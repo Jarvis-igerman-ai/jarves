@@ -157,6 +157,7 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | [MIGRATION_AUDIT](MIGRATION_AUDIT.md) | Legacy repository migration audit (20 Oct 2026) | general | historical | [reviews/SWV4_P01_VERIFY](reviews/SWV4_P01_VERIFY.md) |
 | [PHONE_ACCESS_TAILSCALE](PHONE_ACCESS_TAILSCALE.md) ([HE](PHONE_ACCESS_TAILSCALE_HE.md)) | Phone access over Tailscale, setup guide | V5 | current | [plans/V5_PILLARS](plans/V5_PILLARS.md) |
 | [plans/V5_PILLARS](plans/V5_PILLARS.md) | V5 pillars 2 and 3: Goals and Adaptive Memory (software slice) | V5 | current | [ROADMAP](ROADMAP.md) |
+| [plans/TRUSTED_PHONE_CONNECTION_2026-10-26](plans/TRUSTED_PHONE_CONNECTION_2026-10-26.md) | Trusted phone connection: local CA (path A) and Tailscale cert (path B) so the phone app installs (#513) | V4.5.1 | design | [PHONE_ACCESS_TAILSCALE](PHONE_ACCESS_TAILSCALE.md) |
 | [plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL](plans/WHATSAPP_GREENAPI_FLOWAPI_EVAL.md) | GREEN-API and Flow API evaluation for WhatsApp (research only) | V5+ | research | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) |
 | [reviews/BUG_TABLE_4_1](reviews/BUG_TABLE_4_1.md) | Bug table 4.1, first sweep | 4.0.1 | current | [BUGFIX_LANE](BUGFIX_LANE.md) |
 | [reviews/BUG_TABLE_V45_2026-10-24](reviews/BUG_TABLE_V45_2026-10-24.md) | Bug table V4.5 stabilization, triage of 24 Oct (read by release_gate.py) | 4.0.1 | current | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) |

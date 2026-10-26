@@ -1,0 +1,60 @@
+order = 69
+category = "system"
+features = ["phone_trust"]
+suggest = false
+aliases = ["חיבור מהימן לטלפון", "התקנת אפליקציית הטלפון", "אישור אבטחה לטלפון", "trusted phone connection", "install phone app", "phone certificate", "local CA", "add to home screen"]
+links = ["mobile_access", "phone_hands_free"]
+title_he = "חיבור מהימן לטלפון (התקנה כאפליקציה)"
+title_en = "Trusted phone connection (install as an app)"
+what_he = "בלי חיבור מהימן, Chrome בטלפון מזהיר מהאישור העצמי של JARVES ולא מאפשר להתקין את עמוד הטלפון כאפליקציה אמיתית. כאן JARVES יוצר רשות אישורים מקומית קטנה משלו (בלי צד שלישי): המפתח שלה נשאר במחשב הזה בלבד, והיא מוגבלת טכנית לכתובות ברשת פרטית ולשמות מקומיים, כך שאינה יכולה לאשר אתר ציבורי. אתם מתקינים בטלפון רק את האישור הציבורי שלה, פעם אחת. כבוי כברירת מחדל, בשלב בטא. אם אתם כבר משתמשים ב-Tailscale, זו דרך נוספת (נתיב ב', בשלב הבא)."
+what_en = "Without a trusted connection, Chrome on the phone warns about JARVES's self-signed certificate and will not install the phone page as a real app. Here JARVES makes its own small local certificate authority (no third party): its key stays on this PC only, and it is technically limited to private-network addresses and local names, so it cannot vouch for a public site. You install only its public certificate on the phone, once. Off by default, in beta. If you already use Tailscale that is another way (path B, in the next slice)."
+say = [["חיבור מהימן לטלפון", "Trusted phone connection"]]
+expect_he = "jarvis phone trust status מראה שיש רשות אישורים, תאריך תפוגה (עד שנתיים) וטביעת אצבע SHA-256. אחרי התקנת האישור בטלפון והפעלה מחדש של שרת הטלפון, jarvis phone trust verify כותב \"תקין\"."
+expect_en = "jarvis phone trust status shows the CA, its expiry date (two years at most) and a SHA-256 fingerprint. After installing the certificate on the phone and restarting the phone server, jarvis phone trust verify says OK."
+test_he = "הריצו  jarvis features on beta_features  jarvis features on phone_trust  jarvis phone trust enable. אחרי הפעלה מחדש של שרת הטלפון הריצו jarvis phone trust verify. בטלפון התקינו את הקובץ לפי השלבים ופתחו את עמוד הטלפון: אין אזהרת אישור. לביטול: jarvis phone trust revoke והסרה בטלפון."
+test_en = "Run  jarvis features on beta_features  jarvis features on phone_trust  jarvis phone trust enable. After restarting the phone server run jarvis phone trust verify. On the phone install the file as described and open the phone page: no certificate warning. To undo: jarvis phone trust revoke and remove it on the phone."
+cost_he = "אין עלות. בלי רשת ובלי שירות חיצוני; הכול נוצר במחשב."
+cost_en = "No cost. No network and no outside service; everything is made on this computer."
+privacy_he = "מה זה אומר לסמוך על רשות אישורים: מי שמחזיק את המפתח שלה יכול ליצור אישורים שהטלפון יקבל. המפתח נשאר בקובץ במחשב הזה (הרשאות לבעלים בלבד), לא נשלח, לא נרשם ביומן ולא נכנס לגיבוי או לדוח אבחון. הרשות מוגבלת לכתובות 10.x, 172.16-31.x, 192.168.x, 127.0.0.1 ולשמות localhost, .local, .lan, .home.arpa, ולכן אינה יכולה לאשר אתר ציבורי ו-Chrome ואנדרואיד אוכפים זאת (חלק מהאפליקציות או גרסאות ישנות אולי לא). אנדרואיד יציג אזהרה שהרשת עשויה להיות מנוטרת: זו האזהרה הכללית לכל אישור ידני. התקינו רק בטלפון שלכם. אם המחשב נפרץ, המפתח נפרץ איתו: הריצו jarvis phone trust revoke והסירו את האישור מהטלפון. האישור תקף עד שנתיים; אישור השרת תקף 30 יום ומתחדש לבד."
+privacy_en = "What trusting a CA means: whoever holds its key can make certificates the phone accepts. The key stays in a file on this PC (owner-only permissions), is never sent, never logged and never put in a backup or diagnostics bundle. The CA is limited to 10.x, 172.16-31.x, 192.168.x, 127.0.0.1 and the names localhost, .local, .lan, .home.arpa, so it cannot vouch for a public site, and Chrome and Android enforce that (some apps or old versions may not). Android shows a warning that the network may be monitored: that is its generic text for any manual certificate. Install only on your own phone. If the PC is compromised its key is too: run jarvis phone trust revoke and remove the certificate from the phone. The CA lasts two years at most; the server certificate lasts 30 days and renews by itself."
+
+[parity.features]
+phone_trust = "phone"
+
+[[steps]]
+he = "ודאו שגישה מהטלפון פועלת וששיוך הטלפון עבד (אזהרת האישור בפעם הראשונה צפויה). במחשב: jarvis features on beta_features ואז jarvis features on phone_trust."
+en = "Make sure phone access works and the phone is paired (the certificate warning the first time is expected). On the computer: jarvis features on beta_features, then jarvis features on phone_trust."
+
+[[steps]]
+he = "הריצו jarvis phone trust enable. הפקודה יוצרת את הרשות, מדפיסה את טביעת האצבע ואת נתיב הקובץ הציבורי (jarvis phone trust ca-path), ומסבירה מה זה אומר לסמוך על רשות. הפעילו מחדש את שרת הטלפון."
+en = "Run jarvis phone trust enable. It makes the CA, prints the fingerprint and the path of the public file (jarvis phone trust ca-path), and explains what trusting a CA means. Restart the phone server."
+
+[[steps]]
+he = "בטלפון המצומד הורידו את האישור מ-/api/m/trust/ca.crt (או העבירו את הקובץ). אנדרואיד: הגדרות > אבטחה (או אבטחה ופרטיות > אבטחה נוספת) > התקנת אישור (הצפנה ופרטי כניסה) > אישור CA > \"התקן בכל זאת\" ובחרו את הקובץ. השוו את טביעת האצבע בפרטי האישור."
+en = "On the paired phone download the certificate from /api/m/trust/ca.crt (or copy the file over). Android: Settings > Security (or Security and privacy > More security) > Install a certificate (Encryption and credentials) > CA certificate > \"Install anyway\" and pick the file. Compare the fingerprint in the certificate details."
+
+[[steps]]
+he = "במחשב: jarvis phone trust verify. כתוב \"תקין\"? פתחו את עמוד הטלפון: בלי אזהרה, ואפשר להתקין כאפליקציה (תפריט Chrome > התקנת אפליקציה)."
+en = "On the computer: jarvis phone trust verify. Does it say OK? Open the phone page: no warning, and it can be installed as an app (Chrome menu > Install app)."
+
+[[steps]]
+he = "לביטול והסרה: jarvis phone trust revoke (מוחק את המפתח), ואז בטלפון: הגדרות > אבטחה > הצפנה ופרטי כניסה > פרטי כניסה של משתמש > JARVES local CA > הסרה. לכיבוי התכונה: jarvis features off phone_trust."
+en = "To undo and remove: jarvis phone trust revoke (deletes the key), then on the phone: Settings > Security > Encryption and credentials > User credentials > JARVES local CA > Remove. To turn the feature off: jarvis features off phone_trust."
+
+[[problems]]
+he = "אחרי ההתקנה הדפדפן עדיין מזהיר"
+en = "The browser still warns after installing"
+fix_he = "ודאו שהפעלתם מחדש את שרת הטלפון, ושהכתובת בדפדפן היא כתובת רשת פרטית (192.168.x וכד'). הריצו jarvis phone trust verify; אם כתוב \"לא תקין\", הריצו jarvis phone trust renew והפעילו מחדש. כתובת Tailscale (100.x) אינה מכוסה ברשות המקומית."
+fix_en = "Make sure you restarted the phone server and the address in the browser is a private-network address (192.168.x and so on). Run jarvis phone trust verify; if it says NOT trusted, run jarvis phone trust renew and restart. A Tailscale address (100.x) is not covered by the local CA."
+
+[[problems]]
+he = "הכתובת של המחשב השתנתה"
+en = "The computer's address changed"
+fix_he = "אישור השרת מונפק מחדש אוטומטית בהפעלה הבאה של שרת הטלפון (ואין צורך להתקין שוב את האישור בטלפון). אפשר גם jarvis phone trust renew."
+fix_en = "The server certificate is re-issued automatically at the next phone server start (the phone certificate does not need to be installed again). You can also run jarvis phone trust renew."
+
+[[problems]]
+he = "אנדרואיד כותב שהרשת עשויה להיות מנוטרת"
+en = "Android says the network may be monitored"
+fix_he = "זו האזהרה הכללית של אנדרואיד לכל אישור CA ידני. כאן הרשות שלכם, על המחשב שלכם, ומוגבלת לרשת פרטית. אם אינכם בטוחים, בטלו: jarvis phone trust revoke."
+fix_en = "That is Android's generic warning for any manual CA certificate. Here the CA is yours, on your computer, and limited to a private network. If you are unsure, undo it: jarvis phone trust revoke."
