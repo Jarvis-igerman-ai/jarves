@@ -16,7 +16,7 @@
       typed_pc: "Needs the code shown on the computer.", sec: "s", core: "Core", tls: "Secure connection", yes: "yes", no: "no (text only)",
       busy: "The previous message is still being answered. Wait a moment.", phone_ap_on: "Phone approvals are on.", phone_ap_off: "Phone approvals are off: approvals are answered on the computer.", sending: "Sending…",
       banner: "The computer is unreachable. Nothing is sent until it is back; type the message again then.",
-      not_sent: "Not sent", waiting: "Waiting for the connection…", send_again: "Send again", stale: "Waited too long while offline. Send it again if you still want it.",
+      not_sent: "Not sent", queued: "Waiting for the connection…", send_again: "Send again", stale: "Waited too long while offline. Send it again if you still want it.",
       note: "Note", goals: "Goals", pause: "Pause", resume: "Resume", drop: "Drop", snooze: "Snooze notes 1 h", stop_notes: "Stop notes",
       sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
@@ -31,7 +31,7 @@
       typed_pc: "דורש את הקוד שמוצג במחשב.", sec: "ש׳", core: "ליבה", tls: "חיבור מאובטח", yes: "כן", no: "לא (טקסט בלבד)",
       busy: "ההודעה הקודמת עדיין בטיפול. המתינו רגע.", phone_ap_on: "אישורים מהטלפון פעילים.", phone_ap_off: "אישורים מהטלפון כבויים: עונים על אישורים במחשב.", sending: "שולח…",
       banner: "המחשב לא זמין. שום דבר לא נשלח עד שהוא חוזר; כתבו את ההודעה שוב אז.",
-      not_sent: "לא נשלחה", waiting: "ממתין לחיבור…", send_again: "לשלוח שוב", stale: "ההודעה חיכתה יותר מדי זמן בלי חיבור. שלחו שוב אם עדיין רוצים.",
+      not_sent: "לא נשלחה", queued: "ממתין לחיבור…", send_again: "לשלוח שוב", stale: "ההודעה חיכתה יותר מדי זמן בלי חיבור. שלחו שוב אם עדיין רוצים.",
       note: "הודעה", goals: "יעדים", pause: "השהיה", resume: "המשך", drop: "ויתור", snooze: "השתקת הודעות לשעה", stop_notes: "עצירת הודעות",
       sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
   };
@@ -277,9 +277,27 @@
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); paintInstall(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
   window.addEventListener("online", tick);
-  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
-  applyLang(); show();
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).then(() => setTimeout(paintInstall, 1500)).catch(() => {});
+  // Install help: Chrome offers the real install (WebAPK) only on a trusted certificate or localhost, and a self-signed one also
+  // blocks the service worker. Then only the browser menu "Add to Home screen" shortcut is available. Say so, honestly.
+  let installEv = null;
+  const standalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  function paintInstall() {
+    const box = $("installBox"); if (!box) return;
+    if (standalone()) { box.hidden = true; return; }
+    box.hidden = false; const b = $("installBtn");
+    b.hidden = !installEv; b.textContent = tx("התקנת האפליקציה", "Install the app");
+    $("installNote").textContent = installEv ? tx("אפשר להתקין את JARVES כאפליקציה.", "You can install JARVES as an app.")
+      : window.isSecureContext && navigator.serviceWorker && navigator.serviceWorker.controller
+        ? tx("בתפריט הדפדפן (שלוש הנקודות) בחרו התקנת אפליקציה או הוספה למסך הבית.", "In the browser menu (three dots) choose Install app or Add to Home screen.")
+        : tx("החיבור אינו מהימן (תעודה עצמית), לכן הדפדפן לא יציע התקנה מלאה. בתפריט הדפדפן (שלוש הנקודות) בחרו הוספה למסך הבית: זה קיצור דרך שנפתח כמו אפליקציה. להתקנה מלאה צריך תעודה מהימנה (Tailscale).",
+             "This connection is not trusted (self-signed certificate), so the browser will not offer a full install. In the browser menu (three dots) choose Add to Home screen: it is a shortcut that opens like an app. A full install needs a trusted certificate (Tailscale).");
+  }
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEv = e; paintInstall(); });
+  window.addEventListener("appinstalled", () => { installEv = null; paintInstall(); });
+  $("installBtn").addEventListener("click", async () => { if (!installEv) return; installEv.prompt(); try { await installEv.userChoice; } catch (e) { /* ignore */ } installEv = null; paintInstall(); });
+  applyLang(); show(); paintInstall();
 })();

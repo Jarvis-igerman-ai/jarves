@@ -7,6 +7,8 @@
 <title>JARVES</title>
 <link rel="manifest" href="/m/manifest.webmanifest">
 <link rel="icon" href="/m/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/m/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="/m/style.css">
 <link rel="stylesheet" href="/m/chatview.css">
 <script src="/m/chatview.js" defer></script>
@@ -56,6 +58,10 @@
 
   <section id="tab-home" class="panel">
     <ul id="homeList" class="list"></ul>
+    <div id="installBox" class="card" hidden>
+      <p id="installNote" class="muted"></p>
+      <button type="button" id="installBtn" class="primary" hidden></button>
+    </div>
     <p class="muted" id="meInfo"></p>
     <button type="button" id="unpair" data-t="unpair">Un-pair this phone</button>
   </section>

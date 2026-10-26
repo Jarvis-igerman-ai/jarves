@@ -326,3 +326,29 @@ def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, 
     r, body = get(srv, "/m/index.html")
     assert r.status == status
     assert b"private" not in body and b"install" not in body and b"index.html" not in body and b"boom" not in body
+
+
+def test_manifest_meets_the_install_criteria():
+    """#510: Chrome needs PNG icons at 192 and 512 (plus a maskable one), standalone, a start_url inside the scope."""
+    import json
+    import re
+    import struct
+    m = json.loads((MOBILE_DIR / "manifest.webmanifest").read_text(encoding="utf-8"))
+    assert m["display"] == "standalone" and m["start_url"].startswith(m["scope"]) and m["scope"] == "/m/"
+    seen = {(i["sizes"], i["purpose"]) for i in m["icons"] if i["type"] == "image/png"}
+    assert {("192x192", "any"), ("512x512", "any"), ("512x512", "maskable")} <= seen
+    for i in m["icons"]:
+        if i["type"] == "image/png":
+            name = i["src"].rsplit("/", 1)[1]
+            assert name in mobile.STATIC_FILES
+            data = (MOBILE_DIR / name).read_bytes()
+            w, h = struct.unpack(">II", data[16:24])
+            assert data[:8] == b"\x89PNG\r\n\x1a\n" and f"{w}x{h}" == i["sizes"]
+    sw = (MOBILE_DIR / "sw.js").read_text(encoding="utf-8")
+    assert "addEventListener(\"fetch\"" in sw and "/m/icon-192.png" in sw
+    app = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
+    assert "serviceWorker.register" in app and "beforeinstallprompt" in app
+    head, he_part = app.split("\n    he: {", 1)
+    for lang in (head.split("    en: {", 1)[1], he_part.split("\n  };", 1)[0]):      # a repeated key silently replaced the first text
+        keys = re.findall(r"(?:^|[\s,{])([a-z_]+): \"", lang)
+        assert len(keys) == len(set(keys)), [k for k in keys if keys.count(k) > 1]

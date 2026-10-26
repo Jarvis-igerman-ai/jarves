@@ -100,3 +100,13 @@ he = "הדפדפן אומר \"מפתח גישה לא נכון\" או שהאתר 
 en = "The browser says wrong access key, or the site cannot be reached"
 fix_he = "כל הפעלה של לוח הבקרה יוצרת מפתח פרטי חדש, וקישור ישן או לשונית ישנה לא יעבדו. הריצו jarvis dashboard: אם לוח בקרה כבר רץ, הוא נפתח מחדש עם הקישור הנכון (לא נפתח לוח שני). בדף השגיאה יש גם כפתור \"פתח את לוח הבקרה הנוכחי\". עם --tls-selfsigned הקישור הוא https; הדפדפן מזהיר פעם אחת מתעודה עצמית, וזה צפוי."
 fix_en = "Every run of the dashboard makes a new private key, so an old link or tab stops working. Run jarvis dashboard: if a dashboard is already running it is reopened with the right link (no second one starts). The error page also has an Open the current dashboard button. With --tls-selfsigned the link is https; the browser warns once about the self-signed certificate, which is expected."
+
+[[steps]]
+he = "הוספה למסך הבית (עם התעודה העצמית): בכרום באנדרואיד פתחו את תפריט שלוש הנקודות ובחרו \"הוספה למסך הבית\". זה קיצור דרך שנפתח כמו אפליקציה. התקנה מלאה (PWA) ופס \"התקנת האפליקציה\" מופיעים רק עם תעודה מהימנה, למשל Tailscale עם HTTPS."
+en = "Add to Home screen (with the self-signed certificate): in Chrome on Android open the three-dot menu and choose Add to Home screen. It is a shortcut that opens like an app. The full install (PWA) and the Install the app button appear only with a trusted certificate, for example Tailscale with HTTPS."
+
+[[problems]]
+he = "אין אפשרות להתקין את האפליקציה בטלפון"
+en = "I cannot install the app on the phone"
+fix_he = "כרום מציע התקנה מלאה רק בחיבור מהימן. עם תעודה עצמית השירות-רקע לא נרשם. השתמשו ב\"הוספה למסך הבית\" בתפריט הדפדפן, או הפעילו Tailscale עם HTTPS לתעודה מהימנה."
+fix_en = "Chrome offers a full install only on a trusted connection; with a self-signed certificate the service worker does not register. Use Add to Home screen in the browser menu, or turn on Tailscale with HTTPS for a trusted certificate."
