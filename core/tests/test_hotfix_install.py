@@ -138,14 +138,17 @@ def test_build_only_repo_changes_are_listed_not_refused(tree, path):
     assert (inst / "a.py").read_text() == "A=2\n" and m["pending_installer"] == [path]
 
 
-@pytest.mark.parametrize("path", ["core/pyproject.toml", "core/uv.lock", "core/requirements.txt", "packaging/bridge_pin.json",
-                                  "bridge/whatsapp/main.go"])
-def test_dependency_and_bridge_changes_are_detected_and_refused_with_slice2(tree, path):
+@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_DEP_UNVERIFIED"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
+                                       ("packaging/bridge_pin.json", "HOTFIX_BRIDGE_UNVERIFIED"),
+                                       ("bridge/whatsapp/main.go", "HOTFIX_BRIDGE_UNVERIFIED")])
+def test_dependency_and_bridge_changes_are_verified_or_refused(tree, path, code):
+    """Slice 2 (#460): a lock/bridge change that cannot be verified (no readable lock/pin in this fake source) is refused
+    with its own code; other dependency files keep the slice-2 refusal. Nothing is touched."""
     inst, src, home = tree
     write(src, "a.py", "A=2\n")
     with pytest.raises(hf.Refused) as e:
         hf.apply(inst, source(src, ["core/src/jarves/a.py", path]), home, FakeHooks().hooks())
-    assert e.value.code == "HOTFIX_NEEDS_SLICE2" and "slice 2" in e.value.message and path in e.value.message
+    assert e.value.code == code
     assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
 
 
@@ -380,16 +383,27 @@ def test_git_skips_binary_and_installer_code_inside_the_package(po):
         shutil.rmtree(s.cleanup, ignore_errors=True)
 
 
-@pytest.mark.parametrize("path", ["core/pyproject.toml", "core/uv.lock", "core/requirements.txt",
-                                  "packaging/bridge_pin.json", "bridge/whatsapp/bridge.exe"])
-def test_git_source_refuses_dependency_and_bridge_pin_or_binary(po, path):
+@pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_DEP_UNVERIFIED"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),
+                                       ("packaging/bridge_pin.json", "HOTFIX_BRIDGE_UNVERIFIED"),
+                                       ("bridge/whatsapp/bridge.exe", "HOTFIX_BRIDGE_UNVERIFIED")])
+def test_git_source_refuses_unverifiable_dependency_and_bridge_changes(po, path, code):
     inst, home, commit, repo, base = po
     s = commit({"core/src/jarves/a.py": "A=2\n", path: "changed\n"})
     try:
         with pytest.raises(hf.Refused) as e:
             hf.apply(inst, s, home, FakeHooks().hooks())
-        assert e.value.code == "HOTFIX_NEEDS_SLICE2"
+        assert e.value.code == code
         assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
+    finally:
+        shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_git_pyproject_only_change_is_listed_and_python_applies(po):
+    inst, home, commit, repo, base = po
+    s = commit({"core/src/jarves/a.py": "A=2\n", "core/pyproject.toml": "[project]\ndependencies=[]\n# x\n"})
+    try:
+        r = hf.apply(inst, s, home, FakeHooks().hooks())
+        assert (inst / "a.py").read_text() == "A=2\n" and "core/pyproject.toml" in r["pending_installer"]
     finally:
         shutil.rmtree(s.cleanup, ignore_errors=True)
 
