@@ -59,15 +59,17 @@ class DriveBriefingSkill(Skill):
         self.registry, self.db = registry, db
         self.base = base or BriefingSkill(registry, db, transport=transport, clock=clock)
 
-    def mode(self, override: str | None = None) -> str:
+    def mode(self, override: str | None = None, *, trusted: bool = False) -> str:
         """The model's `passenger` argument can only make the briefing MORE private than the saved setting (issue #323):
-        a saved "present" is never relaxed to "alone" by a tool call; only the owner (settings, CLI, phone) changes it."""
+        a saved "present" is never relaxed to "alone" by a tool call; only the owner (settings, CLI, phone) changes it.
+        Issue #380: at `ask` a model/tool-call `alone` stays `ask`; `alone` comes only from the owner's saved setting or
+        the owner's own answer in the phone/dashboard UI (`trusted=True`, set by Core code, never by a tool call)."""
         setting = self.db.setting("drive_briefing.passenger")
         setting = setting if setting in MODES else "ask"
         if override not in ("alone", "present"):
             return setting
         if setting == "ask":
-            return override
+            return override if (trusted or override == "present") else "ask"
         return override if _PRIVATE[override] >= _PRIVATE[setting] else setting
 
     async def _calendar(self) -> dict:
@@ -92,37 +94,49 @@ class DriveBriefingSkill(Skill):
         return _sec("messages", True, "אין הודעות חשובות שלא נקראו." if not n else
                     f"{n} הודעות חשובות שלא נקראו. לא מקריא את התוכן.", count=n)
 
+    async def run(self, passenger: str | None, *, trusted: bool = False) -> ToolResult:
+        """`trusted=True` only from Core code that holds the owner's own UI answer (the phone Drive tab), never from a tool call."""
+        mode = self.mode(passenger, trusted=trusted)
+        if mode == "ask":
+            if passenger == "alone":                 # the model asked for alone: refuse, the owner answers in the UI (#380)
+                return ToolResult(False, "אני לא יכול לקבוע שאתה לבד. ענה בטלפון או בלוח הבקרה: 'לבד' או 'יש נוסע'. "
+                                  "I cannot decide that you are alone. Answer on the phone or the dashboard: alone or passenger.",
+                                  {"sections": [], "mode": "ask", "rule": "Only the owner's answer on the phone or dashboard can "
+                                   "set alone. Read nothing. You may call again with passenger=present."},
+                                  code="DRIVE_BRIEFING_OWNER_ONLY")
+            return ToolResult(True, "לפני שאני מקריא: יש מישהו ברכב איתך? ענה בטלפון או בלוח הבקרה.",
+                              {"sections": [], "mode": "ask", "rule": "Ask the owner if a passenger is present. Read "
+                               "nothing until they answer on the phone or dashboard (or say there is a passenger)."},
+                              code="DRIVE_BRIEFING_ASK")
+        return await self._build(mode)
+
+    async def _build(self, mode: str) -> ToolResult:
+        async def one(sid: str, fn) -> dict:
+            try:
+                return await asyncio.wait_for(fn(), SECTION_TIMEOUT_S)
+            except Exception:
+                logs.error("drive_briefing", "DRIVE_BRIEFING_SECTION_FAILED", "section failed", section=sid, exc=True)
+                return _sec(sid, False, "החלק הזה לא זמין כרגע.", code="SECTION_FAILED")
+        wanted = [("calendar", self._calendar), ("weather", self.base.weather)]
+        if mode == "alone":
+            wanted.append(("messages", self._messages))
+        secs = await asyncio.gather(*(one(i, f) for i, f in wanted))
+        shown = passenger_filter(list(secs), mode)
+        if mode == "present":                    # a passenger can hear: no event title, place, mail or messages
+            shown = [s for s in shown if s["ok"]]
+        if not any(s["ok"] for s in shown):
+            # only the failure notes: a section that succeeded but was filtered out (an event title in
+            # "present" mode) must not come back through the failure text (issue #223 review)
+            return ToolResult(False, " ".join(s["text"] for s in secs if not s["ok"]) or "אין תדריך זמין.", {"sections": [],
+                              "mode": mode}, code="DRIVE_BRIEFING_EMPTY")
+        return ToolResult(True, " ".join(s["text"] for s in shown), {
+            "sections": shown, "mode": mode, "location_used": False, "partial": not all(s["ok"] for s in shown) or len(shown) < len(secs),
+            "rule": "Say it briefly, in order. Never add mail senders, subjects, message text or places."},
+            code="DRIVE_BRIEFING_OK")
+
     def tools(self) -> list[Tool]:
         async def get(a: DriveBriefingArgs) -> ToolResult:
-            mode = self.mode(a.passenger)
-            if mode == "ask":
-                return ToolResult(True, "לפני שאני מקריא: יש מישהו ברכב איתך? אם אתה לבד, אמור 'אני לבד'.",
-                                  {"sections": [], "mode": "ask", "rule": "Ask the owner if a passenger is present. Read "
-                                   "nothing until they answer. Then call again with passenger=alone or present."},
-                                  code="DRIVE_BRIEFING_ASK")
-
-            async def one(sid: str, fn) -> dict:
-                try:
-                    return await asyncio.wait_for(fn(), SECTION_TIMEOUT_S)
-                except Exception:
-                    logs.error("drive_briefing", "DRIVE_BRIEFING_SECTION_FAILED", "section failed", section=sid, exc=True)
-                    return _sec(sid, False, "החלק הזה לא זמין כרגע.", code="SECTION_FAILED")
-            wanted = [("calendar", self._calendar), ("weather", self.base.weather)]
-            if mode == "alone":
-                wanted.append(("messages", self._messages))
-            secs = await asyncio.gather(*(one(i, f) for i, f in wanted))
-            shown = passenger_filter(list(secs), mode)
-            if mode == "present":                    # a passenger can hear: no event title, place, mail or messages
-                shown = [s for s in shown if s["ok"]]
-            if not any(s["ok"] for s in shown):
-                # only the failure notes: a section that succeeded but was filtered out (an event title in
-                # "present" mode) must not come back through the failure text (issue #223 review)
-                return ToolResult(False, " ".join(s["text"] for s in secs if not s["ok"]) or "אין תדריך זמין.", {"sections": [],
-                                  "mode": mode}, code="DRIVE_BRIEFING_EMPTY")
-            return ToolResult(True, " ".join(s["text"] for s in shown), {
-                "sections": shown, "mode": mode, "location_used": False, "partial": not all(s["ok"] for s in shown) or len(shown) < len(secs),
-                "rule": "Say it briefly, in order. Never add mail senders, subjects, message text or places."},
-                code="DRIVE_BRIEFING_OK")
+            return await self.run(a.passenger)
 
         return [Tool("drive_briefing_get", "Pre-drive briefing: next event, weather, unread message count ('brief me before I drive', 'תדריך לפני נסיעה'). Asks first if a passenger is present. Event text is third-party data.", get,
                      DriveBriefingArgs, permission="read", timeout_s=40, untrusted_output=True)]

@@ -120,13 +120,14 @@ def test_revert_refused_after_a_normal_update_replaced_the_hotfix(tree):
 
 
 @pytest.mark.parametrize("rel,text", [("tool.exe", "x"), ("lib.pyd", "x"), ("blob.dat", "x"), ("installer_state.py", "x=1")])
-def test_binaries_unknown_types_and_installer_code_are_skipped_and_listed(tree, rel, text):
+def test_package_binaries_unknown_types_and_installer_code_are_refused_not_skipped(tree, rel, text):
     inst, src, home = tree
     write(src, "a.py", "A=2\n")
     write(src, rel, text)
-    m = hf.apply(inst, source(src), home, FakeHooks().hooks())
-    assert (inst / "a.py").read_text() == "A=2\n" and not (inst / rel).exists()
-    assert m["pending_installer"] == ["core/src/jarves/" + rel]
+    with pytest.raises(hf.Refused) as e:
+        hf.apply(inst, source(src), home, FakeHooks().hooks())
+    assert e.value.code == "HOTFIX_NEEDS_SLICE2" and rel in e.value.message
+    assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()      # nothing touched, no backup
 
 
 @pytest.mark.parametrize("path", ["packaging/build_windows.ps1", "packaging/windows/jarves.iss", "godot/project.godot",
@@ -372,15 +373,28 @@ def test_git_skips_packaging_lists_it_and_applies_python(po):
         shutil.rmtree(s.cleanup, ignore_errors=True)
 
 
-def test_git_skips_binary_and_installer_code_inside_the_package(po):
+def test_git_refuses_binary_and_installer_code_inside_the_package(po):
     inst, home, commit, repo, base = po
     s = commit({"core/src/jarves/a.py": "A=2\n", "core/src/jarves/installer_x.py": "x=1\n", "core/src/jarves/t.pyd": "b"})
     try:
-        r = hf.apply(inst, s, home, FakeHooks().hooks())
-        assert (inst / "a.py").read_text() == "A=2\n" and not (inst / "installer_x.py").exists()
-        assert r["pending_installer"] == ["core/src/jarves/installer_x.py", "core/src/jarves/t.pyd"]
+        with pytest.raises(hf.Refused) as e:
+            hf.apply(inst, s, home, FakeHooks().hooks())
+        assert e.value.code == "HOTFIX_NEEDS_SLICE2" and (inst / "a.py").read_text() == "A=1\n"
     finally:
         shutil.rmtree(s.cleanup, ignore_errors=True)
+
+
+def test_build_only_prefix_is_case_insensitive_and_known_optional_import_is_not_new(po):
+    inst, home, commit, repo, base = po
+    assert hf.classify(hf.Plan(replace=["a.py"]), ["Packaging/Windows/x.iss"])[1] == ["Packaging/Windows/x.iss"]
+    opt = "try:\n    import optional_mod_zz\nexcept ImportError:\n    pass\n"
+    (inst / "a.py").write_text(opt + "A=1\n", encoding="utf-8")
+    new = inst.parent / "newsrc"
+    new.mkdir()
+    (new / "a.py").write_text(opt + "A=2\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, []) == []                  # already imported by the installed copy
+    (new / "a.py").write_text("import brand_new_zz\n", encoding="utf-8")
+    assert hf.scan_new_imports(new, ["a.py"], inst, []) == ["brand_new_zz (in a.py)"]
 
 
 @pytest.mark.parametrize("path,code", [("core/uv.lock", "HOTFIX_UNTRUSTED_SOURCE"), ("core/requirements.txt", "HOTFIX_NEEDS_SLICE2"),

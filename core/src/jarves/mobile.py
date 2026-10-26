@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from . import logs, mobile_drive, drive_actions, qrmini  # noqa: F401  (mobile_drive / drive_actions register their catalog rows)
+from . import logs, mobile_drive, drive_actions, phone_location, qrmini  # noqa: F401  (these register their catalog rows)
 from .continuity import Continuity
 
 FEATURE = "mobile_access"
@@ -558,9 +558,7 @@ def core_bridge(core, loop) -> Bridge:
 
     def drive_briefing(mode: str) -> dict:
         """The Core's own pre-drive briefing tool, called directly (read-only; the passenger filter lives in the skill)."""
-        from .drive_briefing import DriveBriefingArgs
         skill = core.registry.skills["drive_briefing"]
-        tool = skill.tools()[0]
 
         async def go() -> dict:
             from .drive_mode import PHONE_SCREEN
@@ -568,7 +566,7 @@ def core_bridge(core, loop) -> Bridge:
             token = ROUTE.set(PHONE_SCREEN)        # Core code sets the route: the Gate allows plain reads here, nothing else
             try:
                 core.registry.new_turn(PHONE_SCREEN)
-                r = await tool.handler(DriveBriefingArgs(passenger=mode))
+                r = await skill.run(mode, trusted=True)   # the owner's own phone answer (#380)
                 return {"ok": bool(r.ok), "text": r.message, "sections": (r.data or {}).get("sections") or []}
             finally:
                 core.registry.clear_taint(PHONE_SCREEN)
@@ -941,8 +939,28 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         d = _json_body(h)
         if d is None:
             return
-        st, obj = mobile_drive.journey(mob, d)
+        st, obj = mobile_drive.journey(mob, d, dev["id"])
         return done(st, obj, op="journey")
+    if path == "/api/m/drive/location" and method == "POST":      # opt-in position (#339): rounded, RAM only; the audit holds the kind, never a coordinate
+        if not need("drive"):
+            return
+        d = _json_body(h)
+        if d is None:
+            return
+        if d.get("clear") is not True and not mob.rate_ok("drive-location:" + dev["id"], phone_location.FIX_RATE_PER_MIN):    # clearing is never limited
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="location")
+            return h._json_extra(429, dict(phone_location.RATE_LIMITED), {"Retry-After": "60"})
+        st, obj = phone_location.post(mob, dev["id"], d)
+        return done(st, obj, op="location", kind="clear" if d.get("clear") is True else "fix")
+    if path == "/api/m/drive/where" and method == "POST":         # "where am I": one free reverse lookup of the rounded point
+        if not need("drive"):
+            return
+        if not (mob.rate_ok("drive-where:" + dev["id"], phone_location.WHERE_RATE_PER_MIN)
+                and mob.rate_ok("drive-where:*", phone_location.WHERE_ALL_PER_MIN)):
+            mob.audit("rate_limited", device=dev["id"], path=path, scope="where")
+            return h._json_extra(429, dict(phone_location.RATE_LIMITED), {"Retry-After": "60"})
+        st, obj = phone_location.where(mob, dev["id"])
+        return done(st, obj, op="where")
     if path == "/api/m/drive/action" and method == "POST":       # Drive Actions (V6 #217): text in, a tap-only tel:/Maps/Waze/Music LINK out; nothing is done here
         if not need("drive"):
             return

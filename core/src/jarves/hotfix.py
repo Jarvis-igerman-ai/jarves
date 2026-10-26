@@ -407,10 +407,19 @@ def classify(plan: Plan, repo_changes: list[str] | None, ctx: Slice2Ctx | None =
             (deps if r.rsplit("/", 1)[-1].lower() in ("pyproject.toml", "uv.lock") else other_deps).append(r)
         elif _is_bridge_change(r):
             bridge.append(r)
-        elif r.startswith(FULL_INSTALLER_PREFIXES):
+        elif r.lower().startswith(FULL_INSTALLER_PREFIXES):      # case-insensitive: Windows paths
             pending.append(r)
-    if other_deps or ((deps or bridge) and ctx is None):
+    unplaceable: list[str] = []
+    for rel in plan.files:
+        suffix = Path(rel).suffix.lower()
+        if (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
+                or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES))):
+            unplaceable.append(PACKAGE_PREFIX + rel)           # inside the installed package: runtime, never skipped
+    if other_deps or unplaceable or ((deps or bridge) and ctx is None):
         parts = []
+        if unplaceable:
+            parts.append("package files that cannot be hot-patched (binary, unknown type or installer code: "
+                         + ", ".join(unplaceable[:4]) + ")")
         if deps or other_deps:
             parts.append("dependencies changed (" + ", ".join((other_deps + deps)[:4]) + ")")
         if bridge:
@@ -431,12 +440,7 @@ def classify(plan: Plan, repo_changes: list[str] | None, ctx: Slice2Ctx | None =
         if act is None:
             pending.extend(bridge)                       # the installed exe already is the pinned one
     for rel in plan.files:
-        suffix = Path(rel).suffix.lower()
-        blocked = (suffix in BINARY_SUFFIXES or suffix not in DATA_SUFFIXES
-                   or (suffix == ".py" and any(Path(rel).stem.startswith(n) for n in INSTALLER_CODE_NAMES)))
-        if blocked:
-            pending.append(PACKAGE_PREFIX + rel)
-        elif rel in plan.replace:
+        if rel in plan.replace:
             ok.replace.append(rel)
         else:
             ok.add.append(rel)
@@ -476,6 +480,16 @@ def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs:
         except (SyntaxError, ValueError, OSError):
             missing.setdefault("<unparseable>", rel)
             continue
+        known: set[str] = set()                          # modules the installed copy already imports: not new
+        try:
+            old = ast.parse((installed_pkg / rel).read_text(encoding="utf-8"))
+            for n0 in ast.walk(old):
+                if isinstance(n0, ast.Import):
+                    known.update(a.name.split(".")[0] for a in n0.names)
+                elif isinstance(n0, ast.ImportFrom) and n0.level == 0 and n0.module:
+                    known.add(n0.module.split(".")[0])
+        except (SyntaxError, ValueError, OSError):
+            pass
         for node in ast.walk(tree):
             names: list[str] = []
             if isinstance(node, ast.Import):
@@ -484,7 +498,7 @@ def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs:
                 names = [node.module]
             for n in names:
                 top = n.split(".")[0]
-                if top in std or top == "jarves" or top in missing:
+                if top in std or top == "jarves" or top in missing or top in known:
                     continue
                 if not _module_present(top, dirs):
                     missing[top] = rel
