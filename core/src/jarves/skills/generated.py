@@ -84,6 +84,35 @@ FRONT_KEYS = {"name", "title", "description", "version", "capabilities"}
 V2_KEYS = {"manifest", "min_core", "permissions", "dependencies", "surfaces", "signed_by", "signature"}
 
 
+STATE_LOCK_WAIT_S = 5.0
+STATE_LOCK_STALE_S = 20.0
+
+
+def _take_over_stale_lock(lock: Path) -> bool:
+    """True when a stale lock file (a crashed writer) was removed. Race-safe (#585): the file is first renamed to a unique
+    name, so two takers can never delete a FRESH lock that a third process created after the first stat; if the file we
+    grabbed turns out to be fresh after all, it is put back."""
+    try:
+        if time.time() - lock.stat().st_mtime <= STATE_LOCK_STALE_S:
+            return False
+        grab = lock.with_name(f"state.lock.stale-{os.getpid()}-{time.monotonic_ns()}")
+        os.replace(lock, grab)
+    except OSError:
+        return False
+    try:
+        if time.time() - grab.stat().st_mtime <= STATE_LOCK_STALE_S:        # we grabbed a live lock: restore it
+            try:
+                os.link(grab, lock)
+            except OSError:
+                pass
+            grab.unlink(missing_ok=True)
+            return False
+        grab.unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True
+
+
 class SkillError(ValueError):
     pass
 
@@ -452,24 +481,21 @@ class GeneratedSkills:
             lock = d / "state.lock"
             have = False
             if d.is_dir():
-                deadline = time.monotonic() + 5.0
+                deadline = time.monotonic() + STATE_LOCK_WAIT_S
                 while True:
                     try:
                         os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                         have = True
                         break
                     except FileExistsError:
-                        try:
-                            if time.time() - lock.stat().st_mtime > 20:
-                                lock.unlink(missing_ok=True)
-                                continue
-                        except OSError:
-                            pass
+                        if _take_over_stale_lock(lock):
+                            continue
                         if time.monotonic() > deadline:
-                            break                      # fail open on the file lock only: the thread lock still holds
+                            # #585: never continue without the file lock (a cross-process lost update is possible).
+                            raise SkillError("the Skill state is locked by another process; try again in a moment")
                         time.sleep(0.02)
                     except OSError:
-                        break
+                        break                          # read-only or unusable state dir: the state write itself fails later
             try:
                 yield
             finally:
@@ -732,12 +758,15 @@ class GeneratedSkills:
             # Re-read the state NOW and change only last_error (#564): the owner may have revoked a grant, disabled the Skill
             # or approved a new version while the sandbox ran, and writing back the old dict would undo that. (The broker
             # keeps the grants of the START of the call for the whole run: inherent, the next call sees the change.)
-            with self._state_lock(sid):
-                cur = self.state(sid)
-                if cur and int(cur.get("version", 0)) == ver:
-                    cur["last_error"] = {"tool": tool, "error": logs.redact(str(res.get("error", "")))[:300], "ts": time.time()}
-                    self._set_state(sid, cur)
-            return ToolResult(False, f"{tool} failed: {str(res.get('error', ''))[:200]}", code="SKILL_RUN_FAILED")
+            try:
+                with self._state_lock(sid):
+                    cur = self.state(sid)
+                    if cur and int(cur.get("version", 0)) == ver:
+                        cur["last_error"] = {"tool": tool, "error": logs.redact(str(res.get("error", "")))[:300], "ts": time.time()}
+                        self._set_state(sid, cur)
+            except SkillError:
+                pass                                   # lock busy: the failure is still reported to the caller below
+            return ToolResult(False, f"{tool} failed: {logs.redact(str(res.get('error', '')))[:200]}", code="SKILL_RUN_FAILED")
         return ToolResult(True, str(res.get("message", ""))[:1500], res.get("data") or {})
 
 
