@@ -39,14 +39,20 @@ def summary(sheet: so.Sheet) -> dict:
         counts[r.result] += 1
     return {"version": sheet.version, "rows": [vars(r) for r in sheet.rows], "counts": counts,
             "open": sheet.open_rows(), "signed": sheet.signed, "beta": sheet.beta, "commit": sheet.commit,
-            "date": sheet.date, "problems": sheet.problems()}
+            "date": sheet.date, "owner": sheet.owner, "problems": sheet.problems()}
 
 
-def _finish(sheet: so.Sheet, home: Path, beta: str | None, commit: str | None) -> None:
+def _finish(sheet: so.Sheet, home: Path, beta: str | None, commit: str | None, owner: str | None = None) -> None:
     from . import updates
     beta = beta or updates.beta_label(home) or ""
     commit = commit or str(updates.build_info().get("commit") or "")
-    sheet.sign(beta, commit)
+    if not owner:
+        import getpass
+        try:
+            owner = getpass.getuser()                 # the account signing: recorded with the rows hash (#508)
+        except Exception:                             # noqa: BLE001
+            owner = ""
+    sheet.sign(beta, commit, owner=owner or "")
 
 
 # ---------------------------------------------------------------------- CLI
@@ -65,10 +71,12 @@ def cmd_release(a, cfg, home) -> int:
             so.save(root, sheet)
             print(f"{row.id}: {row.result}" + (f" ({row.note})" if row.note else ""))
         if a.finish:
-            _finish(sheet, home, a.beta, a.commit)
+            _finish(sheet, home, a.beta, a.commit, getattr(a, "owner", None))
             so.save(root, sheet)
-            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}. עכשיו אפשר לתייג v{version}.",
-                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}. "
+            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"גיבוב {sheet.rows_hash}. עכשיו אפשר לתייג v{version}.",
+                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"hash {sheet.rows_hash}. "
                               f"You can now tag v{version}."))
             logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version)
             return 0
@@ -145,6 +153,7 @@ def add_cli(sub) -> None:
                     help="write the tested beta, its commit SHA and today's date; only when every row is done")
     rp.add_argument("--beta", help="finish: the beta tested, e.g. 4.1.0-beta.7 (default: this installed beta)")
     rp.add_argument("--commit", help="finish: full SHA of the tested beta (default: this build's commit)")
+    rp.add_argument("--owner", help="finish: the owner's name recorded in the sheet (default: this account)")
     rp.add_argument("--repo", help="the git checkout holding docs/reviews (default: auto-detected)")
 
 
@@ -190,7 +199,7 @@ def api_signoff_set(ctx, m, body):
         version = _ver(body)
         root, sheet = _mine(ctx.home, None, version)
         if body.get("finish") is True:
-            _finish(sheet, ctx.home, body.get("beta"), body.get("commit"))
+            _finish(sheet, ctx.home, body.get("beta"), body.get("commit"), body.get("owner"))
         else:
             sheet.set_result(str(body.get("row") or ""), str(body.get("result") or ""), str(body.get("note") or ""))
         so.save(root, sheet)

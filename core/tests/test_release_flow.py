@@ -71,7 +71,7 @@ def test_status_lists_what_remains_then_ready(tmp_path):
     sh = so.load(tmp_path, "4.1.0")
     for i in rf.SMOKE_IDS:
         sh.set_result(i, "pass")
-    sh.sign("4.1.0-beta.3", SHA, today="2026-10-26")
+    sh.sign("4.1.0-beta.3", SHA, today="2026-10-26", owner="Owner")
     so.save(tmp_path, sh)
     (tmp_path / "docs" / "release").mkdir(parents=True)
     assert rf.remaining(rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)) == []

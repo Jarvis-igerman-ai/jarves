@@ -20,6 +20,7 @@ tested and says why). `pending`, `fail` and `blocked` stop the release. Nothing 
 """
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -84,6 +85,17 @@ class Sheet:
     commit: str = ""
     date: str = ""
     signed: bool = False
+    owner: str = ""                # #508: who signed (the OS user of the signing session, or --owner)
+    rows_hash: str = ""            # #508: sha256 of every row cell and the sign-off fields at signing time
+
+    def compute_rows_hash(self) -> str:
+        # Hash the text exactly as render() writes it (_cell), so a value typed in the same run as --finish (double spaces,
+        # a newline in a note) hashes the same after save + load; the sign-off fields are covered too (owner, date, ...).
+        # Tamper-evidence against accidental edits only: anyone editing the file can recompute it (#543/#544 guard that).
+        head = [_cell(x) for x in (self.version, self.beta, self.commit, self.date, self.owner)]
+        rows = [" | ".join(_cell(x) for x in (r.id, r.area, r.todo, r.expected, r.result, r.note)) for r in self.rows]
+        blob = chr(10).join(["sheet-hash v1", *head, "--", *rows])
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     # ---- text
     def render(self) -> str:
@@ -97,7 +109,8 @@ class Sheet:
         for r in self.rows:
             out.append("| " + " | ".join(_cell(x) for x in (r.id, r.area, r.todo, r.expected, r.result, r.note)) + " |")
         out += ["", "## Sign-off", "", f"- Tested beta: {self.beta}", f"- Commit: {self.commit}",
-                f"- Date: {self.date}", f"- Signed: {'yes' if self.signed else 'no'}", ""]
+                f"- Date: {self.date}", f"- Owner: {self.owner}", f"- Rows hash: {self.rows_hash}",
+                f"- Signed: {'yes' if self.signed else 'no'}", ""]
         return "\n".join(out)
 
     @classmethod
@@ -119,7 +132,7 @@ class Sheet:
             if cells[4] not in RESULTS:
                 raise SheetError(f"{cells[0]}: unknown result {cells[4]!r}")
             sh.rows.append(Row(*cells))
-        for key, attr in (("Tested beta", "beta"), ("Commit", "commit"), ("Date", "date")):
+        for key, attr in (("Tested beta", "beta"), ("Commit", "commit"), ("Date", "date"), ("Owner", "owner"), ("Rows hash", "rows_hash")):
             mm = re.search(rf"^- {key}:[ \t]*(.*)$", tail, re.M)
             setattr(sh, attr, mm.group(1).strip() if mm else "")
         mm = re.search(r"^- Signed:[ \t]*(\w+)", tail, re.M)
@@ -146,7 +159,7 @@ class Sheet:
     def open_rows(self) -> list[str]:
         return [p for p in (r.problem() for r in self.rows) if p]
 
-    def sign(self, beta: str, commit: str, today: str | None = None) -> None:
+    def sign(self, beta: str, commit: str, today: str | None = None, owner: str = "") -> None:
         """Record which beta was tested, its exact commit and the date. Refuses while any row is open."""
         if not self.rows:
             raise SheetError("the sheet has no rows")
@@ -157,7 +170,12 @@ class Sheet:
             raise SheetError(f"the tested beta must look like {self.version}-beta.N, not {beta!r}")
         if not SHA_RE.match((commit or "").strip().lower()):
             raise SheetError("the commit must be the full 40-character SHA of the tested beta build")
+        owner = " ".join(str(owner or "").split())[:80]
+        if not owner or any(ord(c) < 32 for c in owner):
+            raise SheetError("the sign-off needs the owner's name (--owner NAME)")
         self.beta, self.commit, self.date = beta, commit.strip().lower(), today or date.today().isoformat()
+        self.owner = owner
+        self.rows_hash = self.compute_rows_hash()      # after every signed field is set: they are all hashed
         self.signed = True
 
     def problems(self) -> list[str]:
@@ -173,6 +191,10 @@ class Sheet:
             p.append("'Commit' is missing or not a full SHA")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.date):
             p.append("'Date' is missing")
+        if self.signed and not self.owner.strip():
+            p.append("'Owner' is missing: sign again (jarvis release signoff --finish --owner NAME)")
+        if self.signed and self.rows_hash != self.compute_rows_hash():
+            p.append("the rows changed after signing (rows hash does not match): sign again")
         return p
 
 

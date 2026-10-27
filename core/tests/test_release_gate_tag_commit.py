@@ -47,7 +47,7 @@ def commit(repo, files: dict[str, str], msg="c"):
 def sign(repo, tested):
     s = so.Sheet(version="4.5.0", intro="x", rows=[so.Row("C1", "Changed", "try", "works")])
     s.set_result("C1", "pass")
-    s.sign("4.5.0-beta.2", tested, "2026-10-21")
+    s.sign("4.5.0-beta.2", tested, "2026-10-21", owner="Owner")
     return {so.sheet_path(".", "4.5.0").as_posix(): s.render()}
 
 
@@ -83,7 +83,7 @@ def test_tag_equals_tested_when_sheet_names_the_tag_commit(tmp_path):
     sha = commit(r, {"core/a.py": "x\n"})
     s = so.Sheet(version="4.5.0", intro="x", rows=[so.Row("C1", "Changed", "try", "works")])
     s.set_result("C1", "pass")
-    s.sign("4.5.0-beta.1", sha, "2026-10-21")
+    s.sign("4.5.0-beta.1", sha, "2026-10-21", owner="Owner")
     so.save(r, s)                                   # uncommitted file: the root only needs the sheet text here
     assert run(r, sha, sha) == []
 
@@ -169,18 +169,22 @@ def test_installer_and_sheet_commit_must_equal_the_verified_sha(repo):
     assert any("sheet commit" in p and "differs from the verified" in p for p in run(r, tag, other))
 
 
-def test_sheet_has_no_content_hash_today_documented(repo):
-    """Documents the existing behaviour (#539): the sheet carries no hash of its rows, so a docs-only edit of a signed sheet
-    that keeps every row passing is not detected by the gate. Editing a row back to open still voids the signature."""
+def test_sheet_rows_hash_catches_an_edit_after_signing(repo):
+    """#508 (was documented as a gap in #539): the sign-off holds the owner and a hash of every row cell; a docs-only edit
+    of a signed sheet that keeps every row passing is now detected by the gate."""
     r, tested = repo
     files = sign(r, tested)
     path = next(iter(files))
     commit(r, files)
-    assert not any("hash" in f.lower() for f in so.Sheet.__dataclass_fields__) if hasattr(so.Sheet, "__dataclass_fields__") else True
-    edited = files[path].replace("works", "works (edited after signing)")
-    commit(r, {path: edited})
     tag = git(r, "rev-parse", "HEAD")
-    assert run(r, tag, tested) == []                # no hash check today: kept as is, not weakened, not invented
+    assert run(r, tag, tested) == []                 # as signed
+    s0 = so.load(r, "4.5.0")
+    assert s0.owner == "Owner" and len(s0.rows_hash) == 64
+    edited = files[path].replace("works", "works (edited after signing)")
+    assert edited != files[path]
+    commit(r, {path: edited})
+    tag2 = git(r, "rev-parse", "HEAD")
+    assert any("rows changed after signing" in x for x in run(r, tag2, tested))
     s = so.load(r, "4.5.0")
     s.set_result("C1", "fail")
-    assert s.problems()                              # a changed result still voids the signature
+    assert s.problems()
