@@ -83,6 +83,11 @@ def _line(key: str, value: Any) -> str:
     return logs.redact_pii(logs.redact(f"{key}: {value}"))[:200]
 
 
+def _slug(v: Any, n: int) -> str:
+    """A log level or component as plain lowercase letters, digits and underscore only (never free text)."""
+    return re.sub(r"[^A-Za-z0-9_]", "", str(v or "?"))[:n] or "?"
+
+
 def _safe_code(v: Any) -> str:
     s = str(v or "").strip()
     return s if _CODE.match(s) else ""
@@ -117,7 +122,7 @@ def recent_log_codes(home: Path | None, area: str, limit: int = 20) -> list[str]
                 continue
             comp, code = str(d.get("component") or "").lower(), _safe_code(d.get("code"))
             if code and (comp in comps or area_for(code) == area):
-                out.append(f"{str(d.get('level') or '?')[:8]} {comp[:24]} {code}")
+                out.append(f"{_slug(d.get('level'), 8)} {_slug(comp, 24)} {code}")
                 if len(out) >= limit:
                     return out
     return out
