@@ -10,7 +10,7 @@ plain cause + next step. "No", no answer or a timeout = skip. Rules, all tested:
   automation; only codes a guide problem entry explains (those are failures the self-check can say something about);
 - de-duplicated per (area, code) with a 10 minute cooldown (counted from the question, answered or not), at most 3
   questions per hour overall, one question open at a time, never while a diagnosis runs;
-- slice B (ticket) and slice C (coding agent) are NOT here yet.
+- slice B (ticket) is diag_ticket.py; slice C (coding-agent hand-off, two approvals) is handoff.py.
 """
 from __future__ import annotations
 
@@ -50,7 +50,10 @@ class FailureGate:
                  clock: Callable[[], float] = time.monotonic, cooldown_s: float = COOLDOWN_S,
                  max_per_hour: int = MAX_PER_HOUR, timeout_s: float = ASK_TIMEOUT_S,
                  pending: Callable[[], bool] = lambda: False, declined_cooldown_s: float = DECLINED_COOLDOWN_S,
-                 collect_timeout_s: float = COLLECT_TIMEOUT_S) -> None:
+                 collect_timeout_s: float = COLLECT_TIMEOUT_S,
+                 handoff: Callable[[areas.DiagReport, str], Any] | None = None,
+                 handoff_enabled: Callable[[], bool] = lambda: False) -> None:
+        self.handoff, self.handoff_enabled = handoff, handoff_enabled
         self.pending, self.declined_cooldown_s, self.collect_timeout_s = pending, declined_cooldown_s, collect_timeout_s
         self.enabled, self._ask, self.deliver, self.collect = enabled, ask, deliver, collect
         self.lang, self.ask_model, self.wording_enabled = lang, ask_model, wording_enabled
@@ -117,6 +120,32 @@ class FailureGate:
             self._busy = False
             logs.error("diag", "DIAG_GATE_FAILED", "failure gate failed", exc=True)
 
+    async def _offer_handoff(self, rep: areas.DiagReport, lang: str, route: str) -> None:
+        """Slice C: after the self-check, only when the switch is on and a hand-off exists. The owner decides whether the
+        explanation was enough, so the question is "hand it to a coding agent?". One more yes/no; the Orchestrator then asks its own approval showing the exact brief (a second approval)."""
+        if self.handoff is None:
+            return
+        try:
+            if not self.handoff_enabled():
+                return
+        except Exception:
+            return
+        from . import handoff as ho
+        t = ho.TEXT[lang if lang in ho.TEXT else "en"]
+        logs.info("diag", "DIAG_HANDOFF_ASKED", "offered to hand the failure to a coding agent", area=rep.area, error_code=rep.code)
+        yes = await self._ask(t["ask"], title=t["title"], why=t["why"], risk="medium", kind="other",
+                              details={"area": rep.area, "code": rep.code}, timeout=self.timeout_s, source="diag",
+                              voice=False)
+        if not yes:
+            return
+        out = self.handoff(rep, lang)
+        if asyncio.iscoroutine(out):
+            out = await out
+        if isinstance(out, dict) and out.get("text"):
+            res = self.deliver(str(out["text"]), rep)
+            if asyncio.iscoroutine(res):
+                await res
+
     async def _flow(self, area: str, code: str, data: dict, route: str) -> None:
         lang = "en"
         s = TEXT[lang]
@@ -145,6 +174,7 @@ class FailureGate:
             res = self.deliver(f"{s['head']}: {text}", rep)
             if asyncio.iscoroutine(res):
                 await res
+            await self._offer_handoff(rep, lang, route)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -189,12 +219,24 @@ def attach(core) -> FailureGate:
         except Exception:
             logs.warn("diag", "DIAG_ALERT_FAILED", "could not post the self-check result to the alerts page")
 
+    async def handoff(rep: areas.DiagReport, lang: str) -> dict:
+        from . import handoff as ho
+        from ..userdata import open_db
+        db = open_db(core.home)
+        try:
+            project = str(db.setting("diag.handoff_project") or "")
+        finally:
+            db.close()
+        holder = getattr(core, "agents_orchestrator", None) or {}
+        return await asyncio.get_running_loop().run_in_executor(None, ho.start, holder.get("o"), rep, project, lang)
+
     gate = FailureGate(
         enabled=lambda: core.features.enabled("self_diagnosis_ask"),
         ask=core.ask_confirm, deliver=deliver, pending=lambda: bool(core.approvals and core.approvals.has_pending()),
         collect=lambda area, code, data: areas.run(area, code, home=core.home, cfg=core.cfg, failure_data=data),
         lang=lambda: "he" if getattr(core.cfg.voice, "language", "he") == "he" else "en",
-        ask_model=_model_wording(core), wording_enabled=lambda: core.features.enabled("self_diagnosis_ai_wording"))
+        ask_model=_model_wording(core), wording_enabled=lambda: core.features.enabled("self_diagnosis_ai_wording"),
+        handoff=handoff, handoff_enabled=lambda: core.features.enabled("self_diagnosis_handoff"))
     core.registry.on_failure = gate.notify
     core.failure_gate = gate
     return gate

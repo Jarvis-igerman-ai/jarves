@@ -57,14 +57,14 @@ STEPS = ("language", "connection", "names", "wake", "voice", "beta", "addons", "
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.openrouter", "jarves.github_write", "jarves.github_issues", "jarves.github_prs", "jarves.model_lab",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
-                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.profiles",
+                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.diag.handoff", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.home_setup", "jarves.skills.helper", "jarves.context_trace",
                  "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix", "jarves.triage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "browser_pilot", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
-                      "assisted_dialing", "drive_briefing", "home_setup_cards", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "github_approve_reviews", "model_lab", "skills_manifest2"})
+                      "assisted_dialing", "drive_briefing", "self_diagnosis_handoff", "home_setup_cards", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "github_approve_reviews", "model_lab", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
@@ -74,7 +74,7 @@ GOOGLE_FEATURES = ("google_calendar", "calendar_write", "gmail_read", "gmail_sen
 # that every registered feature is listed.
 GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("core", "בסיס", "Core", ("web_search", "background_tasks", "memory_curator", "memory_llm_pass",
-                             "diagnosis_llm_pass", "self_diagnosis_ask", "self_diagnosis_ai_wording", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation", "skills_manifest2",
+                             "diagnosis_llm_pass", "self_diagnosis_ask", "self_diagnosis_handoff", "self_diagnosis_ai_wording", "conversation_recall", "self_check", "self_diagnostics_2", "self_tests", "issue_reports", "guided_setup", "workspace_agent_edit", "assistant_identity", "skill_creation", "skills_manifest2",
                              "proactive_help", "self_manage", "usage_monitor", "usage_admin_key", "appearance", "background_core", "display_control",
                              "tray_icon", "listening_dot", "autostart")),
     ("voice", "קול", "Voice", ("wake_word", "greeting", "chimes", "voice_change", "client_delegation")),
@@ -1129,6 +1129,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "diagnosis_llm_pass": [_mod("jarves.diagnose")],
     "self_diagnosis_ask": [_mod("jarves.diag.failure_gate"), _mod("jarves.diag.areas")],
     "self_diagnosis_ai_wording": [_mod("jarves.diag.areas")],
+    "self_diagnosis_handoff": [_mod("jarves.diag.handoff"), _mod("jarves.orchestrator"), _data("jarves.guides", "data/diagnosis.toml")],
     "self_check": [_mod("jarves.selfcheck"), _data("jarves", "dashboard_static/selfcheck.js"),
                    _data("jarves.guides", "data/self_check.toml")],
     # SW-V4 O; diag/log_codes.json is built at packaging time (root-cause hints) and optional in a dev checkout

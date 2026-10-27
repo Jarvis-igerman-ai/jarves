@@ -142,6 +142,7 @@ DEFAULTS: dict[str, Any] = {
     # guided account setup (connect.py): the once-a-day "Google is not connected" reminder
     "connect.nudge": True,
     "connect.last_nudge": 0.0,
+    "diag.handoff_project": "",                 # #336 slice C: the allow-listed Orchestrator project a failure is handed to
     "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "connect.state": {},                        # per-integration state: id -> connected | skipped (jarvis connect)
     "home_setup.state": {},                     # home setup cards (#457): id -> {later_until, failed, done}

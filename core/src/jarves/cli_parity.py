@@ -26,7 +26,7 @@ D = "dashboard"
 FEATURES: dict[str, object] = {
     "music": "music", "web_search": "ask", "background_tasks": (D, "the Background tasks page shows live research runs"),
     "memory_curator": "memory", "memory_llm_pass": "memory", "diagnosis_llm_pass": "diagnose",
-    "self_diagnosis_ask": "diagnose", "self_diagnosis_ai_wording": "diagnose",
+    "self_diagnosis_ask": "diagnose", "self_diagnosis_ai_wording": "diagnose", "self_diagnosis_handoff": "diagnose",
     "google_calendar": "calendar", "google_contacts": "contacts", "gmail_read": "mail", "gmail_send": "mail",
     "camera": "camera",
     "face_recognition": (D, "enrolment needs the camera preview; switch via `jarvis features`"),
