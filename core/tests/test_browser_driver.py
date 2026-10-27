@@ -108,7 +108,7 @@ def test_a_real_browser_reads_the_test_page_only_through_the_proxy_and_cannot_re
     wait_text(s, "net: blocked")                                        # fetch to a second local port: refused
     wait_text(s, "ws: closed")                                          # a WebSocket to it: refused
     time.sleep(0.5)
-    assert "local port refused" in proxy.denials                        # the REASON is the port rule, not a side effect
+    assert proxy.denials.count("local port refused") >= 2               # the REASON is the port rule: the fetch AND the WebSocket
     assert proxy.connections_public == 0 and not proxy._public_seen    # nothing public at all: not the <img>, not the browser's own calls
     assert s.local_only
     assert hits.paths == []                                             # the other local service never saw a request

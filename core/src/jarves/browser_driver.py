@@ -2,7 +2,7 @@
 
 `PlaywrightDriver` implements the PilotSession driver contract on a real headless Chromium/Edge:
 * ONE worker thread owns Playwright (its sync API is thread-bound); every call from any other thread is a job on its queue with a
-  deadline (a job that missed its deadline is SKIPPED, never run late), so a dashboard thread never touches Playwright; errors are
+  deadline (a job still queued after its deadline is SKIPPED; one already running is not interrupted), so a dashboard thread never touches Playwright; errors are
   fixed words. A hung page cannot block Stop: close() waits a bounded time and then KILLS the browser's process tree;
 * the browser reaches the network ONLY through `PilotProxy` (launch flags from `proxy.launch_args()` plus: no direct DNS, no QUIC,
   no network prediction; the renderer sandbox stays ON); the context is fresh and private (no profile), service workers blocked,
@@ -36,7 +36,8 @@ CALL_TIMEOUT_S = 20.0
 CLOSE_WAIT_S = 5.0
 NAV_TIMEOUT_MS = 15000
 # local services a test page must never be pointed at (the dashboard port is added by the route): Ollama, adb, DevTools, databases ...
-SERVICE_PORTS = frozenset({22, 23, 25, 53, 80, 443, 445, 1433, 2375, 2376, 3306, 3389, 5037, 5432, 5900, 6379, 9200, 9222, 9229, 11211, 11434, 27017})
+SERVICE_PORTS = frozenset({22, 23, 25, 53, 80, 443, 445, 1433, 1455, 2375, 2376, 3306, 3389, 5037, 5432, 5900, 6379, 8766, 8767, 8768, 8769, 8770,
+                           8787, 9200, 9222, 9229, 11211, 11434, 27017})        # 1455 ChatGPT login callback, 8766+ JARVES dashboards, 8787 Instagram
 EXTRA_ARGS = ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1", "--disable-quic",
               "--disable-features=NetworkPrediction,msSmartScreenProtection"]
 
@@ -49,7 +50,9 @@ def kill_tree(pid: int) -> None:
     """Kill a process and everything below it (the Playwright node driver owns the browser)."""
     try:
         if sys.platform == "win32":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=10)
+            r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=10)
+            if r.returncode != 0:
+                logs.warn("browser", "BROWSER_DRIVER_KILL_FAILED", "taskkill did not end the abandoned pilot browser")
             return
         out = subprocess.run(["ps", "-e", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
         kids: dict[int, list[int]] = {}
@@ -227,6 +230,8 @@ class PlaywrightDriver:
                 logs.warn("browser", "BROWSER_DRIVER_ABANDONED", "the pilot browser did not stop in time; killing it")
                 if self._node_pid:
                     kill_tree(self._node_pid)
+                else:
+                    logs.warn("browser", "BROWSER_DRIVER_KILL_FAILED", "the pilot browser process id is unknown: it may keep running")
         try:
             self.proxy.stop()
         except Exception:                                           # noqa: BLE001
@@ -235,8 +240,8 @@ class PlaywrightDriver:
 
 # ---------------------------------------------------------------------- the service: one local test pilot at a time
 class PilotService:
-    def __init__(self, home: Path, features: Callable[[], object], *, dashboard_port: int = 0) -> None:
-        self.home, self.features, self.dashboard_port = Path(home), features, dashboard_port
+    def __init__(self, home: Path, features: Callable[[], object], *, dashboard_port: "int | Callable[[], int]" = 0) -> None:
+        self.home, self.features, self._dash = Path(home), features, dashboard_port
         self.session: PilotSession | None = None
         self.driver: PlaywrightDriver | None = None
         self._lock = threading.Lock()
@@ -254,7 +259,8 @@ class PilotService:
         if u.scheme != "http" or page_scope(url) != "local" or not u.port or u.username or u.password \
                 or (u.hostname or "") not in ("localhost", "127.0.0.1"):
             raise PilotError("PILOT_URL", "a pilot starts on a local test page only: http://localhost:PORT/")
-        if u.port in SERVICE_PORTS or u.port == self.dashboard_port:
+        dash = self._dash() if callable(self._dash) else self._dash          # read NOW: the dashboard may have restarted on another port
+        if u.port in SERVICE_PORTS or u.port == dash:
             raise PilotError("PILOT_URL_PORT", "that port belongs to a service on this computer (the dashboard, a database, Ollama ...); use your own test page")
         if not self._on("browser_pilot"):
             raise PilotError("BROWSER_PILOT_OFF", "the browser pilot is off (jarvis features on browser_pilot)")
@@ -283,7 +289,12 @@ class PilotService:
         try:
             session.open(url)
         except Exception:
-            self.stop()
+            with self._lock:
+                if gen == self._gen:                                # only OUR start is torn down: a newer start (or a Stop) owns the service now
+                    self._gen += 1
+                    self._stop_locked()
+                else:
+                    session.stop()
             raise
         with self._lock:
             if gen != self._gen:
@@ -330,7 +341,7 @@ def dashboard_routes(register) -> None:
     def service(ctx) -> PilotService:
         global SERVICE
         if SERVICE is None:
-            SERVICE = PilotService(ctx.home, lambda: feat._ctx_features(ctx), dashboard_port=int(getattr(ctx, "port", 0) or 0))
+            SERVICE = PilotService(ctx.home, lambda: feat._ctx_features(ctx), dashboard_port=lambda: int(getattr(ctx, "port", 0) or 0))
         return SERVICE
 
     def local_only(ctx):
