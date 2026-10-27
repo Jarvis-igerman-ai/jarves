@@ -74,7 +74,7 @@ def test_start_frame_stop_happy_path(tmp_path):
     assert len(r["grant"]) >= 40 and r["expires_in_s"] == 300
     f = v.frame(r["grant"])
     assert base64.b64decode(f["png_b64"]) == PNG and f["seq"] == 1
-    assert v.stop(r["grant"]) == {"stopped": True} and d.closed and s.state == bp.STOPPED
+    assert v.stop() == {"stopped": True} and d.closed and s.state == bp.STOPPED
     assert code(v.frame, r["grant"]) == "LIVEVIEW_TOKEN"
 
 
@@ -83,7 +83,7 @@ def test_off_refuses(tmp_path):
     assert code(v.start) == "LIVEVIEW_OFF"
 
 
-@pytest.mark.parametrize("url", ["https://example.com/", "http://10.0.0.5/", "ftp://localhost/"])
+@pytest.mark.parametrize("url", ["https://example.com/", "http://10.0.0.5/", "ftp://localhost/", "http://evil.localhost:8123/"])
 def test_test_site_only_at_start(tmp_path, url):
     v, _, d, _ = mk(tmp_path, url=url)
     assert code(v.start) == "BROWSER_PILOT_VIEW_TEST_SITE" and d.shots == 0
@@ -142,7 +142,7 @@ def test_frame_costs_no_action_and_receipts_are_kind_only(tmp_path):
         t[0] += 1
         v.frame(tok)
     assert s.seq == seq
-    v.stop(tok)
+    v.stop()
     audit = (tmp_path / bp.AUDIT_FILE).read_text(encoding="utf-8")
     assert tok not in audit and "localhost" not in audit and "view:start" in audit and "view:stop" in audit
 
@@ -158,9 +158,64 @@ def test_token_never_in_logs(tmp_path, caplog):
 def test_there_is_no_input_route():
     seen = []
     lv.dashboard_routes(lambda m, rx, fn: seen.append((m, rx)))
-    assert seen == [("POST", r"/api/browser/live/start"), ("POST", r"/api/browser/live/frame"), ("POST", r"/api/browser/live/stop")]
+    assert seen == [("POST", r"/api/browser/live/start$"), ("POST", r"/api/browser/live/frame$"), ("POST", r"/api/browser/live/stop$")]
     src = Path(lv.__file__).read_text(encoding="utf-8")
     assert not re.search(r"\.(click|fill|type|press|keyboard|mouse|evaluate|goto)\(", src)
+
+
+def test_stop_works_without_a_valid_grant_after_expiry(tmp_path):
+    v, s, d, t = mk(tmp_path, ttl_s=60)
+    tok = v.start()["grant"]
+    t[0] += 61
+    assert code(v.frame, tok) == "LIVEVIEW_EXPIRED"
+    assert v.stop() == {"stopped": True} and s.state == bp.STOPPED and d.closed
+
+
+def test_a_driver_crash_ends_the_view_with_fixed_words(tmp_path):
+    v, s, d, t = mk(tmp_path)
+    tok = v.start()["grant"]
+
+    def boom():
+        raise RuntimeError("Page.screenshot failed at https://secret.example/?k=1")
+    d.screenshot = boom
+    t[0] += 1
+    with pytest.raises(lv.LiveError) as e:
+        v.frame(tok)
+    assert e.value.code == "LIVEVIEW_FRAME" and "secret.example" not in e.value.message
+    assert code(v.frame, tok) == "LIVEVIEW_TOKEN"
+
+
+def test_a_navigation_during_the_screenshot_drops_the_frame(tmp_path):
+    v, s, d, t = mk(tmp_path)
+    tok = v.start()["grant"]
+
+    def shot():
+        d.url = "https://bank.example/"
+        return PNG
+    d.screenshot = shot
+    t[0] += 1
+    assert code(v.frame, tok) == "BROWSER_PILOT_VIEW_TEST_SITE"
+    assert code(v.frame, tok) == "LIVEVIEW_TOKEN"
+
+
+def test_concurrent_frames_take_one_screenshot(tmp_path):
+    import time as _t
+    v, s, d, t = mk(tmp_path)
+    tok = v.start()["grant"]
+    n = d.shots
+    slow = d.screenshot
+
+    def shot():
+        _t.sleep(0.05)
+        return slow()
+    d.screenshot = shot
+    t[0] += 1
+    out = []
+    ths = [threading.Thread(target=lambda: out.append(v.frame(tok)["seq"])) for _ in range(6)]
+    [x.start() for x in ths]
+    [x.join() for x in ths]
+    assert d.shots == n + 1
+    assert len(set(out)) == 1                                       # everyone got the same new frame
 
 
 def test_routes_need_a_session(dash):  # noqa: F811

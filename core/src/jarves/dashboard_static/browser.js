@@ -8,9 +8,11 @@ function liveViewCard() {
   const img = el("img", { alt: tx("תצוגה חיה של דף הבדיקה", "Live view of the test page"), style: "max-width:100%;display:none;border:1px solid currentColor" });
   const msg = el("div", { class: "small", role: "status", "aria-live": "polite" });
   let token = "", timer = 0;
-  const end = (text) => { clearInterval(timer); timer = 0; token = ""; start.disabled = false; stop.disabled = true; msg.textContent = text || ""; };
+  const end = (text) => { clearInterval(timer); timer = 0; token = ""; start.disabled = false; msg.textContent = text || ""; };
   const poll = async () => {
     if (!token) return;
+    if (!document.body.contains(img)) { end(""); return; }       // the owner left this page: stop polling (no hidden loop)
+    if (document.hidden) return;                                   // a hidden tab asks for nothing
     try {
       const r = await api("/api/browser/live/frame", { method: "POST", body: JSON.stringify({ grant: token }) });
       img.src = "data:image/png;base64," + r.png_b64; img.style.display = "";
@@ -21,13 +23,12 @@ function liveViewCard() {
     start.disabled = true; msg.textContent = "";
     try {
       const r = await api("/api/browser/live/start", { method: "POST", body: "{}" });
-      token = r.grant; stop.disabled = false; await poll();
-      if (token) timer = setInterval(poll, Math.max(400, r.interval_ms || 500));
+      token = r.grant; await poll();
+      if (token) timer = setInterval(poll, Math.max(1000, r.interval_ms || 1000));
     } catch (e) { end(e.message); }
   } }, tx("תצוגה חיה", "Live view"));
-  const stop = el("button", { type: "button", disabled: true, onclick: async () => {
-    const t = token; if (!t) return;
-    try { await api("/api/browser/live/stop", { method: "POST", body: JSON.stringify({ grant: t }) }); img.style.display = "none"; end(tx("נעצר. הסשן נסגר.", "Stopped. The session is closed.")); }
+  const stop = el("button", { type: "button", onclick: async () => {
+    try { await api("/api/browser/live/stop", { method: "POST", body: "{}" }); img.style.display = "none"; end(tx("נעצר. הסשן נסגר.", "Stopped. The session is closed.")); }
     catch (e) { end(e.message); }
   } }, tx("עצירה", "Stop"));
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),

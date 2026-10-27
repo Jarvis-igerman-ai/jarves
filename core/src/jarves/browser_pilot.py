@@ -345,9 +345,26 @@ class PilotSession:
         if self.clock() - self.started > self.max_seconds:
             self.stop()
             raise PilotError("BROWSER_PILOT_CAP", "the session reached its time cap and was stopped")
-        if page_scope(self._final_url()) != "local":
+        if not self._view_local():
             raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
-        return bytes(self.driver.screenshot() or b"")
+        png = bytes(self.driver.screenshot() or b"")
+        if not self._view_local():                       # a navigation landed while the picture was taken: drop that frame
+            raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
+        return png
+
+    def _view_local(self) -> bool:
+        """The view's own, stricter rule: the page host is literally localhost, 127.x or ::1 (a *.localhost name is
+        loopback only by the browser's own rule, so it is not enough here)."""
+        url = self._final_url()
+        if page_scope(url) != "local":
+            return False
+        host = (urlsplit(url).hostname or "").lower()
+        if host == "localhost":
+            return True
+        try:
+            return ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            return False
 
     def act(self, kind: str) -> None:
         """Any other kind (click, fill, submit, login, ...) is refused and receipted: there is no write path."""
