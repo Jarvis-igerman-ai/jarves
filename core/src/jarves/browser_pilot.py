@@ -86,7 +86,10 @@ def _port_ok(url: str, scope: str) -> bool:
 
 def page_scope(url: str) -> str:
     """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts, a
-    public host on a non-web port). Loopback pages the owner points to may use any port."""
+    public host on a non-web port). Loopback pages the owner points to may use any port. A backslash is refused: a
+    browser reads it as '/' (https://10.0.0.1\\@example.com/ goes to 10.0.0.1) while urlsplit takes the host after '@'."""
+    if chr(92) in (url or ""):
+        return ""
     scope = _page_scope(url)
     return scope if scope and _port_ok(url, scope) else ""
 
@@ -120,7 +123,11 @@ RESOLVE_TIMEOUT_S = 3.0
 def system_resolver(host: str) -> list[str]:
     """All addresses the system resolver gives for a host (tests inject a fake). Bounded: a resolver that does not answer
     in RESOLVE_TIMEOUT_S raises (the caller fails closed); getaddrinfo itself has no timeout (#566)."""
-    return sorted({i[4][0] for i in _resolver_pool().submit(socket.getaddrinfo, host, None).result(timeout=RESOLVE_TIMEOUT_S)})
+    fut = _resolver_pool().submit(socket.getaddrinfo, host, None)
+    try:
+        return sorted({i[4][0] for i in fut.result(timeout=RESOLVE_TIMEOUT_S)})
+    finally:
+        fut.cancel()                                   # a lookup still queued after the timeout never runs: no backlog in the pool
 
 
 _POOL = None

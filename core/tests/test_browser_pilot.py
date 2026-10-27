@@ -303,3 +303,9 @@ def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_share
     s, d, _ = mk(tmp_path, resolver=lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     assert s.request_allowed("https://example.com/") is False
     assert bp._resolver_pool() is bp._resolver_pool() and bp._resolver_pool()._max_workers == bp.RESOLVER_THREADS
+
+
+@pytest.mark.parametrize("url", ["https://10.0.0.1" + chr(92) + "@example.com/", "https://example.com:22" + chr(92) + "@example.org/",
+                                 "https://127.0.0.1:22" + chr(92) + "@example.com/", "https://example.com/a" + chr(92) + "b"])
+def test_574_a_backslash_url_is_refused_browsers_read_it_as_a_slash(url):
+    assert bp.page_scope(url) == "" and bp.vet_url(url, lambda h: ["93.184.216.34"]) == ""
