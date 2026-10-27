@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Only the network: no microphone, no notifications, no foreground service in A2 (voice and notifications are A3). -->
+    <!-- The network, and (A3) the microphone for push-to-talk. No always-on listening, no notifications yet, no foreground service. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Push-to-talk only: asked for on the first press of the Hold to talk button, used only while the button is held and the screen is visible. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:allowBackup="false"

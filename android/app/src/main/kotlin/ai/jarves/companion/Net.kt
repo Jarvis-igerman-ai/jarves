@@ -42,7 +42,14 @@ private fun pinMismatch(e: Throwable): Boolean {
 }
 
 class PinnedTransport(private val pin: String?) : Transport {
-    override fun send(method: String, url: String, headers: Map<String, String>, body: String?): Response {
+    override fun send(method: String, url: String, headers: Map<String, String>, body: String?): Response =
+        exchange(method, url, headers, body?.toByteArray(Charsets.UTF_8), 8000)
+
+    /** The PC transcribes and answers before it replies, so a voice turn may wait longer than a status poll. */
+    override fun sendBytes(method: String, url: String, headers: Map<String, String>, body: ByteArray): Response =
+        exchange(method, url, headers, body, 60000)
+
+    private fun exchange(method: String, url: String, headers: Map<String, String>, body: ByteArray?, readMs: Int): Response {
         val trust = PinTrust(pin)
         val c = try {
             open(hostPort(url), url.removePrefix("https://").substring(hostPort(url).length), trust)
@@ -50,11 +57,12 @@ class PinnedTransport(private val pin: String?) : Transport {
             throw IOException("bad address")
         }
         try {
+            c.readTimeout = readMs
             c.requestMethod = method
             headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
             if (body != null) {
                 c.doOutput = true
-                c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                c.outputStream.use { it.write(body) }
             }
             val status = c.responseCode
             val stream = if (status >= 400) c.errorStream else c.inputStream
