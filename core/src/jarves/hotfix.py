@@ -914,7 +914,7 @@ def _mark_build(installed_pkg: Path, info: dict, manifest: dict, plan: Plan) -> 
 
 
 def _revert_dir(installed_pkg: Path, d: Path, manifest: dict, hooks: Hooks | None = None, *,
-                bridge_was_running: bool = False) -> list[str]:
+                bridge_was_running: bool = False, touched: list | None = None) -> list[str]:
     """Put back every original, delete every added file, restore the build info. Verifies the saved originals first.
     Slice 2: the dependency files and the bridge exe are restored too (the bridge is stopped through the hooks first and
     restarted only if it ran)."""
@@ -925,22 +925,27 @@ def _revert_dir(installed_pkg: Path, d: Path, manifest: dict, hooks: Hooks | Non
         if not saved.is_file() or sha256(saved) != item["sha256_original"]:
             raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
     done = []
+    touch = touched if touched is not None else []         # steps that changed something (deps are not atomic: listed before)
     if manifest.get("bridge"):
         if hooks and hooks.bridge_running and hooks.stop_bridge and hooks.bridge_running():
             hooks.stop_bridge()
         s2.bridge_revert(manifest["bridge"], d / "bridge_original")
+        touch.append("bridge")                             # atomic replace: listed once it happened
         done.append("bridge")
         if bridge_was_running and hooks and hooks.start_bridge:
             hooks.start_bridge()
     if manifest.get("deps"):
+        touch.append("deps")
         s2.revert_deps(manifest["deps"], installed_pkg.parent, d / "deps_originals")
         done.extend(f"{e['name']}=={e['old_version'] or '(removed)'}" for e in manifest["deps"])
     for item in manifest.get("replaced", []):
         _atomic_copy(orig / item["path"], installed_pkg / item["path"])
+        touch.append(item["path"])
         done.append(item["path"])
     for item in manifest.get("added", []):
         try:
             (installed_pkg / item["path"]).unlink()
+            touch.append(item["path"])
             done.append(item["path"])
         except FileNotFoundError:
             pass
@@ -980,18 +985,27 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
                  + [f"{e['name']}=={e['old_version'] or '(removed)'}" for e in man.get("deps") or []])
         return {"status": "dry-run", "id": man["id"], "files": files, "backup": str(d)}
     was_running = bool(hooks.core_running())
+    touched: list = []
+    bridge_was_running = False
     try:
         if man.get("deps") and was_running:
             hooks.stop_core()                          # locked files; restarted below
         bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
-        done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
+        done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running, touched=touched)
     except Exception as e:                             # #525: show the half-done state, bring the Core back, re-raise
-        man["status"] = "revert-failed"
-        man["error"] = str(e)
-        _write_json(d / "manifest.json", man)
+        if touched:                                    # #568 item 3: only when a write was started; else nothing changed
+            man["status"] = "revert-failed"
+            man["error"] = str(e)
+            _write_json(d / "manifest.json", man)
         if restart and was_running:
             try:
                 _restart(hooks, was_running)
+            except Exception:
+                pass
+        if bridge_was_running and hooks.bridge_running and hooks.start_bridge:     # #568 item 4: it ran before, bring it back
+            try:
+                if not hooks.bridge_running():
+                    hooks.start_bridge()
             except Exception:
                 pass
         raise

@@ -221,8 +221,13 @@ def test_revert_refuses_after_a_full_update_even_when_revert_failed(tree, monkey
     hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
     real = hf._atomic_copy
 
-    def locked(*a):
-        raise PermissionError("locked")
+    n = []
+
+    def locked(*a):                                     # the first copy works, the second fails: a write had happened (#568 item 3)
+        n.append(1)
+        if len(n) > 1:
+            raise PermissionError("locked")
+        real(*a)
 
     monkeypatch.setattr(hf, "_atomic_copy", locked)
     with pytest.raises(PermissionError):

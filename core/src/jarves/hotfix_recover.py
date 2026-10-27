@@ -182,7 +182,7 @@ def _check_unlocked(man: dict, install: Path) -> None:
     for e in man.get("deps") or []:
         paths += [sp / i["path"] for i in e["backed_up"]] + [sp / r for r in e["new_paths"]]
     for p in paths:
-        if p.is_file():
+        if p.is_file() and os.access(p, os.W_OK):      # #568 item 2: a read-only attribute is not a running Core (not ours to probe)
             try:
                 with open(p, "r+b"):
                     pass
