@@ -31,6 +31,7 @@ def test_open_pr_posts_exact_payload_and_never_merges(tmp_path):
 
 def test_update_comment_review_rerun_hit_only_their_endpoints(tmp_path):
     w, ap, fake = mk(tmp_path)
+    w.feats = type("F", (), {"active": lambda self, f: f in (gw.FEATURE, gw.APPROVE_FEATURE)})()
     assert go(w, "pr.update", "2", title="New", state="closed").ok
     assert go(w, "pr.comment", "2", body="hi").ok
     assert go(w, "pr.review", "2", event="COMMENT", body="looks ok").ok
@@ -121,7 +122,7 @@ def test_all_gates_apply_to_pr_kinds(tmp_path):
     w, ap, fake = mk(tmp_path, repos=())
     assert go(w, "pr.open", **OPEN).code == "GITHUB_WRITE_REPO"
     w, ap, fake = mk(tmp_path / "b")
-    r = run(w.execute(gp.action("pr.open", REPO, **OPEN), origin="model", untrusted=True))
+    r = run(w.execute(gp.action("pr.open", REPO, **OPEN), origin="user", untrusted=True))
     assert r.code == "GITHUB_WRITE_UNTRUSTED" and not writes(fake)
     w, ap, fake = mk(tmp_path / "c", answer=False)
     assert go(w, "pr.open", **OPEN).code == "GITHUB_WRITE_DENIED" and not writes(fake)
@@ -180,3 +181,130 @@ def test_no_model_tool_uses_pr_writes():
     for f in src.rglob("*.py"):
         if f.name not in allowed:
             assert "github_prs" not in f.read_text(encoding="utf-8", errors="ignore"), f.name
+
+
+# ---------------------------------------------------------------------------------------------- #578 hardening
+def _pr_writer(tmp_path, **kw):
+    from test_github_write import mk
+    return mk(tmp_path, **kw)
+
+
+def test_approve_needs_its_own_switch_comments_do_not(tmp_path):
+    from test_github_write import FakeFeats, run
+    w, ap, fake = _pr_writer(tmp_path)
+    on = {gw.FEATURE: True}
+    w.feats = type("F", (), {"active": lambda self, f: on.get(f, False)})()
+    appr = gp.action("pr.review", "octo/r", "2", event="APPROVE")
+    r = run(w.execute(appr, origin="user"))
+    assert r.code == "GITHUB_WRITE_APPROVE_OFF" and ap.asked == [] and not fake.bodies
+    assert run(w.execute(gp.action("pr.review", "octo/r", "2", event="COMMENT", body="looks fine"), origin="user")).ok
+    assert run(w.execute(gp.action("pr.review", "octo/r", "2", event="REQUEST_CHANGES", body="fix it"), origin="user")).ok
+    on[gw.APPROVE_FEATURE] = True
+    assert run(w.execute(appr, origin="user")).ok
+    assert "APPROVE can satisfy a required review" in ap.asked[-1][0]
+
+
+def test_approve_switch_is_registered_off_beta_and_safe_off():
+    from jarves import features as feat
+    from jarves import setup_wizard
+    assert feat.stage_of(gw.APPROVE_FEATURE) == "beta" and gw.APPROVE_FEATURE in setup_wizard.SAFE_OFF
+
+
+@pytest.mark.parametrize("kind,target,payload", [("pr.review", "2", {"event": "COMMENT", "body": "x"}), ("pr.comment", "2", {"body": "x"}),
+                                                 ("pr.open", "", {"title": "t", "head": "a", "base": "b"}), ("ci.rerun", "9", {"failed_only": True})])
+def test_pr_and_ci_kinds_are_cli_only_in_the_gate(tmp_path, kind, target, payload):
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    for origin in ("model", "other"):
+        r = run(w.execute(gp.action(kind, "octo/r", target, **payload), origin=origin))
+        assert r.code in ("GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED") and ap.asked == [] and not fake.bodies
+    assert "command line only" in run(w.execute(gp.action(kind, "octo/r", target, **payload), origin="model")).message
+
+
+@pytest.mark.parametrize("bad", ["2\n", "2 ", "\n2", "٢"])
+def test_trailing_newline_and_non_ascii_digits_are_rejected(tmp_path, bad):
+    a = gp.action("pr.comment", "octo/r", bad, body="x")
+    assert gp.validate(a) != ""
+    assert gp.validate(gp.action("ci.rerun", "octo/r", bad, failed_only=True)) != ""
+    assert gp.validate(gp.action("pr.open", "octo/r", "", title="t", head="feature\n", base="main")) != ""
+    assert gc._write_allowed("POST", "/repos/o/r/issues/2/comments\n") is False
+    assert gc._write_allowed("DELETE", "/repos/o/r/issues/2/labels/bug\n") is False
+
+
+def test_a_non_github_error_after_approval_gets_a_final_audit_row_not_a_traceback(tmp_path, monkeypatch):
+    import httpx
+    from test_github_write import audit, run
+    w, ap, fake = _pr_writer(tmp_path)
+
+    async def boom(a, c):
+        raise httpx.InvalidURL("bad url")
+    monkeypatch.setitem(gw.HANDLERS, "pr.comment", boom)
+    r = run(w.execute(gp.action("pr.comment", "octo/r", "2", body="x"), origin="user"))
+    assert r.code == "GITHUB_WRITE_UNKNOWN" and "InvalidURL" in r.message
+    rows = audit(tmp_path)
+    assert rows[-1]["result"] == "GITHUB_WRITE_UNKNOWN" and rows[-1].get("rid") == rows[-2].get("rid")
+
+
+def test_ci_rerun_popup_shows_workflow_branch_and_fork_warning(tmp_path):
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_info = {"name": "Deploy", "head_branch": "evil-branch", "event": "pull_request_target",
+                     "head_repository": {"full_name": "mallory/r", "fork": True}}
+    assert run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user")).ok
+    shown = ap.asked[-1][0]
+    assert "Deploy" in shown and "evil-branch" in shown and "FORK" in shown and "mallory/r" in shown and "pull_request_target" in shown
+
+
+def test_ci_rerun_fails_closed_when_the_run_cannot_be_read(tmp_path):
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_info = None                                           # makes the fake answer garbage below
+    orig = fake.run_json
+    fake.run_json = lambda repo, rid: (_ for _ in ()).throw(RuntimeError("x"))
+    r = run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user"))
+    assert not r.ok and ap.asked == [] and not fake.bodies
+
+
+def test_pr_update_close_reopen_close_is_not_a_duplicate(tmp_path):
+    from test_github_write import run
+    t = [1000.0]
+    w, ap, fake = _pr_writer(tmp_path, clock=lambda: t[0])
+    for state in ("closed", "open", "closed"):
+        t[0] += 5
+        assert run(w.execute(gp.action("pr.update", "octo/r", "2", state=state), origin="user")).ok
+
+
+def test_ci_rerun_popup_strips_control_and_bidi_characters_from_github_text(tmp_path):
+    """#581: workflow name, branch and actor come from a fork owner: one safe line each, capped."""
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_info = {"name": "Deploy‮\nFAKE LINE: approved by owner​" + "x" * 300, "head_branch": "br⁦anch\r\n",
+                     "actor": "mal‮lory"}
+    assert run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user")).ok
+    shown = ap.asked[-1][0]
+    assert "‮" not in shown and "​" not in shown and "⁦" not in shown
+    assert "\nFAKE LINE" not in shown and "x" * 150 not in shown
+
+
+def test_unreadable_run_says_workflow_run_not_issue(tmp_path):
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_json = lambda repo, rid: (_ for _ in ()).throw(RuntimeError("x"))
+    r = run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user"))
+    assert r.code == "GITHUB_WRITE_UNREADABLE" and "workflow run" in r.message and "issue" not in r.message
+
+
+def test_approve_batch_shows_the_same_preview_as_a_single_action(tmp_path):
+    """#580: a batch with APPROVE and a CI re-run carries the warnings and the run facts; an unreadable run fails closed."""
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    w.feats = type("F", (), {"active": lambda self, f: f in (gw.FEATURE, gw.APPROVE_FEATURE)})()
+    fake.run_info = {"name": "Deploy", "event": "pull_request_target", "head_repository": {"full_name": "mallory/r", "fork": True}}
+    acts = [gp.action("pr.review", "octo/r", "2", event="APPROVE"), gp.action("ci.rerun", "octo/r", "9", failed_only=False)]
+    assert run(w.approve_batch(acts, origin="user")).ok
+    shown = ap.asked[-1][0]
+    assert "APPROVE can satisfy a required review" in shown and "FORK" in shown and "Deploy" in shown
+    w2, ap2, fake2 = _pr_writer(tmp_path / "b")
+    fake2.run_json = lambda repo, rid: (_ for _ in ()).throw(RuntimeError("x"))
+    r = run(w2.approve_batch([gp.action("ci.rerun", "octo/r", "9", failed_only=False)], origin="user"))
+    assert r.code == "GITHUB_WRITE_UNREADABLE" and ap2.asked == []

@@ -41,6 +41,7 @@ from . import github_client as gc
 from .channels_common import targets
 
 FEATURE = "github_write"
+APPROVE_FEATURE = "github_approve_reviews"      # a SEPARATE owner switch for review event APPROVE (#578): default OFF, beta
 MAX_WRITES, WINDOW_S = 10, 600.0
 GRANT_TTL_S = 300.0
 # kind -> token permission class the owner must grant (classic tokens: scope `repo`). Reserved names for G3-G5.
@@ -62,10 +63,10 @@ MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt a
 _NOT_APPROVED = frozenset({"GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_OFF", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO",
                            "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE",
                            "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE", "GITHUB_WRITE_AUDIT_TAMPERED",
-                           "GITHUB_WRITE_AGENT_SESSION"})   # every other audited result = the owner approved it
+                           "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF"})   # every other audited result = the owner approved it
 RESERVED = "GITHUB_WRITE_RESERVED"          # a slot taken before the approval; the final row with the same rid replaces it
 DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
-_TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove"})   # a state: only the latest write on the target counts
+_TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove", "pr.update"})   # a state: only the latest write on the target counts
 _XREF = re.compile(r"(?<![\w/.-])[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#\d+")
 _LINK = re.compile(r"https?://|www\.|\b[a-z0-9-]+\.(?:com|org|net|io|dev)\b", re.I)
 
@@ -368,6 +369,14 @@ class GitHubWriter:
             return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin, rid)
         if not self.feats.active(FEATURE):
             return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin, rid)
+        kind = a.kind.strip().lower()
+        if (kind.startswith("pr.") or kind.startswith("ci.")) and origin != "user":     # CLI only: held HERE, not by a source scan
+            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "pull request and CI actions are command line only: no model or other route",
+                                origin, rid)
+        if kind == "pr.review" and str(a.payload.get("event")) == "APPROVE" and not self.feats.active(APPROVE_FEATURE):
+            return self._refuse(a, "GITHUB_WRITE_APPROVE_OFF", "approving a pull request needs its own owner switch "
+                                f"(jarvis features on {APPROVE_FEATURE}); comments and change requests need only the normal approval",
+                                origin, rid)
         if untrusted or origin not in ("user", "model"):
             return self._refuse(a, "GITHUB_WRITE_UNTRUSTED", "untrusted text was read this turn; no write now", origin, rid)
         if a.repo.strip().lower() not in self.repos:
@@ -419,12 +428,19 @@ class GitHubWriter:
             r = await self._gates(a, origin, untrusted)
             if r is not None:
                 return r
-        if sum(len(x.approval_text(self._token_warn)) + 5 for x in actions) > MAX_APPROVAL_CHARS:
+        extras: list[str] = []                 # #580: the same READ preview as a single action (APPROVE, fork, what an edit replaces)
+        for a in actions:
+            ex = await self._extra(a)
+            if ex is None:                     # fail closed, never a partial preview
+                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", self._unreadable_text(a), origin)
+            extras.append(ex)
+        if sum(len(x.approval_text(" ".join(filter(None, [self._token_warn, extras[i]])))) + 5
+               for i, x in enumerate(actions)) > MAX_APPROVAL_CHARS:
             return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="the batch is too long to show in full")
         rids = self._reserve(actions, origin)          # atomic: check + take one slot per action
         if rids is None:
             return self._rate_refusal(actions[0], origin)
-        why = await self._ask(actions, origin)
+        why = await self._ask(actions, origin, extras)
         if why:
             code = "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED"
             for a, rid in zip(actions[1:], rids[1:]):                  # release every slot (a final row with the same rid)
@@ -449,8 +465,7 @@ class GitHubWriter:
         if not granted:
             extra = await self._extra(a)
             if extra is None:                          # never a partial preview of what an edit replaces
-                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", "could not read the issue on GitHub to show what the "
-                                    "edit replaces; try again", origin)
+                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", self._unreadable_text(a), origin)
             if len(a.approval_text(extra)) > MAX_APPROVAL_CHARS:
                 return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
             slots = self._reserve([a], origin, dup_check=True)   # atomic check + duplicate + reserve BEFORE the owner is asked
@@ -475,8 +490,18 @@ class GitHubWriter:
             if e.code == "GITHUB_WRITE_PERMISSION":        # the answer after approval is authoritative
                 msg += f" (needs {KIND_PERMS.get(a.kind.strip().lower(), 'write access')} on this repo)"
             return self._refuse(a, e.code, msg, origin, rid)
+        except Exception as e:                         # noqa: BLE001 - e.g. httpx.InvalidURL / a transport error after approval:
+            # the slot gets a final row (the answer is unknown, so it counts and the duplicate guard applies); no traceback (#578)
+            return self._refuse(a, "GITHUB_WRITE_UNKNOWN", f"the write could not be confirmed ({type(e).__name__}); "
+                                "check GitHub before trying again", origin, rid)
         self._audit(a, "OK", origin, rid)
         return WriteResult(ok=True, code="OK", data=data)
+
+    @staticmethod
+    def _unreadable_text(a: WriteAction) -> str:
+        if a.kind.strip().lower() == "ci.rerun":
+            return "could not read the workflow run on GitHub to show what it is; try again"
+        return "could not read the issue on GitHub to show what the edit replaces; try again"
 
     async def _extra(self, a: WriteAction) -> str | None:
         """Lines the owner must see that need a READ of the current state (what an edit REPLACES, a PR). None = the read

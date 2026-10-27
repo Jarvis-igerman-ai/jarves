@@ -4,7 +4,8 @@ Same discipline as github_issues.py: strict payload schema checked BEFORE the ow
 `GitHubClient.write` (verb bound), the ONLY entry is `GitHubWriter.execute()` (forbidden kinds, switch, untrusted turn,
 repo allow-list, token probe, rate limit, popup-only approval bound to the action hash, audit chain).
 Never here: merge (G5, merge queue only), force push, branch protection, settings, secrets, org, permissions, inline review
-comments, workflow dispatch or cancel. A review can only be COMMENT, REQUEST_CHANGES or APPROVE (APPROVE is flagged).
+comments, workflow dispatch or cancel. A review can only be COMMENT, REQUEST_CHANGES or APPROVE (APPROVE needs its own owner switch github_approve_reviews,
+default OFF, and its popup says it can satisfy a required review).
 CLI: `jarvis github pr open|update|comment|review|rerun` (CLI only: NO model tool until the owner decides).
 """
 from __future__ import annotations
@@ -17,14 +18,14 @@ from . import github_issues as gi
 from . import github_write as gw
 
 TITLE_MAX, BODY_MAX = 200, 800
-_RUN = re.compile(r"^[1-9][0-9]{0,14}$")
+_RUN = re.compile(r"[1-9][0-9]{0,14}", re.ASCII)
 FIELDS = {"pr.open": {"title", "body", "head", "base", "draft"}, "pr.update": {"title", "body", "state"},
           "pr.comment": {"body"}, "pr.review": {"event", "body"}, "ci.rerun": {"failed_only"}}
 EVENTS = ("COMMENT", "REQUEST_CHANGES", "APPROVE")
 
 
 def _ref(v, what: str) -> str:
-    if not isinstance(v, str) or not gc._REF.match(v) or v.endswith(".lock") or v.startswith("-") or "@{" in v:
+    if not isinstance(v, str) or not gc._REF.fullmatch(v) or v.endswith(".lock") or v.startswith("-") or "@{" in v:
         return f"{what} must be a plain branch name of this repo"
     return ""
 
@@ -34,7 +35,7 @@ def validate(a: gw.WriteAction) -> str:
     kind, p = a.kind.strip().lower(), a.payload
     if not isinstance(p, dict) or kind not in FIELDS or set(p) - FIELDS[kind] or not p:
         return "payload fields are not allowed for this kind"
-    if (a.target == "") != (kind == "pr.open") or (a.target and not (_RUN if kind == "ci.rerun" else gi._NUM).match(a.target)):
+    if (a.target == "") != (kind == "pr.open") or (a.target and not (_RUN if kind == "ci.rerun" else gi._NUM).fullmatch(a.target)):
         return "target must be the pull request number (the run id for ci.rerun; empty only for a new pull request)"
     checks = {"title": lambda v: gi._text(v, TITLE_MAX, "title"), "body": lambda v: gi._text(v, BODY_MAX, "body"),
               "state": lambda v: "" if v in ("open", "closed") else "state must be open or closed",
@@ -75,6 +76,12 @@ def action(kind: str, repo: str, number: str = "", **payload) -> gw.WriteAction:
     return gw.WriteAction(kind=kind, repo=repo, target=str(number), payload=payload, preview=f"{head}: {detail}"[:200])
 
 
+def _show(v: str, cap: int = 100) -> str:
+    """Text that came from GitHub (a fork owner chooses workflow and branch names) as one safe popup line: control, bidi and
+    invisible characters and CR/LF replaced, length capped."""
+    return gi._CTRL.sub("?", re.sub(r"[\r\n\t]+", " ", v))[:cap]
+
+
 def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
     """Lines the owner must see, from a READ: is the number really a pull request, and what the action can cause."""
     o, _, r = a.repo.partition("/")
@@ -91,6 +98,14 @@ def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
     if kind == "pr.review" and p.get("event") == "REQUEST_CHANGES":
         out.append("WARNING: REQUEST_CHANGES can block merging until it is dismissed")
     if kind == "ci.rerun":
+        run = c.workflow_run(o, r, a.target)          # a READ before the popup; a failure refuses (fail closed, see _extra)
+        run = {k: (_show(v) if isinstance(v, str) else v) for k, v in run.items()}      # #581: GitHub text is not trusted
+        out.append(f"Run {a.target}: workflow {run['name'] or '?'}, event {run['event'] or '?'}, branch {run['branch'] or '?'}, "
+                   f"from {run['head_repo'] or '?'}{' (FORK)' if run['fork'] or (run['head_repo'] and run['head_repo'].lower() != a.repo.lower()) else ''}, "
+                   f"started by {run['actor'] or '?'}")
+        if run["fork"] or (run["head_repo"] and run["head_repo"].lower() != a.repo.lower()) or run["event"] == "pull_request_target":
+            out.append("WARNING: this run comes from a FORK or runs with pull_request_target: it re-executes code that is not yours "
+                       "and may have access to secrets")
         out.append("Re-runs a workflow run: this uses CI minutes and re-executes the workflow code of the repo")
     return "\n".join(out)
 
@@ -117,6 +132,19 @@ def _do(a: gw.WriteAction, c: gc.GitHubClient) -> dict:
 
 async def handle(a: gw.WriteAction, client: gc.GitHubClient) -> dict:
     return await asyncio.to_thread(_do, a, client)
+
+
+def _approve_probe(c) -> tuple[bool, str]:
+    return gw._probe(c)
+
+
+gw.feat.register(gw.APPROVE_FEATURE, "GitHub: אישור בקשות מיזוג (APPROVE)", "GitHub: approve pull requests (APPROVE)", False,
+                 probe=_approve_probe, needs=["github_write"], risk="high", stage="beta",
+                 about="let a review with the event APPROVE be sent from the command line (after your popup approval); an APPROVE can satisfy a "
+                       "required review for merging, so it has its own switch; comments and change requests do not need it",
+                 targets=gw.targets("UNIT test_github_prs.py (fake GitHub API and approvals, no network)",
+                                    "never touched the real GitHub API"),
+                 permissions=["approves a pull request after your approval each time"], settings="jarvis features on github_approve_reviews")
 
 
 for _k in FIELDS:

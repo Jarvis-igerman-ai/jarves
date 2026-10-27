@@ -64,7 +64,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
                       "dashboard_lan", "mobile_access", "browser", "browser_pilot", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
-                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "model_lab", "skills_manifest2"})
+                      "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "github_approve_reviews", "model_lab", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
 WIZARD_HIDDEN = frozenset({"helper_readonly_auto", "whatsapp_archive",     # archive: explained and confirmed on its own
@@ -86,7 +86,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
                                               "autonomy", "morning_briefing", "drive_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
                                               "proactive_intel", "proactive_signals", "dev_manager", "dev_status")),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", ("telegram", "instagram", "whatsapp_handoff",
-                                                                  "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "home_assistant", "anydo", "anydo_update", "task_triage", "github", "github_write")),
+                                                                  "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "home_assistant", "anydo", "anydo_update", "task_triage", "github", "github_write", "github_approve_reviews")),
     ("phone", "שיחות טלפון", "Phone calls", ("assisted_dialing",)),
     ("drive", "נהיגה", "Driving", ("drive_mode", "journey", "phone_drive", "drive_actions", "phone_location", "phone_hands_free")),
     ("dashboard", "לוח בקרה וטלפון", "Dashboard & phone", ("dashboard", "dashboard_lan", "mobile_access", "companion_api", "web_chat", "context_trace")),
@@ -1251,6 +1251,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "github": [_mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github.toml")],
     "model_lab": [_mod("jarves.model_lab"), _mod("jarves.model_policy"), _data("jarves.guides", "data/model_lab.toml")],
     "provider_openrouter": [_mod("jarves.openrouter"), _mod("httpx"), _data("jarves.guides", "data/provider_openrouter.toml")],
+    "github_approve_reviews": [_mod("jarves.github_prs")],
     "github_write": [_mod("jarves.github_write"), _mod("jarves.github_issues"), _mod("jarves.github_prs"), _mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github_write.toml")],
     "profiles": [_mod("jarves.profiles"), _data("jarves", "dashboard_static/profiles.js"),
                  _data("jarves.guides", "data/profiles.toml")],
