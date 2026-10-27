@@ -155,7 +155,7 @@ def test_token_never_in_logs(tmp_path, caplog):
     assert tok not in caplog.text
 
 
-def test_there_is_no_input_route():
+def test_the_route_list_is_closed_and_the_agent_side_has_no_input_calls():
     seen = []
     lv.dashboard_routes(lambda m, rx, fn: seen.append((m, rx)))
     assert seen == [("POST", r"/api/browser/live/start$"), ("POST", r"/api/browser/live/frame$"), ("POST", r"/api/browser/live/stop$"),

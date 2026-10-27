@@ -16,6 +16,7 @@ function liveViewCard() {
     try {
       const r = await api("/api/browser/live/frame", { method: "POST", body: JSON.stringify({ grant: token }) });
       img.src = "data:image/png;base64," + r.png_b64; img.style.display = "";
+      if (typeof setMine === "function" && (r.state === "HUMAN") !== mine.on) setMine(r.state === "HUMAN");
       msg.textContent = tx("קריאה בלבד. פג בעוד ", "Read only. Expires in ") + r.expires_in_s + " s";
     } catch (e) { img.style.display = "none"; end(e.message); }
   };
@@ -23,7 +24,7 @@ function liveViewCard() {
     start.disabled = true; msg.textContent = "";
     try {
       const r = await api("/api/browser/live/start", { method: "POST", body: "{}" });
-      token = r.grant; takeBtn.disabled = false; await poll();
+      token = r.grant; takeBtn.disabled = false; if (r.state === "HUMAN") setMine(true); await poll();
       if (token) timer = setInterval(poll, Math.max(1000, r.interval_ms || 1000));
     } catch (e) { end(e.message); }
   } }, tx("תצוגה חיה", "Live view"));
@@ -35,8 +36,8 @@ function liveViewCard() {
   // nowhere else (not logged, not stored here, never shown to the assistant). Local test pages only.
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify({ grant: token, ...body }) });
   const mine = { on: false };
-  const typeBox = el("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": tx("טקסט להקלדה בדף", "Text to type into the page"), disabled: true });
-  const secret = el("input", { type: "checkbox", id: "live-secret", disabled: true, onchange: () => { typeBox.type = secret.checked ? "password" : "text"; } });
+  const typeBox = el("input", { type: "password", autocomplete: "off", spellcheck: "false", "aria-label": tx("טקסט להקלדה בדף", "Text to type into the page"), disabled: true });
+  const secret = el("input", { type: "checkbox", id: "live-secret", disabled: true, onchange: () => { typeBox.type = secret.checked ? "text" : "password"; } });
   const send = async (kind, data) => {
     if (!token || !mine.on) return;
     try { await post("/api/browser/live/input", { kind, data }); msg.textContent = tx("נשלח לדף.", "Sent to the page."); }
@@ -57,14 +58,19 @@ function liveViewCard() {
     try { await post("/api/browser/live/takeover", {}); setMine(true); msg.textContent = tx("השליטה אצלכם. הסוכן נעול בחוץ.", "You are in control. The assistant is locked out."); }
     catch (e) { msg.textContent = e.message; } } }, tx("קחו שליטה", "Take over"));
   const giveBtn = el("button", { type: "button", disabled: true, onclick: async () => {
-    try { await post("/api/browser/live/return", {}); setMine(false); msg.textContent = tx("הוחזר לסוכן. הוא יקרא את הדף מחדש ולא יראה מה שהקלדתם.", "Given back. The assistant re-reads the page and never sees what you typed."); }
-    catch (e) { msg.textContent = e.message; } } }, tx("החזירו לסוכן", "Give back"));
+    try { await post("/api/browser/live/return", {}); setMine(false); contBtn.disabled = false;
+      msg.textContent = tx("השליטה הוחזרה והסוכן מושהה. הוא יוכל לקרוא את הדף רק אחרי שתאשרו.", "Control is back and the assistant is paused. It can read the page only after you let it continue."); }
+    catch (e) { msg.textContent = e.message; } } }, tx("החזירו (הסוכן מושהה)", "Give back (assistant paused)"));
+  const contBtn = el("button", { type: "button", disabled: true, onclick: async () => {
+    if (!window.confirm(tx("הסוכן יוכל לקרוא את הדף כפי שהוא עכשיו (למשל חשבון מחובר). להמשיך?", "The assistant will be able to read the page as it is now (a logged-in account, for instance). Continue?"))) return;
+    try { await post("/api/browser/live/return", { resume: true }); contBtn.disabled = true; msg.textContent = tx("הסוכן ממשיך. הוא לא ראה מה שהקלדתם.", "The assistant continues. It never saw what you typed."); }
+    catch (e) { msg.textContent = e.message; } } }, tx("אפשרו לסוכן להמשיך", "Let the assistant continue"));
   const baseEnd = end;
   end = (text) => { setMine(false); baseEnd(text); takeBtn.disabled = true; };
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),
     el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.", "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.")),
-    el("div", { class: "row" }, start, takeBtn, giveBtn, stop), msg, img,
-    el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("סיסמה (מוסתר)", "Secret (hidden)")), typeBtn, ...keyBtns));
+    el("div", { class: "row" }, start, takeBtn, giveBtn, contBtn, stop), msg, img,
+    el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("הצגת מה שמוקלד", "Show what I type")), typeBtn, ...keyBtns));
 }
 
 PAGES.browser = async function () {

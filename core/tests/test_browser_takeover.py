@@ -78,7 +78,7 @@ def test_takeover_has_its_own_switch_off_by_default(tmp_path):
     assert v.give_back(g) == {"returned": False, "state": bp.AGENT}
 
 
-def test_agent_is_locked_out_while_the_owner_drives_and_can_return(tmp_path):
+def test_agent_is_locked_out_while_the_owner_drives_and_stays_paused_until_the_owner_lets_it_continue(tmp_path):
     v, s, d, _ = mk(tmp_path)
     g = v.start()["grant"]
     assert v.takeover(g) == {"state": bp.HUMAN}
@@ -86,8 +86,10 @@ def test_agent_is_locked_out_while_the_owner_drives_and_can_return(tmp_path):
         assert code(fn) == "BROWSER_PILOT_NOT_AGENT"
     assert code(s.open, LOCAL) == "BROWSER_PILOT_NOT_AGENT"
     assert code(s.act, "click") == "BROWSER_PILOT_NOT_AGENT"
-    assert v.frame(g)["seq"] >= 1                          # the owner can still watch
-    assert v.give_back(g) == {"returned": True, "state": bp.AGENT, "reread": True}
+    assert v.frame(g)["state"] == bp.HUMAN                # the owner can still watch, and the page learns the state from the server
+    assert v.give_back(g) == {"returned": True, "state": bp.PAUSED, "reread": True}
+    assert code(s.read) == "BROWSER_PILOT_NOT_AGENT"      # back to the owner is NOT back to the agent
+    assert v.give_back(g, True)["state"] == bp.AGENT
     assert s.read()["untrusted_text"] == "Login page"
 
 
@@ -98,16 +100,16 @@ def test_return_means_a_fresh_read_and_a_note_not_cached_text(tmp_path):
     n = d.text_calls
     v.takeover(g)
     d.page_text = "Welcome back, account 4711"
-    v.give_back(g)
+    v.give_back(g, True)
     r = s.read()
     assert d.text_calls == n + 1 and "account 4711" in r["untrusted_text"]
-    assert "owner used this page" in r["note"] and "never shown to you" in r["note"]
+    assert "owner used this page" in r["note"] and "never shown to you" in r["note"] and "best-effort" in r["note"]
 
 
-def test_takeover_waits_for_a_running_agent_call_so_ownership_is_never_stale(tmp_path):
+def test_takeover_never_waits_for_a_hung_agent_call_and_its_result_is_discarded(tmp_path):
     v, s, d, _ = mk(tmp_path)
     g = v.start()["grant"]
-    started, release, order = threading.Event(), threading.Event(), []
+    started, release = threading.Event(), threading.Event()
 
     def slow_text():
         started.set()
@@ -115,18 +117,105 @@ def test_takeover_waits_for_a_running_agent_call_so_ownership_is_never_stale(tmp
         return "slow page"
     d.text = slow_text
     out = {}
-    t1 = threading.Thread(target=lambda: (out.setdefault("read", s.read()), order.append("agent-done")))
+
+    def agent():
+        try:
+            out["r"] = s.read()
+        except bp.PilotError as e:
+            out["err"] = e.code
+    t1 = threading.Thread(target=agent)
     t1.start()
     assert started.wait(5)
-    t2 = threading.Thread(target=lambda: (v.takeover(g), order.append("human-took-over")))
-    t2.start()
-    time.sleep(0.2)
-    assert order == []                                         # the takeover is waiting for the agent call
+    t0 = time.time()
+    assert v.takeover(g) == {"state": bp.HUMAN}              # no wait for the hung call
+    assert time.time() - t0 < 1
     release.set()
     t1.join(5)
-    t2.join(5)
-    assert order == ["agent-done", "human-took-over"] and out["read"]["untrusted_text"] == "slow page"
-    assert code(s.read) == "BROWSER_PILOT_NOT_AGENT"
+    assert out == {"err": "BROWSER_PILOT_NOT_AGENT"}         # the agent never gets the page text from after the takeover
+
+
+def test_stop_works_while_the_driver_hangs(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    v.start()
+    started, release = threading.Event(), threading.Event()
+
+    def hung():
+        started.set()
+        release.wait(5)
+        return "x"
+    d.text = hung
+    t1 = threading.Thread(target=lambda: _quiet(s.read))
+    t1.start()
+    assert started.wait(5)
+    t0 = time.time()
+    assert v.stop() == {"stopped": True}
+    assert time.time() - t0 < 1 and s.state == bp.STOPPED and d.closed
+    release.set()
+    t1.join(5)
+
+
+def _quiet(fn):
+    try:
+        fn()
+    except bp.PilotError:
+        pass
+
+
+def test_pause_cannot_override_the_owner(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    s.pause()
+    s.resume()
+    assert s.state == bp.HUMAN
+
+
+def test_requests_while_the_owner_drives_are_loopback_only(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    assert s.request_allowed("https://example.com/x") is True
+    v.takeover(g)
+    assert s.request_allowed("https://example.com/post") is False        # a form must not send what the owner types to a public host
+    assert s.request_allowed("http://localhost:8123/ok") is True
+    s.stop()
+    assert s.request_allowed("http://localhost:8123/ok") is False
+
+
+def test_the_owners_input_does_not_use_up_the_agents_action_cap(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    for _ in range(bp.MAX_ACTIONS + 10):
+        v.human(g, "key", {"key": "Tab"})
+    v.give_back(g, True)
+    assert s.read()["untrusted_text"] == "Login page" and s.state == bp.AGENT
+
+
+def test_the_view_expiring_while_the_owner_drives_hands_the_session_back_paused(tmp_path):
+    v, s, d, t = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    t[0] += 301
+    assert code(v.frame, g) == "LIVEVIEW_EXPIRED"
+    assert s.state == bp.PAUSED                                          # not stuck in HUMAN with no way back
+    assert v.stop() == {"stopped": True}
+
+
+def test_leaving_the_test_site_while_the_owner_drives_stops_the_session(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    d.url = "https://example.com/"
+    assert code(v.frame, g) == "BROWSER_PILOT_VIEW_TEST_SITE"
+    assert s.state == bp.STOPPED and d.closed
+
+
+def test_start_and_frame_tell_the_page_the_state(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    r = v.start()
+    assert r["state"] == bp.AGENT
+    v.takeover(r["grant"])
+    assert v.frame(r["grant"])["state"] == bp.HUMAN
 
 
 def test_takeover_needs_a_valid_grant_a_running_session_and_the_switch(tmp_path):
@@ -164,15 +253,14 @@ def test_input_only_while_the_owner_drives(tmp_path):
     assert code(v.human, g, "type", {"text": "abc"}) == "BROWSER_PILOT_NOT_HUMAN" and len(d.inputs) == 1
 
 
-def test_a_driver_without_human_input_refuses(tmp_path):
+def test_a_driver_without_human_input_refuses(tmp_path, monkeypatch):
     v, s, d, _ = mk(tmp_path)
     g = v.start()["grant"]
     v.takeover(g)
-    del Drv.human_input
-    try:
-        assert code(v.human, g, "click", {"x": 1, "y": 1}) == "BROWSER_PILOT_INPUT"
-    finally:
-        Drv.human_input = lambda self, kind, data: (self.inputs.append((kind, dict(data))), self.on_input and self.on_input(kind, data))
+    class Bare:
+        pass
+    monkeypatch.delattr(Drv, "human_input")
+    assert code(v.human, g, "click", {"x": 1, "y": 1}) == "BROWSER_PILOT_INPUT"
 
 
 def test_what_the_owner_types_never_leaks(tmp_path, caplog):
@@ -191,9 +279,13 @@ def test_what_the_owner_types_never_leaks(tmp_path, caplog):
     assert SECRET not in audit and "human:type" in audit
     # the page echoes it back (a preview, a "you typed ..." line): the agent still does not get it
     d.page_text = f"Login page. You typed {SECRET} in the box. Welcome."
-    v.give_back(g)
+    v.give_back(g, True)
     out = s.read()
     assert SECRET not in json.dumps(out) and "hidden" in out["untrusted_text"]
+    for echo in (SECRET.upper(), SECRET.replace("-", "\u200b-"), SECRET.replace("-", " - ").replace(" ", ""), "pw=" + SECRET.replace("-", "%2D")):
+        d.page_text = f"Echo: {echo} end"
+        got = s.read()["untrusted_text"]
+        assert SECRET.lower() not in got.lower().replace("\u200b", "") and SECRET.upper() not in got, echo
     s.stop()
     assert s._typed == []
 
@@ -228,12 +320,15 @@ def test_no_takeover_input_on_a_non_local_page(tmp_path):
     assert code(v.human, g, "type", {"text": "abc"}) == "BROWSER_PILOT_VIEW_TEST_SITE" and d.inputs == []
 
 
-def test_the_time_cap_ends_the_takeover(tmp_path):
-    v, s, d, t = mk(tmp_path)
+def test_the_pilot_time_cap_ends_the_takeover(tmp_path):
+    t = [1000.0]
+    d = Drv()
+    s = bp.PilotSession(tmp_path, d, enabled=lambda: True, clock=lambda: t[0], resolver=lambda h: ["93.184.216.34"])
+    v = lv.LiveView(s, enabled=lambda: True, clock=lambda: t[0], ttl_s=100000, takeover_enabled=lambda: True)
     g = v.start()["grant"]
     v.takeover(g)
     t[0] += bp.MAX_SECONDS + 1
-    assert code(v.human, g, "type", {"text": "abc"}) in ("BROWSER_PILOT_CAP", "LIVEVIEW_EXPIRED")
+    assert code(v.human, g, "type", {"text": "abc"}) == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED
     assert d.inputs == []
 
 
@@ -312,9 +407,9 @@ def test_takeover_in_the_real_dashboard(browser, dash, tmp_path):  # noqa: F811
         p.click("#live-view button:has-text('Take over')")
         p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('You are in control')", timeout=30000)
         assert s.state == bp.HUMAN
-        p.fill("#live-view input[type=text]", SECRET)
+        p.fill("#live-view input[autocomplete=off]", SECRET)
         p.click("#live-view button:has-text('Type into the page')")
-        p.wait_for_function("() => !document.querySelector('#live-view input[type=text]').value", timeout=30000)
+        p.wait_for_function("() => !document.querySelector('#live-view input[autocomplete=off]').value", timeout=30000)
         p.click("#live-view button[data-key=Enter]")
         p.click("#live-view img")
         deadline = time.time() + 15
@@ -323,7 +418,11 @@ def test_takeover_in_the_real_dashboard(browser, dash, tmp_path):  # noqa: F811
         assert [k for k, _ in d.inputs] == ["type", "key", "click"] and d.inputs[0][1] == {"text": SECRET}
         assert SECRET not in p.content() and SECRET not in p.inner_text("#live-view")
         p.click("#live-view button:has-text('Give back')")
-        p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('Given back')", timeout=30000)
+        p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('Control is back')", timeout=30000)
+        assert s.state == bp.PAUSED
+        p.once("dialog", lambda dlg: dlg.accept())
+        p.click("#live-view button:has-text('Let the assistant continue')")
+        p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('The assistant continues')", timeout=30000)
         assert s.state == bp.AGENT
         assert errs == []
         ctx.close()

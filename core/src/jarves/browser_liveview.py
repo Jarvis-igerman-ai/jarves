@@ -68,13 +68,14 @@ class LiveView:
         self._hash, self._expires, self._last, self._last_at, self.seq = _h(token), self.clock() + self.ttl_s, b"", -1e9, 0
         self.session._receipt("view:start", "ok")
         logs.info("browser", "BROWSER_LIVEVIEW", "live view started")
-        return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000}
+        return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000, "state": self.session.state}
 
     def _check(self, token: object) -> None:
         if not self._hash or not isinstance(token, str) or not hmac.compare_digest(_h(token), self._hash):
             raise LiveError("LIVEVIEW_TOKEN", "this live view link is not valid", 403)
         if self.clock() > self._expires:
             self._revoke()
+            self.session.human_returns()                 # never leave the agent locked out behind a dead view (HUMAN -> PAUSED)
             raise LiveError("LIVEVIEW_EXPIRED", "the live view expired; start it again", 410)
         if not self.enabled():
             self._revoke()
@@ -98,6 +99,8 @@ class LiveView:
             except PilotError as e:
                 if e.code != "BROWSER_PILOT_OFF":
                     self._revoke()                                     # stopped, capped or left the test site: the view ends
+                    if e.code == "BROWSER_PILOT_VIEW_TEST_SITE" and self.session.state == "HUMAN":
+                        self.session.stop()                            # the owner was driving a page that left the test site
                 raise LiveError(e.code, e.message, 409) from None
             except Exception:                                          # noqa: BLE001 - a driver error text may carry a URL: fixed words only
                 self._revoke()
@@ -106,7 +109,8 @@ class LiveView:
             if not png or len(png) > MAX_FRAME_BYTES:
                 raise LiveError("LIVEVIEW_FRAME", "no usable frame", 502)
             self._last, self._last_at, self.seq = png, now, self.seq + 1
-        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq, "expires_in_s": max(0, int(self._expires - now))}
+        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq, "expires_in_s": max(0, int(self._expires - now)),
+                "state": self.session.state}
 
     # ---- B3: the owner drives the page from this view, in the SAME session (local test pages only, see PilotSession.human_input)
     def _takeover_check(self, token: object) -> None:
@@ -122,10 +126,17 @@ class LiveView:
             logs.info("browser", "BROWSER_LIVEVIEW", "owner took over")
             return {"state": self.session.state}
 
-    def give_back(self, token: object) -> dict:
+    def give_back(self, token: object, resume: object = False) -> dict:
+        """Two explicit steps: give back (the session is PAUSED, the assistant still cannot act) and, only when `resume` is true,
+        let the assistant continue (it may then read the page as it is now, a logged-in account for instance)."""
         with self._lock:
-            self._check(token)               # giving back is always allowed with a valid grant (it only hands control to the agent)
-            return self.session.human_returns()
+            self._check(token)
+            self._last = b""                                   # the picture may show what the owner typed
+            out = self.session.human_returns()
+            if resume is True and self.session.state == "PAUSED":
+                self.session.resume()
+                out = {**out, "returned": True, "state": self.session.state}
+            return out
 
     def human(self, token: object, kind: object, data: object) -> dict:
         """One owner input event. The answer is {"ok": true} only: the typed text is never echoed, logged or stored here."""
@@ -141,10 +152,9 @@ class LiveView:
     def stop(self) -> dict:
         """The Stop button: ends the view AND the pilot session (the driver is closed). It needs no grant: it works after the
         view expired or ended (stopping is fail-safe; the route already requires the local owner)."""
-        with self._lock:
-            self._revoke()
-            self.session._receipt("view:stop", "ok")
-            self.session.stop()
+        self._hash, self._last = "", b""                       # no view lock: Stop must work while a frame or an input hangs
+        self.session._receipt("view:stop", "ok")
+        self.session.stop()
         logs.info("browser", "BROWSER_LIVEVIEW", "live view stopped")
         return {"stopped": True}
 
@@ -174,7 +184,7 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/browser/live/frame$", lambda ctx, m, b: call(ctx, lambda v: v.frame((b or {}).get("grant"))))
     register("POST", r"/api/browser/live/stop$", lambda ctx, m, b: call(ctx, lambda v: v.stop()))
     register("POST", r"/api/browser/live/takeover$", lambda ctx, m, b: call(ctx, lambda v: v.takeover((b or {}).get("grant"))))
-    register("POST", r"/api/browser/live/return$", lambda ctx, m, b: call(ctx, lambda v: v.give_back((b or {}).get("grant"))))
+    register("POST", r"/api/browser/live/return$", lambda ctx, m, b: call(ctx, lambda v: v.give_back((b or {}).get("grant"), (b or {}).get("resume"))))
     register("POST", r"/api/browser/live/input$", lambda ctx, m, b: call(ctx, lambda v: v.human(
         (b or {}).get("grant"), (b or {}).get("kind"), (b or {}).get("data"))))
 
