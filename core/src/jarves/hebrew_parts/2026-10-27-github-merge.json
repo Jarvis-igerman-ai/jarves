@@ -1,4 +1,6 @@
 {
  "turn on auto-merge for one pull request from the command line after your popup approval; only for a branch with a merge queue; there is no direct merge and no bypass": "הפעלת מיזוג אוטומטי לבקשת מיזוג אחת משורת הפקודה אחרי אישור בחלון הקופץ; רק לענף שיש לו תור מיזוג; אין מיזוג ישיר ואין עקיפה",
- "enables auto-merge of a pull request after your approval each time": "מפעיל מיזוג אוטומטי של בקשת מיזוג אחרי האישור שלכם בכל פעם"
+ "enables auto-merge of a pull request after your approval each time": "מפעיל מיזוג אוטומטי של בקשת מיזוג אחרי האישור שלכם בכל פעם",
+ "UNIT test_github_merge.py (fake GitHub API and approvals, no network)": "בדיקות יחידה test_github_merge.py (GitHub מדומה ואישורים מדומים, בלי רשת)",
+ "never touched the real GitHub API; the token permission for auto-merge is verified on first real use": "מעולם לא נגע ב-GitHub האמיתי; הרשאת האסימון למיזוג אוטומטי תיבדק בשימוש אמיתי ראשון"
 }

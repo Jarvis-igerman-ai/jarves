@@ -81,7 +81,7 @@ _WRITE_PATHS = {                                       # each verb only on its o
 _WRITE_VERBS = tuple(_WRITE_PATHS)
 # G5: the ONLY GraphQL mutation documents the client can send. There is no direct-merge mutation here, on purpose.
 _MUTATIONS = {"enable_auto_merge": ("mutation($id:ID!,$sha:GitObjectID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,"
-                                    "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt}}}}", {"id", "sha"})}
+                                    "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}", {"id", "sha"})}
 _NODE = re.compile(r"PR_[A-Za-z0-9_=-]{6,100}", re.ASCII)       # a pull request id only
 _SHA40 = re.compile(r"[0-9a-f]{40}", re.ASCII)
 
@@ -306,7 +306,8 @@ class GitHubClient:
             if "RATE_LIMITED" in kinds:
                 raise GitHubError("GITHUB_RATE_LIMIT", "GitHub rate limit used up; try later")
             raise GitHubError("GITHUB_WRITE_REFUSED", "GitHub refused to turn on auto-merge (not allowed on this repo, or the commit changed)")
-        if not ((got.get("pullRequest") or {}).get("autoMergeRequest")):
+        pr = got.get("pullRequest") or {}
+        if not (pr.get("autoMergeRequest") or pr.get("mergeQueueEntry")):       # queued at once = also a confirmation
             raise GitHubError("GITHUB_WRITE_UNKNOWN", "GitHub did not confirm auto-merge; check the pull request on GitHub first")
         return {"enabled": True}
 
@@ -501,7 +502,7 @@ def add_cli(sub) -> None:
                    choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove",
                             "open", "update", "review", "rerun", "enqueue"],
                    help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
-                        "labels-add|labels-remove; with `pr`: open|update|comment|review|rerun (each asks your approval, shows the exact text)")
+                        "labels-add|labels-remove; with `pr`: open|update|comment|review|rerun|enqueue (each asks your approval, shows the exact text)")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
     h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")
     h.add_argument("--title", default=None)

@@ -13,7 +13,7 @@ from test_github_issues import REPO, TOKEN, mk, run
 
 SHA = "a" * 40
 DOC = ("mutation($id:ID!,$sha:GitObjectID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,"
-       "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt}}}}")
+       "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt} mergeQueueEntry{id}}}}")
 
 
 def writes(fake):
@@ -170,6 +170,15 @@ def test_odd_answers_never_report_success(tmp_path, answer, code):
     w, ap, fake = writer(tmp_path, fake=fake)
     r = go(w)
     assert (r.ok, r.code) == (False, code)
+
+
+def test_an_immediate_queue_entry_counts_as_confirmed(tmp_path):
+    fake = gc.FakeGitHub()
+    fake.graphql_answer = {"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 2, "autoMergeRequest": None,
+                                                                                 "mergeQueueEntry": {"id": "MQE_1"}}}}}
+    w, ap, fake = writer(tmp_path, fake=fake)
+    assert go(w).ok
+    assert "does not cancel it either" in ap.asked[0][0]
 
 
 def test_an_unknown_result_blocks_an_immediate_retry(tmp_path):

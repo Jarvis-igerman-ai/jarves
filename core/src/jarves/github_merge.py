@@ -92,7 +92,8 @@ def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
     out.append(_checks(c, o, r, pr["head_sha"]))
     out.append("Turns on AUTO-MERGE: GitHub queues it after the required checks pass and merges it from the queue. No direct merge, no bypass. "
                "The commit is checked only now: a LATER push by anyone with write access does NOT cancel it, and it then merges "
-               "without a new look from you. This will land code on the base branch")
+               "without a new look from you. A later change of the base branch does not cancel it either: on a branch without a merge "
+               "queue it could merge directly once the checks pass. This will land code on the base branch")
     return "\n".join(out)
 
 
