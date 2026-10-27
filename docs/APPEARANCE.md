@@ -109,4 +109,4 @@ Server texts (feature descriptions, issue titles, settings labels) get a `<field
 - Wide tables (the system log) scroll inside their card, never the page.
 - Module names in the log are data. They are never translated.
 
-Evidence: `core/tools/v3_locale_screens.py` (Playwright) captures en/he at 1440 px and 390 px and checks each page automatically: lang/dir, no horizontal scroll, picker value, drawer side, search-results side, LTR islands. Output: `docs/reviews/swv3_p02c/` and the [report](reviews/SWV3_P02C_REPORT.md).
+Evidence: `core/tools/v3_locale_screens.py` (Playwright) captures en/he at 1440 px and 390 px and checks each page automatically: lang/dir, no horizontal scroll, picker value, drawer side, search-results side, LTR islands. Output: `docs/reviews/swv3_p02c/` and the [report](archive/reviews/SWV3_P02C_REPORT.md).

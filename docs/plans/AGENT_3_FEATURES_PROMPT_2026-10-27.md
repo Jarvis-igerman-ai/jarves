@@ -13,7 +13,7 @@ ORDER: setup cards on Home #457 > smart chat S4 #447 > self-diagnosis next slice
 DONE means: merged; guide `core/src/jarves/guides/data/<feature>.toml` (English + Hebrew), CLI parity entry, features row with an honest stage (beta), Hebrew strings via `core/tools/catalog_add.py`; `test_guides` and `test_cli_parity` pass; feature OFF unless the owner turns on beta features.
 
 RULES
-- ONE open PR at a time, one feature = one branch = one PR, opened ready when `python core/tools/prepush.py` passes, then `gh pr merge N --auto`. No stacking, no draft stage, no merge-main pushes, no close/reopen; push again only for red CI or a Tier R finding, max twice.
+- BATCHING: work on ONE local batch branch in your worktree, one commit per item, `python core/tools/prepush.py` + targeted tests after each commit. ONE ready PR per batch (3+ items of one lane, or end of day; soft cap ~8 commits / ~800 non-test lines), then `gh pr merge N --auto`. P0/P1 fixes and any Tier R change go ALONE and at once. Never mix lanes. A red batch is fixed in place (no split, no close/reopen, no merge-main pushes); keep committing to the NEXT batch branch cut from fresh `jarves/main` while one PR is queued. One open PR at a time. Daily metrics (open P0-P2, PRs merged, CI re-runs, hours merge to installed beta) go to your STATE.md for the 3-day trial.
 - Tier R only when the slice touches Gate, approvals, hotfix/update write paths, installer, browser network egress, wake apply or workflows/secrets: `no-automerge`, ONE independent Opus review, fix in one push. Everything else ships on green.
 - New tools are lazy (prompt budget); tests are clock-free and hermetic.
 - Your merged features must not raise open P0-P2: a defect found in your feature is fixed by you before the next slice.

@@ -1,37 +1,25 @@
-# Context map — open only what this task requires
+# Context map: open only what the task needs
 
-Full index of every document (per version, status, owner doc, testing): [DOC_MAP](DOC_MAP.md). This table only routes a task to the one document it needs.
+Default inputs: `CLAUDE.md`, `AGENTS.md`, [NOW](NOW.md). Everything else on demand. Full index of every document: [DOC_MAP](DOC_MAP.md). Old material: [archive/](archive/README.md) (search only if needed).
 
 | Need | Read only |
 |---|---|
-| Durable project principles, printability, Israel sourcing and user decisions | `PROJECT_PRINCIPLES.md` |
-| Current scope / next action | `NOW.md` (always) |
-| Layer boundaries and model pipeline | `ARCHITECTURE.md` |
-| JARVES user controls, optional touch, phone/PC admin, safe shutdown, debug logging, remote connection and offline recovery | `JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md` |
-| Simulated vs physical GPIO/camera/audio contracts | `DEVICE_CONTRACT.md` |
-| Face renderer same on desktop/device | `FACE_RUNTIME.md` |
-| Camera software: switches, privacy rules, models, setup | `CAMERA_SETUP.md` (plan: `plans/CAMERA_PLAN.md`) |
-| Real WhatsApp send/read: options, ban risk, isolated bridge design | `plans/WHATSAPP_REAL_ACCESS.md` |
-| Webtop parent/guardian / pupil homework, inbox, timetable candidate | `plans/WEBTOP_PARENT_STUDENT.md` (proposal only) |
-| Webtop teacher/staff workflow, reports, permitted AI assistance, privacy | `plans/WEBTOP_TEACHER_WORKSPACE.md` (separate proposal only) |
-| Optional read-only OpenAI admin key (usage/cost checks), how to create and save it | `OPENAI_ADMIN_KEY.md` |
-| Face / 2D avatar / 3D avatar / hidden presentations, `appearance.set` | `APPEARANCE.md` |
-| JARVES-generated Skills: draft, validation, approval, grants, sandbox | `SKILL_CREATION.md` |
-| Assistant software: stack, models, costs (checked dates) | `reviews/SW_V1_TECH_DECISION.md` |
-| Run/debug the Core, Skills, music pairing | `../core/README.md` |
-| Using JARVES end to end (en/he), V4 features, troubleshooting | `USER_GUIDE.md`, `USER_GUIDE.he.md` |
-| Which document is where, which is current or historical | `DOC_MAP.md` |
-| What V4 changed (behaviour, exit codes) | `RELEASE_NOTES_4.0.md`, `../CHANGELOG.md` |
-| Roadmap status per version (V4 released, V5 built vs open, V6, V7) | `ROADMAP.md` |
-| Testing, manual test sheets, release sign-off | `DOC_MAP.md` section 2 |
-| V4 package evidence (privacy, orchestrator, WhatsApp, recall, diagnostics, perf) | `reviews/SWV4_*.md` (one per package) |
-| Historical decisions and alternatives | `archive/DECISIONS.md` |
-| Component slots/fit/assembly | `archive/MECHANICAL.md` |
-| Connections, power, Pi vs PC, USB bridge | `archive/HARDWARE.md` |
-| Stage order / physical transition | `archive/ROADMAP.md` |
-| Phone access over Tailscale (setup EN/HE) | `PHONE_ACCESS_TAILSCALE.md`, `PHONE_ACCESS_TAILSCALE_HE.md` |
-| Future features/personal assistant | `archive/PRODUCT.md` |
-| Open risks/questions | `archive/OPEN_ITEMS.md` |
-| Prior artifacts/PDF/old simulator | `../archive/legacy/` ONLY if asked |
+| Current brief, agents, first 10 minutes | [NOW](NOW.md) |
+| Process (batching, Tier R, issues, targets) | [plans/LEAN_PROCESS_V2_2026-10-27.md](plans/LEAN_PROCESS_V2_2026-10-27.md) |
+| Agent prompts | [AGENT_1](plans/AGENT_1_ISSUES_PROMPT_2026-10-27.md), [AGENT_2](plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md), [AGENT_3](plans/AGENT_3_FEATURES_PROMPT_2026-10-27.md) |
+| Why the process changed | [plans/PROCESS_RETRO_AND_AGENT_PLAN_2026-10-27.md](plans/PROCESS_RETRO_AND_AGENT_PLAN_2026-10-27.md) |
+| Architecture and layers | [ARCHITECTURE](ARCHITECTURE.md), [PROJECT_PRINCIPLES](PROJECT_PRINCIPLES.md) |
+| Security model | [reviews/SWV2_SECURITY.md](reviews/SWV2_SECURITY.md), [reviews/SWV5_SECURITY_REVIEW.md](reviews/SWV5_SECURITY_REVIEW.md), [reviews/V6_SECURITY_REVIEW_2026-10-25.md](reviews/V6_SECURITY_REVIEW_2026-10-25.md) |
+| Release steps, sign-off, hotfix backport | [RELEASING](RELEASING.md), [reviews/RELEASE_CHECKLIST_5.0.0.md](reviews/RELEASE_CHECKLIST_5.0.0.md), [plans/RELEASE_AND_TEST_SYSTEM.md](plans/RELEASE_AND_TEST_SYSTEM.md) |
+| PR flow and CI | [GITHUB_FLOW](GITHUB_FLOW.md), [CI_PERFORMANCE](CI_PERFORMANCE.md), [PREPUSH](PREPUSH.md) |
+| Phone / mobile API contract | [api/companion_v1.md](api/companion_v1.md), [PHONE_ACCESS_TAILSCALE](PHONE_ACCESS_TAILSCALE.md) |
+| Wake word training and gate | [reviews/SWV4_WAKE_TRAIN.md](reviews/SWV4_WAKE_TRAIN.md) |
+| V7 work package | [plans/V7_WORK_PACKAGE_2026-10-26.md](plans/V7_WORK_PACKAGE_2026-10-26.md) |
+| Roadmap per version | [ROADMAP](ROADMAP.md), [plans/PRIORITIES.md](plans/PRIORITIES.md) |
+| Using JARVES (en / he) | [USER_GUIDE](USER_GUIDE.md), [USER_GUIDE.he](USER_GUIDE.he.md) |
+| What 4.5 changed | [RELEASE_NOTES_4.5](RELEASE_NOTES_4.5.md), [../CHANGELOG.md](../CHANGELOG.md) |
+| Latest state | [HANDOFF](HANDOFF.md), [handoff/](handoff/README.md) |
+| Skills creation, device contracts | [SKILL_CREATION](SKILL_CREATION.md), [DEVICE_CONTRACT](DEVICE_CONTRACT.md) |
+| Run or debug the Core | [../core/README.md](../core/README.md) |
 
-Do **not** read the entire table target list. `AGENTS.md` and `NOW.md` are the only default inputs. Do not recursively crawl `docs/`.
+Do not crawl `docs/`. `AGENTS.md` and `NOW.md` are the only default inputs.
