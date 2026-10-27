@@ -225,9 +225,13 @@ def _pid_alive(pid: int) -> bool:
     try:
         import os
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    try:                                                            # a killed child nobody reaped yet is a zombie: dead
+        with open(f"/proc/{pid}/stat", encoding="ascii") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True
 
 
 def test_a_hung_page_cannot_keep_the_browser_alive_after_stop(world, monkeypatch):
