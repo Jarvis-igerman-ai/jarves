@@ -6,7 +6,8 @@ workers. The proxy is the safety net under all of that: it is the only door out,
 
 * default deny: the target must pass `PilotSession.vet_for_proxy` (a public name is resolved ONCE per session under a lock and
   every answer vetted; private, link-local, CGNAT, metadata, SIIT and odd forms refused); public hosts only on 80 (plain GET/HEAD)
-  and 443 (CONNECT tunnel); nothing while the owner drives or has driven except loopback; nothing after Stop;
+  and 443 (CONNECT tunnel); nothing unless the session is running (not paused, stopped, switched off or past its time cap) and only
+  loopback while the owner drives;
 * it connects ONLY to the addresses vetted for that name (`session.pins`), never to a fresh DNS answer: no rebinding;
 * LOOPBACK is not "anything local": only the ports in `local_ports` (the test site's port, nothing else: never the JARVES
   dashboard, Ollama, adb, databases) and never after a public page was allowed (a public page must not reach local services);
@@ -45,6 +46,8 @@ IDLE_S = 60.0
 CONNECT_TIMEOUT_S = 10.0
 MAX_TUNNEL_S = 600.0
 MAX_BYTES = 200 * 1024 * 1024
+TOTAL_BYTES = 1024 * 1024 * 1024        # all connections together, per proxy
+MAX_BUSY_THREADS = 8
 LOG_EVERY_S = 1.0
 _HOP = frozenset({"proxy-authorization", "proxy-connection", "connection", "keep-alive", "te", "trailer", "upgrade", "host",
                   "content-length", "transfer-encoding", "expect"})
@@ -88,6 +91,9 @@ class PilotProxy:
         self._stop = threading.Event()
         self._public_seen = False
         self._lock = threading.Lock()
+        self._conns: set[socket.socket] = set()          # open client sockets (Stop closes them)
+        self._busy_slots = threading.BoundedSemaphore(MAX_BUSY_THREADS)
+        self._total = 0
         self._last_log = -1e9
         self.port = 0
 
@@ -96,6 +102,8 @@ class PilotProxy:
         """(scope, addresses to dial) for host:port, or raise Denied. The ONLY place that decides."""
         if not isinstance(port, int) or not 1 <= port <= 65535:
             raise Denied(400, "bad port")
+        if not self._running():
+            raise Denied(403, "the session is not running")
         h = _canonical_host(host.strip("[]").lower())
         if not h:
             raise Denied(403, "host refused")
@@ -132,6 +140,15 @@ class PilotProxy:
                 self._public_seen = True
         return scope, addrs
 
+    def _running(self) -> bool:
+        """New AND open connections need a running session: switched on, AGENT or HUMAN (not PAUSED, not STOPPED) and inside the
+        session's time cap, counted from the session's start (not from when a tunnel opened)."""
+        s = self.session
+        try:
+            return bool(s.enabled()) and s.state in ("AGENT", "HUMAN") and s.clock() - s.started <= s.max_seconds
+        except Exception:                                      # noqa: BLE001 - unreadable = not running
+            return False
+
     def _dial(self, host: str, port: int, *, plain: bool = False) -> tuple[socket.socket, str]:
         scope, addrs = self.targets(host, port, plain=plain)
         last = None
@@ -167,8 +184,15 @@ class PilotProxy:
                 self._sock.close()
             except OSError:
                 pass
+        with self._lock:
+            conns, threads = list(self._conns), list(self._threads)
+        for c in conns:                                        # a relay stuck in a send or a read ends now
+            try:
+                c.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         end = self.clock() + 3.0
-        for t in list(self._threads):
+        for t in threads:
             t.join(max(0.0, end - self.clock()))
 
     def _serve(self) -> None:
@@ -180,10 +204,18 @@ class PilotProxy:
             except OSError:
                 return
             if not self._slots.acquire(blocking=False):
-                threading.Thread(target=self._busy, args=(c,), daemon=True).start()
+                if self._busy_slots.acquire(blocking=False):   # a flood of rejected connections cannot spawn unlimited threads
+                    threading.Thread(target=self._busy, args=(c,), daemon=True).start()
+                else:
+                    try:
+                        c.close()
+                    except OSError:
+                        pass
                 continue
             t = threading.Thread(target=self._handle, args=(c,), daemon=True)
-            self._threads.add(t)
+            with self._lock:
+                self._threads.add(t)
+                self._conns.add(c)
             t.start()
 
     def _busy(self, c: socket.socket) -> None:
@@ -200,6 +232,7 @@ class PilotProxy:
                 c.close()
             except OSError:
                 pass
+            self._busy_slots.release()
 
     @staticmethod
     def _reply(c: socket.socket, status: int, why: str) -> None:
@@ -311,18 +344,28 @@ class PilotProxy:
                         s.close()
                 except OSError:
                     pass
-            self._threads.discard(threading.current_thread())
+            with self._lock:
+                self._threads.discard(threading.current_thread())
+                self._conns.discard(c)
             self._slots.release()
 
     # ------------------------------------------------------------------------------------------ relays
     def _alive(self, scope: str, started: float) -> bool:
         """Re-checked every second on every open connection."""
         s = self.session
-        if self._stop.is_set() or s.state == "STOPPED" or not s.enabled():
+        if self._stop.is_set() or not self._running():
             return False
-        if scope != "local" and (s.state == "HUMAN" or getattr(s, "after_human", False)):
+        if scope != "local" and s.state == "HUMAN":
             return False
-        return self.clock() - started <= min(MAX_TUNNEL_S, s.max_seconds)
+        if scope == "local" and self._public_seen:             # a public page must not keep a local connection
+            return False
+        return self.clock() - started <= MAX_TUNNEL_S
+
+    def _count(self, n: int) -> bool:
+        """Add n bytes to the proxy-wide total; False when the total cap is reached."""
+        with self._lock:
+            self._total += n
+            return self._total <= TOTAL_BYTES
 
     def _relay(self, a: socket.socket, b: socket.socket, scope: str) -> None:
         """A CONNECT tunnel: bytes both ways."""
@@ -344,7 +387,7 @@ class PilotProxy:
                 if not data:
                     return
                 total += len(data)
-                if total > MAX_BYTES:
+                if total > MAX_BYTES or not self._count(len(data)):
                     return
                 (b if s is a else a).sendall(data)
             last = self.clock()
@@ -372,13 +415,17 @@ class PilotProxy:
                     c.sendall(self._close_head(buf))
                 return
             total += len(data)
-            if total > MAX_BYTES:
+            if total > MAX_BYTES or not self._count(len(data)):
                 return
             if not sent_head:
                 buf += data
-                if b"\r\n\r\n" in buf or len(buf) > MAX_HEADER_BYTES:
+                if b"\r\n\r\n" in buf:
+                    if buf.index(b"\r\n\r\n") > MAX_HEADER_BYTES:
+                        return                                  # an oversized response head is refused, never truncated
                     c.sendall(self._close_head(buf))
                     sent_head, buf = True, b""
+                elif len(buf) > MAX_HEADER_BYTES:
+                    return
             else:
                 c.sendall(data)
             last = self.clock()

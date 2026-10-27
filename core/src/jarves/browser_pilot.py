@@ -311,10 +311,10 @@ class PilotSession:
     def vet_for_proxy(self, url: str) -> bool:
         """For pilot_proxy.py (many threads, no driver calls): the same vetting as request_allowed (a name is resolved ONCE and
         every answer judged) but it never calls driver.pin_hosts (the proxy dials the pinned addresses itself, and a thread-bound
-        driver must not be touched from proxy threads). Nothing after Stop; only loopback while the owner drives or has driven."""
+        driver must not be touched from proxy threads). Nothing after Stop; only loopback while the owner drives."""
         if self.state == STOPPED:
             return False
-        if self.state == "HUMAN" or getattr(self, "after_human", False):
+        if self.state == "HUMAN":
             return page_scope(url) == "local"
         try:
             return bool(vet_url(url, self.resolver))
