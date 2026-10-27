@@ -121,6 +121,14 @@ jobs:
             # the PR run that proved this tree: `durations` feeds its junit timings into main's cache
             [ "$reused" = "true" ] && proof_run=$(sed -n 's/^run_id=//p' reuse.out | head -1)
           fi
+          if [ "$GITHUB_EVENT_NAME" = "merge_group" ]; then
+            # lean process item 1: the queue group has the SAME docs-free tree as a green PR run (nothing merged ahead of it
+            # changed the code), so every test already ran on exactly this code. Reuse that proof: no shards, no browser,
+            # no installer here. Main then reuses the PR installer artifact, or builds it once on the push (resolve-tests).
+            if python3 core/tools/ci_reuse.py resolve --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out                || python3 core/tools/ci_reuse.py resolve-tests --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out; then
+              reused=true; echo "merge group reuses the green PR proof for tree ${tree:0:12}"; cat reuse.out || true
+            fi
+          fi
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
           [ "$reuse_tests_only" = "true" ] && args+=(--reuse-tests-only)

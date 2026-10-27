@@ -303,3 +303,14 @@ def test_merge_queue_cancels_only_superseded_runs_of_the_same_pr():
     assert "gh-readonly-queue/*/pr-*-" in run and "gh run cancel" in run
     assert not any("checkout" in s.get("uses", "") for s in job["steps"])
     assert "supersede" not in load("jarves-checks.yml")["jobs"]["ci-ok"]["needs"]   # never part of the required check
+
+
+def test_merge_group_reuses_the_green_pr_proof_for_the_same_tree():
+    """Lean process item 1: a queue group whose docs-free tree equals a green PR run's tree runs no heavy job."""
+    script = next(s["run"] for s in load("jarves-checks.yml")["jobs"]["changes"]["steps"] if s.get("id") == "c")
+    block = script[script.index('"$GITHUB_EVENT_NAME" = "merge_group"'):script.index('args=(--event')]
+    assert "ci_reuse.py resolve " in block and "ci_reuse.py resolve-tests" in block and "reused=true" in block
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    assert not any(ci_plan.classify(["core/src/jarves/cli.py"], "merge_group", reused=True).values())
+    assert ci_plan.classify(["core/src/jarves/cli.py"], "merge_group")["full"]            # no proof: the full matrix
