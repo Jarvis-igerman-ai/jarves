@@ -1,0 +1,45 @@
+order = 61
+category = "system"
+features = ["github_work"]
+suggest = false
+pages = ["agents"]
+aliases = ["מה חוסם את ה-PR", "סטטוס בקשות מיזוג של הסוכנים", "agents pull requests", "what blocks my pull request", "jarvis github work"]
+links = ["github", "github_write", "agent_orchestrator"]
+error_codes = ["GITHUB_WORK_OFF"]
+title_he = "מצב בקשות המיזוג של הסוכנים"
+title_en = "Agents' pull request status"
+what_he = "לכל סשן של סוכן קוד שעובד על ענף, ג'ארביס אומר אם יש בקשת מיזוג (PR), אם היא טיוטה, אם יש בדיקות שנכשלו או שעדיין רצות, או שהכול ירוק, ומה הצעד הבא. אפשר לשאול גם בקול: \"מה חוסם את ה-PR?\". זה לקריאה בלבד: שום דבר לא נכתב ל-GitHub, והצעדים הבאים רק מציינים את הפקודות שלכם (jarvis github pr rerun, enqueue)."
+what_en = "For each coding-agent session that works on a branch, JARVES says whether there is a pull request, whether it is a draft, whether checks failed or are still running or everything is green, and what to do next. You can also ask by voice: \"what blocks my pull request?\". It is read only: nothing is written to GitHub, and the next steps only name your own commands (jarvis github pr rerun, enqueue)."
+say = [["מה חוסם את ה-PR של הסוכן?", "What blocks my agent's pull request?"]]
+expect_he = "שורה לכל סשן: הענף, מצב הבקשה והצעד הבא. שמות בדיקות וכותרות מגיעים מ-GitHub ומוצגים כשורה אחת מנוקה וקצרה. הפקודה jarvis github work --json נותנת את אותו מידע למכונה."
+expect_en = "One line per session: the branch, the pull request state and the next step. Check names and titles come from GitHub and are shown as one cleaned, short line. jarvis github work --json gives the same data for a program."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. המצב האמיתי: jarvis github work."
+test_en = "The check only sees that the component is installed. The real state: jarvis github work."
+cost_he = "חינם. קריאות קריאה בלבד ל-GitHub עם האסימון לקריאה שלכם."
+cost_en = "Free. Read-only GitHub calls with your read token."
+privacy_he = "נקראים רק ה-repos שברשימה שלכם (github_repos). שום דבר לא נשלח לשום מקום חוץ מ-GitHub, ושום דבר לא נכתב שם."
+privacy_en = "Only the repos on your list (github_repos) are read. Nothing is sent anywhere except to GitHub, and nothing is written there."
+
+[[steps]]
+he = "ודאו ש-GitHub מחובר (jarvis github token), שה-repos שלכם ברשימה (github_repos) ושסוכני הקוד פועלים. אחר כך הדליקו: jarvis features on github_work (בטא)."
+en = "Make sure GitHub is connected (jarvis github token), your repos are listed (github_repos) and the coding agents are on. Then switch on: jarvis features on github_work (beta)."
+action = "feature_on:github_work"
+check = "active:github_work"
+
+[[steps]]
+he = "הקלידו jarvis github work (או --json), או שאלו בקול מה חוסם את ה-PR."
+en = "Type jarvis github work (or --json), or ask by voice what blocks the pull request."
+action = "command:jarvis github work"
+
+[[problems]]
+he = "הוא אומר ש-GitHub לא מחובר או שאין repos"
+en = "He says GitHub is not connected or no repo is listed"
+fix_he = "הריצו jarvis github token והוסיפו את ה-repos ל-github_repos בהגדרות."
+fix_en = "Run jarvis github token and add your repos to github_repos in the settings."
+
+[[problems]]
+he = "אין שורה לסשן שלי"
+en = "There is no line for my session"
+fix_he = "רק סשנים שיש להם ענף (לא main) מופיעים. סוכן שעובד בתיקיית הפרויקט עצמה בענף main לא נספר."
+fix_en = "Only sessions that have a branch (not main) are listed. An agent working in the project folder on main is not counted."

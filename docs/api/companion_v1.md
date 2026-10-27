@@ -33,7 +33,7 @@ Decision: the PC-hosted Core stays the brain. An Android app is a client of the 
 - `features[*].stage`: `stable` or `beta` from the generic release gate; a beta feature is OFF until the owner opts in on the PC.
 
 ## Scopes
-Default: `chat`, `voice`, `status`, `approvals`. Optional (owner grants per device): `tasks`, `prefs`, `drive`.
+Default: `chat`, `voice`, `status`, `approvals`. Optional (owner grants per device): `tasks`, `prefs`, `drive`, `browser` (beta: the browser pilot viewer, https only, `/api/m/browser*`, not used by the app).
 A missing scope gives `403 {"error": "this device may not use <scope>"}`. Pages (`home`, `chat`, `approvals`, `health`) are a second per-device grant.
 
 ## Main calls (full list in the JSON)

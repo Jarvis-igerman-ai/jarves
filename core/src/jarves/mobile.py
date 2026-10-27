@@ -56,7 +56,7 @@ REPLY_TTL_S = 600                  # how long a chat answer is kept for a resend
 REPLY_KEEP = 200
 MSG_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,64}$")
 DEFAULT_SCOPES = ("chat", "voice", "status", "approvals")
-ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs", "drive")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences; drive: the read-mostly Drive tab (all off until granted)
+ALL_SCOPES = DEFAULT_SCOPES + ("tasks", "prefs", "drive", "browser")   # tasks: goal actions + proactive snooze/stop; prefs: Learned preferences; drive: the read-mostly Drive tab (all off until granted)
 # Pages a paired device may be given (the owner picks per device; default all four). Everything else is PC-only and is
 # refused by the server with a fixed code, whatever the page shows: PAGE_PC_ONLY (never grantable) and
 # PAGE_NOT_ALLOWED (a remote page this device was not given).
@@ -72,7 +72,7 @@ STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javasc
                 "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml", "icon-192.png": "image/png", "icon-512.png": "image/png",
                 "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
                 "indicator.js": "text/javascript; charset=utf-8",
-                "plans.js": "text/javascript; charset=utf-8",
+                "plans.js": "text/javascript; charset=utf-8", "browser_view.js": "text/javascript; charset=utf-8",
                 "prefs.js": "text/javascript; charset=utf-8",
                 "drive.js": "text/javascript; charset=utf-8",
                 "hands_free.js": "text/javascript; charset=utf-8",
@@ -908,6 +908,25 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
+    if path == "/api/m/browser" or path.startswith("/api/m/browser/"):
+        # Browser pilot viewer (V7 B4 #399): beta, https only, paired + scope
+        if not need("browser"):
+            return
+        from . import mobile_browser
+        op = path[len("/api/m/browser/"):] if path.startswith("/api/m/browser/") else None
+        if method == "GET" and op is None:
+            return h._json(200, mobile_browser.status(mob))
+        if not ((method == "POST" and path in mobile_browser.ROUTES) or (method == "GET" and op is None)):
+            return h._json(405, {"error": "method not allowed"})
+        if method == "POST" and path in mobile_browser.ROUTES:
+            d = _json_body(h)
+            if d is None:
+                return
+            scheme = "https" if getattr(h.server, "tls", False) else "http"       # per request: the listener this call really arrived on
+            st, obj = mobile_browser.handle(mob, dev["id"], op, d, scheme)
+            if op in ("start", "takeover", "return", "stop"):
+                return done(st, obj, op="browser_" + op)          # the audit holds the action only: never a picture, a grant or typed text
+            return h._json(st, obj)
     if path == "/api/m/prefs" and method == "GET":        # Learned preferences (V5 G3): the same store as the dashboard page
         if not need("prefs"):
             return

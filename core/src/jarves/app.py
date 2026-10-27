@@ -365,6 +365,8 @@ class Core:
         register_anydo(self.registry, self.home, self.health)
         from .triage import TriageSkill             # S3 #446: tasks from messages (lazy, read-only; the write is S2's approval)
         self.registry.register(TriageSkill(self.home, registry=self.registry))
+        from .github_work import WorkSkill          # G6 #413: what blocks the agents' pull requests (lazy, read-only)
+        self.registry.register(WorkSkill(self.home, lambda: self.cfg, lambda: "he" if getattr(self.cfg.voice, "language", "he") == "he" else "en"))
         self.workspace.listeners.append(lambda name: self._spawn(wsp.note_live(self.live, self.workspace, name)))
 
         self.budget = Budget(self.memory, c.ai)

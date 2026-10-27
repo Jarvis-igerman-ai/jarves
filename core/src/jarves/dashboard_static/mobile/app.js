@@ -1,12 +1,13 @@
 // JARVES phone app (V5): a PWA served by the Core. English + Hebrew. No framework; text via textContent only.
 // The bearer token lives in localStorage on this phone; it is never put in a URL.
 "use strict";
+
 (function () {
   const KEY = "jarves_m_token", LANG = "jarves_m_lang";
   const T = {
     en: { pair_title: "Pair this phone", pair_help: "On the computer open the JARVES dashboard, go to Phone and press Pair a phone. Scan the QR code, or type the 8-digit code here.",
       code: "Pairing code", name: "Name for this phone", pair: "Pair", pair_net: "Works on your home network only. Nothing here is reachable from the internet.",
-      tab_home: "This phone", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_drive: "Drive", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
+      tab_home: "This phone", tab_chat: "Chat", tab_voice: "Voice", tab_approvals: "Approvals", tab_plans: "Plans", tab_prefs: "Learned", tab_drive: "Drive", tab_browser: "Browser", tab_health: "Health & speed", send: "Send", type_here: "Type a message",
       waiting: "Waiting for approval", pages_you_have: "Pages on this device", no_tests: "No self-test or speed test has run yet.", chat_off: "Chat is not running on the computer.",
       hold: "Hold to talk", release: "Release to send", unpair: "Un-pair this phone", online: "connected", offline: "computer unreachable",
       pairing: "Pairing…", bad_code: "Wrong or expired code. Make a new one on the computer.", unpaired: "This phone is no longer paired. Pair again.",
@@ -24,7 +25,7 @@
       trust_dl: "Download the certificate", trust_dl_err: "Could not download the certificate. Try again, or copy the file from the computer." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
-      tab_home: "הטלפון הזה", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_drive: "נהיגה", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
+      tab_home: "הטלפון הזה", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_drive: "נהיגה", tab_browser: "דפדפן", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
       waiting: "ממתינים לאישור", pages_you_have: "דפים במכשיר הזה", no_tests: "עוד לא רצה בדיקה עצמית או בדיקת מהירות.", chat_off: "השיחה לא פועלת במחשב.",
       hold: "לחצו והחזיקו לדיבור", release: "שחררו לשליחה", unpair: "ניתוק הטלפון", online: "מחובר", offline: "המחשב לא זמין",
       pairing: "מצמיד…", bad_code: "קוד שגוי או שפג תוקפו. הפיקו קוד חדש במחשב.", unpaired: "הטלפון כבר לא מצומד. צמדו מחדש.",
@@ -76,7 +77,7 @@
   }
   const post = (p, obj) => api(p, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj || {}) });
 
-  function forget() { unmountChat(); if (window.JarvesAudio) window.JarvesAudio.unmount(); if (window.JarvesPlans) window.JarvesPlans.unmount(); if (window.JarvesPrefs) window.JarvesPrefs.unmount(); token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
+  function forget() { unmountChat(); if (window.JarvesAudio) window.JarvesAudio.unmount(); if (window.JarvesPlans) window.JarvesPlans.unmount(); if (window.JarvesPrefs) window.JarvesPrefs.unmount(); if (window.JarvesBrowser) window.JarvesBrowser.unmount(); browserOn = false; token = ""; me = null; try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } show(); }
 
   function show() {
     $("pairView").hidden = !!token; $("appView").hidden = !token;
@@ -84,7 +85,7 @@
     if (token) { load(); timer = setInterval(tick, 4000); }
     else { const m = /(?:^|[#&])c=(\d{6,9})/.exec(location.hash); if (m) { $("code").value = m[1]; history.replaceState(null, "", location.pathname); } }
   }
-  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); mountIndicator(); tick(); voiceNote(); }
+  async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } await checkBrowser(); info(); allowTabs(); mountIndicator(); tick(); voiceNote(); }
   function mountIndicator() { if (window.JarvesAudio && $("audioBar")) window.JarvesAudio.mount({ audio: $("audioBar"), notices: $("noticeBox") }, { api, post, lang: () => lang }); }
   function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; trustNote(); }
 
@@ -122,8 +123,8 @@
 
   // ---- tabs: only the pages the owner gave this device (the server refuses the others anyway: PAGE_NOT_ALLOWED)
   let tab = "chat", chatView = null;
-  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", plans: "scope:tasks", prefs: "scope:prefs", drive: "scope:drive", health: "health" };
-  const allowed = (n) => (TABS[n].startsWith("scope:") ? ((me && me.scopes) || []).includes(TABS[n].slice(6)) : ((me && me.pages) || []).includes(TABS[n]));
+  const TABS = { home: "home", chat: "chat", voice: "chat", approvals: "approvals", plans: "scope:tasks", prefs: "scope:prefs", drive: "scope:drive", browser: "scope:browser", health: "health" };
+  const allowed = (n) => (n === "browser" && !browserOn ? false : TABS[n].startsWith("scope:") ? ((me && me.scopes) || []).includes(TABS[n].slice(6)) : ((me && me.pages) || []).includes(TABS[n]));
   function setTab(name) {
     tab = name;
     document.querySelectorAll("[data-tab]").forEach((x) => x.setAttribute("aria-selected", String(x.dataset.tab === tab)));
@@ -131,6 +132,7 @@
     if (tab === "chat") mountChat();
     if (tab === "plans") mountPlans();
     if (tab === "prefs") mountPrefs();
+    if (tab === "browser") mountBrowser();
     if (tab === "drive") mountDrive();
     else if (window.JarvesHandsFree) window.JarvesHandsFree.unmount();      // hands-free Drive voice never runs behind another tab
     tick();
@@ -177,6 +179,19 @@
       phone: { icon: S ? S.icon : null, hint: S ? S.hint : null, ...composer(), onEvent: (e) => { if (S) S.onChatEvent(e); } } });
   }
   function mountPlans() { if (window.JarvesPlans) window.JarvesPlans.mount($("plansRoot"), { api, post, lang: () => lang }); }
+  function mountBrowser() { if (window.JarvesBrowser) window.JarvesBrowser.mount($("browserRoot"), { api, post, lang: () => lang }); }
+  // The Browser tab shows only when the owner gave this phone the `browser` scope AND the computer says the phone view is on
+  // (GET /api/m/browser enabled). A refusal (403: no scope, or the view is off) hides it without a word.
+  let browserOn = false;
+  async function checkBrowser() {
+    const was = browserOn;
+    if (!(me && (me.scopes || []).includes("browser"))) browserOn = false;
+    else {
+      try { const s = await api("/api/m/browser"); browserOn = !!s.enabled; if (window.JarvesBrowser) window.JarvesBrowser.status(s); }
+      catch (e) { if (e.status) browserOn = false; }                // offline: keep what was known
+    }
+    return was !== browserOn;
+  }
   function mountPrefs() { if (window.JarvesPrefs) window.JarvesPrefs.mount($("prefsRoot"), { api, post, lang: () => lang }); }
   function mountDrive() {
     if (window.JarvesHandsFree) window.JarvesHandsFree.mount($("hfRoot"), { api, lang: () => lang });
@@ -298,6 +313,7 @@
       if (tab === "plans" && window.JarvesPlans) window.JarvesPlans.refresh();
       if (tab === "prefs" && window.JarvesPrefs) window.JarvesPrefs.refresh();
       if (tab === "drive" && window.JarvesDrive) window.JarvesDrive.refresh();
+      if (me.scopes && me.scopes.includes("browser") && await checkBrowser()) allowTabs();
       if (tab === "home") renderHome(await api("/api/m/home"));
       if (tab === "health") renderHealth(await api("/api/m/health"));
     } catch (e) { /* the connection pill already says why */ }
@@ -348,7 +364,7 @@
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });
-  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesShell) window.JarvesShell.repaint(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
+  $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesShell) window.JarvesShell.repaint(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); if (tab === "browser") mountBrowser(); tick(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
   window.addEventListener("online", tick);
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).then(() => { swOk = true; trustNote(); }).catch(() => { swOk = false; trustNote(); });

@@ -23,7 +23,8 @@
   "optional": [
    "tasks",
    "prefs",
-   "drive"
+   "drive",
+   "browser"
   ]
  },
  "rate_limits": {
@@ -609,6 +610,105 @@
    "write": true,
    "app": true,
    "summary": "Hands-free voice session end."
+  },
+  {
+   "method": "GET",
+   "path": "/api/m/browser",
+   "scope": "browser",
+   "page": null,
+   "write": false,
+   "app": false,
+   "summary": "Browser pilot viewer (beta, https only): whether the phone view is on, whether a pilot runs, its state and whether take-over is allowed."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/start",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "Open a view of a RUNNING pilot (never starts a pilot). Returns a one-view grant, valid 5 minutes."
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/frame",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "One picture of the pilot's local test page (base64 PNG) with the session state.",
+   "request": {
+    "required": [
+     "grant"
+    ],
+    "types": {
+     "grant": "string"
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/takeover",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "The owner takes over from the phone (needs the take-over switch on the computer).",
+   "request": {
+    "required": [
+     "grant"
+    ],
+    "types": {
+     "grant": "string"
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/return",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "Give control back (the assistant stays paused); resume=true lets it continue.",
+   "request": {
+    "required": [
+     "grant"
+    ],
+    "types": {
+     "grant": "string"
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/input",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "One click, text, key or scroll into the page while the owner is in control; nothing typed is logged or shown to the assistant.",
+   "request": {
+    "required": [
+     "grant",
+     "kind",
+     "data"
+    ],
+    "types": {
+     "grant": "string",
+     "kind": "string",
+     "data": "object"
+    }
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/m/browser/stop",
+   "scope": "browser",
+   "page": null,
+   "write": true,
+   "app": false,
+   "summary": "Stop the pilot and close the browser."
   }
  ]
 }
