@@ -505,3 +505,43 @@ async def test_failed_run_does_not_undo_a_change_made_while_it_ran(tmp_path, mon
     await mgr.run("shopping", "shopping_list", {})
     st = mgr.state("shopping")
     assert st["version"] == 2 and st["last_error"] is None          # the old call's error is not written onto the new version
+
+
+async def test_state_writes_are_locked_and_last_error_is_redacted(tmp_path, monkeypatch):
+    """#576: parallel threads doing read-modify-write on one Skill lose nothing; temp names are unique; no lock file is left;
+    the stored error text goes through logs.redact."""
+    import threading
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    n = 12
+    errs = []
+
+    def toggler(i):
+        try:
+            for _ in range(5):
+                mgr.set_enabled("shopping", i % 2 == 0, by="dashboard")
+        except Exception as e:                       # noqa: BLE001
+            errs.append(e)
+    ts = [threading.Thread(target=toggler, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errs
+    hist = mgr.state("shopping")["history"]
+    assert sum(1 for h in hist if isinstance(h, dict) and "enabled" in h) == n * 5          # no history entry was lost
+    d = tmp_path / gen.ROOT / "installed" / "shopping"
+    assert not list(d.glob("*.tmp")) and not (d / "state.lock").exists()
+    names = set()
+    real = gen.secrets.token_hex
+    monkeypatch.setattr(gen.secrets, "token_hex", lambda k=3: names.add(real(k)) or real(k))
+    gen._write_json(d / "x.json", {})
+    gen._write_json(d / "x.json", {})
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    secret = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
+
+    async def failing(code, tool, args, broker, timeout_s=0):
+        return {"ok": False, "error": f"bad key {secret}"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing)
+    await mgr.run("shopping", "shopping_list", {})
+    assert secret not in mgr.state("shopping")["last_error"]["error"]
