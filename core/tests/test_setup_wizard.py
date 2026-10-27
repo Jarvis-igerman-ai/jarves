@@ -192,8 +192,8 @@ def test_interactive_english_and_one_by_one_high_risk_needs_yes(env):
             lines += ["y", "no"]                            # "on?" yes, but the explicit confirmation is no
         elif fid == "chimes":
             lines += ["n"]
-        elif fid in ("face_recognition", "camera_when_away"):
-            pass                                            # skipped: their parent (camera) stayed off
+        elif fid in ("face_recognition", "camera_when_away", "self_diagnosis_handoff"):
+            pass                                            # skipped: their parent (camera, the coding agent) stayed off
         else:
             lines += [""]
     w, out = wizard(env, lines=lines)
