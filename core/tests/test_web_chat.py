@@ -826,3 +826,25 @@ def test_jarvis_web_refuses_when_its_switch_is_off(home, capsys):
 def test_core_link_lets_the_cli_open_the_dashboard():
     from jarves import link
     assert "ui.open_dashboard" in link.ALLOWED["cli"]
+
+
+def test_a_failed_settings_read_never_turns_a_silent_chat_into_a_speaking_one(rig):
+    """#665: the silent switch fails closed to its last known value (a locked settings database must not make it speak)."""
+    r = rig()
+    r.chat.set_silent(True)
+    assert r.chat.silent_state()["on"] is True
+    real = r.core.memory.get_setting
+
+    def broken(key, *a, **k):
+        raise RuntimeError("database is locked")
+    r.core.memory.get_setting = broken
+    try:
+        assert r.chat.setting_silent() is True and r.chat.silent_state()["on"] is True
+    finally:
+        r.core.memory.get_setting = real
+    r.chat.set_silent(False)
+    r.core.memory.get_setting = broken
+    try:
+        assert r.chat.setting_silent() is False                       # last known is "not silent"
+    finally:
+        r.core.memory.get_setting = real

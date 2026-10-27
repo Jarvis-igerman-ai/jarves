@@ -59,8 +59,12 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
         # Same exact content tree already passed *all PR tests*, but PR did not build
         # an installer. The main run must still produce+smoke one for release/package.
         # Never skip an installer on the strength of a test-only artifact.
+        if event == "merge_group":
+            # tests proven on this PR's own run; the queue still builds and smoke-tests the installer when the group needs one
+            inst = any(re.match(RULES["installer"], f.strip()) for f in files)
+            return {k: k == "installer" and inst for k in FLAGS}
         if event != "push":
-            raise ValueError("reuse_tests_only requires a main push")
+            raise ValueError("reuse_tests_only requires a main push or a merge group")
         return {k: k == "installer" for k in FLAGS}
     # a merge-queue group (merge_group) is classified like its PR: its commit is the merge of the queue base and the PR,
     # so `git diff HEAD^1 HEAD` is the PR's own change. A docs-only group skips the heavy jobs; the push run on main
