@@ -4,7 +4,7 @@
 "use strict";
 
 (function () {
-  const st = { runs: null, a: "", b: "", paid: false, data: null, err: "" };
+  const st = { off: false, runs: null, a: "", b: "", paid: false, data: null, err: "" };
   const LABEL = { free: ["ok", "חינמי", "Free"], local: ["ok", "מקומי", "Local"], paid: ["medium", "בתשלום", "Paid"],
     unknown: ["plain", "לא ידוע", "Unknown"] };
   const pct = (q) => q === null || q === undefined ? "—" : Math.round(q * 100) + "%";
@@ -13,6 +13,8 @@
   async function load() {
     st.err = "";
     try {
+      st.off = !(await api("/api/modellab/state")).active;
+      if (st.off) { st.runs = null; st.data = null; return; }
       if (!st.runs) {
         st.runs = (await api("/api/modellab/runs")).runs;
         st.a = st.a || (st.runs[0] ? st.runs[0].id : "");
@@ -55,7 +57,10 @@
     const rep = st.data;
     const paid = el("input", { type: "checkbox", id: "mlPaid", onchange: async (e) => { st.paid = e.target.checked; await load(); draw(); } });
     paid.checked = st.paid;
-    const body = st.err ? el("div", { class: "card", role: "alert" }, st.err)
+    const body = st.off ? el("div", { class: "empty", role: "status" }, tx(
+      "מעבדת המודלים כבויה (בטא). הפעילו בדף היכולות: קודם יכולות בטא, ואז המתג “model_lab”. או בטרמינל: “jarvis features on model_lab”.",
+      "Model Lab is off (beta): turn it on in Features: first beta features, then the model_lab switch. Or in a terminal: jarvis features on model_lab."))
+      : st.err ? el("div", { class: "card", role: "alert" }, st.err)
       : !st.runs || !st.runs.length ? el("div", { class: "empty" }, tx(
         "עוד אין הרצות. מעבדת המודלים רצה רק כשאתם מתחילים אותה: בטרמינל הריצו את “jarvis modellab run”. כאן רואים רק תוצאות.",
         "No runs yet. The Model Lab runs only when you start it: in a terminal run jarvis modellab run. This page only shows results."))

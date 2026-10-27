@@ -207,7 +207,7 @@ def test_routes_read_only_local_only_no_key(tmp_path, monkeypatch):
     routes = []
     s.dashboard_routes(lambda meth, pat, fn: routes.append((meth, re.compile(pat), fn)))
     assert {m for m, _, _ in routes} == {"GET"}                       # nothing here can start a run
-    ctx = SimpleNamespace(home=tmp_path, principal={"kind": "local"})
+    ctx = SimpleNamespace(home=tmp_path, principal={"kind": "local"}, _features=SimpleNamespace(active=lambda f: True))
     code, body = s.api_runs(ctx, None, None)
     assert code == 200 and len(body["runs"]) == 2 and body["max_run_cap_usd"] == ml.MAX_RUN_CAP_USD
     m = next(p for _, p, f in routes if f is s.api_compare).fullmatch("/api/modellab/compare/20010909-014640,20010909-014820")
@@ -226,3 +226,49 @@ def test_page_wired_and_js_has_no_run_or_key_call():
     assert any(p["page"] == "modellab" and p["group"] == "dev" for p in pr.pages())
     js = (Path(ml.__file__).parent / "dashboard_static" / "modellab.js").read_text(encoding="utf-8")
     assert 'method: "POST"' not in js and "secrets" not in js and "/api/modellab/" in js and "/api/features" not in js
+
+
+def _ctx(tmp_path, on):
+    from types import SimpleNamespace
+    return SimpleNamespace(home=tmp_path, principal={"kind": "local"}, _features=SimpleNamespace(active=lambda f: on))
+
+
+def test_routes_refuse_when_feature_off_and_state_answers(tmp_path):
+    import re
+    from jarves import model_lab_surface as s
+    _store(tmp_path)
+    m = re.fullmatch(r"/api/modellab/(compare|all)/([0-9,\-]+)", "/api/modellab/compare/20010909-014640")
+    off = _ctx(tmp_path, False)
+    for code, body in (s.api_runs(off, None, None), s.api_compare(off, m, None)):
+        assert code == 409 and body["code"] == "MODELLAB_OFF" and "model_lab" in body["error"]
+    assert s.api_state(off, None, None) == (200, {"active": False})
+    on = _ctx(tmp_path, True)
+    assert s.api_state(on, None, None) == (200, {"active": True})
+    assert s.api_runs(on, None, None)[0] == 200 and s.api_compare(on, m, None)[0] == 200
+
+
+def test_big_report_refused_and_listing_skips_it(tmp_path):
+    import re
+    from jarves import model_lab_surface as s
+    _store(tmp_path)
+    big = tmp_path / "modellab" / "20300101-000000.json"
+    big.write_text(" " * (ml.MAX_REPORT_BYTES + 1), encoding="utf-8")
+    with pytest.raises(ml.ReportTooLarge):
+        ml.load_run(tmp_path, "20300101-000000")
+    assert "20300101-000000" not in [r["id"] for r in ml.list_runs(tmp_path)]
+    m = re.fullmatch(r"/api/modellab/(compare|all)/([0-9,\-]+)", "/api/modellab/compare/20300101-000000")
+    code, body = s.api_compare(_ctx(tmp_path, True), m, None)
+    assert code == 413 and body["code"] == "MODELLAB_REPORT_TOO_LARGE"
+
+
+def test_listing_is_bounded(tmp_path, monkeypatch):
+    d = tmp_path / "modellab"
+    d.mkdir()
+    for i in range(30):
+        (d / f"20300101-{i:06d}.json").write_text("{}", encoding="utf-8")
+    opened = []
+    real = ml._read_report
+    monkeypatch.setattr(ml, "_read_report", lambda p: (opened.append(p.name), real(p))[1])
+    monkeypatch.setattr(ml, "MAX_SCAN", 5)
+    assert ml.list_runs(tmp_path, limit=3) == [] and len(opened) == 5       # only the newest 5 names are opened
+    assert opened[0] == "20300101-000029.json"

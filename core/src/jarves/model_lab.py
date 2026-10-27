@@ -16,6 +16,7 @@ import csv
 import io
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Callable
@@ -207,16 +208,35 @@ def latest(home: Path) -> dict | None:
 _RUN_ID = re.compile(r"^\d{8}-\d{6}(?:-\d{1,4})?$")
 
 
+MAX_REPORT_BYTES = 1_000_000     # a report is ~10 KB; a bigger file is refused, never parsed
+MAX_SCAN = 500                   # at most this many newest file names are looked at when listing
+
+
+class ReportTooLarge(ValueError):
+    code = "MODELLAB_REPORT_TOO_LARGE"
+
+
+def _read_report(path: Path) -> dict:
+    if path.stat().st_size > MAX_REPORT_BYTES:
+        raise ReportTooLarge(f"report is larger than {MAX_REPORT_BYTES} bytes")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def list_runs(home: Path, limit: int = 50) -> list[dict]:
-    """V7 M4 store: newest first, one short line per archived run. A damaged file is skipped, never fatal."""
+    """V7 M4 store: newest first, one short line per archived run. Bounded: only the newest MAX_SCAN names are sorted
+    and at most `limit` files are opened (an oversized or damaged file is skipped, never fatal)."""
+    d = Path(home) / "modellab"
+    try:
+        names = sorted((e.name[:-5] for e in os.scandir(d) if e.name.endswith(".json") and _RUN_ID.match(e.name[:-5])),
+                       reverse=True)[:MAX_SCAN]
+    except OSError:
+        return []
     out = []
-    for f in sorted((Path(home) / "modellab").glob("*.json"), reverse=True):
-        if not _RUN_ID.match(f.stem):
-            continue
+    for stem in names:
         try:
-            rep = json.loads(f.read_text(encoding="utf-8"))
+            rep = _read_report(d / f"{stem}.json")
             summ = rep["summary"]
-            out.append(dict(id=f.stem, mode=rep.get("mode", ""), spent_usd=rep.get("spent_usd", 0.0),
+            out.append(dict(id=stem, mode=rep.get("mode", ""), spent_usd=rep.get("spent_usd", 0.0),
                             models=[x["model"] for x in summ], rows=len(rep["rows"]),
                             accepted=sum(x["accepted"] for x in summ)))
         except (OSError, ValueError, KeyError, TypeError):
@@ -227,11 +247,14 @@ def list_runs(home: Path, limit: int = 50) -> list[dict]:
 
 
 def load_run(home: Path, run_id: str) -> dict | None:
-    """One archived report by id (the id is validated: no path can escape the modellab folder)."""
+    """One archived report by id (validated: no path can escape the folder). None if missing or damaged; raises
+    ReportTooLarge for a file over MAX_REPORT_BYTES."""
     if not isinstance(run_id, str) or not _RUN_ID.match(run_id):
         return None
     try:
-        return json.loads((Path(home) / "modellab" / f"{run_id}.json").read_text(encoding="utf-8"))
+        return _read_report(Path(home) / "modellab" / f"{run_id}.json")
+    except ReportTooLarge:
+        raise
     except (OSError, ValueError):
         return None
 
