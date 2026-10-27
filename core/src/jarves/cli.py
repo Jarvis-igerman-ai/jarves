@@ -2038,6 +2038,7 @@ _EXT_LATE = (
     ("profiles", ("profile",), {"profile": "cmd_profile"}),           # Issue #17: jarvis profile list / create / use
     ("wizard", ("tour",), {"tour": "cmd_tour"}),                      # owner issues #58/#60/#61: jarvis tour
     ("release_cmd", ("release",), {"release": "cmd_release"}),        # jarvis release signoff
+    ("install_latest", ("install-latest",), "COMMANDS"),              # owner automation: backup, silent install, checks
     ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
     ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
     ("model_lab", ("modellab",), "COMMANDS"),                          # V7 M3: jarvis modellab status | run | report
