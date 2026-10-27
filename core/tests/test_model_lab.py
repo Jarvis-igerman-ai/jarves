@@ -272,3 +272,9 @@ def test_listing_is_bounded(tmp_path, monkeypatch):
     monkeypatch.setattr(ml, "MAX_SCAN", 5)
     assert ml.list_runs(tmp_path, limit=3) == [] and len(opened) == 5       # only the newest 5 names are opened
     assert opened[0] == "20300101-000029.json"
+
+
+def test_575_bom_zero_width_and_fullwidth_formula_cells_are_guarded():
+    for c in ["\ufeff=1+1", "\u200b=cmd", "\u2060@SUM(1)", "\uff1d1+1", "\uff0b1"]:
+        assert ml._cell(c).startswith("'"), c
+    assert ml._cell("plain") == "plain" and ml._cell(5) == 5

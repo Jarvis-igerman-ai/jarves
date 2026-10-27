@@ -268,3 +268,11 @@ def test_567_v4_compatible_ipv6_idna_disagreement_and_cut_tail(tmp_path):
     assert len(s.read()["untrusted_text"]) == bp.MAX_TEXT
     d.text = lambda: "ghp_" + "x" * (2 * bp.MAX_TEXT - 4) + "ghp_SECRETSECRETSECRETSECRETSECRET"
     assert "ghp_SECRET" not in s.read()["untrusted_text"]
+
+
+@pytest.mark.parametrize("url", ["http://[::ffff:0:a00:1]/", "http://[fec0::1]/", "http://[::93.184.216.34]/", "http://[::ffff:10.0.0.1]/"])
+def test_575_translated_site_local_and_compat_ipv6_are_refused(url):
+    assert bp.page_scope(url) == ""
+    host = url[8:-2]
+    assert bp.vet_url("https://names.example.com/", lambda h: [host]) == ""
+    assert bp.page_scope("http://[::ffff:93.184.216.34]/") == "public" and bp.page_scope("http://[::1]/") == "local"

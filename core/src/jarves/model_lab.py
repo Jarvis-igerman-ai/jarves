@@ -174,7 +174,9 @@ COLS = ("model", "task", "kind", "status", "accepted", "latency_s", "cost_usd", 
 
 def _cell(v):
     s = str(v)
-    return "'" + s if s.lstrip().startswith(("=", "+", "-", "@")) or s.startswith(("\t", "\r")) else v      # no spreadsheet formula injection
+    probe = s.lstrip(" "+"\t\r\n\ufeff\u200b\u200c\u200d\u2060")      # BOM / zero-width marks do not hide a formula (#575)
+    probe = probe.replace("\uff1d", "=").replace("\uff0b", "+").replace("\uff20", "@")   # full-width = + @
+    return "'" + s if probe.startswith(("=", "+", "-", "@")) or s.startswith(("\t", "\r")) else v      # no spreadsheet formula injection
 
 
 def archive(home: Path, report: dict, wall: Callable[[], float] = time.time) -> Path:
