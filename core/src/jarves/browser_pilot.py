@@ -284,6 +284,8 @@ class PilotSession:
     HUMAN_KEYS = frozenset({"Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"})
     MAX_TYPED = 500
     MAX_HUMAN_EVENTS = 2000
+    MAX_TYPED_ENTRIES = 400
+    MIN_HIDE = 3                         # shorter typed strings are not hidden: they would match everywhere (an oracle) 
     DRIVER_WAIT_S = 5.0
 
     def human_input(self, kind: str, data: dict) -> dict:
@@ -317,7 +319,10 @@ class PilotSession:
                 self.hseq += 1
                 self._receipt("human:" + kind, "ok", human=True)
                 if kind == "type":
-                    self._typed = (self._typed + [clean["text"]])[-50:]
+                    if len(self._typed) >= self.MAX_TYPED_ENTRIES:
+                        self.stop()                          # never forget what was typed (it would stop being hidden): end the session
+                        raise PilotError("BROWSER_PILOT_CAP", "too much was typed in this session; it was stopped")
+                    self._typed.append(clean["text"])
             try:
                 self.driver.human_input(kind, clean)
             except Exception:                              # noqa: BLE001 - fixed words only: an error text may hold the typed text
@@ -428,7 +433,7 @@ class PilotSession:
         a stopped session allows nothing."""
         if self.state == STOPPED:
             return False
-        if self.state == HUMAN:
+        if self.state == HUMAN or self.after_human:         # a public script in a page the owner typed into could read the keys
             return page_scope(url) == "local"
         try:
             ok = bool(vet_url(url, self.resolver))
@@ -455,8 +460,14 @@ class PilotSession:
         raw = self._norm(raw)
         for t in self._typed:
             n = self._norm(t)
-            for v in {n, quote(n, safe=""), quote_plus(n), n.replace(" ", "")}:
-                if len(v) >= 1:
+            if len(n) < self.MIN_HIDE:
+                continue
+            try:
+                forms = {n, quote(n, safe=""), quote_plus(n), n.replace(" ", "")}
+            except UnicodeEncodeError:                         # a lone surrogate cannot be URL-encoded
+                forms = {n}
+            for v in forms:
+                if len(v) >= self.MIN_HIDE:
                     raw = re.sub(re.escape(v), "[text typed by the owner, hidden]", raw, flags=re.I)
         return raw
 
@@ -498,7 +509,12 @@ class PilotSession:
             raise PilotError("BROWSER_PILOT_CAP", "the session reached its time cap and was stopped")
         if not self._view_local():
             raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
-        png = bytes(self.driver.screenshot() or b"")
+        if not self._dlock.acquire(timeout=self.DRIVER_WAIT_S):   # a thread-bound driver is used by one thread at a time
+            raise PilotError("BROWSER_PILOT_BUSY", "the page is busy; try again")
+        try:
+            png = bytes(self.driver.screenshot() or b"")
+        finally:
+            self._dlock.release()
         if not self._view_local():                       # a navigation landed while the picture was taken: drop that frame
             raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
         return png
