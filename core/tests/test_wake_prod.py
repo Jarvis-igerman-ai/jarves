@@ -137,7 +137,8 @@ def test_near_miss_list_is_the_voice_campaign_list():
 def test_trained_model_does_not_wake_on_any_near_miss_sentence(tmp_path):
     rep = train(tmp_path / "m.npz")
     nm = rep["near_miss"]
-    assert nm["rendered"] == 12 * 2 + 8 * 1 and nm["false_wakes"] == [], nm      # 2 en voices, 1 he voice
+    assert nm["rendered"] == 14 * 2 + 3 * 1 and nm["false_wakes"] == [], nm      # held-out gate list: 2 en, 1 he voice
+    assert rep["campaign"]["rendered"] == 12 * 2 + 8 * 1                         # the voice-campaign list, reported
     assert wp.gate(rep) == []
 
 
@@ -146,7 +147,7 @@ def test_a_hair_trigger_model_fails_the_near_miss_check_and_the_gate(tmp_path):
     hot = wt.load_head(tmp_path / "m.npz")
     hot["b2"] = hot["b2"] + 40.0                                                 # scores ~1.0 on everything
     nm = wp.near_miss_check(hot, 0.5, VOICES, fake_synth, fake_embedder)
-    assert len(nm["false_wakes"]) == nm["rendered"] > 0 and nm["worst_score"] > 0.99
+    assert len(nm["false_wakes"]) + len(nm["bare_name_wakes"]) == nm["rendered"] > 0 and nm["worst_score"] > 0.99
     why = wp.gate({**rep, "near_miss": nm})
     assert why and "near-miss" in why[0]
 

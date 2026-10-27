@@ -38,6 +38,18 @@ NEAR_MISS_SENTENCES: list[tuple[str, str]] = [
     ("he", "איזה יום יפה היום"), ("he", "תדליק את האור בסלון"), ("he", "הרבה עבודה היום במשרד"),
     ("he", "הבאתי לך חרוזים")]
 
+# The GATE list: confusable families that are NOT in the training hard negatives (wake_train.HARD_NEG_EN/HE) and not in
+# NEAR_MISS_SENTENCES, so the gate measures generalisation to unseen names, not memory. (lang, text)
+NEAR_MISS_HELDOUT: list[tuple[str, str]] = [
+    ("en", "hey Marvin"), ("en", "hi Mavis"), ("en", "hey Garvey"), ("en", "hey Jarrod"), ("en", "hey Curtis"),
+    ("en", "hey Harris"), ("en", "hey Jervis"), ("en", "hi Gervase"), ("en", "hey surface"), ("en", "hey nervous"),
+    ("en", "Hey Sarah, come here"), ("en", "Harvard is a good school"), ("en", "Marvelous weather today"),
+    ("en", "hey Marcy, listen"), ("he", "היי מרווין"), ("he", "היי גרווי"), ("he", "הרווארד זה בית ספר")]
+# Bare name (no "hey"): reported, never gating. The stock model wakes on it too (SWV4_WAKE_TRAIN.md: score 0.99).
+BARE_NAMES = {"Jarvis", "ג'רוויס"}
+BASELINE_THRESHOLD = 0.5            # the stock model's instant-accept level (voice.wake_accept) the owner quoted
+RECALL_MARGIN = 0.10                # a candidate must beat the model it replaces by this much on the owner's voice
+
 MIN_USABLE_SAMPLES = 3              # fewer usable own recordings: the model is TTS-only (warned, not blocked)
 RECOMMENDED_SAMPLES = 10
 MIN_SYNTH_RECALL = 0.5              # a head that misses half of even its synthetic held-out phrase is broken (#issue)
@@ -145,35 +157,48 @@ def samples_fingerprint(folder: Path | None, files: list[Path] | None = None) ->
 # ---------------------------------------------------------------------- 2. scores and the calibration curve
 def stream_peak(head: dict, embed, audio: np.ndarray, rng: np.random.Generator) -> float:
     """Highest head score while `audio` plays inside a short quiet stream (RAM only)."""
-    items = [(audio.astype(np.float32), True)]
-    stream, _ = wt.build_stream(items, rng)
-    embs, last = embed(stream)
-    xs = [embs[j - wt.WINDOWS + 1: j + 1] for j in last if j >= wt.WINDOWS - 1]
-    return float(wt.head_score(head, np.stack(xs)).max()) if xs else 0.0
+    return scorer_peak(HeadScorer(head, embed), audio, rng)
 
 
 def recall_at(peaks: list[float], threshold: float) -> float | None:
     return round(sum(p >= threshold for p in peaks) / len(peaks), 3) if peaks else None
 
 
+THRESHOLDS = [float(x) for x in np.round(np.arange(0.3, 0.96, 0.05), 2)] + [0.97, 0.98, 0.99]
+
+
 def calibrate(head, embs, last, events, n_samples, own_peaks: list[float], held_idx: list[int],
-              target_fph: float = 0.5) -> tuple[float, dict, list[dict]]:
+              target_fph: float = 0.5, *, near_peaks: list[dict] | None = None, near_budget: int = 0,
+              fph_budget: float | None = None) -> tuple[float, dict, list[dict]]:
     """(threshold, synthetic evaluation at it, the curve). The curve has one row per candidate threshold:
-    synthetic recall and false wakes per hour on the held-out stream, plus the owner's recordings (all / held out).
-    With >= 3 own recordings the operating point is the threshold under the false-wake target that the owner's own
-    voice passes best (ties go to the HIGHER threshold: fewer false wakes); otherwise the synthetic pick."""
+    synthetic recall and false wakes per hour on the held-out stream, the owner's recordings (all / held out) and,
+    with `near_peaks`, the held-out near-miss false wakes. Choice, in tiers (first tier with a row wins):
+    1. false/hour <= target_fph and near-miss false wakes <= near_budget;
+    2. false/hour <= fph_budget (the model being replaced) and near-miss <= near_budget;
+    3. near-miss false wakes <= near_budget;
+    4. the highest threshold.
+    Inside a tier, with >= 3 own recordings, the threshold the owner's voice passes best (ties go to the HIGHER
+    threshold: fewer false wakes); otherwise the lowest synthetic pick."""
     held = [own_peaks[i] for i in held_idx if i < len(own_peaks)]
     curve, rows = [], {}
-    for th in np.round(np.arange(0.3, 0.96, 0.05), 2):
+    for th in THRESHOLDS:
         r = wt.evaluate(head, embs, last, events, n_samples, float(th))
         rows[float(th)] = r
-        curve.append({"threshold": float(th), "recall": r["recall"], "false_per_hour": r["false_per_hour"],
-                      "owner_recall": recall_at(own_peaks, float(th)),
-                      "owner_held_out_recall": recall_at(held, float(th))})
-    ok = [row for row in curve if row["false_per_hour"] <= target_fph]
+        row = {"threshold": float(th), "recall": r["recall"], "false_per_hour": r["false_per_hour"],
+               "owner_recall": recall_at(own_peaks, float(th)),
+               "owner_held_out_recall": recall_at(held, float(th))}
+        if near_peaks is not None:
+            row["near_miss_false"] = sum(p["score"] >= th and p["text"] not in BARE_NAMES for p in near_peaks)
+        curve.append(row)
+    near_ok = lambda row: near_peaks is None or row["near_miss_false"] <= near_budget
+    tiers = [[r for r in curve if r["false_per_hour"] <= target_fph and near_ok(r)]]
+    if fph_budget is not None:
+        tiers.append([r for r in curve if r["false_per_hour"] <= fph_budget and near_ok(r)])
+    if near_peaks is not None:
+        tiers.append([r for r in curve if near_ok(r)])
+    ok = next((t for t in tiers if t), [])
     if ok and len(own_peaks) >= MIN_USABLE_SAMPLES:
-        best = max(ok, key=lambda row: (row["owner_recall"], row["threshold"]))
-        th = best["threshold"]
+        th = max(ok, key=lambda row: (row["owner_recall"], row["threshold"]))["threshold"]
     elif ok:
         th = ok[0]["threshold"]
     else:
@@ -182,28 +207,129 @@ def calibrate(head, embs, last, events, n_samples, own_peaks: list[float], held_
 
 
 # ---------------------------------------------------------------------- 3. false-wake regression (near misses)
-def near_miss_check(head: dict, threshold: float, voices, synth, embed, *, seed: int = 7,
-                    sentences: list[tuple[str, str]] | None = None) -> dict:
-    """Render every near-miss sentence with the local voices of its language (normal speed; RAM only) and score it.
-    A 'false wake' = peak score >= threshold. `rendered` = how many renderings were actually scored (0 = no voice)."""
-    rng = np.random.default_rng(seed + 500)
-    rendered, wakes, worst = 0, [], 0.0
-    for lang, text in (sentences if sentences is not None else NEAR_MISS_SENTENCES):
+def render_near(voices, synth, sentences: list[tuple[str, str]]) -> list[dict]:
+    """Render every sentence with the local voices of its language (normal speed; RAM only)."""
+    out = []
+    for lang, text in sentences:
         for v in [v for v in voices if v.lang == lang]:
             try:
                 a, sr = synth(text, v.id, 1.0, 1.0)
             except Exception:
                 continue
             a = wt.trim(wt.resample(a, sr))
-            if not 0.2 * wt.SR < len(a) < 6.0 * wt.SR:
-                continue
-            peak = stream_peak(head, embed, a, rng)
-            rendered += 1
-            worst = max(worst, peak)
-            if peak >= threshold:
-                wakes.append({"text": text, "voice": v.id, "score": round(peak, 3)})
-    return {"sentences": len(sentences if sentences is not None else NEAR_MISS_SENTENCES), "rendered": rendered,
-            "false_wakes": wakes, "worst_score": round(worst, 3), "threshold": threshold}
+            if 0.2 * wt.SR < len(a) < 6.0 * wt.SR:
+                out.append({"text": text, "voice": v.id, "audio": a})
+    return out
+
+
+def score_near(scorer, rendered: list[dict], seed: int = 7) -> list[dict]:
+    """Peak score of every rendering. The noise stream of rendering i is the same for every model (same seed), so two
+    models are compared on identical audio."""
+    return [{"text": r["text"], "voice": r["voice"],
+             "score": scorer_peak(scorer, r["audio"], np.random.default_rng(seed + 500 + i))}
+            for i, r in enumerate(rendered)]
+
+
+def near_miss_check(head: dict | None, threshold: float, voices, synth, embed, *, seed: int = 7,
+                    sentences: list[tuple[str, str]] | None = None, peaks: list[dict] | None = None) -> dict:
+    """Score every near-miss sentence (rendered by the local voices of its language; RAM only). A 'false wake' =
+    peak score >= threshold; bare names (BARE_NAMES) are listed apart and never count. `rendered` = how many
+    renderings were scored (0 = no voice). `peaks` = precomputed scores (train_phrase makes them once)."""
+    sents = sentences if sentences is not None else NEAR_MISS_SENTENCES
+    if peaks is None:
+        peaks = score_near(HeadScorer(head, embed), render_near(voices, synth, sents), seed)
+    wakes = [{"text": p["text"], "voice": p["voice"], "score": round(p["score"], 3)}
+             for p in peaks if p["score"] >= threshold and p["text"] not in BARE_NAMES]
+    bare = [{"text": p["text"], "voice": p["voice"], "score": round(p["score"], 3)}
+            for p in peaks if p["score"] >= threshold and p["text"] in BARE_NAMES]
+    return {"sentences": len(sents), "rendered": len(peaks), "false_wakes": wakes, "bare_name_wakes": bare,
+            "worst_score": round(max([p["score"] for p in peaks if p["text"] not in BARE_NAMES] or [0.0]), 3),
+            "threshold": threshold,
+            "scores": [{"text": p["text"], "voice": p["voice"], "score": round(p["score"], 3)} for p in peaks]}
+
+
+# ---------------------------------------------------------------------- 3b. scorers and the baseline model
+class HeadScorer:
+    """Per-80 ms scores of a trained head (same windows as `wake_train.evaluate`)."""
+    name = "candidate"
+
+    def __init__(self, head: dict, embed) -> None:
+        self.head, self.embed = head, embed
+
+    def scores(self, audio: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        embs, last = self.embed(audio)
+        xs, ts = [], []
+        for k, j in enumerate(last):
+            if j >= wt.WINDOWS - 1:
+                xs.append(embs[j - wt.WINDOWS + 1: j + 1])
+                ts.append((k + 1) * wt.CHUNK)
+        if not xs:
+            return np.zeros(0, int), np.zeros(0)
+        return np.asarray(ts), wt.head_score(self.head, np.stack(xs))
+
+
+class StandardScorer:
+    """The stock openWakeWord model (default hey_jarvis) scored like the Core's OpenWakeWordDetector: the model a
+    custom head would replace."""
+
+    def __init__(self, model: str = "hey_jarvis", threshold: float = BASELINE_THRESHOLD) -> None:
+        self.model, self.threshold = model, threshold
+        self.name = f"standard {model}"
+        self._f = self._w = None
+
+    def _load(self) -> None:
+        if self._w is None:
+            import pyopen_wakeword as m
+            self._f = m.OpenWakeWordFeatures.from_builtin()
+            self._w = m.OpenWakeWord.from_builtin(m.Model(self.model))
+
+    def scores(self, audio: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        self._load()
+        self._f.reset()
+        self._w.reset()
+        pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
+        ts, sc = [], []
+        for k, i in enumerate(range(0, len(pcm) - wt.CHUNK + 1, wt.CHUNK)):
+            best = 0.0
+            for emb in self._f.process_streaming(pcm[i:i + wt.CHUNK].tobytes()):
+                for p in self._w.process_streaming(emb):
+                    best = max(best, float(p))
+            ts.append((k + 1) * wt.CHUNK)
+            sc.append(best)
+        return np.asarray(ts), np.asarray(sc)
+
+
+def scorer_peak(scorer, audio: np.ndarray, rng: np.random.Generator) -> float:
+    """Highest score of `scorer` while `audio` plays inside a short quiet stream (RAM only)."""
+    stream, _ = wt.build_stream([(audio.astype(np.float32), True)], rng)
+    lead = wt.background(int(wt.SR * 0.3) + wt.WARMUP_CHUNKS * wt.CHUNK, rng, 0.002).astype(np.float32)
+    ts, sc = scorer.scores(np.concatenate([lead, stream]))      # a running mic: the start-up windows come first
+    sc = np.asarray(sc)[np.asarray(ts) > wt.WARMUP_CHUNKS * wt.CHUNK]
+    return float(np.max(sc)) if len(sc) else 0.0
+
+
+def measure_baseline(scorer, rendered: list[dict], own: list[np.ndarray], test_audio: np.ndarray, test_events: list,
+                     seed: int = 7) -> dict:
+    """The model being replaced, measured on the SAME near-miss renderings, owner recordings and synthetic held-out
+    stream as the candidate (at `scorer.threshold`)."""
+    th = float(getattr(scorer, "threshold", BASELINE_THRESHOLD))
+    peaks = score_near(scorer, rendered, seed)
+    held = {t for _, t in NEAR_MISS_HELDOUT}
+    gate_p = [p for p in peaks if p["text"] in held]
+    camp_p = [p for p in peaks if p["text"] not in held]
+    own_peaks = [scorer_peak(scorer, a, np.random.default_rng(seed + 100 + i)) for i, a in enumerate(own)]
+    held_idx = [i for i in range(len(own)) if i % 4 == 3]
+    ts, sc = scorer.scores(test_audio)
+    ev = wt.replay(sc, ts, test_events, len(test_audio), th)
+    bad = lambda ps: [p for p in ps if p["score"] >= th and p["text"] not in BARE_NAMES]
+    return {"name": getattr(scorer, "name", "baseline"), "threshold": th,
+            "near_miss_false": len(bad(gate_p)), "near_miss_rendered": len(gate_p),
+            "near_miss_texts": [f"{p['text']} ({p['voice']}, {p['score']:.3f})" for p in bad(gate_p)],
+            "campaign_false": len(bad(camp_p)), "campaign_rendered": len(camp_p),
+            "bare_name_wakes": sum(p["score"] >= th and p["text"] in BARE_NAMES for p in peaks),
+            "owner_recall": recall_at(own_peaks, th),
+            "owner_held_out_recall": recall_at([own_peaks[i] for i in held_idx], th),
+            "false_per_hour": ev["false_per_hour"], "synthetic_recall": ev["recall"]}
 
 
 # ---------------------------------------------------------------------- 4. never overwrite; apply with history; revert
@@ -241,24 +367,67 @@ def _write_log(home: Path, entries: list[dict]) -> None:
 
 def gate(report: dict) -> list[str]:
     """Reasons NOT to apply this model (empty = fine). Synthetic numbers alone never block; the near-miss list and
-    the owner's own held-out recordings do."""
+    the owner's own held-out recordings do. With a `baseline` block (the model it replaces, measured on the same
+    renderings, recordings and stream) the bar is RELATIVE: not worse than that model on near-miss false wakes and
+    false wakes per hour, and better on the owner's voice by RECALL_MARGIN. Without one: no near-miss may wake it."""
     why = []
     nm = report.get("near_miss") or {}
-    if nm.get("false_wakes"):
-        who = ", ".join(f"\"{w['text']}\" ({w['score']})" for w in nm["false_wakes"][:3])
-        why.append(f"{len(nm['false_wakes'])} near-miss sentence(s) would wake it: {who}")
+    base = report.get("baseline")
+    wakes = nm.get("false_wakes") or []
+    allowed = int(base["near_miss_false"]) if base else 0
+    if len(wakes) > allowed:
+        who = ", ".join(f"\"{w['text']}\" ({w['score']})" for w in wakes[:3])
+        more = (f" (the {base['name']} wakes on {allowed})" if base else "")
+        why.append(f"{len(wakes)} near-miss sentence(s) would wake it: {who}{more}")
     own = report.get("owner") or {}
+    if base:
+        camp = len((report.get("campaign") or {}).get("false_wakes") or [])
+        if camp > int(base.get("campaign_false", 0)):
+            why.append(f"{camp} campaign phrase(s) wake it, the {base['name']} wakes on {base['campaign_false']}")
+        fph = (report.get("eval") or {}).get("false_per_hour")
+        if fph is not None and base.get("false_per_hour") is not None and fph > base["false_per_hour"]:
+            why.append(f"{fph} false wakes/hour on the synthetic stream, the {base['name']} has "
+                       f"{base['false_per_hour']}")
+        mine, theirs = own.get("recall_at_threshold"), base.get("owner_recall")
+        if mine is not None and theirs is not None and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES \
+                and mine < min(1.0, theirs + RECALL_MARGIN) - 1e-9:
+            why.append(f"your recordings wake it {mine:.0%}, the {base['name']} {theirs:.0%}: it must beat it by "
+                       f"{RECALL_MARGIN:.0%}")
     held = own.get("held_out_recall_at_threshold")
     if held is not None and len(own.get("held_out_indices") or []) >= 1 and held < MIN_OWNER_RECALL:
         why.append(f"your held-out recordings wake it only {held:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
     allr = own.get("recall_at_threshold")
-    if (held is None or held >= MIN_OWNER_RECALL) and allr is not None             and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES and allr < MIN_OWNER_RECALL:
+    if (held is None or held >= MIN_OWNER_RECALL) and allr is not None and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES and allr < MIN_OWNER_RECALL:
         why.append(f"your recordings wake it only {allr:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
     syn = (report.get("eval") or {}).get("recall")
     if syn is not None and syn < MIN_SYNTH_RECALL:
         why.append(f"it recognises only {syn:.0%} of its own synthetic held-out phrases (need {MIN_SYNTH_RECALL:.0%}):"
                    " the training did not work")
     return why
+
+
+def format_comparison(report: dict) -> list[str]:
+    """The candidate next to the model it replaces (empty when there is no baseline)."""
+    base = report.get("baseline")
+    if not base:
+        return []
+    nm, camp, own = report.get("near_miss") or {}, report.get("campaign") or {}, report.get("owner") or {}
+    pct = lambda x: "-" if x is None else f"{x:.0%}"
+    rows = [("", "candidate", base["name"]),
+            ("threshold", report["threshold"], base["threshold"]),
+            ("your recordings woken", pct(own.get("recall_at_threshold")), pct(base.get("owner_recall"))),
+            ("... held out", pct(own.get("held_out_recall_at_threshold")), pct(base.get("owner_held_out_recall"))),
+            ("near-miss false wakes (held-out list)", f"{len(nm.get('false_wakes') or [])}/{nm.get('rendered', 0)}",
+             f"{base['near_miss_false']}/{base['near_miss_rendered']}"),
+            ("campaign phrases (trained on) false wakes",
+             f"{len(camp.get('false_wakes') or [])}/{camp.get('rendered', 0)}",
+             f"{base['campaign_false']}/{base['campaign_rendered']}"),
+            ("bare name wakes (reported, not gated)", len(nm.get("bare_name_wakes") or []) +
+             len(camp.get("bare_name_wakes") or []), base["bare_name_wakes"]),
+            ("synthetic false wakes/hour", (report.get("eval") or {}).get("false_per_hour"), base["false_per_hour"]),
+            ("synthetic recall", pct((report.get("eval") or {}).get("recall")), pct(base["synthetic_recall"]))]
+    w = max(len(str(r[0])) for r in rows)
+    return ["  " + f"{str(a):<{w}}  {str(b):>12}  {str(c):>12}" for a, b, c in rows]
 
 
 def promote(home: Path, cfg, candidate: Path, phrase: str, threshold: float, active: Path) -> dict:
@@ -335,10 +504,12 @@ def revert(home: Path, cfg) -> dict | None:
 
 
 def format_curve(curve: list[dict], chosen: float) -> list[str]:
-    rows = ["  threshold  synthetic recall  false/hour  your recordings  held out"]
+    near = any("near_miss_false" in r for r in curve)
+    rows = ["  threshold  synthetic recall  false/hour  your recordings  held out" + ("  near-miss" if near else "")]
     for r in curve:
         f = lambda x: "   -  " if x is None else f"{x:6.0%}"
         rows.append(f"  {r['threshold']:<9}  {r['recall']:>14.0%}  {r['false_per_hour']:>10}  "
                     f"{f(r.get('owner_recall')):>15}  {f(r.get('owner_held_out_recall')):>8}"
+                    + (f"  {r['near_miss_false']:>9}" if near else "")
                     + ("   <- chosen" if abs(r["threshold"] - chosen) < 1e-9 else ""))
     return rows
