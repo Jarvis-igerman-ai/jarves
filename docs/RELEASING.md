@@ -24,8 +24,8 @@ and in the footer. Going back: `jarvis update --channel stable`, and `jarvis upd
 Every green `main` is already a beta (layer 2). A stable release promotes a beta that the owner tested:
 
 1. Pick the version: `version` in `core/pyproject.toml` (for example `4.0.1`); the tag will be `v4.0.1`.
-2. Add `docs/reviews/RELEASE_CHECKLIST_<version>.md` (rows `| # | item | status |`, every row `done`, `n/a` or
-   `accepted`); it records the bug-table state. Only 4.0.0 used the old `SWV4_RELEASE_CHECKLIST.md`.
+2. (Retired 26 Oct 2026) The per-version release checklist and the bug tables no longer gate a release: the gate prints
+   them as "legacy, not gating" and decides on the live GitHub P0-P2 issues. Writing `RELEASE_CHECKLIST_<version>.md` is optional.
    Fold the one-file-per-change entries into their base files in the release PR: `python core/tools/catalog_add.py --fold`
    (dashboard texts, `locales/parts`) and `python core/tools/changelog_build.py --write` (`changelog.d` into CHANGELOG.md).
 3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
@@ -43,12 +43,10 @@ All of these must hold, else the tag is refused:
 
 - the tag is `vX.Y.Z` and the installer is `X.Y.Z.<build>`;
 - the SHA being published is the verified SHA and its `jarves-checks` run on `main` is green;
-- the release checklist has no open P0-P2 (and optional bug tables list none). Bug tables (`release.yml` passes
-  `docs/reviews/*BUG_TABLE*.md`) are read by each table's header row: a `Sev`/`Severity`/`Priority` column and a
-  `Status`/`State` column (or `Retest`/`Result`, where a non-empty retest without "fail"/"open"/"pending" counts as closed);
-  a status starting with fixed, closed, accepted, wontfix, duplicate, done, resolved, verified or pass is closed. Tables
-  without a severity column are ignored, and every problem names its file. A new bug table must keep these columns
-  (`test_every_bug_table_in_the_repo_has_a_status_the_gate_can_read`);
+- (retired 26 Oct 2026, owner decision, simple-releases OD-S2) the release checklist rows and the bug tables
+  `docs/reviews/*BUG_TABLE*.md` do NOT gate: the gate prints their open rows as "legacy, not gating" so nothing is hidden. The
+  `--bug-tables` option is still accepted for compatibility, warns once and never gates. The live issue check below is the single
+  source of truth, and `jarvis release status` uses the same helper (`release_flow.classify_issues`);
 - no open GitHub issue labelled P0-P2 (planned work labelled `enhancement`, `v5` to `v9` or `4.5.1` is not a defect, but only when the issue is not also labelled `bug`). The ONE exception is the owner-only label `known-issue-4.5`: an open P0-P2 carrying it is an accepted known issue for the 4.5 stable, not a blocker even when labelled `bug`; the gate prints each as "accepted known issues" (number + title) and the owner applies the label only by his own decision. If GitHub cannot be read the gate refuses;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
