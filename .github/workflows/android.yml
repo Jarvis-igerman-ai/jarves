@@ -35,6 +35,6 @@ jobs:
         run: |
           export JAVA_HOME="${JAVA_HOME_21_X64}"
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses < <(yes) > "${RUNNER_TEMP}/licenses.log" 2>&1 || { tail -n 30 "${RUNNER_TEMP}/licenses.log"; exit 1; }
           ./gradlew --no-daemon --console=plain assembleDebug testDebugUnitTest
           test -s app/build/outputs/apk/debug/app-debug.apk

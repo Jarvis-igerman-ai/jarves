@@ -104,13 +104,19 @@ def tailnet_cert(home: Path, name: str | None, run: Callable[[list[str]], str | 
     return cert, key
 
 
-def choose_tls(home: Path, info: dict, run=None, which=None) -> tuple[tuple[Path, Path] | None, str]:
-    """(cert and key | None, source). Order: `tailscale cert` when the tailnet is ready -> the certificate already in
-    mobile_tls (own files or the self-signed one) -> none (plain http, text only)."""
+def choose_tls(home: Path, info: dict, run=None, which=None,
+               trust: bool | None = None) -> tuple[tuple[Path, Path] | None, str]:
+    """(cert and key | None, source). Order: `tailscale cert` when the tailnet is ready -> the JARVES local-CA leaf when the
+    owner switched `phone_trust` on and made a CA (#513) -> the certificate already in mobile_tls (own files or the
+    self-signed one) -> none (plain http, text only)."""
     if info.get("present") and info.get("name"):
         got = tailnet_cert(home, info["name"], run, which)
         if got:
             return got, "tailscale"
+    from . import phone_trust
+    leaf = phone_trust.tls_pair(home, phone_trust.trust_on(home) if trust is None else trust)
+    if leaf:
+        return leaf, "localca"
     from .mobile import tls_paths
     cert, key = tls_paths(home)
     if cert.is_file() and key.is_file():

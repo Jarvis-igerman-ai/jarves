@@ -1541,6 +1541,12 @@ def cmd_doctor(a, cfg, home) -> int:
                 asyncio.run(_live_smoke(cfg, add))
             else:
                 add("info", "live test skipped")
+    try:                                             # #513: the trusted phone connection (only when a CA exists)
+        from . import phone_trust
+        for level, what, detail in phone_trust.doctor_rows(home):
+            add(level, what, detail)
+    except Exception as e:
+        add("warn", f"trusted phone connection could not be checked: {type(e).__name__}")
     bad = [r for r in rows if r[0] == "fail"]
     print(f"\n{len(bad)} problem(s) found." if bad else "\nAll checks passed.")
     return 1 if bad else 0
