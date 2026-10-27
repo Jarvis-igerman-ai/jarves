@@ -418,6 +418,8 @@ class PilotSession:
         scope = vet_url(url, self.resolver)
         if not scope:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
+        if self.after_human and scope != "local":
+            raise self._refuse("open", "BROWSER_PILOT_URL", "after the owner used this page only local pages can be opened")
         if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
             raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)
@@ -457,7 +459,7 @@ class PilotSession:
         if not self._typed:
             return raw
         from urllib.parse import quote, quote_plus
-        raw = self._norm(raw)
+        raw = self._norm(raw[:2 * MAX_TEXT + 2 * self.MAX_TYPED])      # cap first: hiding is up to 1600 passes
         for t in self._typed:
             n = self._norm(t)
             if len(n) < self.MIN_HIDE:
@@ -507,16 +509,16 @@ class PilotSession:
         if self.clock() - self.started > self.max_seconds:
             self.stop()
             raise PilotError("BROWSER_PILOT_CAP", "the session reached its time cap and was stopped")
-        if not self._view_local():
-            raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
         if not self._dlock.acquire(timeout=self.DRIVER_WAIT_S):   # a thread-bound driver is used by one thread at a time
             raise PilotError("BROWSER_PILOT_BUSY", "the page is busy; try again")
         try:
+            if not self._view_local():                   # reading the address touches the driver too: inside the lock
+                raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
             png = bytes(self.driver.screenshot() or b"")
+            if not self._view_local():                   # a navigation landed while the picture was taken: drop that frame
+                raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
         finally:
             self._dlock.release()
-        if not self._view_local():                       # a navigation landed while the picture was taken: drop that frame
-            raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
         return png
 
     def _view_local(self) -> bool:

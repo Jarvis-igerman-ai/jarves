@@ -51,25 +51,24 @@ class LiveView:
         self._last_at = -1e9
         self._last: bytes = b""
         self.seq = 0
+        self._gb = 0                                       # bumped on start / give back / revoke: a frame taken before it is dropped
         self._lock = threading.RLock()        # the dashboard is threaded: start / frame / stop never overlap (#649 review).
         # NOTE for the driver PR: the page driver must be called from its own thread (Playwright sync is thread-bound).
 
     def start(self) -> dict:
-        with self._lock:
-            return self._start()
-
-    def _start(self) -> dict:
         if not self.enabled():
             raise LiveError("LIVEVIEW_OFF", "the live view is off (jarvis features on browser_liveview)", 403)
-        try:
-            self.session.view_frame()                       # fail early: switch, stopped, time cap, local test page only
+        try:                                                # driver I/O OUTSIDE the view lock: fail early (switch, stopped, cap, test page only)
+            self.session.view_frame()
         except PilotError as e:
-            raise LiveError(e.code, e.message, 409) from None
-        token = secrets.token_urlsafe(32)
-        self._hash, self._expires, self._last, self._last_at, self.seq = _h(token), self.clock() + self.ttl_s, b"", -1e9, 0
-        self.session._receipt("view:start", "ok")
-        logs.info("browser", "BROWSER_LIVEVIEW", "live view started")
-        return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000, "state": self.session.state}
+            raise LiveError(e.code, e.message, 429 if e.code == "BROWSER_PILOT_BUSY" else 409) from None
+        with self._lock:
+            token = secrets.token_urlsafe(32)
+            self._hash, self._expires, self._last, self._last_at, self.seq = _h(token), self.clock() + self.ttl_s, b"", -1e9, 0
+            self._gb += 1
+            self.session._receipt("view:start", "ok")
+            logs.info("browser", "BROWSER_LIVEVIEW", "live view started")
+            return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000, "state": self.session.state}
 
     def _check(self, token: object) -> None:
         if not self._hash or not isinstance(token, str) or not hmac.compare_digest(_h(token), self._hash):
@@ -84,6 +83,7 @@ class LiveView:
 
     def _revoke(self) -> None:
         self._hash, self._last = "", b""
+        self._gb += 1
 
     def frame(self, token: object) -> dict:
         """The view lock is held only for this object's own fields, NEVER across the page driver: a hung screenshot must not block
@@ -99,6 +99,7 @@ class LiveView:
             with self._lock:
                 self._check(token)
                 cached = self._cached()
+                gb = self._gb
             if cached is not None:                           # another request just took the picture
                 return self._answer(cached)
             try:
@@ -120,7 +121,7 @@ class LiveView:
             if not png or len(png) > MAX_FRAME_BYTES:
                 raise LiveError("LIVEVIEW_FRAME", "no usable frame", 502)
             with self._lock:
-                if not self._hash:                           # revoked (Stop, give back) while the picture was taken: drop it
+                if not self._hash or self._gb != gb:         # revoked or handed back while the picture was taken: drop it
                     raise LiveError("LIVEVIEW_TOKEN", "this live view link is not valid", 403)
                 self._last, self._last_at, self.seq = png, self.clock(), self.seq + 1
             return self._answer(png)
@@ -154,8 +155,12 @@ class LiveView:
         """Two explicit steps: give back (the session is PAUSED, the assistant still cannot act) and, only when `resume` is true,
         let the assistant continue (it may then read the page as it is now, a logged-in account for instance)."""
         with self._lock:
-            self._check(token)
+            if resume is True:
+                self._takeover_check(token)
+            else:
+                self._check(token)
             self._last = b""                                   # the picture may show what the owner typed
+            self._gb += 1                                      # ... and a picture still being taken must not become the cache
             was_paused = self.session.state == "PAUSED"        # decided on the SERVER state, not on what the page believes
             out = self.session.human_returns()
             if resume is True and was_paused and self.session.state == "PAUSED":

@@ -11,17 +11,25 @@ function liveViewCard() {
   let epoch = 0;
   let token = "", timer = 0;
   let end = (text) => { clearInterval(timer); timer = 0; token = ""; start.disabled = false; msg.textContent = text || ""; };
+  let inflight = false;
   const poll = async () => {
-    if (!token) return;
+    if (!token || inflight) return;                                // one request at a time (a slow page must not pile polls up)
     if (!document.body.contains(img)) { end(""); return; }       // the owner left this page: stop polling (no hidden loop)
     if (document.hidden) return;                                   // a hidden tab asks for nothing
+    inflight = true;
     try {
       const ep = epoch;                                            // a frame asked BEFORE a button press must not undo it
       const r = await api("/api/browser/live/frame", { method: "POST", body: JSON.stringify({ grant: token }) });
       img.src = "data:image/png;base64," + r.png_b64; img.style.display = "";
-      if (ep === epoch && typeof setMine === "function" && (r.state === "HUMAN") !== mine.on) setMine(r.state === "HUMAN");
+      if (ep === epoch && typeof setMine === "function") {
+        if ((r.state === "HUMAN") !== mine.on) setMine(r.state === "HUMAN");
+        contBtn.disabled = r.state !== "PAUSED";                     // "let the assistant continue" follows the SERVER state (also after a reload)
+      }
       clockEl.textContent = tx("פג בעוד ", "Expires in ") + r.expires_in_s + " s";
-    } catch (e) { img.style.display = "none"; end(e.message); }
+    } catch (e) {
+      if (/busy/i.test(e.message || "")) { clockEl.textContent = tx("הדף עסוק, מנסה שוב", "The page is busy, trying again"); return; }   // keep the view
+      img.style.display = "none"; end(e.message);
+    } finally { inflight = false; }
   };
   const start = el("button", { type: "button", class: "primary", onclick: async () => {
     start.disabled = true; msg.textContent = "";
@@ -50,7 +58,7 @@ function liveViewCard() {
     const t = typeBox.value; typeBox.value = ""; if (t) await send("type", { text: t }); } }, tx("הקלדה בדף", "Type into the page"));
   const keyBtns = ["Enter", "Tab"].map((k) => el("button", { type: "button", disabled: true, "data-key": k, onclick: () => send("key", { key: k }) }, k));
   const driveBtns = [typeBtn, ...keyBtns];
-  const setMine = (on) => { mine.on = on; takeBtn.disabled = on || !token; giveBtn.disabled = !on; typeBox.disabled = secret.disabled = !on; driveBtns.forEach((b) => { b.disabled = !on; });
+  const setMine = (on) => { mine.on = on; takeBtn.disabled = on || !token; giveBtn.disabled = !on; if (on) contBtn.disabled = true; typeBox.disabled = secret.disabled = !on; driveBtns.forEach((b) => { b.disabled = !on; });
     img.style.cursor = on ? "crosshair" : ""; };
   img.addEventListener("click", (ev) => {
     if (!mine.on || !img.naturalWidth) return;
@@ -58,15 +66,17 @@ function liveViewCard() {
     send("click", { x: Math.round((ev.clientX - r.left) * img.naturalWidth / r.width), y: Math.round((ev.clientY - r.top) * img.naturalHeight / r.height) });
   });
   const takeBtn = el("button", { type: "button", disabled: true, onclick: async () => {
-    try { epoch++; await post("/api/browser/live/takeover", {}); setMine(true); msg.textContent = tx("השליטה אצלכם. הסוכן נעול בחוץ.", "You are in control. The assistant is locked out."); }
+    try { epoch++; await post("/api/browser/live/takeover", {}); epoch++; setMine(true); msg.textContent = tx("השליטה אצלכם. הסוכן נעול בחוץ.", "You are in control. The assistant is locked out."); }
     catch (e) { msg.textContent = e.message; } } }, tx("קחו שליטה", "Take over"));
   const giveBtn = el("button", { type: "button", disabled: true, onclick: async () => {
-    try { epoch++; await post("/api/browser/live/return", {}); setMine(false); contBtn.disabled = false;
+    try { epoch++; await post("/api/browser/live/return", {}); epoch++; setMine(false); contBtn.disabled = false;
       msg.textContent = tx("השליטה הוחזרה והסוכן מושהה. הוא יוכל לקרוא את הדף רק אחרי שתאשרו.", "Control is back and the assistant is paused. It can read the page only after you let it continue."); }
     catch (e) { msg.textContent = e.message; } } }, tx("החזירו (הסוכן מושהה)", "Give back (assistant paused)"));
   const contBtn = el("button", { type: "button", disabled: true, onclick: async () => {
     if (!window.confirm(tx("הסוכן יוכל לקרוא את הדף כפי שהוא עכשיו (למשל חשבון מחובר). להמשיך?", "The assistant will be able to read the page as it is now (a logged-in account, for instance). Continue?"))) return;
-    try { epoch++; await post("/api/browser/live/return", { resume: true }); contBtn.disabled = true; msg.textContent = tx("הסוכן ממשיך. הוא לא ראה מה שהקלדתם.", "The assistant continues. It never saw what you typed."); }
+    try { epoch++; const r = await post("/api/browser/live/return", { resume: true }); epoch++;
+      if (r.state === "AGENT") { contBtn.disabled = true; msg.textContent = tx("הסוכן ממשיך. הוא לא ראה מה שהקלדתם.", "The assistant continues. It never saw what you typed."); }
+      else { setMine(r.state === "HUMAN"); contBtn.disabled = r.state !== "PAUSED"; msg.textContent = tx("לא הופעל: מצב הסשן הוא ", "Not resumed: the session is ") + r.state; } }
     catch (e) { msg.textContent = e.message; } } }, tx("אפשרו לסוכן להמשיך", "Let the assistant continue"));
   const baseEnd = end;
   end = (text) => { setMine(false); baseEnd(text); takeBtn.disabled = true; };
