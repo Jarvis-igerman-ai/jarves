@@ -1,0 +1,6 @@
+{
+ "approves a pull request after your approval each time": "מאשר בקשת מיזוג, בכל פעם רק אחרי האישור שלכם",
+ "let a review with the event APPROVE be sent from the command line (after your popup approval); an APPROVE can satisfy a required review for merging, so it has its own switch; comments and change requests do not need it": "מאפשר לשלוח ביקורת מסוג APPROVE משורת הפקודה (אחרי אישור בחלון הקופץ). אישור כזה יכול למלא ביקורת נדרשת למיזוג, ולכן יש לו מתג משלו; הערות ובקשות שינוי לא צריכות אותו",
+ "never touched the real GitHub API": "אף פעם לא פנה לממשק האמיתי של GitHub",
+ "UNIT test_github_prs.py (fake GitHub API and approvals, no network)": "בדיקות יחידה test_github_prs.py (ממשק GitHub מזויף ואישורים מזויפים, בלי רשת)"
+}
