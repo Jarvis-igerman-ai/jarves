@@ -110,7 +110,9 @@ def test_issue_drops_names_the_ca_may_not_sign(ca):
 def test_permitted_rules():
     for ok in ("localhost", "127.0.0.1", "10.1.2.3", "172.16.5.5", "172.31.255.1", "192.168.0.7", "pc.local", "nas.lan", "x.home.arpa"):
         assert pt.permitted(ok), ok
-    for no in ("8.8.8.8", "172.32.0.1", "100.64.0.1", "example.com", "local", "pc.ts.net", "127.0.0.2", "localhost.evil.com"):
+    assert pt.permitted("local")                                  # RFC 5280 form: the constraint "local" covers itself too
+    for no in ("8.8.8.8", "172.32.0.1", "100.64.0.1", "example.com", "notlocal", "evil-lan", "pc.ts.net", "127.0.0.2",
+               "localhost.evil.com", "pc.local.evil.com", "a_b.local", "::1", "fd00::1", ""):
         assert not pt.permitted(no), no
 
 
@@ -120,6 +122,84 @@ def test_leaf_is_not_a_ca_and_is_short_lived(ca):
     c = x509.load_pem_x509_certificate(pt.leaf_paths(ca)[0].read_bytes())
     assert c.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is False
     assert c.not_valid_after_utc - T0 <= dt.timedelta(days=pt.LEAF_DAYS)
+    assert c.not_valid_after_utc - c.not_valid_before_utc <= dt.timedelta(days=398)          # Chrome / CA-B Forum leaf limit
+    eku = c.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert list(eku) == [x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]
+    san = c.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+    assert san.critical and len(c.subject) == 0                  # empty subject: only the SAN names the host
+    ku = c.extensions.get_extension_for_class(x509.KeyUsage).value
+    assert ku.digital_signature and not ku.key_cert_sign
+
+
+def test_ca_name_constraints_are_exactly_the_private_set(ca):
+    from cryptography import x509
+    nc = pt._load_ca_cert(ca).extensions.get_extension_for_class(x509.NameConstraints).value
+    ips = sorted(str(g.value) for g in nc.permitted_subtrees if isinstance(g, x509.IPAddress))
+    dns = sorted(g.value for g in nc.permitted_subtrees if isinstance(g, x509.DNSName))
+    assert ips == sorted(pt.PERMITTED_NETS) and dns == sorted(pt.PERMITTED_DNS)
+    assert not any(isinstance(g, (x509.UniformResourceIdentifier, x509.RFC822Name)) for g in nc.permitted_subtrees)
+
+
+def test_local_names_validate_and_lookalikes_do_not(ca):
+    leaf, ca_pem = _leaf(ca, hosts=["pc.local", "nas.lan", "192.168.1.20"])
+    assert pt.verify_chain(leaf, ca_pem, "pc.local", T0)[0] is True
+    assert pt.verify_chain(leaf, ca_pem, "pc.local.evil.com", T0)[0] is False
+
+
+def test_expired_ca_signs_nothing_and_rotate_makes_a_new_one(ca):
+    late = T0 + dt.timedelta(days=pt.CA_MAX_DAYS + 1)
+    with pytest.raises(RuntimeError):
+        pt.issue_leaf(ca, LAN, late)
+    assert pt.ensure_leaf(ca, LAN, late) is None
+    assert pt.status(ca, late)["ca_expired"] is True
+    old = pt.fingerprint(ca)
+    import jarves.phone_trust as m
+    st = m.rotate(ca, late)
+    assert st["previous"] == old and st["fingerprint"] != old and st["ca"] and not st["ca_expired"]
+
+
+def test_status_never_carries_the_key(ca):
+    st = json.dumps(pt.status(ca, T0))
+    assert "ca.key" not in st and "PRIVATE" not in st
+    pt.ca_paths(ca)[1].unlink()                                    # e.g. after a restore: the key is never in a backup
+    s2 = pt.status(ca, T0)
+    assert s2["ca"] is False and s2["ca_cert_without_key"] is True
+    assert pt.ensure_leaf(ca, LAN, T0) is None
+
+
+def test_backup_and_diagnostics_leave_the_keys_out(ca):
+    from jarves import backup
+    pt.ensure_leaf(ca, LAN, T0)
+    take, skipped = backup.plan(ca, {})
+    names = {n for _p, n in take}
+    assert not any(n.endswith(("ca.key", "leaf.key")) for n in names), names
+    assert {s["name"] for s in skipped} >= {"mobile_tls/ca/ca.key", "mobile_tls/leaf.key"}
+
+
+def test_keep_fresh_reloads_a_renewed_leaf_into_the_running_context(ca, monkeypatch):
+    import threading as th
+    monkeypatch.setattr(pt, "trust_on", lambda h: True)
+    pt.ensure_leaf(ca, ["localhost", "127.0.0.1"])
+    loaded = []
+
+    class Ctx:
+        def load_cert_chain(self, c, k):
+            loaded.append((c, k))
+    calls = {"n": 0}
+    real = pt.ensure_leaf
+
+    def fake(home, hosts=None, now=None, run=None):
+        calls["n"] += 1
+        if calls["n"] == 1:                                       # the first check: the address changed, so a new leaf
+            return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])
+        stop.set()
+        return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])
+    stop = th.Event()
+    monkeypatch.setattr(pt, "ensure_leaf", fake)
+    t = pt.keep_fresh(ca, Ctx(), interval_s=0.01, stop=stop)
+    t.join(10)
+    assert not t.is_alive()
+    assert loaded == [tuple(str(p) for p in pt.leaf_paths(ca))]   # reloaded exactly once (the second check reused it)
 
 
 # ---------------------------------------------------------------- renewal on the fake clock

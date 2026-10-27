@@ -1101,6 +1101,9 @@ class Dashboard:
             sctx.load_cert_chain(str(tls[0]), str(tls[1]))
             self.httpd.socket = sctx.wrap_socket(self.httpd.socket, server_side=True)
             self.httpd.tls = True
+            if tls_source == "localca":          # #513: the 30-day leaf is renewed and reloaded while the server runs
+                from . import phone_trust
+                self._trust_renewer = phone_trust.keep_fresh(home, sctx)
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
         self.token = token
@@ -1213,6 +1216,9 @@ class Dashboard:
             sctx.load_cert_chain(str(tls[0]), str(tls[1]))
             httpd.socket = sctx.wrap_socket(httpd.socket, server_side=True)
             httpd.tls = True
+            if src == "localca":                 # #513: renew and reload the 30-day leaf while the listener runs
+                from . import phone_trust
+                self._trust_renewer = phone_trust.keep_fresh(self.ctx.home, sctx)
             httpd.daemon_threads = True
             features.set("mobile_access", True, by="dashboard")
         except BaseException:                                           # fail closed: no listener, nothing half-enabled
@@ -1239,6 +1245,9 @@ class Dashboard:
 
     def stop(self) -> None:
         getattr(self, "_stop_evt", threading.Event()).set()
+        renewer = getattr(self, "_trust_renewer", None)
+        if renewer is not None:
+            renewer.stop.set()
         from . import runmarks
         runmarks.clear_live(self.ctx.home, self.port)
         if self.phone_httpd is not None:

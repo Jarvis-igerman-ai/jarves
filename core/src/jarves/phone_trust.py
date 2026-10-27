@@ -16,10 +16,12 @@ import datetime as _dt
 import hashlib
 import ipaddress
 import os
+import re
 import socket
 import ssl
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -31,9 +33,12 @@ CA_COMMON_NAME = "JARVES local CA"
 CA_MAX_DAYS = 730
 LEAF_DAYS = 30
 RENEW_BEFORE_DAYS = 10
+RENEW_CHECK_S = 6 * 3600                                  # a running phone server re-checks its leaf this often
 CA_BACKDATE = _dt.timedelta(days=1)                       # clock skew between PC and phone
 PERMITTED_NETS = ("127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-PERMITTED_DNS = ("localhost", ".local", ".lan", ".home.arpa")
+# RFC 5280 form (no leading dot): "local" permits "local" and every name under it (pc.local). Every verifier reads it the same
+# way; the leading-dot form is an OpenSSL/Chromium extension that some Android verifiers treat differently.
+PERMITTED_DNS = ("localhost", "local", "lan", "home.arpa")
 LEAF_NAME = "leaf"
 CA_ROUTE = "/api/m/trust/ca.crt"
 
@@ -162,13 +167,22 @@ def permitted(host: str) -> bool:
     except ValueError:
         pass
     h = host.rstrip(".").lower()
-    for d in PERMITTED_DNS:
-        if d.startswith("."):
-            if h.endswith(d) and len(h) > len(d):
-                return True
-        elif h == d:
-            return True
-    return False
+    if not _DNS_NAME.match(h):
+        return False
+    return any(h == d or h.endswith("." + d) for d in PERMITTED_DNS)
+
+
+_DNS_NAME = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
+
+
+def _host_local_name() -> str | None:
+    """'<computer name>.local' (mDNS) when the computer name is a valid DNS label; None otherwise."""
+    try:
+        n = socket.gethostname().strip().lower()
+    except OSError:
+        return None
+    n = n.split(".")[0]
+    return f"{n}.local" if n and _DNS_NAME.match(n) else None
 
 
 def lan_hosts(extra: list[str] | None = None) -> list[str]:
@@ -176,10 +190,20 @@ def lan_hosts(extra: list[str] | None = None) -> list[str]:
     may vouch for are kept (others are dropped, never signed)."""
     out: list[str] = ["localhost", "127.0.0.1"]
     try:
+        from .dashboard_auth import lan_ip                # the address the phone server prints (no packet is sent)
+        ip = lan_ip()
+        if ip:
+            out.append(ip)
+    except Exception:
+        pass
+    try:
         from .tailnet import local_addresses
         out += local_addresses()
     except Exception:
         pass
+    name = _host_local_name()
+    if name:
+        out.append(name)
     out += list(extra or [])
     seen: list[str] = []
     for h in out:
@@ -206,7 +230,7 @@ def issue_leaf(home: Path, hosts: list[str], now: _dt.datetime | None = None, ru
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+    from cryptography.x509.oid import ExtendedKeyUsageOID
     ca_crt, ca_key_p = ca_paths(home)
     try:
         ca = x509.load_pem_x509_certificate(ca_crt.read_bytes())
@@ -217,18 +241,23 @@ def issue_leaf(home: Path, hosts: list[str], now: _dt.datetime | None = None, ru
     if not hosts:
         raise RuntimeError("no private-network name or address to vouch for")
     n = _utc(now)
+    if ca.not_valid_after_utc - n <= _dt.timedelta(days=1):
+        raise RuntimeError("the JARVES local CA has expired: run jarvis phone trust rotate")
     not_after = min(n + _dt.timedelta(days=LEAF_DAYS), ca.not_valid_after_utc)
     key = ec.generate_private_key(ec.SECP256R1())
+    # Empty subject + CRITICAL SAN (RFC 5280 4.2.1.6): browsers match only the SAN, and an IP in the common name would be read
+    # as a DNS name by some verifiers and fail the name constraints.
     cert = (x509.CertificateBuilder()
-            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hosts[0])])).issuer_name(ca.subject)
+            .subject_name(x509.Name([])).issuer_name(ca.subject)
             .public_key(key.public_key()).serial_number(x509.random_serial_number())
             .not_valid_before(n - CA_BACKDATE).not_valid_after(not_after)
             .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
             .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False, key_encipherment=False,
-                                         data_encipherment=False, key_agreement=True, key_cert_sign=False, crl_sign=False,
+                                         data_encipherment=False, key_agreement=False, key_cert_sign=False, crl_sign=False,
                                          encipher_only=False, decipher_only=False), critical=True)
             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-            .add_extension(x509.SubjectAlternativeName(_sans(hosts)), critical=False)
+            .add_extension(x509.SubjectAlternativeName(_sans(hosts)), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
             .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca.public_key()), critical=False)
             .sign(ca_key, hashes.SHA256()))
     crt_p, key_p = leaf_paths(home)
@@ -341,10 +370,13 @@ def verify_listener(home: Path, host: str, port: int, timeout: float = 5.0) -> t
 
 # ---------------------------------------------------------------------- status / revoke
 def status(home: Path, now: _dt.datetime | None = None) -> dict:
+    """What `jarvis phone trust status` shows. Public facts only: the key's PRESENCE, never its path or bytes."""
     ca = _load_ca_cert(home)
     n = _utc(now)
     leaf = leaf_info(home)
-    return {"ca": ca is not None, "ca_expires": ca.not_valid_after_utc.date().isoformat() if ca else None,
+    has_key = ca_paths(home)[1].is_file()
+    return {"ca": ca is not None and has_key, "ca_cert_without_key": ca is not None and not has_key,
+            "ca_expires": ca.not_valid_after_utc.date().isoformat() if ca else None,
             "ca_expired": bool(ca and ca.not_valid_after_utc <= n), "fingerprint": fingerprint(home),
             "leaf_expires": leaf["not_after"].date().isoformat() if leaf else None,
             "leaf_hosts": leaf["hosts"] if leaf else [], "ca_file": str(ca_paths(home)[0])}
@@ -367,6 +399,55 @@ def revoke(home: Path) -> dict:
         pass
     logs.warn("mobile", "PHONE_TRUST_REVOKED", "the local phone certificate authority was removed", files=removed)
     return {"removed": removed}
+
+
+def rotate(home: Path, now: _dt.datetime | None = None, run=None) -> dict:
+    """A NEW CA (new key, new fingerprint) in place of the old one, plus a fresh leaf. The phone must remove the old
+    certificate and install the new one. Returns status() with the old fingerprint as `previous`."""
+    old = fingerprint(home)
+    revoke(home)
+    create_ca(home, now, run)
+    ensure_leaf(home, None, now, run)
+    st = status(home, now)
+    st["previous"] = old
+    logs.warn("mobile", "PHONE_TRUST_ROTATED", "the local phone certificate authority was replaced")
+    return st
+
+
+def keep_fresh(home: Path, sctx: ssl.SSLContext, interval_s: float = RENEW_CHECK_S,
+               stop: threading.Event | None = None, hosts: Callable[[], list[str]] | None = None) -> threading.Thread:
+    """A running phone server lives longer than a 30-day leaf: every `interval_s` re-run ensure_leaf and, when a new leaf was
+    issued, load it into the SAME server context (new handshakes get it; open connections keep the old one). Daemon thread,
+    no network; it does nothing while the feature is off or the CA is revoked. `t.stop.set()` ends it."""
+    stop = stop or threading.Event()
+
+    def stamp() -> int:
+        p = leaf_paths(home)[0]
+        try:
+            return p.stat().st_mtime_ns
+        except OSError:
+            return 0
+
+    def loop() -> None:
+        last = stamp()
+        while not stop.wait(interval_s):
+            if not trust_on(home):
+                continue
+            got = ensure_leaf(home, hosts() if hosts else None)
+            if got is None or stamp() == last:
+                continue
+            try:
+                sctx.load_cert_chain(str(got[0]), str(got[1]))
+                last = stamp()
+                logs.info("mobile", "PHONE_TRUST_LEAF_RELOADED", "the phone server now uses a renewed certificate")
+            except (OSError, ssl.SSLError) as e:
+                logs.warn("mobile", "PHONE_TRUST_RELOAD_FAILED", "could not load the renewed certificate",
+                          error=type(e).__name__)
+
+    t = threading.Thread(target=loop, name="jarves-phone-trust-renew", daemon=True)
+    t.stop = stop  # type: ignore[attr-defined]
+    t.start()
+    return t
 
 
 # ---------------------------------------------------------------------- catalog row (feature `phone_trust`, beta, OFF)
