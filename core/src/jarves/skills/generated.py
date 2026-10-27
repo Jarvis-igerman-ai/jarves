@@ -29,10 +29,13 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -316,7 +319,7 @@ def _summaries(r: dict) -> tuple[str, str]:
 
 # ---------------------------------------------------------------------- storage of drafts / installs
 def _write_json(path: Path, obj) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(3)}.tmp")     # unique: two writers never share a temp file
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, path)
 
@@ -326,6 +329,10 @@ def _read_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default
+
+
+_STATE_LOCKS: dict[str, threading.RLock] = {}
+_STATE_LOCKS_GUARD = threading.Lock()
 
 
 class GeneratedSkills:
@@ -427,6 +434,42 @@ class GeneratedSkills:
             return sorted(p.name for p in self.drafts.iterdir() if p.is_dir() and ID_RX.match(p.name))
         except OSError:
             return []
+
+    @contextmanager
+    def _state_lock(self, sid: str):
+        """One lock per Skill around every read-modify-write of state.json (#576): a thread lock inside this process and a
+        lock file between processes (Core, dashboard, CLI). A lock file older than 20 s is stale (a crashed writer)."""
+        key = f"{self.home}|{sid}"
+        with _STATE_LOCKS_GUARD:
+            tl = _STATE_LOCKS.setdefault(key, threading.RLock())
+        with tl:
+            d = self.installed / sid
+            lock = d / "state.lock"
+            have = False
+            if d.is_dir():
+                deadline = time.monotonic() + 5.0
+                while True:
+                    try:
+                        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                        have = True
+                        break
+                    except FileExistsError:
+                        try:
+                            if time.time() - lock.stat().st_mtime > 20:
+                                lock.unlink(missing_ok=True)
+                                continue
+                        except OSError:
+                            pass
+                        if time.monotonic() > deadline:
+                            break                      # fail open on the file lock only: the thread lock still holds
+                        time.sleep(0.02)
+                    except OSError:
+                        break
+            try:
+                yield
+            finally:
+                if have:
+                    lock.unlink(missing_ok=True)
 
     def state(self, sid: str) -> dict:
         return _read_json(self.installed / sid / "state.json", {})
@@ -550,6 +593,10 @@ class GeneratedSkills:
         return st
 
     def grant(self, sid: str, capabilities: list[str], actions: bool, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._grant(sid, capabilities, actions, by=by)
+
+    def _grant(self, sid: str, capabilities: list[str], actions: bool, *, by: str) -> dict:
         self._user(by)
         st = self._installed(sid)
         rep = self.report(sid)
@@ -566,6 +613,10 @@ class GeneratedSkills:
         return self.view(sid)
 
     def set_enabled(self, sid: str, on: bool, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._set_enabled(sid, on, by=by)
+
+    def _set_enabled(self, sid: str, on: bool, *, by: str) -> dict:
         if on:
             self._user(by)          # turning OFF is always allowed (any route); ON only by the owner
         st = self._installed(sid)
@@ -577,6 +628,10 @@ class GeneratedSkills:
         return self.view(sid)
 
     def rollback(self, sid: str, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._rollback(sid, by=by)
+
+    def _rollback(self, sid: str, *, by: str) -> dict:
         self._user(by)
         st = self._installed(sid)
         cur = int(st.get("version", 0))
@@ -672,10 +727,11 @@ class GeneratedSkills:
             # Re-read the state NOW and change only last_error (#564): the owner may have revoked a grant, disabled the Skill
             # or approved a new version while the sandbox ran, and writing back the old dict would undo that. (The broker
             # keeps the grants of the START of the call for the whole run: inherent, the next call sees the change.)
-            cur = self.state(sid)
-            if cur and int(cur.get("version", 0)) == ver:
-                cur["last_error"] = {"tool": tool, "error": str(res.get("error", ""))[:300], "ts": time.time()}
-                self._set_state(sid, cur)
+            with self._state_lock(sid):
+                cur = self.state(sid)
+                if cur and int(cur.get("version", 0)) == ver:
+                    cur["last_error"] = {"tool": tool, "error": logs.redact(str(res.get("error", "")))[:300], "ts": time.time()}
+                    self._set_state(sid, cur)
             return ToolResult(False, f"{tool} failed: {str(res.get('error', ''))[:200]}", code="SKILL_RUN_FAILED")
         return ToolResult(True, str(res.get("message", ""))[:1500], res.get("data") or {})
 
