@@ -47,6 +47,7 @@ class LiveView:
         self.takeover_enabled = takeover_enabled
         self._fl = threading.Lock()                       # one screenshot at a time (never held together with _lock across driver I/O)
         self._hash = ""
+        self._holder = "local"
         self._expires = 0.0
         self._last_at = -1e9
         self._last: bytes = b""
@@ -55,7 +56,9 @@ class LiveView:
         self._lock = threading.RLock()        # the dashboard is threaded: start / frame / stop never overlap (#649 review).
         # NOTE for the driver PR: the page driver must be called from its own thread (Playwright sync is thread-bound).
 
-    def start(self) -> dict:
+    def start(self, holder: str = "local") -> dict:
+        """`holder` = who the grant belongs to ("local" = the dashboard on this computer, "phone:<device>"). A live, unexpired grant of
+        ANOTHER holder is never replaced (LIVEVIEW_IN_USE): a phone cannot knock the owner's view off, nor one phone another."""
         if not self.enabled():
             raise LiveError("LIVEVIEW_OFF", "the live view is off (jarvis features on browser_liveview)", 403)
         try:                                                # driver I/O OUTSIDE the view lock: fail early (switch, stopped, cap, test page only)
@@ -63,15 +66,18 @@ class LiveView:
         except PilotError as e:
             raise LiveError(e.code, e.message, 429 if e.code == "BROWSER_PILOT_BUSY" else 409) from None
         with self._lock:
+            if self._hash and self.clock() <= self._expires and holder != self._holder:
+                raise LiveError("LIVEVIEW_IN_USE", "the live view is open somewhere else; close it there first", 409)
             token = secrets.token_urlsafe(32)
+            self._holder = holder
             self._hash, self._expires, self._last, self._last_at, self.seq = _h(token), self.clock() + self.ttl_s, b"", -1e9, 0
             self._gb += 1
             self.session._receipt("view:start", "ok")
             logs.info("browser", "BROWSER_LIVEVIEW", "live view started")
             return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000, "state": self.session.state}
 
-    def _check(self, token: object) -> None:
-        if not self._hash or not isinstance(token, str) or not hmac.compare_digest(_h(token), self._hash):
+    def _check(self, token: object, holder: str = "local") -> None:
+        if not self._hash or not isinstance(token, str) or not hmac.compare_digest(_h(token), self._hash) or holder != self._holder:
             raise LiveError("LIVEVIEW_TOKEN", "this live view link is not valid", 403)
         if self.clock() > self._expires:
             self._revoke()
@@ -82,14 +88,14 @@ class LiveView:
             raise LiveError("LIVEVIEW_OFF", "the live view is off", 403)
 
     def _revoke(self) -> None:
-        self._hash, self._last = "", b""
+        self._hash, self._last, self._holder = "", b"", "local"
         self._gb += 1
 
-    def frame(self, token: object) -> dict:
+    def frame(self, token: object, holder: str = "local") -> dict:
         """The view lock is held only for this object's own fields, NEVER across the page driver: a hung screenshot must not block
         Stop, takeover, give back or the owner's input. One screenshot at a time (`_fl`); the others get the same new frame."""
         with self._lock:
-            self._check(token)
+            self._check(token, holder)
             cached = self._cached()
         if cached is not None:
             return self._answer(cached)
@@ -97,7 +103,7 @@ class LiveView:
             raise LiveError("LIVEVIEW_BUSY", "the page is busy; try again", 429)
         try:
             with self._lock:
-                self._check(token)
+                self._check(token, holder)
                 cached = self._cached()
                 gb = self._gb
             if cached is not None:                           # another request just took the picture
@@ -138,27 +144,27 @@ class LiveView:
                 "expires_in_s": max(0, int(self._expires - self.clock())), "state": self.session.state}
 
     # ---- B3: the owner drives the page from this view, in the SAME session (local test pages only, see PilotSession.human_input)
-    def _takeover_check(self, token: object) -> None:
-        self._check(token)
+    def _takeover_check(self, token: object, holder: str = "local") -> None:
+        self._check(token, holder)
         if not self.takeover_enabled():
             raise LiveError("LIVEVIEW_TAKEOVER_OFF", f"taking over needs its own owner switch (jarvis features on {TAKEOVER})", 403)
 
-    def takeover(self, token: object) -> dict:
+    def takeover(self, token: object, holder: str = "local") -> dict:
         with self._lock:
-            self._takeover_check(token)
+            self._takeover_check(token, holder)
             if not self.session.human_takes_over():
                 raise LiveError("LIVEVIEW_TAKEOVER", "the session cannot be taken over now (is it running, and not already yours?)", 409)
             logs.info("browser", "BROWSER_LIVEVIEW", "owner took over")
             return {"state": self.session.state}
 
-    def give_back(self, token: object, resume: object = False) -> dict:
+    def give_back(self, token: object, resume: object = False, holder: str = "local") -> dict:
         """Two explicit steps: give back (the session is PAUSED, the assistant still cannot act) and, only when `resume` is true,
         let the assistant continue (it may then read the page as it is now, a logged-in account for instance)."""
         with self._lock:
             if resume is True:
-                self._takeover_check(token)
+                self._takeover_check(token, holder)
             else:
-                self._check(token)
+                self._check(token, holder)
             self._last = b""                                   # the picture may show what the owner typed
             self._gb += 1                                      # ... and a picture still being taken must not become the cache
             was_paused = self.session.state == "PAUSED"        # decided on the SERVER state, not on what the page believes
@@ -168,10 +174,10 @@ class LiveView:
                 out = {**out, "returned": True, "state": self.session.state}
             return out
 
-    def human(self, token: object, kind: object, data: object) -> dict:
+    def human(self, token: object, kind: object, data: object, holder: str = "local") -> dict:
         """One owner input event. The answer is {"ok": true} only: the typed text is never echoed, logged or stored here."""
         with self._lock:
-            self._takeover_check(token)
+            self._takeover_check(token, holder)
         try:                                                   # outside the view lock: a hung page must not block the owner's other buttons
             return self.session.human_input(str(kind), data if isinstance(data, dict) else {})
         except PilotError as e:
@@ -183,7 +189,7 @@ class LiveView:
     def stop(self) -> dict:
         """The Stop button: ends the view AND the pilot session (the driver is closed). It needs no grant: it works after the
         view expired or ended (stopping is fail-safe; the route already requires the local owner)."""
-        self._hash, self._last = "", b""                       # no view lock: Stop must work while a frame or an input hangs
+        self._hash, self._last, self._holder = "", b"", "local"   # no view lock: Stop must work while a frame or an input hangs
         self.session._receipt("view:stop", "ok")
         self.session.stop()
         logs.info("browser", "BROWSER_LIVEVIEW", "live view stopped")

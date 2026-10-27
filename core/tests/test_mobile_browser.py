@@ -139,3 +139,54 @@ def test_status_for_the_tab(world):
 def test_the_browser_scope_is_not_a_default_scope():
     from jarves import mobile
     assert "browser" in mobile.ALL_SCOPES and "browser" not in mobile.DEFAULT_SCOPES
+
+
+# ---------------------------------------------------------------- #679 review fixes
+def test_a_phone_cannot_knock_the_owners_view_off_or_use_its_grant(world):
+    v, s, d = world
+    mob = Mob(*ALL)
+    local = v.start()["grant"]                              # the dashboard on the computer holds the view
+    st, body = call(mob, "start")
+    assert st == 409 and body["code"] == "LIVEVIEW_IN_USE"
+    assert v.frame(local)["png_b64"]                        # the owner's grant still works
+    st, body = call(mob, "frame", {"grant": local})         # a phone presenting the owner's grant is refused
+    assert st == 403 and body["code"] == "LIVEVIEW_TOKEN"
+
+
+def test_two_phones_do_not_knock_each_other_off_or_share_a_grant(world):
+    mob = Mob(*ALL)
+    a = mb.handle(mob, "devA", "start", {}, "https")[1]["grant"]
+    st, body = mb.handle(mob, "devB", "start", {}, "https")
+    assert st == 409 and body["code"] == "LIVEVIEW_IN_USE"
+    assert mb.handle(mob, "devB", "frame", {"grant": a}, "https")[0] == 403          # B cannot use A's grant
+    assert mb.handle(mob, "devA", "frame", {"grant": a}, "https")[0] == 200
+
+
+def test_the_same_phone_may_restart_and_an_expired_view_can_be_taken_over(world):
+    v, s, d = world
+    mob = Mob(*ALL)
+    first = call(mob, "start")[1]["grant"]
+    second = call(mob, "start")[1]["grant"]                  # same holder: replaced
+    assert call(mob, "frame", {"grant": first})[0] == 403 and call(mob, "frame", {"grant": second})[0] == 200
+    v._expires = 0                                           # expired: another device may start
+    assert mb.handle(mob, "devB", "start", {}, "https")[0] == 200
+
+
+def test_resume_needs_the_takeover_switch_also_from_the_phone(world):
+    v, s, d = world
+    mob = Mob(*ALL)
+    g = call(mob, "start")[1]["grant"]
+    call(mob, "takeover", {"grant": g})
+    call(mob, "return", {"grant": g})
+    v.takeover_enabled = lambda: False
+    st, body = call(mob, "return", {"grant": g, "resume": True})
+    assert st == 403 and body["code"] == "LIVEVIEW_TAKEOVER_OFF" and s.state == bp.PAUSED
+
+
+def test_status_reveals_nothing_while_the_switch_is_off(world):
+    assert mb.status(Mob(bl.FEATURE)) == {"enabled": False}
+
+
+def test_the_rate_limit_is_below_the_device_bucket():
+    from jarves import mobile
+    assert mb.RATE_PER_MIN < mobile.DEVICE_RATE_PER_MIN

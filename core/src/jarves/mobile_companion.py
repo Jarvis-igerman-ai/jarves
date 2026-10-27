@@ -14,7 +14,7 @@ API_HEADER = "X-Jarves-Api"
 INFO_PATH = "/api/m/companion/info"
 # Features an app cares about (only those that are registered are reported).
 APP_FEATURES = ("companion_api", "mobile_access", "goal_plans", "preferences", "drive_mode", "drive_briefing")
-SUPPORTED_SCOPES = ("chat", "voice", "status", "approvals", "tasks", "prefs", "drive")
+SUPPORTED_SCOPES = ("chat", "voice", "status", "approvals", "tasks", "prefs", "drive", "browser")
 
 
 def _features(mob):

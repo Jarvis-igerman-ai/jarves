@@ -899,19 +899,22 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
-    mb = re.fullmatch(r"/api/m/browser(?:/(start|frame|takeover|return|input|stop))?", path)
-    if mb:                                                # Browser pilot viewer (V7 B4 #399): beta, https only, paired + scope
+    if path == "/api/m/browser" or path.startswith("/api/m/browser/"):
+        # Browser pilot viewer (V7 B4 #399): beta, https only, paired + scope
         if not need("browser"):
             return
         from . import mobile_browser
-        op = mb.group(1)
+        op = path[len("/api/m/browser/"):] if path.startswith("/api/m/browser/") else None
         if method == "GET" and op is None:
             return h._json(200, mobile_browser.status(mob))
-        if method == "POST" and op:
+        if not ((method == "POST" and path in mobile_browser.ROUTES) or (method == "GET" and op is None)):
+            return h._json(405, {"error": "method not allowed"})
+        if method == "POST" and path in mobile_browser.ROUTES:
             d = _json_body(h)
             if d is None:
                 return
-            st, obj = mobile_browser.handle(mob, dev["id"], op, d, mob.scheme)
+            scheme = "https" if getattr(h.server, "tls", False) else "http"       # per request: the listener this call really arrived on
+            st, obj = mobile_browser.handle(mob, dev["id"], op, d, scheme)
             if op in ("start", "takeover", "return", "stop"):
                 return done(st, obj, op="browser_" + op)          # the audit holds the action only: never a picture, a grant or typed text
             return h._json(st, obj)

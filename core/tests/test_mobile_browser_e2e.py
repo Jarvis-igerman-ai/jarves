@@ -81,14 +81,14 @@ class Pilot:
         self.grants, self.frames = [], 0
         start, frame = self.v.start, self.v.frame
 
-        def _start():
-            out = start()
+        def _start(*a, **k):
+            out = start(*a, **k)
             self.grants.append(out["grant"])
             return out
 
-        def _frame(g):
+        def _frame(g, *a, **k):
             self.frames += 1
-            return frame(g)
+            return frame(g, *a, **k)
         self.v.start, self.v.frame = _start, _frame
 
 

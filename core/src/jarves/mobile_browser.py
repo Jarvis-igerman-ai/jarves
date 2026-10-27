@@ -6,11 +6,13 @@ expiry, local test pages only, owner input to the page only, nothing typed is lo
 path adds, all enforced HERE on the server:
 * its own beta switch `browser_phone_view` (OFF by default) on top of `browser_liveview` and, for input, `browser_takeover`;
 * a paired device with the `browser` scope (not in the default scopes: granted on the computer, like tasks/prefs/drive);
-* HTTPS only (or loopback): keystrokes and pictures never travel over plain http on the LAN;
+* HTTPS only, decided PER REQUEST by the caller from the real listener (no loopback exception): keystrokes and pictures never travel over
+  plain http;
+* the grant belongs to its holder (`phone:<device>`): another device or the dashboard cannot use or replace it while it is live;
 * it can only VIEW or TAKE OVER a pilot that is already running; it can NOT start a pilot (that is the computer, with a URL typed
   there), it can Stop it;
 * a small request rate per device; the audit holds the device and the action kind only.
-Routes: GET /api/m/browser; POST /api/m/browser/{start,frame,takeover,return,input,stop}. The grant is in the POST body."""
+Routes: GET /api/m/browser and POST /api/m/browser/<op> with op in OPS. The grant is in the POST body."""
 from __future__ import annotations
 
 from . import browser_liveview as bl
@@ -21,8 +23,10 @@ from .calm import targets
 
 FEATURE = "browser_phone_view"
 SCOPE = "browser"
-RATE_PER_MIN = 240                 # frames at 1/s plus inputs: well inside; a flood is refused
+RATE_PER_MIN = 90                  # below the device bucket (120/min) so the clearer answer wins; frames 1/s plus buttons fit
 OPS = ("start", "frame", "takeover", "return", "input", "stop")
+ROUTES = ("/api/m/browser/start", "/api/m/browser/frame", "/api/m/browser/takeover", "/api/m/browser/return", "/api/m/browser/input",
+          "/api/m/browser/stop")      # the literal paths (the contract drift guard reads them)
 
 
 def _on(mob, fid: str) -> bool:
@@ -35,6 +39,8 @@ def _on(mob, fid: str) -> bool:
 
 
 def status(mob) -> dict:
+    if not _on(mob, FEATURE):
+        return {"enabled": False}                          # while the switch is off a device learns nothing about the pilot
     v = bl.ACTIVE
     return {"enabled": _on(mob, FEATURE), "session": v is not None, "state": (v.session.state if v is not None else ""),
             "takeover": bool(v is not None and v.takeover_enabled())}
@@ -53,18 +59,18 @@ def handle(mob, dev_id: str, op: str, body: dict, scheme: str) -> tuple[int, dic
         return 404, {"error": "not found"}
     if not mob.rate_ok("browser:" + dev_id, RATE_PER_MIN):
         return 429, {"error": "too many requests", "code": "PHONE_BROWSER_RATE"}
-    grant = body.get("grant")
+    grant, who = body.get("grant"), "phone:" + dev_id
     try:
         if op == "start":
-            out = v.start()
+            out = v.start(who)
         elif op == "frame":
-            out = v.frame(grant)
+            out = v.frame(grant, who)
         elif op == "takeover":
-            out = v.takeover(grant)
+            out = v.takeover(grant, who)
         elif op == "return":
-            out = v.give_back(grant, body.get("resume"))
+            out = v.give_back(grant, body.get("resume"), who)
         elif op == "input":
-            out = v.human(grant, body.get("kind"), body.get("data"))
+            out = v.human(grant, body.get("kind"), body.get("data"), who)
         else:
             out = v.stop()
         return 200, out
@@ -72,8 +78,8 @@ def handle(mob, dev_id: str, op: str, body: dict, scheme: str) -> tuple[int, dic
         return e.status, {"error": e.message, "code": e.code}
     except PilotError as e:                                  # noqa: BLE001 - fixed words only
         return 409, {"error": e.message, "code": e.code}
-    except Exception:                                        # noqa: BLE001
-        logs.warn("mobile", "MOBILE_BROWSER_FAILED", "phone browser view failed")
+    except Exception as e:                                   # noqa: BLE001
+        logs.warn("mobile", "MOBILE_BROWSER_FAILED", "phone browser view failed", error_type=type(e).__name__)
         return 500, {"error": "the browser view failed", "code": "PHONE_BROWSER_FAILED"}
 
 
