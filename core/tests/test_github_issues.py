@@ -690,3 +690,19 @@ def test_head_lagging_one_row_after_a_crash_is_not_a_tamper_alarm(tmp_path):
     assert head["n"] == len(_audit_lines(tmp_path))                                      # and it heals on the next row
     _tamper_then_write_is_refused(                                                       # a removed row is still caught
         tmp_path, lambda p: p.write_text("\n".join(_audit_lines(tmp_path)[:-1]) + "\n", encoding="utf-8"), w, fake)
+
+
+def test_label_deleted_while_the_owner_is_deciding_is_not_recreated(tmp_path):
+    """#492 point 5: the label check is a FRESH listing right before the write (after the approval), so a label deleted on
+    GitHub between the first check and the POST is refused instead of being silently re-created by GitHub."""
+    w, ap, fake = mk(tmp_path)
+    assert "bug" in fake.labels
+    real_ask = ap.ask
+
+    async def ask_then_delete(prompt, **kw):
+        out = await real_ask(prompt, **kw)
+        fake.labels.remove("bug")                      # someone deletes the label while the owner thinks
+        return out
+    ap.ask = ask_then_delete
+    r = go(w, "labels.add", "7", labels=["bug"])
+    assert r.code == "GITHUB_WRITE_BAD_ARGUMENT" and not writes(fake)

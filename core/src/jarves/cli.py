@@ -2350,7 +2350,7 @@ def main(argv: list[str] | None = None) -> int:
     hp = sub.add_parser("help", help="explain a topic: jarvis help timers / google / music (no topic = the list)")
     hp.add_argument("topic", nargs="*", help="a topic id or a word in Hebrew or English")
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
-    dg.add_argument("area", nargs="?", choices=["anydo", "whatsapp", "google", "voice"],
+    dg.add_argument("area", nargs="?", choices=["anydo", "whatsapp", "google", "voice", "github"],
                     help="read-only self-check of one area: plain cause + next step (add --code CODE for a failure; --json)")
     dg.add_argument("--handoff-project", nargs="?", const="", default=None, metavar="NAME",
                     help="set the allow-listed coding-agent project a failure may be handed to (empty = none)")
