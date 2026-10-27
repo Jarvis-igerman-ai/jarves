@@ -231,3 +231,87 @@ def test_interrupt_and_stop_abort_the_server_turn(tmp_path, server, monkeypatch)
     assert server.posts[-1][0].split("?")[0] == "/session/ses_new1/abort"
     assert o.stop_session(sid, approved=True)["ok"] and o.db.session(sid)["state"] == "STOPPED"
     o.db.close()
+
+
+# ---------------------------------------------------------------- D2 review fixes (Opus review of #405)
+def _started(tmp_path, server, monkeypatch, answers=None):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+
+    def ask(prompt, **kw):
+        asked.append((prompt, kw))
+        return True if answers is None else answers.pop(0)
+    monkeypatch.setattr(o, "_ask_owner", ask)
+    return o, asked, o.start_session("opencode", "proj", "task")["session"]["id"]
+
+
+def test_ask_and_every_other_send_path_also_needs_the_approval(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    n_posts, n_asked = len(server.posts), len(asked)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: False)
+    r = o.ask(sid, "what are you doing?", live=True)
+    assert not r.get("ok") and len(server.posts) == n_posts          # denied: nothing reached the server
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append((p, k)) or True)
+    o.ask(sid, "what are you doing?", live=True)
+    assert len(asked) > n_asked and len(server.posts) == n_posts + 1
+    o.db.close()
+
+
+def test_approved_flag_is_ignored_for_opencode_and_long_or_dirty_prompts_are_refused(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or False)
+    r = o.start_session("opencode", "proj", "task", approved=True)          # a bridge caller says approved=True
+    assert r["code"] == "NOT_APPROVED" and len(asked) == 1 and not server.posts
+    r = o.start_session("opencode", "proj", "x" * 2000, approved=True)
+    assert not r["ok"] and "too long" in r["text"] and len(asked) == 1
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    o.start_session("opencode", "proj", "do it\u202e evil")
+    assert "\u202e" not in asked[-1] and "Prompt (untrusted text, shown in full)" in asked[-1]
+    assert "\u202e" not in server.posts[1][1]["parts"][0]["text"]               # what was shown is what was sent
+    o.db.close()
+
+
+def test_session_in_another_folder_is_aborted_and_refused(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    server.force_dir = "C:/somewhere/else"
+    r = o.start_session("opencode", "proj", "task")
+    assert not r["ok"] and r["code"] == "SERVER_ERROR"
+    assert [p.split("?")[0] for p, _ in server.posts] == ["/session", "/session/ses_new1/abort"]     # aborted, no prompt
+    o.db.close()
+
+
+def test_failed_first_prompt_aborts_the_new_server_session(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    real = oc.Client.prompt
+
+    def boom(self, *a, **k):
+        raise oc.OpenCodeError("SERVER_ERROR", "HTTP 500")
+    monkeypatch.setattr(oc.Client, "prompt", boom)
+    assert not o.start_session("opencode", "proj", "task")["ok"]
+    assert server.posts[-1][0].split("?")[0] == "/session/ses_new1/abort"
+    assert not [s for s in o.db.sessions() if s["provider"] == "opencode"]
+    monkeypatch.setattr(oc.Client, "prompt", real)
+    o.db.close()
+
+
+def test_stopped_session_is_not_shown_as_live_again_by_a_refresh(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    server.sessions.append({"id": "ses_new1", "directory": "x", "title": "task", "time": {"created": 1, "updated": 2}})
+    assert o.stop_session(sid, approved=True)["ok"]
+    o.list(force=True)
+    assert o.db.session(sid)["state"] == "STOPPED"
+    o.db.close()
+
+
+def test_a_redirect_is_not_a_success(server):
+    c = oc.Client(server.url)
+    server.status_for_posts = 302
+    with pytest.raises(oc.OpenCodeError):
+        c.abort("ses_new1", "C:/proj")

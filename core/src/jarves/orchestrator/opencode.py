@@ -97,9 +97,9 @@ class Client:
         if r.status in (401, 403):
             conn.close()
             raise OpenCodeError("AUTH_REQUIRED", "the server refused the password")
-        if r.status >= 400:
+        if not 200 <= r.status < 300:                     # no redirect is followed; a 3xx is not a success
             conn.close()
-            raise OpenCodeError("SERVER_ERROR", f"HTTP {r.status} on {path}")
+            raise OpenCodeError("SERVER_ERROR", f"HTTP {r.status} on {bare}")
         return conn, r
 
     def get_json(self, path: str) -> Any:
@@ -150,6 +150,13 @@ class Client:
         sid = d.get("id") if isinstance(d, dict) else None
         if not isinstance(sid, str) or not re.fullmatch(_ID, sid):
             raise OpenCodeError("SERVER_ERROR", "the server did not return a session id")
+        got = str(d.get("directory") or "")
+        if _norm_dir(got) != _norm_dir(directory):         # the session must live in the worktree we asked for
+            try:
+                self.abort(sid, directory)
+            except OpenCodeError:
+                pass
+            raise OpenCodeError("SERVER_ERROR", "the session was created in another folder than the worktree")
         return sid
 
     def prompt(self, session_id: str, text: str, directory: str) -> None:
@@ -214,6 +221,10 @@ class Client:
             raise OpenCodeError("SERVER_ERROR", f"stream failed ({type(e).__name__})") from None
         finally:
             conn.close()
+
+
+def _norm_dir(p: str) -> str:
+    return str(p or "").replace("\\", "/").rstrip("/").lower()
 
 
 def _ms(t: Any) -> float | None:

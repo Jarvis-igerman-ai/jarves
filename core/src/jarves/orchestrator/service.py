@@ -38,6 +38,7 @@ from .envelope import (LIVE_STATES, Envelope, EnvelopeError, clean, make, say, s
 STATUS_Q = re.compile(r"\b(status|state|what(?:'s| is) (?:it|he|she|claude|codex) doing|doing\b|progress|blocked|"
                       r"stuck|busy|working on|where is it)|מה המצב|מה הוא עושה|מה קורה|מצב|התקדמות|חסום|תקוע|על מה "
                       r"הוא עובד", re.I)
+OC_PROMPT_SHOWN = 1500            # an OpenCode prompt longer than the approval can show is refused, never sent unseen
 PROVIDER_WORDS = {"claude": "claude", "קלוד": "claude", "קלאוד": "claude", "codex": "codex", "קודקס": "codex",
                   "opencode": "opencode"}
 NOTIFY_KINDS = ("approval", "blocked", "done", "failed")
@@ -234,6 +235,8 @@ class Orchestrator:
         for v in rows:
             sid = session_key("opencode", v["provider_session_id"])
             cur = self.db.session(sid) or {}
+            if cur.get("origin") == "managed" and cur.get("state") == "STOPPED":
+                continue                                 # D2: a session JARVES stopped is not shown as live again
             if sid in self.managed:                      # D2: a session JARVES started keeps its managed row; only liveness
                 self.db.upsert_session(sid, state=v["state"], last_seen_at=now)
                 continue
@@ -534,6 +537,16 @@ class Orchestrator:
             return {"ok": False, "code": "HOP_LIMIT" if "HOP" in str(e) else "error", "text": str(e)}
         m = self.managed.get(s["id"])
         sid = s["id"]
+        if isinstance(m, _OpenCodeSession):            # D2: EVERY prompt to OpenCode is approved on screen, whoever asked
+            shown = clean(text, OC_PROMPT_SHOWN + 1)
+            if len(shown) > OC_PROMPT_SHOWN:
+                return {"ok": False, "code": "error", "text": f"The prompt is too long to approve on screen "
+                                                              f"(max {OC_PROMPT_SHOWN} characters)."}
+            text = shown                               # what is shown is exactly what is sent
+            if not self._ask_owner(self._opencode_prompt_text(s, shown), title="agents_opencode_prompt", risk="medium",
+                                   voice=False, details=self._opencode_details(s)):
+                self.db.audit(by, kind, session_id=sid, decision="denied", detail="opencode prompt")
+                return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
         if m is not None:
             ok = self._managed_send(sid, m, wrap_for_agent([{**env.to_dict(), "payload": env.payload}])
                                     if kind == "status_request" else text, steer=(kind == "command"))
@@ -599,16 +612,11 @@ class Orchestrator:
                 return False
         return False
 
-    def tell(self, ref: str, text: str, *, by: str = "owner", lang: str | None = None, approved: bool = False) -> dict:
+    def tell(self, ref: str, text: str, *, by: str = "owner", lang: str | None = None) -> dict:
         lang = lang or lang_of(text)
         s, err = self._resolved(ref, lang, live_only=True)
         if err:
             return err
-        if isinstance(self.managed.get(s["id"]), _OpenCodeSession) and not approved and not self._ask_owner(
-                self._opencode_prompt_text(s, text), title="agents_opencode_prompt", risk="medium", voice=False,
-                details=self._opencode_details(s)):
-            self.db.audit(by, "tell", session_id=s["id"], decision="denied", detail="opencode prompt")
-            return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
         if s["state"] == "PAUSED" and s["id"] in self.managed:
             self.db.upsert_session(s["id"], state="IDLE")
         r = self._deliver(s, "command", text, by=by, lang=lang)
@@ -756,6 +764,11 @@ class Orchestrator:
         if provider == "opencode":                    # D2: the server is external; the switch must be on, password set
             if not self._opencode_on():
                 return {"ok": False, "code": "PROVIDER_MISSING", "text": say("PROVIDER_MISSING", lang)}
+            approved = False                          # never trusted from a caller / the bridge: the full popup always shows
+            task = clean(task, OC_PROMPT_SHOWN + 1)
+            if len(task) > OC_PROMPT_SHOWN:
+                return {"ok": False, "code": "error", "text": f"The task is too long to approve on screen "
+                                                              f"(max {OC_PROMPT_SHOWN} characters)."}
         else:
             cmd = self.claude_cmd if provider == "claude" else self.codex_cmd
             if not cmd:
@@ -785,10 +798,11 @@ class Orchestrator:
                 return {"ok": False, "code": e.code, "text": say(e.code, lang), "detail": e.detail}
         if not approved and not self._ask_owner(
                 f"Start a new {provider} session in {proj.name}" + (" (project folder)" if here else
-                                                                     " (new worktree)") + f":\n{task[:600]}"
+                                                                     " (new worktree)")
                 + (f"\nThe prompt goes to the OpenCode server at {self.acfg.opencode_url}, repo {proj.name}, branch: "
                    + ("the project's current branch" if here else "a NEW jarves/ branch in a new worktree")
-                   + ", session: new." if provider == "opencode" else ""),
+                   + f", session: new.\nPrompt (untrusted text, shown in full):\n{task}" if provider == "opencode"
+                   else f":\n{task[:600]}"),
                 title="agents_start", risk="medium", voice=False,
                 details={"provider": provider, "project": proj.name, "folder": proj.path,
                          **({"server": self.acfg.opencode_url, "branch": "current" if here else "new jarves/ worktree branch",
@@ -816,16 +830,23 @@ class Orchestrator:
                 "server": self.acfg.opencode_url}
 
     def _opencode_prompt_text(self, s: dict, text: str) -> str:
-        return (f"Send this prompt to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
+        return (f"Send a prompt to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
                 f"folder {s.get('cwd')}, branch {s.get('branch') or 'worktree branch'}) at {self.acfg.opencode_url}?"
-                f"\n{text[:600]}")
+                f"\nPrompt (untrusted text, shown in full):\n{text}")
 
     def _start_opencode(self, proj, cwd: str, task: str, *, by: str, lang: str) -> dict:
         try:
             c = self._opencode_client()
             raw = c.create_session(cwd, task[:80])
-            if task.strip():
-                c.prompt(raw, task, cwd)
+            try:
+                if task.strip():
+                    c.prompt(raw, task, cwd)
+            except opencode.OpenCodeError:
+                try:
+                    c.abort(raw, cwd)                    # never leave an unmanaged server session behind
+                except opencode.OpenCodeError:
+                    pass
+                raise
         except opencode.OpenCodeError as e:
             return {"ok": False, "code": e.code, "text": say(e.code, lang), "detail": e.detail}
         sid = session_key("opencode", raw)
