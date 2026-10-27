@@ -202,6 +202,7 @@ class PilotSession:
         self.resolver = self._pinned_resolver
         self.state, self.seq, self.started = AGENT, 0, clock()
         self.receipts: list[dict] = []
+        self._pin_lock = threading.RLock()
         # B3 locks. _slock guards the state and is NEVER held across driver I/O (Stop and takeover never wait for a hung page).
         # _dlock serialises driver calls (an agent call holds it, the owner's input waits at most DRIVER_WAIT_S for it).
         # _gen counts state changes: an agent call that started before a change throws its result away (no stale ownership).
@@ -213,9 +214,10 @@ class PilotSession:
         self.after_human = False
 
     def _pinned_resolver(self, host: str) -> list[str]:
-        if host not in self.pins:
-            self.pins[host] = list(self._raw_resolver(host))
-        return self.pins[host]
+        with self._pin_lock:                                # two threads (the proxy has many) resolve a name ONCE
+            if host not in self.pins:
+                self.pins[host] = list(self._raw_resolver(host))
+            return self.pins[host]
 
     def _pin_or_stop(self) -> bool:
         """Hand the vetted addresses to the driver. An exception from the driver stops the session (fail closed, #574 item 4)."""
@@ -428,6 +430,19 @@ class PilotSession:
             raise self._refuse("open", "BROWSER_PILOT_REDIRECT", "the page led to an address that may not be read; the session was stopped")
         self._receipt("open", "ok")
         return {"scope": scope, "state": self.state}
+
+    def vet_for_proxy(self, url: str) -> bool:
+        """For pilot_proxy.py (many threads, no driver calls): the same vetting as request_allowed (a name is resolved ONCE and
+        every answer judged) but it never calls driver.pin_hosts (the proxy dials the pinned addresses itself, and a thread-bound
+        driver must not be touched from proxy threads). Nothing after Stop; only loopback while the owner drives or has driven."""
+        if self.state == STOPPED:
+            return False
+        if self.state == "HUMAN" or self.after_human:        # a public script in a page the owner typed into could read the keys
+            return page_scope(url) == "local"
+        try:
+            return bool(vet_url(url, self.resolver))
+        except Exception:                                    # noqa: BLE001 - a resolver bug never allows a request
+            return False
 
     def request_allowed(self, url: str) -> bool:
         """For the real driver's route handler: every request (document, redirect target, subresource) must pass this. While the
