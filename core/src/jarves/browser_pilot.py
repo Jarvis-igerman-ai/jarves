@@ -11,8 +11,10 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Callable
 
 from . import features as feat
@@ -71,8 +73,25 @@ def _canonical_host(host: str) -> str:
     return host
 
 
+PUBLIC_PORTS = (80, 443)           # a public page is read on a web port only: no example.com:22 (#574 item 7)
+
+
+def _port_ok(url: str, scope: str) -> bool:
+    try:
+        port = urlsplit((url or "").strip()).port
+    except ValueError:
+        return False
+    return scope != "public" or port is None or port in PUBLIC_PORTS
+
+
 def page_scope(url: str) -> str:
-    """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts)."""
+    """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts, a
+    public host on a non-web port). Loopback pages the owner points to may use any port."""
+    scope = _page_scope(url)
+    return scope if scope and _port_ok(url, scope) else ""
+
+
+def _page_scope(url: str) -> str:
     host = _canonical_host(url_host(url))
     if not host or blocked(host):
         return ""
@@ -101,12 +120,21 @@ RESOLVE_TIMEOUT_S = 3.0
 def system_resolver(host: str) -> list[str]:
     """All addresses the system resolver gives for a host (tests inject a fake). Bounded: a resolver that does not answer
     in RESOLVE_TIMEOUT_S raises (the caller fails closed); getaddrinfo itself has no timeout (#566)."""
-    import concurrent.futures
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    try:
-        return sorted({i[4][0] for i in ex.submit(socket.getaddrinfo, host, None).result(timeout=RESOLVE_TIMEOUT_S)})
-    finally:
-        ex.shutdown(wait=False)
+    return sorted({i[4][0] for i in _resolver_pool().submit(socket.getaddrinfo, host, None).result(timeout=RESOLVE_TIMEOUT_S)})
+
+
+_POOL = None
+_POOL_GUARD = threading.Lock()
+RESOLVER_THREADS = 4                                   # one shared, capped pool: hung lookups cannot grow the thread count (#574)
+
+
+def _resolver_pool():
+    global _POOL
+    with _POOL_GUARD:
+        if _POOL is None:
+            import concurrent.futures
+            _POOL = concurrent.futures.ThreadPoolExecutor(max_workers=RESOLVER_THREADS, thread_name_prefix="pilot-dns")
+        return _POOL
 
 
 def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) -> str:
@@ -172,6 +200,16 @@ class PilotSession:
         if host not in self.pins:
             self.pins[host] = list(self._raw_resolver(host))
         return self.pins[host]
+
+    def _pin_or_stop(self) -> bool:
+        """Hand the vetted addresses to the driver. An exception from the driver stops the session (fail closed, #574 item 4)."""
+        try:
+            self._apply_pins()
+            return True
+        except Exception:                                # noqa: BLE001
+            logs.warn("browser", "BROWSER_PILOT_PIN_FAILED", "the driver could not take the pinned addresses; session stopped")
+            self.stop()
+            return False
 
     def _apply_pins(self) -> None:
         def good(addrs) -> bool:                              # a refused (private) answer is never handed to the driver
@@ -252,7 +290,8 @@ class PilotSession:
         scope = vet_url(url, self.resolver)
         if not scope:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
-        self._apply_pins()                                   # the host was resolved and vetted once: the driver connects only there
+        if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
+            raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)
         if not vet_url(self._final_url(), self.resolver):    # a redirect or script navigation, or an unreadable address
             self.stop()
@@ -262,9 +301,12 @@ class PilotSession:
 
     def request_allowed(self, url: str) -> bool:
         """For the real driver's route handler: every request (document, redirect target, subresource) must pass this."""
-        ok = bool(vet_url(url, self.resolver))
-        if ok:
-            self._apply_pins()                               # a host first seen in a redirect or subresource is pinned too
+        try:
+            ok = bool(vet_url(url, self.resolver))
+        except Exception:                                    # noqa: BLE001 - a resolver bug never allows a request
+            return False
+        if ok and not self._pin_or_stop():                   # a host first seen in a redirect or subresource is pinned too
+            return False
         return ok
 
     def read(self) -> dict:

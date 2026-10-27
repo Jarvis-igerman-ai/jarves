@@ -276,3 +276,30 @@ def test_575_translated_site_local_and_compat_ipv6_are_refused(url):
     host = url[8:-2]
     assert bp.vet_url("https://names.example.com/", lambda h: [host]) == ""
     assert bp.page_scope("http://[::ffff:93.184.216.34]/") == "public" and bp.page_scope("http://[::1]/") == "local"
+
+
+@pytest.mark.parametrize("url,expect", [("https://example.com/", "public"), ("http://example.com:80/", "public"), ("https://example.com:443/x", "public"),
+                                        ("https://example.com:22/", ""), ("http://example.com:8080/", ""), ("https://example.com:99999/", ""),
+                                        ("http://localhost:8000/", "local"), ("http://127.0.0.1:3000/", "local")])
+def test_574_public_hosts_only_on_web_ports_loopback_any_port(url, expect):
+    assert bp.page_scope(url) == expect
+
+
+def test_574_a_pin_hosts_exception_stops_the_session_and_refuses(tmp_path):
+    s, d, _ = mk(tmp_path)
+
+    def boom(m):
+        raise RuntimeError("no proxy")
+    d.pin_hosts = boom
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_PIN" and s.state == bp.STOPPED and d.opened == [] and d.closed
+    s2, d2, _ = mk(tmp_path / "b")
+    d2.pin_hosts = boom
+    assert s2.request_allowed("https://example.com/x") is False and s2.state == bp.STOPPED
+
+
+def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_shared_and_capped(tmp_path, monkeypatch):
+    s, d, _ = mk(tmp_path, resolver=lambda h: (_ for _ in ()).throw(RuntimeError("x")))
+    assert s.request_allowed("https://example.com/") is False
+    assert bp._resolver_pool() is bp._resolver_pool() and bp._resolver_pool()._max_workers == bp.RESOLVER_THREADS
