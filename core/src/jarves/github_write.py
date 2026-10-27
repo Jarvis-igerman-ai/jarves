@@ -505,6 +505,8 @@ class GitHubWriter:
     def _unreadable_text(a: WriteAction) -> str:
         if a.kind.strip().lower() == "ci.rerun":
             return "could not read the workflow run on GitHub to show what it is; try again"
+        if a.kind.strip().lower() == "merge.enqueue":
+            return "could not read the pull request on GitHub to show what will be merged; try again"
         return "could not read the issue on GitHub to show what the edit replaces; try again"
 
     async def _extra(self, a: WriteAction) -> str | None:

@@ -1,3 +1,3 @@
 {
- "turn on auto-merge for one pull request from the command line after your popup approval; GitHub merges it through the merge queue only after every required check passed; there is no direct merge and no bypass": "הפעלת מיזוג אוטומטי לבקשת מיזוג אחת משורת הפקודה אחרי אישור בחלון הקופץ; GitHub ממזג דרך תור המיזוג רק אחרי שכל הבדיקות הנדרשות עברו; אין מיזוג ישיר ואין עקיפה"
+ "turn on auto-merge for one pull request from the command line after your popup approval; only for a branch with a merge queue; there is no direct merge and no bypass": "הפעלת מיזוג אוטומטי לבקשת מיזוג אחת משורת הפקודה אחרי אישור בחלון הקופץ; רק לענף שיש לו תור מיזוג; אין מיזוג ישיר ואין עקיפה"
 }

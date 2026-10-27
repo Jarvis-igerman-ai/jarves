@@ -82,7 +82,7 @@ _WRITE_VERBS = tuple(_WRITE_PATHS)
 # G5: the ONLY GraphQL mutation documents the client can send. There is no direct-merge mutation here, on purpose.
 _MUTATIONS = {"enable_auto_merge": ("mutation($id:ID!,$sha:GitObjectID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,"
                                     "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt}}}}", {"id", "sha"})}
-_NODE = re.compile(r"[A-Za-z0-9_=-]{8,100}", re.ASCII)
+_NODE = re.compile(r"PR_[A-Za-z0-9_=-]{6,100}", re.ASCII)       # a pull request id only
 _SHA40 = re.compile(r"[0-9a-f]{40}", re.ASCII)
 
 
@@ -264,7 +264,22 @@ class GitHubClient:
         return {"state": str(j.get("state") or ""), "draft": bool(j.get("draft")), "merged": bool(j.get("merged")),
                 "head_sha": sha if _SHA40.fullmatch(sha) else "", "node_id": nid if _NODE.fullmatch(nid) else "",
                 "title": str(j.get("title") or "")[:200],
-                "base": str((j.get("base") or {}).get("ref") or "") if isinstance(j.get("base"), dict) else ""}
+                "base": str((j.get("base") or {}).get("ref") or "") if isinstance(j.get("base"), dict) else "",
+                "base_repo": str(((j.get("base") or {}).get("repo") or {}).get("full_name") or "") if isinstance(j.get("base"), dict) else "",
+                "head_repo": str(((j.get("head") or {}).get("repo") or {}).get("full_name") or "") if isinstance(j.get("head"), dict) else "",
+                "head_ref": str((j.get("head") or {}).get("ref") or "") if isinstance(j.get("head"), dict) else "",
+                "author": str((j.get("user") or {}).get("login") or "") if isinstance(j.get("user"), dict) else ""}
+
+    def has_merge_queue(self, owner: str, repo: str, branch: str) -> bool:
+        """Does this branch have a merge queue? (a GraphQL query; a query never changes anything)."""
+        _name(owner, "owner"), _name(repo, "repo")
+        if not _REF.fullmatch(branch or ""):
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "bad branch")
+        q = "query($o:String!,$r:String!,$b:String!){repository(owner:$o,name:$r){mergeQueue(branch:$b){id}}}"
+        j = self._json("POST", "/graphql", json={"query": q, "variables": {"o": owner, "r": repo, "b": branch}})
+        if not isinstance(j, dict) or j.get("errors"):
+            raise GitHubError("GITHUB_PROVIDER_ERROR", "GraphQL error")
+        return bool((((j.get("data") or {}).get("repository") or {}).get("mergeQueue") or {}).get("id"))
 
     def graphql_write(self, name: str, variables: dict) -> dict:
         """THE GraphQL write door (G5): only the documents in _MUTATIONS, with exactly their variables, api.github.com only.
@@ -279,9 +294,21 @@ class GitHubClient:
             j = r.json() if r.content else {}
         except ValueError:
             j = {}
-        if not isinstance(j, dict) or j.get("errors"):
+        data = j.get("data") if isinstance(j, dict) else None
+        got = ((data or {}).get("enablePullRequestAutoMerge") or {}) if isinstance(data, dict) else {}
+        errs = j.get("errors") if isinstance(j, dict) else None
+        if errs:
+            kinds = {str(e.get("type") or "") for e in errs if isinstance(e, dict)}
+            if got:                       # an error next to a result: the mutation may have run, so never allow a blind retry
+                raise GitHubError("GITHUB_WRITE_UNKNOWN", "GitHub answered with an error and a result; check the pull request on GitHub first")
+            if "FORBIDDEN" in kinds:
+                raise GitHubError("GITHUB_WRITE_PERMISSION", "the token may not turn on auto-merge on this repo")
+            if "RATE_LIMITED" in kinds:
+                raise GitHubError("GITHUB_RATE_LIMIT", "GitHub rate limit used up; try later")
             raise GitHubError("GITHUB_WRITE_REFUSED", "GitHub refused to turn on auto-merge (not allowed on this repo, or the commit changed)")
-        return j.get("data") or {}
+        if not ((got.get("pullRequest") or {}).get("autoMergeRequest")):
+            raise GitHubError("GITHUB_WRITE_UNKNOWN", "GitHub did not confirm auto-merge; check the pull request on GitHub first")
+        return {"enabled": True}
 
     def me(self) -> dict:
         return {"login": self._json("GET", "/user").get("login")}
@@ -350,6 +377,8 @@ class FakeGitHub:
         self.pull_info: dict = {}               # overrides for GET /pulls/N (state, draft, merged, head, ...)
         self.graphql_bodies: list = []          # JSON bodies of GraphQL POSTs, in order
         self.graphql_errors = False             # a GraphQL mutation answers with errors
+        self.graphql_answer: dict | None = None  # overrides the whole mutation answer (JSON body)
+        self.merge_queue = True                 # the base branch has a merge queue
         self.transport = httpx.MockTransport(self._handle)
 
     def run_json(self, repo: str, run_id: str) -> dict:
@@ -367,10 +396,14 @@ class FakeGitHub:
         if req.method == "POST" and p == "/graphql":
             body = json.loads(req.content) if req.content else {}
             self.graphql_bodies.append(body)
+            if "mergeQueue(branch:$b){id}" in str(body.get("query")):
+                return httpx.Response(200, headers=hdr, json={"data": {"repository": {"mergeQueue": {"id": "MQ_1"} if self.merge_queue else None}}})
             if "mutation" in str(body.get("query")):
+                if self.graphql_answer is not None:
+                    return httpx.Response(200, headers=hdr, json=self.graphql_answer)
                 if self.graphql_errors:
                     return httpx.Response(200, headers=hdr, json={"errors": [{"message": "x"}]})
-                return httpx.Response(200, headers=hdr, json={"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 2}}}})
+                return httpx.Response(200, headers=hdr, json={"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 2, "autoMergeRequest": {"enabledAt": "2026-10-27T10:00:00Z"}}}}})
         if req.method != "GET" and p != "/graphql":
             return self._write(req, p, hdr)
         if p.endswith("/labels"):
@@ -411,11 +444,14 @@ class FakeGitHub:
         if p.endswith("/actions/runs"):
             return httpx.Response(200, headers=hdr, json={"workflow_runs": [
                 {"id": 9, "name": "CI", "status": "completed", "conclusion": "success"}]})
-        m = re.fullmatch(r"/repos/[^/]+/[^/]+/pulls/(\d+)", p)
-        if m:
+        m2 = re.fullmatch(r"/repos/([^/]+/[^/]+)/pulls/(\d+)", p)
+        if m2:
+            m = re.fullmatch(r"/repos/[^/]+/[^/]+/pulls/(\d+)", p)
             return httpx.Response(200, headers=hdr, json={"number": int(m.group(1)), "title": "a pr", "state": "open", "draft": False,
-                                                          "merged": False, "node_id": "PR_kwDOabcdefgh", "head": {"sha": self.head_sha},
-                                                          "base": {"ref": "main"}, **self.pull_info})
+                                                          "merged": False, "node_id": "PR_kwDOabcdefgh",
+                                                          "head": {"sha": self.head_sha, "ref": "fix-1", "repo": {"full_name": m2.group(1)}},
+                                                          "base": {"ref": "main", "repo": {"full_name": m2.group(1)}},
+                                                          "user": {"login": "octo"}, **self.pull_info})
         if p == "/graphql":
             return httpx.Response(200, headers=hdr, json={"data": {"repository": {"mergeQueue": {"entries": {"nodes": [
                 {"position": 1, "state": "QUEUED", "pullRequest": {"number": 2, "title": "a pr"}}]}}}}})
