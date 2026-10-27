@@ -287,3 +287,160 @@ def test_disk_check_never_blocks_on_a_failed_probe_and_cli_writes_numbers_only(t
     lines = out.read_text("ascii").splitlines()
     assert code == 4 and [x.split("=")[0] for x in lines] == ["drive", "short_mb", "need_mb"]
     assert all(str(tmp_path) not in x for x in lines)
+
+
+NOT_RUNNING = lambda: False   # noqa: E731
+
+
+def _dead_upgrade(tmp_path):
+    """A migrated upgrade whose new program is dead: data at schema 3, old program kept in app/rollback, health_failed."""
+    home, state, app = tmp_path / "home", tmp_path / "app" / "install-state.json", tmp_path / "app"
+    app.mkdir()
+    seed.seed(home)
+    installer.prepare(home, state)
+    installer.complete(home, state)
+    for part, old, new in (("python", "OLD-PY", "NEW-BROKEN-PY"), ("face", "OLD-FACE", "NEW-FACE")):
+        (app / "rollback" / part).mkdir(parents=True)
+        (app / "rollback" / part / "v.txt").write_text(old)
+        (app / part).mkdir()
+        (app / part / "v.txt").write_text(new)
+    installer.note_rollback(home, "health_failed")
+    return home, state, app
+
+
+def test_recover_after_health_failed_restores_data_and_old_program_only_with_approval(tmp_path):
+    """#261: no VM needed: the whole transaction is plain files. Declined = nothing changes."""
+    home, state, app = _dead_upgrade(tmp_path)
+    assert installer.recover(app, state, approved=False, ask=lambda _: "no", running=NOT_RUNNING) == "declined"
+    assert seed.verify(home, legacy=False) == [] and (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"
+    assert installer.recover(app, state, approved=False, ask=lambda _: "YES", running=NOT_RUNNING) == "recovered"
+    assert seed.verify(home, legacy=True) == []                        # data back to the verified pre-update backup
+    assert (app / "python" / "v.txt").read_text() == "OLD-PY" and (app / "face" / "v.txt").read_text() == "OLD-FACE"
+    kept = list(app.glob("failed-recovery-*"))
+    assert len(kept) == 1 and (kept[0] / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"   # nothing deleted
+    assert installer._read_json(home / "updates" / installer.HEALTH_FILE)["status"] == "rolled_back"
+
+
+def test_recover_refuses_a_healthy_install_and_a_bad_backup(tmp_path):
+    home, state, app = _dead_upgrade(tmp_path)
+    installer.note_rollback(home, "rolled_back")
+    assert installer.recover(app, state, approved=True, running=NOT_RUNNING) == "not_needed"
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"
+    installer.note_rollback(home, "health_failed")
+    record = json.loads(state.read_text())
+    Path(record["backups"][0]["backup"]).write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="verifies"):
+        installer.recover(app, state, approved=True, running=NOT_RUNNING)
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"      # the program was not touched either
+
+
+def test_recover_cli_exit_codes(tmp_path, monkeypatch):
+    home, state, app = _dead_upgrade(tmp_path)
+    monkeypatch.setattr(installer, "core_running", NOT_RUNNING)
+    assert installer.main(["recover", "--app", str(app), "--state", str(state), "--yes"]) == 0
+    assert installer.main(["recover", "--app", str(app), "--state", str(state), "--yes"]) == 6    # nothing left to recover
+
+
+def test_setup_offers_the_recovery_entry_only_while_the_previous_program_is_kept():
+    """#261: the Start-menu entry runs the OLD python with the recover action and is gated on the kept python existing."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    line = next(x for x in iss.splitlines() if x.startswith(r'Name: "{group}\Recover previous JARVES'))
+    assert r"rollback\python\python.exe" in line and " recover " in line and "Check: PreviousProgramKept" in line
+    assert "function PreviousProgramKept" in iss
+
+
+def test_recover_refuses_while_a_core_runs_and_without_args(tmp_path):
+    home, state, app = _dead_upgrade(tmp_path)
+    assert installer.recover(app, state, approved=True, running=lambda: True) == "core_running"
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"
+    with pytest.raises(SystemExit):
+        installer.main(["recover"])
+
+
+def test_core_running_reads_the_os_lock(tmp_path):
+    assert installer.core_running(tmp_path / "none.lock") is False
+    lock = tmp_path / "core.lock"
+    lock.write_bytes(b"x" + b" " * 20)
+    assert installer.core_running(lock) is False                       # nobody holds it
+    import os
+    import sys
+    fd = os.open(str(lock), os.O_RDWR)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert installer.core_running(lock) is True
+    finally:
+        os.close(fd)
+
+
+def test_recover_undoes_the_program_swap_when_the_data_restore_fails(tmp_path, monkeypatch):
+    """Review #261: restore after the swap fails -> program put back as it was, retry possible."""
+    home, state, app = _dead_upgrade(tmp_path)
+
+    def boom(h, s):
+        raise ValueError("restore failed")
+    monkeypatch.setattr(installer, "restore_data", boom)
+    with pytest.raises(ValueError):
+        installer.recover(app, state, approved=True, running=NOT_RUNNING)
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY" and (app / "rollback" / "python" / "v.txt").read_text() == "OLD-PY"
+    assert (app / "face" / "v.txt").read_text() == "NEW-FACE" and (app / "rollback" / "face" / "v.txt").read_text() == "OLD-FACE"
+    monkeypatch.undo()
+    assert installer.recover(app, state, approved=True, running=NOT_RUNNING) == "recovered"      # retry works
+
+
+def test_recover_never_leaves_a_hole_when_a_rename_fails_midway(tmp_path, monkeypatch):
+    home, state, app = _dead_upgrade(tmp_path)
+    real = Path.rename
+    calls = {"n": 0}
+
+    def flaky(self, target):
+        calls["n"] += 1
+        if calls["n"] == 3:                                              # python moved aside, then rollback\python -> python
+            raise PermissionError("locked")
+        return real(self, target)
+    monkeypatch.setattr(Path, "rename", flaky)
+    assert installer.recover(app, state, approved=True, running=NOT_RUNNING) == "swap_failed"
+    monkeypatch.undo()
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY" and (app / "rollback" / "python" / "v.txt").read_text() == "OLD-PY"
+    assert seed.verify(home, legacy=False) == []                         # data untouched
+
+
+def test_relaunch_hands_off_to_a_detached_child_and_does_not_wait(tmp_path, monkeypatch):
+    """Review #261: the parent runs from app/rollback/python (locked exe); it must start the temp-copy child and return,
+    never wait for it, and the child must be told to wait for the parent's pid before it swaps."""
+    import os
+    import sys
+    from types import SimpleNamespace
+    home, state, app = _dead_upgrade(tmp_path)
+    exe = app / "rollback" / "python" / "python.exe"
+    exe.write_text("fake exe")
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(installer, "core_running", NOT_RUNNING)
+    calls = []
+    args = SimpleNamespace(app=app, state=state, home=None, yes=False)
+    assert installer._relaunch_from_copy(args, spawn=lambda cmd, **kw: calls.append((cmd, kw)), ask=lambda _: "no") == 6
+    assert calls == []                                                    # declined: nothing started
+    rc = installer._relaunch_from_copy(args, spawn=lambda cmd, **kw: calls.append((cmd, kw)), ask=lambda _: "YES")
+    assert rc == 0 and len(calls) == 1
+    cmd, kw = calls[0]
+    assert "rollback" not in cmd[0] and Path(cmd[0]).name == "python.exe"          # runs from the temp copy
+    assert cmd[cmd.index("--wait-pid") + 1] == str(os.getpid()) and "--yes" in cmd and "recover" in cmd
+    if os.name == "nt":
+        import subprocess
+        assert kw["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP and kw["creationflags"] & subprocess.CREATE_NEW_CONSOLE
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "elsewhere" / "python.exe"))
+    assert installer._relaunch_from_copy(args, spawn=lambda *a, **k: calls.append(1)) is None   # not inside rollback
+    assert len(calls) == 1
+
+
+def test_wait_for_exit_polls_until_the_launcher_is_gone():
+    seq = iter([True, True, False])
+    slept = []
+    assert installer.wait_for_exit(123, alive=lambda p: next(seq), sleep=slept.append) is True and len(slept) == 2
+    assert installer.wait_for_exit(123, 0.0, alive=lambda p: True, sleep=lambda s: None) is False
+    assert installer._pid_alive(0) is False
