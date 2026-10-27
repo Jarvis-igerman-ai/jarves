@@ -309,7 +309,7 @@ def test_merge_group_reuses_only_its_own_prs_green_proof():
     """Lean process item 1: a queue group whose docs-free tree equals a green run of ITS OWN PR runs no heavy job."""
     script = next(s["run"] for s in load("jarves-checks.yml")["jobs"]["changes"]["steps"] if s.get("id") == "c")
     block = script[script.index('"$GITHUB_EVENT_NAME" = "merge_group"'):script.index('args=(--event')]
-    assert "pr-" in block and "pull_request" in block and ".head_sha" in block and "pull_requests" in block
+    assert "ci_reuse.py merge-group" in block and '"$MG_REF"' in block      # the decision itself is unit-tested in test_ci_speed_tools
     assert "reused=true" in block and "reuse_tests_only=true" in block
     sys.path.insert(0, str(ROOT / "core" / "tools"))
     import ci_plan

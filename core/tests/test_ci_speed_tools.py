@@ -621,3 +621,60 @@ def test_red_main_reruns_failed_jobs_once_before_the_issue():
     assert rerun["steps"][0]["run"].endswith("--failed") and "gh run rerun" in rerun["steps"][0]["run"]
     assert not any("checkout" in s.get("uses", "") for s in rerun["steps"])
     assert "run_attempt > 1" in doc["jobs"]["alert"]["if"]
+
+
+# ---- merge group reuse decision (Tier R nits of #663 / #664)
+def _mg_api(proof_name, run, head="h1", pr=7):
+    def api(path):
+        if path == f"repos/o/r/pulls/{pr}":
+            return {"head": {"sha": head}}
+        if "/artifacts" in path:
+            if f"name={proof_name}&" not in path:
+                return {"artifacts": []}
+            return {"artifacts": [{"id": 1, "name": proof_name, "workflow_run": {"id": 101}, "created_at": "2026-10-27"}]}
+        if path == "repos/o/r/actions/runs/101":
+            return run
+        raise AssertionError(path)
+    return api
+
+
+def _own_run(**kw):
+    base = _run(101, event="pull_request")
+    base.update({"head_sha": "h1", "pull_requests": [{"number": 7}]})
+    base.update(kw)
+    return base
+
+
+GROUP = "gh-readonly-queue/main/pr-7-abcdef"
+
+
+def test_merge_group_decision_accepts_only_its_own_prs_green_run_at_its_head():
+    inst, proof = ci_reuse.artifact_name(TREE), ci_reuse.PROOF_PREFIX + TREE
+    assert ci_reuse.pr_of_group(GROUP) == 7 and ci_reuse.pr_of_group("refs/heads/main") is None
+    d = ci_reuse.merge_group_decision("o/r", TREE, GROUP, _mg_api(inst, _own_run()))
+    assert d == {"mode": "installer", "pr": 7, "run_id": 101}
+    d = ci_reuse.merge_group_decision("o/r", TREE, GROUP, _mg_api(proof, _own_run()))
+    assert d["mode"] == "tests"
+    for bad in (_own_run(head_sha="old"),                              # PR got a newer push than the proof
+                _own_run(pull_requests=[{"number": 99}]),              # a proof produced by another PR
+                _own_run(event="merge_group"),                         # not a PR run
+                _own_run(conclusion="failure")):
+        assert ci_reuse.merge_group_decision("o/r", TREE, GROUP, _mg_api(inst, bad))["mode"] == "none"
+    assert ci_reuse.merge_group_decision("o/r", TREE, "refs/heads/x", _mg_api(inst, _own_run()))["mode"] == "none"
+
+    def boom(path):
+        raise RuntimeError("api down")
+    assert ci_reuse.merge_group_decision("o/r", TREE, GROUP, boom)["mode"] == "none"      # fail closed: full matrix
+
+
+def test_browser_retry_files_fail_closed(tmp_path):
+    import ci_flake
+    xml = tmp_path / "j.xml"
+    xml.write_text('<testsuites><testsuite><testcase classname="tests.test_a" name="x"><failure message="m"/></testcase>'
+                   '<testcase classname="tests.test_b" name="y"><error message="m"/></testcase></testsuite></testsuites>', encoding="utf-8")
+    assert ci_flake.retry_files_any(xml) == ["test_a.py", "test_b.py"]
+    xml.write_text('<testsuites><testsuite><testcase classname="tests.test_a" name="x"><failure message="m"/></testcase>'
+                   '<testcase classname="weird" name="y"><failure message="m"/></testcase></testsuite></testsuites>', encoding="utf-8")
+    assert ci_flake.retry_files_any(xml) == []                       # one unmappable failure: the whole suite is re-run
+    xml.write_text("<not xml", encoding="utf-8")
+    assert ci_flake.retry_files_any(xml) == [] and ci_flake.retry_files_any(tmp_path / "missing.xml") == []

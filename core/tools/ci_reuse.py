@@ -37,7 +37,8 @@ def gh_json(path: str) -> dict:
     return json.loads(r.stdout)
 
 
-def resolve(repo: str, tree: str, api: Callable[[str], dict] = gh_json) -> dict | None:
+def resolve(repo: str, tree: str, api: Callable[[str], dict] = gh_json,
+            accept: Callable[[dict], bool] = lambda run: True) -> dict | None:
     """The newest trustworthy artifact for `tree`, or None."""
     if not tree or len(tree) < 20:
         return None
@@ -51,14 +52,15 @@ def resolve(repo: str, tree: str, api: Callable[[str], dict] = gh_json) -> dict 
         run = api(f"repos/{repo}/actions/runs/{run_id}")
         head_repo = (run.get("head_repository") or {}).get("full_name")
         if (run.get("name") == WORKFLOW_NAME and run.get("status") == "completed" and run.get("conclusion") == "success"
-                and head_repo == repo):
+                and head_repo == repo and accept(run)):
             return {"run_id": run_id, "artifact_id": art["id"], "name": art["name"], "event": run.get("event"),
                     "head_sha": run.get("head_sha"), "run_number": run.get("run_number"), "size": art.get("size_in_bytes")}
     return None
 
 
 
-def resolve_tests(repo: str, tree: str, api: Callable[[str], dict] = gh_json) -> dict | None:
+def resolve_tests(repo: str, tree: str, api: Callable[[str], dict] = gh_json,
+                  accept: Callable[[dict], bool] = lambda run: True) -> dict | None:
     """Green, same-repo PR test proof for *no-installer* changes; main still builds an installer.
 
     This artifact is uploaded only by a non-draft PR classified code=true, installer=false.
@@ -79,10 +81,46 @@ def resolve_tests(repo: str, tree: str, api: Callable[[str], dict] = gh_json) ->
         run = api(f"repos/{repo}/actions/runs/{run_id}")
         if (run.get("name") == WORKFLOW_NAME and run.get("event") in ("pull_request", "merge_group")
                 and run.get("status") == "completed" and run.get("conclusion") == "success"
-                and (run.get("head_repository") or {}).get("full_name") == repo):
+                and (run.get("head_repository") or {}).get("full_name") == repo and accept(run)):
             return {"run_id": run_id, "artifact_id": art["id"], "name": name,
                     "head_sha": run.get("head_sha")}
     return None
+
+
+def pr_of_group(head_ref: str) -> int | None:
+    """PR number from a merge-queue branch name: gh-readonly-queue/main/pr-<N>-<sha>."""
+    m = re.search(r"/pr-(\d+)-", head_ref or "")
+    return int(m.group(1)) if m else None
+
+
+def merge_group_decision(repo: str, tree: str, head_ref: str, api: Callable[[str], dict] = gh_json) -> dict:
+    """What a merge-queue group may reuse: {"mode": "installer"|"tests"|"none", "pr", "run_id"}.
+
+    Only a green run of THIS group's own PR, at the PR's current head, counts: another PR (or one that edited the workflow)
+    could otherwise upload an artifact named for this tree. "installer" = a PR installer exists (nothing to test or
+    build); "tests" = tests proven but the installer is still to be built and smoked by this group."""
+    none = {"mode": "none", "pr": None, "run_id": None}
+    pr = pr_of_group(head_ref)
+    if not pr:
+        return none
+    try:
+        head = api(f"repos/{repo}/pulls/{pr}").get("head", {}).get("sha")
+    except RuntimeError:
+        return none
+    if not head:
+        return none
+
+    def own(run: dict) -> bool:
+        return (run.get("event") == "pull_request" and run.get("head_sha") == head
+                and pr in [p.get("number") for p in run.get("pull_requests") or []])
+    try:
+        hit = resolve(repo, tree, api, own)
+        if hit:
+            return {"mode": "installer", "pr": pr, "run_id": hit["run_id"]}
+        hit = resolve_tests(repo, tree, api, own)
+    except RuntimeError:
+        return none
+    return {"mode": "tests", "pr": pr, "run_id": hit["run_id"]} if hit else none
 
 
 # Documentation does not change what is tested or built, so it is not part of the content address: a docs-only merge
@@ -122,9 +160,17 @@ def main(argv: list[str] | None = None) -> int:
     v = sub.add_parser("resolve-tests", help="Reuse green PR tests only; main still needs installer build")
     v.add_argument("--repo", required=True)
     v.add_argument("--tree", required=True)
+    g = sub.add_parser("merge-group", help="what this merge-queue group may reuse from its own PR's green run")
+    g.add_argument("--repo", required=True)
+    g.add_argument("--tree", required=True)
+    g.add_argument("--head-ref", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "tree":
         print(git_tree(a.rev))
+        return 0
+    if a.cmd == "merge-group":
+        d = merge_group_decision(a.repo, a.tree, a.head_ref)
+        print(f"mode={d['mode']}\npr={d['pr'] or ''}\nrun_id={d['run_id'] or ''}")
         return 0
     try:
         hit = resolve_tests(a.repo, a.tree) if a.cmd == "resolve-tests" else resolve(a.repo, a.tree)
