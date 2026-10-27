@@ -2,6 +2,16 @@
 
 Refreshed 27 Oct 2026 on main 313425ae (green) by an agent (Refs #505). Nothing here is a signature: the owner signs, agents never do.
 
+## Phase 1 for the stable (27 Oct 2026, 06:30 UTC, main 86a93667)
+
+- Tested beta: 4.0.1-beta.195, installer 4.0.1.1214 (sha256 a1ec102b3c67a407e912274828a5029fdbf7b5b93200e7347e9721cd4a4fd2c1), commit 313425aeee1f70f11740d8bfd23fa4f5653f9183. main 86a93667 is a descendant with 6 docs-only files changed (#610, #612, #613); beta.196 in `latest-beta.json` is the same installer bytes re-stamped on 86a93667.
+- CI for 313425ae: merge-queue run 40445814680, every job green (Python Core Windows 4 shards and Linux 3 shards, real-browser Windows and Linux incl. the setup wizard, Windows installer build + silent install, installer smoke release/ci-smoke x functional/autostart-purge, installer upgrade and rollback, Core-Godot E2E, performance gate). Push run 40447597708 green (docs reuse). Beta publish: jarves-package 40448426810 and 40448529833 (candidate + beta). main 86a93667: jarves-checks 40451587348 green, package 40451679093.
+- Owner PC (codes only): installer 4.0.1.1040 + hotfix.4 carrying the Python code of 313425ae (hotfix 20261027-041717, previous 20261026-223500, backup taken first). `jarvis selftest` quick: PASS 10/10 (re-run 06:3x UTC); `jarvis doctor`: All checks passed; CORE_READY 9281 ms; WAKE_MIC_OPEN 920 ms; WAKE_LISTENING about 9 s after ready. The PC did not run the beta installer itself (hotfix path); S1/S5 live update and rollback were not run on it.
+- Row verdicts: S1 and S5 proven by automation (CI install, upgrade and rollback on the tested installer tree). S2, S3, S4: logic covered by CI; the human ear/voice check in the room was not run. All five are recorded as accepted by the owner's approval, never as a hand pass.
+- Gate dry run (`release_gate.py --tag v4.0.1 --sha 313425ae...`): 13 problems before signing: no verified SHA (given at tag time), open #543 #544 #605, S1-S5 pending, sheet unsigned, Tested beta/Commit/Date missing.
+- Workflow dry run 40461847679 (dispatch on main, dry_run=true): checkout and setup-uv pass; "Find the tested installer" refuses with "no signed-off commit in docs/reviews/MANUAL_TEST_4.0.1.md"; fails closed as designed.
+- New minor findings: #620 (hotfix restart seen as a crash by the self-check), #621 (beta build numbers out of order).
+
 | Check | State | Evidence |
 |---|---|---|
 | main green | PASS | jarves-checks 313425ae: success (push run 40447597708) |

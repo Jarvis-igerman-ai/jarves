@@ -1,5 +1,7 @@
 # Owner review page for 4.0.1 (about 15 minutes)
 
+Update 27 Oct 2026: the owner APPROVED the stable 4.5 (v4.0.1) in chat at 06:36 UTC (tested beta 4.0.1-beta.195, commit 313425ae). Rows S1-S5 are recorded as accepted by that approval (S2-S4 were not heard by a person; S1/S5 are proven by CI), #543 #544 #605 were accepted as known issues (label known-issue-4.5), and the sheet was finished with owner igalgerman. The steps below are kept as the record of the earlier plan. Release notes: [RELEASE_NOTES_4.5](../RELEASE_NOTES_4.5.md).
+
 Evidence: `docs/release/EVIDENCE_4.0.1.md` (refreshed 27 Oct 2026 on main 313425ae; gate slice 3 #537, tag-commit fix #541, release status #514 merged). Agents did the machine part; these are the only things left for you. Nothing was signed or tagged by an agent. Refs #505.
 
 ## Look at (3 minutes)
