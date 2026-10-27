@@ -97,6 +97,8 @@ class PilotProxy:
         self._total = 0
         self._last_log = -1e9
         self.port = 0
+        self.credentials: dict = {}
+        self.connections = 0                             # accepted tunnels / requests that were let through (tests and status)
 
     # ------------------------------------------------------------------------------------------ decision
     def targets(self, host: str, port: int, *, plain: bool = False) -> tuple[str, list[str]]:
@@ -136,8 +138,9 @@ class PilotProxy:
         addrs = [a for a in addrs if _addr_ok(a, scope)]
         if not addrs:
             raise Denied(403, "no vetted address")
-        if scope == "public":
-            with self._lock:
+        with self._lock:
+            self.connections += 1
+            if scope == "public":
                 self._public_seen = True
         return scope, addrs
 
@@ -177,7 +180,8 @@ class PilotProxy:
         self._sock, self.port = s, s.getsockname()[1]
         self._accept = threading.Thread(target=self._serve, name="pilot-proxy", daemon=True)
         self._accept.start()
-        return {"server": f"127.0.0.1:{self.port}", "username": "pilot", "password": self.secret}
+        self.credentials = {"server": f"127.0.0.1:{self.port}", "username": "pilot", "password": self.secret}
+        return dict(self.credentials)
 
     def stop(self) -> None:
         self._stop.set()

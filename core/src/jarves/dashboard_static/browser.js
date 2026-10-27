@@ -80,7 +80,19 @@ function liveViewCard() {
     catch (e) { msg.textContent = e.message; } } }, tx("אפשרו לסוכן להמשיך", "Let the assistant continue"));
   const baseEnd = end;
   end = (text) => { setMine(false); baseEnd(text); takeBtn.disabled = true; };
+  // Start/stop a pilot on ONE local test page (the browser runs through a local proxy that allows that port only).
+  const urlBox = el("input", { type: "text", dir: "ltr", placeholder: "http://localhost:8000/", autocomplete: "off", spellcheck: "false",
+    "aria-label": tx("כתובת דף בדיקה מקומי", "Local test page address"), style: "min-width:260px" });
+  const pilotStart = el("button", { type: "button", onclick: async () => {
+    msg.textContent = "";
+    try { await api("/api/browser/pilot/start", { method: "POST", body: JSON.stringify({ url: urlBox.value.trim() }) });
+      msg.textContent = tx("פיילוט נפתח בדף הבדיקה. אפשר ללחוץ על תצוגה חיה.", "Pilot started on the test page. You can press Live view."); }
+    catch (e) { msg.textContent = e.message; } } }, tx("הפעלת פיילוט בדף בדיקה", "Start a test pilot"));
+  const pilotStop = el("button", { type: "button", onclick: async () => {
+    try { await api("/api/browser/pilot/stop", { method: "POST", body: "{}" }); img.style.display = "none"; end(tx("הפיילוט נסגר.", "The pilot is closed.")); }
+    catch (e) { msg.textContent = e.message; } } }, tx("סגירת הפיילוט", "Close the pilot"));
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),
+    el("div", { class: "row" }, urlBox, pilotStart, pilotStop),
     el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.", "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.")),
     el("div", { class: "row" }, start, takeBtn, giveBtn, contBtn, stop), msg, clockEl, img,
     el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("הצגת מה שמוקלד", "Show what I type")), typeBtn, ...keyBtns));

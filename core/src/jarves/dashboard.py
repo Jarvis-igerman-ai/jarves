@@ -58,7 +58,7 @@ PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves
                   "jarves.projectmgr.surfaces",                                    # Projects page (project manager)
                   "jarves.dialing",                                                # SW-V4 H: Phone calls page
                   "jarves.browser",                                                # Browser allow-list page
-                  "jarves.browser_liveview",                                       # B2: read-only live view of the pilot (loopback only)
+                  "jarves.browser_liveview", "jarves.browser_driver",                                       # B2: read-only live view of the pilot (loopback only)
                   "jarves.self_manage",                                            # Self-management page
                   "jarves.approvals", "jarves.skills.helper",                      # V3: Approvals list, Helper switch
                   "jarves.diag.service",                                           # SW-V4 O: Health page
