@@ -40,6 +40,15 @@ NEAR_MISS_SENTENCES: list[tuple[str, str]] = [
 
 MIN_USABLE_SAMPLES = 3              # fewer usable own recordings: the model is TTS-only (warned, not blocked)
 RECOMMENDED_SAMPLES = 10
+# Sample-check thresholds (check_sample). voice/wake_record.py imports these, so the recorder can never accept a clip
+# this check would reject.
+CLIP_LEVEL = 0.99                   # |sample| at or above this counts as clipped
+CLIP_FRACTION = 0.002               # more clipped samples than this share = "clipped (too loud)"
+MIN_RMS_DB = -42.0                  # below this the phrase is "too quiet"
+WARN_RMS_DB = -36.0
+MIN_SNR_DB = 10.0                   # below this "too noisy"
+WARN_SNR_DB = 18.0
+
 MIN_SYNTH_RECALL = 0.5              # a head that misses half of even its synthetic held-out phrase is broken (#issue)
 MIN_OWNER_RECALL = 0.8              # --apply is refused below this on the owner's held-out recordings (when >= 4)
 
@@ -100,11 +109,11 @@ def check_sample(path: Path, *, seen: set[str] | None = None) -> SampleCheck:
         c.problems.append("silent or almost silent: check the microphone")
     body = wt.trim(a)
     c.rms_db = round(20 * np.log10(float(np.sqrt(np.mean(body ** 2))) + 1e-9), 1)
-    if peak >= 0.005 and c.rms_db < -42:
+    if peak >= 0.005 and c.rms_db < MIN_RMS_DB:
         c.problems.append(f"too quiet ({c.rms_db} dBFS): move closer or raise the microphone level")
-    elif c.rms_db < -36:
+    elif c.rms_db < WARN_RMS_DB:
         c.warnings.append(f"quiet ({c.rms_db} dBFS)")
-    if float((np.abs(a) >= 0.99).mean()) > 0.002:
+    if float((np.abs(a) >= CLIP_LEVEL).mean()) > CLIP_FRACTION:
         c.problems.append("clipped (too loud): lower the microphone level")
     frame = int(sr * 0.02)
     n = len(a) // frame
@@ -113,9 +122,9 @@ def check_sample(path: Path, *, seen: set[str] | None = None) -> SampleCheck:
         srt = np.sort(e)
         k = max(1, n // 10)
         c.snr_db = round(float(20 * np.log10(srt[-k:].mean() / srt[:k].mean())), 1)
-        if c.snr_db < 10:
+        if c.snr_db < MIN_SNR_DB:
             c.problems.append(f"too noisy (speech only {c.snr_db} dB above the background)")
-        elif c.snr_db < 18:
+        elif c.snr_db < WARN_SNR_DB:
             c.warnings.append(f"noisy (speech {c.snr_db} dB above the background)")
     c.ok = not c.problems
     return c

@@ -434,6 +434,12 @@ TEXT: dict[str, str] = {
     "never tried with a real voice and mic: run `jarvis wake test --model ...` and `--false-wakes 30`":
         "מעולם לא נוסה עם קול ומיקרופון אמיתיים: הרץ `jarvis wake test --model ...` ו-`--false-wakes 30`",
     "numpy head + espeak-ng voices; never trained or run on a Pi": "ראש numpy וקולות espeak-ng; מעולם לא אומן ולא הורץ על Pi",
+    "UNIT test_wake_record.py (fake devices, frozen clock); the owner's script it was ported from recorded 19/20 usable clips on his PC 2026-10-26":
+        "בדיקת יחידה test_wake_record.py (התקנים מזויפים, שעון קפוא); הסקריפט של הבעלים שממנו נלקח המקליט הקליט 19 מתוך 20 קטעים שמישים במחשב שלו ב-26.10.2026",
+    "the ported recorder and its ctypes mic-level control are not yet run on a real microphone":
+        "המקליט שהועבר ובקרת עוצמת המיקרופון שלו (ctypes) עוד לא הורצו על מיקרופון אמיתי",
+    "no Windows level control on Linux: the recorder only coaches; never run on a Pi":
+        "אין בקרת עוצמה של Windows ב-Linux: המקליט רק מדריך; מעולם לא הורץ על Pi",
     # --- guides: live state, extra probes, fallback platform notes
     "turned off": "כבוי",
     "not in this version yet": "עוד לא קיים בגרסה הזו",
