@@ -32,7 +32,7 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
    (`jarvis release signoff ... --finish`); commit the signed sheet.
 4. Check that `main` is green. There is no nightly requirement and no five-nights rule (owner 26 Oct 2026). Fill and sign
    `docs/release/SIGN_OFF_<version>.md`. That one signed sheet is the only owner signature: there is no second SIGNED file.
-5. Dry run: Actions > `jarves-release` > Run workflow with the tag and `dry_run` ticked (or
+5. Dry run: Actions > `jarves-release` > Run workflow on `main` with the tag name and `dry_run` ticked (the workflow checks out `main`, never the tag, so the tag need not exist; a dispatch never publishes unless started on a real tag ref with `dry_run` unticked; without a signed sheet it must fail at the gate, which proves it fails closed) (or
    `python core/tools/release_gate.py --tag v<version> --sha <commit>`); it lists everything still missing.
 6. Tag the signed-off commit and push the tag (`git tag v<version> <sha> && git push origin v<version>`):
    `release.yml` re-checks the gate and publishes the tested installer as the stable release.
