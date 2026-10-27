@@ -1,0 +1,40 @@
+name: Android companion (debug APK)
+
+# V7 A2 (#390): builds the Android companion app as a DEBUG APK and runs its JVM unit tests. Nothing is signed, published or uploaded.
+# Only runs when android/ (or this file) changes, so it never slows the main pipeline; it is not part of the required `CI result`.
+on:
+  pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  debug-apk:
+    name: Android debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the debug APK and run the unit tests (the runner image ships JDK 21 and the Android SDK)
+        shell: bash
+        working-directory: android
+        run: |
+          export JAVA_HOME="${JAVA_HOME_21_X64}"
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          ./gradlew --no-daemon --console=plain assembleDebug testDebugUnitTest
+          test -s app/build/outputs/apk/debug/app-debug.apk
