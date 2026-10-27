@@ -76,6 +76,12 @@ def action(kind: str, repo: str, number: str = "", **payload) -> gw.WriteAction:
     return gw.WriteAction(kind=kind, repo=repo, target=str(number), payload=payload, preview=f"{head}: {detail}"[:200])
 
 
+def _show(v: str, cap: int = 100) -> str:
+    """Text that came from GitHub (a fork owner chooses workflow and branch names) as one safe popup line: control, bidi and
+    invisible characters and CR/LF replaced, length capped."""
+    return gi._CTRL.sub("?", re.sub(r"[\r\n\t]+", " ", v))[:cap]
+
+
 def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
     """Lines the owner must see, from a READ: is the number really a pull request, and what the action can cause."""
     o, _, r = a.repo.partition("/")
@@ -93,6 +99,7 @@ def _extra(a: gw.WriteAction, c: gc.GitHubClient) -> str:
         out.append("WARNING: REQUEST_CHANGES can block merging until it is dismissed")
     if kind == "ci.rerun":
         run = c.workflow_run(o, r, a.target)          # a READ before the popup; a failure refuses (fail closed, see _extra)
+        run = {k: (_show(v) if isinstance(v, str) else v) for k, v in run.items()}      # #581: GitHub text is not trusted
         out.append(f"Run {a.target}: workflow {run['name'] or '?'}, event {run['event'] or '?'}, branch {run['branch'] or '?'}, "
                    f"from {run['head_repo'] or '?'}{' (FORK)' if run['fork'] or (run['head_repo'] and run['head_repo'].lower() != a.repo.lower()) else ''}, "
                    f"started by {run['actor'] or '?'}")

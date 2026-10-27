@@ -960,24 +960,41 @@ def revert(installed_pkg: Path, home: Path, hooks: Hooks, *, restart: bool = Tru
     d, man = found
     if man.get("status") not in ("applied", "applying", "revert-failed"):
         raise Refused("HOTFIX_NONE", f"the latest hotfix ({man.get('id')}) is already {man.get('status')}")
-    cur = (installed_info(installed_pkg).get("hotfix") or {})
+    info = installed_info(installed_pkg)
+    cur = (info.get("hotfix") or {})
     if man.get("status") == "applied" and cur.get("id") != man.get("id"):
         raise Refused("HOTFIX_REPLACED", "a normal update already replaced this hotfix; nothing to revert",
                       "reverting now would downgrade the build")
-    if dry_run:                                        # #515: read-only; verify the saved originals, list, touch nothing
-        for item in man.get("replaced", []):
-            saved = d / "originals" / item["path"]
-            if not saved.is_file() or sha256(saved) != item["sha256_original"]:
-                raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
+    if info.get("version") and man.get("base_version") and info["version"] != man["base_version"]:
+        raise Refused("HOTFIX_REPLACED", f"the installed version ({info['version']}) is not the one this hotfix was made "
+                      f"for ({man['base_version']}); nothing to revert", "reverting now would mix files of two versions")
+    for item in man.get("replaced", []):               # #515/#524: verify every saved original before anything changes
+        saved = d / "originals" / item["path"]
+        if not saved.is_file() or sha256(saved) != item["sha256_original"]:
+            raise HotfixError("HOTFIX_ORIGINAL_BAD", f"saved original of {item['path']} is missing or changed")
+    from . import hotfix_slice2 as s2
+    s2.verify_backups(man, d)                          # bridge exe and dependency backups too (read-only)
+    if dry_run:                                        # #515: read-only; list, touch nothing
         files = ([i["path"] for i in man.get("replaced", [])] + [i["path"] for i in man.get("added", [])]
                  + (["bridge"] if man.get("bridge") else [])
                  + [f"{e['name']}=={e['old_version'] or '(removed)'}" for e in man.get("deps") or []])
         return {"status": "dry-run", "id": man["id"], "files": files, "backup": str(d)}
     was_running = bool(hooks.core_running())
-    if man.get("deps") and was_running:
-        hooks.stop_core()                              # locked files; restarted below
-    bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
-    done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
+    try:
+        if man.get("deps") and was_running:
+            hooks.stop_core()                          # locked files; restarted below
+        bridge_was_running = bool(man.get("bridge") and hooks.bridge_running and hooks.bridge_running())
+        done = _revert_dir(installed_pkg, d, man, hooks, bridge_was_running=bridge_was_running)
+    except Exception as e:                             # #525: show the half-done state, bring the Core back, re-raise
+        man["status"] = "revert-failed"
+        man["error"] = str(e)
+        _write_json(d / "manifest.json", man)
+        if restart and was_running:
+            try:
+                _restart(hooks, was_running)
+            except Exception:
+                pass
+        raise
     if restart:
         _restart(hooks, was_running)
     man["status"] = "reverted"

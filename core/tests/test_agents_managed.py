@@ -134,6 +134,7 @@ def test_claude_managed_start_tell_interrupt_stop_and_cost(world):
     r = o.start_session("claude", "alpha", "add logging", approved=True)
     assert r["ok"], r
     sid = r["session"]["id"]
+    assert sid[:8] in r["text"]                                # #362: the CLI/chat text names the session id
     s = _state(o, sid, "IDLE")
     assert s["auth"] == "subscription" and s["origin"] == "managed" and "Working on: add logging" in s["last_summary"]
     assert s["cost_usd"] == pytest.approx(0.01) and s["tokens_total"] == 120
@@ -231,6 +232,13 @@ def test_two_providers_three_projects_digest_and_no_collisions(world):
         assert o.tell("claude", "x")["code"] == "AMBIGUOUS_SESSION"            # two claude: asks which
     finally:
         h.end()
+
+
+def test_core_not_running_message_names_the_port_clash_fix(world):
+    o = world["o"]
+    o.serve = None
+    r = o.start_session("claude", "alpha", "x", approved=True)
+    assert r["code"] == "CORE_NOT_RUNNING" and "[link] port" in r["text"] and "jarvis start" in r["text"]
 
 
 def test_claude_launch_carries_the_remaining_daily_cap_as_max_budget(world):

@@ -73,8 +73,9 @@ class FakeProvider:
         self.script, self.clock, self.latency_s = script, clock, latency_s or {}
         self.fail, self.tokens, self.calls = set(fail), tokens, []
 
-    def call(self, model_id: str, prompt: str, task_id: str = "") -> Reply:
+    def call(self, model_id: str, prompt: str, task_id: str = "", max_tokens: int = MAX_OUT_TOKENS) -> Reply:
         self.calls.append((model_id, task_id))
+        self.max_tokens = max_tokens
         if model_id in self.fail:
             raise RuntimeError("fake provider failure")
         if self.clock is not None:
@@ -82,11 +83,13 @@ class FakeProvider:
         return Reply(self.script.get((model_id, task_id), ""), *self.tokens)
 
 
-_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|Bearer\s+\S+|[A-Za-z0-9_\-]{32,})")
+_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|(?:AKIA|ASIA)[0-9A-Z]{16}|Bearer\s+\S+|[A-Za-z0-9_\-]{32,})")
 
 
 def scrub(text: str) -> str:
-    return _SECRET.sub("[redacted]", str(text))[:SNIPPET]
+    """Own pattern for long tokens PLUS logs.redact, so every secret format the logs know (AWS keys, ...) is covered."""
+    from . import logs
+    return logs.redact(_SECRET.sub("[redacted]", str(text)))[:SNIPPET]
 
 
 def grade(task: Task, text: str) -> bool:
@@ -130,19 +133,20 @@ def run_eval(registry: ModelRegistry, policy: SpendPolicy, provider, models, *, 
                 continue
             t0 = clock()
             try:
-                r = provider.call(mid, t.prompt, t.id)
+                r = provider.call(mid, t.prompt, t.id, max_tokens=MAX_OUT_TOKENS)   # the cap check assumed this worst case
             except Exception as e:  # noqa: BLE001 - a provider failure is data; only the class name is kept
                 row.update(status="error", latency_s=round(clock() - t0, 3), note=type(e).__name__)
                 continue
             lat = round(clock() - t0, 3)
-            cost = d.model.cost_usd(r.tokens_in, r.tokens_out)
+            tin, tout = max(0, int(r.tokens_in)), max(0, int(r.tokens_out))     # a negative count must not lower the cost
+            cost = d.model.cost_usd(tin, tout)
             if not math.isfinite(cost):
                 cost = d.est_cost_usd
             if cost:
                 policy.record(AGENT, cost)
                 spent += cost
             row.update(status="ok", accepted=grade(t, r.text), latency_s=lat, cost_usd=round(cost, 6),
-                       tokens_in=r.tokens_in, tokens_out=r.tokens_out, snippet=scrub(r.text))
+                       tokens_in=tin, tokens_out=tout, snippet=scrub(r.text))
     return {"rows": rows, "summary": summarize(registry, rows), "spent_usd": round(spent, 6),
             "run_cap_usd": float(cap), "mode": policy.mode}
 
@@ -169,14 +173,18 @@ COLS = ("model", "task", "kind", "status", "accepted", "latency_s", "cost_usd", 
 
 def _cell(v):
     s = str(v)
-    return "'" + s if s.startswith(("=", "+", "-", "@")) else v      # no spreadsheet formula injection
+    return "'" + s if s.startswith(("=", "+", "-", "@", "\t", "\r")) else v      # no spreadsheet formula injection
 
 
 def archive(home: Path, report: dict, wall: Callable[[], float] = time.time) -> Path:
     """Write <home>/modellab/<stamp>.json and .csv; returns the json path."""
     d = Path(home) / "modellab"
     d.mkdir(parents=True, exist_ok=True)
-    p = d / f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime(wall()))}.json"
+    stamp = time.strftime('%Y%m%d-%H%M%S', time.gmtime(wall()))
+    p, n = d / f"{stamp}.json", 1
+    while p.exists() or p.with_suffix(".csv").exists():       # two runs in the same second never overwrite each other
+        n += 1
+        p = d / f"{stamp}-{n}.json"
     p.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     buf = io.StringIO()
     w = csv.writer(buf)

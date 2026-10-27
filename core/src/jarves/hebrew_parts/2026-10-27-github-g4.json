@@ -1,5 +1,5 @@
 {
  "change GitHub (issues, comments, labels, pull requests, reviews, CI re-run) only after you approve the exact text, only on repos you list, never merge directly": "לשנות את GitHub (issues, תגובות, תוויות, בקשות מיזוג, ביקורות, הרצה חוזרת של CI) רק אחרי שאישרת את הטקסט המדויק, רק במאגרים שרשמת, בלי מיזוג ישיר",
  "UNIT test_github_write.py, test_github_issues.py, test_github_prs.py (fake GitHub API and approvals, no network)": "בדיקות יחידה test_github_write.py, test_github_issues.py, test_github_prs.py (GitHub ואישורים מדומים, בלי רשת)",
- "never touched the real GitHub API; the owner creates the token with Issues, Pull requests and Actions write for the chosen repos": "מעולם לא פנה ל-GitHub האמיתי; הבעלים יוצר אסימון עם Issues, Pull requests ו-Actions write למאגרים שנבחרו"
+ "never touched the real GitHub API; the owner creates the token with Issues, Pull requests and Actions write for the chosen repos": "מעולם לא פנה ל-GitHub האמיתי; הבעלים יוצר אסימון עם הרשאות כתיבה “Issues”, “Pull requests” ו-“Actions” למאגרים שנבחרו"
 }

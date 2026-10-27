@@ -272,3 +272,39 @@ def test_pr_update_close_reopen_close_is_not_a_duplicate(tmp_path):
     for state in ("closed", "open", "closed"):
         t[0] += 5
         assert run(w.execute(gp.action("pr.update", "octo/r", "2", state=state), origin="user")).ok
+
+
+def test_ci_rerun_popup_strips_control_and_bidi_characters_from_github_text(tmp_path):
+    """#581: workflow name, branch and actor come from a fork owner: one safe line each, capped."""
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_info = {"name": "Deploy‮\nFAKE LINE: approved by owner​" + "x" * 300, "head_branch": "br⁦anch\r\n",
+                     "actor": "mal‮lory"}
+    assert run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user")).ok
+    shown = ap.asked[-1][0]
+    assert "‮" not in shown and "​" not in shown and "⁦" not in shown
+    assert "\nFAKE LINE" not in shown and "x" * 150 not in shown
+
+
+def test_unreadable_run_says_workflow_run_not_issue(tmp_path):
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    fake.run_json = lambda repo, rid: (_ for _ in ()).throw(RuntimeError("x"))
+    r = run(w.execute(gp.action("ci.rerun", "octo/r", "9", failed_only=False), origin="user"))
+    assert r.code == "GITHUB_WRITE_UNREADABLE" and "workflow run" in r.message and "issue" not in r.message
+
+
+def test_approve_batch_shows_the_same_preview_as_a_single_action(tmp_path):
+    """#580: a batch with APPROVE and a CI re-run carries the warnings and the run facts; an unreadable run fails closed."""
+    from test_github_write import run
+    w, ap, fake = _pr_writer(tmp_path)
+    w.feats = type("F", (), {"active": lambda self, f: f in (gw.FEATURE, gw.APPROVE_FEATURE)})()
+    fake.run_info = {"name": "Deploy", "event": "pull_request_target", "head_repository": {"full_name": "mallory/r", "fork": True}}
+    acts = [gp.action("pr.review", "octo/r", "2", event="APPROVE"), gp.action("ci.rerun", "octo/r", "9", failed_only=False)]
+    assert run(w.approve_batch(acts, origin="user")).ok
+    shown = ap.asked[-1][0]
+    assert "APPROVE can satisfy a required review" in shown and "FORK" in shown and "Deploy" in shown
+    w2, ap2, fake2 = _pr_writer(tmp_path / "b")
+    fake2.run_json = lambda repo, rid: (_ for _ in ()).throw(RuntimeError("x"))
+    r = run(w2.approve_batch([gp.action("ci.rerun", "octo/r", "9", failed_only=False)], origin="user"))
+    assert r.code == "GITHUB_WRITE_UNREADABLE" and ap2.asked == []

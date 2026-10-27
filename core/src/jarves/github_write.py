@@ -317,13 +317,18 @@ class GitHubWriter:
             return "" if {"repo", "public_repo"} & set(p["scopes"]) else f"the token lacks the 'repo' scope ({perm})"
         return "" if p["push"] is True else f"the token has no write permission on the repo ({perm})"
 
-    def _reserve(self, actions: list[WriteAction], origin: str) -> list[str] | None:
+    def _reserve(self, actions: list[WriteAction], origin: str, *, dup_check: bool = False) -> list[str] | str | None:
         """Check the rate limit AND take the slots in ONE locked step (another call or process cannot slip in between).
         Returns the slot ids, or None (limit reached, audit tampered or lock unavailable: fail closed)."""
         try:
             with _locked(self._path):
                 if self._tampered() or self._used() + len(actions) > self.limit[0]:
                     return None
+                if dup_check:                          # #497: under the lock, so two identical calls cannot both pass
+                    for a in actions:
+                        dup = self._duplicate(a) or self._in_flight(a)
+                        if dup:
+                            return dup
                 rids = [uuid.uuid4().hex[:12] for _ in actions]
                 for a, rid in zip(actions, rids):
                     _append_chained(self._path, self._rec(a, RESERVED, origin, rid))
@@ -331,42 +336,54 @@ class GitHubWriter:
         except OSError:
             return None
 
+    def _in_flight(self, a: WriteAction) -> str:
+        """An identical action whose slot is still open (the owner is being asked, or the write is running)."""
+        rows = self._rows()
+        closed = {r.get("rid") for r in rows if r.get("rid") and r.get("result") != RESERVED}
+        now, h = self.clock(), a.hash()[:16]
+        if any(r.get("result") == RESERVED and r.get("hash") == h and r.get("rid") not in closed
+               and r.get("rid") not in {g[1] for g in self._grants.values()}      # a batch grant is spent by execute()
+               and now - float(r.get("ts") or 0) < GRANT_TTL_S for r in rows):
+            return "this exact action is already waiting for approval or running; wait for it to finish"
+        return ""
+
     def _rate_refusal(self, a: WriteAction, origin: str) -> WriteResult:
         n, window = self.limit
         return self._refuse(a, "GITHUB_WRITE_RATE_LIMIT", f"more than {n} writes in {int(window)} s", origin)
 
-    async def _gates(self, a: WriteAction, origin: str, untrusted: bool) -> WriteResult | None:
+    async def _gates(self, a: WriteAction, origin: str, untrusted: bool, rid: str = "") -> WriteResult | None:
+        """`rid` = the slot a batch approval already reserved: every refusal here closes it (#497)."""
         if self._tampered():
             return self._refuse(a, "GITHUB_WRITE_AUDIT_TAMPERED", "the write audit file was changed or shortened: all GitHub "
-                                "writes are stopped until the owner runs: jarvis github write reset-audit", origin)
+                                "writes are stopped until the owner runs: jarvis github write reset-audit", origin, rid)
         if forbidden(a.kind):
-            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "this kind of change is never allowed", origin)
+            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "this kind of change is never allowed", origin, rid)
         if a.kind.strip().lower() not in KIND_PERMS:          # fail closed: an unknown kind is refused, not allowed
-            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "unknown kind of change", origin)
+            return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "unknown kind of change", origin, rid)
         if len(json.dumps(a.payload, ensure_ascii=False, sort_keys=True, default=str)) > MAX_PAYLOAD_CHARS:
-            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "payload too large to show in full to the owner", origin)
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "payload too large to show in full to the owner", origin, rid)
         bad = (VALIDATORS.get(a.kind.strip().lower()) or (lambda _a: ""))(a)
         if bad:
-            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", bad, origin)
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", bad, origin, rid)
         if len(a.approval_text()) > MAX_APPROVAL_CHARS:
-            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
+            return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin, rid)
         if not self.feats.active(FEATURE):
-            return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin)
+            return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin, rid)
         kind = a.kind.strip().lower()
         if (kind.startswith("pr.") or kind.startswith("ci.")) and origin != "user":     # CLI only: held HERE, not by a source scan
             return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "pull request and CI actions are command line only: no model or other route",
-                                origin)
+                                origin, rid)
         if kind == "pr.review" and str(a.payload.get("event")) == "APPROVE" and not self.feats.active(APPROVE_FEATURE):
             return self._refuse(a, "GITHUB_WRITE_APPROVE_OFF", "approving a pull request needs its own owner switch "
                                 f"(jarvis features on {APPROVE_FEATURE}); comments and change requests need only the normal approval",
-                                origin)
+                                origin, rid)
         if untrusted or origin not in ("user", "model"):
-            return self._refuse(a, "GITHUB_WRITE_UNTRUSTED", "untrusted text was read this turn; no write now", origin)
+            return self._refuse(a, "GITHUB_WRITE_UNTRUSTED", "untrusted text was read this turn; no write now", origin, rid)
         if a.repo.strip().lower() not in self.repos:
-            return self._refuse(a, "GITHUB_WRITE_REPO", "this repo is not in the owner's github_repos list", origin)
+            return self._refuse(a, "GITHUB_WRITE_REPO", "this repo is not in the owner's github_repos list", origin, rid)
         why = self._scope_problem(a)
         if why:
-            return self._refuse(a, "GITHUB_WRITE_SCOPE", why, origin)
+            return self._refuse(a, "GITHUB_WRITE_SCOPE", why, origin, rid)
         return None
 
     def _tampered(self) -> str:
@@ -409,12 +426,19 @@ class GitHubWriter:
             r = await self._gates(a, origin, untrusted)
             if r is not None:
                 return r
-        if sum(len(x.approval_text(self._token_warn)) + 5 for x in actions) > MAX_APPROVAL_CHARS:
+        extras: list[str] = []                 # #580: the same READ preview as a single action (APPROVE, fork, what an edit replaces)
+        for a in actions:
+            ex = await self._extra(a)
+            if ex is None:                     # fail closed, never a partial preview
+                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", self._unreadable_text(a), origin)
+            extras.append(ex)
+        if sum(len(x.approval_text(" ".join(filter(None, [self._token_warn, extras[i]])))) + 5
+               for i, x in enumerate(actions)) > MAX_APPROVAL_CHARS:
             return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="the batch is too long to show in full")
         rids = self._reserve(actions, origin)          # atomic: check + take one slot per action
         if rids is None:
             return self._rate_refusal(actions[0], origin)
-        why = await self._ask(actions, origin)
+        why = await self._ask(actions, origin, extras)
         if why:
             code = "GITHUB_WRITE_TIMEOUT" if why == "timeout" else "GITHUB_WRITE_DENIED"
             for a, rid in zip(actions[1:], rids[1:]):                  # release every slot (a final row with the same rid)
@@ -432,18 +456,19 @@ class GitHubWriter:
         rid = self._grants.pop(h)[1] if granted else ""   # (the gates still run: switch, repo, scope; the slot is reserved)
         dup = self._duplicate(a)
         if dup:
-            return self._refuse(a, "GITHUB_WRITE_DUPLICATE", dup, origin)
-        r = await self._gates(a, origin, untrusted)
+            return self._refuse(a, "GITHUB_WRITE_DUPLICATE", dup, origin, rid)
+        r = await self._gates(a, origin, untrusted, rid)
         if r is not None:
             return r
         if not granted:
             extra = await self._extra(a)
             if extra is None:                          # never a partial preview of what an edit replaces
-                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", "could not read the issue on GitHub to show what the "
-                                    "edit replaces; try again", origin)
+                return self._refuse(a, "GITHUB_WRITE_UNREADABLE", self._unreadable_text(a), origin)
             if len(a.approval_text(extra)) > MAX_APPROVAL_CHARS:
                 return self._refuse(a, "GITHUB_WRITE_BAD_ARGUMENT", "action too large to show in full to the owner", origin)
-            slots = self._reserve([a], origin)         # atomic check + reserve BEFORE the owner is asked
+            slots = self._reserve([a], origin, dup_check=True)   # atomic check + duplicate + reserve BEFORE the owner is asked
+            if isinstance(slots, str):
+                return self._refuse(a, "GITHUB_WRITE_DUPLICATE", slots, origin)
             if slots is None:
                 return self._rate_refusal(a, origin)
             rid = slots[0]
@@ -469,6 +494,12 @@ class GitHubWriter:
                                 "check GitHub before trying again", origin, rid)
         self._audit(a, "OK", origin, rid)
         return WriteResult(ok=True, code="OK", data=data)
+
+    @staticmethod
+    def _unreadable_text(a: WriteAction) -> str:
+        if a.kind.strip().lower() == "ci.rerun":
+            return "could not read the workflow run on GitHub to show what it is; try again"
+        return "could not read the issue on GitHub to show what the edit replaces; try again"
 
     async def _extra(self, a: WriteAction) -> str | None:
         """Lines the owner must see that need a READ of the current state (what an edit REPLACES, a PR). None = the read
@@ -548,6 +579,20 @@ feat.register(FEATURE, "GitHub: כתיבה באישור", "GitHub: writes with a
               permissions=["writes approved each time"], settings="jarvis github write status")
 
 
+def _confirm_reset(cfg, home) -> bool:
+    """#497: the reset restarts the rate limit and the duplicate guard, so it needs the owner's click in the JARVES popup on
+    this computer (local_only), like every write; an isatty/env check alone can be faked by a pty."""
+    import asyncio
+    from .approvals import ApprovalService, PopupChannel
+    svc = ApprovalService(home)
+    svc.channels.append(PopupChannel(svc, enabled=True, lang=getattr(getattr(cfg, "ui", None), "popup_language", "en")))
+    return bool(asyncio.run(svc.ask(
+        "Reset the GitHub write audit? The old file is kept as evidence; the rate limit and the duplicate guard start from zero. / "
+        "לאפס את יומן הביקורת של כתיבה ל-GitHub? הקובץ הישן נשמר כראיה; מגבלת הקצב ובדיקת הכפילות מתחילות מאפס.",
+        title="GitHub: reset write audit", risk="high", kind="tool", local_only=True,
+        why="the audit chain is reset by the owner only", source="user")))
+
+
 def cmd_github_write(a, cfg, home) -> int:
     """jarvis github write status|on|off: the switch and what is allowed (the allow-list is `github_repos` in config.toml)."""
     from .cli import _cli_features
@@ -557,6 +602,9 @@ def cmd_github_write(a, cfg, home) -> int:
         why = agent_session_reason()
         if why:
             print(f"GITHUB_WRITE_AGENT_SESSION: refused: {why}; the owner resets the audit in his own terminal")
+            return 1
+        if not _confirm_reset(cfg, home):
+            print(clilang.bi("איפוס יומן הביקורת לא אושר בחלון JARVES. / The audit reset was not approved in the JARVES window."))
             return 1
         kept = reset_audit(home)
         print(clilang.bi("יומן הביקורת אופס; הקובץ הישן נשמר כראיה. / The audit was reset; the old file is kept as evidence.")
