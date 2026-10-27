@@ -109,8 +109,7 @@ def test_sessions_enter_registry_observe_only_and_writes_refused(tmp_path, serve
     assert {s["session"] for s in rows} == {"ses_aaa111", "ses_bbb222"}
     assert all(s["attach"] == "observe_only" and s["capabilities"] == ["observe"] for s in rows)
     t = o.tell("ses_aaa111", "do something")
-    assert not t["ok"] and t["code"] == "UNSUPPORTED_ATTACH"
-    assert o.start_session("opencode", "proj", "x", approved=True)["code"] == "PROVIDER_MISSING"
+    assert not t["ok"] and t["code"] == "UNSUPPORTED_ATTACH"           # a session started elsewhere stays observe-only
     assert o.call("opencode", action="sessions")["ok"] and o.call("opencode", action="events")["ok"]
     assert {m for m, _ in server.requests} == {"GET"}
     assert any(c["check"] == "opencode_server" and c["ok"] for c in o.call("doctor")["checks"])
@@ -144,3 +143,220 @@ def test_events_have_an_overall_deadline_and_cap(server):
     assert time.monotonic() - t0 < 3
     server.keepalive = False
     assert len(oc.Client(server.url).events(10_000, timeout=3)) == 3 and oc.MAX_EVENTS == 100
+
+
+# ---------------------------------------------------------------- D2 (#405): third harness, approval-gated writes
+def test_only_three_writes_are_possible_and_paths_are_validated(server):
+    c = oc.Client(server.url)
+    sid = c.create_session("C:/proj", "task")
+    c.prompt(sid, "hello", "C:/proj")
+    c.abort(sid, "C:/proj")
+    assert [p.split("?")[0] for p, _ in server.posts] == ["/session", f"/session/{sid}/prompt_async", f"/session/{sid}/abort"]
+    assert server.posts[1][1] == {"parts": [{"type": "text", "text": "hello"}]} and "directory=C%3A%2Fproj" in server.posts[1][0]
+    for bad in ("../x", "a/b", "", "x" * 80, "a b"):
+        with pytest.raises(oc.OpenCodeError):
+            c.abort(bad, "C:/proj")
+    for method, path in (("DELETE", "/session/ses_new1"), ("POST", "/session/ses_new1/share"), ("PATCH", "/session/ses_new1"),
+                         ("POST", "/config"), ("POST", "/session/ses_new1/shell")):
+        n = len(server.requests)
+        with pytest.raises(oc.OpenCodeError):
+            c._open(path, method=method, body=b"{}")
+        assert len(server.requests) == n                                # refused before any connection
+    with pytest.raises(oc.OpenCodeError):
+        c.prompt("ses_new1", "  ", "C:/proj")
+    with pytest.raises(oc.OpenCodeError):
+        c.prompt("ses_new1", "x" * (oc.MAX_PROMPT + 1), "C:/proj")
+
+
+def _git_proj(tmp_path):
+    import subprocess
+    proj = tmp_path / "proj"
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", str(proj), *args], check=True, capture_output=True)
+    (proj / "f.txt").write_text("x")
+    subprocess.run(["git", "-C", str(proj), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(proj), "commit", "-qm", "init"], check=True, capture_output=True)
+
+
+def test_start_needs_the_switch_the_password_and_the_owner(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, on=False)
+    assert o.start_session("opencode", "proj", "task", approved=True)["code"] == "PROVIDER_MISSING" and not server.requests
+    o.db.close()
+    monkeypatch.delenv("OPENCODE_SERVER_PASSWORD")
+    (tmp_path / "b").mkdir()
+    o = _orch(tmp_path / "b", server, monkeypatch)
+    r = o.start_session("opencode", "proj", "task", approved=True)
+    assert r["code"] == "AUTH_REQUIRED" and not server.posts
+    o.db.close()
+
+
+def test_start_runs_in_its_own_worktree_after_approval_and_every_prompt_is_approved(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    answers = iter([False, True, False, True])
+
+    def ask(prompt, **kw):
+        asked.append((prompt, kw))
+        return next(answers)
+    monkeypatch.setattr(o, "_ask_owner", ask)
+    r = o.start_session("opencode", "proj", "fix the build")
+    assert r["code"] == "NOT_APPROVED" and not server.posts            # nothing was sent before the answer
+    assert "OpenCode server at" in asked[0][0] and "NEW jarves/ branch" in asked[0][0] and asked[0][1]["details"]["session"] == "new"
+    r = o.start_session("opencode", "proj", "fix the build")
+    assert r["ok"] and r["session"]["provider"] == "opencode" and r["session"]["attach"] == "managed"
+    wt = r["session"]["cwd"].replace("\\", "/")
+    assert "/.jarves/worktrees/" in wt and r["session"]["branch"].startswith("jarves/")     # own worktree, own branch
+    paths = [p.split("?")[0] for p, _ in server.posts]
+    assert paths == ["/session", "/session/ses_new1/prompt_async"]
+    sid = r["session"]["id"]
+    # a later prompt asks again with repo / branch / session in the approval
+    t = o.tell(sid, "now add tests")
+    assert t["code"] == "NOT_APPROVED" and len(server.posts) == 2
+    assert "ses_new1" in asked[2][0] and "proj" in asked[2][0] and asked[2][1]["details"]["session"] == "ses_new1"
+    t = o.tell(sid, "now add tests")
+    assert t["ok"] and server.posts[-1][1]["parts"][0]["text"] == "now add tests"
+    # a refresh does not turn the managed row back into an observe-only one
+    row = [s for s in o.list(force=True)["sessions"] if s["session"] == "ses_new1"]
+    assert not row or row[0]["attach"] == "managed"
+    o.db.close()
+
+
+def test_interrupt_and_stop_abort_the_server_turn(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    sid = o.start_session("opencode", "proj", "task")["session"]["id"]
+    assert o.interrupt(sid)["ok"]
+    assert server.posts[-1][0].split("?")[0] == "/session/ses_new1/abort"
+    assert o.stop_session(sid, approved=True)["ok"] and o.db.session(sid)["state"] == "STOPPED"
+    o.db.close()
+
+
+# ---------------------------------------------------------------- D2 review fixes (Opus review of #405)
+def _started(tmp_path, server, monkeypatch, answers=None):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+
+    def ask(prompt, **kw):
+        asked.append((prompt, kw))
+        return True if answers is None else answers.pop(0)
+    monkeypatch.setattr(o, "_ask_owner", ask)
+    return o, asked, o.start_session("opencode", "proj", "task")["session"]["id"]
+
+
+def test_ask_and_every_other_send_path_also_needs_the_approval(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    n_posts, n_asked = len(server.posts), len(asked)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: False)
+    r = o.ask(sid, "what are you doing?", live=True)
+    assert not r.get("ok") and len(server.posts) == n_posts          # denied: nothing reached the server
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append((p, k)) or True)
+    o.ask(sid, "what are you doing?", live=True)
+    assert len(asked) > n_asked and len(server.posts) == n_posts + 1
+    o.db.close()
+
+
+def test_approved_flag_is_ignored_for_opencode_and_long_or_dirty_prompts_are_refused(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or False)
+    r = o.start_session("opencode", "proj", "task", approved=True)          # a bridge caller says approved=True
+    assert r["code"] == "NOT_APPROVED" and len(asked) == 1 and not server.posts
+    r = o.start_session("opencode", "proj", "x" * 2000, approved=True)
+    assert not r["ok"] and "too long" in r["text"] and len(asked) == 1
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    o.start_session("opencode", "proj", "do it\u202e evil")
+    assert "\u202e" not in asked[-1] and "Prompt (untrusted text, shown in full)" in asked[-1]
+    assert "\u202e" not in server.posts[1][1]["parts"][0]["text"]               # what was shown is what was sent
+    o.db.close()
+
+
+def test_session_in_another_folder_is_aborted_and_refused(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    server.force_dir = "C:/somewhere/else"
+    r = o.start_session("opencode", "proj", "task")
+    assert not r["ok"] and r["code"] == "SERVER_ERROR"
+    assert [p.split("?")[0] for p, _ in server.posts] == ["/session", "/session/ses_new1/abort"]     # aborted, no prompt
+    o.db.close()
+
+
+def test_failed_first_prompt_aborts_the_new_server_session(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    real = oc.Client.prompt
+
+    def boom(self, *a, **k):
+        raise oc.OpenCodeError("SERVER_ERROR", "HTTP 500")
+    monkeypatch.setattr(oc.Client, "prompt", boom)
+    assert not o.start_session("opencode", "proj", "task")["ok"]
+    assert server.posts[-1][0].split("?")[0] == "/session/ses_new1/abort"
+    assert not [s for s in o.db.sessions() if s["provider"] == "opencode"]
+    monkeypatch.setattr(oc.Client, "prompt", real)
+    o.db.close()
+
+
+def test_stopped_session_is_not_shown_as_live_again_by_a_refresh(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    server.sessions.append({"id": "ses_new1", "directory": "x", "title": "task", "time": {"created": 1, "updated": 2}})
+    assert o.stop_session(sid, approved=True)["ok"]
+    o.list(force=True)
+    assert o.db.session(sid)["state"] == "STOPPED"
+    o.db.close()
+
+
+def test_a_redirect_is_not_a_success(server):
+    c = oc.Client(server.url)
+    server.status_for_posts = 302
+    with pytest.raises(oc.OpenCodeError):
+        c.abort("ses_new1", "C:/proj")
+
+
+# ---------------------------------------------------------------- D2 re-check fixes
+def test_ask_path_sends_exactly_what_the_popup_showed_including_code_blocks(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    q = "what next?\n```\nrm -rf /tmp/x\n```"
+    n = len(server.posts)
+    o.ask(sid, q, live=True)
+    shown = asked[-1][0]
+    sent = server.posts[n][1]["parts"][0]["text"]
+    assert "rm -rf /tmp/x" in shown and "code omitted" not in shown            # the code block is visible in the popup
+    assert sent in shown and len(shown) <= 2000                                # exactly the shown text, popup fits the cap
+    assert "[code omitted]" not in sent
+    o.db.close()
+
+
+def test_stop_reports_a_failed_abort_and_keeps_the_session(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    monkeypatch.setattr(oc.Client, "abort", lambda self, *a, **k: (_ for _ in ()).throw(oc.OpenCodeError("SERVER_ERROR", "HTTP 500")))
+    r = o.stop_session(sid, approved=True)
+    assert not r["ok"] and r["code"] == "SERVER_ERROR" and "still tracked" in r["text"]
+    assert o.db.session(sid)["state"] != "STOPPED" and sid in o.managed
+    o.db.close()
+
+
+def test_stop_and_resume_refuse_an_opencode_session_jarves_does_not_control(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    o.managed.clear()                                                         # as after a Core restart
+    r = o.stop_session(sid, approved=True)
+    assert not r["ok"] and r["code"] == "UNSUPPORTED_ATTACH" and "stop it in OpenCode itself" in r["text"]
+    assert o.db.session(sid)["state"] != "STOPPED"
+    assert o.resume(sid, approved=True)["code"] in ("UNSUPPORTED_ATTACH", "CORE_NOT_RUNNING")
+    o.serve = True
+    assert o.resume(sid, approved=True)["code"] == "UNSUPPORTED_ATTACH"
+    o.db.close()
+
+
+def test_wrong_folder_abort_uses_the_folder_the_server_returned(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    server.force_dir = "C:/somewhere/else"
+    o.start_session("opencode", "proj", "task")
+    assert "directory=C%3A%2Fsomewhere%2Felse" in server.posts[-1][0] and "/abort" in server.posts[-1][0]
+    o.db.close()

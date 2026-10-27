@@ -43,18 +43,18 @@ hebrew.TEXT.update({
 })
 
 
-OC_ABOUT = ("reads (never changes) your OpenCode sessions through its local server: which sessions exist, their "
-            "state and recent events; loopback address and server password only; no start, prompt or write")
+OC_ABOUT = ("shows your OpenCode sessions through its local server and, only after you approve each one, starts a "
+            "session in its own worktree, sends a prompt or stops it; loopback address and server password only")
 OC_EVIDENCE = ("core/tests/test_agents_opencode.py (fake OpenCode server with response shapes from "
                "opencode.ai/docs/server and /sdk; no real server contacted)")
-features.register("agent_opencode", "OpenCode - קריאה בלבד", "OpenCode (read-only)", False, risk="high",
+features.register("agent_opencode", "OpenCode - צפייה והפעלה באישור", "OpenCode (view and start with approval)", False, risk="high",
                   skills=[], applies="live", about=OC_ABOUT,
                   targets={"windows": {"status": "implemented_unverified", "evidence": OC_EVIDENCE},
                            "linux_arm64_pi": {"status": "implemented_unverified", "roadmap_issue": PI_ROADMAP,
                                               "blocker": "OpenCode server on a Pi not tried yet"}})
 hebrew.TEXT.update({
-    OC_ABOUT: "קורא (לא משנה) את סשני OpenCode שלך דרך השרת המקומי שלו: אילו סשנים קיימים, המצב שלהם ואירועים "
-              "אחרונים; רק כתובת מקומית וסיסמת שרת; בלי הפעלה, הוראה או כתיבה",
+    OC_ABOUT: "מציג את סשני OpenCode שלך דרך השרת המקומי שלו, ורק אחרי שאתה מאשר כל פעולה מפעיל סשן בעץ עבודה "
+              "נפרד, שולח הוראה או עוצר אותו; רק כתובת מקומית וסיסמת שרת",
     OC_EVIDENCE: "core/tests/test_agents_opencode.py (שרת OpenCode מדומה עם מבנה תשובות מהתיעוד; לא נוצר קשר עם "
                  "שרת אמיתי)",
     "OpenCode server on a Pi not tried yet": "שרת OpenCode על Pi עוד לא נוסה",
