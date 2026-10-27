@@ -12,8 +12,17 @@ SECRET = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
 
 
 class FakeDriver:
+    """current_url is a PROPERTY like Playwright page.url and Selenium driver.current_url (#566)."""
+
     def __init__(self):
-        self.opened, self.closed = [], False
+        self.opened, self.closed, self.final, self.pinned = [], False, None, []
+
+    @property
+    def current_url(self):
+        return self.final if self.final is not None else (self.opened[-1] if self.opened else "")
+
+    def pin_hosts(self, mapping):
+        self.pinned.append(mapping)
 
     def open(self, url):
         self.opened.append(url)
@@ -176,7 +185,7 @@ def test_unresolvable_host_fails_closed_and_local_needs_no_dns(tmp_path):
 
 def test_redirect_to_a_private_address_stops_the_session(tmp_path):
     s, d, _ = mk(tmp_path, resolver=lambda host: ["10.0.0.9"] if host == "evil.example.com" else ["93.184.216.34"])
-    d.current_url = lambda: "https://evil.example.com/inside"
+    d.final = "https://evil.example.com/inside"
     with pytest.raises(bp.PilotError) as e:
         s.open("https://example.com/")
     assert e.value.code == "BROWSER_PILOT_REDIRECT" and d.closed and s.state == bp.STOPPED
@@ -202,3 +211,50 @@ def test_read_cuts_before_redacting_and_default_clock_is_monotonic(tmp_path, mon
     assert len(s.read()["untrusted_text"]) == bp.MAX_TEXT and max(seen) == 2 * bp.MAX_TEXT
     import inspect
     assert inspect.signature(bp.PilotSession).parameters["clock"].default is bp.time.monotonic
+
+
+def test_final_url_is_checked_when_current_url_is_a_property_or_unreadable(tmp_path):
+    """#566 item 2: a property (string) is checked; a missing or non-string address stops the session (fail closed)."""
+    s, d, _ = mk(tmp_path, resolver=lambda host: ["10.0.0.9"] if host == "evil.example.com" else ["93.184.216.34"])
+    d.final = "https://evil.example.com/"
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_REDIRECT"
+    s, d, _ = mk(tmp_path / "b")
+    d.final = ""
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_REDIRECT" and d.closed
+
+
+def test_names_are_resolved_once_and_pinned_for_the_driver(tmp_path):
+    """#566 item 1: a rebinding server (public first, private next) cannot change what was vetted."""
+    answers = iter([["93.184.216.34"], ["10.0.0.1"], ["10.0.0.1"]])
+    calls = []
+    s, d, _ = mk(tmp_path, resolver=lambda host: calls.append(host) or next(answers))
+    s.open("https://example.com/")
+    assert s.request_allowed("https://example.com/img.png") is True and calls == ["example.com"]   # one resolution
+    assert d.pinned[-1] == {"example.com": ["93.184.216.34"]}
+    assert s.request_allowed("https://rebind.example.net/") is False                                 # private answer refused
+    s.request_allowed("https://example.com/")
+    assert all("rebind.example.net" not in m for m in d.pinned)                                       # never handed to the driver
+
+
+def test_a_driver_without_the_contract_is_refused(tmp_path):
+    class Old:
+        def open(self, url): ...
+        def text(self): return ""
+        def screenshot(self): return b""
+        def close(self): ...
+    with pytest.raises(TypeError) as e:
+        bp.PilotSession(tmp_path, Old(), enabled=lambda: True)
+    assert "pin_hosts" in str(e.value) and "current_url" in str(e.value)
+
+
+def test_system_resolver_has_a_timeout_and_fails_closed(monkeypatch):
+    import threading
+    gate = threading.Event()
+    monkeypatch.setattr(bp.socket, "getaddrinfo", lambda *a, **k: gate.wait(5))
+    monkeypatch.setattr(bp, "RESOLVE_TIMEOUT_S", 0.05)
+    assert bp.vet_url("https://slow.example.com/") == ""
+    gate.set()

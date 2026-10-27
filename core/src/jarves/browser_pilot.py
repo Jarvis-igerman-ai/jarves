@@ -88,9 +88,18 @@ def page_scope(url: str) -> str:
 KNOWN_KINDS = OBSERVE_KINDS | {"state:agent", "state:human", "state:paused", "state:stopped"}
 
 
+RESOLVE_TIMEOUT_S = 3.0
+
+
 def system_resolver(host: str) -> list[str]:
-    """All addresses the system resolver gives for a host (tests inject a fake)."""
-    return sorted({i[4][0] for i in socket.getaddrinfo(host, None)})
+    """All addresses the system resolver gives for a host (tests inject a fake). Bounded: a resolver that does not answer
+    in RESOLVE_TIMEOUT_S raises (the caller fails closed); getaddrinfo itself has no timeout (#566)."""
+    import concurrent.futures
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        return sorted({i[4][0] for i in ex.submit(socket.getaddrinfo, host, None).result(timeout=RESOLVE_TIMEOUT_S)})
+    finally:
+        ex.shutdown(wait=False)
 
 
 def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) -> str:
@@ -126,14 +135,50 @@ def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) ->
 
 
 class PilotSession:
-    """One read-only session over a page driver: open(url) / text() / screenshot() / close() (a fake in tests)."""
+    """One read-only session over a page driver (a fake in tests). The driver contract, enforced when the session is made
+    so a real driver cannot skip it (#566):
+      open(url) / text() / screenshot() / close()
+      current_url   the page's address after navigation: a callable OR a plain string (Playwright page.url, Selenium
+                    driver.current_url are properties). A missing or unreadable address stops the session (fail closed).
+      pin_hosts(m)  called with {host: [vetted ip, ...]} before every open and whenever a new host was vetted: the driver
+                    must connect ONLY to these addresses (Chromium --host-resolver-rules "MAP host ip", or a proxy that
+                    connects to the vetted IP). Every name is resolved ONCE per session and all answers are vetted, so a
+                    rebinding server cannot hand the browser a second, private answer.
+    request_allowed(url) is the guard for every request, redirect target and subresource."""
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
+        missing = [n for n in ("open", "text", "screenshot", "close", "pin_hosts", "current_url") if not hasattr(driver, n)]
+        if missing:
+            raise TypeError("the pilot driver must implement " + ", ".join(missing) + " (see PilotSession)")
         self.home, self.driver, self.enabled, self.clock = Path(home), driver, enabled, clock
-        self.max_actions, self.max_seconds, self.resolver = max_actions, max_seconds, resolver
+        self.max_actions, self.max_seconds = max_actions, max_seconds
+        self.pins: dict[str, list[str]] = {}               # host -> the addresses vetted once for this session
+        self._raw_resolver = resolver
+        self.resolver = self._pinned_resolver
         self.state, self.seq, self.started = AGENT, 0, clock()
         self.receipts: list[dict] = []
+
+    def _pinned_resolver(self, host: str) -> list[str]:
+        if host not in self.pins:
+            self.pins[host] = list(self._raw_resolver(host))
+        return self.pins[host]
+
+    def _apply_pins(self) -> None:
+        def good(addrs) -> bool:                              # a refused (private) answer is never handed to the driver
+            try:
+                return bool(addrs) and all(ipaddress.ip_address(str(x).split("%")[0]).is_global for x in addrs)
+            except ValueError:
+                return False
+        self.driver.pin_hosts({h: list(v) for h, v in self.pins.items() if good(v)})
+
+    def _final_url(self) -> str:
+        cur = self.driver.current_url
+        try:
+            val = cur() if callable(cur) else cur
+        except Exception:                                    # noqa: BLE001 - unreadable = refused
+            return ""
+        return val if isinstance(val, str) else ""
 
     # --- state machine
     def _to(self, new: str) -> None:
@@ -198,9 +243,9 @@ class PilotSession:
         scope = vet_url(url, self.resolver)
         if not scope:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
+        self._apply_pins()                                   # the host was resolved and vetted once: the driver connects only there
         self.driver.open(url)
-        final = getattr(self.driver, "current_url", None)
-        if callable(final) and not vet_url(str(final() or ""), self.resolver):      # a redirect or script navigation
+        if not vet_url(self._final_url(), self.resolver):    # a redirect or script navigation, or an unreadable address
             self.stop()
             raise self._refuse("open", "BROWSER_PILOT_REDIRECT", "the page led to an address that may not be read; the session was stopped")
         self._receipt("open", "ok")
@@ -208,7 +253,10 @@ class PilotSession:
 
     def request_allowed(self, url: str) -> bool:
         """For the real driver's route handler: every request (document, redirect target, subresource) must pass this."""
-        return bool(vet_url(url, self.resolver))
+        ok = bool(vet_url(url, self.resolver))
+        if ok:
+            self._apply_pins()                               # a host first seen in a redirect or subresource is pinned too
+        return ok
 
     def read(self) -> dict:
         self._gate("read")
