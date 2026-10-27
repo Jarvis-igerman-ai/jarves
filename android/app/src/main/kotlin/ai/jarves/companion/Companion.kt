@@ -94,6 +94,23 @@ class CompanionClient(private val base: String, private val transport: Transport
         }
     }
 
+    /** How many approvals wait on the PC (the length of the approvals list: unlike /api/m/sync it consumes nothing), or null when the PC did not answer sensibly. */
+    fun waiting(token: String): Int? {
+        val r = try {
+            transport.send("GET", url("/api/m/approvals"), mapOf("Authorization" to "Bearer $token", API_HEADER to API_SUPPORTED.toString()), null)
+        } catch (e: IOException) {
+            return null
+        } catch (e: RuntimeException) {
+            return null
+        }
+        if (r.status != 200) return null
+        return try {
+            (JSONObject(r.body).optJSONArray("pending")?.length() ?: 0).coerceIn(0, 999)
+        } catch (e: JSONException) {
+            null
+        }
+    }
+
     /** The first call after pairing and then every few seconds: is the PC there, and is its brain running? */
     fun check(token: String): Link {
         val r = try {

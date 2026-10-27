@@ -1,6 +1,7 @@
 package ai.jarves.companion
 
 import android.app.Application
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -55,6 +56,15 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
+    private val notifyPrefs = NotifyPrefs(app)
+    private val _notify = MutableStateFlow(notifyPrefs.enabled && NotifyWork.permissionGranted(app))
+    val notifyOn: StateFlow<Boolean> = _notify
+
+    fun setNotify(on: Boolean) {
+        notifyPrefs.enabled = on
+        _notify.value = on
+        if (on) NotifyWork.start(getApplication()) else NotifyWork.stop(getApplication())
+    }
 
     init {
         session = (screen.value as? Screen.Status)?.session
@@ -133,6 +143,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun unpair() {
+        setNotify(false)
         poll?.cancel()
         session = null
         store.clear()
@@ -153,6 +164,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.setNotify(granted) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -163,7 +176,15 @@ class MainActivity : ComponentActivity() {
                         when (val x = s) {
                             is Screen.Pair -> PairScreen(x, model::check)
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
-                            is Screen.Status -> StatusScreen(x, model::unpair)
+                            is Screen.Status -> {
+                                StatusScreen(x, model::unpair)
+                                val on by model.notifyOn.collectAsStateWithLifecycle()
+                                NotifyCard(on) { want ->
+                                    if (!want) model.setNotify(false)
+                                    else if (NotifyWork.permissionGranted(this@MainActivity)) model.setNotify(true)
+                                    else askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
                         }
                     }
                 }

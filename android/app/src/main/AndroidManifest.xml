@@ -3,6 +3,8 @@
 
     <!-- Only the network: no microphone, no notifications, no foreground service in A2 (voice and notifications are A3). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- A3b: only after the owner turns the switch on; a count of waiting approvals, never their content. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
