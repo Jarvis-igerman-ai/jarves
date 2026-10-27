@@ -669,8 +669,13 @@ class GeneratedSkills:
         broker = _Broker(self, sid, set(grants.get("capabilities") or []))
         res = await run_sandboxed(py or "", tool, args, broker)
         if not res.get("ok"):
-            st["last_error"] = {"tool": tool, "error": str(res.get("error", ""))[:300], "ts": time.time()}
-            self._set_state(sid, st)
+            # Re-read the state NOW and change only last_error (#564): the owner may have revoked a grant, disabled the Skill
+            # or approved a new version while the sandbox ran, and writing back the old dict would undo that. (The broker
+            # keeps the grants of the START of the call for the whole run: inherent, the next call sees the change.)
+            cur = self.state(sid)
+            if cur and int(cur.get("version", 0)) == ver:
+                cur["last_error"] = {"tool": tool, "error": str(res.get("error", ""))[:300], "ts": time.time()}
+                self._set_state(sid, cur)
             return ToolResult(False, f"{tool} failed: {str(res.get('error', ''))[:200]}", code="SKILL_RUN_FAILED")
         return ToolResult(True, str(res.get("message", ""))[:1500], res.get("data") or {})
 
