@@ -929,8 +929,14 @@ def _revert_dir(installed_pkg: Path, d: Path, manifest: dict, hooks: Hooks | Non
     if manifest.get("bridge"):
         if hooks and hooks.bridge_running and hooks.stop_bridge and hooks.bridge_running():
             hooks.stop_bridge()
-        s2.bridge_revert(manifest["bridge"], d / "bridge_original")
-        touch.append("bridge")                             # atomic replace: listed once it happened
+        try:                                               # two writes (exe, then the .sha256 sidecar): a failure after
+            s2.bridge_revert(manifest["bridge"], d / "bridge_original")    # the exe was put back is a half-done revert
+        except Exception:
+            b, dest = manifest["bridge"], Path(manifest["bridge"]["dest"])
+            if (sha256(dest) == b["sha256_original"]) if (b.get("sha256_original") and dest.is_file()) else not dest.exists():
+                touch.append("bridge")
+            raise
+        touch.append("bridge")
         done.append("bridge")
         if bridge_was_running and hooks and hooks.start_bridge:
             hooks.start_bridge()
