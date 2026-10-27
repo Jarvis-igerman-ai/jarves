@@ -55,7 +55,7 @@ class PinnedTransport(private val pin: String?) : Transport {
             }
             val status = c.responseCode
             val stream = if (status >= 400) c.errorStream else c.inputStream
-            val text = stream?.use { it.readBytes().take(256 * 1024).toByteArray().toString(Charsets.UTF_8) } ?: ""
+            val text = stream?.use { readCapped(it, 256 * 1024) } ?: ""
             return Response(status, text)
         } catch (e: SSLException) {
             // The handshake failed. A pin that no longer matches is NOT "offline": say so (the PC regenerated its certificate, or someone is in between).
@@ -127,4 +127,16 @@ class SessionStore(private val context: Context) {
     fun clear() {
         safe()?.edit()?.clear()?.apply()
     }
+}
+
+/** Reads at most [max] bytes and stops there: a hostile or broken PC cannot make the phone read an endless answer. */
+fun readCapped(input: java.io.InputStream, max: Int): String {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (out.size() < max) {
+        val n = input.read(buf, 0, minOf(buf.size, max - out.size()))
+        if (n < 0) break
+        out.write(buf, 0, n)
+    }
+    return out.toString(Charsets.UTF_8.name())
 }
