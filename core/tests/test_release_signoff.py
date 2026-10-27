@@ -392,3 +392,15 @@ def test_508_sign_needs_an_owner_and_a_removed_owner_or_hash_blocks_the_gate(tmp
     assert any("Owner" in p for p in again.problems())
     forged = so2.Sheet.parse(s.render().replace("expected", "changed"))
     assert any("rows changed after signing" in p for p in forged.problems())
+    other = so2.Sheet.parse(s.render().replace("- Owner: The Owner", "- Owner: Someone Else"))
+    assert any("rows changed after signing" in p for p in other.problems())         # sign-off fields are hashed too
+
+
+def test_508_note_typed_in_the_finishing_run_survives_save_and_load(tmp_path):
+    from jarves import release_signoff as so2
+    so2.save(tmp_path, so2.Sheet(version="4.1.0", rows=[so2.Row("A1", "area", "todo", "expected")]))
+    s = so2.load(tmp_path, "4.1.0")
+    s.set_result("A1", "accepted-blocked", "no  phone\nhere | today")              # same run as --finish
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Owner")
+    so2.save(tmp_path, s)
+    assert so2.load(tmp_path, "4.1.0").problems() == []

@@ -73,8 +73,10 @@ def cmd_release(a, cfg, home) -> int:
         if a.finish:
             _finish(sheet, home, a.beta, a.commit, getattr(a, "owner", None))
             so.save(root, sheet)
-            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}. עכשיו אפשר לתייג v{version}.",
-                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}. "
+            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"גיבוב {sheet.rows_hash}. עכשיו אפשר לתייג v{version}.",
+                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"hash {sheet.rows_hash}. "
                               f"You can now tag v{version}."))
             logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version)
             return 0

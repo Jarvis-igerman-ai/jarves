@@ -86,10 +86,15 @@ class Sheet:
     date: str = ""
     signed: bool = False
     owner: str = ""                # #508: who signed (the OS user of the signing session, or --owner)
-    rows_hash: str = ""            # #508: sha256 of every cell of every row at signing time
+    rows_hash: str = ""            # #508: sha256 of every row cell and the sign-off fields at signing time
 
     def compute_rows_hash(self) -> str:
-        blob = chr(10).join("|".join((r.id, r.area, r.todo, r.expected, r.result, r.note)) for r in self.rows)
+        # Hash the text exactly as render() writes it (_cell), so a value typed in the same run as --finish (double spaces,
+        # a newline in a note) hashes the same after save + load; the sign-off fields are covered too (owner, date, ...).
+        # Tamper-evidence against accidental edits only: anyone editing the file can recompute it (#543/#544 guard that).
+        head = [_cell(x) for x in (self.version, self.beta, self.commit, self.date, self.owner)]
+        rows = [" | ".join(_cell(x) for x in (r.id, r.area, r.todo, r.expected, r.result, r.note)) for r in self.rows]
+        blob = chr(10).join(["sheet-hash v1", *head, "--", *rows])
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     # ---- text
@@ -169,7 +174,8 @@ class Sheet:
         if not owner or any(ord(c) < 32 for c in owner):
             raise SheetError("the sign-off needs the owner's name (--owner NAME)")
         self.beta, self.commit, self.date = beta, commit.strip().lower(), today or date.today().isoformat()
-        self.owner, self.rows_hash = owner, self.compute_rows_hash()
+        self.owner = owner
+        self.rows_hash = self.compute_rows_hash()      # after every signed field is set: they are all hashed
         self.signed = True
 
     def problems(self) -> list[str]:
