@@ -30,9 +30,23 @@ async function agentPost(path, body, box) {
   catch (e) { box.textContent = e.message; }
 }
 
+// G6 (#413): what blocks the agents' pull requests. Hidden when the switch is off or the API is not there. Text nodes only.
+async function agentsPrCard() {
+  let r;
+  try { r = await api(`/api/github/work?lang=${agentsLang()}`); } catch (e) { return null; }
+  if (!r || !r.enabled) return null;
+  const rows = (r.rows || []).map((x) => el("tr", {},
+    el("td", { dir: "auto", "data-noi18n": "" }, x.branch),
+    el("td", {}, pill(x.state === "ready" ? "ok" : x.state === "checks_failing" ? "fail" : "plain", x.state.replace("_", " "))),
+    el("td", { dir: "auto", "data-noi18n": "", class: "small" }, x.next)));
+  return el("div", { class: "card", id: "agents-prs" }, el("h3", {}, tx("בקשות המיזוג של הסוכנים", "Agents' pull requests")),
+    rows.length ? el("table", {}, el("thead", {}, el("tr", {}, ["ענף", "מצב", "הצעד הבא"].map((h, i) => el("th", {}, tx(h, ["Branch", "State", "Next step"][i]))))),
+      el("tbody", {}, rows)) : el("div", { class: "empty" }, r.text || tx("אין סשן עם ענף.", "No session with a branch.")));
+}
+
 PAGES.agents = async function () {
   const lang = agentsLang();
-  const [d, ap] = await Promise.all([api(`/api/agents?digest=1&lang=${lang}`), api("/api/agents/approvals")]);
+  const [d, ap, prCard] = await Promise.all([api(`/api/agents?digest=1&lang=${lang}`), api("/api/agents/approvals"), agentsPrCard()]);
   if (d.enabled === false) {
     render(header(tx("סוכני קוד", "Coding agents"), tx("Claude Code ו-Codex", "Claude Code and Codex")),
       el("div", { class: "card" }, el("div", { class: "empty" }, tx("מנהל סוכני הקוד כבוי: ", "The coding-agent orchestrator is off: ") + (d.reason || "")),
@@ -94,6 +108,7 @@ PAGES.agents = async function () {
     d.hidden_outside_allowlist ? el("div", { class: "muted small" }, `${d.hidden_outside_allowlist} ` + tx("סשנים נוספים מחוץ לרשימת המותרים", "more session(s) outside the allow-list")) : null),
   waiting.length ? [el("h3", {}, tx("ממתינים לאישור שלך", "Waiting for your approval")), waiting] : null,
   el("div", { class: "card" }, table),
+  prCard,
   el("h3", {}, tx("סשן חדש", "New session")), start);
   timer = setInterval(() => route(true), 10000);
 };
