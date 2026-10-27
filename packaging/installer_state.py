@@ -292,6 +292,48 @@ def note_rollback(home: Path, status: str) -> dict:
     return rec
 
 
+PROGRAM_PARTS = ("python", "face", "bridge", "jarvis.cmd")
+
+
+def recover(app: Path, state: Path, *, approved: bool, home: Path | None = None, ask=input) -> str:
+    """#261: the owner's way back when an update migrated the data AND the new program is dead (health_failed): the new
+    python cannot run `jarvis update --rollback`, and the Core that would offer it never starts. Runs under the kept OLD
+    python ({app}\\rollback\\python). Only after the owner's approval (`approved`, or typing YES when ask() is used): the
+    verified data backup is restored (restore_data), then every program part still kept in {app}\\rollback is swapped
+    back (the dead new part is kept aside in {app}\\failed-recovery-*, nothing is deleted). Refuses unless health.json
+    says health_failed, so it is never a way to roll back a healthy install. Returns a short status word."""
+    app = Path(app)
+    record = _read_json(Path(state))
+    home = safe_home(Path(home) if home else Path(str(record.get("home") or "")))
+    if _read_json(home / "updates" / HEALTH_FILE).get("status") != "health_failed":
+        return "not_needed"
+    rollback = app / "rollback"
+    kept = [n for n in PROGRAM_PARTS if (rollback / n).exists()]
+    if not (rollback / "python").exists() or not kept:
+        return "no_previous_program"
+    if not approved and str(ask("Restore the previous JARVES version and the data backup taken before the update? "
+                                "Changes made since the update are lost. Type YES to continue: ")).strip() != "YES":
+        return "declined"
+    restore_data(home, Path(state))                         # verifies every backup first; raises, touches nothing, if one is bad
+    aside = app / ("failed-recovery-" + str(time.time_ns()))
+    aside.mkdir(parents=True)
+    done = []
+    try:
+        for name in kept:
+            if (app / name).exists():
+                (app / name).rename(aside / name)
+            (rollback / name).rename(app / name)
+            done.append(name)
+    except OSError:
+        for name in done:                                   # never leave a hole: put the new parts back
+            (app / name).rename(rollback / name)
+            if (aside / name).exists():
+                (aside / name).rename(app / name)
+        return "swap_failed"
+    note_rollback(home, "rolled_back")
+    return "recovered"
+
+
 MB = 1024 * 1024
 # What the verified backup leaves out (backup.EXCLUDE_DIRS, a superset kept here so this runs under ANY old python).
 _NOT_BACKED_UP = {"backups", "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__", "voice_cache", "whatsapp_bridge"}
@@ -349,8 +391,9 @@ def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dic
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health",
-                                       "note-rollback", "can-program-rollback", "diskcheck"))
-    ap.add_argument("--home", type=Path, required=True)
+                                       "note-rollback", "can-program-rollback", "diskcheck", "recover"))
+    ap.add_argument("--home", type=Path)
+    ap.add_argument("--yes", action="store_true", help="recover: the owner already approved (otherwise type YES)")
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
     ap.add_argument("--timeout", type=float, default=180.0)
@@ -362,6 +405,13 @@ def main(argv=None) -> int:
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
+        if args.action == "recover":
+            # exit code: 0 recovered, 6 not needed / nothing to put back / declined / swap failed (the word is printed)
+            word = recover(args.app, args.state, approved=args.yes, home=args.home)
+            print("RECOVER:", word)
+            return 0 if word == "recovered" else 6
+        if args.home is None:
+            ap.error("--home is required")
         if args.action == "health":
             # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
             # (the installer treats every other exit code, e.g. a python that crashes, as "failed" too)

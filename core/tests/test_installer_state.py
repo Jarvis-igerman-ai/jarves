@@ -287,3 +287,59 @@ def test_disk_check_never_blocks_on_a_failed_probe_and_cli_writes_numbers_only(t
     lines = out.read_text("ascii").splitlines()
     assert code == 4 and [x.split("=")[0] for x in lines] == ["drive", "short_mb", "need_mb"]
     assert all(str(tmp_path) not in x for x in lines)
+
+
+def _dead_upgrade(tmp_path):
+    """A migrated upgrade whose new program is dead: data at schema 3, old program kept in app/rollback, health_failed."""
+    home, state, app = tmp_path / "home", tmp_path / "app" / "install-state.json", tmp_path / "app"
+    app.mkdir()
+    seed.seed(home)
+    installer.prepare(home, state)
+    installer.complete(home, state)
+    for part, old, new in (("python", "OLD-PY", "NEW-BROKEN-PY"), ("face", "OLD-FACE", "NEW-FACE")):
+        (app / "rollback" / part).mkdir(parents=True)
+        (app / "rollback" / part / "v.txt").write_text(old)
+        (app / part).mkdir()
+        (app / part / "v.txt").write_text(new)
+    installer.note_rollback(home, "health_failed")
+    return home, state, app
+
+
+def test_recover_after_health_failed_restores_data_and_old_program_only_with_approval(tmp_path):
+    """#261: no VM needed: the whole transaction is plain files. Declined = nothing changes."""
+    home, state, app = _dead_upgrade(tmp_path)
+    assert installer.recover(app, state, approved=False, ask=lambda _: "no") == "declined"
+    assert seed.verify(home, legacy=False) == [] and (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"
+    assert installer.recover(app, state, approved=False, ask=lambda _: "YES") == "recovered"
+    assert seed.verify(home, legacy=True) == []                        # data back to the verified pre-update backup
+    assert (app / "python" / "v.txt").read_text() == "OLD-PY" and (app / "face" / "v.txt").read_text() == "OLD-FACE"
+    kept = list(app.glob("failed-recovery-*"))
+    assert len(kept) == 1 and (kept[0] / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"   # nothing deleted
+    assert installer._read_json(home / "updates" / installer.HEALTH_FILE)["status"] == "rolled_back"
+
+
+def test_recover_refuses_a_healthy_install_and_a_bad_backup(tmp_path):
+    home, state, app = _dead_upgrade(tmp_path)
+    installer.note_rollback(home, "rolled_back")
+    assert installer.recover(app, state, approved=True) == "not_needed"
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"
+    installer.note_rollback(home, "health_failed")
+    record = json.loads(state.read_text())
+    Path(record["backups"][0]["backup"]).write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="verifies"):
+        installer.recover(app, state, approved=True)
+    assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY"      # the program was not touched either
+
+
+def test_recover_cli_exit_codes(tmp_path):
+    home, state, app = _dead_upgrade(tmp_path)
+    assert installer.main(["recover", "--app", str(app), "--state", str(state), "--yes"]) == 0
+    assert installer.main(["recover", "--app", str(app), "--state", str(state), "--yes"]) == 6    # nothing left to recover
+
+
+def test_setup_offers_the_recovery_entry_only_while_the_previous_program_is_kept():
+    """#261: the Start-menu entry runs the OLD python with the recover action and is gated on rollback\python existing."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8-sig")
+    line = next(x for x in iss.splitlines() if x.startswith('Name: "{group}\Recover previous JARVES'))
+    assert "rollback\python\python.exe" in line and " recover " in line and "Check: PreviousProgramKept" in line
+    assert "function PreviousProgramKept" in iss

@@ -117,6 +117,8 @@ Name: "{group}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}"; IconF
 Name: "{group}\JARVES setup"; Filename: "{app}\python\pythonw.exe"; Parameters: "-I ""{app}\installer_state.py"" open-setup --home ""{code:GetDataDir}"""; WorkingDir: "{app}"
 Name: "{group}\JARVES dashboard"; Filename: "{app}\jarvis.cmd"; Parameters: "dashboard"; WorkingDir: "{app}"
 Name: "{group}\JARVES doctor"; Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" doctor"""; WorkingDir: "{app}"
+; #261: shown only while the previous program is kept. Runs with the OLD python, asks for YES, then restores the verified data backup and the previous program
+Name: "{group}\Recover previous JARVES (after a failed update)"; Filename: "{cmd}"; Parameters: "/k """"{app}\rollback\python\python.exe"" -I ""{app}\installer_state.py"" recover --app ""{app}"" --state ""{app}\install-state.json"""""; WorkingDir: "{app}"; Check: PreviousProgramKept
 Name: "{group}\Check for JARVES updates"; Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" update"""; WorkingDir: "{app}"
 Name: "{group}\Uninstall JARVES"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\JARVES"; Filename: "{app}\jarvis.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\face\JARVES Face.exe"; Tasks: desktopicon
@@ -235,6 +237,11 @@ end;
 function RemoveDesktopShortcut(): Boolean;
 begin
   Result := not WizardSilent() and not WizardIsTaskSelected('desktopicon');
+end;
+
+function PreviousProgramKept(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\rollback\python\python.exe'));
 end;
 
 function DisableAutostart(): Boolean;
