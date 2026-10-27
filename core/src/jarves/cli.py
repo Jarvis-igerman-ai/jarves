@@ -1374,8 +1374,12 @@ def _wake_train(a, cfg, home) -> int:
     else:
         out = wake_prod.candidate_path(home, slug(phrase))      # never the active model: that needs --apply
     try:
+        v = cfg.voice
+        level = max(float(v.wake_threshold), float(v.wake_accept))      # the instant-accept level the Core really uses
+        live = Path(v.wake_word) if str(v.wake_word).endswith(".npz") else None
         rep = train_phrase(phrase, out, say=a.say, samples=samples, voices=voices, seed=a.seed,
-                           sample_files=files, progress=lambda s: print("  " + s, flush=True))
+                           sample_files=files, progress=lambda s: print("  " + s, flush=True),
+                           live_head=live, live_threshold=level, baseline_threshold=level)
     except (RuntimeError, ImportError, OSError) as e:
         print(f"WAKE_TRAIN_FAILED: {e}", file=sys.stderr)
         return 1
