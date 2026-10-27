@@ -162,3 +162,9 @@ def test_567_aws_secret_key_leading_space_formula_and_atomic_archive_name(tmp_pa
     rep = ml.run_eval(REG, SpendPolicy("free-only"), ml.FakeProvider({}, clock=clk), ["free-a"], tasks=ml.TASKS[:1], clock=clk)
     names = {ml.archive(tmp_path, rep, wall=lambda: 0).name for _ in range(3)}
     assert names == {"19700101-000000.json", "19700101-000000-2.json", "19700101-000000-3.json"}
+
+
+def test_575_bom_zero_width_and_fullwidth_formula_cells_are_guarded():
+    for c in ["\ufeff=1+1", "\u200b=cmd", "\u2060@SUM(1)", "\uff1d1+1", "\uff0b1"]:
+        assert ml._cell(c).startswith("'"), c
+    assert ml._cell("plain") == "plain" and ml._cell(5) == 5
