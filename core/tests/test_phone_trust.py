@@ -255,6 +255,7 @@ def _handshake_serial(port: int, root_pem: str) -> int:
     import socket
     from cryptography import x509
     cl = ssl.create_default_context(cadata=root_pem)          # trusts ONLY the JARVES root; the server sends leaf + intermediate
+    cl.minimum_version = ssl.TLSVersion.TLSv1_2                # explicit floor
     with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
         with cl.wrap_socket(raw, server_hostname="127.0.0.1") as s:
             return x509.load_der_x509_certificate(s.getpeercert(binary_form=True)).serial_number
@@ -316,6 +317,7 @@ def test_keep_fresh_survives_errors_and_swaps_once(ca, monkeypatch):
     monkeypatch.setattr(pt, "ensure_leaf", fake)
     monkeypatch.setattr(pt, "server_context", lambda c, k: swaps.append((str(c), str(k))) or ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))
     base = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    base.minimum_version = ssl.TLSVersion.TLSv1_2
     t = pt.keep_fresh(ca, base, interval_s=0.01, stop=stop)
     t.join(10)
     assert not t.is_alive() and calls["n"] == 3
@@ -379,6 +381,7 @@ def test_verify_listener_with_only_the_ca(home):
     pt.ensure_leaf(home, ["localhost", "127.0.0.1"])
     leaf_c, leaf_k = pt.leaf_paths(home)
     srv_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    srv_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     srv_ctx.load_cert_chain(str(leaf_c), str(leaf_k))
     ls = socket.socket()
     ls.bind(("127.0.0.1", 0))
