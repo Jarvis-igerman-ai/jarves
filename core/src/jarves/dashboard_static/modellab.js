@@ -57,7 +57,7 @@
     paid.checked = st.paid;
     const body = st.err ? el("div", { class: "card", role: "alert" }, st.err)
       : !st.runs || !st.runs.length ? el("div", { class: "empty" }, tx(
-        "עוד אין הרצות. מעבדת המודלים רצה רק כשאתם מתחילים אותה: בטרמינל הריצו את "jarvis modellab run". כאן רואים רק תוצאות.",
+        "עוד אין הרצות. מעבדת המודלים רצה רק כשאתם מתחילים אותה: בטרמינל הריצו את “jarvis modellab run”. כאן רואים רק תוצאות.",
         "No runs yet. The Model Lab runs only when you start it: in a terminal run jarvis modellab run. This page only shows results."))
         : el("div", {}, el("div", { class: "row" }, runSelect(tx("הרצה", "Run"), st.a, false, async (v) => { st.a = v; await load(); draw(); }),
           runSelect(tx("השוואה להרצה", "Compare with run"), st.b, true, async (v) => { st.b = v; await load(); draw(); }),
