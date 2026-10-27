@@ -108,16 +108,47 @@ PAGES.home = async function () {
     el("div", { class: "small mono", dir: "ltr" }, tx(v.action_he, v.action_en)),
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך משנים ←", "How to change it →"))))));
   const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L checklist
+  const setupCards = await homeSetupCards();   // #457: one guided card per open setup item (beta, OFF by default)
   const strip = typeof window.privacyStripCard === "function" ? window.privacyStripCard() : null;     // strip.js
   render(el("div", { class: "big-status hero" }, el("span", { class: "lamp " + lampOf(d.status) }),
     el("div", {}, el("h1", { class: "title" }, tx(d.status_he, d.status_en)),
       el("div", { class: "muted" }, d.live ? tx("מדבר עכשיו", "talking now") : tx(d.next.he, d.next.en))),
     el("span", { class: "spacer" }), d.next.link ? el("a", { class: "button-link", href: d.next.link }, tx("קדימה ←", "Go →")) : null),
-    limitCards, setup, tiles, lc ? last : null,
+    limitCards, setupCards, setup, tiles, lc ? last : null,
     el("details", { class: "home-more card" }, el("summary", {}, tx("עוד פרטים: חיבורים, יכולות ופרטיות", "More details: connections, features and privacy")),
       strip, el("div", { class: "grid-home" }, conns, feats), privacyCard(d.privacy)));
   timer = setInterval(() => route(true), 15000);
 };
+
+// ---------------------------------------------------------------- Home setup cards (#457, beta)
+async function homeSetupCards() {
+  let d;
+  try { d = await api("/api/home/setup-cards"); } catch (e) { return null; }
+  if (!d.enabled || !d.cards.length) return null;
+  return el("div", { class: "setup-cards", id: "home-setup-cards" }, d.cards.map((c) => {
+    const msg = el("div", { class: "small", dir: "auto", role: "status" });
+    const reply = (answer) => async () => {
+      try {
+        const r = await post("/api/home/setup-cards", { id: c.id, answer });
+        if (r.hidden) { route(true); return; }
+        msg.textContent = r.message_he ? tx(r.message_he, r.message_en) : tx("נרשם. עברו על השלבים או פתחו את המדריך.", "Noted. Go through the steps or open the guide.");
+      } catch (e) { msg.textContent = e.message; }
+    };
+    return el("div", { class: "card", "data-setup-card": c.id },
+      el("h2", {}, tx("להגדיר: ", "Set up: ") + tx(c.title_he, c.title_en)),
+      el("div", { class: "muted small", dir: "auto" }, tx(c.detail_he, c.detail_en)),
+      el("div", { dir: "auto" }, tx(c.steps_he, c.steps_en)),
+      el("div", { class: "actions" },
+        el("button", { type: "button", class: "primary", onclick: async () => {
+          try { const r = await post("/api/connect/run", { id: c.id }); msg.textContent = tx(r.message_he, r.message_en); if (r.open) location.hash = r.open + "?setup=1"; }
+          catch (e) { msg.textContent = e.message; } } }, tx("חיבור", "Connect")),
+        el("button", { type: "button", "data-answer": "works", onclick: reply("works") }, tx("עובד", "Works")),
+        el("button", { type: "button", "data-answer": "failed", onclick: reply("failed") }, tx("לא עבד", "Did not work")),
+        el("button", { type: "button", "data-answer": "later", onclick: reply("later") }, tx("אחר כך", "Later")),
+        c.failed ? el("a", { class: "button-link", href: "#/guide/" + c.guide }, tx("המדריך ←", "Open the guide →")) : null),
+      msg);
+  }));
+}
 
 // ---------------------------------------------------------------- Connections (Google)
 const CHECK = { ok: ["ok", "עובד", "works"], fail: ["fail", "נכשל", "failed"], not_run: ["plain", "עוד לא נבדק", "not checked yet"],
