@@ -12,3 +12,14 @@ against live GitHub. Both commands are Tier R.
 
 Notes: no new feature switch (a command, not a feature); parity is the guides plus the commands themselves. No new
 dashboard texts, so no locale part was added; the guides carry their own Hebrew. `release run` never tags or pushes.
+
+## Review fixes (Opus review of #640)
+1. `release run` now has `release_run.cmd_run`; test goes through `release_cmd.cmd_release(action="run")`.
+2. Setup force-stops everything under {app}\python, so `install-latest` is two phases: `begin` (verify, backup, stop, launch,
+   keeps the setup process id) and a detached PowerShell waiter OUTSIDE {app} that waits for the setup process to exit and
+   then starts `install-latest --finish STATE` from the NEW program (checks, rollback, report file). Manual proof on the owner
+   PC: run `jarvis install-latest --channel beta` from PowerShell; the window may close; after 2-4 minutes
+   `jarvis install-latest --report` shows PASS and `jarvis update status` shows the new version. First install of this
+   feature: the installed version has no `--finish`, so the waiter writes an honest FAIL-style note telling to run doctor by hand.
+3. A failed launch restarts the Core if it ran and prints a clean report.
+4. Checks wait for the setup process to exit; no rollback while setup runs; Core-not-running no longer waits on the 90 s watch.

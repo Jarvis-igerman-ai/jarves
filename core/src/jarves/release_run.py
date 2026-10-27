@@ -142,3 +142,15 @@ def run(root: Path, version: str, *, approved_by: str | None = None, dry_run: bo
     r.lines += ["  " + x for x in next_commands(version, sheet_rel, evidence_rel)]
     r.code = 0
     return r
+
+
+def cmd_run(a, home, repo_root: Path, version: str, finish: Callable[[so.Sheet, str], None]) -> int:
+    """CLI entry (release_cmd.cmd_release, action `run`): real GitHub fetch, prints the lines, returns the code."""
+    try:
+        res = run(repo_root, version, approved_by=getattr(a, "approved_by_owner", None),
+                  dry_run=bool(getattr(a, "dry_run", False)), finish=finish)
+    except so.SheetError as e:
+        print(f"RELEASE_RUN: {e}")
+        return 2
+    print("\n".join(res.lines))
+    return res.code

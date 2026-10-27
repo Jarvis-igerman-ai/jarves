@@ -137,3 +137,19 @@ def test_cli_registration():
     assert ns.action == "run" and ns.approved_by_owner == "chat ok now" and ns.dry_run is True
     assert sub.choices["release"].parse_args(["run"]).approved_by_owner is None
     assert rf.REPO in "".join(rr.next_commands(V, "a", "b"))
+
+
+def test_cmd_release_run_goes_through_cmd_run(tmp_path, monkeypatch, capsys):
+    (tmp_path / "core").mkdir()
+    make_sheet(tmp_path)
+    monkeypatch.setattr(rf, "github_fetch", fetcher())
+    ns = argparse.Namespace(action="run", version=V, repo=str(tmp_path), approved_by_owner=None, dry_run=False,
+                            beta=f"{V}-beta.3", commit=SHA, owner=None, row=None, finish=False, report=False, force=False)
+    assert release_cmd.cmd_release(ns, None, tmp_path) == 1          # no approval: nothing signed
+    assert "--approved-by-owner" in capsys.readouterr().out and not so.load(tmp_path, V).signed
+    ns.approved_by_owner = "ok"                                       # too short: clean error, not a traceback
+    assert release_cmd.cmd_release(ns, None, tmp_path) == 2 and "RELEASE_RUN" in capsys.readouterr().out
+    ns.approved_by_owner = "chat approval 2026-10-27 09:00 UTC"
+    assert release_cmd.cmd_release(ns, None, tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "git tag -a v5.0.0" in out and so.load(tmp_path, V).signed

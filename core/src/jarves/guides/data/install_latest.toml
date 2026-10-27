@@ -27,8 +27,8 @@ en = "To install: jarvis install-latest --channel beta. It backs up, verifies th
 action = "command:jarvis install-latest --channel beta"
 
 [[steps]]
-he = "קראו את הדוח. אם הכול PASS סיימתם. אם משהו FAIL, הפקודה כבר החזירה את הגרסה הקודמת; אפשר גם ידנית: jarvis update --rollback --yes."
-en = "Read the report. If everything is PASS you are done. If something is FAIL the command already put the previous version back; you can also do it by hand: jarvis update --rollback --yes."
+he = "קראו את הדוח (אחרי ההתקנה החלון הזה נסגר מעצמו; הדוח נשמר ומודפס שוב עם jarvis install-latest --report). אם הכול PASS סיימתם. אם משהו FAIL, הפקודה כבר החזירה את הגרסה הקודמת; אפשר גם ידנית: jarvis update --rollback --yes."
+en = "Read the report (setup closes this window by itself; the report is saved and printed again with jarvis install-latest --report). If everything is PASS you are done. If something is FAIL the command already put the previous version back; you can also do it by hand: jarvis update --rollback --yes."
 action = "command:jarvis update --rollback"
 
 [[problems]]

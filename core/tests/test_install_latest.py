@@ -12,7 +12,8 @@ NOW = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
 
 
 class Fake:
-    def __init__(self, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False):
+    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False):
+        self.tmp, self.launch_error, self.installer_exits, self.spawn = tmp, launch_error, installer_exits, spawn
         self.calls: list = []
         self.available, self.error, self.core, self.wait_end = available, error, core, wait
         self.cli = cli or {}
@@ -44,22 +45,39 @@ class Fake:
             key = argv[0]
             return self.cli.get(key, (0, "JARVES 4.5.1-beta.9 (commit abc)" if key == "update" else "ok"))
 
+        def launch(p, w, restart):
+            self.calls.append(f"launch restart={restart}")
+            if self.launch_error:
+                raise self.launch_error
+            return 4242
+
+        def wait_installer():
+            self.calls.append("wait_installer")
+            return self.installer_exits
+
+        def spawn(pid, state):
+            self.calls.append(f"spawn pid={pid}")
+            self.spawned = state
+
         return il.Deps(
+            home=self.tmp, start_core=rec("start_core"), wait_installer=wait_installer,
+            spawn_finisher=spawn if self.spawn else None,
             channel=self.channel, set_channel=rec("set_channel"), backup_now=backup,
             check=lambda ch: {"error": self.error, "available": self.available, "current": "4.5.0",
                               "latest": {"version": "4.5.1", "display": "4.5.1-beta.9"}},
             prepare=prepare, core_running=lambda: self.core, detect_running=lambda up: {"core": up},
             record_was_running=rec("record"), stop_core=rec("stop"),
-            launch=lambda p, w, restart: self.calls.append(f"launch restart={restart}"),
+            launch=launch,
             wait=lambda c: self.wait_end, run_cli=run_cli, rollback=rec("rollback", {}),
-            now=lambda: NOW, say=lambda s: None)
+            now=lambda: NOW)
 
 
-def test_happy_path_order_and_report():
-    f = Fake()
+def test_happy_path_order_and_report(tmp_path):
+    f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
-    assert f.calls[:7] == ["set_channel", "backup", "prepare", "record", "stop", "launch restart=True", "cli:update status"]
+    assert f.calls[:8] == ["set_channel", "backup", "prepare", "record", "stop", "launch restart=True", "wait_installer",
+                           "cli:update status"]
     assert [c for c in f.calls if c.startswith("cli:")] == ["cli:update status", "cli:doctor", "cli:selftest",
                                                             "cli:status --brief"]
     text = rep.render()
@@ -68,28 +86,28 @@ def test_happy_path_order_and_report():
     assert text.count("[PASS]") >= 6 and "[FAIL]" not in text
 
 
-def test_failed_check_rolls_back():
-    f = Fake(cli={"selftest": (1, "selftest FAIL: database")})
+def test_failed_check_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"selftest": (1, "selftest FAIL: database")})
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and "rollback" in f.calls
     assert ("selftest", False, "exit 1: selftest FAIL: database") in rep.checks
     assert rep.render().startswith("FAIL") and "rolled back" in rep.render()
 
 
-def test_failed_installer_rolls_back_without_running_checks():
-    f = Fake(wait="failed")
+def test_failed_installer_rolls_back_without_running_checks(tmp_path):
+    f = Fake(tmp=tmp_path, wait="failed")
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and not any(c.startswith("cli:") for c in f.calls)
 
 
-def test_version_mismatch_is_a_failure():
-    f = Fake(cli={"update": (0, "JARVES 4.5.0 (commit abc)")})
+def test_version_mismatch_is_a_failure(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"update": (0, "JARVES 4.5.0 (commit abc)")})
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back
 
 
-def test_rollback_that_cannot_run_is_reported_with_the_command():
-    f = Fake(wait="failed")
+def test_rollback_that_cannot_run_is_reported_with_the_command(tmp_path):
+    f = Fake(tmp=tmp_path, wait="failed")
     d = f.deps()
     d.rollback = lambda: (_ for _ in ()).throw(UpdateError("ROLLBACK_NONE", "no previous"))
     rep = il.run(d)
@@ -97,44 +115,105 @@ def test_rollback_that_cannot_run_is_reported_with_the_command():
     assert any(n == "automatic rollback" and not ok and "jarvis update --rollback --yes" in d_ for n, ok, d_ in rep.checks)
 
 
-def test_core_not_running_installs_without_restart_flag_and_tolerates_status_1():
-    f = Fake(core=False, wait="timeout", cli={"status": (1, "Core is NOT running")})
+def test_core_not_running_installs_without_restart_flag_and_tolerates_status_1(tmp_path):
+    f = Fake(tmp=tmp_path, core=False, wait="timeout", cli={"status": (1, "Core is NOT running")})
     rep = il.run(f.deps())
     assert rep.ok and "launch restart=False" in f.calls and "stop" not in f.calls
 
 
-def test_backup_failure_stops_before_anything_changes():
-    f = Fake(backup_error=True)
+def test_backup_failure_stops_before_anything_changes(tmp_path):
+    f = Fake(tmp=tmp_path, backup_error=True)
     rep = il.run(f.deps())
     assert not rep.ok and not rep.changed and f.calls == ["backup"]
     assert "prepare" not in f.calls and "stop" not in f.calls
 
 
-def test_verification_failure_stops_before_stopping_the_core():
-    f = Fake(prep_error=UpdateError("UPDATE_CHECKSUM_MISMATCH", "bad sha"))
+def test_verification_failure_stops_before_stopping_the_core(tmp_path):
+    f = Fake(tmp=tmp_path, prep_error=UpdateError("UPDATE_CHECKSUM_MISMATCH", "bad sha"))
     rep = il.run(f.deps())
     assert not rep.ok and not rep.changed and "stop" not in f.calls and "launch restart=True" not in f.calls
     assert "UPDATE_CHECKSUM_MISMATCH" in rep.render()
 
 
-def test_up_to_date_and_check_error():
-    assert il.run(Fake(available=False).deps()).ok
-    f = Fake(error="offline")
+def test_up_to_date_and_check_error(tmp_path):
+    assert il.run(Fake(tmp=tmp_path, available=False).deps()).ok
+    f = Fake(tmp=tmp_path, error="offline")
     rep = il.run(f.deps())
     assert not rep.ok and "offline" in rep.render() and "backup" not in f.calls
 
 
-def test_dry_run_changes_nothing():
-    f = Fake()
+def test_dry_run_changes_nothing(tmp_path):
+    f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta", dry_run=True)
     assert rep.ok and rep.dry_run and not rep.changed
     assert f.calls == []                                   # not even the channel switch
     assert rep.render().startswith("DRY RUN") and "would: backup now" in rep.render()
 
 
-def test_bad_channel_and_parser():
-    assert not il.run(Fake().deps(), channel="nightly").ok
+def test_bad_channel_and_parser(tmp_path):
+    assert not il.run(Fake(tmp=tmp_path).deps(), channel="nightly").ok
     sub = argparse.ArgumentParser().add_subparsers(dest="cmd")
     il.add_cli(sub)
     ns = sub.choices["install-latest"].parse_args(["--channel", "beta", "--dry-run"])
     assert ns.channel == "beta" and ns.dry_run is True
+
+
+def test_launch_failure_restarts_core_and_reports_cleanly(tmp_path):
+    for err in (UpdateError("UPDATE_CHECKSUM_MISMATCH", "changed after verification"), OSError("Popen failed")):
+        f = Fake(tmp=tmp_path, launch_error=err)
+        rep = il.run(f.deps())                           # must not raise
+        assert not rep.ok and not rep.changed and "start_core" in f.calls
+        assert f.calls.index("stop") < f.calls.index("start_core")
+        text = rep.render()
+        assert text.startswith("FAIL") and "nothing was installed" in text and "restart Core" in text
+        assert not any(c.startswith("cli:") for c in f.calls) and "rollback" not in f.calls
+    f = Fake(tmp=tmp_path, core=False, launch_error=OSError("x"))
+    il.run(f.deps())
+    assert "start_core" not in f.calls                    # the Core was not running: nothing to restart
+
+
+def test_checks_wait_for_the_setup_process_and_never_roll_back_while_it_runs(tmp_path):
+    f = Fake(tmp=tmp_path, core=False, wait="timeout")
+    rep = il.run(f.deps())
+    assert rep.ok and f.calls.index("wait_installer") < f.calls.index("cli:update status")
+    g = Fake(tmp=tmp_path, core=False, installer_exits=False)
+    rep = il.run(g.deps())
+    assert not rep.ok and not rep.rolled_back and "rollback" not in g.calls
+    assert not any(c.startswith("cli:") for c in g.calls) and "still running" in rep.render()
+
+
+def test_core_not_running_does_not_wait_for_the_core_watch(tmp_path):
+    f = Fake(tmp=tmp_path, core=False, wait="failed")      # watch() would say failed/timeout: it must not be consulted
+    assert il.run(f.deps()).ok
+
+
+def test_spawned_finisher_runs_outside_the_installed_program(tmp_path):
+    f = Fake(tmp=tmp_path, spawn=True)
+    rep = il.begin(f.deps())
+    assert rep.pending and rep.changed and rep.render().startswith("PENDING")
+    assert "spawn pid=4242" in f.calls and not any(c.startswith("cli:") or c == "rollback" for c in f.calls)
+    state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
+    d = f.deps()
+    done = il.finish(d, state, installer_running=False)    # what the waiter's `--finish` does in the new program
+    assert done.ok and not done.pending and done.version == "4.5.1" and done.revert_id == "pre-update.zip"
+    assert (tmp_path / "updates" / il.REPORT_FILE).read_text(encoding="utf-8").startswith("PASS")
+    again = il.finish(f.deps(), state, installer_running=True)   # waiter timed out: no judgement, no rollback
+    assert not again.ok and "rollback" not in f.calls
+
+
+def test_finisher_script_waits_then_starts_the_new_program_with_quoting(tmp_path):
+    s = il.finisher_script(77, tmp_path / "it's.json", r"C:\Apps\JARVES\python\python.exe", tmp_path / "r.txt")
+    assert "$p = 77" in s and s.index("Wait-Process") < s.index("--finish")
+    assert "it''s.json" in s and "--installer-running" in s and "jarvis update --rollback --yes" in s
+    assert "rollback()" not in s
+
+
+def test_wait_report_returns_new_report_only(tmp_path):
+    (tmp_path / "updates").mkdir()
+    p = tmp_path / "updates" / il.REPORT_FILE
+    t = [0.0]
+    assert il.wait_report(tmp_path, 0, timeout_s=6, sleep=lambda s: t.__setitem__(0, t[0] + s), clock=lambda: t[0]) is None
+    p.write_text("PASS x\n", encoding="utf-8")
+    assert il.wait_report(tmp_path, 0, timeout_s=6, sleep=lambda s: None, clock=lambda: 0.0) == "PASS x"
+    assert il.wait_report(tmp_path, p.stat().st_mtime + 100, timeout_s=3, sleep=lambda s: None,
+                          clock=iter([0, 1, 5]).__next__) is None
