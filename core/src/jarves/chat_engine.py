@@ -278,6 +278,7 @@ class WebChat:
         self._turn_n = 0
         self._future: concurrent.futures.Future | None = None
         self._quiet: tuple[float, bool] = (0.0, False)
+        self._silent_last = False                         # last silent switch value seen or written (#665)
         self.blocks = ub.BlockStore(clock=clock)           # S2: server-side record of the checklists that were shown
         self.closed = False
         svc = getattr(core, "approvals", None)
@@ -306,13 +307,21 @@ class WebChat:
 
     # ------------------------------------------------------------------ silence
     def setting_silent(self) -> bool:
+        """The owner's silent switch. A failed read (a busy or locked settings database on another thread) must never turn a
+        silent chat into a speaking one: it answers with the last value seen or written (#665); only a core with no
+        settings store at all counts as "not silent"."""
         try:
-            return (self.core.memory.get_setting("chat:silent") or "") == "on"
-        except Exception:
+            on = (self.core.memory.get_setting("chat:silent") or "") == "on"
+        except AttributeError:
             return False
+        except Exception:
+            return self._silent_last
+        self._silent_last = on
+        return on
 
     def set_silent(self, on: bool) -> None:
         self.core.memory.set_setting("chat:silent", "on" if on else "off")
+        self._silent_last = bool(on)
         self.events.add("state")
 
     def quiet(self) -> bool:
@@ -321,7 +330,7 @@ class WebChat:
             try:
                 self._quiet = (now, quiet_now(self.home, self.clock))
             except Exception:
-                self._quiet = (now, False)
+                self._quiet = (now, self._quiet[1])            # keep the last answer: a failed check never un-silences (#665)
         return self._quiet[1]
 
     def silent_state(self) -> dict:
