@@ -52,6 +52,18 @@ def retry_files(junit: Path) -> list[str] | None:
     return files if len(files) <= MAX_FILES else None
 
 
+def retry_files_any(junit: Path) -> list[str]:
+    """Files to re-run for a retry of ANY failure (the real-browser job). Fail closed: no junit, no failure found, or a
+    failure whose file cannot be mapped means [] = re-run the whole suite, never a partial one."""
+    try:
+        fails = failures(junit)
+    except (OSError, ET.ParseError):
+        return []
+    if not fails or any(not f["file"] for f in fails):
+        return []
+    return sorted({f["file"] for f in fails})
+
+
 def report(first: Path, second: Path | None) -> dict:
     first_fail = failures(first)
     second_fail = {f["test"] for f in failures(second)} if second and second.is_file() else set()
@@ -64,11 +76,15 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("failed-files")
     f.add_argument("--junit", type=Path, required=True)
+    f.add_argument("--any", action="store_true", help="any failure counts; print nothing (= whole suite) if one cannot be mapped")
     r = sub.add_parser("report")
     r.add_argument("--first", type=Path, required=True)
     r.add_argument("--second", type=Path)
     r.add_argument("--out", type=Path, required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "failed-files" and a.any:
+        print(" ".join(f"tests/{x}" for x in retry_files_any(a.junit)))
+        return 0
     if a.cmd == "failed-files":
         files = retry_files(a.junit) if a.junit.is_file() else None
         if not files:

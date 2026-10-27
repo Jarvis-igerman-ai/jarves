@@ -125,19 +125,13 @@ jobs:
             # lean process item 1: the queue group has the SAME docs-free tree as a green run of ITS OWN PR at the PR's current
             # head (nothing merged ahead changed the code). Reuse that proof, but only a proof this PR produced: another PR
             # (or a PR that edited this workflow) could otherwise upload an artifact named for this tree.
-            pr=$(printf '%s' "$MG_REF" | sed -n 's|.*/pr-\([0-9][0-9]*\)-.*|\1|p')
-            head=""; [ -n "$pr" ] && head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .head.sha || true)
-            mg_proof() {   # $1 = resolve | resolve-tests ; sets proof_run when the proving run belongs to this PR at its head
-              python3 core/tools/ci_reuse.py "$1" --repo "$GITHUB_REPOSITORY" --tree "$tree" > reuse.out || return 1
-              local rid; rid=$(sed -n 's/^run_id=//p' reuse.out | head -1)
-              [ -n "$rid" ] && [ -n "$head" ] || return 1
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$rid" \
-                --jq "select(.event==\"pull_request\" and .head_sha==\"$head\" and ([.pull_requests[].number]|index($pr))) | .id" | grep -q . || return 1
-              proof_run=$rid
-            }
-            if mg_proof resolve; then
+            python3 core/tools/ci_reuse.py merge-group --repo "$GITHUB_REPOSITORY" --tree "$tree" --head-ref "$MG_REF" > mg.out || echo "mode=none" > mg.out
+            cat mg.out
+            mode=$(sed -n 's/^mode=//p' mg.out | head -1); pr=$(sed -n 's/^pr=//p' mg.out | head -1)
+            [ "$mode" = "none" ] || proof_run=$(sed -n 's/^run_id=//p' mg.out | head -1)
+            if [ "$mode" = "installer" ]; then
               reused=true     # a real PR installer exists for this tree: nothing to test or build here
-            elif mg_proof resolve-tests; then
+            elif [ "$mode" = "tests" ]; then
               reuse_tests_only=true     # tests proven, no installer yet: build and smoke it here when core/src etc. changed
             fi
             if [ -n "$proof_run" ]; then echo "merge group reuses PR #$pr run $proof_run for tree ${tree:0:12}" | tee -a "$GITHUB_STEP_SUMMARY"; fi
@@ -402,9 +396,17 @@ jobs:
       - name: pytest real-browser files (one retry; ANY skip fails the run)
         shell: bash
         run: |
-          run() { uv run pytest -q -rs -p no:cacheprovider --browser only -m "not quarantine" --junitxml=pytest-junit.xml 2>&1 | tee pytest.out; return "${PIPESTATUS[0]}"; }
-          run || { echo "::warning::real-browser tests failed once; retrying the browser files one time"; run; }
-          rc=$?
+          run() { uv run pytest -q -rs -p no:cacheprovider --browser only -m "not quarantine" --junitxml=pytest-junit.xml "$@" 2>&1 | tee -a pytest.out; return "${PIPESTATUS[0]}"; }
+          # CI speed (docs/plans/CI_SPEED_2026-10-26.md): the retry re-runs only the files that failed (a full second
+          # browser suite doubled the job to 15-23 min on 1 run in 6). Same rule as before: a second failure fails the job.
+          rc=0
+          run || {
+            cp pytest-junit.xml first-junit.xml 2>/dev/null || true       # keep the first failure for diagnostics (like the core job)
+            # fail closed: a failure that cannot be mapped to a file re-runs the WHOLE browser suite, never a partial one
+            FAILED=$(uv run python tools/ci_flake.py failed-files --any --junit first-junit.xml)
+            echo "::warning::real-browser tests failed once; retrying ${FAILED:-the whole browser suite} one time"
+            run $FAILED; rc=$?
+          }
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
           exit $rc
       - name: Redacted diagnostics on failure
