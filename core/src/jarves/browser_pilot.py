@@ -39,6 +39,8 @@ class PilotError(Exception):
 
 _NUMERIC_LABEL = re.compile(r"^(0x[0-9a-f]*|[0-9]+)$")
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_SIIT = ipaddress.ip_network("::ffff:0:0:0/96")      # IPv4-translated (::ffff:0:a00:1 embeds 10.0.0.1): refused (#575)
+_SITE_LOCAL = ipaddress.ip_network("fec0::/10")     # deprecated site-local: refused
 _V4COMPAT = ipaddress.ip_network("::/96")        # deprecated IPv4-compatible form (::10.0.0.1): map the low 32 bits
 
 
@@ -81,7 +83,9 @@ def page_scope(url: str) -> str:
             return "local"
         odd = host.endswith((".local", ".internal", ".lan", ".home", ".arpa"))
         return "public" if "." in host and not odd else ""
-    if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64 or (ip in _V4COMPAT and int(ip) > 1)):
+    if ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1)):
+        return ""                                    # translated / deprecated forms: never public, whatever they embed
+    if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64):
         ip = ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
     if ip.is_loopback:
         return "local"
@@ -130,7 +134,9 @@ def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) ->
             ip = ipaddress.ip_address(str(a).split("%")[0])
         except ValueError:
             return ""
-        if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64 or (ip in _V4COMPAT and int(ip) > 1)):
+        if ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1)):
+            return ""
+        if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64):
             ip = ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
         if not ip.is_global:
             return ""
