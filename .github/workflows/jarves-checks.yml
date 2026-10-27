@@ -381,9 +381,28 @@ jobs:
       - name: pytest real-browser files (one retry; ANY skip fails the run)
         shell: bash
         run: |
-          run() { uv run pytest -q -rs -p no:cacheprovider --browser only -m "not quarantine" --junitxml=pytest-junit.xml 2>&1 | tee pytest.out; return "${PIPESTATUS[0]}"; }
-          run || { echo "::warning::real-browser tests failed once; retrying the browser files one time"; run; }
-          rc=$?
+          run() { uv run pytest -q -rs -p no:cacheprovider --browser only -m "not quarantine" --junitxml=pytest-junit.xml "$@" 2>&1 | tee -a pytest.out; return "${PIPESTATUS[0]}"; }
+          # CI speed (docs/plans/CI_SPEED_2026-10-26.md): the retry re-runs only the files that failed (a full second
+          # browser suite doubled the job to 15-23 min on 1 run in 6). Same rule as before: a second failure fails the job.
+          rc=0
+          run || {
+            FAILED=$(python3 - <<'PY'
+          import re, xml.etree.ElementTree as ET
+          files = set()
+          try:
+              for case in ET.parse("pytest-junit.xml").getroot().iter("testcase"):
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      m = re.match(r"(?:tests\.)?(test_\w+)", case.get("classname") or "")
+                      if m:
+                          files.add("tests/%s.py" % m.group(1))
+          except Exception:
+              pass
+          print(" ".join(sorted(files)))
+          PY
+            )
+            echo "::warning::real-browser tests failed once; retrying ${FAILED:-the whole browser suite} one time"
+            run $FAILED; rc=$?
+          }
           if grep -E "(^SKIPPED|[0-9]+ skipped|xfailed)" pytest.out; then echo "::error::tests were skipped"; exit 1; fi
           exit $rc
       - name: Redacted diagnostics on failure
