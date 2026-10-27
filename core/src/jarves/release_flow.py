@@ -19,7 +19,8 @@ from pathlib import Path
 from . import release_signoff as so
 
 REPO = "Jarvis-igerman-ai/jarves"
-_LATER = re.compile(r"(?i)^(enhancement|v[5-9])$")
+_LATER = re.compile(r"(?i)^(enhancement|v[5-9]|4\.5\.1)$")
+ACCEPTED_LABEL = "known-issue-4.5"   # OWNER-ONLY label: the owner accepts an open P0-P2 as a known issue for the 4.5 stable
 AUTOMATION_NOTE = "accepted by automation: {ev}"
 
 SMOKE = (
@@ -59,16 +60,40 @@ def check_main(runs: list[dict], head: str | None) -> Check:
     return Check("main green", ok, f"jarves-checks {str(last.get('head_sha', ''))[:10]}: {last.get('conclusion')}")
 
 
-def check_issues(issues: list[dict]) -> Check:
-    bad = []
+def _label_names(issue: dict) -> list[str]:
+    return [(str(l.get("name", "")) if isinstance(l, dict) else str(l)).strip() for l in issue.get("labels", [])]
+
+
+def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str]], list[tuple[int | None, str, str]]]:
+    """THE one open-P0-P2 rule, shared by `jarvis release status` and core/tools/release_gate.py (#535).
+
+    Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs) labelled P0-P2.
+    Label `known-issue-4.5` (owner-only, exact) makes an issue accepted: printed, not a blocker, even when labelled bug.
+    Planned work (enhancement, v5-v9, 4.5.1) is skipped ONLY when the issue is not also labelled bug."""
+    blockers: list[tuple[int | None, str, str]] = []
+    accepted: list[tuple[int | None, str, str]] = []
     for i in issues:
         if "pull_request" in i or str(i.get("state", "open")) != "open":
             continue
-        labels = [str(l.get("name", "")) if isinstance(l, dict) else str(l) for l in i.get("labels", [])]
+        labels = _label_names(i)
         sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
-        if sev and not any(_LATER.match(l) for l in labels) or any(l.lower() == "bug" for l in labels):
-            bad.append(f"#{i.get('number')} {sev}")
-    return Check("zero open P0-P2", not bad, "none open" if not bad else "open: " + ", ".join(bad))
+        if not sev:
+            continue
+        row = (i.get("number"), sev, str(i.get("title", ""))[:70])
+        if any(l.lower() == ACCEPTED_LABEL for l in labels):
+            accepted.append(row)
+        elif any(l.lower() == "bug" for l in labels) or not any(_LATER.match(l) for l in labels):
+            blockers.append(row)
+    return blockers, accepted
+
+
+def check_issues(issues: list[dict]) -> Check:
+    bad, accepted = classify_issues(issues)
+    note = ""
+    if accepted:
+        note = f"; accepted known issues ({ACCEPTED_LABEL}): " + ", ".join(f"#{n} {s}" for n, s, _ in accepted)
+    detail = ("none open" if not bad else "open: " + ", ".join(f"#{n} {s}" for n, s, _ in bad)) + note
+    return Check("zero open P0-P2", not bad, detail)
 
 
 def check_sheet(root: Path, version: str) -> Check:

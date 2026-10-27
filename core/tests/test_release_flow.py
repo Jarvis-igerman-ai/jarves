@@ -96,3 +96,59 @@ def test_cli_sheet_and_status(tmp_path, home, monkeypatch, capsys):
     assert run("status", "--report") == 1
     out = capsys.readouterr().out
     assert "What remains" in out and (tmp_path / "docs/release/EVIDENCE_4.1.0.md").is_file()
+
+
+def _iss(n, *labels, **kw):
+    return {"number": n, "title": f"t{n}", "state": "open", "labels": [{"name": x} for x in labels], **kw}
+
+
+def _load_gate():
+    import importlib.util
+    import sys
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("release_gate_t", Path(__file__).resolve().parents[1] / "tools" / "release_gate.py")
+    gate = importlib.util.module_from_spec(spec)
+    sys.modules["release_gate_t"] = gate
+    spec.loader.exec_module(gate)
+    return gate
+
+
+def test_status_and_gate_share_one_issue_rule():
+    """#535 / #518 item 5: known-issue-4.5 is skipped and printed, a bug without it counts, planned-work labels never skip a bug."""
+    gate = _load_gate()
+    accepted = [_iss(1, "P1", "bug", "known-issue-4.5"), _iss(2, "P2", "known-issue-4.5")]
+    c = rf.check_issues(accepted)
+    assert c.ok and "#1 P1" in c.detail and "known-issue-4.5" in c.detail
+    mixed = accepted + [_iss(3, "P1", "bug"), _iss(4, "P1", "bug", "v7"), _iss(5, "P2", "bug", "4.5.1"),
+                        _iss(6, "P0", "bug", "enhancement"), _iss(7, "P2", "v6"), _iss(8, "P2", "4.5.1"),
+                        _iss(9, "P3", "bug"), _iss(10, "P1", pull_request={}), {**_iss(11, "P1"), "state": "closed"}]
+    st = rf.check_issues(mixed)
+    assert not st.ok
+    blockers = st.detail.split("; accepted")[0]
+    for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P0")):
+        assert f"#{n} {s}" in blockers
+    for n in (7, 8, 9, 10, 11):
+        assert f"#{n} " not in blockers
+    # the gate sees exactly the same blockers and accepted set
+    assert [p.split(" issue ")[1].split(":")[0] for p in gate.issue_problems(mixed)] == ["#3", "#4", "#5", "#6"]
+    assert gate.accepted_issues(mixed) == ["#1 (P1): t1", "#2 (P2): t2"]
+
+
+def test_status_gh_failure_refuses_and_signed_sheet_required(tmp_path):
+    def boom(kind):
+        raise OSError("gh down")
+    checks = rf.collect(tmp_path, "4.5.0", fetch=boom, head=SHA, now=NOW)
+    assert not checks[1].ok and "could not read GitHub" in checks[1].detail
+    ok = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
+    sheet = [c for c in ok if c.name == "owner sheet"][0]
+    assert not sheet.ok and "missing" in sheet.detail            # no signed sheet: not ready, whatever the issues say
+    assert any(t.startswith("[you] owner sheet") for t in rf.remaining(ok))
+
+
+def test_status_ignores_legacy_bug_tables_and_checklists(tmp_path):
+    rev = tmp_path / "docs" / "reviews"
+    rev.mkdir(parents=True)
+    (rev / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
+    (rev / "RELEASE_CHECKLIST_4.5.0.md").write_text("| 3 | thing | open |\n")
+    checks = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
+    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0-P2"]

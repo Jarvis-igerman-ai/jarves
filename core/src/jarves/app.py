@@ -1872,7 +1872,9 @@ class Core:
                 clip_noted = now                  # VQ-7: say the exact fix on the dashboard/status, once a minute
                 logs.warn("wake", "WAKE_MIC_CLIPPING", "the microphone level is too high (audio clips)",
                           peak=round(clip.peak, 3), fix=MIC_CLIP_FIX)
-                self._wake_note("clipping", MIC_CLIP_FIX, peak=round(clip.peak, 3))
+                from .voice.wake_record import webcam_hint
+                self._wake_note("clipping", MIC_CLIP_FIX + webcam_hint(_mic_name(self.cfg.voice.input_device)),
+                                peak=round(clip.peak, 3))
             yield c
 
     def _wake_should_listen(self) -> bool:
