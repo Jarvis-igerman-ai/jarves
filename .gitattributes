@@ -1,1 +1,2 @@
 *.cmd text eol=crlf
+docs/DOC_MAP.md merge=union
