@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -32,7 +33,26 @@ HEADER = ("ID", "Area", "What to do", "Expected", "Result", "Note")
 SHEET_DIR = Path("docs") / "reviews"
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_SPLIT = re.compile(r"(?<!\\)\|")
+
+
+def _split_row(line: str) -> list[str]:
+    """Split a table row on pipes that are not escaped; a backslash escapes the next character (so a note ending in a backslash
+    is stored as two backslashes and cannot swallow the separator, #606)."""
+    cells, cur, i = [], [], 0
+    while i < len(line):
+        c = line[i]
+        if c == chr(92) and i + 1 < len(line):
+            cur.append(line[i:i + 2])
+            i += 2
+            continue
+        if c == "|":
+            cells.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    cells.append("".join(cur))
+    return cells
 
 
 class SheetError(ValueError):
@@ -52,11 +72,20 @@ def sheet_path(root: Path | str, version: str) -> Path:
 
 
 def _cell(text: str) -> str:
-    return " ".join(str(text).replace("|", "\\|").split())
+    t = unicodedata.normalize("NFC", str(text))                      # an editor that rewrites the sheet in NFD must not void it
+    return " ".join(t.replace(chr(92), chr(92) * 2).replace("|", chr(92) + "|").split())
 
 
 def _uncell(text: str) -> str:
-    return text.strip().replace("\\|", "|")
+    out, i, t = [], 0, text.strip()
+    while i < len(t):
+        if t[i] == chr(92) and i + 1 < len(t) and t[i + 1] in (chr(92), "|"):
+            out.append(t[i + 1])
+            i += 2
+        else:
+            out.append(t[i])
+            i += 1
+    return unicodedata.normalize("NFC", "".join(out))
 
 
 @dataclass
@@ -126,7 +155,7 @@ class Sheet:
         for line in body.splitlines():
             if not line.startswith("|") or line.startswith("|---") or line.startswith("| ID "):
                 continue
-            cells = [_uncell(c) for c in _SPLIT.split(line.strip())[1:-1]]
+            cells = [_uncell(c) for c in _split_row(line.strip())[1:-1]]
             if len(cells) != len(HEADER):
                 raise SheetError(f"bad table row: {line[:60]!r}")
             if cells[4] not in RESULTS:
@@ -171,7 +200,7 @@ class Sheet:
         if not SHA_RE.match((commit or "").strip().lower()):
             raise SheetError("the commit must be the full 40-character SHA of the tested beta build")
         owner = " ".join(str(owner or "").split())[:80]
-        if not owner or any(ord(c) < 32 for c in owner):
+        if not owner or not owner.isprintable():                      # no control, DEL, bidi or zero-width characters (#606)
             raise SheetError("the sign-off needs the owner's name (--owner NAME)")
         self.beta, self.commit, self.date = beta, commit.strip().lower(), today or date.today().isoformat()
         self.owner = owner
