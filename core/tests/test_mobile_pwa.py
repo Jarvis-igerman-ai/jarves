@@ -136,6 +136,13 @@ def test_index_has_no_inline_script_or_style():
     assert 'rel="manifest"' in html and "viewport" in html
     man = json.loads((MOBILE_DIR / "manifest.webmanifest").read_text(encoding="utf-8"))
     assert man["scope"] == "/m/" and man["start_url"] == "/m/" and man["display"] == "standalone"
+    # Chrome installability (#510): PNG icons at 192 and 512 that really exist and have those sizes.
+    pngs = {i["sizes"]: i["src"] for i in man["icons"] if i["type"] == "image/png"}
+    assert set(pngs) == {"192x192", "512x512"}
+    for sizes, src in pngs.items():
+        raw = (MOBILE_DIR / src.rsplit("/", 1)[1]).read_bytes()
+        w, h = int.from_bytes(raw[16:20], "big"), int.from_bytes(raw[20:24], "big")
+        assert raw[1:4] == b"PNG" and f"{w}x{h}" == sizes
 
 
 def catalog(src, lang):
