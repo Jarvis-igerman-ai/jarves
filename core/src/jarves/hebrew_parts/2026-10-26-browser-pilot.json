@@ -1,5 +1,5 @@
 {
- "let JARVES read pages you point to (local pages and public pages only) in a read-only session: no login, no form, no click, no stored cookie; you can pause or stop it": "מאפשר לג'ארביס לקרוא דפים שתצביעו עליהם (דפים מקומיים וציבוריים בלבד) בסשן לקריאה בלבד: בלי התחברות, בלי טפסים, בלי לחיצות, בלי עוגיות שמורות; אפשר להשהות או לעצור",
+ "let JARVES read pages you point to (local pages and public pages only) in a read-only session: the assistant never logs in, fills a form or clicks, and nothing is stored; only you can take over; you can pause or stop it": "מאפשר לג'ארביס לקרוא דפים שתצביעו עליהם (דפים מקומיים וציבוריים בלבד) בסשן לקריאה בלבד: הסוכן אף פעם לא מתחבר, ממלא טפסים או לוחץ, ושום דבר לא נשמר; רק אתם יכולים לקחת שליטה; אפשר להשהות או לעצור",
  "never run on a real page; read-only pilot, no live view yet": "מעולם לא הורץ על דף אמיתי; פיילוט לקריאה בלבד, עדיין בלי תצוגה חיה",
  "UNIT test_browser_pilot.py (fake page driver, no real browser)": "בדיקות יחידה test_browser_pilot.py (דפדפן מדומה, בלי דפדפן אמיתי)"
 }

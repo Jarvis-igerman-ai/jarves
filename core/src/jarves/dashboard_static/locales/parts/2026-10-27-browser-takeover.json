@@ -1,0 +1,13 @@
+{
+ "dict": {
+  "Give back": "החזירו לסוכן",
+  "Given back. The assistant re-reads the page and never sees what you typed.": "הוחזר לסוכן. הוא יקרא את הדף מחדש ולא יראה מה שהקלדתם.",
+  "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.": "רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.",
+  "Secret (hidden)": "סיסמה (מוסתר)",
+  "Sent to the page.": "נשלח לדף.",
+  "Take over": "קחו שליטה",
+  "Text to type into the page": "טקסט להקלדה בדף",
+  "Type into the page": "הקלדה בדף",
+  "You are in control. The assistant is locked out.": "השליטה אצלכם. הסוכן נעול בחוץ."
+ }
+}
