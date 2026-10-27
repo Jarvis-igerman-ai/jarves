@@ -4,6 +4,9 @@
 
 (function () {
   const NS = "http://www.w3.org/2000/svg";
+  // The certificate fingerprint next to the pairing code: the Android app shows the same value and the owner compares them before pairing.
+  const fpLine = (c) => !c || !c.fingerprint ? "" : el("div", { class: "small mono", dir: "ltr", "data-noi18n": "" },
+    tx("טביעת אצבע של התעודה (להשוואה באפליקציית אנדרואיד): ", "Certificate fingerprint (compare it in the Android app): ") + c.fingerprint.replace(/(..)(?!$)/g, "$1:"));
   function qrSvg(rows) {
     const n = rows.length, q = 4, svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", `0 0 ${n + 2 * q} ${n + 2 * q}`); svg.setAttribute("width", "220"); svg.setAttribute("height", "220");
@@ -31,7 +34,7 @@
           const c = await api("/api/mobile/code", { method: "POST", body: "{}" });
           box.replaceChildren(el("div", { class: "muted small" }, tx("קוד צימוד דרך Tailscale (5 דקות, שימוש אחד):", "Pairing code over Tailscale (5 minutes, one use):")),
             el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), c.tailnet_qr ? qrSvg(c.tailnet_qr) : "",
-            el("div", { class: "muted small" }, (c.tailnet_url || c.url).split("#")[0]));
+            el("div", { class: "muted small" }, (c.tailnet_url || c.url).split("#")[0]), fpLine(c));
         } catch (e) { box.textContent = e.message; }
       } }, tx("צימוד דרך Tailscale", "Pair over Tailscale"))));
       const only = el("button", { type: "button", class: "switch", id: "tailnetOnly", "aria-pressed": d.bind_tailnet_only ? "true" : "false", onclick: async () => {
@@ -60,7 +63,7 @@
           try {
             const c = await api("/api/mobile/code", { method: "POST", body: "{}" });
             box.replaceChildren(el("div", { class: "muted small" }, tx("קוד צימוד (5 דקות, שימוש אחד):", "Pairing code (5 minutes, one use):")),
-              el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]));
+              el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]), fpLine(c));
           } catch (e) { box.textContent = e.message; }
         } }, tx("צימוד טלפון", "Pair a phone"))), box]
         : [el("div", {}, tx("כבוי: המחשב הזה בלבד.", "Off: this computer only.")),
@@ -75,7 +78,7 @@
               await route(true);
               const b2 = document.getElementById("phoneCodeBox");
               if (b2) b2.replaceChildren(el("div", { class: "muted small" }, tx("קוד צימוד (5 דקות, שימוש אחד):", "Pairing code (5 minutes, one use):")),
-                el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]));
+                el("div", { class: "m4-big" }, c.code.replace(/(\d{4})(\d{4})/, "$1 $2")), qrSvg(c.qr), el("div", { class: "muted small" }, c.url.split("#")[0]), fpLine(c));
             } catch (e) {
               ev.target.disabled = false;
               box.replaceChildren(el("div", { class: "warn", id: "phoneEnableError" }, e.message),

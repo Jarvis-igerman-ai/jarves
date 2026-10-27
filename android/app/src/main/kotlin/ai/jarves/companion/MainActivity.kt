@@ -50,22 +50,41 @@ sealed interface Screen {
 
 class AppModel(app: Application) : AndroidViewModel(app) {
     private val store = SessionStore(app)
+    private var active = false
+    private var session: Session? = null
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
 
     init {
-        (screen.value as? Screen.Status)?.let { startPolling(it.session) }
+        session = (screen.value as? Screen.Status)?.session
+    }
+
+    /** The screen is visible: poll. In the background nothing is polled (battery, and the PC is not asked for nothing). */
+    fun onStart() {
+        active = true
+        session?.let { startPolling(it) }
+    }
+
+    fun onStop() {
+        active = false
+        poll?.cancel()
     }
 
     private fun startPolling(s: Session) {
+        session = s
         poll?.cancel()
+        if (!active) return
         poll = viewModelScope.launch {
             val client = CompanionClient(s.base, PinnedTransport(s.pin))
             while (isActive) {
-                val link = withContext(Dispatchers.IO) { client.check(s.token) }
+                val link = try {
+                    withContext(Dispatchers.IO) { client.check(s.token) }
+                } catch (e: Exception) {
+                    Link.Unreachable
+                }
                 _screen.value = Screen.Status(s, link)
-                if (link is Link.Revoked) break
+                if (link is Link.Revoked || link is Link.CertChanged) break      // nothing more to ask until the owner decides
                 delay(10_000)
             }
         }
@@ -73,14 +92,22 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     /** Step 1: connect once and read the certificate fingerprint. Nothing is sent. */
     fun check(base: String, name: String, code: String) {
-        val b = base.trim().removePrefix("https://").trimEnd('/')
+        val b = parseBase(base)
+        if (b == null) {
+            _screen.value = Screen.Pair(PairError.BAD_ADDRESS)
+            return
+        }
         if (!Regex("\\d{8}").matches(code)) {
             _screen.value = Screen.Pair(PairError.BAD_CODE)
             return
         }
         _screen.value = Screen.Pair(busy = true)
         viewModelScope.launch {
-            val fp = withContext(Dispatchers.IO) { probeFingerprint(b) }
+            val fp = try {
+                withContext(Dispatchers.IO) { probeFingerprint(b) }
+            } catch (e: Exception) {
+                null
+            }
             _screen.value = if (fp == null) Screen.Pair(PairError.UNREACHABLE) else Screen.Confirm(b, name, code, fp)
         }
     }
@@ -107,6 +134,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
     fun unpair() {
         poll?.cancel()
+        session = null
         store.clear()
         _screen.value = Screen.Pair()
     }
@@ -114,6 +142,16 @@ class AppModel(app: Application) : AndroidViewModel(app) {
 
 class MainActivity : ComponentActivity() {
     private val model: AppModel by viewModels()
+
+    override fun onStart() {
+        super.onStart()
+        model.onStart()
+    }
+
+    override fun onStop() {
+        model.onStop()
+        super.onStop()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -154,6 +192,7 @@ fun PairScreen(s: Screen.Pair, onCheck: (String, String, String) -> Unit) {
 }
 
 fun errorText(e: PairError): Int = when (e) {
+    PairError.BAD_ADDRESS -> R.string.err_address
     PairError.BAD_CODE -> R.string.err_code
     PairError.REFUSED -> R.string.err_refused
     PairError.RATE -> R.string.err_rate
@@ -179,6 +218,7 @@ fun StatusScreen(s: Screen.Status, onUnpair: () -> Unit) {
         is Link.PcOffline -> Banner(stringResource(R.string.pc_offline), true)
         Link.Unreachable -> Banner(stringResource(R.string.unreachable), true)
         Link.Revoked -> Banner(stringResource(R.string.revoked), true)
+        Link.CertChanged -> Banner(stringResource(R.string.cert_changed), true)
         is Link.Incompatible -> Banner(stringResource(R.string.incompatible, link.apiMin), true)
         null -> Text("…")
     }
@@ -189,8 +229,9 @@ fun StatusScreen(s: Screen.Status, onUnpair: () -> Unit) {
         if (kotlin.math.abs(skew) > 120) Text(stringResource(R.string.skew, skew))
     }
     OutlinedButton(onUnpair, modifier = Modifier.fillMaxWidth()) {
-        Text(stringResource(if (link == Link.Revoked) R.string.pair_again else R.string.unpair))
+        Text(stringResource(if (link == Link.Revoked || link == Link.CertChanged) R.string.pair_again else R.string.unpair))
     }
+    Text(stringResource(R.string.unpair_note), style = MaterialTheme.typography.bodySmall)
 }
 
 /** The PC-offline banner: a red card when the computer or its brain is not there; nothing is queued by the app. */

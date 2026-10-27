@@ -8,7 +8,7 @@
     <string name="code">8-digit code</string>
     <string name="check_pc">Check the computer</string>
     <string name="confirm_title">Is this your computer?</string>
-    <string name="confirm_help">Compare this fingerprint with the one the computer shows. Pair only if they match.</string>
+    <string name="confirm_help">Compare this fingerprint with the one next to the pairing code on the computer (dashboard, Phone page). Pair only if they match.</string>
     <string name="confirm_yes">They match: pair</string>
     <string name="confirm_no">Cancel</string>
     <string name="err_unreachable">The computer did not answer. Same Wi-Fi? Is the phone link on?</string>
@@ -26,4 +26,7 @@
     <string name="skew">Clock difference with the computer: %1$d s</string>
     <string name="unpair">Unpair this phone</string>
     <string name="pair_again">Pair again</string>
+    <string name="err_address">Type the address as host:port, for example 192.168.1.20:8766 (no http, no path).</string>
+    <string name="cert_changed">The computer\'s certificate changed. This may be a new certificate on your computer, or someone in between. Pair again only after you compare the fingerprint.</string>
+    <string name="unpair_note">Unpairing here only forgets the pairing on this phone. Also remove this phone on the computer (Phone page) so its key stops working.</string>
 </resources>

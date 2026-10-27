@@ -36,9 +36,15 @@ sealed interface Link {
     data object Unreachable : Link
     data object Revoked : Link
     data class Incompatible(val apiMin: Int) : Link
+
+    /** The PC now presents a DIFFERENT certificate than the one the owner confirmed: not "offline" - possibly someone in between. */
+    data object CertChanged : Link
 }
 
-enum class PairError { BAD_CODE, REFUSED, RATE, UNREACHABLE, BAD_ANSWER }
+/** Thrown by the transport when the pinned certificate did not match. */
+class CertChangedException(message: String) : IOException(message)
+
+enum class PairError { BAD_ADDRESS, BAD_CODE, REFUSED, RATE, UNREACHABLE, BAD_ANSWER }
 
 class PairFailed(val kind: PairError) : Exception(kind.name)
 
@@ -71,6 +77,8 @@ class CompanionClient(private val base: String, private val transport: Transport
             transport.send("POST", url("/api/m/pair"), mapOf("X-Jarves" to "1", "Content-Type" to "application/json"), body)
         } catch (e: IOException) {
             throw PairFailed(PairError.UNREACHABLE)
+        } catch (e: RuntimeException) {
+            throw PairFailed(PairError.UNREACHABLE)
         }
         when (r.status) {
             200 -> Unit
@@ -93,8 +101,12 @@ class CompanionClient(private val base: String, private val transport: Transport
                 "GET", url("/api/m/companion/info"),
                 mapOf("Authorization" to "Bearer $token", API_HEADER to API_SUPPORTED.toString()), null,
             )
+        } catch (e: CertChangedException) {
+            return Link.CertChanged
         } catch (e: IOException) {
             return Link.Unreachable
+        } catch (e: RuntimeException) {
+            return Link.Unreachable                 // a hostile or odd server must never crash the app
         }
         if (r.status == 401) return Link.Revoked
         if (r.status != 200) return Link.Unreachable
@@ -116,4 +128,30 @@ object Pinning {
 
     fun matches(pinHex: String?, certDer: ByteArray): Boolean =
         pinHex != null && pinHex.equals(sha256Hex(certDer), ignoreCase = true)
+}
+
+
+/** The address the owner types: a host name or IPv4/IPv6 literal and an explicit port, nothing else (no scheme, path, query, user info). */
+fun parseBase(input: String): String? {
+    val t = input.trim()
+    val m = Regex("^(\\[[0-9A-Fa-f:.]{2,45}\\]|[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?):(\\d{1,5})$").matchEntire(t) ?: return null
+    val port = m.groupValues[3].toInt()
+    return if (port in 1..65535) t else null
+}
+
+/** The PC's phone link uses a self-signed certificate: trust exactly the one whose SHA-256 the owner confirmed (null pin = capture mode for the probe only). */
+class PinTrust(private val pin: String?) : javax.net.ssl.X509TrustManager {
+    var seen: String? = null
+        private set
+
+    override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) =
+        throw java.security.cert.CertificateException("no client auth")
+
+    override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) {
+        val leaf = chain.firstOrNull()?.encoded ?: throw java.security.cert.CertificateException("no certificate")
+        seen = Pinning.sha256Hex(leaf)
+        if (pin != null && !Pinning.matches(pin, leaf)) throw java.security.cert.CertificateException("the PC's certificate changed")
+    }
+
+    override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
 }

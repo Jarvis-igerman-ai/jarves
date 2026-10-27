@@ -331,6 +331,9 @@ class MobileAccess:
         self.audit("pairing_code_created", by=by)
         url = self.pair_url(code)
         out = {"code": code, "expires_s": CODE_TTL_S, "url": url, "qr": qrmini.rows(url)}
+        fp = cert_fingerprint(self.home)
+        if fp:                                                  # the Android app pins this certificate: the owner compares it on the phone
+            out["fingerprint"] = fp
         turl = self.tailnet_url(code)
         if turl:
             out.update(tailnet_url=turl, tailnet_qr=qrmini.rows(turl))
@@ -1188,6 +1191,17 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str) ->
 # ---------------------------------------------------------------------- TLS helpers
 def tls_paths(home: Path) -> tuple[Path, Path]:
     return Path(home) / TLS_DIR / "cert.pem", Path(home) / TLS_DIR / "key.pem"
+
+
+def cert_fingerprint(home: Path) -> str:
+    """SHA-256 of the self-signed certificate the phone link serves (lower-case hex), '' when there is none. Shown on the Phone page next
+    to the pairing code so the owner can compare it with what the Android app displays before it pins the certificate."""
+    import ssl
+    try:
+        pem = tls_paths(home)[0].read_text(encoding="ascii")
+        return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+    except (OSError, ValueError, UnicodeError):
+        return ""
 
 
 def make_selfsigned(home: Path, host: str | None) -> tuple[Path, Path]:
