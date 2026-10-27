@@ -758,7 +758,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if path == "/api/m/me" and method == "GET":
         return h._json(200, {"device": dev["id"], "name": dev["name"], "scopes": dev["scopes"], "pages": dev["pages"],
                              "phone_approvals": mob.settings()["phone_approvals"],
-                             "voice": bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https")})
+                             "voice": bool(mob.bridge and mob.bridge.voice_available() and mob.scheme == "https"),
+                             "trust": phone_trust.phone_view(mob.home, mob.tls_source)})
     if path == mobile_companion.INFO_PATH and method == "GET":      # Companion API v1 (V7-A1): read-only, any paired device
         return h._json_extra(200, mobile_companion.info(mob, dev), {mobile_companion.API_HEADER: str(mobile_companion.API_VERSION)})
     if path == phone_trust.CA_ROUTE and method == "GET":      # #513: the PUBLIC CA certificate, only to a paired phone

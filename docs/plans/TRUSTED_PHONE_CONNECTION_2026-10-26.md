@@ -57,16 +57,24 @@ if you already use Tailscale. If the PC is compromised, the CA key is too: revok
 | Trust confusion (owner thinks it is a Tailscale/third-party thing) | wording in guide and card |
 | Phone auth bypass through the new route | only GET, public certificate, same rate limit and token check as other `/api/m/` routes |
 
-## Path B design (slice 2)
+## Path B design (guidance in slice 1)
 `jarvis phone status` already detects Tailscale. Guided steps: install on PC and phone, sign in (the owner, in Tailscale's own app:
 JARVES never sees credentials or API keys), enable HTTPS certificates in the Tailscale admin console, then `tailscale cert` for the
 machine's tailnet name (already in `tailnet.tailnet_cert`), `phone bind tailnet`, verify. Nothing new is stored.
 
 ## Slices
-1. Server side of path A: `phone_trust.py`, `jarvis phone trust status|enable|renew|verify|revoke|ca-path`, the paired-phone CA route,
-   TLS source order, feature `phone_trust` (beta, OFF), capabilities row, setup wizard entry, guide EN+HE, CLI parity, hermetic tests.
-   Zero prompt additions (no tool, no system prompt text).
-2. The Home setup card (#457 pattern), the dashboard Phone page buttons, Path B guidance, the on-phone verify, one-time-code QR if asked,
+1. Done (branch a2-trust): server side of path A: `phone_trust.py`, `jarvis phone trust status|enable|rotate|renew|verify|revoke|ca-path`
+   (enable, rotate and revoke need a typed yes or `--yes`), the paired-phone CA route, TLS source order, live leaf renewal
+   (`keep_fresh` reloads the leaf into the running server context every 6 hours), feature `phone_trust` (beta, OFF, risk high,
+   SAFE_OFF in the wizard), capabilities row, guide EN+HE, CLI parity, hermetic tests. Zero prompt additions.
+   Path B guidance: `jarvis phone trust tailscale` (detection only; says the next step). Phone page: a text-only hint on
+   "This phone" when the connection is not trusted (server source not tailscale/localca, or the browser refused the service
+   worker), with a "Download the certificate" button only when a CA exists and the feature is on (fetch with the device token,
+   saved as a file; the owner installs it himself).
+   Leaf profile (Chrome/Android): EC P-256, empty subject + critical SAN, KeyUsage digitalSignature, EKU serverAuth, 30 days
+   (limit 398), AKI/SKI. CA: BasicConstraints critical ca=true pathlen 0, KeyUsage keyCertSign+cRLSign, critical NameConstraints
+   in RFC 5280 form (`localhost`, `local`, `lan`, `home.arpa`, no leading dot).
+2. The Home setup card (#457 pattern), the dashboard Phone page buttons, the on-phone verify, one-time-code QR if asked,
    and the manifest/service worker/icon fix of branch `phone-ui` (#510) so the install criteria pass once trusted.
 
 ## Owner questions (defaults in OWNER_OPENS.md)

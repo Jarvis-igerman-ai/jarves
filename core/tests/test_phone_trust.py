@@ -336,18 +336,81 @@ def _cli(home, *argv):
     return rc, out.getvalue(), err.getvalue()
 
 
-def test_cli_enable_needs_the_feature_then_revoke(home, monkeypatch):
-    rc, _o, err = _cli(home, "enable")
+def test_cli_enable_needs_the_feature_and_a_yes_then_revoke(home, monkeypatch):
+    rc, _o, err = _cli(home, "enable", "--yes")
     assert rc == 1 and "phone_trust" in err and not pt.ca_paths(home)[0].exists()
     monkeypatch.setattr(pt, "trust_on", lambda h: True)
-    rc, out, _e = _cli(home, "enable")
+    rc, _o, err = _cli(home, "enable")                                              # no --yes and no terminal: refused
+    assert rc == 1 and "--yes" in err and not pt.ca_paths(home)[0].exists()
+    rc, out, _e = _cli(home, "enable", "--yes")
     assert rc == 0 and pt.ca_paths(home)[0].is_file()
     assert "Install a certificate" in out and "SHA-256" in out and "private-network" in out
-    assert "PRIVATE KEY" not in out
+    assert "PRIVATE KEY" not in out and "ca.key" not in out
+    fp = pt.fingerprint(home)
+    rc, out, _e = _cli(home, "enable", "--yes")                                     # idempotent: the CA is kept
+    assert rc == 0 and "already exists" in out and pt.fingerprint(home) == fp
     rc, out, _e = _cli(home, "ca-path")
     assert rc == 0 and out.strip().endswith("ca.crt")
     rc, out, _e = _cli(home, "status", "--json")
-    assert json.loads(out)["ca"] is True
-    rc, out, _e = _cli(home, "revoke")
+    assert json.loads(out)["ca"] is True and "PRIVATE" not in out
+    rc, _o, err = _cli(home, "revoke")                                              # revoke also needs the yes
+    assert rc == 1 and pt.ca_paths(home)[0].exists()
+    rc, out, _e = _cli(home, "revoke", "--yes")
     assert rc == 0 and "User credentials" in out and not pt.ca_paths(home)[0].exists()
     assert _cli(home, "ca-path")[0] == 1
+    assert _cli(home, "revoke")[0] == 0                                             # nothing left: nothing to ask
+
+
+def test_cli_rotate_replaces_the_ca(home, monkeypatch):
+    monkeypatch.setattr(pt, "trust_on", lambda h: True)
+    _cli(home, "enable", "--yes")
+    old = pt.fingerprint(home)
+    assert _cli(home, "rotate")[0] == 1 and pt.fingerprint(home) == old              # no yes: unchanged
+    rc, out, _e = _cli(home, "rotate", "--yes")
+    assert rc == 0 and pt.fingerprint(home) != old and old in out and "Remove" in out
+    assert pt.leaf_info(home)["issued_by_current_ca"] is True
+
+
+def test_cli_tailscale_guidance_is_detection_only(home, monkeypatch):
+    from jarves import tailnet as tn
+    states = {
+        "not-installed": {"present": False, "ip": None, "name": None, "cli": False, "certs_possible": False, "state": "not-installed"},
+        "no-name": {"present": True, "ip": "100.64.1.2", "name": None, "cli": True, "certs_possible": False, "state": "ready"},
+        "ready": {"present": True, "ip": "100.64.1.2", "name": "pc.tail1234.ts.net", "cli": True, "certs_possible": True,
+                  "state": "ready"},
+    }
+    for want, det in states.items():
+        monkeypatch.setattr(tn, "detect", lambda d=det: d)
+        rc, out, _e = _cli(home, "tailscale", "--json")
+        assert json.loads(out)["state"] == want
+        rc, out, _e = _cli(home, "tailscale")
+        assert (rc == 0) == (want == "ready")
+        if want == "ready":
+            assert "https://pc.tail1234.ts.net:" in out and "HTTPS Certificates" in out
+    assert not pt.ca_dir(home).exists()                                              # path B stores nothing
+
+
+# ---------------------------------------------------------------- the phone page hint (text only)
+def test_me_tells_the_phone_how_the_connection_is_proved(srv, home, monkeypatch):
+    tok, _dev, _ = pair(srv)
+    st, body, _r = req(srv, "GET", "/api/m/me", token=tok)
+    tr = body["trust"]
+    assert st == 200 and tr["trusted_source"] is False and tr["ca_download"] is False       # feature off: no download offered
+    pt.create_ca(home, T0)
+    monkeypatch.setattr(pt, "trust_on", lambda h: True)
+    tr = req(srv, "GET", "/api/m/me", token=tok)[1]["trust"]
+    assert tr["ca_download"] is True and set(tr) == {"source", "trusted_source", "ca_download"}
+    assert pt.phone_view(home, "localca")["trusted_source"] is True
+    assert pt.phone_view(home, "tailscale")["trusted_source"] is True
+    assert pt.phone_view(home, "weird")["source"] == "none"
+
+
+def test_phone_page_has_the_hint_in_both_languages():
+    from pathlib import Path
+    root = Path(pt.__file__).parent / "dashboard_static" / "mobile"
+    html = (root / "index.html").read_text("utf-8")
+    js = (root / "app.js").read_text("utf-8")
+    assert 'id="trustNote"' in html and 'id="trustCa"' in html
+    for k in ("trust_note:", "trust_note_ca:", "trust_dl:", "trust_dl_err:"):
+        assert js.count(k) == 2, k                                                         # English and Hebrew
+    assert "innerHTML" not in js.split("function trustNote")[1].split("});")[0]            # text only

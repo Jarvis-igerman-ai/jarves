@@ -326,6 +326,18 @@ def tls_pair(home: Path, enabled: bool, now: _dt.datetime | None = None) -> tupl
     return ensure_leaf(home, None, now)
 
 
+def phone_view(home: Path, tls_source: str) -> dict:
+    """What the paired phone page needs for its hint (#513): how this server proves itself, and whether a CA certificate can be
+    downloaded. Public facts only (never a path, a fingerprint of the key or the key)."""
+    src = tls_source if tls_source in ("tailscale", "localca", "selfsigned", "none") else "none"
+    ca = False
+    try:
+        ca = trust_on(home) and ca_paths(home)[0].is_file() and ca_paths(home)[1].is_file()
+    except OSError:
+        ca = False
+    return {"source": src, "trusted_source": src in ("tailscale", "localca"), "ca_download": bool(ca)}
+
+
 # ---------------------------------------------------------------------- verify
 def verify_chain(leaf_pem: bytes, ca_pem: bytes, host: str, now: _dt.datetime | None = None) -> tuple[bool, str]:
     """Validate `leaf_pem` against ONLY `ca_pem` for `host` at `now` (chain, name constraints, dates, host name, serverAuth).
@@ -453,30 +465,23 @@ def keep_fresh(home: Path, sctx: ssl.SSLContext, interval_s: float = RENEW_CHECK
 # ---------------------------------------------------------------------- catalog row (feature `phone_trust`, beta, OFF)
 from . import capabilities  # noqa: E402
 from . import features as feat  # noqa: E402
-from . import hebrew  # noqa: E402
 
 FEATURE = "phone_trust"
 EVIDENCE = ("UNIT test_phone_trust.py (fake clock, no network: chain validation with cryptography, name constraints, renewal, "
-            "revoke, the paired-phone download route)")
+            "rotate, revoke, backup leaves the keys out, the paired-phone download route)")
 BLOCKER = "NOT-RUN: never installed on a real Android phone; Chrome install criteria not yet seen to pass (owner-gated)"
-ABOUT = ("a trusted https connection for the phone app: JARVES makes its own small local certificate authority (name-constrained to "
-         "private-network addresses, key stays on this PC, you can revoke it) so Chrome lets the phone page install as an app. "
-         "Optional and off by default; you install one certificate on your phone yourself")
+ABOUT = ("a trusted https connection for the phone app, so Chrome lets the phone page install as an app. Path A: JARVES makes its "
+         "own small local certificate authority (name-constrained to private-network addresses, key stays on this PC, you can "
+         "revoke it) and you install its public certificate on your phone yourself. Path B: guided steps for a real Tailscale "
+         "certificate. Optional and off by default")
 PI = "the phone page is hosted by the PC in V6; there is no Pi path"
-hebrew.TEXT.update({
-    ABOUT: "חיבור https מהימן לאפליקציית הטלפון: JARVES יוצר רשות אישורים מקומית קטנה משלו (מוגבלת לכתובות ברשת פרטית, המפתח נשאר "
-           "במחשב הזה, אפשר לבטל) כדי ש-Chrome יאפשר להתקין את עמוד הטלפון כאפליקציה. אופציונלי וכבוי כברירת מחדל; "
-           "את האישור בטלפון מתקינים בעצמכם",
-    EVIDENCE: "בדיקות יחידה test_phone_trust.py (שעון מדומה, בלי רשת: אימות שרשרת עם cryptography, הגבלות שמות, חידוש, ביטול, "
-              "מסלול ההורדה לטלפון מצומד)",
-    BLOCKER: "לא הורץ: לא הותקן בטלפון אנדרואיד אמיתי; קריטריוני ההתקנה של Chrome עוד לא נראו עוברים (בידי הבעלים)",
-    PI: "עמוד הטלפון מתארח במחשב ב-V6; אין נתיב ל-Pi",
-})
+PERMISSION = "you install the JARVES certificate on your own phone (Android asks for your screen lock)"
+# Hebrew for these texts: hebrew_parts/2026-10-27-phone-trust.json and the dashboard locale part of the same name.
 feat.register(FEATURE, "חיבור מהימן לטלפון", "Trusted phone connection", False, risk="high", about=ABOUT,
               needs=["mobile_access"], stage="beta",
               targets={"windows": {"status": "implemented_unverified", "evidence": EVIDENCE, "blocker": BLOCKER},
                        "linux_arm64_pi": {"status": "not_applicable", "blocker": PI}},
-              permissions=["you install the JARVES certificate on your own phone (Android asks for your screen lock)"],
+              permissions=[PERMISSION],
               settings="jarvis features on phone_trust, then jarvis phone trust enable")
 capabilities.declare_extra(FEATURE, phone={"status": "implemented_unverified", "evidence": EVIDENCE, "blocker": BLOCKER,
                                            "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/513"})

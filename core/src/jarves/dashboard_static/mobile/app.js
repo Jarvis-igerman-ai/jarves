@@ -18,7 +18,10 @@
       banner: "The computer is unreachable. Nothing is sent until it is back; type the message again then.",
       not_sent: "Not sent", waiting_conn: "Waiting for the connection…", send_again: "Send again", stale: "Waited too long while offline. Send it again if you still want it.",
       note: "Note", goals: "Goals", pause: "Pause", resume: "Resume", drop: "Drop", snooze: "Snooze notes 1 h", stop_notes: "Stop notes",
-      sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals." },
+      sig_snoozed: "Notes snoozed for one hour.", sig_stopped: "Notes stopped. Turn them on again on the computer.", from_pc: "computer", no_goals: "No active goals.",
+      trust_note: "This connection is not trusted (the computer uses its own unverified certificate), so this page cannot be installed as an app. Optional fix: on the computer open the guide \u201cTrusted phone connection\u201d.",
+      trust_note_ca: "This phone does not trust the connection yet, so the app cannot be installed. Download the JARVES certificate below and install it yourself: Settings > Security > Install a certificate > CA certificate. The guide on the computer has the steps: \u201cTrusted phone connection\u201d.",
+      trust_dl: "Download the certificate", trust_dl_err: "Could not download the certificate. Try again, or copy the file from the computer." },
     he: { pair_title: "צימוד הטלפון", pair_help: "במחשב פתחו את לוח הבקרה של JARVES, עברו אל טלפון ולחצו על צימוד טלפון. סרקו את קוד ה-QR או הקלידו כאן את הקוד בן 8 הספרות.",
       code: "קוד צימוד", name: "שם לטלפון", pair: "לצמד", pair_net: "עובד ברשת הביתית בלבד. שום דבר כאן לא נגיש מהאינטרנט.",
       tab_home: "הטלפון הזה", tab_chat: "שיחה", tab_voice: "קול", tab_approvals: "אישורים", tab_plans: "תוכניות", tab_prefs: "למדתי", tab_drive: "נהיגה", tab_health: "תקינות ומהירות", send: "שליחה", type_here: "כתבו הודעה",
@@ -33,7 +36,10 @@
       banner: "המחשב לא זמין. שום דבר לא נשלח עד שהוא חוזר; כתבו את ההודעה שוב אז.",
       not_sent: "לא נשלחה", waiting_conn: "ממתין לחיבור…", send_again: "לשלוח שוב", stale: "ההודעה חיכתה יותר מדי זמן בלי חיבור. שלחו שוב אם עדיין רוצים.",
       note: "הודעה", goals: "יעדים", pause: "השהיה", resume: "המשך", drop: "ויתור", snooze: "השתקת הודעות לשעה", stop_notes: "עצירת הודעות",
-      sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים." },
+      sig_snoozed: "ההודעות הושתקו לשעה.", sig_stopped: "ההודעות נעצרו. מדליקים שוב במחשב.", from_pc: "מחשב", no_goals: "אין יעדים פעילים.",
+      trust_note: "החיבור לא מהימן (המחשב משתמש באישור משלו שלא אומת), ולכן אי אפשר להתקין את העמוד כאפליקציה. תיקון אופציונלי: במחשב פתחו את המדריך \u201cחיבור מהימן לטלפון\u201d.",
+      trust_note_ca: "הטלפון עוד לא סומך על החיבור, ולכן אי אפשר להתקין את האפליקציה. הורידו למטה את האישור של JARVES והתקינו אותו בעצמכם: הגדרות > אבטחה > התקנת אישור > אישור CA. השלבים במדריך במחשב: \u201cחיבור מהימן לטלפון\u201d.",
+      trust_dl: "הורדת האישור", trust_dl_err: "לא הצלחנו להוריד את האישור. נסו שוב, או העבירו את הקובץ מהמחשב." },
   };
   const $ = (id) => document.getElementById(id);
   const newId = () => "c-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);      // 8-64 chars: the server's command id
@@ -80,7 +86,28 @@
   }
   async function load() { try { me = await api("/api/m/me"); } catch (e) { return; } info(); allowTabs(); mountIndicator(); tick(); voiceNote(); }
   function mountIndicator() { if (window.JarvesAudio && $("audioBar")) window.JarvesAudio.mount({ audio: $("audioBar"), notices: $("noticeBox") }, { api, post, lang: () => lang }); }
-  function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; }
+  function info() { if (me) $("meInfo").textContent = `${me.name} · ${me.phone_approvals ? t("phone_ap_on") : t("phone_ap_off")}`; trustNote(); }
+
+  // ---- #513: a text-only hint when the connection is not trusted (the app cannot install). JARVES installs nothing on the
+  // phone: the owner downloads the PUBLIC CA certificate here (over the paired, token-checked connection) and installs it himself.
+  let swOk = null;                                   // null: not known yet; false: the browser refused the service worker
+  function trustNote() {
+    const n = $("trustNote"), b = $("trustCa"), tr = (me && me.trust) || null;
+    const untrusted = !!tr && (!tr.trusted_source || swOk === false);
+    n.hidden = !untrusted; b.hidden = !(untrusted && tr.ca_download);
+    if (untrusted) n.textContent = tr.ca_download ? t("trust_note_ca") : t("trust_note");
+  }
+  $("trustCa").addEventListener("click", async () => {
+    const b = $("trustCa"); b.disabled = true;
+    try {
+      const r = await fetch("/api/m/trust/ca.crt", { headers: { "X-Jarves": "1", Authorization: "Bearer " + token }, cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a"); a.href = url; a.download = "jarves-local-ca.crt"; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (e) { $("trustNote").textContent = t("trust_dl_err"); }
+    b.disabled = false;
+  });
 
   // ---- pairing
   $("pairForm").addEventListener("submit", async (ev) => {
@@ -324,7 +351,8 @@
   $("lang").addEventListener("click", () => { lang = lang === "he" ? "en" : "he"; try { localStorage.setItem(LANG, lang); } catch (e) { /* ignore */ } applyLang(); if (window.JarvesShell) window.JarvesShell.repaint(); if (window.JarvesAudio) window.JarvesAudio.repaint(); voiceNote(); info(); unmountChat(); if (tab === "chat") mountChat(); if (tab === "plans") mountPlans(); if (tab === "prefs") mountPrefs(); if (tab === "drive") mountDrive(); tick(); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) discardRec(); tick(); });      // never keep the mic open in the background
   window.addEventListener("online", tick);
-  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).catch(() => {});
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/m/sw.js", { scope: "/m/" }).then(() => { swOk = true; trustNote(); }).catch(() => { swOk = false; trustNote(); });
+  else swOk = false;
   if (window.JarvesShell) window.JarvesShell.init({ tx, go: setTab, chat: () => chatView });
   applyLang(); show();
 })();
