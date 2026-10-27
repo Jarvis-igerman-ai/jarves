@@ -545,3 +545,50 @@ async def test_state_writes_are_locked_and_last_error_is_redacted(tmp_path, monk
     monkeypatch.setattr(gen, "run_sandboxed", failing)
     await mgr.run("shopping", "shopping_list", {})
     assert secret not in mgr.state("shopping")["last_error"]["error"]
+
+
+def _installed_shopping(tmp_path):
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    return mgr, tmp_path / gen.ROOT / "installed" / "shopping"
+
+
+def test_state_lock_timeout_raises_instead_of_continuing(tmp_path, monkeypatch):
+    """#585: a live lock held by another process for longer than the wait is an error, not a silent unlocked write."""
+    mgr, d = _installed_shopping(tmp_path)
+    monkeypatch.setattr(gen, "STATE_LOCK_WAIT_S", 0.2)
+    (d / "state.lock").write_text("x")                       # fresh lock of "another process"
+    with pytest.raises(gen.SkillError, match="locked"):
+        mgr.set_enabled("shopping", False, by="dashboard")
+    assert (d / "state.lock").exists()                       # we never delete a lock that is not ours
+
+
+def test_stale_lock_is_taken_over_and_a_fresh_one_is_kept(tmp_path):
+    """#585: a crashed writer's old lock is removed; a lock that is fresh when we look is never deleted."""
+    import os
+    import time as _t
+    mgr, d = _installed_shopping(tmp_path)
+    lock = d / "state.lock"
+    lock.write_text("x")
+    assert gen._take_over_stale_lock(lock) is False and lock.exists()
+    old = _t.time() - 60
+    os.utime(lock, (old, old))
+    assert gen._take_over_stale_lock(lock) is True and not lock.exists()
+    assert not list(d.glob("state.lock.stale-*"))
+    assert gen._take_over_stale_lock(lock) is False          # nothing there
+    lock.write_text("x")
+    os.utime(lock, (old, old))
+    mgr.set_enabled("shopping", False, by="dashboard")       # stale lock does not block a writer
+    assert not lock.exists()
+
+
+async def test_failure_message_returned_to_the_caller_is_redacted(tmp_path, monkeypatch):
+    """#586: a secret in a sandbox error is redacted in the ToolResult text too, not only in last_error."""
+    mgr, d = _installed_shopping(tmp_path)
+
+    async def boom(py, tool, args, broker):
+        return {"ok": False, "error": "failed with token sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"}
+    monkeypatch.setattr(gen, "run_sandboxed", boom)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert not r.ok and "sk-ant-api03-abcdefghijklmnopqrstuvwxyz" not in r.message
