@@ -49,7 +49,7 @@ def test_sheet_round_trip_and_sign_off(tmp_path):
         again.sign("4.1.0", SHA)                              # not a beta label
     with pytest.raises(so.SheetError):
         again.sign("4.1.0-beta.1", "abc")                     # not a full SHA
-    again.sign("4.1.0-beta.1", SHA, "2026-10-21")
+    again.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Owner")
     so.save(tmp_path, again)
     done = so.load(tmp_path, "4.1.0")
     assert done.problems() == [] and done.commit == SHA and done.date == "2026-10-21"
@@ -122,7 +122,7 @@ def _signed_root(tmp_path, sha=SHA):
     s = _sheet()
     s.set_result("C1", "pass")
     s.set_result("OI-02", "pass")
-    s.sign("4.1.0-beta.3", sha, "2026-10-21")
+    s.sign("4.1.0-beta.3", sha, "2026-10-21", owner="Owner")
     so.save(tmp_path, s)
     return tmp_path
 
@@ -377,3 +377,18 @@ def test_cli_bug_tables_option_warns_and_legacy_never_gates(tmp_path, monkeypatc
     assert "--bug-tables no longer gates" in out and "legacy, not gating" in out and "bug B2 (P1)" in out
     assert "accepted known issues (1" in out
     assert "open P1 issue" not in out
+
+
+def test_508_sign_needs_an_owner_and_a_removed_owner_or_hash_blocks_the_gate(tmp_path):
+    from jarves import release_signoff as so2
+    s = so2.Sheet(version="4.1.0", rows=[so2.Row("A1", "area", "todo", "expected", "pass")])
+    with pytest.raises(so2.SheetError):
+        s.sign("4.1.0-beta.1", SHA, "2026-10-21")                       # no owner
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="  The   Owner ")
+    assert s.owner == "The Owner" and not s.problems()
+    again = so2.Sheet.parse(s.render())
+    assert again.owner == "The Owner" and again.rows_hash == s.rows_hash and not again.problems()
+    again.owner = ""
+    assert any("Owner" in p for p in again.problems())
+    forged = so2.Sheet.parse(s.render().replace("expected", "changed"))
+    assert any("rows changed after signing" in p for p in forged.problems())

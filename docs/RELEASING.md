@@ -66,7 +66,7 @@ Run it yourself: `python core/tools/release_gate.py --tag v4.1.0 --sha <tag sha>
 3. Record each result: `jarvis release signoff --version 4.1.0 --row C1 --result pass` (or `fail`, `blocked`,
    `accepted-blocked --note "why"`), or use the dashboard page **Release sign-off** (English and Hebrew).
 4. When every row is `pass` or `accepted-blocked` with a note: `jarvis release signoff --version 4.1.0 --finish`. This writes
-   the tested beta version, its commit SHA and the date into the sheet. Commit it (docs only), then tag that commit (it is allowed to differ from the tested beta commit by documentation only).
+   the tested beta version, its commit SHA, the date, the owner (this account, or `--owner NAME`) and a hash of every row into the sheet; the gate refuses a sheet whose rows were edited after signing (#508). Commit it (docs only), then tag that commit (it is allowed to differ from the tested beta commit by documentation only).
 
 Any later change to a row voids the signature.
 
