@@ -20,7 +20,7 @@ import time
 import unicodedata
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,8 @@ EXPIRY_DAYS = 90                              # owner decision: skipped tasks st
 SIMILAR = 0.85
 FILE = "triage_skipped.json"
 # offered to the model only when the owner's words ask for tasks from messages (no always-on prompt cost)
-LAZY = r"tasks? from|make (me )?tasks|create tasks|what (should|do|must) i (do|need)|משימות|מה (אני )?צריך|מה לעשות"
+LAZY = (r"tasks? from|make (me )?tasks|create tasks|what (should|do|must) i (do|need)|follow-?ups? (from|in)|"
+        r"משימות|מה (אני )?צריך|מה לעשות|מהמיילים|מהמייל|מההערות")
 
 
 def norm(s: str) -> str:
@@ -119,6 +120,7 @@ class Cand(BaseModel):
     person: str | None = Field(None, max_length=40)
     ref: str | None = Field(None, max_length=40, description="the message id from the tool result, as given")
     when: str | None = Field(None, max_length=16, description="the message date/time as shown, e.g. 2026-10-26 14:10")
+    source: Literal["whatsapp", "mail", "note"] | None = Field(None, description="where it came from: whatsapp, mail or note (default whatsapp)")
 
 
 class FromMessagesArgs(BaseModel):
@@ -178,7 +180,7 @@ class TriageSkill(Skill):
                 seen.append(title)
                 dups += dup
                 cards.append({"title": title, "due": _ok_due(c.due) or None, "person": " ".join(ub.clean(c.person or "").split()) or None,
-                              "ref": ref, "when": c.when, "skip": dup})
+                              "ref": ref, "when": c.when, "skip": dup, "source": c.source})
             if not cards:
                 return ToolResult(False, "TRIAGE_NONE: no usable task (empty titles or all skipped before). Tell the owner there is nothing new.",
                                   {"dropped": dropped, "already_skipped": hidden}, code="TRIAGE_NONE")
@@ -198,7 +200,7 @@ class TriageSkill(Skill):
                               {"shown_to_owner": True, "cards": len(cards), "flagged_duplicates": dups, "already_skipped": hidden,
                                "dropped": dropped, "any_do_checked": existing is not None, "titles_withheld": True},
                               ui_blocks=good)
-        return [Tool("tasks_from_messages", "Make tasks from messages just read: 'tasks from these', 'משימות מההודעות'.", run,
+        return [Tool("tasks_from_messages", "Tasks from messages, mail, notes just read: 'tasks from these', 'משימות מההודעות'.", run,
                      FromMessagesArgs, permission="read", lazy=LAZY)]
 
 

@@ -457,12 +457,30 @@ def pick_threshold(head, embs, last, events, n, target_fph: float = 0.5) -> tupl
 
 
 # ---------------------------------------------------------------------- the whole pipeline
+def pick_baseline(embed: Callable, out: Path, live_head: Path | None, live_threshold: float | None,
+                  baseline_threshold: float | None, progress: Callable[[str], None] = print):
+    """The model a new head replaces (#595): the LIVE custom head at the level the Core really uses when there is one (and it
+    is not the file being written), else the stock model at that same level (`wake_accept`), not a fixed 0.5."""
+    from . import wake_prod
+    stock_level = baseline_threshold or wake_prod.BASELINE_THRESHOLD
+    if live_head is not None and Path(live_head).is_file() and Path(live_head).resolve() != Path(out).resolve():
+        try:
+            sc = wake_prod.HeadScorer(load_head(Path(live_head)), embed)
+            sc.threshold = float(live_threshold if live_threshold is not None else wake_prod.BASELINE_THRESHOLD)
+            sc.name = "your current model"
+            return sc
+        except (OSError, ValueError, KeyError) as e:
+            progress(f"the current custom model cannot be read ({e}): comparing with the stock model")
+    return wake_prod.StandardScorer(threshold=stock_level)
+
+
 def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, samples: Path | None = None,
                  voices: list[Voice] | None = None, synth: Synth | None = None,
                  embedder: Callable | None = None, seed: int = 7, rates=(0.8, 0.95, 1.1, 1.3),
                  pitches=(0.8, 1.0, 1.2), copies: int = 2, progress: Callable[[str], None] = print,
                  sample_files: list[Path] | None = None, hard_negatives: bool = True,
-                 baseline: object = "auto") -> dict:
+                 baseline: object = "auto", live_head: Path | None = None, live_threshold: float | None = None,
+                 baseline_threshold: float | None = None) -> dict:
     """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report.
     `hard_negatives`: render HARD_NEG_EN/HARD_NEG_HE (confusable names) and train on them, weighted HARD_WEIGHT x.
     `baseline`: the model this one would replace, scored on the SAME renderings/recordings/stream so the gate can be
@@ -594,7 +612,8 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     near_peaks = wake_prod.score_near(head_scorer, rendered, seed)
     base = None
     if baseline == "auto":
-        baseline = wake_prod.StandardScorer() if embedder is None else None
+        baseline = None if embedder is not None else pick_baseline(embed, out, live_head, live_threshold, baseline_threshold,
+                                                                   progress)
     if baseline is not None:
         try:
             base = wake_prod.measure_baseline(baseline, rendered, own_trim, data["test"][0], data["test"][1],
@@ -605,8 +624,10 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     gate_peaks = [p for p in near_peaks if p["text"] in held_list]
     threshold, ev, curve = wake_prod.calibrate(
         head, embs, last, events, len(audio), own_peaks, held_idx, near_peaks=gate_peaks,
-        near_budget=(base["near_miss_false"] if base else 0),
-        fph_budget=(base["false_per_hour"] if base else None))
+        # the same caps as gate(): a bad baseline must not steer the threshold to a level the gate then refuses
+        near_budget=(min(int(base["near_miss_false"]), wake_prod.MAX_NEAR_MISS_WAKES) if base else 0),
+        fph_budget=(min(float(base["false_per_hour"]), wake_prod.MAX_FALSE_PER_HOUR)
+                    if base and base.get("false_per_hour") is not None else None))
     near = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed,
                                      sentences=wake_prod.NEAR_MISS_HELDOUT, peaks=gate_peaks)
     campaign = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed,

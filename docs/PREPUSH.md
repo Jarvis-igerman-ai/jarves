@@ -17,7 +17,7 @@ Options: `--fast` skips the slower checks (`locales`, `ci`, `net`); `--changed-o
 
 ## Hermetic size budget (#307)
 
-The `perf` check measures the backend prompt (tools JSON + rules) with the `hermetic_features` fixture (`core/tests/conftest.py`): the environment probes `display_control` (Godot viewer found), `tray_icon` (desktop session + pystray), `wake_word` and `chimes` are pinned to "not available", `GODOT_EXE` is removed, and the home is an empty temp dir. Before, a PC with Godot installed offered the show/hide tools and measured 48807 chars against the 48400 cap while CI (no Godot) measured 48346 and passed. Now the number is 48260 on every machine. If you add a probe-gated tool, pin its probe in that fixture. See [handoff](handoff/2026-10-26-perf-hermetic-307.md).
+The `perf` check measures the backend prompt (tools JSON + rules) with the `hermetic_features` fixture (`core/tests/conftest.py`): the environment probes `display_control` (Godot viewer found), `tray_icon` (desktop session + pystray), `wake_word` and `chimes` are pinned to "not available", `GODOT_EXE` is removed, and the home is an empty temp dir. Before, a PC with Godot installed offered the show/hide tools and measured 48807 chars against the 48400 cap while CI (no Godot) measured 48346 and passed. Now the number is 48260 on every machine. If you add a probe-gated tool, pin its probe in that fixture. See [handoff](archive/handoff/2026-10-26-perf-hermetic-307.md).
 
 ## Optional pre-push hook
 

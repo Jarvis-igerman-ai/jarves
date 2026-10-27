@@ -4,7 +4,7 @@ Draft prepared 25 Oct 2026 (#192), refreshed against `jarves/main` adfe3e21 afte
 `core/pyproject.toml` still says 4.0.1. Read by `core/tools/release_gate.py` when the tag `v5.0.0` is pushed: every row must be `done`,
 `n/a` or `accepted`. Rows marked "checked by the gate" are verified automatically at tag time. Rows that are not `done` are honest and stay
 red until the work is finished or the owner decides. Steps: [RELEASING](../RELEASING.md) "Stable release, step by step". Triage:
-[BUG_TABLE_V50_2026-10-25](BUG_TABLE_V50_2026-10-25.md). Plan: [V5_INVENTORY_AND_PLAN_2026-10-24](../plans/V5_INVENTORY_AND_PLAN_2026-10-24.md).
+[BUG_TABLE_V50_2026-10-25](BUG_TABLE_V50_2026-10-25.md). Plan: [V5_INVENTORY_AND_PLAN_2026-10-24](../archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md).
 Safe default (plan G12 and G13): 5.0.0 goes out as a beta only; the stable tag waits for the owner's signed sheet.
 
 | # | Item | Status | Evidence / what is left |

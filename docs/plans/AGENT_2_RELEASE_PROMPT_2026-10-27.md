@@ -22,14 +22,14 @@ EVERY BETA WITH AN INSTALL (once a day, plus any beta that fixes a P0/P1): insta
 FAST FIX: P0 within 1 hour, P1 within 1 day, P2 within 2 days. Open P0-P2 never grows from one beta to the next. Above 5 open P0-P2: your next item is always a P0-P2 fix (beta-found first) until <= 3. A beta with a new open P0/P1 is never promoted.
 
 HOW YOU WORK (lean rules)
-- ONE open PR at a time, opened ready when `python core/tools/prepush.py` passes; then `gh pr merge N --auto`. Bundle small fixes of one area. No stacking, no draft stage, no merge-main pushes, no close/reopen. Push again only to fix red CI or a Tier R finding, max twice; then split or stop and report.
+- BATCHING: work on ONE local batch branch in your worktree, one commit per item, `python core/tools/prepush.py` + targeted tests after each commit. ONE ready PR per batch (3+ items of one lane, or end of day; soft cap ~8 commits / ~800 non-test lines), then `gh pr merge N --auto`. P0/P1 fixes and any Tier R change go ALONE and at once. Never mix lanes. A red batch is fixed in place (no split, no close/reopen, no merge-main pushes); keep committing to the NEXT batch branch cut from fresh `jarves/main` while one PR is queued. One open PR at a time. Daily metrics (open P0-P2, PRs merged, CI re-runs, hours merge to installed beta) go to your STATE.md for the 3-day trial.
 - Tier R (Gate, approvals, release sign-off/gate/tag, hotfix/update write paths, installer/packaging, browser network, wake apply, workflows/secrets): label `no-automerge`, ONE independent Opus review, fix in one push, then queue. Everything else ships on green, no reviewer.
 - Red run: read the log, fix the cause; a test that fails then passes goes to the quarantine ledger with a `showstopper` issue. Never rerun blindly.
 - One GitHub issue per real defect; Agent 1 owns the old backlog, you own beta-found and release-list issues (label `release-blocker`).
 - Each worktree from fresh `jarves/main` in C:\work\wt\<branch>; remove it the day it merges.
 
 VERSION PLAN (agent-doable first; owner-only per the present/away rule)
-- Now: lean-process do-now items 1, 2, 4, 5, 6 (merge-group reuse, lean group + #516, watchdog + status board, `jarvis install-latest`, `jarvis release run`), each its own PR, one at a time, CI ones Tier R.
+- Now (FIRST in 4.5.1, before everything else: the unbuilt tools docs-only CI fast path, `jarvis install-latest`, `jarvis release run`, watchdog): lean-process do-now items 1, 2, 4, 5, 6 (merge-group reuse, lean group + #516, watchdog + status board, `jarvis install-latest`, `jarvis release run`), each its own PR, one at a time, CI ones Tier R.
 - 4.5.1: #505 list: #261 installer recovery, #441, #620 #621, held #614. Owner-only: #179 greeting re-measure (his PC, spend cap), wake retrain apply after his `jarvis wake test`, GitHub settings #543 #544 #605.
 - 5.0 (phone; beta until his phone sheet #193): #509 #510 #513 trusted connection card, adb pre-run on the test phone, PWA install. Owner-only: his phone rows.
 - 6.0 (drive/hands-free): #219 #224 and follow-ups. Owner-only: the car test.

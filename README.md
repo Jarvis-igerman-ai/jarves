@@ -19,8 +19,8 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 **The old private `igalgerman/JARVIS` repository is OBSOLETE for all development.** This PUBLIC `Jarvis-igerman-ai/jarves` repository is the **sole active source of truth**. Legacy V4 code/Issues have been **partially migrated**, not merged or fully tested; do **not** send pushes or syncs back to private. GitHub Archive of the old repository is pending final verification.
 
 - **[Current handoff](docs/HANDOFF.md)** — start at the top for public-only status and pending gates.
-- **[V4 migration handoff](docs/MIGRATION_HANDOFF.md)** — public PRs #6–#10, migrated Issues and remaining integration.
-- **[Agent resume prompt/template](docs/AGENT_HANDOFF_TEMPLATE.md)** — copy/paste for Claude Code / Codex.
+- **[V4 migration handoff](docs/archive/MIGRATION_HANDOFF.md)** — public PRs #6–#10, migrated Issues and remaining integration.
+- **[Agent resume prompt/template](docs/archive/AGENT_HANDOFF_TEMPLATE.md)** — copy/paste for Claude Code / Codex.
 - **[ROADMAP](docs/ROADMAP.md)** — V5 stage 2 and approved V6 Drive & Act stage 3 future directions (not implementation authorization).
 
 ## Start here — persistent project context
@@ -29,16 +29,16 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 |---|---|
 | **Permanent decisions and non-negotiable buildability principles** | [PROJECT_PRINCIPLES](docs/PROJECT_PRINCIPLES.md) |
 | Current authorized work | [NOW](docs/NOW.md) |
-| Latest code/CI and issues | [Public issues](https://github.com/Jarvis-igerman-ai/jarves/issues), [migration status](docs/MIGRATION_STATUS.md) and [HANDOFF](docs/HANDOFF.md) (older entries may be historical) |
-| Current physical design backlog | [Public hardware/design issue #4](https://github.com/Jarvis-igerman-ai/jarves/issues/4) and [design review](docs/reviews/S1_DESIGN_REVIEW.md) |
+| Latest code/CI and issues | [Public issues](https://github.com/Jarvis-igerman-ai/jarves/issues), [migration status](docs/archive/MIGRATION_STATUS.md) and [HANDOFF](docs/HANDOFF.md) (older entries may be historical) |
+| Current physical design backlog | [Public hardware/design issue #4](https://github.com/Jarvis-igerman-ai/jarves/issues/4) and [design review](docs/archive/reviews/S1_DESIGN_REVIEW.md) |
 | Milestones, V5 and V6 vision stages | [ROADMAP](docs/ROADMAP.md) |
 | **Engineering challenges, simulations and staged safety/quality reviews** | [ENGINEERING_REVIEW_GATES](docs/ENGINEERING_REVIEW_GATES.md) |
 | **Active software / CI implementation package** | [SW-V1 approved plan](docs/SW_V1_WORK_PACKAGE.md) |
-| **Future personal assistant, Skills, YouTube Music, controls and diagnostics** | [JARVES software requirements](docs/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md) |
+| **Future personal assistant, Skills, YouTube Music, controls and diagnostics** | [JARVES software requirements](docs/archive/JARVES_CONTROLS_DIAGNOSTICS_REQUIREMENTS.md) |
 | FreeCAD → Blender → Godot → Core boundaries | [ARCHITECTURE](docs/ARCHITECTURE.md) |
 | Rules for agents and selective reading | [AGENTS](AGENTS.md), [CONTEXT_MAP](docs/CONTEXT_MAP.md) |
 | Interactive viewer instructions | [godot/README](godot/README.md) |
-| **Run the assistant (Core + face), setup, troubleshooting** | [core/README](core/README.md) · [SW-V1 review](docs/reviews/SW_V1_REVIEW.md) |
+| **Run the assistant (Core + face), setup, troubleshooting** | [core/README](core/README.md) · [SW-V1 review](docs/archive/reviews/SW_V1_REVIEW.md) |
 
 ## Historic snapshot — 18 October 2026 (superseded by [NOW](docs/NOW.md))
 
@@ -52,7 +52,7 @@ A cute, friendly, premium-looking stationary home companion. **Simulation first,
 
 ## Earlier snapshot — 17 October 2026
 
-**Pebble A visual review candidate** (Issue #4): CAD `cad/JARVIS_pebble.FCStd` (generator `cad/build_pebble.py`) → Blender (`blender/finishes.json`, renders in `blender/renders/`) → Godot viewer. On the configured PC launch `godot/run_viewer.cmd`. Review summary: [S1_T03R2_PEBBLE_VISUAL](docs/reviews/S1_T03R2_PEBBLE_VISUAL.md). The old blockout (`cad/JARVIS_blockout.FCStd`) is kept as "before".
+**Pebble A visual review candidate** (Issue #4): CAD `cad/JARVIS_pebble.FCStd` (generator `cad/build_pebble.py`) → Blender (`blender/finishes.json`, renders in `blender/renders/`) → Godot viewer. On the configured PC launch `godot/run_viewer.cmd`. Review summary: [S1_T03R2_PEBBLE_VISUAL](docs/archive/reviews/S1_T03R2_PEBBLE_VISUAL.md). The old blockout (`cad/JARVIS_blockout.FCStd`) is kept as "before".
 
 **Design direction:** improved A Pebble: cute, friendly and premium, with a practical flat display face and mic top. Three finishes are provisional; colors, precise model and components remain undecided. Expect multiple visual review rounds.
 

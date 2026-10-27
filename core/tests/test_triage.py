@@ -118,7 +118,7 @@ async def test_injection_strings_are_just_card_text(tmp_path):
     res, _ = await run(tmp_path, [{"title": HOSTILE[:120], "person": "<b>x</b>", "ref": "m<1>"}])
     c = res.ui_blocks[0]["cards"][0]
     assert c["title"].startswith("<img") and c["ref"] == "" and c["person"] == "<b>x</b>"   # kept as text; a bad ref is dropped
-    assert set(c) == {"id", "title", "due", "person", "ref", "when", "skip"} and "on" not in c   # no control, action or link in a card
+    assert set(c) == {"id", "title", "due", "person", "ref", "when", "skip", "source"} and "on" not in c   # no control, action or link in a card
 
 
 async def test_past_or_bad_due_is_dropped(tmp_path):
@@ -300,3 +300,22 @@ def test_forged_edit_over_http_is_refused(setup):
     _show(r, b)
     st, out = _click(r, {"block": b["id"], "selected": ["i1"], "edits": {"i1": "x" * 500}})
     assert st == 400 and out["code"] == "UI_ACTION_INVALID" and r.chat.blocks.state(b["id"]) == "open"
+
+
+# ---------------------------------------------------------------- S4: mail and notes as sources
+@pytest.mark.asyncio
+async def test_source_mail_and_note_reach_the_card(tmp_path):
+    res, sink = await run(tmp_path, [{"title": "reply to Dana", "source": "mail", "ref": "m1"},
+                                     {"title": "buy milk", "source": "note"}, {"title": "call Ron"}])
+    assert res.ok
+    cards = sink.blocks[0]["cards"] if sink.blocks else res.ui_blocks[0]["cards"]
+    assert [c["source"] for c in cards] == ["mail", "note", ""]
+    assert "[mail]" in ub.numbered(res.ui_blocks[0])
+
+
+@pytest.mark.asyncio
+async def test_unknown_source_is_refused_not_shown(tmp_path):
+    reg = SkillRegistry()
+    reg.register(triage.TriageSkill(tmp_path, titles_fn=lambda: None))
+    res = await reg.call("tasks_from_messages", {"candidates": [{"title": "x", "source": "<script>"}]})
+    assert not res.ok

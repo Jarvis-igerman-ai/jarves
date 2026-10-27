@@ -1018,3 +1018,79 @@ def test_a_long_answer_streaming_into_a_short_log_keeps_following_until_the_owne
     until(page, at_end, 5000)                                  # the newest text is in view, also after the Copy row arrived
     assert page.is_hidden(".jc-jump")
     assert page.errors == []
+
+
+# ------------------------------------------------------------------ #509 (owner report): the phone app at phone size
+PHONE_FIT = """() => {
+  const de = document.documentElement, W = de.clientWidth;
+  const shown = (e) => e.getClientRects().length && !e.closest('[hidden]') && getComputedStyle(e).visibility !== 'hidden';
+  const tag = (e) => e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + ' ' + (e.textContent || '').trim().slice(0, 20);
+  const inScroller = (e) => { for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
+      const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll') return true; } return false; };
+  return {sw: de.scrollWidth, bw: document.body.scrollWidth, cw: W, dir: de.dir, lang: de.lang,
+    small: [...document.querySelectorAll('button, input, select, textarea, a, summary, [role=tab]')].filter(shown)
+      .map((e) => { const r = e.getBoundingClientRect(); return [tag(e), Math.round(r.width), Math.round(r.height)]; })
+      .filter(([, w, h]) => w < 44 || h < 44),
+    outside: [...document.querySelectorAll('#appView *, #pairView *, .bar *')].filter(shown).filter((e) => !inScroller(e))
+      .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > W + 1 || r.left < -1); }).map(tag),
+    appr: (() => { const b = document.querySelector('#tab-chat .jc-appr'); return b ? b.getBoundingClientRect().height / innerHeight : 0; })(),
+    risk: [...document.querySelectorAll('#tab-chat .jc-card .jc-pill')].filter(shown).length,
+    cards: document.querySelectorAll('#tab-chat .jc-card').length};
+}"""
+
+
+def _fits(page, lang):
+    m = page.evaluate(PHONE_FIT)
+    assert m["sw"] <= m["cw"] and m["bw"] <= m["cw"], m                # no sideways scroll
+    assert m["outside"] == [], m["outside"]                             # nothing sticks out of the screen
+    assert m["small"] == [], m["small"]                                 # every control (also "Details") >= 44 px
+    assert m["dir"] == ("rtl" if lang == "he" else "ltr") and m["lang"] == lang
+    return m
+
+
+@pytest.mark.parametrize("lang,locale,scheme", [("en", "en-US", "light"), ("he", "he-IL", "dark")])
+def test_phone_app_fits_390_and_360_px_with_waiting_requests_and_long_text(browser, phone, lang, locale, scheme):
+    """#509: at 390 and 360 px (EN light, HE dark): no sideways scroll, 44 px targets including the request card's
+    Details, a long unbroken link and a long request title wrap, waiting requests keep the conversation in view and
+    show their risk, the composer pads the safe area and the viewport allows the notch (viewport-fit=cover)."""
+    p = phone(tls=True)
+    page = new_page(browser, locale=locale, scheme=scheme)
+    page.goto(f"{p.base}/m/")
+    page.wait_for_selector("#pairView:not([hidden])")
+    assert "viewport-fit=cover" in page.get_attribute("meta[name=viewport]", "content")
+    _fits(page, lang)
+    page.goto("about:blank")
+    ui_pair(page, p)
+    p.owner("POST", "/api/mobile/settings", {"phone_approvals": True})
+    p.ask("Send test message")
+    p.ask("y" * 90)                                                     # a long unbroken title
+    p.ask("Install tool", typed=True)
+    until(page, "document.querySelectorAll('#tab-chat .jc-card').length === 3")
+    say(page, "https://example.com/" + "a" * 160)
+    until(page, "[...document.querySelectorAll('.jc-msg')].some(m => m.textContent.includes('echo: https'))")
+    page.wait_for_timeout(250)
+    m = _fits(page, lang)
+    assert m["risk"] == 3                                               # every request card shows its risk
+    assert m["appr"] <= 0.34, m["appr"]                                 # requests never squeeze the chat to a strip
+    order = page.evaluate("""[...document.querySelector('#tab-chat .jc-card .jc-row').children].map((b) =>
+        [b.classList.contains('primary'), Math.round(b.getBoundingClientRect().left)])""")
+    primary_left = [x for ok, x in order if ok][0]
+    deny_left = [x for ok, x in order if not ok][0]
+    assert (primary_left > deny_left) == (lang == "en")                 # Approve at the inline end, like the Approvals page
+    pad = page.evaluate("getComputedStyle(document.querySelector('#tab-chat .jc-formwrap')).paddingBottom")
+    assert pad.endswith("px") and float(pad[:-2]) >= 8
+    css = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "m_theme.css").read_text(encoding="utf-8")
+    assert "env(safe-area-inset-bottom)" in css and "env(safe-area-inset-top)" in css and "100dvh" in css
+    page.tap("#menuBtn")
+    page.wait_for_selector("#drawer:not([hidden])")
+    page.wait_for_timeout(250)
+    _fits(page, lang)
+    page.tap("#drawerClose")
+    page.set_viewport_size({"width": 360, "height": 740})               # a smaller phone
+    page.wait_for_timeout(250)
+    _fits(page, lang)
+    for tab in ("approvals", "health", "home", "voice"):
+        go(page, tab)
+        page.wait_for_timeout(300)
+        _fits(page, lang)
+    assert page.errors == []

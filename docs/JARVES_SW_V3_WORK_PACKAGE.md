@@ -1,4 +1,4 @@
-> **Historical, superseded by [CHANGELOG](../CHANGELOG.md) and the [V3 integration report](reviews/SWV3_INTEGRATION_REPORT.md) (V3 released).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](DOC_MAP.md).
+> **Historical, superseded by [CHANGELOG](../CHANGELOG.md) and the [V3 integration report](archive/reviews/SWV3_INTEGRATION_REPORT.md) (V3 released).** Kept as evidence and owner decision record; do not use it as the current plan. Index: [DOC_MAP](DOC_MAP.md).
 
 # JARVES — SW-V3 Work Package (prioritized)
 

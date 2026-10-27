@@ -1,6 +1,6 @@
 # JARVES Core (Python)
 
-The assistant brain: state, the Godot face link, DevicePort, voice, memory, Skills and music. Stack decision and sources: [SW_V1_TECH_DECISION](../docs/reviews/SW_V1_TECH_DECISION.md).
+The assistant brain: state, the Godot face link, DevicePort, voice, memory, Skills and music. Stack decision and sources: [SW_V1_TECH_DECISION](../docs/archive/reviews/SW_V1_TECH_DECISION.md).
 
 ## Setup (Windows now, Raspberry Pi OS 64-bit later)
 
@@ -234,17 +234,17 @@ User-facing walkthrough: [USER_GUIDE](../docs/USER_GUIDE.md) ([עברית](../do
 
 | Feature | Commands | Guide topic | Evidence |
 |---|---|---|---|
-| Privacy and redaction | `jarvis diag`, Home privacy switch, `jarvis status` (privacy banner) | `privacy` | [SWV4_B_PRIVACY](../docs/reviews/SWV4_B_PRIVACY.md); lint `python tools/log_lint.py`; audit `python tools/redaction_audit.py --both-modes` |
+| Privacy and redaction | `jarvis diag`, Home privacy switch, `jarvis status` (privacy banner) | `privacy` | [SWV4_B_PRIVACY](../docs/archive/reviews/SWV4_B_PRIVACY.md); lint `python tools/log_lint.py`; audit `python tools/redaction_audit.py --both-modes` |
 | Approvals (signed answers, popup) | `jarvis approvals list \| approve \| deny \| history` | `autonomy` | [SWV4_R01_DEFENSE](../docs/reviews/SWV4_R01_DEFENSE.md) |
 | Client-mode delegation | `jarvis budget set --daily-usd 1 --turn-usd 0.05`, `jarvis budget test-cap` | `client_delegation` | [SWV4_D_DELEGATION](../docs/reviews/SWV4_D_DELEGATION.md) |
 | Agent Orchestrator | `jarvis agents list \| status \| ask \| tell \| start \| stop \| doctor \| install-plugin` | `agent_orchestrator` | [SWV4_E_ORCHESTRATOR](../docs/reviews/SWV4_E_ORCHESTRATOR.md) |
-| WhatsApp bridge | `jarvis whatsapp status \| link \| mode \| allow \| kill \| purge` | `whatsapp_bridge` | [SWV4_F_WHATSAPP](../docs/reviews/SWV4_F_WHATSAPP.md); Go bridge in `../bridge/whatsapp`, build `scripts/build_whatsapp_bridge.ps1` |
+| WhatsApp bridge | `jarvis whatsapp status \| link \| mode \| allow \| kill \| purge` | `whatsapp_bridge` | [SWV4_F_WHATSAPP](../docs/archive/reviews/SWV4_F_WHATSAPP.md); Go bridge in `../bridge/whatsapp`, build `scripts/build_whatsapp_bridge.ps1` |
 | Conversation recall | `jarvis recall "q" [--since]`, `--stats \| --repair \| --rebuild \| --forget` | `recall` | [SWV4_G_RECALL](../docs/reviews/SWV4_G_RECALL.md); `python tools/recall_quality.py` |
-| Health and Self-Diagnostics 2.0 | `jarvis health [report \| preflight \| canary \| ai-review \| ticket \| remediate]` | `health` | [SWV4_O_SELFDIAG2](../docs/reviews/SWV4_O_SELFDIAG2.md) |
+| Health and Self-Diagnostics 2.0 | `jarvis health [report \| preflight \| canary \| ai-review \| ticket \| remediate]` | `health` | [SWV4_O_SELFDIAG2](../docs/archive/reviews/SWV4_O_SELFDIAG2.md) |
 | Wake model | `jarvis wake test --apply`, `jarvis wake train [--revert]` | `wake_word` | [SWV4_WAKE_TRAIN](../docs/reviews/SWV4_WAKE_TRAIN.md) |
-| Performance gates | `python tools/perf_gate.py --class ci` (or `owner`); budgets in `perf_budgets.toml` | none | [SWV4_PERF_BUDGETS](../docs/reviews/SWV4_PERF_BUDGETS.md), [SWV4_M_PERF_CI](../docs/reviews/SWV4_M_PERF_CI.md) |
+| Performance gates | `python tools/perf_gate.py --class ci` (or `owner`); budgets in `perf_budgets.toml` | none | [SWV4_PERF_BUDGETS](../docs/reviews/SWV4_PERF_BUDGETS.md), [SWV4_M_PERF_CI](../docs/archive/reviews/SWV4_M_PERF_CI.md) |
 | Dashboard (English, Hebrew) | `jarvis dashboard` | `dashboard` | [SWV4_K_DASHBOARD](../docs/reviews/SWV4_K_DASHBOARD.md) |
-| Assisted dialing | `jarvis dial <name\|number>` | `assisted_dialing` (off by default) | [SWV4_H_DIALING](../docs/reviews/SWV4_H_DIALING.md) |
+| Assisted dialing | `jarvis dial <name\|number>` | `assisted_dialing` (off by default) | [SWV4_H_DIALING](../docs/archive/reviews/SWV4_H_DIALING.md) |
 
 Installer upgrade and `jarvis update --rollback`: [SWV4_L_INSTALLER](../docs/reviews/SWV4_L_INSTALLER.md).
 

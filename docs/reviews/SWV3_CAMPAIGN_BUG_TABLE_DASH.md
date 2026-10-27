@@ -1,6 +1,6 @@
 # SW-V3 campaign, Pass D (dashboard): bug table
 
-Branch `v3-campaign-dash` (off `v3-final` d701ef4) · issue [#17](https://github.com/igalgerman/JARVIS/issues/17) · report: [SWV3_CAMPAIGN_DASHBOARD.md](SWV3_CAMPAIGN_DASHBOARD.md). Severity per the plan (P0-P3). Policy: P0-P2 fixed at once, P3 listed.
+Branch `v3-campaign-dash` (off `v3-final` d701ef4) · issue [#17](https://github.com/igalgerman/JARVIS/issues/17) · report: [SWV3_CAMPAIGN_DASHBOARD.md](../archive/reviews/SWV3_CAMPAIGN_DASHBOARD.md). Severity per the plan (P0-P3). Policy: P0-P2 fixed at once, P3 listed.
 
 ## Fixed (retested in real headless Edge)
 
