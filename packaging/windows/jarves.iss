@@ -151,6 +151,7 @@ Type: filesandordirs; Name: "{app}\python"
 Type: filesandordirs; Name: "{app}\face"
 Type: filesandordirs; Name: "{app}\rollback"
 Type: filesandordirs; Name: "{app}\failed-upgrade-*"
+Type: filesandordirs; Name: "{app}\failed-recovery-*"
 Type: files; Name: "{app}\install-state.json"
 Type: dirifempty; Name: "{app}"
 

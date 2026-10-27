@@ -408,3 +408,39 @@ def test_recover_never_leaves_a_hole_when_a_rename_fails_midway(tmp_path, monkey
     monkeypatch.undo()
     assert (app / "python" / "v.txt").read_text() == "NEW-BROKEN-PY" and (app / "rollback" / "python" / "v.txt").read_text() == "OLD-PY"
     assert seed.verify(home, legacy=False) == []                         # data untouched
+
+
+def test_relaunch_hands_off_to_a_detached_child_and_does_not_wait(tmp_path, monkeypatch):
+    """Review #261: the parent runs from app/rollback/python (locked exe); it must start the temp-copy child and return,
+    never wait for it, and the child must be told to wait for the parent's pid before it swaps."""
+    import os
+    import sys
+    from types import SimpleNamespace
+    home, state, app = _dead_upgrade(tmp_path)
+    exe = app / "rollback" / "python" / "python.exe"
+    exe.write_text("fake exe")
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(installer, "core_running", NOT_RUNNING)
+    calls = []
+    args = SimpleNamespace(app=app, state=state, home=None, yes=False)
+    assert installer._relaunch_from_copy(args, spawn=lambda cmd, **kw: calls.append((cmd, kw)), ask=lambda _: "no") == 6
+    assert calls == []                                                    # declined: nothing started
+    rc = installer._relaunch_from_copy(args, spawn=lambda cmd, **kw: calls.append((cmd, kw)), ask=lambda _: "YES")
+    assert rc == 0 and len(calls) == 1
+    cmd, kw = calls[0]
+    assert "rollback" not in cmd[0] and Path(cmd[0]).name == "python.exe"          # runs from the temp copy
+    assert cmd[cmd.index("--wait-pid") + 1] == str(os.getpid()) and "--yes" in cmd and "recover" in cmd
+    if os.name == "nt":
+        import subprocess
+        assert kw["creationflags"] & subprocess.CREATE_NEW_PROCESS_GROUP and kw["creationflags"] & subprocess.CREATE_NEW_CONSOLE
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "elsewhere" / "python.exe"))
+    assert installer._relaunch_from_copy(args, spawn=lambda *a, **k: calls.append(1)) is None   # not inside rollback
+    assert len(calls) == 1
+
+
+def test_wait_for_exit_polls_until_the_launcher_is_gone():
+    seq = iter([True, True, False])
+    slept = []
+    assert installer.wait_for_exit(123, alive=lambda p: next(seq), sleep=slept.append) is True and len(slept) == 2
+    assert installer.wait_for_exit(123, 0.0, alive=lambda p: True, sleep=lambda s: None) is False
+    assert installer._pid_alive(0) is False
