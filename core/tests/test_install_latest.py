@@ -55,13 +55,16 @@ class Fake:
             self.calls.append("wait_installer")
             return self.installer_exits
 
-        def spawn(pid, state):
-            self.calls.append(f"spawn pid={pid}")
+        def spawn(state):
+            self.calls.append("spawn")
             self.spawned = state
+
+        def publish(pid):
+            self.calls.append(f"pid={pid}")
 
         return il.Deps(
             home=self.tmp, start_core=rec("start_core"), wait_installer=wait_installer,
-            spawn_finisher=spawn if self.spawn else None,
+            spawn_finisher=spawn if self.spawn else None, publish_pid=publish,
             channel=self.channel, set_channel=rec("set_channel"), backup_now=backup,
             check=lambda ch: {"error": self.error, "available": self.available, "current": "4.5.0",
                               "latest": {"version": "4.5.1", "display": "4.5.1-beta.9"}},
@@ -191,7 +194,8 @@ def test_spawned_finisher_runs_outside_the_installed_program(tmp_path):
     f = Fake(tmp=tmp_path, spawn=True)
     rep = il.begin(f.deps())
     assert rep.pending and rep.changed and rep.render().startswith("PENDING")
-    assert "spawn pid=4242" in f.calls and not any(c.startswith("cli:") or c == "rollback" for c in f.calls)
+    assert f.calls.index("spawn") < f.calls.index("stop") < f.calls.index("launch restart=True") < f.calls.index("pid=4242")
+    assert not any(c.startswith("cli:") or c == "rollback" for c in f.calls)
     state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
     d = f.deps()
     done = il.finish(d, state, installer_running=False)    # what the waiter's `--finish` does in the new program
@@ -201,11 +205,68 @@ def test_spawned_finisher_runs_outside_the_installed_program(tmp_path):
     assert not again.ok and "rollback" not in f.calls
 
 
-def test_finisher_script_waits_then_starts_the_new_program_with_quoting(tmp_path):
-    s = il.finisher_script(77, tmp_path / "it's.json", r"C:\Apps\JARVES\python\python.exe", tmp_path / "r.txt")
-    assert "$p = 77" in s and s.index("Wait-Process") < s.index("--finish")
-    assert "it''s.json" in s and "--installer-running" in s and "jarvis update --rollback --yes" in s
-    assert "rollback()" not in s
+def test_finisher_script_quoting_and_order(tmp_path):
+    evil = tmp_path / "O\u2019Brien \u2018x\u201a y\u201b it's"
+    s = il.finisher_script(evil / "st.json", r"C:\Apps\JARVES\python\python.exe", evil / "r.txt", evil / "p.pid",
+                           r"C:\u\JARVES-Setup-4.5.1.exe")
+    for q in "'\u2018\u2019\u201a\u201b":
+        assert q * 2 in s                                   # every quote character in the path is doubled
+    assert "O\u2019\u2019Brien" in s and "it''s" in s
+    assert s.index("cancel") < s.index("Wait-Process") < s.index("--finish")
+    assert "--installer-running" in s and "jarvis update --rollback --yes" in s and "rollback()" not in s
+    assert il._ps("a\nb'c") == "'ab''c'"
+
+
+def test_waiter_script_bom_and_non_ascii_paths(tmp_path):
+    p = tmp_path / "\u05d1\u05d3\u05d9\u05e7\u05d4.ps1"
+    p.write_text(il.finisher_script(tmp_path / "\u05e2.json", "py.exe", tmp_path / "r", tmp_path / "p", "i.exe"),
+                 encoding="utf-8-sig")
+    raw = p.read_bytes()
+    assert raw[:3] == b"\xef\xbb\xbf" and "\u05e2.json" in raw.decode("utf-8-sig")
+
+
+def test_real_spawn_writes_bom_script_and_starts_hidden_waiter_outside_app(tmp_path, monkeypatch):
+    import argparse
+    import subprocess
+    from jarves import updates
+    from jarves.config import Config
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(updates, "is_installed_build", lambda: True)
+    home = tmp_path / "h\u05d1"
+    (home / "updates").mkdir(parents=True)
+    d = il.real_deps(argparse.Namespace(), Config(), home)
+    st = home / "updates" / il.STATE_FILE
+    st.write_text('{"installer": "C:/x/Setup.exe"}', encoding="utf-8")
+    assert d.spawn_finisher is not None
+    d.spawn_finisher(st)
+    (args, kw), = calls
+    assert (home / "updates" / "install-latest-finish.ps1").read_bytes()[:3] == b"\xef\xbb\xbf"
+    assert not kw["creationflags"] & 0x8                    # no DETACHED_PROCESS: it would cancel CREATE_NO_WINDOW
+    assert kw["creationflags"] & getattr(subprocess, "CREATE_NO_WINDOW", 0) == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    assert Path(kw["cwd"]) == home / "updates"
+    d.publish_pid(None)
+    assert (home / "updates" / il.PID_FILE).read_text() == "cancel"
+    d.publish_pid(77)
+    assert (home / "updates" / il.PID_FILE).read_text() == "77"
+
+
+def test_old_report_state_and_pid_are_removed_before_launch(tmp_path):
+    up = tmp_path / "updates"
+    up.mkdir()
+    for n in (il.REPORT_FILE, il.STATE_FILE, il.PID_FILE):
+        (up / n).write_text("PASS old", encoding="utf-8")
+    f = Fake(tmp=tmp_path, spawn=True)
+    il.begin(f.deps())
+    assert not (up / il.REPORT_FILE).exists() and not (up / il.PID_FILE).exists()
+    assert (up / il.STATE_FILE).read_text(encoding="utf-8") != "PASS old"
+
+
+def test_launch_failure_cancels_the_waiter_and_waiter_starts_before_setup(tmp_path):
+    f = Fake(tmp=tmp_path, spawn=True, launch_error=OSError("x"))
+    rep = il.begin(f.deps())
+    assert not rep.ok and "pid=None" in f.calls and "start_core" in f.calls
+    assert f.calls.index("spawn") < f.calls.index("stop") < f.calls.index("launch restart=True")
 
 
 def test_wait_report_returns_new_report_only(tmp_path):

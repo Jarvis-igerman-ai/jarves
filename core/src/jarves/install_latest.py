@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -35,6 +36,7 @@ from . import logs
 CHANNELS = ("stable", "beta")
 STATE_FILE = "install-latest-state.json"
 REPORT_FILE = "install-latest-report.txt"
+PID_FILE = "install-latest.pid"                   # setup process id written by the parent; "cancel" = setup never started
 SETUP_WAIT_S = 1200
 
 
@@ -57,7 +59,8 @@ class Deps:
     wait: Callable[[bool], str]                               # (core_ran) -> 'done' | 'failed' | 'timeout'
     run_cli: Callable[[list[str]], tuple[int, str]]           # the NEW program, fresh process: (exit code, output)
     rollback: Callable[[], dict]
-    spawn_finisher: Callable[[int, Path], None] | None = None  # (setup pid, state file); None: finish in this process
+    spawn_finisher: Callable[[Path], None] | None = None      # (state file) start the waiter; None: finish in this process
+    publish_pid: Callable[[int | None], None] = lambda pid: None   # tell the waiter the setup pid (None = cancelled)
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
 
@@ -196,24 +199,43 @@ def begin(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Repo
         deps.record_was_running(was)
     except OSError:
         pass
+    up = _updates(deps)
+    for name in (REPORT_FILE, STATE_FILE, PID_FILE):      # nothing of an older run may be mistaken for this one
+        try:
+            (up / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+    state = {"report": {**rep.to_dict(), "changed": True}, "shown": shown, "core_up": core_up,
+             "installer": str(prep["installer"])}
+    spawned = False
+    if deps.spawn_finisher is not None:                   # the waiter exists BEFORE setup can stop this process
+        try:
+            up.mkdir(parents=True, exist_ok=True)
+            sp = up / STATE_FILE
+            sp.write_text(json.dumps(state), encoding="utf-8")
+            deps.spawn_finisher(sp)
+            spawned = True
+        except Exception:                                 # noqa: BLE001  (no waiter: finish here, still after setup)
+            spawned = False
     try:
         if core_up:
             deps.stop_core()
         pid = deps.launch(prep, was, core_up)             # restart flag only when the Core ran
     except Exception as e:                                # noqa: BLE001  (UpdateError, OSError from the process start)
+        if spawned:
+            try:
+                deps.publish_pid(None)                    # the waiter ends without judging anything
+            except Exception:                             # noqa: BLE001
+                pass
         return _fail_start(deps, rep, e, core_up)
     rep.changed = True
-    state = {"report": rep.to_dict(), "shown": shown, "core_up": core_up}
-    if deps.spawn_finisher is not None:
+    if spawned:
         try:
-            _updates(deps).mkdir(parents=True, exist_ok=True)
-            sp = _updates(deps) / STATE_FILE
-            sp.write_text(json.dumps(state), encoding="utf-8")
-            deps.spawn_finisher(pid, sp)
-            rep.pending = True
-            return rep
-        except Exception:                                 # noqa: BLE001  (no waiter: finish here, still after setup)
+            deps.publish_pid(pid)
+        except Exception:                                 # noqa: BLE001  (the waiter also finds setup by its path)
             pass
+        rep.pending = True
+        return rep
     return finish(deps, state)
 
 
@@ -275,23 +297,45 @@ def _cli_subprocess(argv: list[str]) -> tuple[int, str]:
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+_QUOTES = "'‘’‚‛"                # PowerShell treats all four as a single quote
+
+
 def _ps(s) -> str:
-    return "'" + str(s).replace("'", "''") + "'"
+    """A PowerShell single-quoted string: every quote character is doubled, so a path cannot end the string."""
+    return "'" + "".join(c * 2 if c in _QUOTES else c for c in str(s).replace("\r", "").replace("\n", "")) + "'"
 
 
-def finisher_script(pid: int, state: Path, python: str, report: Path) -> str:
-    """PowerShell run OUTSIDE {app}: wait for the setup process, then start phase two from the new program. If the
-    new version has no `--finish` (first install of this feature), it leaves an honest report instead."""
-    return (f"$p = {int(pid)}\r\n"
-            f"Wait-Process -Id $p -Timeout {SETUP_WAIT_S} -ErrorAction SilentlyContinue\r\n"
-            "$left = [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)\r\n"
-            f"$a = @('-X','utf8','-m','jarves','install-latest','--finish',{_ps(state)})\r\n"
-            "if ($left) { $a += '--installer-running' }\r\n"
-            f"& {_ps(python)} @a\r\n"
-            f"if ($LASTEXITCODE -ne 0 -and -not (Test-Path -LiteralPath {_ps(report)})) {{\r\n"
-            "  'FAIL  install-latest  setup ran, but the installed version cannot finish the checks. Run: jarvis doctor; "
-            "jarvis selftest; jarvis update status. Roll back: jarvis update --rollback --yes' | Set-Content "
-            f"-LiteralPath {_ps(report)} -Encoding UTF8 }}\r\n")
+def finisher_script(state: Path, python: str, report: Path, pid_file: Path, installer: str) -> str:
+    """PowerShell run OUTSIDE {app}, started BEFORE setup: wait for the parent to publish the setup pid (or find the setup
+    process by its path), wait for that process to exit, then start phase two from the NEW program. A pid file saying
+    `cancel` ends it silently (setup never started). If the new version has no `--finish` (first install of this
+    feature) it leaves an honest report: the old one was deleted before launch. Write the file as UTF-8 WITH BOM."""
+    lines = [
+        f"$pidFile = {_ps(pid_file)}",
+        f"$inst = {_ps(installer)}",
+        "$p = 0",
+        "$end = (Get-Date).AddSeconds(180)",
+        "while ((Get-Date) -lt $end -and $p -eq 0) {",
+        "  if (Test-Path -LiteralPath $pidFile) {",
+        "    $t = (Get-Content -LiteralPath $pidFile -Raw -ErrorAction SilentlyContinue)",
+        "    if ($t -and $t.Trim() -eq 'cancel') { exit 0 }",
+        "    $n = 0; if ($t -and [int]::TryParse($t.Trim(), [ref]$n) -and $n -gt 0) { $p = $n; break }",
+        "  }",
+        "  $q = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $inst } | Select-Object -First 1",
+        "  if ($q) { $p = $q.Id; break }",
+        "  Start-Sleep -Milliseconds 500",
+        "}",
+        f"if ($p -gt 0) {{ Wait-Process -Id $p -Timeout {SETUP_WAIT_S} -ErrorAction SilentlyContinue }}",
+        "$left = ($p -gt 0) -and [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)",
+        f"$a = @('-X','utf8','-m','jarves','install-latest','--finish',{_ps(state)})",
+        "if ($left) { $a += '--installer-running' }",
+        f"& {_ps(python)} @a",
+        f"if ($LASTEXITCODE -ne 0 -and -not (Test-Path -LiteralPath {_ps(report)})) {{",
+        "  'FAIL  install-latest  setup ran, but the installed version cannot finish the checks. Run: jarvis doctor; "
+        "jarvis selftest; jarvis update status. Roll back: jarvis update --rollback --yes' | Set-Content "
+        f"-LiteralPath {_ps(report)} -Encoding UTF8 }}",
+    ]
+    return "\r\n".join(lines) + "\r\n"
 
 
 def real_deps(a, cfg, home: Path) -> Deps:
@@ -330,17 +374,25 @@ def real_deps(a, cfg, home: Path) -> Deps:
         except subprocess.TimeoutExpired:
             return False
 
-    def spawn(pid: int, state: Path) -> None:
-        script = Path(home) / "updates" / "install-latest-finish.ps1"
-        script.write_text(finisher_script(pid, state, sys.executable, Path(home) / "updates" / REPORT_FILE),
-                          encoding="utf-8")
-        flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                 | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    def spawn(state: Path) -> None:
+        upd = Path(home) / "updates"
+        inst = json.loads(state.read_text(encoding="utf-8")).get("installer", "")
+        script = upd / "install-latest-finish.ps1"
+        script.write_text(finisher_script(state, sys.executable, upd / REPORT_FILE, upd / PID_FILE, inst),
+                          encoding="utf-8-sig")          # Windows PowerShell 5.1 reads a BOM-less file as ANSI
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                           "-WindowStyle", "Hidden", "-File", str(script)], creationflags=flags, close_fds=True,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         cwd=str(Path(sys.executable).resolve().parent.parent))
-        proc.pop("p", None)                               # the waiter owns the wait from here on
+                         cwd=str(upd))                   # outside {app}: setup may replace that folder
+
+    def publish_pid(pid: int | None) -> None:
+        f = Path(home) / "updates" / PID_FILE
+        tmp = f.with_name(f.name + ".tmp")
+        tmp.write_text("cancel" if pid is None else str(int(pid)), encoding="ascii")
+        os.replace(tmp, f)
+        if pid is not None:
+            proc.pop("p", None)                           # the waiter owns the wait from here on
 
     def start_core() -> None:
         cli.cmd_start(argparse.Namespace(show=False), cfg, home)
@@ -357,7 +409,7 @@ def real_deps(a, cfg, home: Path) -> Deps:
                 wait=lambda core_ran: up.watch(home, lambda _l: None, timeout_s=420.0),
                 run_cli=_cli_subprocess,
                 rollback=lambda: rollback(home, approved=True, restore_data=True, silent=True, port=cfg.link.port),
-                spawn_finisher=spawn if is_installed_build() else None)
+                spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid)
 
 
 def wait_report(home: Path, since: float, *, timeout_s: float = 1500.0, sleep=time.sleep, clock=time.time) -> str | None:

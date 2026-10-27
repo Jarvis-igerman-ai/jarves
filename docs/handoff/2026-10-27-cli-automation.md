@@ -23,3 +23,8 @@ dashboard texts, so no locale part was added; the guides carry their own Hebrew.
    feature: the installed version has no `--finish`, so the waiter writes an honest FAIL-style note telling to run doctor by hand.
 3. A failed launch restarts the Core if it ran and prints a clean report.
 4. Checks wait for the setup process to exit; no rollback while setup runs; Core-not-running no longer waits on the 90 s watch.
+
+## Review round 2
+Waiter script is UTF-8 with BOM; every PowerShell quote character (' and U+2018/2019/201A/201B) is doubled; old report, state
+and pid files are deleted before launch; the waiter is started BEFORE setup (it waits for the setup pid published by the parent,
+or finds setup by its path, `cancel` if setup never started); waiter runs with CREATE_NO_WINDOW and cwd <home>/updates.
