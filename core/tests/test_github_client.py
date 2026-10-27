@@ -93,7 +93,7 @@ def test_one_write_door_with_a_fixed_endpoint_family():
     src = inspect.getsource(gh)
     assert '"PUT"' not in src and src.count("write=True") == 1                    # only write() passes write=True
     c = gh.GitHubClient(token=TOKEN, transport=gh.FakeGitHub().transport)
-    for m, p in [("PUT", "/repos/o/r/issues"), ("DELETE", "/repos/o/r"), ("POST", "/repos/o/r/pulls"),
+    for m, p in [("PUT", "/repos/o/r/issues"), ("DELETE", "/repos/o/r"), ("POST", "/repos/o/r/pulls/1/merge"),
                  ("POST", "/repos/o/r/issues/1/../../merge"), ("POST", "/repos/o/r/issues/x"), ("PATCH", "/user"),
                  ("DELETE", "/repos/o/r/issues/1/labels"), ("DELETE", "/repos/o/r/issues/1/labels/."),     # = remove ALL
                  ("DELETE", "/repos/o/r/issues/1/labels/.."), ("DELETE", "/repos/o/r/issues/1/labels/%2E%2e"),

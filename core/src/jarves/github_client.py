@@ -73,8 +73,9 @@ def broad_scopes(scopes: list[str] | None) -> list[str]:
 
 _SEG = r"(?!\.\.?/)[A-Za-z0-9_.-]{1,100}"            # owner / repo; never a "." or ".." segment
 _WRITE_PATHS = {                                       # each verb only on its own endpoint templates (issues family)
-    "POST": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues(/[1-9]\d{{0,8}}/(comments|labels))?$"),
-    "PATCH": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}$"),
+    "POST": re.compile(rf"^/repos/{_SEG}/{_SEG}/(issues(/[1-9]\d{{0,8}}/(comments|labels))?|pulls|pulls/[1-9]\d{{0,8}}/reviews"
+                       rf"|actions/runs/[1-9]\d{{0,14}}/(rerun|rerun-failed-jobs))$"),         # G4: pulls family + CI re-run only
+    "PATCH": re.compile(rf"^/repos/{_SEG}/{_SEG}/(issues|pulls)/[1-9]\d{{0,8}}$"),
     "DELETE": re.compile(rf"^/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#]{{1,300}}$"),
 }
 _WRITE_VERBS = tuple(_WRITE_PATHS)
@@ -352,6 +353,12 @@ class FakeGitHub:
         if self.write_fail:
             return httpx.Response(self.write_fail[0], headers={**hdr, **self.write_fail[1]}, json={"message": "x"})
         self.bodies.append(json.loads(req.content) if req.content else None)
+        if req.method == "POST" and p.endswith("/pulls"):
+            return httpx.Response(201, headers=hdr, json={"number": 8, "html_url": "https://github.com/octo/r/pull/8"})
+        if req.method == "POST" and p.endswith("/reviews"):
+            return httpx.Response(200, headers=hdr, json={"id": 66, "html_url": "https://github.com/octo/r/pull/2#r66"})
+        if req.method == "POST" and "/actions/runs/" in p:
+            return httpx.Response(201, headers=hdr, json={})
         if req.method == "POST" and p.endswith("/issues"):
             return httpx.Response(201, headers=hdr, json={"number": 7, "html_url": "https://github.com/octo/r/issues/7"})
         if req.method == "POST" and p.endswith("/comments"):
@@ -380,11 +387,12 @@ feat.register("github", "GitHub (קריאה בלבד)", "GitHub (read only)", Fa
 def add_cli(sub) -> None:
     h = sub.add_parser("github", help="GitHub (read only): `status` shows the connection; `token` saves a read-only "
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
-    h.add_argument("action", choices=["status", "token", "off", "write", "issue"])
+    h.add_argument("action", choices=["status", "token", "off", "write", "issue", "pr"])
     h.add_argument("write_action", nargs="?", default=None,
-                   choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove"],
+                   choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove",
+                            "open", "update", "review", "rerun"],
                    help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
-                        "labels-add|labels-remove (each asks your approval, shows the exact text)")
+                        "labels-add|labels-remove; with `pr`: open|update|comment|review|rerun (each asks your approval, shows the exact text)")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
     h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")
     h.add_argument("--title", default=None)
@@ -392,12 +400,20 @@ def add_cli(sub) -> None:
     h.add_argument("--state", default=None, choices=["open", "closed"])
     h.add_argument("--label", action="append", default=None, help="an existing label (repeatable)")
     h.add_argument("--assignee", action="append", default=None, help="a GitHub login (repeatable)")
+    h.add_argument("--head", default=None, help="with `pr open`: the branch with the changes (same repo)")
+    h.add_argument("--base", default=None, help="with `pr open`: the branch to merge into later (via the queue)")
+    h.add_argument("--draft", action="store_true", help="with `pr open`: open as a draft")
+    h.add_argument("--event", default=None, choices=["COMMENT", "REQUEST_CHANGES", "APPROVE"], help="with `pr review`")
+    h.add_argument("--failed-only", dest="failed_only", action="store_true", help="with `pr rerun`: only the failed jobs")
 
 
 def cmd_github(a, cfg, home) -> int:
     if a.action == "issue":
         from .github_issues import cmd_github_issue
         return cmd_github_issue(a, cfg, home)
+    if a.action == "pr":
+        from .github_prs import cmd_github_pr
+        return cmd_github_pr(a, cfg, home)
     if a.action == "write":
         from .github_write import cmd_github_write
         return cmd_github_write(a, cfg, home)
