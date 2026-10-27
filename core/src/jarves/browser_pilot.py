@@ -222,6 +222,7 @@ class PilotSession:
         self.state, self.seq, self.started = AGENT, 0, clock()
         self.receipts: list[dict] = []
         self._pin_lock = threading.RLock()
+        self.local_only = False              # a LOCAL-ONLY session (the real test pilot): every public host is refused, whoever asks
         # B3 locks. _slock guards the state and is NEVER held across driver I/O (Stop and takeover never wait for a hung page).
         # _dlock serialises driver calls (an agent call holds it, the owner's input waits at most DRIVER_WAIT_S for it).
         # _gen counts state changes: an agent call that started before a change throws its result away (no stale ownership).
@@ -320,6 +321,8 @@ class PilotSession:
         if not self._dlock.acquire(timeout=self.DRIVER_WAIT_S):
             raise PilotError("BROWSER_PILOT_BUSY", "the page is busy; try again")
         try:
+            local_before = self._view_local()                # reads the page address: driver I/O, so NOT under the state lock
+            stop_why = ""
             with self._slock:
                 if not self.enabled():
                     raise PilotError("BROWSER_PILOT_OFF", "the browser pilot is off (jarvis features on browser_pilot)")
@@ -327,35 +330,39 @@ class PilotSession:
                     raise PilotError("BROWSER_PILOT_NOT_HUMAN", "the owner has not taken over this session")
                 gen = self._gen
                 if self.clock() - self.started > self.max_seconds:
-                    self.stop()
-                    raise PilotError("BROWSER_PILOT_CAP", "the session reached its time cap and was stopped")
-                if self.hseq >= self.MAX_HUMAN_EVENTS:
+                    stop_why = "the session reached its time cap and was stopped"
+                elif self.hseq >= self.MAX_HUMAN_EVENTS:
                     raise PilotError("BROWSER_PILOT_CAP", "too many inputs in this session")
-                if kind not in ("click", "type", "key", "scroll") or not isinstance(data, dict) or not hasattr(self.driver, "human_input"):
-                    raise PilotError("BROWSER_PILOT_INPUT", "this input is not supported")
-                if not self._view_local():
-                    raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "taking over works on local test pages only")
-                clean = self._clean_input(kind, data)
-                if clean is None:
-                    raise PilotError("BROWSER_PILOT_INPUT", "this input is not valid")
-                self.hseq += 1
-                self._receipt("human:" + kind, "ok", human=True)
-                if kind == "type":
-                    if len(self._typed) >= self.MAX_TYPED_ENTRIES:
-                        self.stop()                          # never forget what was typed (it would stop being hidden): end the session
-                        raise PilotError("BROWSER_PILOT_CAP", "too much was typed in this session; it was stopped")
-                    self._typed.append(clean["text"])
+                if not stop_why:
+                    if kind not in ("click", "type", "key", "scroll") or not isinstance(data, dict) or not hasattr(self.driver, "human_input"):
+                        raise PilotError("BROWSER_PILOT_INPUT", "this input is not supported")
+                    if not local_before:
+                        raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "taking over works on local test pages only")
+                    clean = self._clean_input(kind, data)
+                    if clean is None:
+                        raise PilotError("BROWSER_PILOT_INPUT", "this input is not valid")
+                    if kind == "type" and len(self._typed) >= self.MAX_TYPED_ENTRIES:
+                        stop_why = "too much was typed in this session; it was stopped"   # never forget what was typed: end the session
+                    else:
+                        self.hseq += 1
+                        self._receipt("human:" + kind, "ok", human=True)
+                        if kind == "type":
+                            self._typed.append(clean["text"])
+            if stop_why:
+                self.stop()                                  # outside the state lock: closing the driver can take seconds
+                raise PilotError("BROWSER_PILOT_CAP", stop_why)
             try:
                 self.driver.human_input(kind, clean)
             except Exception:                              # noqa: BLE001 - fixed words only: an error text may hold the typed text
                 logs.warn("browser", "BROWSER_PILOT_INPUT_FAILED", "pilot driver input failed")
                 raise PilotError("BROWSER_PILOT_INPUT", "the page did not take the input") from None
+            local_after = self._view_local()                 # driver I/O outside the state lock
             with self._slock:
                 if self._gen != gen or self.state != HUMAN:
                     raise PilotError("BROWSER_PILOT_NOT_HUMAN", "the session changed while the input was sent")
-                if not self._view_local():                 # a click led away from the test page
-                    self.stop()
-                    raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the page left the local test site; the session was stopped")
+            if not local_after:                              # a click led away from the test page
+                self.stop()
+                raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the page left the local test site; the session was stopped")
             return {"ok": True}
         finally:
             self._dlock.release()
@@ -440,8 +447,8 @@ class PilotSession:
         scope = vet_url(url, self.resolver)
         if not scope:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
-        if self.after_human and scope != "local":
-            raise self._refuse("open", "BROWSER_PILOT_URL", "after the owner used this page only local pages can be opened")
+        if (self.after_human or self.local_only) and scope != "local":
+            raise self._refuse("open", "BROWSER_PILOT_URL", "only local test pages can be opened in this session")
         if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
             raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)
@@ -457,7 +464,7 @@ class PilotSession:
         driver must not be touched from proxy threads). Nothing after Stop; only loopback while the owner drives or has driven."""
         if self.state == STOPPED:
             return False
-        if self.state == "HUMAN" or self.after_human:        # a public script in a page the owner typed into could read the keys
+        if self.state == "HUMAN" or self.after_human or self.local_only:   # a public script in a page the owner typed into could read the keys
             return page_scope(url) == "local"
         try:
             return bool(vet_url(url, self.resolver))
@@ -470,7 +477,7 @@ class PilotSession:
         a stopped session allows nothing."""
         if self.state == STOPPED:
             return False
-        if self.state == HUMAN or self.after_human:         # a public script in a page the owner typed into could read the keys
+        if self.state == HUMAN or self.after_human or self.local_only:      # a public script in a page the owner typed into could read the keys
             return page_scope(url) == "local"
         try:
             ok = bool(vet_url(url, self.resolver))

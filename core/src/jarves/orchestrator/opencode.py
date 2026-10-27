@@ -1,7 +1,8 @@
 """OpenCode adapter, READ-ONLY (V7 slice D1, issue #404). A client of OpenCode's headless HTTP server
 (`opencode serve`; docs https://opencode.ai/docs/server/ and /sdk/): `GET /global/health`, `GET /session`,
-`GET /session/status`, `GET /event` (SSE). Only these four GET calls exist here: no start, prompt, abort, delete or
-any other write. The server must be on loopback and the owner's server password (env var `OPENCODE_SERVER_PASSWORD`,
+`GET /session/status`, `GET /event` (SSE). D2 (#405) adds exactly three writes, used only by the Orchestrator after
+the owner approved: `POST /session` (create), `POST /session/:id/prompt_async` (send a prompt), `POST /session/:id/abort`.
+Any other method or path is refused here (no delete, no share, no config, no shell). The server must be on loopback and the owner's server password (env var `OPENCODE_SERVER_PASSWORD`,
 HTTP basic auth, user `opencode`) is required: no password -> AUTH_REQUIRED without a request. The password is
 never logged, never stored in the config (only the NAME of the env var) and never put in an exception text.
 Sessions map onto the Orchestrator's registry (provider "opencode", observe only): no second session controller."""
@@ -12,10 +13,11 @@ import http.client
 import ipaddress
 import json
 import os
+import re
 import socket
 import time
 from typing import Any, Iterator
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .envelope import clean
 
@@ -28,6 +30,13 @@ MAX_BODY = 2_000_000
 MAX_EVENTS = 100
 MAX_LINES = 1000                    # SSE lines read per call, data or keepalive
 STATE_MAP = {"idle": "IDLE", "busy": "RUNNING", "retry": "RUNNING"}     # SessionStatus.type (docs: /session/status)
+
+
+_ID = r"[A-Za-z0-9_-]{1,64}"
+# the only writes (method, path pattern); everything else is refused before a connection is made
+WRITE_ALLOWED = (("POST", re.compile(r"/session")), ("POST", re.compile(rf"/session/{_ID}/prompt_async")),
+                 ("POST", re.compile(rf"/session/{_ID}/abort")))
+MAX_PROMPT = 20_000
 
 
 class OpenCodeError(Exception):
@@ -62,14 +71,21 @@ class Client:
         tok = base64.b64encode(f"{username}:{secret}".encode()).decode()
         self._headers = {"Authorization": "Basic " + tok, "Accept": "application/json"}
 
-    def _open(self, path: str, timeout: float | None = None) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
+    def _open(self, path: str, timeout: float | None = None, method: str = "GET", body: bytes | None = None
+              ) -> tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
+        bare = path.split("?", 1)[0]
+        if method != "GET" and not any(m == method and rx.fullmatch(bare) for m, rx in WRITE_ALLOWED):
+            raise OpenCodeError("SERVER_ERROR", f"{method} {bare} is not an allowed OpenCode call")
         conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout or self.timeout)
         try:
             conn.connect()
             peer = ipaddress.ip_address(conn.sock.getpeername()[0].split("%")[0])
             if not peer.is_loopback:                                  # re-verify the connected peer
                 raise OpenCodeError("NOT_LOOPBACK", "the connected address is not loopback")
-            conn.request("GET", path, headers=self._headers)          # GET only: this adapter never writes
+            headers = dict(self._headers)
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            conn.request(method, path, body=body, headers=headers)    # GET, or one of the three allowed writes
             r = conn.getresponse()
         except OpenCodeError:
             conn.close()
@@ -81,9 +97,9 @@ class Client:
         if r.status in (401, 403):
             conn.close()
             raise OpenCodeError("AUTH_REQUIRED", "the server refused the password")
-        if r.status >= 400:
+        if not 200 <= r.status < 300:                     # no redirect is followed; a 3xx is not a success
             conn.close()
-            raise OpenCodeError("SERVER_ERROR", f"HTTP {r.status} on {path}")
+            raise OpenCodeError("SERVER_ERROR", f"HTTP {r.status} on {bare}")
         return conn, r
 
     def get_json(self, path: str) -> Any:
@@ -100,6 +116,60 @@ class Client:
             return json.loads(raw.decode("utf-8", "replace"))
         except ValueError:
             raise OpenCodeError("SERVER_ERROR", f"{path}: not JSON") from None
+
+    def _write(self, path: str, payload: dict) -> Any:
+        conn, r = self._open(path, method="POST", body=json.dumps(payload).encode("utf-8"))
+        try:
+            raw = r.read(MAX_BODY + 1)
+        except (OSError, http.client.HTTPException) as e:
+            raise OpenCodeError("SERVER_ERROR", f"read failed ({type(e).__name__})") from None
+        finally:
+            conn.close()
+        if not raw.strip():
+            return {}
+        try:
+            return json.loads(raw.decode("utf-8", "replace"))
+        except ValueError:
+            return {}
+
+    @staticmethod
+    def _dir(directory: str) -> str:
+        if not directory or len(directory) > 400 or "\x00" in directory:
+            raise OpenCodeError("SERVER_ERROR", "bad directory")
+        return "?directory=" + quote(directory, safe="")
+
+    @staticmethod
+    def _sid(session_id: str) -> str:
+        if not re.fullmatch(_ID, str(session_id or "")):
+            raise OpenCodeError("SERVER_ERROR", "bad session id")
+        return str(session_id)
+
+    def create_session(self, directory: str, title: str = "") -> str:
+        """POST /session in `directory` (the worktree): returns the new session id."""
+        d = self._write("/session" + self._dir(directory), {"title": clean(title, 120)})
+        sid = d.get("id") if isinstance(d, dict) else None
+        if not isinstance(sid, str) or not re.fullmatch(_ID, sid):
+            raise OpenCodeError("SERVER_ERROR", "the server did not return a session id")
+        got = str(d.get("directory") or "")
+        if _norm_dir(got) != _norm_dir(directory):         # the session must live in the worktree we asked for
+            try:
+                self.abort(sid, got or directory)          # the folder the SERVER put it in is where the session lives
+            except OpenCodeError:
+                pass
+            raise OpenCodeError("SERVER_ERROR", "the session was created in another folder than the worktree")
+        return sid
+
+    def prompt(self, session_id: str, text: str, directory: str) -> None:
+        """POST /session/:id/prompt_async: ONE text part, asynchronous (answers 204). The caller has the owner's approval."""
+        text = str(text or "")
+        if not text.strip() or len(text) > MAX_PROMPT:
+            raise OpenCodeError("SERVER_ERROR", "empty or too long prompt")
+        self._write(f"/session/{self._sid(session_id)}/prompt_async" + self._dir(directory),
+                    {"parts": [{"type": "text", "text": text}]})
+
+    def abort(self, session_id: str, directory: str) -> None:
+        """POST /session/:id/abort: stops the running turn."""
+        self._write(f"/session/{self._sid(session_id)}/abort" + self._dir(directory), {})
 
     def health(self) -> dict:
         d = self.get_json("/global/health")
@@ -151,6 +221,10 @@ class Client:
             raise OpenCodeError("SERVER_ERROR", f"stream failed ({type(e).__name__})") from None
         finally:
             conn.close()
+
+
+def _norm_dir(p: str) -> str:
+    return str(p or "").replace("\\", "/").rstrip("/").lower()
 
 
 def _ms(t: Any) -> float | None:

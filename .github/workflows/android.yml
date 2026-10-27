@@ -29,12 +29,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+      - name: Check that the Gradle wrapper jar is an official one
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb  # v6.3.0
       - name: Build the debug APK and run the unit tests (the runner image ships JDK 21 and the Android SDK)
         shell: bash
         working-directory: android
         run: |
           export JAVA_HOME="${JAVA_HOME_21_X64}"
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
-          yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses < <(yes) > "${RUNNER_TEMP}/licenses.log" 2>&1 || { tail -n 30 "${RUNNER_TEMP}/licenses.log"; exit 1; }
           ./gradlew --no-daemon --console=plain assembleDebug testDebugUnitTest
           test -s app/build/outputs/apk/debug/app-debug.apk
