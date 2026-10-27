@@ -114,7 +114,7 @@ def _page_scope(url: str) -> str:
     return "public" if ip.is_global else ""
 
 
-KNOWN_KINDS = OBSERVE_KINDS | {"state:agent", "state:human", "state:paused", "state:stopped"}
+KNOWN_KINDS = OBSERVE_KINDS | {"state:agent", "state:human", "state:paused", "state:stopped", "view:start", "view:stop"}
 
 
 RESOLVE_TIMEOUT_S = 3.0
@@ -332,6 +332,22 @@ class PilotSession:
         n = len(self.driver.screenshot() or b"")
         self._receipt("screenshot", "ok")
         return {"bytes": n, "stored": False}
+
+    def view_frame(self) -> bytes:
+        """B2: one PNG of the page for the owner's live view (browser_liveview.py). Never returned to a model. Allowed in
+        every state except STOPPED (the owner may watch while the agent is paused or the human drives), costs no action,
+        but obeys the switch, the time cap and the TEST-SITE-ONLY rule: the page must be a loopback page right now
+        (checked on every frame, so a navigation to a public page ends the view instead of showing it)."""
+        if not self.enabled():
+            raise PilotError("BROWSER_PILOT_OFF", "the browser pilot is off (jarvis features on browser_pilot)")
+        if self.state == STOPPED:
+            raise PilotError("BROWSER_PILOT_STOPPED", "the session is stopped")
+        if self.clock() - self.started > self.max_seconds:
+            self.stop()
+            raise PilotError("BROWSER_PILOT_CAP", "the session reached its time cap and was stopped")
+        if page_scope(self._final_url()) != "local":
+            raise PilotError("BROWSER_PILOT_VIEW_TEST_SITE", "the live view shows local test pages only")
+        return bytes(self.driver.screenshot() or b"")
 
     def act(self, kind: str) -> None:
         """Any other kind (click, fill, submit, login, ...) is refused and receipted: there is no write path."""

@@ -1,6 +1,6 @@
 order = 59
 category = "system"
-features = ["browser_pilot"]
+features = ["browser_pilot", "browser_liveview"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
 error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
@@ -29,6 +29,11 @@ check = "active:browser_pilot"
 he = "לכיבוי: jarvis features off browser_pilot. הדפדפן הרגיל נשאר כפי שהיה (jarvis browser)."
 en = "To turn off: jarvis features off browser_pilot. The normal browser stays as it was (jarvis browser)."
 
+[[steps]]
+he = "תצוגה חיה (בטא, כבויה כברירת מחדל): הדליקו את המתג \"תצוגה חיה של הדפדפן\" (jarvis features on browser_liveview). בעמוד הדפדפן בלוח הבקרה לוחצים \"תצוגה חיה\" ורואים את הדף כתמונה שמתרעננת, לקריאה בלבד: אי אפשר ללחוץ או להקליד דרכה. היא נפתחת רק במחשב עצמו, רק לדפי בדיקה מקומיים (localhost), פגה אחרי 5 דקות, ולחצן \"עצירה\" סוגר גם את הסשן."
+en = "Live view (beta, off by default): switch on \"Browser live view\" (jarvis features on browser_liveview). On the dashboard Browser page press Live view and watch the page as a refreshing picture, read only: you cannot click or type through it. It opens only on the computer itself, only for local test pages (localhost), expires after 5 minutes, and the Stop button also closes the session."
+action = "feature_on:browser_liveview"
+
 [[problems]]
 he = "הוא אומר שהפיילוט כבוי"
 en = "He says the pilot is off"
@@ -40,3 +45,9 @@ he = "הוא מסרב לפתוח כתובת"
 en = "He refuses to open an address"
 fix_he = "רק דפים מקומיים (localhost) וציבוריים נפתחים. כתובות פרטיות ברשת הביתית ודפי חשבון של ספקי AI חסומים."
 fix_en = "Only local (localhost) and public pages open. Private home-network addresses and AI account pages are blocked."
+
+[[problems]]
+he = "התצוגה החיה לא נפתחת או נסגרה"
+en = "The live view will not open, or it closed"
+fix_he = "היא פועלת רק במחשב עצמו, רק כשדף בדיקה מקומי (localhost) פתוח בסשן הפיילוט, פגה אחרי 5 דקות, ונסגרת כשהסשן נעצר או עובר לדף אחר. התחילו אותה שוב מעמוד הדפדפן."
+fix_en = "It works only on the computer itself, only while a local test page (localhost) is open in the pilot session, expires after 5 minutes, and ends when the session stops or moves to another page. Start it again from the Browser page."

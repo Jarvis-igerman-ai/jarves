@@ -57,12 +57,12 @@ STEPS = ("language", "connection", "names", "wake", "voice", "beta", "addons", "
 # Modules that register add-ons in jarves.features at import (the dashboard imports the same ones).
 ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.whatsapp", "jarves.briefing", "jarves.homeassistant", "jarves.anydo", "jarves.github_client", "jarves.openrouter", "jarves.github_write", "jarves.github_issues", "jarves.github_prs", "jarves.model_lab",
                  "jarves.appearance", "jarves.backup", "jarves.usage", "jarves.updates", "jarves.runtime",
-                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.profiles",
+                 "jarves.operations", "jarves.guides", "jarves.skills.generated", "jarves.browser", "jarves.browser_pilot", "jarves.browser_liveview", "jarves.profiles",
                  "jarves.selfcheck", "jarves.connect", "jarves.skills.helper", "jarves.context_trace",
                  "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix", "jarves.triage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-                      "dashboard_lan", "mobile_access", "browser", "browser_pilot", "telegram", "home_assistant", "instagram", "helper",
+                      "dashboard_lan", "mobile_access", "browser", "browser_pilot", "browser_liveview", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
                       "assisted_dialing", "drive_briefing", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "github_approve_reviews", "model_lab", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
@@ -81,7 +81,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("music", "מוזיקה", "Music", ("music",)),
     ("google", "גוגל", "Google", GOOGLE_FEATURES),
     ("camera", "מצלמה ופרטיות", "Camera & privacy", ("camera", "camera_preview", "face_recognition", "camera_when_away")),
-    ("browser", "דפדפן", "Browser", ("browser", "browser_pilot")),
+    ("browser", "דפדפן", "Browser", ("browser", "browser_pilot", "browser_liveview")),
     ("automation", "אוטומציה", "Automation", ("scheduler", "reports", "timers", "lists", "notes", "files", "proactive_alerts",
                                               "autonomy", "morning_briefing", "drive_briefing", "text_chat", "goals", "goal_plans", "goal_done_line", "adaptive_memory", "prefs_in_prompt",
                                               "proactive_intel", "proactive_signals", "dev_manager", "dev_status")),
@@ -1219,6 +1219,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "autostart": [_mod("jarves.runtime.autostart")],
     # the browser itself is the installed Edge/Chrome (Windows) or Chromium (Pi), probed by the feature
     "browser": [_mod("playwright.async_api"), _mod("jarves.browser"), _mod("jarves.skills.browser")],
+    "browser_liveview": [_mod("jarves.browser_liveview"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "browser_pilot": [_mod("jarves.browser_pilot"), _mod("jarves.browser"), _data("jarves.guides", "data/browser_pilot.toml")],
     "telegram": [_mod("jarves.telegram_channel"), _mod("httpx"), _data("jarves.guides", "data/telegram.toml")],
     "instagram": [_mod("jarves.instagram_channel"), _mod("httpx"), _data("jarves.guides", "data/instagram.toml")],
