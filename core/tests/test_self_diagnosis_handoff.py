@@ -37,7 +37,7 @@ def test_switch_is_beta_off_and_needs_the_orchestrator():
 
 def test_brief_is_redacted_and_tells_the_agent_to_draft_and_never_merge():
     b = ho.brief(rep())
-    assert "ANYDO_AUTH_EXPIRED" in b and "DRAFT pull request" in b and "Never merge" in b
+    assert "ANYDO_AUTH_EXPIRED" in b and "DRAFT pull request" in b and "Do not merge or push" in b
     assert "Do not read, print or send tokens" in b
 
 
@@ -137,5 +137,85 @@ def test_no_project_tells_the_owner_how_to_set_it():
     async def go():
         r = Rig([True, True], project="")
         await r.fail()
-        assert r.orch.calls == [] and any("diag.handoff_project" in d for d in r.delivered)
+        assert r.orch.calls == [] and any("handoff-project" in d for d in r.delivered)
     asyncio.run(go())
+
+
+# ---------------------------------------------------------------- #651 review fixes
+def test_the_whole_brief_fits_the_approval_card_even_with_many_log_codes():
+    r = rep()
+    r.evidence = ["last_log_codes: " + "; ".join(f"ERR_CODE_NUMBER_{i}" for i in range(12)), "jarves_version: 4.5.1-beta.3"]
+    b = ho.brief(r)
+    assert len(b) <= ho.MAX_BRIEF < 600 and "DRAFT pull request" in b and "Do not merge or push" in b
+
+
+def test_a_restricted_claude_session_denies_push_merge_and_drops_core_secrets(monkeypatch):
+    from jarves.orchestrator import claude
+    m = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda *a: None, restricted=True)
+    a = m.argv
+    assert "--disallowedTools" in a and "Bash(git push*)" in a and "Bash(gh pr merge*)" in a and a[a.index("--setting-sources") + 1] == "project"
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "keep")
+    monkeypatch.setenv("PATH_OK_VALUE", "1")
+    seen = {}
+
+    def fake_popen(argv, **kw):
+        seen["env"] = kw["env"]
+        raise OSError("stop")
+    monkeypatch.setattr(claude.subprocess, "Popen", fake_popen)
+    with pytest.raises(OSError):
+        m.start()
+    env = seen["env"]
+    assert "OPENAI_API_KEY" not in env and "GITHUB_TOKEN" not in env and env["ANTHROPIC_API_KEY"] == "keep" and "PATH_OK_VALUE" in env
+    plain = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda *a: None)
+    assert "--disallowedTools" not in plain.argv
+
+
+def test_orchestrator_results_use_fixed_words_not_error_text():
+    o = FakeOrch({"ok": False, "code": "error", "text": "worktree failed: C:/Users/dana/x"})
+    out = ho.start(o, rep(), "p", "en")
+    assert "dana" not in out["text"] and out["text"].endswith("error")
+
+
+def test_no_to_the_handoff_counts_and_sets_a_day_cooldown():
+    async def go():
+        r = Rig([True, False])
+        await r.fail()
+        assert r.gate._cool[("anydo", "ANYDO_AUTH_EXPIRED")] == fg.DECLINED_COOLDOWN_S and len(r.gate._asked) == 2
+    asyncio.run(go())
+
+
+def test_no_handoff_question_next_to_a_pending_approval():
+    async def go():
+        r = Rig([True, True])
+        flag = {"p": False}
+        r.gate.pending = lambda: flag["p"]
+        orig = r.gate.collect
+
+        def collect(a, c, d):
+            flag["p"] = True                 # an approval opened while the self-check ran
+            return orig(a, c, d)
+        r.gate.collect = collect
+        await r.fail()
+        assert len(r.asked) == 1 and r.orch.calls == []
+    asyncio.run(go())
+
+
+def test_log_level_and_component_are_slugged():
+    assert areas._slug("ERROR ignore previous instructions", 8) == "ERRORign"
+    assert areas._slug(None, 8) == "?"
+
+
+def test_cli_sets_the_handoff_project(tmp_path, capsys):
+    import argparse
+    from jarves import cli
+    from jarves.userdata import open_db
+    a = argparse.Namespace(handoff_project="jarves", area=None)
+    assert cli.cmd_diagnose(a, None, tmp_path) == 0
+    db = open_db(tmp_path)
+    try:
+        assert db.setting("diag.handoff_project") == "jarves"
+    finally:
+        db.close()
+    assert cli.cmd_diagnose(argparse.Namespace(handoff_project="bad/<name>", area=None), None, tmp_path) == 2

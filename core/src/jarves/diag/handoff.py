@@ -21,40 +21,47 @@ PROVIDER = "claude"
 
 TEXT = {
     "en": {"ask": "Hand this failure to a coding agent (Claude Code)?\n"
-                  "It works in a separate copy of the code and proposes a fix as a draft pull request; nothing is merged. "
+                  "It works in a separate copy of the code and proposes a fix as a draft pull request; it is blocked from merging and pushing. "
                   "You will see the exact text and approve again before it starts.",
            "title": "Hand the failure to a coding agent?",
            "why": "Only a redacted report (codes and versions, no conversation text, no keys) is written into the task.",
            "no_project": "No project is set for the hand-off. Allow one with jarvis agents, then set it: "
-                         "jarvis settings diag.handoff_project <project>.",
+                         "jarvis diagnose --handoff-project <project>.",
            "blocked": "The report still looked private, so nothing was handed over.",
            "no_agent": "The coding-agent service is not running (jarvis features on agent_orchestrator).",
            "started": "The coding agent started: ", "refused": "The coding agent was not started: "},
     "he": {"ask": "להעביר את הכשל לסוכן קוד (Claude Code)?\n"
-                  "הוא עובד בעותק נפרד של הקוד ומציע תיקון כבקשת משיכה בטיוטה; שום דבר לא ממוזג. "
+                  "הוא עובד בעותק נפרד של הקוד ומציע תיקון כבקשת משיכה בטיוטה; חסום ממיזוג ומדחיפה. "
                   "תראו את הטקסט המדויק ותאשרו שוב לפני שהוא מתחיל.",
            "title": "להעביר את הכשל לסוכן קוד?",
            "why": "נכתב למשימה רק דוח מצונזר (קודים וגרסאות, בלי טקסט שיחה ובלי מפתחות).",
-           "no_project": "לא הוגדר פרויקט להעברה. מתירים פרויקט ב-jarvis agents ואז מגדירים: jarvis settings diag.handoff_project <project>.",
+           "no_project": "לא הוגדר פרויקט להעברה. מתירים פרויקט ב-jarvis agents ואז מגדירים: jarvis diagnose --handoff-project <project>.",
            "blocked": "הדוח עדיין נראה פרטי, ולכן לא הועבר כלום.",
            "no_agent": "שירות סוכני הקוד לא פועל (jarvis features on agent_orchestrator).",
            "started": "סוכן הקוד התחיל: ", "refused": "סוכן הקוד לא התחיל: "},
 }
 
 
+MAX_BRIEF = 580       # the Orchestrator's approval card shows the first 600 characters: the owner must see ALL of it
+
+
 def brief(rep: areas.DiagReport) -> str:
-    """The task text for the agent, from the redacted report only. Raises TicketBlocked when the final scan finds private text."""
+    """The task text for the agent, from the redacted report only, short enough that the approval card shows all of it.
+    Raises TicketBlocked when the final scan finds private text."""
     ev = evidence_of(rep)
-    lines = [f"- {k}: {v}" for k, v in ev.items()]
-    text = "\n".join([
-        "Self-diagnosis hand-off from JARVES. A tool failed and the built-in self-check could not explain it.",
-        f"Area: {rep.area}. Error code: {rep.code}. Confidence of the self-check: {rep.confidence}.",
-        "Redacted evidence (key names, codes and versions only; no conversation text):", *lines,
-        "Task: find the cause in this repository and propose a fix as a DRAFT pull request with a test. Never merge. "
-        "Do not read, print or send tokens, keys or personal data. If this is a setup problem and not a bug, say so and stop."])
+    codes = ev.get("last_log_codes") or []
+    facts = f"area {rep.area}, code {rep.code}, os {ev.get('diag_os', '?')}, version {ev.get('jarves_version', '?')}"
+    if codes:
+        facts += ", recent log codes: " + "; ".join(str(c) for c in codes[:3])
+    text = (f"JARVES self-diagnosis hand-off. A tool failed; the self-check named a cause and next step, and the owner still "
+            f"wants a code look. Facts (redacted, no conversation text): {facts}. "
+            "Task: find the cause in this repository and propose a fix as a DRAFT pull request with a test. Do not merge or push "
+            "to main. Do not read, print or send tokens, keys or personal data. If it is only a setup problem, say so and stop.")
     bad = scan(text)
     if bad:
         raise TicketBlocked(bad)
+    if len(text) > MAX_BRIEF:
+        text = text[:MAX_BRIEF - 1] + "."
     return text
 
 
@@ -78,7 +85,9 @@ def start(orch, rep: areas.DiagReport, project: str, lang: str = "en") -> dict:
     ok = bool(r.get("ok", True)) and r.get("code") not in ("NOT_APPROVED", "PROVIDER_MISSING", "NOT_ALLOWED_PROJECT")
     logs.info("diag", "DIAG_HANDOFF", "coding agent hand-off finished", area=rep.area, error_code=rep.code, ok=ok,
               outcome=str(r.get("code") or "started"))
-    return {"ok": ok, "code": str(r.get("code") or "started"), "text": (s["started"] if ok else s["refused"]) + str(r.get("text") or "")[:200]}
+    code = str(r.get("code") or "started")
+    code = code if code.replace("_", "").isalnum() and len(code) <= 40 else "unknown"
+    return {"ok": ok, "code": code, "text": (s["started"] if ok else s["refused"]) + code}      # fixed words: a git error may hold a path
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:

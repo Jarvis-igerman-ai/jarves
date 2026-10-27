@@ -44,15 +44,15 @@ he = "רוצים כרטיס מהבדיקה? jarvis diagnose anydo --code קוד 
 en = "Want a ticket from the check? jarvis diagnose anydo --code CODE --ticket saves the redacted report as a LOCAL ticket only (no messages, names, addresses or keys; if any private-looking text is left it is blocked and not saved). Nothing is sent. To send: jarvis ticket send ID, which shows the exact text and asks first."
 
 [[steps]]
-he = "העברה לסוכן קוד (בטא, כבויה כברירת מחדל): אחרי הבדיקה העצמית ג'ארביס יכול לשאול אם להעביר את הכשל ל-Claude Code. קודם מתירים פרויקט (jarvis agents), מגדירים אותו (jarvis settings diag.handoff_project שם) ומדליקים את המתג (jarvis features on self_diagnosis_handoff). כן פותח כרטיס אישור שני שמציג את הטקסט המדויק, ורק אחריו הסוכן עובד בעותק נפרד של הקוד ומציע תיקון כבקשת משיכה בטיוטה. שום דבר לא ממוזג, ובטקסט יש רק דוח מצונזר."
-en = "Hand-off to a coding agent (beta, off by default): after the self-check JARVES can ask whether to hand the failure to Claude Code. First allow a project (jarvis agents), set it (jarvis settings diag.handoff_project NAME) and switch on self_diagnosis_handoff (jarvis features on self_diagnosis_handoff). Yes opens a SECOND approval card that shows the exact text; only then does the agent work in a separate copy of the code and propose a fix as a draft pull request. Nothing is merged, and the text holds only a redacted report."
+he = "העברה לסוכן קוד (בטא, כבויה כברירת מחדל): אחרי הבדיקה העצמית ג'ארביס יכול לשאול אם להעביר את הכשל ל-Claude Code. קודם מתירים פרויקט (jarvis agents), מגדירים אותו (jarvis diagnose --handoff-project שם) ומדליקים את המתג (jarvis features on self_diagnosis_handoff). כן פותח כרטיס אישור שני שמציג את הטקסט המדויק, ורק אחריו הסוכן עובד בעותק נפרד של הקוד ומציע תיקון כבקשת משיכה בטיוטה. הסוכן חסום ממיזוג ומדחיפה, ובטקסט יש רק דוח מצונזר."
+en = "Hand-off to a coding agent (beta, off by default): after the self-check JARVES can ask whether to hand the failure to Claude Code. First allow a project (jarvis agents), set it (jarvis diagnose --handoff-project NAME) and switch on self_diagnosis_handoff (jarvis features on self_diagnosis_handoff). Yes opens a SECOND approval card that shows the exact text; only then does the agent work in a separate copy of the code and propose a fix as a draft pull request. The agent is blocked from merging and pushing, and the text holds only a redacted report."
 action = "feature_on:self_diagnosis_handoff"
 
 [[problems]]
 he = "ההעברה לסוכן קוד אומרת שאין פרויקט"
 en = "The hand-off says no project is set"
-fix_he = "מתירים פרויקט ב-jarvis agents ומגדירים אותו: jarvis settings diag.handoff_project שם."
-fix_en = "Allow a project in jarvis agents and set it: jarvis settings diag.handoff_project NAME."
+fix_he = "מתירים פרויקט ב-jarvis agents ומגדירים אותו: jarvis diagnose --handoff-project שם."
+fix_en = "Allow a project in jarvis agents and set it: jarvis diagnose --handoff-project NAME."
 
 [[problems]]
 he = "הוא שואל אחרי כל כשל ואני לא רוצה"

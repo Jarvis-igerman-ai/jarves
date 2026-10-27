@@ -1674,6 +1674,20 @@ def _diagnose_area(a, cfg, home) -> int:
 
 def cmd_diagnose(a, cfg, home) -> int:
     from . import diagnose, selfcheck
+    if getattr(a, "handoff_project", None) is not None:          # #336 slice C: which allow-listed project a failure is handed to
+        import re as _re
+        from .userdata import open_db
+        name = str(a.handoff_project).strip()
+        if name and not _re.fullmatch(r"[\w .-]{1,60}", name):
+            print("not changed: use the project name from `jarvis agents projects` (letters, digits, space, dot, dash)")
+            return 2
+        db = open_db(home)
+        try:
+            db.set_setting("diag.handoff_project", name, actor="cli")
+        finally:
+            db.close()
+        print(f"hand-off project: {name or '(none)'}   (the switch: jarvis features on self_diagnosis_handoff)")
+        return 0
     if getattr(a, "area", None):                     # #336 slice A: read-only self-check of one area
         return _diagnose_area(a, cfg, home)
     if selfcheck.wants_selfcheck(a):                 # --now / --history / --schedule / --suggestion
@@ -2331,6 +2345,8 @@ def main(argv: list[str] | None = None) -> int:
     dg = sub.add_parser("diagnose", help="self-diagnosis: find problems in recent conversations")
     dg.add_argument("area", nargs="?", choices=["anydo", "whatsapp", "google", "voice"],
                     help="read-only self-check of one area: plain cause + next step (add --code CODE for a failure; --json)")
+    dg.add_argument("--handoff-project", nargs="?", const="", default=None, metavar="NAME",
+                    help="set the allow-listed coding-agent project a failure may be handed to (empty = none)")
     dg.add_argument("--code", default="", help="with an area: the error code of the failure (e.g. ANYDO_AUTH_EXPIRED)")
     dg.add_argument("--days", type=int, default=None, help="look back N days (conversations: 30, self-check: 7)")
     dg.add_argument("--import-log", nargs="?", const="", default=None, metavar="PATH",

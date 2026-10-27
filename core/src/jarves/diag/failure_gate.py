@@ -130,13 +130,20 @@ class FailureGate:
                 return
         except Exception:
             return
+        try:
+            if self.pending():                                 # never next to a real approval: one "yes" must mean one thing
+                return
+        except Exception:
+            return
         from . import handoff as ho
         t = ho.TEXT[lang if lang in ho.TEXT else "en"]
         logs.info("diag", "DIAG_HANDOFF_ASKED", "offered to hand the failure to a coding agent", area=rep.area, error_code=rep.code)
+        self._asked.append(self.clock())                       # counts toward the hourly cap like the first question
         yes = await self._ask(t["ask"], title=t["title"], why=t["why"], risk="medium", kind="other",
                               details={"area": rep.area, "code": rep.code}, timeout=self.timeout_s, source="diag",
                               voice=False)
         if not yes:
+            self._cool[(rep.area, rep.code)] = self.declined_cooldown_s      # No / no answer: not asked again for a day
             return
         out = self.handoff(rep, lang)
         if asyncio.iscoroutine(out):
@@ -221,14 +228,17 @@ def attach(core) -> FailureGate:
 
     async def handoff(rep: areas.DiagReport, lang: str) -> dict:
         from . import handoff as ho
-        from ..userdata import open_db
-        db = open_db(core.home)
-        try:
-            project = str(db.setting("diag.handoff_project") or "")
-        finally:
-            db.close()
         holder = getattr(core, "agents_orchestrator", None) or {}
-        return await asyncio.get_running_loop().run_in_executor(None, ho.start, holder.get("o"), rep, project, lang)
+
+        def work() -> dict:
+            from ..userdata import open_db
+            db = open_db(core.home)
+            try:
+                project = str(db.setting("diag.handoff_project") or "")
+            finally:
+                db.close()
+            return ho.start(holder.get("o"), rep, project, lang)
+        return await asyncio.get_running_loop().run_in_executor(None, work)
 
     gate = FailureGate(
         enabled=lambda: core.features.enabled("self_diagnosis_ask"),

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -239,15 +240,25 @@ def plugin_installed(cmd: list[str]) -> tuple[bool | None, str]:
     return (PLUGIN_ID in out or f'"{PLUGIN}"' in out), ""
 
 
+RESTRICTED_DENY = ("Bash(git push*)", "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(git tag*)", "Bash(jarvis*)",
+                   "Bash(gh api*)", "Bash(curl*)", "Bash(wget*)")
+RESTRICTED_KEEP = frozenset({"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"})
+_SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key|private_?key|auth)")
+
+
 # ---------------------------------------------------------------------- sessions JARVES starts
 class ManagedClaude:
     """One `claude -p` stream-json process = one session JARVES started (or resumed). Thread-based reader; the
     callbacks run on the reader thread: on_event(kind, data)."""
 
     def __init__(self, cmd: list[str], cwd: str, *, plugin_dir: str | None, on_event: Callable[[str, dict], None],
-                 resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0) -> None:
+                 resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0,
+                 restricted: bool = False) -> None:
         argv = [*cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "default"]
+        self.restricted = restricted
+        if restricted:        # a self-diagnosis hand-off (#336 C): the owner's broad allow rules do not apply, merging and pushing are denied
+            argv += ["--setting-sources", "project", "--disallowedTools", *RESTRICTED_DENY]
         if plugin_dir:
             argv += ["--plugin-dir", plugin_dir]
         if resume:
@@ -269,6 +280,8 @@ class ManagedClaude:
 
     def start(self) -> "ManagedClaude":
         env = dict(os.environ)
+        if self.restricted:                                   # no secret of the core reaches a hand-off agent (its own provider key stays)
+            env = {k: v for k, v in env.items() if k in RESTRICTED_KEEP or not _SECRET_KEY.search(k)}
         env.update(self.env or {})
         self.proc = subprocess.Popen(self.argv, cwd=self.cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",

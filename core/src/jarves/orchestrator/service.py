@@ -804,7 +804,7 @@ class Orchestrator:
         def on_event(kind: str, d: dict) -> None:
             self._managed_claude_event(holder, kind, d, started)
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
-                                 max_budget_usd=self._budget_left())
+                                 max_budget_usd=self._budget_left(), restricted=(by == "diag"))
         try:
             m.start()
         except OSError as e:
