@@ -84,7 +84,7 @@ alert dismissal, force push, bypassing checks, settings).
 ## Do now (max 8, in this order; items 1-6 are the unbuilt tools and come FIRST in 4.5.1 for agent 2: docs-only CI fast path, `jarvis install-latest`, `jarvis release run`, watchdog)
 | # | Item | Owner | Effort | Saves |
 |---|---|---|---|---|
-| 1 | Merge group reuses the green PR proof when the tree is identical; merge group builds the installer only on packaging changes (main push already builds it via `resolve-tests` before the beta). Tier R workflow PR | Agent 2 | M | ~7 min per group, ~10 runners per group |
+| 1 | (Agent 2 retro 27 Oct: docs-only PRs already merge in ~3 min, no separate fast path needed.) Merge group reuses the green PR proof when the tree is identical; merge group builds the installer only on packaging changes (main push already builds it via `resolve-tests` before the beta). Tier R workflow PR | Agent 2 | M | ~7 min per group, ~10 runners per group |
 | 2 | Lean merge group: validate + 4 Windows shards; Linux, browser, perf, e2e, installer chain run on the main push (gate the beta) and nightly; land #516 (browser retry only failed files). Separate Tier R PR after 1 | Agent 2 | M | group 16 -> 9 min; queue wait -20 min/PR |
 | 3 | Browser job only on web/dashboard/browser paths; a test that fails then passes goes to the quarantine ledger automatically with a `showstopper` issue | Agent 1 | S | ~4 min per PR, ~half of red PR runs |
 | 4 | Watchdog (scheduled workflow, every 30 min): re-queue dropped PRs, toggle the label when `Auto-label policy` is missing, update one pinned "Status board" issue (merged, open PRs, open P0-P2, newest beta, owner items) | Agent 2 | M | ~60 min/day manager time |

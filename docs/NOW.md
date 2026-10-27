@@ -11,7 +11,7 @@ Plain words. This is the current truth; if another document disagrees, this one 
 | Agent | Lane | Prompt |
 |---|---|---|
 | 1 | issues + security (open P0-P2 only goes down) | [AGENT_1](plans/AGENT_1_ISSUES_PROMPT_2026-10-27.md) |
-| 2 | releases, CI speed, betas, install tests; builds the unbuilt tools FIRST (docs-only CI fast path, `jarvis install-latest`, `jarvis release run`, watchdog) | [AGENT_2](plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md) |
+| 2 | releases, CI speed, betas, install tests; builds the unbuilt tools FIRST (`jarvis install-latest`, merge-group proof reuse, `jarvis release run` is in, watchdog is in; the docs-only fast path already exists: docs PRs merge in about 3 min) | [AGENT_2](plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md) |
 | 3 | features V5-V7, OFF by default | [AGENT_3](plans/AGENT_3_FEATURES_PROMPT_2026-10-27.md) |
 
 Each keeps `C:\Users\97254\.claude\projects\C--work-jarvis\agents\agentN_STATE.md` (<= 30 lines).
