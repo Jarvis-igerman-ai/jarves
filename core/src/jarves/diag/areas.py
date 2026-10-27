@@ -1,4 +1,4 @@
-"""Self-diagnosis slice A (issue #336): a READ-ONLY self-check for one area (anydo, whatsapp, google, voice).
+"""Self-diagnosis slice A (issue #336): a READ-ONLY self-check for one area (anydo, whatsapp, google, voice, github).
 
 `run(area, code, ...) -> DiagReport` collects REDACTED evidence (error code, the SHAPE of the raw response, connection
 and permission state, version, the last log codes of the area) and matches code + area to the guide `[[problems]]`
@@ -20,16 +20,16 @@ from typing import Any, Awaitable, Callable
 
 from .. import logs
 
-AREAS = ("anydo", "whatsapp", "google", "voice")
+AREAS = ("anydo", "whatsapp", "google", "voice", "github")
 MAX_EVIDENCE = 24
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _PREFIX = (("ANYDO_", "anydo"), ("WA_", "whatsapp"), ("WHATSAPP_", "whatsapp"), ("BRIDGE_", "whatsapp"),
            ("GOOGLE_", "google"), ("GMAIL_", "google"), ("CALENDAR_", "google"), ("CONTACTS_", "google"),
-           ("VOICE_", "voice"), ("LIVE_", "voice"), ("STT_", "voice"), ("WAKE_", "voice"), ("AI_", "voice"))
+           ("GITHUB_", "github"), ("VOICE_", "voice"), ("LIVE_", "voice"), ("STT_", "voice"), ("WAKE_", "voice"), ("AI_", "voice"))
 _TOOL_PREFIX = (("anydo", "anydo"), ("whatsapp", "whatsapp"), ("wa_", "whatsapp"), ("gmail", "google"),
-                ("calendar", "google"), ("google", "google"))
+                ("calendar", "google"), ("google", "google"), ("github", "github"))
 _LOG_COMPONENT = {"anydo": ("anydo",), "whatsapp": ("whatsapp", "whatsapp_bridge", "wa"), "google": ("google", "gmail", "calendar"),
-                  "voice": ("live", "voice", "stt", "wake")}
+                  "voice": ("live", "voice", "stt", "wake"), "github": ("github",)}
 
 
 def area_for(code: str = "", tool: str = "") -> str | None:
@@ -175,6 +175,17 @@ def _ev_whatsapp(home: Path | None, cfg) -> list[str]:
     return out
 
 
+def _ev_github(home: Path | None, cfg) -> list[str]:
+    """Connection state only (#439): token present yes/no, the scope SHAPE (how many scopes the guide asks for, read-only),
+    never the token, a repo name or a response value. Rate-limit state is a live client property, not stored: not read here."""
+    from .. import github_client as gc
+    if home is None:
+        return [_line("connection", "no data folder")]
+    st = gc.TokenStore(Path(home)).status()
+    return [_line("token_present", bool(st.get("connected"))), _line("read_only", bool(st.get("read_only"))),
+            _line("scopes_needed_count", len(st.get("scopes_needed") or []))]
+
+
 def _ev_voice(home: Path | None, cfg) -> list[str]:
     out: list[str] = []
     if cfg is not None:
@@ -193,7 +204,7 @@ def _ev_voice(home: Path | None, cfg) -> list[str]:
 
 
 COLLECTORS: dict[str, Callable[[Path | None, Any], list[str]]] = {
-    "anydo": _ev_anydo, "google": _ev_google, "whatsapp": _ev_whatsapp, "voice": _ev_voice}
+    "anydo": _ev_anydo, "google": _ev_google, "whatsapp": _ev_whatsapp, "voice": _ev_voice, "github": _ev_github}
 
 
 # ------------------------------------------------------------------------------------------ matching
