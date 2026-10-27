@@ -1,0 +1,44 @@
+order = 64
+category = "system"
+pages = ["updates"]
+features = []
+aliases = ["התקנת הגרסה האחרונה", "התקנה שקטה", "install latest", "install-latest", "silent install", "update and test"]
+links = ["updates", "beta_channel", "backup"]
+title_he = "התקנת הגרסה האחרונה בפקודה אחת"
+title_en = "Install the latest build with one command"
+what_he = "פקודה אחת מגבה, מורידה את ההתקנה החתומה האחרונה של הערוץ, מתקינה בשקט, מריצה בדיקות ומדפיסה דוח קצר. אם בדיקה נכשלת היא חוזרת לגרסה הקודמת."
+what_en = "One command backs up, downloads the newest signed installer of the channel, installs silently, runs the checks and prints one short report. If a check fails it goes back to the previous version."
+say = [["תתקין את הגרסה האחרונה", "Install the latest version"]]
+expect_he = "בסוף מודפס דוח אחד: הגרסה, מזהה הגיבוי לחזרה, איך חוזרים אחורה, ו-PASS או FAIL לכל בדיקה (גרסה, doctor, selftest, status)."
+expect_en = "At the end one report is printed: the version, the backup id to go back to, how to roll back, and PASS or FAIL for each check (version, doctor, selftest, status)."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "מוריד רק את קובץ ההתקנה החתום ואת קובץ הגרסאות של הערוץ; לא נשלח מידע אישי. החתימה ו-SHA256 נבדקים כמו ב-jarvis update install."
+privacy_en = "It downloads only the signed installer and the channel's release file; no personal data is sent. The signature and SHA256 are checked exactly as in jarvis update install."
+
+[[steps]]
+he = "קודם בדקו מה יקרה, בלי לשנות כלום: jarvis install-latest --dry-run (אפשר להוסיף --channel beta או --channel stable)."
+en = "First see what would happen, changing nothing: jarvis install-latest --dry-run (add --channel beta or --channel stable if you like)."
+action = "command:jarvis install-latest --dry-run"
+
+[[steps]]
+he = "להתקנה: jarvis install-latest --channel beta. הפקודה מגבה, בודקת חתימה, עוצרת את ליבת ג'ארביס אם רצה, מתקינה בשקט (בלי חלונות ובלי צלילים) ומפעילה אותה מחדש."
+en = "To install: jarvis install-latest --channel beta. It backs up, verifies the signature, stops the Core if it runs, installs silently (no windows, no sounds) and starts it again."
+action = "command:jarvis install-latest --channel beta"
+
+[[steps]]
+he = "קראו את הדוח. אם הכול PASS סיימתם. אם משהו FAIL, הפקודה כבר החזירה את הגרסה הקודמת; אפשר גם ידנית: jarvis update --rollback --yes."
+en = "Read the report. If everything is PASS you are done. If something is FAIL the command already put the previous version back; you can also do it by hand: jarvis update --rollback --yes."
+action = "command:jarvis update --rollback"
+
+[[problems]]
+he = "כתוב שאין התקנה חדשה או שהבדיקה נכשלה"
+en = "It says nothing newer, or the check failed"
+fix_he = "בערוץ הבטא יש גרסה חדשה רק אחרי בנייה ירוקה שפורסמה. בדקו חיבור לאינטרנט והריצו jarvis update status."
+fix_en = "The beta channel has a newer version only after a green build was published. Check the internet connection and run jarvis update status."
+
+[[problems]]
+he = "ההתקנה נעצרה לפני שהגרסה הוחלפה"
+en = "It stopped before the version was replaced"
+fix_he = "הגיבוי או אימות החתימה נכשלו, ולכן שום דבר לא הותקן ולא נעצר. הנתונים והגרסה הנוכחית שלמים; תקנו את מה שהדוח מציין ונסו שוב."
+fix_en = "The backup or the signature check failed, so nothing was installed or stopped. Your data and the current version are intact; fix what the report names and try again."
