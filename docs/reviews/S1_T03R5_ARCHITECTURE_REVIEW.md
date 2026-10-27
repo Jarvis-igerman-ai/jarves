@@ -1,6 +1,6 @@
 # JARVES — R5 architecture review: one recommended low-risk design (before CAD)
 
-**Status:** engineering recommendation. This is a bounded review: no CAD, purchase, printing or vendor contact. It refines [S1_T03R5_DESIGN_DECISION.md](S1_T03R5_DESIGN_DECISION.md) (Pi in the base stays) and **replaces its chassis/fastener plan**.
+**Status:** engineering recommendation. This is a bounded review: no CAD, purchase, printing or vendor contact. It refines [S1_T03R5_DESIGN_DECISION.md](../archive/reviews/S1_T03R5_DESIGN_DECISION.md) (Pi in the base stays) and **replaces its chassis/fastener plan**.
 **Model:** Claude Opus 5.5, single engineer. No subagents were used: this was a reasoning task, so delegating would have cost more than it saved.
 
 ## 1. Challenging R5, element by element

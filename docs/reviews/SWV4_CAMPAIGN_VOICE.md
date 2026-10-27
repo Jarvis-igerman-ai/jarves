@@ -93,7 +93,7 @@ WhatsApp bridge (tools/fake_whatsapp_bridge.py), local Responses servers (tests/
 | 107 | wake: owner's custom head (a COPY) vs built-in, Hey/Hi/OK Jarvis x 3 volumes x clean+noise + 20 near-misses | PASS | head `hey_jarvis_copy.npz@0.95`: Hey 10/12, Hi 12/12, OK 6/6, Okay 6/6, false 1/20; built-in @0.15: same detections, false 2/20 (both through the wake ASR-confirm stage; synthetic voices only) |
 | — | assisted dialing (H) | BLOCKED | not in the integrated tree (no dialing / Phone Link code) |
 
-### Latency vs V3 ([SWV3_CAMPAIGN_VOICE.md](SWV3_CAMPAIGN_VOICE.md), [SWV3_P03_REPORT.md](SWV3_P03_REPORT.md))
+### Latency vs V3 ([SWV3_CAMPAIGN_VOICE.md](../archive/reviews/SWV3_CAMPAIGN_VOICE.md), [SWV3_P03_REPORT.md](SWV3_P03_REPORT.md))
 
 | Measure | V4 (this pass) | V3 |
 |---|---|---|

@@ -2,7 +2,7 @@
 
 Branch `v4-k-dashboard` (off `origin/v4-final` a226def) · issue [#17](https://github.com/igalgerman/JARVIS/issues/17) ·
 plan: `docs/JARVES_SW_V4_WORK_PACKAGE.md` section K · V3 leftovers: [SWV3_CAMPAIGN_BUG_TABLE_DASH.md](SWV3_CAMPAIGN_BUG_TABLE_DASH.md) D-10..D-18 ·
-screenshots (DEMO profile only): [swv4_k/](swv4_k/).
+screenshots (DEMO profile only): [swv4_k/](swv4_k).
 
 ## 1. What changed
 
@@ -90,7 +90,7 @@ JS errors, console errors, HTTP >= 400, failed requests, a page that is not regi
 
 | Sweep | Matrix | Loads | Problems | Evidence |
 |---|---|---|---|---|
-| 1 | 42 pages x en/he x 1440/390 px, light, screenshots | 168 | **0** | [sweep_1440_390_light.json](swv4_k/sweep_1440_390_light.json), [screenshots](swv4_k/) |
+| 1 | 42 pages x en/he x 1440/390 px, light, screenshots | 168 | **0** | [sweep_1440_390_light.json](swv4_k/sweep_1440_390_light.json), [screenshots](swv4_k) |
 | 2 | 42 pages x en/he x 1024 px, dark, Tab through every page (focus rings) | 84 | **0** | [sweep_1024_dark_focus.json](swv4_k/sweep_1024_dark_focus.json) |
 | 3 | 42 pages x en/he x 1440/390 px, dark | 168 | **0** | [sweep_1440_390_dark.json](swv4_k/sweep_1440_390_dark.json) |
 

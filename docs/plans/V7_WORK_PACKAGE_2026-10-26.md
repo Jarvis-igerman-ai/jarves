@@ -1,6 +1,6 @@
 # V7 work package (planning plus execution), 26 October 2026
 
-> **Status: owner APPROVED V7 for planning AND execution on 25 Oct 2026 ("i approve v7"; see the V7 lines in the owner's open-items file and [issue #50](https://github.com/Jarvis-igerman-ai/jarves/issues/50)). Execution order is gated: V4.5 / V5 / V6 gates in [NOW](../NOW.md) keep priority for PR slots.** Scope source: [V7 proposal](V7_PROPOSAL_2026-10-21.md). Architecture invariant from the proposal still holds: the Python Core, the existing provider contract, DevicePort/Skills, approvals and the Orchestrator stay authoritative; V7 adds adapters and presentation layers, never a second Core, memory, approval ledger or GitHub provider.
+> **Status: owner APPROVED V7 for planning AND execution on 25 Oct 2026 ("i approve v7"; see the V7 lines in the owner's open-items file and [issue #50](https://github.com/Jarvis-igerman-ai/jarves/issues/50)). Execution order is gated: V4.5 / V5 / V6 gates in [NOW](../NOW.md) keep priority for PR slots.** Scope source: [V7 proposal](../archive/plans/V7_PROPOSAL_2026-10-21.md). Architecture invariant from the proposal still holds: the Python Core, the existing provider contract, DevicePort/Skills, approvals and the Orchestrator stay authoritative; V7 adds adapters and presentation layers, never a second Core, memory, approval ledger or GitHub provider.
 >
 > Not V7 (queued separately by the owner): smart web chat (#365) and tasks-from-messages (#364). Face recognition (#358) is future backlog. V6 car/audio/Skills pillars stay in V6.
 

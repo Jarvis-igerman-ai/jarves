@@ -95,7 +95,7 @@ Plain words. Written after the stable release. No secrets, no personal data. Own
 - 4.5.1: the 8 accepted known issues (#179 #261 #441 #509 #510 #543 #544 #605; the last three need owner GitHub settings), #620, #621, CodeQL #46/#47, the docs-only CI fast path, bug tables retired from the gate (OD-S2), wake gate PR #614 and the voice items once measured.
 - 5.0 phone: phone sheet #193 (stays beta until he signs), trusted connection card (branch `trust-ca` slice 1; design `docs/plans/TRUSTED_PHONE_CONNECTION_2026-10-26.md` lives on that branch, not yet on main), PWA install, #509 #510.
 - 6.0 drive: hands-free #219, car test #224 (beta until his car sheet).
-- 7.0: G5 queue merges (#412), D2 OpenCode (#405), B2-B6 using the real-driver design [BROWSER_PILOT_REAL_DRIVER_2026-10-27](../plans/BROWSER_PILOT_REAL_DRIVER_2026-10-27.md), Android A1 and on (#390), M5 live trial (#419, free-only, cap in code).
+- 7.0: G5 queue merges (#412), D2 OpenCode (#405), B2-B6 using the real-driver design [BROWSER_PILOT_REAL_DRIVER_2026-10-27](../archive/plans/BROWSER_PILOT_REAL_DRIVER_2026-10-27.md), Android A1 and on (#390), M5 live trial (#419, free-only, cap in code).
 
 ## 9. Known risks
 

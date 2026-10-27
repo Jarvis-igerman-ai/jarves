@@ -18,7 +18,7 @@ Then: close already-done issues with evidence (#396, #357/#360, #343/#349 vs #38
 
 RULES
 - An issue only for a real defect or an owner report; nits go to the ledger. Close only with evidence (PR, test, run link).
-- ONE open PR at a time, opened ready when `python core/tools/prepush.py` passes, then `gh pr merge N --auto`. Bundle related fixes (<= ~300 lines). No stacking, no draft stage, no merge-main pushes, no close/reopen; push again only for red CI or a Tier R finding, max twice.
+- BATCHING: work on ONE local batch branch in your worktree, one commit per item, `python core/tools/prepush.py` + targeted tests after each commit. ONE ready PR per batch (3+ items of one lane, or end of day; soft cap ~8 commits / ~800 non-test lines), then `gh pr merge N --auto`. P0/P1 fixes and any Tier R change go ALONE and at once. Never mix lanes. A red batch is fixed in place (no split, no close/reopen, no merge-main pushes); keep committing to the NEXT batch branch cut from fresh `jarves/main` while one PR is queued. One open PR at a time. Daily metrics (open P0-P2, PRs merged, CI re-runs, hours merge to installed beta) go to your STATE.md for the 3-day trial.
 - Tier R (Gate, approvals, hotfix/update write paths, installer, browser network, wake apply, workflows/secrets): `no-automerge`, ONE independent Opus review, fix in one push. Everything else ships on green.
 - Every fix carries a regression test (clock-free, hermetic). Red run: read the log, fix the cause, never rerun blindly.
 - Owner present (last message < 10 min): one AskUserQuestion batch (<= 4) a day at most; away: OWNER_OPENS.md with a safe default, keep going.
