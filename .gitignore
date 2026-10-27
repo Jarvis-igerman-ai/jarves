@@ -53,3 +53,10 @@ core/src/jarves/diag/log_codes.json
 
 # a test run with a relative home must not leave pilot audit files in the repo
 core/browser/
+
+# Android companion (V7 A2): build output and the local SDK path
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/build.log

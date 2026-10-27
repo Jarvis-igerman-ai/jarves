@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ג\'ארביס</string>
+    <string name="pair_title">חיבור למחשב</string>
+    <string name="pair_help">במחשב פותחים את לוח הבקרה, עמוד הטלפון, ויוצרים קוד חד-פעמי. אחר כך מקלידים כאן את הכתובת ואת הקוד.</string>
+    <string name="addr">כתובת המחשב (מארח:פורט)</string>
+    <string name="device_name">שם הטלפון הזה</string>
+    <string name="code">קוד בן 8 ספרות</string>
+    <string name="check_pc">בדיקת המחשב</string>
+    <string name="confirm_title">זה המחשב שלכם?</string>
+    <string name="confirm_help">משווים את טביעת האצבע הזאת לזו שמופיעה ליד קוד הצימוד במחשב (לוח הבקרה, עמוד הטלפון). מתחברים רק אם הן זהות.</string>
+    <string name="confirm_yes">הן זהות: לחבר</string>
+    <string name="confirm_no">ביטול</string>
+    <string name="err_unreachable">המחשב לא ענה. אותה רשת Wi-Fi? קישור הטלפון דלוק?</string>
+    <string name="err_code">הקוד חייב להיות בן 8 ספרות.</string>
+    <string name="err_refused">המחשב דחה את הקוד (שגוי, משומש או שפג).</string>
+    <string name="err_rate">יותר מדי ניסיונות. מחכים דקה.</string>
+    <string name="err_answer">התשובה לא הובנה.</string>
+    <string name="status_title">המחשב שלכם</string>
+    <string name="online">מחובר. ג\'ארביס פועל במחשב.</string>
+    <string name="pc_offline">ג\'ארביס לא פועל במחשב.</string>
+    <string name="unreachable">המחשב לא מחובר: הוא לא עונה.</string>
+    <string name="revoked">הטלפון הזה נותק במחשב. מחברים שוב.</string>
+    <string name="incompatible">המחשב צריך אפליקציה חדשה יותר (API %1$d).</string>
+    <string name="version">ג\'ארביס %1$s במחשב</string>
+    <string name="skew">הפרש שעון מול המחשב: %1$d שניות</string>
+    <string name="unpair">ניתוק הטלפון הזה</string>
+    <string name="pair_again">חיבור מחדש</string>
+    <string name="err_address">מקלידים את הכתובת כמארח:פורט, למשל 192.168.1.20:8766 (בלי http ובלי נתיב).</string>
+    <string name="cert_changed">התעודה של המחשב השתנתה. אולי זו תעודה חדשה במחשב שלכם, ואולי מישהו באמצע. מחברים שוב רק אחרי שמשווים את טביעת האצבע.</string>
+    <string name="unpair_note">ניתוק כאן רק משכיח את החיבור בטלפון הזה. כדאי גם להסיר את הטלפון הזה במחשב (עמוד הטלפון) כדי שהמפתח שלו יפסיק לעבוד.</string>
+</resources>
