@@ -319,3 +319,18 @@ def test_merge_group_reuses_only_its_own_prs_green_proof():
     assert flags["installer"] and sum(flags.values()) == 1          # tests proven, installer still built and smoked
     assert not any(ci_plan.classify(["core/tests/test_x.py"], "merge_group", reuse_tests_only=True).values())
     assert ci_plan.classify(code, "merge_group")["full"]            # no proof: the full matrix
+
+
+def test_jarves_checks_has_no_duplicate_job_keys_and_browser_retry_fails_closed():
+    class Strict(yaml.SafeLoader):
+        pass
+
+    def mapping(loader, node, deep=False):
+        keys = [loader.construct_object(k, deep=True) for k, _ in node.value]
+        dup = {k for k in keys if keys.count(k) > 1}
+        assert not dup, f"duplicate YAML keys: {dup}"
+        return yaml.SafeLoader.construct_mapping(loader, node, deep)
+    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    doc = yaml.load((ROOT / ".github" / "workflows" / "jarves-checks.yml").read_text(encoding="utf-8"), Loader=Strict)
+    runs = " ".join(s.get("run", "") for s in doc["jobs"]["browser"]["steps"])
+    assert "ci_flake.py failed-files --any" in runs and "python3 - <<" not in runs and "first-junit.xml" in runs

@@ -105,7 +105,7 @@ def merge_group_decision(repo: str, tree: str, head_ref: str, api: Callable[[str
         return none
     try:
         head = api(f"repos/{repo}/pulls/{pr}").get("head", {}).get("sha")
-    except RuntimeError:
+    except Exception:
         return none
     if not head:
         return none
@@ -118,7 +118,7 @@ def merge_group_decision(repo: str, tree: str, head_ref: str, api: Callable[[str
         if hit:
             return {"mode": "installer", "pr": pr, "run_id": hit["run_id"]}
         hit = resolve_tests(repo, tree, api, own)
-    except RuntimeError:
+    except Exception:
         return none
     return {"mode": "tests", "pr": pr, "run_id": hit["run_id"]} if hit else none
 
