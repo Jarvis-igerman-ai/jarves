@@ -181,7 +181,7 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    branch rule). Tick "Required reviewers" and add yourself. Save.
 4. **Move the two secrets into that environment.** In the same page, "Environment secrets", add `RELEASES_TOKEN` and
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
-   repository secrets of the same names. (The publish job must name `environment: stable-release` first: tracked in #544;
+   repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
 5. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
