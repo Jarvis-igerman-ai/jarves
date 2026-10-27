@@ -83,7 +83,7 @@ class FakeProvider:
         return Reply(self.script.get((model_id, task_id), ""), *self.tokens)
 
 
-_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|(?:AKIA|ASIA)[0-9A-Z]{16}|Bearer\s+\S+|[A-Za-z0-9_\-]{32,})")
+_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|(?:AKIA|ASIA)[0-9A-Z]{16}|Bearer\s+\S+|[A-Za-z0-9_+/=\-]{32,})")
 
 
 def scrub(text: str) -> str:
@@ -173,7 +173,7 @@ COLS = ("model", "task", "kind", "status", "accepted", "latency_s", "cost_usd", 
 
 def _cell(v):
     s = str(v)
-    return "'" + s if s.startswith(("=", "+", "-", "@", "\t", "\r")) else v      # no spreadsheet formula injection
+    return "'" + s if s.lstrip().startswith(("=", "+", "-", "@")) or s.startswith(("\t", "\r")) else v      # no spreadsheet formula injection
 
 
 def archive(home: Path, report: dict, wall: Callable[[], float] = time.time) -> Path:
@@ -181,11 +181,15 @@ def archive(home: Path, report: dict, wall: Callable[[], float] = time.time) -> 
     d = Path(home) / "modellab"
     d.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime('%Y%m%d-%H%M%S', time.gmtime(wall()))
-    p, n = d / f"{stamp}.json", 1
-    while p.exists() or p.with_suffix(".csv").exists():       # two runs in the same second never overwrite each other
-        n += 1
-        p = d / f"{stamp}-{n}.json"
-    p.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    n = 1
+    while True:                                                # atomic create ("x"): no two runs share a name, even across processes
+        p = d / (f"{stamp}.json" if n == 1 else f"{stamp}-{n}.json")
+        try:
+            with open(p, "x", encoding="utf-8") as fh:
+                fh.write(json.dumps(report, ensure_ascii=False, indent=1))
+            break
+        except FileExistsError:
+            n += 1
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(COLS)

@@ -258,3 +258,13 @@ def test_system_resolver_has_a_timeout_and_fails_closed(monkeypatch):
     monkeypatch.setattr(bp, "RESOLVE_TIMEOUT_S", 0.05)
     assert bp.vet_url("https://slow.example.com/") == ""
     gate.set()
+
+
+def test_567_v4_compatible_ipv6_idna_disagreement_and_cut_tail(tmp_path):
+    assert bp.page_scope("http://[::10.0.0.1]/") == "" and bp.page_scope("http://[::1]/") == "local"
+    assert bp.vet_url("https://fa\u00dfe.de/", lambda h: ["93.184.216.34"]) == ""          # IDNA 2003 vs UTS 46 differ: refused
+    s, d, _ = mk(tmp_path)
+    d.text = lambda: "a" * (2 * bp.MAX_TEXT + 500)
+    assert len(s.read()["untrusted_text"]) == bp.MAX_TEXT
+    d.text = lambda: "ghp_" + "x" * (2 * bp.MAX_TEXT - 4) + "ghp_SECRETSECRETSECRETSECRETSECRET"
+    assert "ghp_SECRET" not in s.read()["untrusted_text"]

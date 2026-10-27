@@ -152,3 +152,13 @@ def test_hardening_529_max_tokens_clamp_csv_scrub_and_unique_archive(tmp_path):
     csv_text = p1.with_suffix(".csv").open(encoding="utf-8", newline="").read()      # keep the raw CR
     assert aws not in csv_text and "[redacted]" in csv_text
     assert "'" + chr(9) + "cell" in csv_text and "'" + chr(13) + "cell" in csv_text   # item 2: tab and CR cells are guarded too
+
+
+def test_567_aws_secret_key_leading_space_formula_and_atomic_archive_name(tmp_path):
+    aws_secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    assert aws_secret not in ml.scrub("secret " + aws_secret)
+    assert ml._cell("  =1+1").startswith("'") and ml._cell("plain") == "plain"
+    clk = Clock()
+    rep = ml.run_eval(REG, SpendPolicy("free-only"), ml.FakeProvider({}, clock=clk), ["free-a"], tasks=ml.TASKS[:1], clock=clk)
+    names = {ml.archive(tmp_path, rep, wall=lambda: 0).name for _ in range(3)}
+    assert names == {"19700101-000000.json", "19700101-000000-2.json", "19700101-000000-3.json"}
