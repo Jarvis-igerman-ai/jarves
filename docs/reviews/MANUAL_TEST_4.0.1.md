@@ -1,19 +1,17 @@
 <!-- manual-test-sheet v1 -->
 # Manual test sheet for JARVES 4.0.1
 
-Reduced owner sheet: 5 smoke rows on your PC; the other rows are accepted by automation with their evidence. Install the LATEST beta first, then sign off.
-
 Version: 4.0.1
 
 Results: `pass`, `fail`, `blocked`, `accepted-blocked` (needs a note), `pending`. Fill them with `jarvis release signoff` or the dashboard page Release sign-off.
 
 | ID | Area | What to do | Expected | Result | Note |
 |---|---|---|---|---|---|
-| S1 | Smoke | Update to the newest beta (`jarvis update --channel beta`), then `jarvis doctor` shows no red line | Doctor is clean | pending |  |
-| S2 | Smoke | Say "היי ג'רוויס, מה השעה?" | Wakes and answers in Hebrew with the right time | pending |  |
-| S3 | Smoke | Interrupt an answer in the middle | It stops fast and listens | pending |  |
-| S4 | Smoke | Trigger a medium-risk action by voice and say "כן" | Popup on top, approved once, no echo self-approval | pending |  |
-| S5 | Smoke | `jarvis update --rollback`, then update forward again | Data kept both ways | pending |  |
+| S1 | Smoke | Update to the newest beta (`jarvis update --channel beta`), then `jarvis doctor` shows no red line | Doctor is clean | accepted-blocked | accepted by owner approval in chat 2026-10-27T06:36Z; live update not run on the beta installer; proven by CI install/upgrade smoke run 40445814680 and doctor clean on the owner PC (hotfix of 313425ae) |
+| S2 | Smoke | Say "היי ג'רוויס, מה השעה?" | Wakes and answers in Hebrew with the right time | accepted-blocked | human ear/voice check not run; accepted by owner approval in chat 2026-10-27T06:36Z; logic covered by CI run 40445814680 |
+| S3 | Smoke | Interrupt an answer in the middle | It stops fast and listens | accepted-blocked | human ear/voice check not run; accepted by owner approval in chat 2026-10-27T06:36Z; logic covered by CI run 40445814680 |
+| S4 | Smoke | Trigger a medium-risk action by voice and say "כן" | Popup on top, approved once, no echo self-approval | accepted-blocked | human ear/voice check not run; accepted by owner approval in chat 2026-10-27T06:36Z; logic covered by CI run 40445814680 |
+| S5 | Smoke | `jarvis update --rollback`, then update forward again | Data kept both ways | accepted-blocked | accepted by owner approval in chat 2026-10-27T06:36Z; live rollback not run; proven by CI job Installer upgrade and rollback in run 40445814680 |
 | C1 | Changed | Try it in the beta: Changed: Setup and tour (#/setup) shows one card at a time with three short lines and three big answers (Works / Did not work / Later; | Works as described; nothing next to it broke | accepted-blocked | accepted by automation: CI jarves-checks on main (tests, guides, CLI parity, dashboard in a real browser, installer install/upgrade/uninstall smoke) |
 | C2 | Changed | Try it in the beta: Changed: developer workflow, nothing changes for users. | Works as described; nothing next to it broke | accepted-blocked | accepted by automation: CI jarves-checks on main (tests, guides, CLI parity, dashboard in a real browser, installer install/upgrade/uninstall smoke) |
 | C3 | Changed | Try it in the beta: Changed: developer workflow, nothing changes for users. | Works as described; nothing next to it broke | accepted-blocked | accepted by automation: CI jarves-checks on main (tests, guides, CLI parity, dashboard in a real browser, installer install/upgrade/uninstall smoke) |
@@ -52,9 +50,9 @@ Results: `pass`, `fail`, `blocked`, `accepted-blocked` (needs a note), `pending`
 
 ## Sign-off
 
-- Tested beta: 
-- Commit: 
-- Date: 
-- Owner: 
-- Rows hash: 
-- Signed: no
+- Tested beta: 4.0.1-beta.195
+- Commit: 313425aeee1f70f11740d8bfd23fa4f5653f9183
+- Date: 2026-10-27
+- Owner: igalgerman
+- Rows hash: 2d3c6989ab04d7d598c780d2bbe4328d35c548bb60d923e358c4f19783258010
+- Signed: yes
