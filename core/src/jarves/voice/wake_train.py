@@ -50,6 +50,11 @@ FORMAT = "jarves-wake-head-v1"
 # embeddings after a (re)start, so all three agree.
 WARMUP_CHUNKS = 25
 STARTUP_EMBEDDINGS = 100
+# Why 100 and not 91 (#594, measured with the real front end 27 Oct 2026): after the 91-embedding burst, the next 9 embeddings
+# are computed from a zero (silent) context. Against the embedding the same audio gives with real history they differ by up
+# to ~23 absolute per value (chunks 1-8, gone at chunk 10); the head was trained on history-conditioned embeddings only.
+# Dropping just the burst would feed those to the head. The 2.0 s deaf window after a reset is therefore the front end's
+# context warm-up (0.8 s) plus the 16 embeddings a window needs (1.28 s); it cannot be shortened without retraining.
 
 NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the weather today", "hey there",
           "can you hear me", "thank you very much", "let's go outside", "where are my keys", "play something nice",
