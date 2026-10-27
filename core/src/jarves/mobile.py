@@ -69,7 +69,7 @@ PC_ONLY_SEGMENTS = frozenset({"settings", "secrets", "files", "workspace", "memo
 EVENTS_PER_MIN = 600           # chat long-poll: one request per streamed burst, a bucket of its own
 STATIC_FILES = {"index.html": "text/html; charset=utf-8", "app.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8", "sw.js": "text/javascript; charset=utf-8",
-                "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml",
+                "manifest.webmanifest": "application/manifest+json", "icon.svg": "image/svg+xml", "icon-192.png": "image/png", "icon-512.png": "image/png",
                 "chatview.js": "text/javascript; charset=utf-8", "chatview.css": "text/css; charset=utf-8",
                 "indicator.js": "text/javascript; charset=utf-8",
                 "plans.js": "text/javascript; charset=utf-8",
