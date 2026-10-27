@@ -243,7 +243,7 @@ def plugin_installed(cmd: list[str]) -> tuple[bool | None, str]:
 RESTRICTED_DENY = ("Bash(git push*)", "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(git tag*)", "Bash(jarvis*)",
                    "Bash(gh api*)", "Bash(curl*)", "Bash(wget*)")
 RESTRICTED_KEEP = frozenset({"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"})
-_SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key|private_?key|auth)")
+_SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key|private_?key|auth|access_?key|dsn|database_url|_pat$)")
 
 
 # ---------------------------------------------------------------------- sessions JARVES starts

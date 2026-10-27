@@ -5,7 +5,7 @@ more yes/no question (hand it to a coding agent?) -> on yes the existing Orchest
 its OWN approval card, which shows the exact brief, the project and the folder (a second, separate approval: one mis-heard
 "yes" never starts an agent) -> the agent works in a fresh worktree under the Orchestrator's daily cost cap.
 The brief is built ONLY from the redacted report (codes, key names, versions, the guide id), is scanned like a ticket (a
-secret-, e-mail-, phone- or path-shaped string blocks the hand-off) and tells the agent to propose a DRAFT pull request and
+secret-, e-mail-, phone- or path-shaped string blocks the hand-off) and tells the agent to propose a patch and
 never merge. The project comes from the setting `diag.handoff_project` (an allow-listed Orchestrator project); empty = the
 hand-off says how to set it. Tests use a fake Orchestrator: no live agent, no spend."""
 from __future__ import annotations
@@ -21,7 +21,7 @@ PROVIDER = "claude"
 
 TEXT = {
     "en": {"ask": "Hand this failure to a coding agent (Claude Code)?\n"
-                  "It works in a separate copy of the code and proposes a fix as a draft pull request; it is blocked from merging and pushing. "
+                  "It works in a separate copy of the code and proposes a fix as a patch (a commit with a test). It cannot merge or push; every other command asks your approval. "
                   "You will see the exact text and approve again before it starts.",
            "title": "Hand the failure to a coding agent?",
            "why": "Only a redacted report (codes and versions, no conversation text, no keys) is written into the task.",
@@ -31,7 +31,7 @@ TEXT = {
            "no_agent": "The coding-agent service is not running (jarvis features on agent_orchestrator).",
            "started": "The coding agent started: ", "refused": "The coding agent was not started: "},
     "he": {"ask": "להעביר את הכשל לסוכן קוד (Claude Code)?\n"
-                  "הוא עובד בעותק נפרד של הקוד ומציע תיקון כבקשת משיכה בטיוטה; חסום ממיזוג ומדחיפה. "
+                  "הוא עובד בעותק נפרד של הקוד ומציע תיקון כטלאי (קומיט עם בדיקה). הוא לא יכול למזג או לדחוף; כל פקודה אחרת מבקשת את אישורכם. "
                   "תראו את הטקסט המדויק ותאשרו שוב לפני שהוא מתחיל.",
            "title": "להעביר את הכשל לסוכן קוד?",
            "why": "נכתב למשימה רק דוח מצונזר (קודים וגרסאות, בלי טקסט שיחה ובלי מפתחות).",
@@ -53,10 +53,10 @@ def brief(rep: areas.DiagReport) -> str:
     facts = f"area {rep.area}, code {rep.code}, os {ev.get('diag_os', '?')}, version {ev.get('jarves_version', '?')}"
     if codes:
         facts += ", recent log codes: " + "; ".join(str(c) for c in codes[:3])
-    text = (f"JARVES self-diagnosis hand-off. A tool failed; the self-check named a cause and next step, and the owner still "
-            f"wants a code look. Facts (redacted, no conversation text): {facts}. "
-            "Task: find the cause in this repository and propose a fix as a DRAFT pull request with a test. Do not merge or push "
-            "to main. Do not read, print or send tokens, keys or personal data. If it is only a setup problem, say so and stop.")
+    text = ("Rules first. Do not read, print or send tokens, keys or personal data. Do not merge or push. Task: find the cause in "
+            "this repository and propose a fix as a patch (a commit with a test); if it is only a setup problem, say so and stop. "
+            f"Context: JARVES self-diagnosis hand-off; a tool failed, the self-check named a cause and next step, and the owner "
+            f"still wants a code look. Facts (redacted, no conversation text): {facts}.")
     bad = scan(text)
     if bad:
         raise TicketBlocked(bad)
@@ -97,6 +97,6 @@ def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
 feat.register(FEATURE, "העברת כשל לסוכן קוד", "Hand a failure to a coding agent", False, probe=_probe,
               needs=["self_diagnosis_ask", "agent_orchestrator"], risk="high",
               about="after the self-check, offer to hand a redacted report to a coding agent that "
-                    "proposes a fix as a draft pull request; two approvals, nothing is merged",
+                    "proposes a fix as a patch; two approvals, and it cannot merge or push",
               targets=targets("test_self_diagnosis_handoff.py"),
               permissions=["read", "starts a coding agent after two approvals"], settings="jarvis features on self_diagnosis_handoff")

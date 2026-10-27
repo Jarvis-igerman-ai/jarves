@@ -35,9 +35,9 @@ def test_switch_is_beta_off_and_needs_the_orchestrator():
     assert f.default_enabled is False and feat.stage_of(ho.FEATURE) == "beta" and "agent_orchestrator" in f.needs
 
 
-def test_brief_is_redacted_and_tells_the_agent_to_draft_and_never_merge():
+def test_brief_puts_the_rules_first_and_asks_for_a_patch_never_a_merge():
     b = ho.brief(rep())
-    assert "ANYDO_AUTH_EXPIRED" in b and "DRAFT pull request" in b and "Do not merge or push" in b
+    assert "ANYDO_AUTH_EXPIRED" in b and "a patch (a commit with a test)" in b and "Do not merge or push" in b
     assert "Do not read, print or send tokens" in b
 
 
@@ -55,7 +55,7 @@ def test_start_uses_the_orchestrators_own_approval_and_never_pre_approves():
     assert out["ok"] is True
     provider, project, task, kw = o.calls[0]
     assert (provider, project, kw["by"], kw["approved"]) == ("claude", "jarves", "diag", False)   # its own card shows the brief
-    assert "DRAFT pull request" in task
+    assert "a patch (a commit with a test)" in task and task.startswith("Rules first.")
 
 
 def test_no_project_no_agent_blocked_and_refused():
@@ -146,7 +146,7 @@ def test_the_whole_brief_fits_the_approval_card_even_with_many_log_codes():
     r = rep()
     r.evidence = ["last_log_codes: " + "; ".join(f"ERR_CODE_NUMBER_{i}" for i in range(12)), "jarves_version: 4.5.1-beta.3"]
     b = ho.brief(r)
-    assert len(b) <= ho.MAX_BRIEF < 600 and "DRAFT pull request" in b and "Do not merge or push" in b
+    assert len(b) <= ho.MAX_BRIEF < 600 and "a patch (a commit with a test)" in b and "Do not merge or push" in b
 
 
 def test_a_restricted_claude_session_denies_push_merge_and_drops_core_secrets(monkeypatch):
@@ -158,6 +158,8 @@ def test_a_restricted_claude_session_denies_push_merge_and_drops_core_secrets(mo
     monkeypatch.setenv("GITHUB_TOKEN", "x")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "keep")
     monkeypatch.setenv("PATH_OK_VALUE", "1")
+    for k in ("GH_PAT", "DATABASE_URL", "AWS_ACCESS_KEY_ID", "SENTRY_DSN"):
+        monkeypatch.setenv(k, "x")
     seen = {}
 
     def fake_popen(argv, **kw):
@@ -167,6 +169,7 @@ def test_a_restricted_claude_session_denies_push_merge_and_drops_core_secrets(mo
     with pytest.raises(OSError):
         m.start()
     env = seen["env"]
+    assert not {"GH_PAT", "DATABASE_URL", "AWS_ACCESS_KEY_ID", "SENTRY_DSN"} & set(env)
     assert "OPENAI_API_KEY" not in env and "GITHUB_TOKEN" not in env and env["ANTHROPIC_API_KEY"] == "keep" and "PATH_OK_VALUE" in env
     plain = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda *a: None)
     assert "--disallowedTools" not in plain.argv
