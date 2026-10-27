@@ -291,7 +291,7 @@ def test_live_view_in_the_real_dashboard(browser, dash, tmp_path):  # noqa: F811
         p.wait_for_selector("#live-view button", timeout=30000)
         p.click("#live-view button:has-text('Live view')")
         p.wait_for_function("() => { const i = document.querySelector('#live-view img'); return i && i.src.startsWith('data:image/png;base64,') && i.naturalWidth > 0; }", timeout=30000)
-        assert "Read only" in p.inner_text("#live-view")
+        assert "Expires in" in p.inner_text("#live-view")
         p.click("#live-view button:has-text('Stop')")
         p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('Stopped')", timeout=30000)
         assert s.state == bp.STOPPED and drv.closed

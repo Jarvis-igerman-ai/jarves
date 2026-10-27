@@ -89,7 +89,7 @@ def test_agent_is_locked_out_while_the_owner_drives_and_stays_paused_until_the_o
     assert v.frame(g)["state"] == bp.HUMAN                # the owner can still watch, and the page learns the state from the server
     assert v.give_back(g) == {"returned": True, "state": bp.PAUSED, "reread": True}
     assert code(s.read) == "BROWSER_PILOT_NOT_AGENT"      # back to the owner is NOT back to the agent
-    assert v.give_back(g, True)["state"] == bp.AGENT
+    assert v.give_back(g); v.give_back(g, True)["state"] == bp.AGENT
     assert s.read()["untrusted_text"] == "Login page"
 
 
@@ -100,7 +100,7 @@ def test_return_means_a_fresh_read_and_a_note_not_cached_text(tmp_path):
     n = d.text_calls
     v.takeover(g)
     d.page_text = "Welcome back, account 4711"
-    v.give_back(g, True)
+    v.give_back(g); v.give_back(g, True)
     r = s.read()
     assert d.text_calls == n + 1 and "account 4711" in r["untrusted_text"]
     assert "owner used this page" in r["note"] and "never shown to you" in r["note"] and "best-effort" in r["note"]
@@ -187,7 +187,7 @@ def test_the_owners_input_does_not_use_up_the_agents_action_cap(tmp_path):
     v.takeover(g)
     for _ in range(bp.MAX_ACTIONS + 10):
         v.human(g, "key", {"key": "Tab"})
-    v.give_back(g, True)
+    v.give_back(g); v.give_back(g, True)
     assert s.read()["untrusted_text"] == "Login page" and s.state == bp.AGENT
 
 
@@ -279,7 +279,7 @@ def test_what_the_owner_types_never_leaks(tmp_path, caplog):
     assert SECRET not in audit and "human:type" in audit
     # the page echoes it back (a preview, a "you typed ..." line): the agent still does not get it
     d.page_text = f"Login page. You typed {SECRET} in the box. Welcome."
-    v.give_back(g, True)
+    v.give_back(g); v.give_back(g, True)
     out = s.read()
     assert SECRET not in json.dumps(out) and "hidden" in out["untrusted_text"]
     for echo in (SECRET.upper(), SECRET.replace("-", "\u200b-"), SECRET.replace("-", " - ").replace(" ", ""), "pw=" + SECRET.replace("-", "%2D")):
@@ -428,3 +428,99 @@ def test_takeover_in_the_real_dashboard(browser, dash, tmp_path):  # noqa: F811
         ctx.close()
     finally:
         lv.set_active(None)
+
+
+# ---------------------------------------------------------------- follow-up fixes after the #657 re-check
+def test_public_requests_stay_refused_after_the_owner_used_the_page(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    v.give_back(g)
+    v.give_back(g, True)
+    assert s.state == bp.AGENT and s.after_human
+    assert s.request_allowed("https://example.com/x") is False          # a public script in the page could read the typed keys
+    assert s.request_allowed("http://localhost:8123/ok") is True
+
+
+def test_resume_never_skips_the_pause_when_the_server_is_still_in_human(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    out = v.give_back(g, True)                                           # the page sent resume at once: ignored
+    assert out["state"] == bp.PAUSED and s.state == bp.PAUSED
+
+
+def test_typed_text_is_never_forgotten_the_session_stops_at_the_cap(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    for i in range(bp.PilotSession.MAX_TYPED_ENTRIES):
+        v.human(g, "type", {"text": f"entry-{i:04d}"})
+    assert len(s._typed) == bp.PilotSession.MAX_TYPED_ENTRIES
+    with pytest.raises(lv.LiveError) as e:
+        v.human(g, "type", {"text": "one-too-many"})
+    assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED and s._typed == []
+
+
+def test_short_typed_strings_are_not_hidden_and_lone_surrogates_do_not_crash(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    v.takeover(g)
+    v.human(g, "type", {"text": "ab"})
+    v.human(g, "type", {"text": "x" + chr(0xD800) + "yz"})
+    v.give_back(g); v.give_back(g, True)
+    d.page_text = "a table of contents, ab and xyz"
+    out = s.read()["untrusted_text"]
+    assert "ab" in out and "hidden" not in out                            # no oracle from a 2-letter string
+
+
+def test_a_hung_frame_never_blocks_stop_takeover_or_give_back(tmp_path):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    started, release = threading.Event(), threading.Event()
+
+    def hung():
+        started.set()
+        release.wait(5)
+        return b"PNG-fake"
+    d.screenshot = hung
+    d.page_text = "x"
+    t = [0.0]
+    th = threading.Thread(target=lambda: _swallow(v.frame, g))
+    th.start()
+    assert started.wait(5)
+    t0 = time.time()
+    assert v.takeover(g) == {"state": bp.HUMAN}
+    assert v.give_back(g)["state"] == bp.PAUSED
+    assert v.stop() == {"stopped": True}
+    assert time.time() - t0 < 1.5
+    release.set()
+    th.join(5)
+
+
+def _swallow(fn, *a):
+    try:
+        fn(*a)
+    except (lv.LiveError, bp.PilotError):
+        pass
+
+
+def test_a_frame_during_an_agent_call_is_bounded_not_a_hang(tmp_path, monkeypatch):
+    v, s, d, _ = mk(tmp_path)
+    g = v.start()["grant"]
+    monkeypatch.setattr(bp.PilotSession, "DRIVER_WAIT_S", 0.2)
+    started, release = threading.Event(), threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(5)
+        return "x"
+    d.text = slow
+    th = threading.Thread(target=lambda: _swallow(s.read))
+    th.start()
+    assert started.wait(5)
+    t0 = time.time()
+    assert code(v.frame, g) == "BROWSER_PILOT_BUSY" and time.time() - t0 < 2
+    assert v.takeover(g)                                              # the view is still alive (a busy page is not a dead one)
+    release.set()
+    th.join(5)
