@@ -315,3 +315,48 @@ def test_a_redirect_is_not_a_success(server):
     server.status_for_posts = 302
     with pytest.raises(oc.OpenCodeError):
         c.abort("ses_new1", "C:/proj")
+
+
+# ---------------------------------------------------------------- D2 re-check fixes
+def test_ask_path_sends_exactly_what_the_popup_showed_including_code_blocks(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    q = "what next?\n```\nrm -rf /tmp/x\n```"
+    n = len(server.posts)
+    o.ask(sid, q, live=True)
+    shown = asked[-1][0]
+    sent = server.posts[n][1]["parts"][0]["text"]
+    assert "rm -rf /tmp/x" in shown and "code omitted" not in shown            # the code block is visible in the popup
+    assert sent in shown and len(shown) <= 2000                                # exactly the shown text, popup fits the cap
+    assert "[code omitted]" not in sent
+    o.db.close()
+
+
+def test_stop_reports_a_failed_abort_and_keeps_the_session(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    monkeypatch.setattr(oc.Client, "abort", lambda self, *a, **k: (_ for _ in ()).throw(oc.OpenCodeError("SERVER_ERROR", "HTTP 500")))
+    r = o.stop_session(sid, approved=True)
+    assert not r["ok"] and r["code"] == "SERVER_ERROR" and "still tracked" in r["text"]
+    assert o.db.session(sid)["state"] != "STOPPED" and sid in o.managed
+    o.db.close()
+
+
+def test_stop_and_resume_refuse_an_opencode_session_jarves_does_not_control(tmp_path, server, monkeypatch):
+    o, asked, sid = _started(tmp_path, server, monkeypatch)
+    o.managed.clear()                                                         # as after a Core restart
+    r = o.stop_session(sid, approved=True)
+    assert not r["ok"] and r["code"] == "UNSUPPORTED_ATTACH" and "stop it in OpenCode itself" in r["text"]
+    assert o.db.session(sid)["state"] != "STOPPED"
+    assert o.resume(sid, approved=True)["code"] in ("UNSUPPORTED_ATTACH", "CORE_NOT_RUNNING")
+    o.serve = True
+    assert o.resume(sid, approved=True)["code"] == "UNSUPPORTED_ATTACH"
+    o.db.close()
+
+
+def test_wrong_folder_abort_uses_the_folder_the_server_returned(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    monkeypatch.setattr(o, "_ask_owner", lambda *a, **k: True)
+    server.force_dir = "C:/somewhere/else"
+    o.start_session("opencode", "proj", "task")
+    assert "directory=C%3A%2Fsomewhere%2Felse" in server.posts[-1][0] and "/abort" in server.posts[-1][0]
+    o.db.close()

@@ -538,18 +538,22 @@ class Orchestrator:
         m = self.managed.get(s["id"])
         sid = s["id"]
         if isinstance(m, _OpenCodeSession):            # D2: EVERY prompt to OpenCode is approved on screen, whoever asked
-            shown = clean(text, OC_PROMPT_SHOWN + 1)
+            # the EXACT string that will be sent (a status question is wrapped with its header and reply rule), cleaned
+            # once with code blocks kept, shown in full and sent unchanged: shown == sent
+            raw_out = wrap_for_agent([{**env.to_dict(), "payload": env.payload}]) if kind == "status_request" else text
+            shown = clean(raw_out, OC_PROMPT_SHOWN + 1, keep_code=True)
             if len(shown) > OC_PROMPT_SHOWN:
                 return {"ok": False, "code": "error", "text": f"The prompt is too long to approve on screen "
                                                               f"(max {OC_PROMPT_SHOWN} characters)."}
-            text = shown                               # what is shown is exactly what is sent
+            text = shown
             if not self._ask_owner(self._opencode_prompt_text(s, shown), title="agents_opencode_prompt", risk="medium",
                                    voice=False, details=self._opencode_details(s)):
                 self.db.audit(by, kind, session_id=sid, decision="denied", detail="opencode prompt")
                 return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
         if m is not None:
-            ok = self._managed_send(sid, m, wrap_for_agent([{**env.to_dict(), "payload": env.payload}])
-                                    if kind == "status_request" else text, steer=(kind == "command"))
+            ok = self._managed_send(sid, m, text if isinstance(m, _OpenCodeSession) else
+                                    (wrap_for_agent([{**env.to_dict(), "payload": env.payload}])
+                                     if kind == "status_request" else text), steer=(kind == "command"))
             if not ok:
                 return {"ok": False, "code": "SESSION_CLOSED", "text": say("SESSION_CLOSED", lang)}
             self.db.enqueue(env)
@@ -685,6 +689,11 @@ class Orchestrator:
         if err:
             return err
         m = self.managed.get(s["id"])
+        if m is None and s["provider"] == "opencode":
+            return {"ok": False, "code": "UNSUPPORTED_ATTACH",
+                    "text": ("JARVES does not control this OpenCode session (it was started elsewhere, or JARVES restarted "
+                             "and lost track of it); stop it in OpenCode itself." if lang == "en" else
+                             "ג'רוויס לא שולט בסשן OpenCode הזה (הופעל במקום אחר, או שג'רוויס הופעל מחדש); עצרו אותו ב-OpenCode.")}
         if m is None:
             r = self._deliver(s, "command", "The owner asks you to wrap up: finish or checkpoint the current step, "
                                             "summarize, and stop.", by=by, lang=lang)
@@ -694,7 +703,12 @@ class Orchestrator:
                                                 title="agents_stop", risk="medium", voice=False,
                                                 details={"project": s.get("project"), "session": s["id"]}):
             return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
-        self._interrupt(s["id"], m)
+        stopped = self._interrupt(s["id"], m)
+        if isinstance(m, _OpenCodeSession) and not stopped:       # the abort failed: do not claim it stopped, keep the session
+            self.db.audit(by, "stop", session_id=s["id"], decision="approved", result="abort_failed")
+            return {"ok": False, "code": "SERVER_ERROR",
+                    "text": ("Could not stop the OpenCode session (the server did not accept the abort); it is still tracked."
+                             if lang == "en" else "לא הצלחתי לעצור את סשן OpenCode (השרת לא קיבל את העצירה); הוא עדיין במעקב.")}
         if isinstance(m, claude.ManagedClaude):
             m.close(grace_s=10)
         self.managed.pop(s["id"], None)
@@ -765,7 +779,7 @@ class Orchestrator:
             if not self._opencode_on():
                 return {"ok": False, "code": "PROVIDER_MISSING", "text": say("PROVIDER_MISSING", lang)}
             approved = False                          # never trusted from a caller / the bridge: the full popup always shows
-            task = clean(task, OC_PROMPT_SHOWN + 1)
+            task = clean(task, OC_PROMPT_SHOWN + 1, keep_code=True)
             if len(task) > OC_PROMPT_SHOWN:
                 return {"ok": False, "code": "error", "text": f"The task is too long to approve on screen "
                                                               f"(max {OC_PROMPT_SHOWN} characters)."}
@@ -830,9 +844,9 @@ class Orchestrator:
                 "server": self.acfg.opencode_url}
 
     def _opencode_prompt_text(self, s: dict, text: str) -> str:
-        return (f"Send a prompt to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
-                f"folder {s.get('cwd')}, branch {s.get('branch') or 'worktree branch'}) at {self.acfg.opencode_url}?"
-                f"\nPrompt (untrusted text, shown in full):\n{text}")
+        return (f"Send this to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
+                f"branch {s.get('branch') or 'worktree branch'}, server {self.acfg.opencode_url})?"
+                f"\nExact text that will be sent (untrusted):\n{text}\n(folder {s.get('cwd')})")
 
     def _start_opencode(self, proj, cwd: str, task: str, *, by: str, lang: str) -> dict:
         try:
@@ -1017,6 +1031,8 @@ class Orchestrator:
         s, err = self._resolved(ref, lang)
         if err:
             return err
+        if s["provider"] == "opencode":                # D2: an OpenCode session is never resumed (no codex path for it)
+            return {"ok": False, "code": "UNSUPPORTED_ATTACH", "text": say("UNSUPPORTED_ATTACH", lang)}
         if s["id"] in self.managed:
             return {"ok": True, "code": "ok", "text": "Already running under JARVES." if lang == "en" else
                     "כבר פועל דרך ג'רוויס."}

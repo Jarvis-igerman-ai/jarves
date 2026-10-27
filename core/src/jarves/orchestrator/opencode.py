@@ -153,7 +153,7 @@ class Client:
         got = str(d.get("directory") or "")
         if _norm_dir(got) != _norm_dir(directory):         # the session must live in the worktree we asked for
             try:
-                self.abort(sid, directory)
+                self.abort(sid, got or directory)          # the folder the SERVER put it in is where the session lives
             except OpenCodeError:
                 pass
             raise OpenCodeError("SERVER_ERROR", "the session was created in another folder than the worktree")
