@@ -162,3 +162,67 @@ def test_567_aws_secret_key_leading_space_formula_and_atomic_archive_name(tmp_pa
     rep = ml.run_eval(REG, SpendPolicy("free-only"), ml.FakeProvider({}, clock=clk), ["free-a"], tasks=ml.TASKS[:1], clock=clk)
     names = {ml.archive(tmp_path, rep, wall=lambda: 0).name for _ in range(3)}
     assert names == {"19700101-000000.json", "19700101-000000-2.json", "19700101-000000-3.json"}
+
+
+# ---- V7 M4 (#418): results store, compare, dashboard routes (fakes, no network, no real clock)
+def _store(tmp_path, *, stamps=(1_000_000_000, 1_000_000_100)):
+    for i, t in enumerate(stamps):
+        rep, _ = run(["free-a", "loc", "pay"] if i == 0 else ["free-a"])
+        ml.archive(tmp_path, rep, wall=lambda t=t: t)
+
+
+def test_store_lists_newest_first_and_skips_damage(tmp_path):
+    _store(tmp_path)
+    d = tmp_path / "modellab"
+    (d / "20250101-000000.json").write_text("{not json", encoding="utf-8")
+    (d / "notes.json").write_text("{}", encoding="utf-8")
+    runs = ml.list_runs(tmp_path)
+    assert [r["id"] for r in runs] == ["20010909-014820", "20010909-014640"]
+    assert runs[1]["models"] == ["free-a", "loc", "pay"] and ml.list_runs(tmp_path / "none") == []
+
+
+def test_load_run_rejects_path_tricks(tmp_path):
+    _store(tmp_path)
+    for bad in ("../x", "20010909-014640.json", "..\\..\\x", "", None, 5):
+        assert ml.load_run(tmp_path, bad) is None
+    assert ml.load_run(tmp_path, "20010909-014640")["mode"] == "free-only"
+
+
+def test_compare_is_free_only_by_default(tmp_path):
+    _store(tmp_path)
+    reps = {i["id"]: ml.load_run(tmp_path, i["id"]) for i in ml.list_runs(tmp_path)}
+    c = ml.compare(reps)
+    assert c["free_only"] and [m["model"] for m in c["models"]] == ["free-a", "loc"]
+    assert c["run_ids"] == sorted(reps) and set(c["models"][0]["runs"]) == set(reps)
+    assert set(c["models"][1]["runs"]) == {"20010909-014640"}
+    assert "pay" in [m["model"] for m in ml.compare(reps, free_only=False)["models"]]
+
+
+def test_routes_read_only_local_only_no_key(tmp_path, monkeypatch):
+    import re
+    from types import SimpleNamespace
+    from jarves import model_lab_surface as s
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secretsecret123456")
+    _store(tmp_path)
+    routes = []
+    s.dashboard_routes(lambda meth, pat, fn: routes.append((meth, re.compile(pat), fn)))
+    assert {m for m, _, _ in routes} == {"GET"}                       # nothing here can start a run
+    ctx = SimpleNamespace(home=tmp_path, principal={"kind": "local"})
+    code, body = s.api_runs(ctx, None, None)
+    assert code == 200 and len(body["runs"]) == 2 and body["max_run_cap_usd"] == ml.MAX_RUN_CAP_USD
+    m = next(p for _, p, f in routes if f is s.api_compare).fullmatch("/api/modellab/compare/20010909-014640,20010909-014820")
+    code, cmp_ = s.api_compare(ctx, m, None)
+    assert code == 200 and [x["model"] for x in cmp_["models"]] == ["free-a", "loc"]
+    assert "secretsecret" not in json.dumps(cmp_) + json.dumps(body)
+    gone = next(p for _, p, f in routes if f is s.api_compare).fullmatch("/api/modellab/all/20990101-000000")
+    assert s.api_compare(ctx, gone, None)[0] == 404
+    ctx.principal = {"kind": "device"}
+    assert s.api_runs(ctx, None, None)[0] == 403 and s.api_compare(ctx, m, None)[0] == 403
+
+
+def test_page_wired_and_js_has_no_run_or_key_call():
+    from pathlib import Path
+    from jarves import page_registry as pr
+    assert any(p["page"] == "modellab" and p["group"] == "dev" for p in pr.pages())
+    js = (Path(ml.__file__).parent / "dashboard_static" / "modellab.js").read_text(encoding="utf-8")
+    assert 'method: "POST"' not in js and "secrets" not in js and "/api/modellab/" in js and "/api/features" not in js

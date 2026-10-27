@@ -204,6 +204,53 @@ def latest(home: Path) -> dict | None:
     return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
 
 
+_RUN_ID = re.compile(r"^\d{8}-\d{6}(?:-\d{1,4})?$")
+
+
+def list_runs(home: Path, limit: int = 50) -> list[dict]:
+    """V7 M4 store: newest first, one short line per archived run. A damaged file is skipped, never fatal."""
+    out = []
+    for f in sorted((Path(home) / "modellab").glob("*.json"), reverse=True):
+        if not _RUN_ID.match(f.stem):
+            continue
+        try:
+            rep = json.loads(f.read_text(encoding="utf-8"))
+            summ = rep["summary"]
+            out.append(dict(id=f.stem, mode=rep.get("mode", ""), spent_usd=rep.get("spent_usd", 0.0),
+                            models=[x["model"] for x in summ], rows=len(rep["rows"]),
+                            accepted=sum(x["accepted"] for x in summ)))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if len(out) >= limit:
+            break
+    return out
+
+
+def load_run(home: Path, run_id: str) -> dict | None:
+    """One archived report by id (the id is validated: no path can escape the modellab folder)."""
+    if not isinstance(run_id, str) or not _RUN_ID.match(run_id):
+        return None
+    try:
+        return json.loads((Path(home) / "modellab" / f"{run_id}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def compare(reports: dict[str, dict], free_only: bool = True) -> dict:
+    """Per model, its summary in each given run (oldest first), for the comparison table. `free_only` (the default)
+    leaves out paid models; a model whose label is unknown is treated as paid."""
+    ids = sorted(reports)
+    models: dict[str, dict] = {}
+    for rid in ids:
+        for x in reports[rid].get("summary", []):
+            if free_only and x.get("label") not in ("free", "local"):
+                continue
+            m = models.setdefault(x["model"], dict(model=x["model"], label=x.get("label", "unknown"), runs={}))
+            m["runs"][rid] = {k: x.get(k) for k in ("quality", "avg_latency_s", "cost_usd", "cost_per_accepted_usd",
+                                                   "ran", "skipped", "errors", "accepted")}
+    return dict(run_ids=ids, free_only=free_only, models=sorted(models.values(), key=lambda m: m["model"]))
+
+
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
     return True, ""
 
