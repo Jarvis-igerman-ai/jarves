@@ -44,3 +44,9 @@ id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeou
 issue = 660
 since = "2026-10-27"
 reason = "Linux: approved pipe command exited 2 in 0.03 s once (PR 658 run 40516866677), passes elsewhere"
+
+[[test]]
+id = "test_web_chat.py::test_silent_turns_never_speak_ring_or_light_the_face"
+issue = 665
+since = "2026-10-27"
+reason = "Linux: a silent turn spoke once (PR 664 run 40545736537); fail-open silent read fixed, awaiting clean runs"
