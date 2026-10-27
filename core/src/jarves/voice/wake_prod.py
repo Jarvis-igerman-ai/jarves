@@ -41,12 +41,16 @@ NEAR_MISS_SENTENCES: list[tuple[str, str]] = [
 # The GATE list: confusable families that are NOT in the training hard negatives (wake_train.HARD_NEG_EN/HE) and not in
 # NEAR_MISS_SENTENCES, so the gate measures generalisation to unseen names, not memory. (lang, text)
 NEAR_MISS_HELDOUT: list[tuple[str, str]] = [
-    ("en", "hey Marvin"), ("en", "hi Mavis"), ("en", "hey Garvey"), ("en", "hey Jarrod"), ("en", "hey Curtis"),
-    ("en", "hey Harris"), ("en", "hey Jervis"), ("en", "hi Gervase"), ("en", "hey surface"), ("en", "hey nervous"),
+    ("en", "hey Elvis"), ("en", "hi Mavis"), ("en", "hey Calvert"), ("en", "hey Dervish"), ("en", "hey Alvarez"),
+    ("en", "hey Nolan"), ("en", "hey Jervis"), ("en", "hey Bernard"), ("en", "hey Sylvester"), ("en", "hey nervous"),
     ("en", "Hey Sarah, come here"), ("en", "Harvard is a good school"), ("en", "Marvelous weather today"),
-    ("en", "hey Marcy, listen"), ("he", "היי מרווין"), ("he", "היי גרווי"), ("he", "הרווארד זה בית ספר")]
+    ("en", "hey Kervin"), ("he", "היי מרווין"), ("he", "היי גרווי"), ("he", "הרווארד זה בית ספר")]
 # Bare name (no "hey"): reported, never gating. The stock model wakes on it too (SWV4_WAKE_TRAIN.md: score 0.99).
 BARE_NAMES = {"Jarvis", "ג'רוויס"}
+# Absolute ceilings on top of the relative gate (#595): a candidate that is merely as bad as a bad stock model on this machine
+# or voice set must not pass. Tunable; chosen well above what a trained head measured at (about 0-5 false wakes per hour).
+MAX_FALSE_PER_HOUR = 30.0           # synthetic stream
+MAX_NEAR_MISS_WAKES = 3             # of the held-out near-miss list at the chosen threshold
 BASELINE_THRESHOLD = 0.5            # the stock model's instant-accept level (voice.wake_accept) the owner quoted
 RECALL_MARGIN = 0.10                # a candidate must beat the model it replaces by this much on the owner's voice
 
@@ -277,6 +281,28 @@ class HeadScorer:
         return np.asarray(ts), wt.head_score(self.head, np.stack(xs))
 
 
+def phonetic_skeleton(text: str) -> str:
+    """Consonant skeleton of the name in a greeting phrase ("hey Marvis" -> "mrvs"), for the disjointness check."""
+    import re
+    s = re.sub(r"^(hey|hi|hello)\s+", "", text.lower().strip())
+    s = (re.split(r"[^a-z]", s) or [""])[0]
+    return re.sub(r"(.)\1+", r"\1", re.sub(r"[aeiouy]", "", s))
+
+
+def phonetic_twin(a: str, b: str) -> bool:
+    """Two names a TTS voice would render almost alike: same first two skeleton letters, skeleton edit distance <= 1."""
+    sa, sb = phonetic_skeleton(a), phonetic_skeleton(b)
+    if len(sa) < 3 or len(sb) < 3 or sa[:2] != sb[:2]:
+        return False
+    prev = list(range(len(sb) + 1))
+    for i, x in enumerate(sa, 1):
+        cur = [i]
+        for j, y in enumerate(sb, 1):
+            cur.append(min(prev[j] + 1, cur[-1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1] <= 1
+
+
 class StandardScorer:
     """The stock openWakeWord model (default hey_jarvis) scored like the Core's OpenWakeWordDetector: the model a
     custom head would replace."""
@@ -383,10 +409,10 @@ def gate(report: dict) -> list[str]:
     nm = report.get("near_miss") or {}
     base = report.get("baseline")
     wakes = nm.get("false_wakes") or []
-    allowed = int(base["near_miss_false"]) if base else 0
+    allowed = min(int(base["near_miss_false"]), MAX_NEAR_MISS_WAKES) if base else 0
     if len(wakes) > allowed:
         who = ", ".join(f"\"{w['text']}\" ({w['score']})" for w in wakes[:3])
-        more = (f" (the {base['name']} wakes on {allowed})" if base else "")
+        more = (f" (the {base['name']} wakes on {base['near_miss_false']}; the ceiling is {MAX_NEAR_MISS_WAKES})" if base else "")
         why.append(f"{len(wakes)} near-miss sentence(s) would wake it: {who}{more}")
     own = report.get("owner") or {}
     if base:
@@ -394,7 +420,9 @@ def gate(report: dict) -> list[str]:
         if camp > int(base.get("campaign_false", 0)):
             why.append(f"{camp} campaign phrase(s) wake it, the {base['name']} wakes on {base['campaign_false']}")
         fph = (report.get("eval") or {}).get("false_per_hour")
-        if fph is not None and base.get("false_per_hour") is not None and fph > base["false_per_hour"]:
+        if fph is not None and fph > MAX_FALSE_PER_HOUR:
+            why.append(f"{fph} false wakes/hour on the synthetic stream is above the ceiling of {MAX_FALSE_PER_HOUR:g}")
+        elif fph is not None and base.get("false_per_hour") is not None and fph > base["false_per_hour"]:
             why.append(f"{fph} false wakes/hour on the synthetic stream, the {base['name']} has "
                        f"{base['false_per_hour']}")
         mine, theirs = own.get("recall_at_threshold"), base.get("owner_recall")
