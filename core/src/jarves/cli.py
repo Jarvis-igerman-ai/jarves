@@ -1655,6 +1655,17 @@ def _diagnose_area(a, cfg, home) -> int:
         print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
         return 0
     print(rep.text("he" if clilang.current() == "he" else "en"))
+    if getattr(a, "ticket", False):                  # #336 slice B: a LOCAL ticket from the redacted report; nothing is sent
+        from .diag import diag_ticket
+        try:
+            t = diag_ticket.make(home, rep)
+        except diag_ticket.TicketBlocked as e:
+            print(clilang.bi("הכרטיס נחסם: נמצא בו טקסט פרטי (" + ", ".join(e.reasons) + "). לא נשמר כלום. / Ticket blocked: private-looking text ("
+                             + ", ".join(e.reasons) + "). Nothing was saved."))
+            return 1
+        print(f"Ticket {t['id']} saved locally. NOTHING is sent. This exact text would be sent:\n\n# {t['title']}\n\n{t['body']}\n\n"
+              f"To send it: jarvis ticket send {t['id']}   (asks you first)")
+        return 0
     print("evidence (redacted, no values from responses):")
     for line in rep.evidence:
         print("  " + line)

@@ -39,6 +39,10 @@ en = "Check one area by hand: jarvis diagnose anydo, whatsapp, google or voice (
 action = "feature_on:self_diagnosis_ai_wording"
 check = "enabled:self_diagnosis_ai_wording"
 
+[[steps]]
+he = "רוצים כרטיס מהבדיקה? jarvis diagnose anydo --code קוד --ticket שומר דוח מצונזר כרטיס מקומי בלבד (בלי הודעות, שמות, כתובות או מפתחות; אם נשאר בו טקסט פרטי הוא נחסם ולא נשמר). שום דבר לא נשלח. לשליחה: jarvis ticket send מזהה, והוא מציג את הטקסט המדויק ושואל קודם."
+en = "Want a ticket from the check? jarvis diagnose anydo --code CODE --ticket saves the redacted report as a LOCAL ticket only (no messages, names, addresses or keys; if any private-looking text is left it is blocked and not saved). Nothing is sent. To send: jarvis ticket send ID, which shows the exact text and asks first."
+
 [[problems]]
 he = "הוא שואל אחרי כל כשל ואני לא רוצה"
 en = "He asks after a failure and I do not want that"
