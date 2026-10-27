@@ -279,3 +279,32 @@ def test_identical_action_in_flight_is_refused_before_a_second_popup(tmp_path):
     r = run(w.execute(a, origin="user"))
     assert r.code == "GITHUB_WRITE_DUPLICATE" and "already waiting" in r.message and ap.asked == []
     assert isinstance(w._reserve([act(payload={"title": "other"})], "user", dup_check=True), list)   # a different action is fine
+
+
+def test_batch_refuses_the_same_action_twice(tmp_path):
+    """#569 item 1."""
+    w, ap, _ = mk(tmp_path)
+    r = run(w.approve_batch([act(), act()], origin="user"))
+    assert r.code == "GITHUB_WRITE_BAD_ARGUMENT" and ap.asked == [] and w._used() == 0
+
+
+def test_reset_popup_shows_the_audit_state(tmp_path, monkeypatch):
+    """#569 item 3."""
+    from jarves import approvals as appr
+    seen = []
+
+    class Svc:
+        def __init__(self, home):
+            self.channels = []
+
+        async def ask(self, prompt, **kw):
+            seen.append(prompt)
+            return True
+    monkeypatch.setattr(appr, "ApprovalService", Svc)
+    monkeypatch.setattr(appr, "PopupChannel", lambda *a, **k: object())
+    assert gw._confirm_reset(None, tmp_path) is True and "Audit state: OK" in seen[-1]
+    f = tmp_path / "github" / "write_audit.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("garbage\n", encoding="utf-8")
+    gw._confirm_reset(None, tmp_path)
+    assert "TAMPERED" in seen[-1]
