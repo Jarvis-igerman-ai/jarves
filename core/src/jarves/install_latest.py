@@ -132,13 +132,13 @@ def _updates(deps: Deps) -> Path:
     return Path(deps.home) / "updates"
 
 
-def _save_report(deps: Deps, rep: Report) -> None:
+def _save_report(deps: Deps, rep: Report, keep_lock: bool = False) -> None:
     try:
         _updates(deps).mkdir(parents=True, exist_ok=True)
         (_updates(deps) / REPORT_FILE).write_text(rep.render() + "\n", encoding="utf-8")
     except OSError:
         pass
-    if not rep.pending:
+    if not rep.pending and not keep_lock:
         _free_lock(deps)
 
 
@@ -179,7 +179,7 @@ def _take_lock(deps: Deps) -> bool:
     except FileExistsError:
         return False
     except OSError:
-        return True                                       # cannot lock (read-only home): do not block the run
+        return False                                      # cannot take the lock: refuse rather than race
     with os.fdopen(fd, "w", encoding="ascii") as f:
         f.write(f"{os.getpid()} {int(deps.clock())}")
     return True
@@ -274,8 +274,14 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
             sp.write_text(json.dumps(state), encoding="utf-8")
             deps.spawn_finisher(sp)
             spawned = True
-        except Exception:                                 # noqa: BLE001  (no waiter: finish here, still after setup)
+        except Exception:                                 # noqa: BLE001
             spawned = False
+        if not spawned:
+            # an installed build is stopped by setup: finishing inline would die with it (no checks, no rollback, no report)
+            rep.add("start the waiter", False, "could not start the helper that checks after setup; nothing was installed")
+            rep.stopped_at = "waiter"
+            _save_report(deps, rep)
+            return rep
     try:
         if core_up:
             deps.stop_core()
@@ -331,7 +337,7 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
             rep.rolled_back = True
             rep.add("automatic rollback", True, "started: previous version + data from before the update")
             rep.ok = False
-            _save_report(deps, rep)                       # the old installer may stop this process: the report exists first
+            _save_report(deps, rep, keep_lock=True)       # the old installer may stop this process: the report exists first
             deps.rollback()
         except UpdateError as e:
             rep.rolled_back = False
@@ -378,6 +384,7 @@ def finisher_script(state: Path, python: str, report: Path, pid_file: Path, inst
     process by its path), wait for that process to exit, then start phase two from the NEW program. A pid file saying
     `cancel` ends it silently (setup never started). If the new version has no `--finish` (first install of this
     feature) it leaves an honest report: the old one was deleted before launch. Write the file as UTF-8 WITH BOM."""
+    lock = Path(pid_file).with_name(LOCK_FILE)
     lines = [
         f"$pidFile = {_ps(pid_file)}",
         f"$inst = {_ps(installer)}",
@@ -399,6 +406,7 @@ def finisher_script(state: Path, python: str, report: Path, pid_file: Path, inst
         "  'FAIL  install-latest  setup is still running or was not seen in time; nothing was judged or rolled back. "
         "Check later: jarvis update status' | Set-Content "
         f"-LiteralPath {_ps(report)} -Encoding UTF8",
+        f"  Remove-Item -LiteralPath {_ps(lock)} -Force -ErrorAction SilentlyContinue",
         "  exit 0",
         "}",
         f"$a = @('-I','-X','utf8','-m','jarves','install-latest','--finish',{_ps(state)})",
@@ -407,6 +415,7 @@ def finisher_script(state: Path, python: str, report: Path, pid_file: Path, inst
         "  'FAIL  install-latest  setup ran, but the installed version cannot finish the checks. Run: jarvis doctor; "
         "jarvis selftest; jarvis update status. Roll back: jarvis update --rollback --yes' | Set-Content "
         f"-LiteralPath {_ps(report)} -Encoding UTF8 }}",
+        f"Remove-Item -LiteralPath {_ps(lock)} -Force -ErrorAction SilentlyContinue",
     ]
     return "\r\n".join(lines) + "\r\n"
 

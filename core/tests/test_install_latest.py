@@ -354,3 +354,28 @@ def test_finish_with_installer_running_flag_judges_nothing(tmp_path):
     g = Fake(tmp=tmp_path)
     rep = il.finish(g.deps(), state, installer_running=True)
     assert not rep.ok and not rep.rolled_back and "rollback" not in g.calls and not any(c.startswith("cli:") for c in g.calls)
+
+
+def test_installed_build_without_a_waiter_stops_before_anything_is_stopped(tmp_path):
+    f = Fake(tmp=tmp_path, spawn=True)
+    d = f.deps()
+
+    def boom(state):
+        raise OSError("powershell missing")
+    d.spawn_finisher = boom
+    rep = il.begin(d)
+    assert not rep.ok and rep.stopped_at == "waiter" and not rep.changed
+    assert "stop" not in f.calls and not any(c.startswith("launch") for c in f.calls)
+    assert not (tmp_path / "updates" / il.LOCK_FILE).exists()
+    assert (tmp_path / "updates" / il.REPORT_FILE).read_text(encoding="utf-8").startswith("FAIL")
+
+
+def test_lock_stays_until_rollback_returns_and_waiter_deletes_it_on_fail_paths(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"selftest": (1, "x")})
+    d = f.deps()
+    seen = []
+    d.rollback = lambda: seen.append((tmp_path / "updates" / il.LOCK_FILE).exists())
+    il.run(d)
+    assert seen == [True] and not (tmp_path / "updates" / il.LOCK_FILE).exists()
+    s = il.finisher_script(Path("u/st.json"), "py.exe", Path("u/r"), Path("u/p"), "i.exe")
+    assert s.count(il.LOCK_FILE) == 2 and s.rstrip().endswith("SilentlyContinue")
