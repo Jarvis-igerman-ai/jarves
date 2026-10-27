@@ -44,6 +44,17 @@ EMB = 96
 SPAN_S = (WINDOWS - 1) * CHUNK / SR + 0.775      # audio seen by one window (~1.98 s)
 POS_AFTER_S = 0.35           # a window ending up to this long after the phrase end is positive
 FORMAT = "jarves-wake-head-v1"
+# The front end emits a burst of ~91 start-up embeddings on its first chunk after a reset; windows built from it are
+# an artifact (a head can score 1.0 on them: measured with hard-negative training). Training never uses the first
+# WARMUP_CHUNKS windows of a stream, the scorers ignore them, and HeadWakeDetector drops the first STARTUP_EMBEDDINGS
+# embeddings after a (re)start, so all three agree.
+WARMUP_CHUNKS = 25
+STARTUP_EMBEDDINGS = 100
+# Why 100 and not 91 (#594, measured with the real front end 27 Oct 2026): after the 91-embedding burst, the next 9 embeddings
+# are computed from a zero (silent) context. Against the embedding the same audio gives with real history they differ by up
+# to ~23 absolute per value (chunks 1-8, gone at chunk 10); the head was trained on history-conditioned embeddings only.
+# Dropping just the burst would feed those to the head. The 2.0 s deaf window after a reset is therefore the front end's
+# context warm-up (0.8 s) plus the 16 embeddings a window needs (1.28 s); it cannot be shortened without retraining.
 
 NEG_EN = ["what time is it", "turn on the music", "good morning", "how is the weather today", "hey there",
           "can you hear me", "thank you very much", "let's go outside", "where are my keys", "play something nice",
@@ -57,6 +68,21 @@ NEAR_EN = ["hey Marcus", "hey Carlos", "hey Jarrett", "hey Travers", "hey Chavez
            "hey Jason", "hey Marvel", "hey Arthur", "hey Parvez", "hey Charlie", "hey Davies", "hey Jagger",
            "hey Gervais", "hey Barnes", "hi Marcus", "hi Carlos", "okay Darwin", "hey Jarrah", "hey Larkin",
            "hey Carver", "hey starfish", "hey Artie", "ok Jason", "hey Charvez", "hey Tavish", "hey Jarmusch"]
+# HARD NEGATIVES (issue: wake-hardneg): confusable names/words rendered by the TTS voices and TRAINED ON, weighted
+# HARD_WEIGHT x. The gate does NOT use these phrases: it uses a disjoint held-out list of other confusable families
+# (wake_prod.NEAR_MISS_HELDOUT), so the gate is not tuned on its own test. Bare "Jarvis" stays a training negative
+# ("hey" is part of the phrase) but is only REPORTED by the gate (wake_prod.BARE_NAMES): the stock model wakes on it
+# too (score 0.99), so refusing a custom model for it would be unfair.
+HARD_NEG_EN = ["Travis", "hey Travis", "hi Travis", "hey Travis, come here", "service", "hey service", "Service, please",
+               "hey service desk", "Jarvie", "hey Jarvie", "hi Jarvie", "hey Jarvie, no", "Harvey", "hey Harvey",
+               "hi Harvey", "hey Harvey, wait", "Garvis", "hey Garvis", "hi Garvis", "Marvis", "hey Marvis",
+               "hey Marvis, listen", "a jar of", "a jar of peanut butter", "jar of honey", "hey, jar of jam",
+               "Charles", "hey Charles", "Hey Charles, come here", "hey Davis", "hi Davis", "Davis", "Harvest season",
+               "hey harvest", "have a nice day", "hey Jarvik", "hey Jarrad", "hey Carvis", "hey Servis", "hey Jarvey"]
+HARD_NEG_HE = ["טרוויס", "היי טרוויס", "היי מרוויס", "היי הרווי", "היי צ'ארלס", "היי דיוויס", "ג'רוויס", "שירות",
+               "היי שירות", "צנצנת של דבש", "היי ג'ארווי", "היי גרוויס"]
+HARD_WEIGHT = 3.0
+
 NEG_HE = ["מה השעה", "תדליק מוזיקה", "בוקר טוב", "מה מזג האוויר היום", "תודה רבה", "איפה המפתחות שלי",
           "בוא נלך הביתה", "אני הולך לחנות", "תתקשר לאמא", "הפגישה בעשר", "רגע אחד בבקשה", "היי", "שלום לך",
           "מה נשמע", "יאללה", "ג'ארוויס", "היי ג'ארוויס", "תעשה לי טובה", "סגור", "תסגור את החלון", "מעולה",
@@ -94,7 +120,7 @@ def head_score(head: dict, x: np.ndarray) -> np.ndarray:
     """x: (n, WINDOWS, 96) embeddings -> (n,) probabilities."""
     z = (x.reshape(len(x), -1) - head["mu"]) / head["sd"]
     h = np.maximum(0.0, z @ head["w1"] + head["b1"])
-    return 1.0 / (1.0 + np.exp(-(h @ head["w2"] + head["b2"]).ravel()))
+    return 1.0 / (1.0 + np.exp(-np.clip((h @ head["w2"] + head["b2"]).ravel(), -60, 60)))
 
 
 def save_head(path: Path, head: dict, meta: dict) -> None:
@@ -116,8 +142,9 @@ def load_head(path: str | Path) -> dict:
 
 
 def train_head(x: np.ndarray, y: np.ndarray, *, hidden: int = 32, epochs: int = 40, lr: float = 2e-3,
-               l2: float = 1e-4, seed: int = 0) -> dict:
-    """Class-weighted binary MLP with Adam, numpy only (a few seconds for ~30k windows)."""
+               l2: float = 1e-4, seed: int = 0, sample_weight: np.ndarray | None = None) -> dict:
+    """Class-weighted binary MLP with Adam, numpy only (a few seconds for ~30k windows). `sample_weight` (n,) scales
+    single windows (hard negatives count more); the class balance stays on the plain counts."""
     rng = np.random.default_rng(seed)
     f = x.reshape(len(x), -1).astype(np.float32)
     mu, sd = f.mean(0), f.std(0) + 1e-3
@@ -128,8 +155,9 @@ def train_head(x: np.ndarray, y: np.ndarray, *, hidden: int = 32, epochs: int = 
          "b2": np.zeros(1, np.float32)}
     m = {k: np.zeros_like(v) for k, v in p.items()}
     v2 = {k: np.zeros_like(v) for k, v in p.items()}
-    pos = max(1, int(y.sum()))
-    wpos, wneg = len(y) / (2 * pos), len(y) / (2 * max(1, len(y) - pos))
+    sw = np.ones(len(y), np.float32) if sample_weight is None else np.asarray(sample_weight, np.float32)
+    pos = max(1, int(y.sum()))                       # class balance on the UNweighted counts (as before); the hard
+    wpos, wneg = len(y) / (2 * pos), len(y) / (2 * max(1, len(y) - pos))   # weight is applied on top, per window
     step = 0
     for _ in range(epochs):
         order = rng.permutation(len(f))
@@ -138,8 +166,8 @@ def train_head(x: np.ndarray, y: np.ndarray, *, hidden: int = 32, epochs: int = 
             xb, yb = f[idx], y[idx].astype(np.float32)
             h_pre = xb @ p["w1"] + p["b1"]
             h = np.maximum(0, h_pre)
-            out = 1 / (1 + np.exp(-(h @ p["w2"] + p["b2"]).ravel()))
-            w = np.where(yb > 0, wpos, wneg).astype(np.float32)
+            out = 1 / (1 + np.exp(-np.clip((h @ p["w2"] + p["b2"]).ravel(), -60, 60)))
+            w = (np.where(yb > 0, wpos, wneg) * sw[idx]).astype(np.float32)
             g_out = (w * (out - yb) / len(idx))[:, None]
             grads = {"w2": h.T @ g_out + l2 * p["w2"], "b2": g_out.sum(0)}
             g_h = (g_out @ p["w2"].T) * (h_pre > 0)
@@ -239,6 +267,36 @@ def trim(a: np.ndarray, floor: float = 0.01) -> np.ndarray:
     return a[idx[0]: idx[-1] + 1] if len(idx) else a
 
 
+MAX_PHRASE_S = 1.5           # a positive clip longer than this can never fill a ~2 s window (see windows())
+
+
+def trim_speech(a: np.ndarray, sr: int = SR, pad_s: float = 0.1) -> np.ndarray:
+    """Trim a REAL recording to the spoken phrase. `trim` alone keeps everything above 1 % of the peak, which on a
+    room recording with a noise floor keeps the whole fixed-length clip (all of a 19-clip set stayed 2.6 s): such a
+    clip is never labelled positive, so training taught the head that the owner's own voice is NEGATIVE
+    (own-voice recall 0 %). Here: frame energy against the clip's own noise floor, tightened until the phrase fits."""
+    fr = int(sr * 0.02)
+    n = len(a) // fr
+    if n < 5:
+        return trim(a)
+    e = np.sqrt((a[: n * fr].reshape(n, fr) ** 2).mean(1)) + 1e-9
+    noise_lvl, top = float(np.percentile(e, 10)), float(np.percentile(e, 95))
+    if top <= noise_lvl * 1.5:
+        return trim(a)
+    thr = max(noise_lvl * 3.0, top * 0.1)
+    out = a
+    for _ in range(8):
+        idx = np.flatnonzero(e > thr)
+        if not len(idx):
+            break
+        pad = int(pad_s * sr)
+        out = a[max(0, idx[0] * fr - pad): min(len(a), (idx[-1] + 1) * fr + pad)]
+        if len(out) <= MAX_PHRASE_S * sr:
+            break
+        thr *= 1.5
+    return out
+
+
 def noise(kind: str, n: int, rng: np.random.Generator) -> np.ndarray:
     w = rng.standard_normal(n).astype(np.float32)
     if kind == "white":
@@ -300,6 +358,32 @@ def real_embedder() -> Callable[[np.ndarray], tuple[np.ndarray, np.ndarray]]:
     return embed
 
 
+def steady_noise_windows(embed: Callable, rng: np.random.Generator, clips: int = 40) -> np.ndarray:
+    """Negative windows of STEADY room noise (white/pink/brown, -60 to -16 dBFS, 3-8 s each) as (n, WINDOWS, EMB).
+    Without them a head trained on speech-like hard negatives fired on pure noise (measured: peak 1.0 on every
+    noise probe, issue wake-hardneg)."""
+    out = []
+    for i in range(clips):
+        a = (noise(("white", "pink", "brown")[i % 3], int(rng.uniform(3, 8) * SR), rng)
+             * 10 ** rng.uniform(-3, -0.8)).astype(np.float32)
+        embs, last = embed(a)
+        out += [embs[j - WINDOWS + 1: j + 1] for k, j in enumerate(last) if j >= WINDOWS - 1 and k >= WARMUP_CHUNKS]
+    return np.stack(out) if out else np.zeros((0, WINDOWS, EMB), np.float32)
+
+
+def diverged(head: dict, embed: Callable, seconds: float = 6.0) -> bool:
+    """True when the head scores >= 0.9 on plain steady room noise (after the first 2 s: the front end is still
+    warming up there): it cannot be a wake model."""
+    rng = np.random.default_rng(12345)
+    for kind in ("white", "pink", "brown"):
+        a = (noise(kind, int(seconds * SR), rng) * 0.02).astype(np.float32)
+        embs, last = embed(a)
+        xs = [embs[j - WINDOWS + 1: j + 1] for k, j in enumerate(last) if k >= 2 * WINDOWS and j >= WINDOWS - 1]   # not the start-up
+        if xs and float(head_score(head, np.stack(xs)).max()) >= 0.9:
+            return True
+    return False
+
+
 def windows(embs: np.ndarray, last: np.ndarray, events: list) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(X (n,16,96), y (n,), window end sample (n,)) with ambiguous windows left out (see module doc)."""
     starts = np.array([e[0] for e in events if e[2]] or [-1])
@@ -307,7 +391,7 @@ def windows(embs: np.ndarray, last: np.ndarray, events: list) -> tuple[np.ndarra
     xs, ys, ts = [], [], []
     span = int(SPAN_S * SR)
     for k, j in enumerate(last):
-        if j < WINDOWS - 1:
+        if j < WINDOWS - 1 or k < WARMUP_CHUNKS:
             continue
         t = (k + 1) * CHUNK
         overlap = (starts < t) & (ends > t - span)
@@ -326,17 +410,13 @@ def windows(embs: np.ndarray, last: np.ndarray, events: list) -> tuple[np.ndarra
     return np.stack(xs), np.asarray(ys), np.asarray(ts)
 
 
-def evaluate(head: dict, embs: np.ndarray, last: np.ndarray, events: list, n_samples: int,
-             threshold: float, cooldown_s: float = 2.0) -> dict:
-    """Streaming replay: recall over positive events, false wakes per hour outside them."""
-    xs, ts = [], []
-    for k, j in enumerate(last):
-        if j >= WINDOWS - 1:
-            xs.append(embs[j - WINDOWS + 1: j + 1])
-            ts.append((k + 1) * CHUNK)
-    if not xs:
-        return {"recall": 0.0, "false_per_hour": 0.0, "hours": 0.0, "positives": 0}
-    sc, ts = head_score(head, np.stack(xs)), np.asarray(ts)
+def replay(sc: np.ndarray, ts: np.ndarray, events: list, n_samples: int, threshold: float,
+           cooldown_s: float = 2.0) -> dict:
+    """Streaming replay of per-chunk scores `sc` at sample positions `ts`: recall over positive events, false wakes
+    per hour outside them (any model: a trained head or the stock detector)."""
+    sc, ts = np.asarray(sc), np.asarray(ts)
+    keep = ts > WARMUP_CHUNKS * CHUNK                  # start-up windows are an artifact (see WARMUP_CHUNKS)
+    sc, ts = sc[keep], ts[keep]
     pos = [(s, e) for s, e, p in events if p]
     hit = 0
     for s, e in pos:
@@ -351,6 +431,19 @@ def evaluate(head: dict, embs: np.ndarray, last: np.ndarray, events: list, n_sam
     neg_hours = max(1e-9, (n_samples - sum(e - s for s, e in pos)) / SR / 3600)
     return {"recall": round(hit / max(1, len(pos)), 3), "false_per_hour": round(false / neg_hours, 2),
             "false_wakes": false, "hours": round(neg_hours, 3), "positives": len(pos)}
+
+
+def evaluate(head: dict, embs: np.ndarray, last: np.ndarray, events: list, n_samples: int,
+             threshold: float, cooldown_s: float = 2.0) -> dict:
+    """Streaming replay: recall over positive events, false wakes per hour outside them."""
+    xs, ts = [], []
+    for k, j in enumerate(last):
+        if j >= WINDOWS - 1:
+            xs.append(embs[j - WINDOWS + 1: j + 1])
+            ts.append((k + 1) * CHUNK)
+    if not xs:
+        return {"recall": 0.0, "false_per_hour": 0.0, "hours": 0.0, "positives": 0}
+    return replay(head_score(head, np.stack(xs)), np.asarray(ts), events, n_samples, threshold, cooldown_s)
 
 
 def pick_threshold(head, embs, last, events, n, target_fph: float = 0.5) -> tuple[float, dict]:
@@ -368,8 +461,13 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                  voices: list[Voice] | None = None, synth: Synth | None = None,
                  embedder: Callable | None = None, seed: int = 7, rates=(0.8, 0.95, 1.1, 1.3),
                  pitches=(0.8, 1.0, 1.2), copies: int = 2, progress: Callable[[str], None] = print,
-                 sample_files: list[Path] | None = None) -> dict:
-    """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report."""
+                 sample_files: list[Path] | None = None, hard_negatives: bool = True,
+                 baseline: object = "auto") -> dict:
+    """Generate, train, evaluate and save `out` (.npz) + `out`.json (report). Returns the report.
+    `hard_negatives`: render HARD_NEG_EN/HARD_NEG_HE (confusable names) and train on them, weighted HARD_WEIGHT x.
+    `baseline`: the model this one would replace, scored on the SAME renderings/recordings/stream so the gate can be
+    relative ("auto" = the stock openWakeWord hey_jarvis when the real front end is used, none with a fake embedder;
+    None = no comparison; or any object with .scores(audio) -> (ts, scores), .name, .threshold)."""
     t0 = time.monotonic()
     rng = np.random.default_rng(seed)
     texts = list(dict.fromkeys([phrase, *(say or [])]))
@@ -392,6 +490,13 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
         a = trim(resample(a, sr))
         return a if 0.2 * SR < len(a) < 3.0 * SR else (a[: int(3.0 * SR)] if len(a) >= 3.0 * SR else None)
 
+    norm = lambda t: re.sub(r"[^\w֐-׿]+", " ", t.lower()).strip()
+    own_texts = {norm(t) for t in texts}
+    hard = {"en": [t for t in HARD_NEG_EN if norm(t) not in own_texts] if hard_negatives else [],
+            "he": [t for t in HARD_NEG_HE if norm(t) not in own_texts] if hard_negatives else []}
+    hard_items: list = []                            # train-voice renderings of the hard negatives (weighted)
+    hard_variants = ((1.0, 1.0), (rates[-1], pitches[0]), (rates[0], pitches[-1]), (rates[min(1, len(rates) - 1)],
+                                                                                    pitches[-1]))
     sets = {"train": [], "test": []}
     n_tts = 0
     for v in voices:
@@ -415,9 +520,24 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
                 if a is not None:
                     # the held-out stream gets 3 augmented copies: more negative minutes for the false-wake rate
                     sets[part] += [(augment(a, rng), False) for _ in range(3 if part == "test" else 1)]
-    own = read_samples(samples, sample_files) if samples else []
+        for text in hard[v.lang]:
+            for r, p in hard_variants:
+                a = render(text, v, r, p)
+                if a is not None:
+                    n_tts += 1
+                    if part == "train":
+                        hard_items += [(augment(a, rng), False) for _ in range(2)]
+                    else:                            # the held-out voice: part of the honest false-wake stream
+                        sets["test"] += [(augment(a, rng), False) for _ in range(2)]
+    own = [trim_speech(a) for a in (read_samples(samples, sample_files) if samples else [])]
+    too_long = [i for i, a in enumerate(own) if len(a) > (MAX_PHRASE_S + 0.3) * SR]
+    if own and len(too_long) == len(own):
+        raise RuntimeError("none of your recordings could be cut down to just the phrase (all longer than "
+                           f"{MAX_PHRASE_S + 0.3:.1f} s after trimming): record one short phrase per file in a quiet "
+                           "room, nothing else in the clip")
     for i, a in enumerate(own):                      # every 4th own recording is kept for the test
-        a = trim(a)
+        if i in too_long:
+            continue                                  # would never be a positive window: leave it out, say so
         part = "test" if i % 4 == 3 else "train"
         sets[part] += [(augment(a, rng), True) for _ in range(copies * 3)]
     for part in sets:                                # noise-only stretches
@@ -441,24 +561,67 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
         data[part] = (audio, events, embs, last)
         progress(f"{part}: {len(audio) / SR / 60:.1f} min of audio -> {len(embs)} embeddings")
     x, y, _ = windows(data["train"][2], data["train"][3], data["train"][1])
-    head = train_head(x, y, seed=seed)
+    sw = np.ones(len(y), np.float32)
+    if hard_items:
+        hard_items = [hard_items[i] for i in rng.permutation(len(hard_items))]
+        audio_h, events_h = build_stream(hard_items, rng)
+        embs_h, last_h = embed(audio_h)
+        xh, yh, _ = windows(embs_h, last_h, events_h)
+        progress(f"hard negatives: {len(hard_items)} renderings of {sum(len(v) for v in hard.values())} confusable "
+                 f"phrases -> {len(xh)} windows, weight {HARD_WEIGHT:g}x")
+        x, y = np.concatenate([x, xh]), np.concatenate([y, yh])
+        sw = np.concatenate([sw, np.full(len(yh), HARD_WEIGHT, np.float32)])
+    xs_n = steady_noise_windows(embed, rng)           # hard negatives alone taught the head "anything steady = wake"
+    if len(xs_n):
+        x, y = np.concatenate([x, xs_n]), np.concatenate([y, np.zeros(len(xs_n), y.dtype)])
+        sw = np.concatenate([sw, np.ones(len(xs_n), np.float32)])
+    for lr in (2e-3, 5e-4):                          # a diverged head (fires on pure noise) is retrained gentler
+        head = train_head(x, y, seed=seed, sample_weight=sw, lr=lr)
+        if not diverged(head, embed):
+            break
+        progress(f"the head fired on plain room noise at lr {lr}: training again with a lower learning rate")
+    else:
+        raise RuntimeError("the trained head fires on plain room noise (training diverged): not saved")
     audio, events, embs, last = data["test"]
     from . import wake_prod                          # production loop: owner-calibrated curve + near-miss check
-    own_trim = [trim(a) for a in own]
+    own_trim = own
     own_peaks = [wake_prod.stream_peak(head, embed, a, np.random.default_rng(seed + 100 + i))
                  for i, a in enumerate(own_trim)]
     held_idx = [i for i in range(len(own_trim)) if i % 4 == 3]
-    threshold, ev, curve = wake_prod.calibrate(head, embs, last, events, len(audio), own_peaks, held_idx)
-    near = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed)
+    # the near-miss renderings are made once and scored by the head (and by the model it replaces)
+    rendered = wake_prod.render_near(voices, synth, wake_prod.NEAR_MISS_HELDOUT + wake_prod.NEAR_MISS_SENTENCES)
+    head_scorer = wake_prod.HeadScorer(head, embed)
+    near_peaks = wake_prod.score_near(head_scorer, rendered, seed)
+    base = None
+    if baseline == "auto":
+        baseline = wake_prod.StandardScorer() if embedder is None else None
+    if baseline is not None:
+        try:
+            base = wake_prod.measure_baseline(baseline, rendered, own_trim, data["test"][0], data["test"][1],
+                                              seed)
+        except Exception as e:                       # engine missing: no comparison, the absolute gate applies
+            progress(f"baseline comparison skipped: {e}")
+    held_list = {t for _, t in wake_prod.NEAR_MISS_HELDOUT}
+    gate_peaks = [p for p in near_peaks if p["text"] in held_list]
+    threshold, ev, curve = wake_prod.calibrate(
+        head, embs, last, events, len(audio), own_peaks, held_idx, near_peaks=gate_peaks,
+        near_budget=(base["near_miss_false"] if base else 0),
+        fph_budget=(base["false_per_hour"] if base else None))
+    near = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed,
+                                     sentences=wake_prod.NEAR_MISS_HELDOUT, peaks=gate_peaks)
+    campaign = wake_prod.near_miss_check(head, threshold, voices, synth, embed, seed=seed,
+                                         sentences=wake_prod.NEAR_MISS_SENTENCES,
+                                         peaks=[p for p in near_peaks if p["text"] not in held_list])
     report = {"phrase": phrase, "texts": texts, "model": str(out), "threshold": threshold, "held_out_voice": held,
               "voices": [f"{v.engine}:{v.id}" for v in voices], "own_recordings": len(own),
-              "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
+              "own_skipped_too_long": len(too_long), "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
               "owner": {"recordings": len(own), "peak_scores": [round(float(x), 3) for x in own_peaks],
                         "held_out_indices": held_idx,
                         "recall_at_threshold": wake_prod.recall_at(own_peaks, threshold),
                         "held_out_recall_at_threshold": wake_prod.recall_at([own_peaks[i] for i in held_idx],
                                                                             threshold)},
-              "near_miss": near, "samples_sha256": wake_prod.samples_fingerprint(samples, sample_files),
+              "near_miss": near, "campaign": campaign, "baseline": base, "hard_negative_phrases":
+                  sum(len(v) for v in hard.values()), "samples_sha256": wake_prod.samples_fingerprint(samples, sample_files),
               "train_windows": int(len(y)), "train_positive_windows": int(y.sum()), "eval": ev,
               "train_eval": evaluate(head, data["train"][2], data["train"][3], data["train"][1],
                                      len(data["train"][0]), threshold),

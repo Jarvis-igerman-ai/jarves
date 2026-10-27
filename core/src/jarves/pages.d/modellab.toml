@@ -1,0 +1,5 @@
+page = "modellab"
+group = "dev"
+he = "מעבדת מודלים"
+en = "Model Lab"
+scripts = ["/static/modellab.js"]

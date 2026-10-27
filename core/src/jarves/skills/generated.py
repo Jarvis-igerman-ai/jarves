@@ -29,10 +29,13 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -212,6 +215,10 @@ def _check_code(src: str, skill_id: str, caps: set[str]) -> tuple[list[dict], li
     return out, errs, warns
 
 
+def _lf(text: str) -> str:
+    return (text or "").replace(chr(13) + chr(10), chr(10)).replace(chr(13), chr(10))
+
+
 def _sha(md: str, py: str | None) -> str:
     h = hashlib.sha256(md.encode("utf-8"))
     h.update(b"\0")
@@ -312,7 +319,7 @@ def _summaries(r: dict) -> tuple[str, str]:
 
 # ---------------------------------------------------------------------- storage of drafts / installs
 def _write_json(path: Path, obj) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(3)}.tmp")     # unique: two writers never share a temp file
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, path)
 
@@ -324,6 +331,11 @@ def _read_json(path: Path, default):
         return default
 
 
+_SNAPSHOT_WARNED: set[str] = set()
+_STATE_LOCKS: dict[str, threading.RLock] = {}
+_STATE_LOCKS_GUARD = threading.Lock()
+
+
 class GeneratedSkills:
     """Drafts, installs, grants and the runner for one data dir (Core and dashboard processes share the files)."""
 
@@ -331,9 +343,33 @@ class GeneratedSkills:
         self.home = Path(home)
         self.root = self.home / ROOT
         self.drafts, self.installed, self.removed = self.root / "drafts", self.root / "installed", self.root / "removed"
-        self.taken = taken or (lambda: (set(), set()))     # () -> (built-in skill names, built-in tool names)
+        # () -> (built-in skill names, built-in tool names). The Core passes the live registry; the CLI and the dashboard
+        # read the snapshot the Core writes on start (#314 item 3), so they refuse a clashing name too.
+        self.taken = taken or self._snapshot_taken
         self.http = http                                   # httpx.AsyncClient-like (tests inject a fake)
         self.v2 = v2 or (lambda: False)                    # the skills_manifest2 switch (platform2.py); OFF = as before
+
+    @property
+    def _names_file(self) -> Path:
+        return self.root / "builtin_names.json"
+
+    def _snapshot_taken(self) -> tuple[set[str], set[str]]:
+        d = _read_json(self._names_file, {})
+        if (not isinstance(d, dict) or not d) and str(self.home) not in _SNAPSHOT_WARNED:     # log once per data folder
+            _SNAPSHOT_WARNED.add(str(self.home))
+            logs.warn("skills", "SKILL_NAMES_SNAPSHOT_MISSING", "no built-in names snapshot: the clash check of this process is empty "
+                      "until the Core has started once")
+        d = d if isinstance(d, dict) else {}
+        return ({x for x in d.get("skills", []) if isinstance(x, str)}, {x for x in d.get("tools", []) if isinstance(x, str)})
+
+    def save_taken_snapshot(self) -> None:
+        """Core only: record the built-in Skill and tool names for the other processes (best effort)."""
+        try:
+            skills, tools = self.taken()
+            self.root.mkdir(parents=True, exist_ok=True)
+            _write_json(self._names_file, {"skills": sorted(skills), "tools": sorted(tools)})
+        except OSError:
+            logs.warn("skills", "SKILL_NAMES_SNAPSHOT_FAILED", "could not save the built-in names snapshot")
 
     # --- manifest v2 (issue #220; only consulted while the switch is on)
     def _apply_v2(self, rep: dict, md: str, py: str | None, upgrading: bool) -> dict:
@@ -404,6 +440,42 @@ class GeneratedSkills:
         except OSError:
             return []
 
+    @contextmanager
+    def _state_lock(self, sid: str):
+        """One lock per Skill around every read-modify-write of state.json (#576): a thread lock inside this process and a
+        lock file between processes (Core, dashboard, CLI). A lock file older than 20 s is stale (a crashed writer)."""
+        key = f"{self.home}|{sid}"
+        with _STATE_LOCKS_GUARD:
+            tl = _STATE_LOCKS.setdefault(key, threading.RLock())
+        with tl:
+            d = self.installed / sid
+            lock = d / "state.lock"
+            have = False
+            if d.is_dir():
+                deadline = time.monotonic() + 5.0
+                while True:
+                    try:
+                        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                        have = True
+                        break
+                    except FileExistsError:
+                        try:
+                            if time.time() - lock.stat().st_mtime > 20:
+                                lock.unlink(missing_ok=True)
+                                continue
+                        except OSError:
+                            pass
+                        if time.monotonic() > deadline:
+                            break                      # fail open on the file lock only: the thread lock still holds
+                        time.sleep(0.02)
+                    except OSError:
+                        break
+            try:
+                yield
+            finally:
+                if have:
+                    lock.unlink(missing_ok=True)
+
     def state(self, sid: str) -> dict:
         return _read_json(self.installed / sid / "state.json", {})
 
@@ -428,6 +500,8 @@ class GeneratedSkills:
         """Write a draft and validate it. Never installs, never runs, never touches an installed version."""
         if len(md or "") > MAX_MD * 2 or len(py or "") > MAX_PY * 2:
             return {"ok": False, "errors": ["draft too large"], "warnings": [], "id": None}
+        md = _lf(md)                      # #314 item 4: the draft is read back with LF endings, so hash what is stored
+        py = _lf(py) if py is not None else None
         try:
             meta, _ = parse_skill_md(md)
             sid = self._id(str(meta.get("name", "")))
@@ -524,6 +598,10 @@ class GeneratedSkills:
         return st
 
     def grant(self, sid: str, capabilities: list[str], actions: bool, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._grant(sid, capabilities, actions, by=by)
+
+    def _grant(self, sid: str, capabilities: list[str], actions: bool, *, by: str) -> dict:
         self._user(by)
         st = self._installed(sid)
         rep = self.report(sid)
@@ -540,6 +618,10 @@ class GeneratedSkills:
         return self.view(sid)
 
     def set_enabled(self, sid: str, on: bool, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._set_enabled(sid, on, by=by)
+
+    def _set_enabled(self, sid: str, on: bool, *, by: str) -> dict:
         if on:
             self._user(by)          # turning OFF is always allowed (any route); ON only by the owner
         st = self._installed(sid)
@@ -551,6 +633,10 @@ class GeneratedSkills:
         return self.view(sid)
 
     def rollback(self, sid: str, *, by: str) -> dict:
+        with self._state_lock(self._id(sid)):
+            return self._rollback(sid, by=by)
+
+    def _rollback(self, sid: str, *, by: str) -> dict:
         self._user(by)
         st = self._installed(sid)
         cur = int(st.get("version", 0))
@@ -627,8 +713,15 @@ class GeneratedSkills:
         grants = st.get("grants") or {}
         if spec["permission"] == "action" and not grants.get("actions"):
             return ToolResult(False, f"{tool} needs the owner's 'actions' grant (dashboard)", code="SKILL_NOT_GRANTED")
-        md, py = self.files(sid)
-        if self.v2() and (why := self._integrity(sid, files=(md, py))):
+        ver = int(st.get("version", 0))
+        try:
+            md, py = self._files_of(sid, ver)               # the version the grants above belong to (#314 item 2)
+        except (OSError, UnicodeDecodeError):
+            return ToolResult(False, f"skill {sid} changed; try again", code="SKILL_STALE")
+        now = self.state(sid)
+        if int(now.get("version", 0)) != ver or now.get("grants") != st.get("grants") or not now.get("enabled"):
+            return ToolResult(False, f"skill {sid} changed version or grants; try again", code="SKILL_STALE")
+        if self.v2() and (why := self._integrity(sid, version=ver, files=(md, py))):
             logs.warn("skills", "SKILL_TAMPERED", "Skill not run: stored copy changed", skill=sid, tool=tool)
             return ToolResult(False, f"skill {sid} not run: {why}", code="SKILL_TAMPERED")
         if tool == f"{sid}_guide":
@@ -636,8 +729,14 @@ class GeneratedSkills:
         broker = _Broker(self, sid, set(grants.get("capabilities") or []))
         res = await run_sandboxed(py or "", tool, args, broker)
         if not res.get("ok"):
-            st["last_error"] = {"tool": tool, "error": str(res.get("error", ""))[:300], "ts": time.time()}
-            self._set_state(sid, st)
+            # Re-read the state NOW and change only last_error (#564): the owner may have revoked a grant, disabled the Skill
+            # or approved a new version while the sandbox ran, and writing back the old dict would undo that. (The broker
+            # keeps the grants of the START of the call for the whole run: inherent, the next call sees the change.)
+            with self._state_lock(sid):
+                cur = self.state(sid)
+                if cur and int(cur.get("version", 0)) == ver:
+                    cur["last_error"] = {"tool": tool, "error": logs.redact(str(res.get("error", "")))[:300], "ts": time.time()}
+                    self._set_state(sid, cur)
             return ToolResult(False, f"{tool} failed: {str(res.get('error', ''))[:200]}", code="SKILL_RUN_FAILED")
         return ToolResult(True, str(res.get("message", ""))[:1500], res.get("data") or {})
 
@@ -927,14 +1026,20 @@ def attach(core) -> GeneratedSkills:
         return skills, tools
 
     mgr = GeneratedSkills(core.home, taken=taken, v2=lambda: features.active("skills_manifest2"))
+    mgr.save_taken_snapshot()
     core.registry.allowed_actions |= {"skill_propose"}     # writes only an inert draft
     core.registry.register(make_builder_skill(mgr))
     sync(mgr, core.registry)
 
     async def watch() -> None:
+        seen = taken()
         while True:
             await asyncio.sleep(2.0)
             try:
+                now = taken()
+                if now != seen:                  # #565: tools registered late reach the CLI and the dashboard too
+                    seen = now
+                    mgr.save_taken_snapshot()
                 if sync(mgr, core.registry):
                     _refresh_tools_md(core)
             except Exception:

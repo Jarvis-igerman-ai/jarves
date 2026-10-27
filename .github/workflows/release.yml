@@ -1,8 +1,10 @@
 name: jarves-release
 # STABLE release, tag-driven (docs/RELEASING.md). Push a tag vX.Y.Z. The gate (core/tools/release_gate.py) must pass:
-# the tested commit has a green jarves-checks run, no open P0-P2, nightly green, and the owner's manual test sign-off
+# the tested commit has a green jarves-checks run, no open P0-P2 (live GitHub labels; legacy bug tables and checklist are
+# printed as information only, not gating), and the owner's manual test sign-off
 # docs/reviews/MANUAL_TEST_<X.Y.Z>.md (recorded with `jarvis release signoff`) names the tested beta commit = this
-# tag's commit (or only documentation changed since). Only then is the tested installer published as the stable release.
+# tag's commit (or only documentation changed since: the tag commit contains the signed sheet, so it is normally a docs-only
+# descendant of the tested commit; fetch-depth 0 below gives the gate the full history, a failed lookup refuses, #539). Only then is the tested installer published as the stable release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
@@ -27,14 +29,20 @@ jobs:
       contents: read
       actions: read
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      # on a tag ref the tag IS the ref (the free-text input may not name another one, #598); on a branch dispatch it is the input
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag || github.ref_name }}
+      INPUT_TAG: ${{ github.event.inputs.tag }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      # a dispatch is a dry run unless it was started on a real tag ref with dry_run unticked; a tag push publishes (#592)
+      DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.dry_run != 'false' || github.ref_type != 'tag')) && 'true' || 'false' }}
       GH_TOKEN: ${{ github.token }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          # always the triggering ref: the tag commit on a tag push, main on a dispatch (the dispatched tag need not exist yet, #592)
+          ref: ${{ github.ref }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
         with:
@@ -43,6 +51,10 @@ jobs:
       - name: Find the tested installer (the jarves-checks run of the signed-off commit)
         id: find
         run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad tag name"; exit 1; }
+          if [ "$REF_TYPE" = "tag" ] && [ -n "$INPUT_TAG" ] && [ "$INPUT_TAG" != "$REF_NAME" ]; then
+            echo "::error::the tag input ($INPUT_TAG) differs from the tag ref being released ($REF_NAME)"; exit 1
+          fi
           ver="${TAG#v}"
           sha=$(grep -m1 -E '^- Commit: [0-9a-f]{40}' "docs/reviews/MANUAL_TEST_${ver}.md" | grep -oE '[0-9a-f]{40}' || true)
           [ -n "$sha" ] || { echo "::error::no signed-off commit in docs/reviews/MANUAL_TEST_${ver}.md"; exit 1; }
@@ -64,9 +76,9 @@ jobs:
         run: |
           python3 packaging/release.py verify --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
           python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
-      - name: Release gate (sign-off, SHA, checklist, nightly)
+      - name: Release gate (sign-off, SHA, live P0-P2 issues)
         working-directory: core
-        run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist --bug-tables 'docs/reviews/*BUG_TABLE*.md'
+        run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}
         run: python3 packaging/release.py public-publish --dir dist --dry-run

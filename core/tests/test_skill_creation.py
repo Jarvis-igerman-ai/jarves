@@ -436,3 +436,112 @@ def test_feature_registered_with_platform_status():
     assert f.tools == ["skill_propose"] and f.risk == "medium"
     assert f.targets["windows"]["status"] == "implemented_unverified"
     assert f.targets["linux_arm64_pi"]["status"] == "planned" and f.targets["linux_arm64_pi"]["blocker"]
+
+
+async def test_run_never_mixes_old_grants_with_a_newer_version(tmp_path, monkeypatch):
+    """#314 item 2: a version approved while a call is starting must not run once with the previous version's grants."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    assert (await mgr.run("shopping", "shopping_list", {})).ok
+    real = mgr._files_of
+
+    def swap(sid, version):
+        out = real(sid, version)
+        st = mgr.state(sid)                                  # a new version is approved right now: grants are cleared
+        mgr._set_state(sid, {**st, "version": st["version"] + 1, "enabled": False, "grants": {"capabilities": [], "actions": False}})
+        return out
+
+    monkeypatch.setattr(mgr, "_files_of", swap)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert not r.ok and r.code == "SKILL_STALE"
+
+
+def test_cli_and_dashboard_managers_know_the_builtin_names(tmp_path):
+    """#314 item 3: the Core saves the built-in names; a manager made without the registry refuses a clashing draft."""
+    reg, core_mgr = setup(tmp_path)
+    core_mgr.save_taken_snapshot()
+    other = gen.GeneratedSkills(tmp_path)                    # what the CLI and the dashboard build
+    assert "music" in other.taken()[0] and "music_play" in other.taken()[1]
+    rep = other.propose(_md(name="music"), None, by="dashboard")
+    assert not rep["ok"]
+    assert gen.GeneratedSkills(tmp_path / "fresh").taken() == (set(), set())     # no snapshot yet: as before
+
+
+async def test_a_draft_with_crlf_line_endings_can_be_approved(tmp_path):
+    """#314 item 4: the draft is read back with LF endings, so the sha256 shown to the owner must be of the LF text."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_ONLY.replace("\n", "\r\n"), by="voice")
+    assert rep["ok"], rep["errors"]
+    assert mgr.draft("tea_coach")["report"]["sha256"] == rep["sha256"]
+    assert mgr.approve("tea_coach", rep["sha256"], by="dashboard")["version"] == 1
+
+
+async def test_failed_run_does_not_undo_a_change_made_while_it_ran(tmp_path, monkeypatch):
+    """#564: a revoke made while the sandbox ran stays revoked; only last_error is added; a new version keeps its state."""
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+
+    async def failing(code, tool, args, broker, timeout_s=0):
+        mgr.grant("shopping", [], False, by="dashboard")            # the owner revokes while the call runs
+        return {"ok": False, "error": "boom"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing)
+    r = await mgr.run("shopping", "shopping_list", {})
+    assert r.code == "SKILL_RUN_FAILED"
+    st = mgr.state("shopping")
+    assert st["grants"] == {"capabilities": [], "actions": False} and st["last_error"]["error"] == "boom"
+
+    async def failing_new_version(code, tool, args, broker, timeout_s=0):
+        cur = mgr.state("shopping")
+        mgr._set_state("shopping", {**cur, "version": cur["version"] + 1, "last_error": None})   # a new version was approved
+        return {"ok": False, "error": "late"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing_new_version)
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    await mgr.run("shopping", "shopping_list", {})
+    st = mgr.state("shopping")
+    assert st["version"] == 2 and st["last_error"] is None          # the old call's error is not written onto the new version
+
+
+async def test_state_writes_are_locked_and_last_error_is_redacted(tmp_path, monkeypatch):
+    """#576: parallel threads doing read-modify-write on one Skill lose nothing; temp names are unique; no lock file is left;
+    the stored error text goes through logs.redact."""
+    import threading
+    reg, mgr = setup(tmp_path)
+    rep = mgr.propose(MD_SHOP, py_shop(), by="voice")
+    mgr.approve("shopping", rep["sha256"], by="dashboard")
+    n = 12
+    errs = []
+
+    def toggler(i):
+        try:
+            for _ in range(5):
+                mgr.set_enabled("shopping", i % 2 == 0, by="dashboard")
+        except Exception as e:                       # noqa: BLE001
+            errs.append(e)
+    ts = [threading.Thread(target=toggler, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errs
+    hist = mgr.state("shopping")["history"]
+    assert sum(1 for h in hist if isinstance(h, dict) and "enabled" in h) == n * 5          # no history entry was lost
+    d = tmp_path / gen.ROOT / "installed" / "shopping"
+    assert not list(d.glob("*.tmp")) and not (d / "state.lock").exists()
+    names = set()
+    real = gen.secrets.token_hex
+    monkeypatch.setattr(gen.secrets, "token_hex", lambda k=3: names.add(real(k)) or real(k))
+    gen._write_json(d / "x.json", {})
+    gen._write_json(d / "x.json", {})
+    mgr.set_enabled("shopping", True, by="dashboard")
+    mgr.grant("shopping", ["storage"], True, by="dashboard")
+    secret = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
+
+    async def failing(code, tool, args, broker, timeout_s=0):
+        return {"ok": False, "error": f"bad key {secret}"}
+    monkeypatch.setattr(gen, "run_sandboxed", failing)
+    await mgr.run("shopping", "shopping_list", {})
+    assert secret not in mgr.state("shopping")["last_error"]["error"]

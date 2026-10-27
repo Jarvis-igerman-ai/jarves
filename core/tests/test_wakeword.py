@@ -173,3 +173,38 @@ def test_level_meter():
     assert 0.94 <= full <= 1.0      # full-scale sine = -3 dBFS
     mid = level_meter(np.full(1280, 0.01, np.float32))   # -40 dBFS
     assert abs(mid - 1 / 3) < 0.01
+
+
+def _confirming(**voice):
+    from jarves.config import VoiceConfig
+    from jarves.voice.wakeword import make_wake_detector
+    v = VoiceConfig(wake_agc=False, **voice)
+    det = make_wake_detector(v)
+    return v, det
+
+
+def test_owner_threshold_starts_confirm_and_instant_accept_stays_at_wake_accept():
+    _, det = _confirming(wake_threshold=0.25)
+    assert det.gate == 0.25 and det.accept == 0.5            # 0.25-0.5 -> local speech confirm, >= 0.5 -> instant
+
+
+def test_autonomy_false_wake_tuning_never_makes_false_wakes_easier(tmp_path):
+    from jarves import autonomy as AU
+    from jarves.config import Config
+    cfg = Config()
+    cfg.voice.wake_threshold = 0.35
+    cfg.voice.wake_threshold = 0.35
+    a = type("A", (), {})()
+    a.home, a.cfg = tmp_path, cfg
+    accepts = []
+    for _ in range(4):
+        _, det = _confirming(**{"wake_threshold": cfg.voice.wake_threshold})
+        accepts.append((det.gate, det.accept))
+        AU._wake_apply(a, {})
+    _, det = _confirming(wake_threshold=cfg.voice.wake_threshold)
+    accepts.append((det.gate, det.accept))
+    assert all(acc >= 0.5 for _, acc in accepts)
+    assert [x[1] for x in accepts] == sorted(x[1] for x in accepts)          # instant-accept never decreases
+    assert [x[0] for x in accepts] == sorted(x[0] for x in accepts)          # confirm only gets stricter
+    # a lower owner threshold (0.25) is not an instant-accept level either
+    assert _confirming(wake_threshold=0.25)[1].accept == 0.5

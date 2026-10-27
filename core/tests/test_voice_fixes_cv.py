@@ -326,3 +326,92 @@ async def test_cv08_exact_local_calculator():
 def test_cv16_name_prefix_rule():
     text = front_instructions()
     assert "לְאביטל" in text and 'never "לביטל"' in text and "לְצחי" in text
+
+
+async def test_vq1_short_english_transcript_does_not_flip_the_reply_language():
+    """Live run 26 Oct: short Hebrew heard as short English must not switch the reply to English."""
+    lv, sent = make_live()
+    try:
+        await _user(lv, "What's up Jarvis")          # 13 letters, first English turn: stay Hebrew
+        await _jarves(lv, "היי.")
+        notes = [k for k, _, _ in sent.items if k in ("instructions", "thinking")]
+        assert notes == []
+        await _user(lv, "What time is it")           # second English turn in a row: switch
+        assert [k for k, _, _ in sent.items if k == "instructions"] == ["instructions"]
+    finally:
+        await _cleanup(lv)
+
+
+def test_vq2_clock_note_has_an_exact_spoken_time_and_is_israel_local():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    # DST in Israel ended 25 Oct 2026: 18:27 UTC on 26 Oct is 20:27 local (UTC+2)
+    local = datetime(2026, 10, 26, 18, 27, tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Jerusalem"))
+    note = live_mod.clock_note(local)
+    assert "20:27" in note and "שמונה ועשרים ושבע בערב" in note and "26.10.2026" in note
+    assert live_mod.he_spoken_time(datetime(2026, 10, 26, 12, 0)) == "שתים-עשרה בדיוק בצהריים"
+    assert live_mod.he_spoken_time(datetime(2026, 10, 26, 0, 5)).startswith("שתים-עשרה וחמש")
+
+
+def test_vq3_wake_guard_ceiling_decay_and_clip_monitor(tmp_path):
+    import numpy as np
+    from jarves.voice import wake_guard as wg
+    from jarves.voice.wake_calib import ClipMonitor, MIC_CLIP_FIX
+    t = [1_000_000.0]
+    log = wg.WakeOutcomeLog(tmp_path, clock=lambda: t[0])
+    for _ in range(30):
+        log.record(True)                              # a feedback loop of misses: bounded by the ceiling
+    assert log.level() <= wg.MAX_LEVEL
+    class D:                                          # a two-stage detector at accept 0.5
+        accept, threshold, always_confirm = 0.5, 0.5, False
+    out = wg.apply_to_detector(D(), log.bump(), log.always_confirm())
+    assert out["accept"] <= max(0.5, wg.ACCEPT_CEILING) + 1e-9
+    t[0] += 7 * 3600                                  # decay: seven quiet hours relax it
+    assert log.level() < wg.MAX_LEVEL or log.counts()[1] < 30
+    t[0] += 20 * 3600
+    assert log.level() == 0
+    log.reset()
+    assert wg.WakeOutcomeLog(tmp_path).counts() == (0, 0)
+    m = ClipMonitor()
+    loud = (np.ones(1280) * 32767).astype("<i2").tobytes()
+    quiet = (np.ones(1280) * 1000).astype("<i2").tobytes()
+    assert not any(m.feed(quiet) for _ in range(10)) and m.advice() is None
+    for _ in range(3):
+        m.feed(loud)
+    assert m.clipping() and m.advice() == MIC_CLIP_FIX and "Microphone Array" in MIC_CLIP_FIX
+
+
+def test_vq4_cli_wake_reset_tune(tmp_path, capsys):
+    from jarves.voice.wake_guard import WakeOutcomeLog
+    from jarves import cli
+    import types
+    log = WakeOutcomeLog(tmp_path)
+    for _ in range(4):
+        log.record(True)
+    from jarves.config import Config
+    assert cli.cmd_wake(types.SimpleNamespace(action="reset-tune", model=None, list_mics=False), Config(), tmp_path) == 0
+    assert WakeOutcomeLog(tmp_path).counts() == (0, 0)
+
+
+def test_vq5_configured_wake_threshold_is_honoured():
+    from jarves.config import VoiceConfig
+    from jarves.voice.wakeword import make_wake_detector
+    d = make_wake_detector(VoiceConfig(wake_threshold=0.25, wake_confirm=True))
+    assert d.gate == 0.25 and d.accept == 0.5      # #519: owner threshold starts the speech confirm; instant stays 0.5
+    assert make_wake_detector(VoiceConfig(wake_confirm=True)).accept == 0.5     # unset: unchanged default
+    from jarves import app
+    assert app.WAKE_START_HOLD_S <= 10
+
+
+def test_vq6_score_at_configured_threshold_wakes_without_waiting_for_the_asr():
+    from jarves.voice.wake_confirm import AutoGain, ConfirmingDetector
+    calls = []
+    class Base:
+        last_score = 0.0
+        def feed(self, pcm): pass
+        def reset(self): pass
+    base = Base()
+    det = ConfirmingDetector(base, lambda a: calls.append(1) or True, accept=0.25)
+    base.last_score = 0.3
+    assert det.feed(b"\0\0" * 1280) == 0.3 and calls == []          # instant: no 1.5-7 s ASR
+    assert AutoGain().max_gain_db <= 12                              # no 4 -> 14 dB swings back into clipping

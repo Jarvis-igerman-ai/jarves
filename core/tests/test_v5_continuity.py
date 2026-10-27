@@ -443,3 +443,12 @@ def test_a_non_numeric_age_never_crashes_the_ledger(cont):
     ran = []
     st, _, _ = cont.execute("p1", "cmd-00000009", "goal", lambda: ran.append(1) or (200, {}), age_s="soon")
     assert st == 200 and ran
+
+
+def test_sync_hides_the_turns_when_the_chat_page_is_not_granted(srv, fake):
+    """F14 #206: /api/m/sync checked the chat scope but not the chat page grant (every other chat route checks both)."""
+    tok, dev = pair(srv, scopes=["chat", "status"])
+    srv.mobile.cont.add_turn("desktop", "user", "typed at the pc")
+    assert [t["text"] for t in call(srv, "GET", "/api/m/sync?since=0", tok)[1]["turns"]] == ["typed at the pc"]
+    assert srv.mobile.set_pages(dev, [p for p in mobile.PAGES if p != "chat"], "test")
+    assert call(srv, "GET", "/api/m/sync?since=0", tok)[1]["turns"] == []

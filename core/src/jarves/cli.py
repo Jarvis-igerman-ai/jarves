@@ -1071,11 +1071,13 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
     import time as _t
     import numpy as np
     from .voice.audio import AudioUnavailable
-    from .voice.wake_calib import diagnose
+    from .voice.wake_calib import ClipMonitor, diagnose
     from .voice.wake_confirm import AutoGain, SpeechMonitor, name_match
     from .voice.wakeword import level_meter
     agc = AutoGain(initial_gain_db=v.wake_gain_db) if v.wake_agc else None
     mon = SpeechMonitor(min_score=0.0)
+    clip = ClipMonitor()
+    clip_said = False
     ring = np.zeros(int(16000 * 2.5), np.int16)
     gate = v.wake_gate if confirm is not None else threshold
     attempts: list[dict] = []
@@ -1088,8 +1090,12 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
         async for chunk in mic.mic_chunks(16000, 2560):
             t_end = t_end or _t.monotonic() + seconds
             n += 1
+            clip.feed(chunk)
+            if clip.clipping() and not clip_said:        # live, before the verdict: say the exact fix once
+                clip_said = True
+                out("\n WARNING: " + clip.advice() + "\n")
             raw = np.frombuffer(chunk, "<i2")
-            nonzero = nonzero or bool(np.abs(raw).max() > 2) if raw.size else nonzero
+            nonzero = nonzero or bool(raw.size and np.abs(raw.astype(np.int32)).max() > 2)
             fed = agc.process(chunk) if agc is not None else chunk
             a = np.frombuffer(fed, "<i2")
             ring = np.roll(ring, -len(a))
@@ -1134,7 +1140,17 @@ async def _wake_listen_test(det, *, mic_factory, seconds: float, phrase: str, th
         + f", {len(attempts)} attempt(s), best wake score {best:.2f} (instant wake at {threshold}"
         + (f", local speech check from {gate}" if confirm is not None else "") + f"), near misses {near}.")
     out(f"{verdict}: {advice}")
-    return {"verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
+    if clip.clipping():
+        out(f"CLIPPING: {clip.advice()}")
+    from .voice.wake_record import mic_diagnosis
+    try:
+        from .app import _mic_name
+        mic_note = mic_diagnosis(_mic_name(v.input_device), mon.floor_db, clip.clipping())
+    except Exception:                                   # advice only
+        mic_note = ""
+    if mic_note:
+        out(f"MIC: {mic_note}")
+    return {"mic_note": mic_note, "clipping": clip.clipping(), "clip_advice": clip.advice(), "verdict": verdict, "advice": advice, "floor_db": mon.floor_db, "speech_db": speech_db, "best": best,
             "attempts": attempts, "peaks": peaks, "near_misses": near}
 
 
@@ -1159,6 +1175,14 @@ def cmd_wake(a, cfg, home) -> int:
         return _wake_train(a, cfg, home)
     if a.action == "eval":
         return _wake_eval(a, cfg, home)
+    if a.action == "record":
+        from .voice.wake_record import cmd_record
+        return cmd_record(a, cfg, home)
+    if a.action == "reset-tune":
+        from .voice.wake_guard import WakeOutcomeLog
+        WakeOutcomeLog(home).reset()
+        print("Learned wake tuning cleared (wake/outcomes.json). Restart JARVES (or wait for the next wake) to apply.")
+        return 0
     if getattr(a, "list_mics", False):
         import sounddevice as sd
         from .app import _mic_name
@@ -1369,12 +1393,27 @@ def _wake_train(a, cfg, home) -> int:
               + (f" (held out, not trained on: {ow['held_out_recall_at_threshold']:.0%})"
                  if ow["held_out_recall_at_threshold"] is not None else "") + ".")
     nm = rep["near_miss"]
-    print(f"Near-miss sentences: {len(nm['false_wakes'])} false wakes in {nm['rendered']} renderings "
-          f"(worst score {nm['worst_score']}).")
+    print(f"Near-miss sentences (held-out names, not trained on): {len(nm['false_wakes'])} false wakes in "
+          f"{nm['rendered']} renderings (worst score {nm['worst_score']}).")
     for w in nm["false_wakes"]:
         print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
+    cp = rep.get("campaign")
+    if cp:
+        print(f"Voice-campaign phrases (trained on, reported only): {len(cp['false_wakes'])} false wakes in "
+              f"{cp['rendered']} renderings; bare name woke {len(cp.get('bare_name_wakes') or [])}x (not gated).")
+    if rep.get("baseline"):
+        print("Against the model it replaces (same renderings, recordings and stream):")
+        for line in wake_prod.format_comparison(rep):
+            print(line)
     for line in rep["next"]:
         print("  " + line)
+    if not a.apply and (why := wake_prod.gate(rep)):
+        print("\nNot applied, and NOT recommended:")
+        for w in why:
+            print(f"  - {w}")
+        print("Next step: keep the current model. Record 20+ clean, short recordings of the phrase (quiet room, "
+              "one phrase per file) and train again; --apply refuses this one unless you add --accept-risk.")
+        return 0
     if not a.apply:
         print(f"\nNot applied. The active wake model is unchanged. Use it with: "
               f"jarvis wake train {' '.join(a.phrase)} --apply   (undo later with: jarvis wake train --revert)")
@@ -1986,6 +2025,7 @@ _EXT_LATE = (
     ("release_cmd", ("release",), {"release": "cmd_release"}),        # jarvis release signoff
     ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
     ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
+    ("model_lab", ("modellab",), "COMMANDS"),                          # V7 M3: jarvis modellab status | run | report
     ("budget_cli", ("budget",), "COMMANDS"),                          # SW-V4 D (#14)
     ("privacy", ("privacy",), "COMMANDS"),                            # OD-12: jarvis privacy status | full-text on|off
     ("phone_cli", ("phone",), "COMMANDS"),                            # V5: jarvis phone status | approvals | ...
@@ -2076,8 +2116,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, help="config.toml (default: <JARVES_HOME>/config.toml)")
     ap.add_argument("--profile", metavar="NAME", help="use this profile (its own memory, conversations, costs, "
                                                       "settings, keys); also JARVES_PROFILE. See: jarvis profile list")
-    from .updates import version_line
-    ap.add_argument("--version", action="version", version=version_line())
+    class _Version(argparse.Action):
+        """Prints the version line with the BETA badge of this home (#257); nothing is read unless --version is used."""
+        def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):
+            super().__init__(option_strings, dest, nargs=0, default=default, help=help)
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            from .updates import version_line
+            try:
+                home = state_dir()
+            except Exception:                 # an unreadable home still prints the plain line
+                home = None
+            print(version_line(home))
+            parser.exit()
+    ap.add_argument("--version", action=_Version, help="show the version and exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
     def log_opts(p):
         p.add_argument("--log-level", type=str.upper, choices=logs.LEVELS, help="terminal log level")
@@ -2171,9 +2223,12 @@ def main(argv: list[str] | None = None) -> int:
         if entry[0] == "early":
             entry[1].add_cli(sub)
     wk = sub.add_parser("wake", help="calibrate the wake word to your voice and mic, or train a new wake phrase")
-    wk.add_argument("action", choices=["test", "train", "eval"],
+    wk.add_argument("action", choices=["test", "train", "eval", "reset-tune", "record"],
                     help="test = live check of your voice + mic with an exact fix; train = new phrase (candidate; --apply to use, --revert to undo); "
-                         "eval = measured detection rate / false wakes per hour on a synthetic corpus")
+                         "eval = measured detection rate / false wakes per hour on a synthetic corpus; reset-tune = forget the learned false-wake tightening; "
+                         "record = guided recorder: picks a working microphone, coaches the level, records 20 clips of you")
+    wk.add_argument("--no-auto-level", action="store_true", help="record: never change the Windows microphone level (only tell me what to change)")
+    wk.add_argument("--mic", help="record: prefer the microphone whose name contains this text")
     wk.add_argument("--list-mics", action="store_true", help="test: list the input devices and exit")
     wk.add_argument("--openai", action="store_true", help="eval: add OpenAI TTS voices (metered once, cached)")
     wk.add_argument("--minutes", type=float, default=24.0, help="eval: minutes of non-wake audio (default 24)")

@@ -155,6 +155,7 @@ class HeadWakeDetector:
         self._features = None
         self._ring: np.ndarray | None = None
         self._n = 0
+        self._skip = 0
         self.last_score = 0.0
 
     def _load_sync(self) -> None:
@@ -174,6 +175,7 @@ class HeadWakeDetector:
             raise WakeWordUnavailable("WAKE_NO_ENGINE", "wake word engine (pyopen-wakeword) is not installed",
                                       "install the voice extra: uv sync --extra voice") from e
         self._ring = np.zeros((self.head["windows"], 96), np.float32)
+        self._skip = wt_startup_embeddings()
         self.name = self.head.get("phrase") or self.name
 
     async def load(self) -> None:
@@ -192,6 +194,9 @@ class HeadWakeDetector:
         best = 0.0
         for emb in self._features.process_streaming(pcm16_mono_16k):
             for row in emb.reshape(-1, 96):
+                if self._skip > 0:                  # the front end's start-up burst: not speech (wake_train.WARMUP)
+                    self._skip -= 1
+                    continue
                 self._ring = np.roll(self._ring, -1, axis=0)
                 self._ring[-1] = row
                 self._n += 1
@@ -205,6 +210,12 @@ class HeadWakeDetector:
             self._features.reset()
             self._ring[:] = 0
             self._n = 0
+            self._skip = wt_startup_embeddings()
+
+
+def wt_startup_embeddings() -> int:
+    from .wake_train import STARTUP_EMBEDDINGS
+    return STARTUP_EMBEDDINGS
 
 
 def make_detector(wake_word: str = "hey_jarvis", threshold: float = 0.5) -> WakeWordDetector:
@@ -223,8 +234,14 @@ def make_wake_detector(v) -> WakeWordDetector:
     agc = AutoGain(initial_gain_db=getattr(v, "wake_gain_db", 0.0) or 0.0) if getattr(v, "wake_agc", False) else None
     if getattr(v, "wake_confirm", False):
         base = make_detector(v.wake_word, 1.01)          # the gate: only its raw score is read
-        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model), accept=max(v.wake_threshold,
-                                  v.wake_accept), gate=v.wake_gate, agc=agc)
+        # wake_threshold (owner: `wake test --apply`, or raised by autonomy after false wakes) is the level that
+        # STARTS the local speech confirm. The instant-accept level (no ASR confirm) is max(wake_threshold,
+        # wake_accept): only the separate owner-only key wake_accept can change it, and a lower wake_threshold or an
+        # autonomy change can never make it easier (privacy: issue #519).
+        explicit = "wake_threshold" in getattr(v, "model_fields_set", ())
+        accept = max(v.wake_threshold, v.wake_accept)
+        gate = min(max(v.wake_gate, v.wake_threshold), accept) if explicit else v.wake_gate
+        return ConfirmingDetector(base, WhisperConfirm(v.wake_confirm_model, cpu_threads=4), accept=accept, gate=gate, agc=agc)
     det = make_detector(v.wake_word, v.wake_threshold)
     return GainDetector(det, agc) if agc is not None else det
 

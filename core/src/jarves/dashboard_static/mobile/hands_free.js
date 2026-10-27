@@ -104,7 +104,7 @@
       s.ctx = new (window.AudioContext || window.webkitAudioContext)(); s.src = s.ctx.createMediaStreamSource(s.stream);
       s.proc = s.ctx.createScriptProcessor(2048, 1, 1); s.proc.onaudioprocess = (e) => onChunk(s, new Float32Array(e.inputBuffer.getChannelData(0)));
       s.src.connect(s.proc); s.proc.connect(s.ctx.destination);
-    } catch (e) { s.msg = t("nomic"); s.over = true; try { s.stream && s.stream.getTracks().forEach((x) => x.stop()); } catch (x) { /* ignore */ } paint(); cx.api("/api/m/drive/voice/end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "mic_lost" }) }).catch(() => {}); return; }
+    } catch (e) { s.msg = t("nomic"); s.over = true; release(s); paint(); cx.api("/api/m/drive/voice/end", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reason: "mic_lost" }) }).catch(() => {}); return; }
     if (window.JarvesAudio) window.JarvesAudio.phoneMic(true, { stop: () => finish("user", "e_user"), discard: () => finish("user", "e_user"), live: () => !!s.stream && s.stream.getTracks().some((x) => x.readyState === "live") });
     try {                                              // keep the screen on; a lost lock while visible ends the session
       if (navigator.wakeLock) { s.lock = await navigator.wakeLock.request("screen"); s.lock.onrelease = () => { if (!document.hidden) finish("wake_lock_lost", "e_wake_lock_lost"); }; } else s.say = t("nowake");

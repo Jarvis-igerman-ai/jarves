@@ -1,0 +1,21 @@
+{
+ "dict": {
+  "Also show paid models": "הצג גם מודלים בתשלום",
+  "Compare with run": "השוואה להרצה",
+  "Cost per accepted": "עלות לתשובה מקובלת",
+  "Default: free and local models only. A paid run needs a cap you set, at most 2 USD.": "ברירת מחדל: מודלים חינמיים ומקומיים בלבד. הרצה בתשלום דורשת תקרה שאתם קובעים, עד 2 דולר.",
+  "Each model in each selected run": "כל מודל בכל הרצה שנבחרה",
+  "Free": "חינמי",
+  "Local": "מקומי",
+  "Model": "מודל",
+  "No comparison": "בלי השוואה",
+  "No free or local models in this run. You can also show paid ones.": "אין מודלים חינמיים או מקומיים בהרצה הזו. אפשר להציג גם בתשלום.",
+  "No runs yet. The Model Lab runs only when you start it: in a terminal run jarvis modellab run. This page only shows results.": "עוד אין הרצות. מעבדת המודלים רצה רק כשאתם מתחילים אותה: בטרמינל הריצו את “jarvis modellab run”. כאן רואים רק תוצאות.",
+  "Paid": "בתשלום",
+  "Quality": "איכות",
+  "Quality, speed and cost per model on a fixed public task set. Read only: nothing runs from this page and no key is shown.": "איכות, מהירות ועלות לכל מודל, ממערך משימות ציבורי וקבוע. רק קריאה: שום דבר לא רץ מהדף הזה, ולא מוצג מפתח.",
+  "Run": "הרצה",
+  "Speed": "מהירות",
+  "Type": "סוג"
+ }
+}

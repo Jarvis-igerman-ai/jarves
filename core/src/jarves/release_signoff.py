@@ -20,7 +20,9 @@ tested and says why). `pending`, `fail` and `blocked` stop the release. Nothing 
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -31,7 +33,26 @@ HEADER = ("ID", "Area", "What to do", "Expected", "Result", "Note")
 SHEET_DIR = Path("docs") / "reviews"
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_SPLIT = re.compile(r"(?<!\\)\|")
+
+
+def _split_row(line: str) -> list[str]:
+    """Split a table row on pipes that are not escaped; a backslash escapes the next character (so a note ending in a backslash
+    is stored as two backslashes and cannot swallow the separator, #606)."""
+    cells, cur, i = [], [], 0
+    while i < len(line):
+        c = line[i]
+        if c == chr(92) and i + 1 < len(line):
+            cur.append(line[i:i + 2])
+            i += 2
+            continue
+        if c == "|":
+            cells.append("".join(cur))
+            cur = []
+        else:
+            cur.append(c)
+        i += 1
+    cells.append("".join(cur))
+    return cells
 
 
 class SheetError(ValueError):
@@ -51,11 +72,20 @@ def sheet_path(root: Path | str, version: str) -> Path:
 
 
 def _cell(text: str) -> str:
-    return " ".join(str(text).replace("|", "\\|").split())
+    t = unicodedata.normalize("NFC", str(text))                      # an editor that rewrites the sheet in NFD must not void it
+    return " ".join(t.replace(chr(92), chr(92) * 2).replace("|", chr(92) + "|").split())
 
 
 def _uncell(text: str) -> str:
-    return text.strip().replace("\\|", "|")
+    out, i, t = [], 0, text.strip()
+    while i < len(t):
+        if t[i] == chr(92) and i + 1 < len(t) and t[i + 1] in (chr(92), "|"):
+            out.append(t[i + 1])
+            i += 2
+        else:
+            out.append(t[i])
+            i += 1
+    return unicodedata.normalize("NFC", "".join(out))
 
 
 @dataclass
@@ -84,6 +114,17 @@ class Sheet:
     commit: str = ""
     date: str = ""
     signed: bool = False
+    owner: str = ""                # #508: who signed (the OS user of the signing session, or --owner)
+    rows_hash: str = ""            # #508: sha256 of every row cell and the sign-off fields at signing time
+
+    def compute_rows_hash(self) -> str:
+        # Hash the text exactly as render() writes it (_cell), so a value typed in the same run as --finish (double spaces,
+        # a newline in a note) hashes the same after save + load; the sign-off fields are covered too (owner, date, ...).
+        # Tamper-evidence against accidental edits only: anyone editing the file can recompute it (#543/#544 guard that).
+        head = [_cell(x) for x in (self.version, self.beta, self.commit, self.date, self.owner)]
+        rows = [" | ".join(_cell(x) for x in (r.id, r.area, r.todo, r.expected, r.result, r.note)) for r in self.rows]
+        blob = chr(10).join(["sheet-hash v1", *head, "--", *rows])
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     # ---- text
     def render(self) -> str:
@@ -97,7 +138,8 @@ class Sheet:
         for r in self.rows:
             out.append("| " + " | ".join(_cell(x) for x in (r.id, r.area, r.todo, r.expected, r.result, r.note)) + " |")
         out += ["", "## Sign-off", "", f"- Tested beta: {self.beta}", f"- Commit: {self.commit}",
-                f"- Date: {self.date}", f"- Signed: {'yes' if self.signed else 'no'}", ""]
+                f"- Date: {self.date}", f"- Owner: {self.owner}", f"- Rows hash: {self.rows_hash}",
+                f"- Signed: {'yes' if self.signed else 'no'}", ""]
         return "\n".join(out)
 
     @classmethod
@@ -113,13 +155,13 @@ class Sheet:
         for line in body.splitlines():
             if not line.startswith("|") or line.startswith("|---") or line.startswith("| ID "):
                 continue
-            cells = [_uncell(c) for c in _SPLIT.split(line.strip())[1:-1]]
+            cells = [_uncell(c) for c in _split_row(line.strip())[1:-1]]
             if len(cells) != len(HEADER):
                 raise SheetError(f"bad table row: {line[:60]!r}")
             if cells[4] not in RESULTS:
                 raise SheetError(f"{cells[0]}: unknown result {cells[4]!r}")
             sh.rows.append(Row(*cells))
-        for key, attr in (("Tested beta", "beta"), ("Commit", "commit"), ("Date", "date")):
+        for key, attr in (("Tested beta", "beta"), ("Commit", "commit"), ("Date", "date"), ("Owner", "owner"), ("Rows hash", "rows_hash")):
             mm = re.search(rf"^- {key}:[ \t]*(.*)$", tail, re.M)
             setattr(sh, attr, mm.group(1).strip() if mm else "")
         mm = re.search(r"^- Signed:[ \t]*(\w+)", tail, re.M)
@@ -146,7 +188,7 @@ class Sheet:
     def open_rows(self) -> list[str]:
         return [p for p in (r.problem() for r in self.rows) if p]
 
-    def sign(self, beta: str, commit: str, today: str | None = None) -> None:
+    def sign(self, beta: str, commit: str, today: str | None = None, owner: str = "") -> None:
         """Record which beta was tested, its exact commit and the date. Refuses while any row is open."""
         if not self.rows:
             raise SheetError("the sheet has no rows")
@@ -157,7 +199,12 @@ class Sheet:
             raise SheetError(f"the tested beta must look like {self.version}-beta.N, not {beta!r}")
         if not SHA_RE.match((commit or "").strip().lower()):
             raise SheetError("the commit must be the full 40-character SHA of the tested beta build")
+        owner = " ".join(str(owner or "").split())[:80]
+        if not owner or not owner.isprintable():                      # no control, DEL, bidi or zero-width characters (#606)
+            raise SheetError("the sign-off needs the owner's name (--owner NAME)")
         self.beta, self.commit, self.date = beta, commit.strip().lower(), today or date.today().isoformat()
+        self.owner = owner
+        self.rows_hash = self.compute_rows_hash()      # after every signed field is set: they are all hashed
         self.signed = True
 
     def problems(self) -> list[str]:
@@ -173,6 +220,10 @@ class Sheet:
             p.append("'Commit' is missing or not a full SHA")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", self.date):
             p.append("'Date' is missing")
+        if self.signed and not self.owner.strip():
+            p.append("'Owner' is missing: sign again (jarvis release signoff --finish --owner NAME)")
+        if self.signed and self.rows_hash != self.compute_rows_hash():
+            p.append("the rows changed after signing (rows hash does not match): sign again")
         return p
 
 
@@ -193,7 +244,7 @@ def save(root: Path | str, sheet: Sheet) -> Path:
     return path
 
 
-DOCS_ONLY = re.compile(r"^(docs/|[^/]+\.md$|LICENSE|\.gitignore)")
+DOCS_ONLY = re.compile(r"^(docs/|[^/]+\.md$|LICENSE$|\.gitignore$)")   # anchored: LICENSE_x/y.py is code
 
 
 def docs_only(files: list[str]) -> bool:

@@ -142,3 +142,43 @@ def test_speedtest_rate_needs_five_starts_and_counters_have_no_trend(home):
 def test_advisor_knows_the_greeting_metric():
     from jarves import perf_advisor
     assert "greeting_missed_pct" in perf_advisor.SUGGESTIONS
+
+
+# ---------------------------------------------------------------- #179: wake sessions greet; no_speech waits for it
+async def test_no_speech_cutoff_waits_while_the_greeting_is_pending(monkeypatch):
+    from test_issue16 import _Clock
+    from test_voice_faults import FakeAudio, Rec, make_live
+    clock = _Clock(4.0)                   # watchdog ticks at 4, 8, 12 (old cutoff), 16 simulated s
+    monkeypatch.setattr(live_mod, "time", clock)
+    rec = Rec()
+    lv = make_live(rec, FakeClient(), FakeAudio(), no_speech_timeout_s=12, idle_disconnect_s=600, greeting="שלום")
+    await lv.start()
+    await asyncio.sleep(3.6)              # ~14 simulated s: past 12 s, inside the 15 s greeting budget
+    assert rec.ends == []
+    for _ in range(100):
+        if rec.ends:
+            break
+        await asyncio.sleep(0.05)
+    assert rec.ends == ["no_speech"]      # still bounded when the greeting never arrives
+    await lv.stop()
+
+
+def _ns(greeting=True, lang="he", drive=False):
+    feats = SimpleNamespace(active=lambda fid: drive)
+    return SimpleNamespace(_greeted=False, features=feats,
+                           cfg=SimpleNamespace(voice=SimpleNamespace(greeting=greeting, language=lang)))
+
+
+def test_wake_session_gets_a_short_greeting_when_the_feature_is_on():
+    from jarves.app import Core
+    on, off = _ns(), _ns(greeting=False)
+    assert Core.wake_greeting(on) and len(Core.wake_greeting(on)) < 20
+    assert on._greeted and Core.wake_greeting(off) is None and not off._greeted
+
+
+def test_wake_greeting_follows_ui_language_and_is_silent_in_drive_mode():
+    from jarves.app import Core
+    assert Core.wake_greeting(_ns(lang="en")) == "I'm listening."
+    assert Core.wake_greeting(_ns(lang="he")) == "אני מקשיב."
+    d = _ns(drive=True)
+    assert Core.wake_greeting(d) is None and not d._greeted

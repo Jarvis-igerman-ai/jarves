@@ -39,25 +39,31 @@ def summary(sheet: so.Sheet) -> dict:
         counts[r.result] += 1
     return {"version": sheet.version, "rows": [vars(r) for r in sheet.rows], "counts": counts,
             "open": sheet.open_rows(), "signed": sheet.signed, "beta": sheet.beta, "commit": sheet.commit,
-            "date": sheet.date, "problems": sheet.problems()}
+            "date": sheet.date, "owner": sheet.owner, "problems": sheet.problems()}
 
 
-def _finish(sheet: so.Sheet, home: Path, beta: str | None, commit: str | None) -> None:
+def _finish(sheet: so.Sheet, home: Path, beta: str | None, commit: str | None, owner: str | None = None) -> None:
     from . import updates
     beta = beta or updates.beta_label(home) or ""
     commit = commit or str(updates.build_info().get("commit") or "")
-    sheet.sign(beta, commit)
+    if not owner:
+        import getpass
+        try:
+            owner = getpass.getuser()                 # the account signing: recorded with the rows hash (#508)
+        except Exception:                             # noqa: BLE001
+            owner = ""
+    sheet.sign(beta, commit, owner=owner or "")
 
 
 # ---------------------------------------------------------------------- CLI
 def cmd_release(a, cfg, home) -> int:
-    if a.action != "signoff":
-        return 2
     try:
-        version = so.normalise_version(a.version)
+        version = so.normalise_version(a.version or _pyproject_version(repo_root(home, a.repo)))
     except so.SheetError as e:
         print(f"RELEASE_SIGNOFF: {e}")
         return 2
+    if a.action in ("status", "sheet"):
+        return _flow(a, home, version)
     try:
         root, sheet = _mine(home, a.repo, version)
         if a.row:
@@ -65,10 +71,12 @@ def cmd_release(a, cfg, home) -> int:
             so.save(root, sheet)
             print(f"{row.id}: {row.result}" + (f" ({row.note})" if row.note else ""))
         if a.finish:
-            _finish(sheet, home, a.beta, a.commit)
+            _finish(sheet, home, a.beta, a.commit, getattr(a, "owner", None))
             so.save(root, sheet)
-            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}. עכשיו אפשר לתייג v{version}.",
-                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}. "
+            print(clilang.fmt(f"נחתם: בטא {sheet.beta}, קומיט {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"גיבוב {sheet.rows_hash}. עכשיו אפשר לתייג v{version}.",
+                              f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
+                              f"hash {sheet.rows_hash}. "
                               f"You can now tag v{version}."))
             logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version)
             return 0
@@ -91,10 +99,53 @@ def cmd_release(a, cfg, home) -> int:
     return 0
 
 
+def _pyproject_version(root: Path) -> str:
+    import re
+    try:
+        m = re.search(r'(?m)^version\s*=\s*"([^"]+)"', (root / "core" / "pyproject.toml").read_text(encoding="utf-8"))
+    except OSError:
+        m = None
+    return m.group(1) if m else ""
+
+
+def _flow(a, home, version: str) -> int:
+    """`jarvis release status` (evidence + what remains) and `jarvis release sheet` (reduced owner sheet)."""
+    from . import release_flow as rf
+    root = repo_root(home, a.repo)
+    if a.action == "sheet":
+        try:
+            path = rf.write_sheet(root, version, force=a.force)
+        except so.SheetError as e:
+            print(f"RELEASE_SHEET: {e}")
+            return 1
+        print(clilang.fmt(f"גיליון קצר ל-{version}: {path}", f"Reduced owner sheet for {version}: {path}"))
+        return 0
+    checks = rf.collect(root, version)
+    for c in checks:
+        print(f"  [{'PASS' if c.ok else 'TODO'}] {c.name}: {c.detail}")
+    if a.report:
+        out = root / "docs" / "release" / f"EVIDENCE_{version}.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(rf.report(version, checks), encoding="utf-8", newline="\n")
+        print(f"Evidence report: {out}")
+    left = rf.remaining(checks)
+    if left:
+        print("What remains:")
+        for t in left:
+            print(f"  - {t}")
+        return 1
+    print(clilang.fmt(f"מוכן: אפשר לתייג v{version}.", f"READY: you can tag v{version}."))
+    return 0
+
+
 def add_cli(sub) -> None:
     rp = sub.add_parser("release", help="release sign-off: record your manual test of a stable release")
-    rp.add_argument("action", choices=["signoff"], help="signoff: show / fill / finish the manual test sheet")
-    rp.add_argument("--version", required=True, help="the stable version being released, e.g. 4.1.0")
+    rp.add_argument("action", nargs="?", default="status", choices=["status", "sheet", "signoff"],
+                    help="status: every gate + what remains (default); sheet: write the reduced owner sheet; "
+                         "signoff: show / fill / finish the manual test sheet")
+    rp.add_argument("--version", help="the stable version being released, e.g. 4.1.0 (default: core/pyproject.toml)")
+    rp.add_argument("--report", action="store_true", help="status: also write docs/release/EVIDENCE_<version>.md")
+    rp.add_argument("--force", action="store_true", help="sheet: rebuild even if it holds results or a signature")
     rp.add_argument("--row", help="a sheet row id to record (with --result)")
     rp.add_argument("--result", choices=[r for r in so.RESULTS if r != "pending"], default="pass")
     rp.add_argument("--note", help="note for the row (required for accepted-blocked)")
@@ -102,6 +153,7 @@ def add_cli(sub) -> None:
                     help="write the tested beta, its commit SHA and today's date; only when every row is done")
     rp.add_argument("--beta", help="finish: the beta tested, e.g. 4.1.0-beta.7 (default: this installed beta)")
     rp.add_argument("--commit", help="finish: full SHA of the tested beta (default: this build's commit)")
+    rp.add_argument("--owner", help="finish: the owner's name recorded in the sheet (default: this account)")
     rp.add_argument("--repo", help="the git checkout holding docs/reviews (default: auto-detected)")
 
 
@@ -147,7 +199,7 @@ def api_signoff_set(ctx, m, body):
         version = _ver(body)
         root, sheet = _mine(ctx.home, None, version)
         if body.get("finish") is True:
-            _finish(sheet, ctx.home, body.get("beta"), body.get("commit"))
+            _finish(sheet, ctx.home, body.get("beta"), body.get("commit"), body.get("owner"))
         else:
             sheet.set_result(str(body.get("row") or ""), str(body.get("result") or ""), str(body.get("note") or ""))
         so.save(root, sheet)

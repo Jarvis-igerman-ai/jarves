@@ -81,7 +81,9 @@ def tooltip(view: dict) -> str:
     except ProfileError:
         p = DEFAULT
     name = "JARVES" if p == DEFAULT else f"JARVES [{p}]"      # two profiles = two tray icons: say which is which
-    return (name + " - " + status_line(view))[:120]       # Windows limits the tip to 127 characters
+    from . import indicator
+    lead = indicator.text(indicator.state_of(view), indicator.locale_of(view))     # the state first, in the UI language
+    return (name + " - " + lead + " | " + status_line(view))[:120]       # Windows limits the tip to 127 characters
 
 
 def desktop_session() -> tuple[bool, str]:
@@ -102,17 +104,33 @@ def library_available() -> tuple[bool, str]:
 
 
 def icon_image(view: dict, size: int = 64):
-    """A calm ring: cyan = listening, dim = window hidden, red bar = mic muted, amber dot = alerts paused."""
+    """One icon per state (runtime/indicator.py), distinct in colour AND shape: waiting = blue ring, listening = green
+    disc, thinking = amber dots, speaking = cyan bars, muted = red disc with a slash, error = red cross. A small amber
+    dot in the corner = proactive alerts paused."""
     from PIL import Image, ImageDraw
+    from . import indicator
+    state = indicator.state_of(view)
+    col = indicator.STYLE[state][0]
+    ring, shape = col + (255,), indicator.STYLE[state][1]
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     s = size / 64
-    running = view.get("core", {}).get("state") == "running"
-    ring = (64, 210, 230, 255) if running else (120, 120, 120, 255)
     d.ellipse((4 * s, 4 * s, 60 * s, 60 * s), fill=(18, 24, 32, 255), outline=ring, width=max(2, int(6 * s)))
-    d.ellipse((24 * s, 24 * s, 40 * s, 40 * s), fill=ring)
-    if view.get("mic", {}).get("muted"):
-        d.line((12 * s, 52 * s, 52 * s, 12 * s), fill=(235, 70, 70, 255), width=max(2, int(7 * s)))
+    if shape == "ring":
+        d.ellipse((20 * s, 20 * s, 44 * s, 44 * s), outline=ring, width=max(2, int(5 * s)))
+    elif shape == "dots":
+        for x in (20, 32, 44):
+            d.ellipse(((x - 4) * s, 28 * s, (x + 4) * s, 36 * s), fill=ring)
+    elif shape == "wave":
+        for x, h in ((18, 8), (27, 16), (36, 22), (45, 12)):
+            d.rectangle(((x - 3) * s, (32 - h) * s, (x + 3) * s, (32 + h) * s), fill=ring)
+    elif shape == "cross":
+        d.line((20 * s, 20 * s, 44 * s, 44 * s), fill=ring, width=max(2, int(7 * s)))
+        d.line((44 * s, 20 * s, 20 * s, 44 * s), fill=ring, width=max(2, int(7 * s)))
+    else:
+        d.ellipse((22 * s, 22 * s, 42 * s, 42 * s), fill=ring)
+        if shape == "slash":
+            d.line((12 * s, 52 * s, 52 * s, 12 * s), fill=(235, 70, 70, 255), width=max(2, int(7 * s)))
     if view.get("alerts", {}).get("paused"):
         d.ellipse((44 * s, 2 * s, 62 * s, 20 * s), fill=(245, 175, 40, 255))
     return img

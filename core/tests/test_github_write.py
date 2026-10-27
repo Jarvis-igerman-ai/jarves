@@ -42,7 +42,7 @@ def mk(tmp_path, *, on=True, answer=True, repos=(REPO,), fake=None, resolution="
     return w, ap, fake
 
 
-def act(kind="pr.open", repo=REPO, target="", payload=None, preview="open an issue"):
+def act(kind="merge.enqueue", repo=REPO, target="", payload=None, preview="open an issue"):
     return gw.WriteAction(kind=kind, repo=repo, target=target, payload=payload or {"title": "t"}, preview=preview)
 
 
@@ -61,7 +61,7 @@ def test_passing_every_gate_is_not_implemented_and_nothing_is_written(tmp_path):
     assert (r.ok, r.code) == (False, "GITHUB_WRITE_NOT_IMPLEMENTED")
     assert len(ap.asked) == 1 and {m for m, _ in fake.calls} == {"GET"}      # only the read probe
     p, kw = ap.asked[0]
-    assert "pr.open" in p and "octo/r" in p and '"title": "t"' in p and kw["risk"] == "high"
+    assert "merge.enqueue" in p and "octo/r" in p and '"title": "t"' in p and kw["risk"] == "high"
     assert kw["details"]["action_hashes"] == act().hash()[:16]
 
 
@@ -198,7 +198,7 @@ def test_audit_has_codes_not_payload_or_token(tmp_path):
     run(w.execute(act(payload={"body": secret}, preview="comment"), origin="user"))
     run(w.execute(act(kind="repo.delete"), origin="user"))
     rows = audit(tmp_path)
-    assert [r["result"] for r in rows] == ["GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_FORBIDDEN"]
+    assert [r["result"] for r in rows] == ["GITHUB_WRITE_RESERVED", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_FORBIDDEN"]
     assert {"ts", "kind", "repo", "target", "hash", "origin", "result"} <= set(rows[0]) and rows[0]["repo"] == REPO
     raw = (tmp_path / "github" / "write_audit.jsonl").read_text(encoding="utf-8")
     assert secret not in raw and TOKEN not in raw
@@ -216,7 +216,7 @@ def test_token_never_in_results_or_status(tmp_path, caplog):
 def test_handler_path_and_no_write_verbs(tmp_path, monkeypatch):
     async def h(a, client):
         return {"number": 7}
-    monkeypatch.setitem(gw.HANDLERS, "pr.open", h)
+    monkeypatch.setitem(gw.HANDLERS, "merge.enqueue", h)
     w, ap, _ = mk(tmp_path)
     r = run(w.execute(act(), origin="user"))
     assert r.ok and r.data == {"number": 7} and audit(tmp_path)[-1]["result"] == "OK"
@@ -257,3 +257,54 @@ def test_payload_changed_during_approval_is_refused(tmp_path):
         return await orig(prompt, **kw)
     ap.ask = mutate
     assert run(w.execute(a, origin="user")).code == "GITHUB_WRITE_DENIED"
+
+
+def test_batch_slot_is_released_when_a_granted_action_is_refused_later(tmp_path):
+    """#497: a granted action refused by a gate (or the duplicate guard) closes its reserved slot at once."""
+    w, ap, _ = mk(tmp_path, limit=(3, 600.0))
+    acts = [act(payload={"title": f"t{i}"}) for i in range(3)]
+    assert run(w.approve_batch(acts, origin="user")).ok and w._used() == 3
+    w.feats.on = False                                                         # switch turned off after the approval
+    for a in acts:
+        assert run(w.execute(a, origin="user")).code == "GITHUB_WRITE_OFF"
+    assert w._used() == 0                                                      # every reserved slot is free again
+
+
+def test_identical_action_in_flight_is_refused_before_a_second_popup(tmp_path):
+    """#497: the duplicate check runs under the reservation lock, so two identical calls cannot both reach the popup."""
+    w, ap, _ = mk(tmp_path)
+    a = act()
+    first = w._reserve([a], "user", dup_check=True)
+    assert isinstance(first, list)                                             # the first call holds the slot (owner being asked)
+    r = run(w.execute(a, origin="user"))
+    assert r.code == "GITHUB_WRITE_DUPLICATE" and "already waiting" in r.message and ap.asked == []
+    assert isinstance(w._reserve([act(payload={"title": "other"})], "user", dup_check=True), list)   # a different action is fine
+
+
+def test_batch_refuses_the_same_action_twice(tmp_path):
+    """#569 item 1."""
+    w, ap, _ = mk(tmp_path)
+    r = run(w.approve_batch([act(), act()], origin="user"))
+    assert r.code == "GITHUB_WRITE_BAD_ARGUMENT" and ap.asked == [] and w._used() == 0
+
+
+def test_reset_popup_shows_the_audit_state(tmp_path, monkeypatch):
+    """#569 item 3."""
+    from jarves import approvals as appr
+    seen = []
+
+    class Svc:
+        def __init__(self, home):
+            self.channels = []
+
+        async def ask(self, prompt, **kw):
+            seen.append(prompt)
+            return True
+    monkeypatch.setattr(appr, "ApprovalService", Svc)
+    monkeypatch.setattr(appr, "PopupChannel", lambda *a, **k: object())
+    assert gw._confirm_reset(None, tmp_path) is True and "Audit state: OK" in seen[-1]
+    f = tmp_path / "github" / "write_audit.jsonl"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("garbage\n", encoding="utf-8")
+    gw._confirm_reset(None, tmp_path)
+    assert "TAMPERED" in seen[-1]

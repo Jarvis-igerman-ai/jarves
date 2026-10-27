@@ -141,3 +141,130 @@ def test_bridge_dest_outside_install_is_refused(tree, tmp_path):
     with pytest.raises(rec.Recover) as e:
         rec.recover(inst, home)
     assert e.value.code == "RECOVER_UNSAFE_PATH" and not victim.exists() and (inst / "a.py").read_text() == "A=2\n"
+
+
+def test_recover_skips_an_already_reverted_backup(tree, monkeypatch):
+    """#501: the newest backup that is still applied is picked, not a reverted one."""
+    inst, src, home = tree
+    ids = iter(["20261026-100000", "20261026-110000"])
+    monkeypatch.setattr(hf, "_now_id", lambda: next(ids))
+    write(src, "a.py", "A=2\n")
+    first = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    write(src, "a.py", "A=3\n")
+    second = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    assert hf.revert(inst, home, FakeHooks().hooks())["id"] == second            # really reverted: hotfix 1 is current
+    r = rec.recover(inst, home)
+    assert r["id"] == first and (inst / "a.py").read_text() == "A=1\n"
+
+
+def test_recover_reports_the_partial_state_when_a_restore_fails_midway(tree, monkeypatch):
+    inst, home, hid = applied(tree)
+    real = rec._atomic_copy
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        real(src, dst)
+
+    monkeypatch.setattr(rec, "_atomic_copy", flaky)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_PARTIAL" and "disk full" in e.value.message
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "revert-failed"
+    monkeypatch.setattr(rec, "_atomic_copy", real)                       # a rerun finishes the job
+    assert rec.recover(inst, home)["status"] == "restored"
+    assert (inst / "a.py").read_text() == "A=1\n"
+
+
+def test_recover_refuses_clearly_when_a_file_is_locked(tree, monkeypatch):
+    inst, home, hid = applied(tree)
+    real_open = open
+
+    def locked(p, mode="r", *a, **k):
+        if mode == "r+b" and str(p).endswith("a.py"):
+            raise PermissionError("locked")
+        return real_open(p, mode, *a, **k)
+
+    monkeypatch.setattr("builtins.open", locked)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_CORE_RUNNING" and e.value.refused
+    monkeypatch.undo()
+    assert (inst / "a.py").read_text() == "A=2\n"                        # nothing was changed
+
+
+def _full_update(inst):
+    (inst / "a.py").write_text("A=NEWVERSION\n")
+    (inst / hf.BUILD_INFO_NAME).write_text(json.dumps({"version": "9.9.9"}))
+
+
+def test_recover_never_restores_an_old_backup_over_a_full_update(tree):
+    """Review of #501: a full installer update leaves old backups 'applied'; skipping a reverted newest one must not
+    restore the old originals over the new build."""
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    old = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    _full_update(inst)
+    with pytest.raises(rec.Recover) as e:
+        rec.recover(inst, home)
+    assert e.value.code == "RECOVER_REPLACED" and (inst / "a.py").read_text() == "A=NEWVERSION\n"
+    man = home / "hotfix" / old / "manifest.json"
+    assert json.loads(man.read_text())["status"] == "applied"           # backup kept, untouched
+
+
+def test_revert_refuses_after_a_full_update_even_when_revert_failed(tree, monkeypatch):
+    """Review of #525: a failed revert marks 'revert-failed'; that must not switch off the downgrade guard."""
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    real = hf._atomic_copy
+
+    n = []
+
+    def locked(*a):                                     # the first copy works, the second fails: a write had happened (#568 item 3)
+        n.append(1)
+        if len(n) > 1:
+            raise PermissionError("locked")
+        real(*a)
+
+    monkeypatch.setattr(hf, "_atomic_copy", locked)
+    with pytest.raises(PermissionError):
+        hf.revert(inst, home, FakeHooks().hooks())
+    monkeypatch.setattr(hf, "_atomic_copy", real)
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "revert-failed"
+    _full_update(inst)
+    with pytest.raises(hf.Refused) as e:
+        hf.revert(inst, home, FakeHooks().hooks())
+    assert e.value.code == "HOTFIX_REPLACED" and (inst / "a.py").read_text() == "A=NEWVERSION\n"
+
+
+def test_revert_with_a_bad_backup_changes_nothing_and_keeps_applied(tree):
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
+    (home / "hotfix" / hid / "originals" / "a.py").write_text("tampered")
+    with pytest.raises(hf.HotfixError):
+        hf.revert(inst, home, FakeHooks().hooks())
+    assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "applied"
+    assert (inst / "a.py").read_text() == "A=2\n"
+
+
+def test_recover_refuses_a_read_only_file_before_any_change(tree):
+    """Review of #588 (#568 item 2): read-only is not 'Core is running', and recover must not start a half restore."""
+    import os
+    import stat
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    write(src, "b.py", "B=2\n")
+    hf.apply(inst, source(src), home, FakeHooks().hooks())
+    ro = inst / "b.py"
+    os.chmod(ro, stat.S_IREAD)
+    try:
+        with pytest.raises(rec.Recover) as e:
+            rec.recover(inst, home)
+        assert e.value.code == "RECOVER_READ_ONLY" and "Core" not in e.value.message
+        assert (inst / "a.py").read_text() == "A=2\n"                       # nothing was restored
+    finally:
+        os.chmod(ro, stat.S_IWRITE | stat.S_IREAD)

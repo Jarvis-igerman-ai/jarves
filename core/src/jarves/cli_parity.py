@@ -45,10 +45,10 @@ FEATURES: dict[str, object] = {
     "dev_manager": "dev", "dev_status": "dev", "files": (D, "the file workspace is browsed on the My files page"),
     "proactive_alerts": (D, "alerts are read and answered on the Alerts page"),
     "autonomy": (D, "autonomy proposals are approved on the Autonomy page"),
-    "background_core": "start", "display_control": "show", "tray_icon": "start", "autostart": "autostart",
+    "background_core": "start", "display_control": "show", "tray_icon": "start", "listening_dot": (D, "a pure switch; change it with `jarvis features`"), "autostart": "autostart",
     "update_check": "update", "beta_channel": "update", "auto_update": "update","release_signoff": "release", "proactive_help": (D, "a pure switch; change it with `jarvis features`"),
     "profiles": "profile", "context_trace": (D, "the context trace is a dashboard view of one conversation"),
-    "browser": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
+    "browser": "browser", "browser_pilot": "browser", "helper": "approvals", "helper_readonly_auto": (D, "a pure switch; `jarvis features`"),
     "whatsapp_handoff": (D, "WhatsApp opens a draft in the app; no CLI needed, switch via `jarvis features`"),
     "morning_briefing": "jobs", "home_assistant": "home", "conversation_recall": "recall",
     "self_diagnostics_2": "health", "client_delegation": "budget",
@@ -56,7 +56,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents", "agent_opencode": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
-    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo", "github": "github", "provider_openrouter": "models", "github_write": "github",
+    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo", "github": "github", "provider_openrouter": "models", "github_write": "github", "github_approve_reviews": "github", "model_lab": "modellab",
     "drive_briefing": (D, "a spoken pre-drive briefing; switch it with `jarvis features`"),   # V6 P5
 }
 

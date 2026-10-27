@@ -64,6 +64,7 @@ def _delegation_kwargs(core) -> dict:
 
 STOP_TASKS_TIMEOUT_S = 6.0         # issue #17: bound on waiting for cancelled background tasks in Core.stop
 WAKE_GRACE_AFTER_LIVE_S = 1.5   # issue #17: after a conversation ends the wake word stays deaf this long (own speech tail)
+WAKE_START_HOLD_S = 8.0      # conversation start: wake word waits this long (it was 45 s: the owner's 'start' got nothing)
 NEAR_MISS_MIN = 0.12         # a wake score at/above this but below the threshold is logged (WAKE_NEAR_MISS)
 
 
@@ -1332,12 +1333,14 @@ class Core:
         await self._start_live()
 
     async def _chime(self, kind: str) -> None:
-        """Short soft chime: "wake" = heard you, "ready" = connected, talk now."""
+        """Short soft chime: "wake" = heard you, "ready" = connected, talk now (not after a wake: ONE pip per wake),
+        "close" = the conversation closed after hidden-mode idle."""
         if not self.cfg.voice.chime or self.dev.audio is None:
             return
         import numpy as _np
         rate = 24000
-        notes = {"wake": [(880, 0.10)], "ready": [(660, 0.08), (990, 0.12)]}.get(kind, [])
+        notes = {"wake": [(880, 0.10)], "ready": [(660, 0.08), (990, 0.12)],
+                 "close": [(660, 0.12), (440, 0.22)]}.get(kind, [])          # close = soft falling "closing" cue
         parts = []
         for hz, dur in notes:
             t = _np.arange(int(rate * dur)) / rate
@@ -1389,12 +1392,19 @@ class Core:
             self._hold_wake_until = 0.0
             self._wake_grace_until = time.monotonic() + WAKE_GRACE_AFTER_LIVE_S    # speaker tail is not "Hey Jarvis"
             if ack and self.wake_log is not None and not self.stopping:
-                if reason == "no_speech":
+                lv_ = live_ref[0]
+                greeting_lost = bool(getattr(lv_, "greeting", None)) and not getattr(
+                    getattr(lv_, "_first_audio", None), "is_set", lambda: True)()
+                if reason == "no_speech" and greeting_lost:
+                    # VQ-5: the session closed while its greeting never played: a broken start, not proof of a false
+                    # wake. Counting it tightened the wake word after every miss (a feedback loop).
+                    logs.info("wake", "WAKE_NO_SPEECH_NEUTRAL", "greeting never played: not counted as a false wake")
+                elif reason == "no_speech":
                     self.wake_log.record(True)
                     if self.wake is not None:
                         self.wake.note_false_trigger()
                     self._wake_tune()
-                elif reason in ("user", "idle", "timeout", "remote_closed", "budget"):
+                elif reason in ("user", "idle", "idle_stop", "timeout", "remote_closed", "budget"):
                     self.wake_log.record(False)
                     self._wake_tune()
             if self.live is live_ref[0]:
@@ -1414,6 +1424,8 @@ class Core:
                     else "conversation reached its maximum length (voice.session_max_s); reconnecting")}))
                 await self._voice_limit_notice("VOICE_SESSION_MAX", f"{self.cfg.voice.session_max_s:g} s",
                                                self.cfg.voice.session_max_s)
+            elif reason == "idle_stop" and not self.stopping:
+                self._spawn(self._chime("close"))       # soft distinct closing cue; the tray goes back to "waiting"
             elif reason in ("idle", "no_speech") and not self.stopping:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה נסגרה בגלל שקט (voice.idle_disconnect_s)" if he_
@@ -1490,6 +1502,8 @@ class Core:
                                  v.language, v.realtime_voice, v.half_duplex, audio_io, max_session_s=max_s,
                                  idle_disconnect_s=v.idle_disconnect_s, **common, **extra)
         live_ref[0] = live
+        if hasattr(live, "idle_stop_fn"):
+            live.idle_stop_fn = self._idle_stop_s
         wsp.attach_live(live, self.workspace, self.memory)   # persona files + known facts in the voice instructions
         if getattr(self, "ops", None) is not None:            # V5: the owner's confirmed preferences (small budget)
             from . import preferences as prefs_mod
@@ -1541,12 +1555,23 @@ class Core:
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open
+        if ack and greeting and hasattr(live, "wait_ready"):
+            self._spawn(self._wake_greeting_watch(live))     # nudge/retry also for wake sessions (nobody awaits them)
         if ack:
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
-            self._spawn(self._chime("ready"))
+            # no second pip: a wake session already pipped once (_chime("wake")); the owner heard two
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+
+    async def _wake_greeting_watch(self, live) -> None:
+        try:
+            await live.wait_ready()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio on a wake session; continuing without it",
+                      error_type=type(e).__name__)
 
     async def _tasks_changed(self, views: list[dict]) -> None:
         """Background task list for the screen (tasks.py docstring: message shape)."""
@@ -1762,8 +1787,10 @@ class Core:
         self.wake_log = WakeOutcomeLog(self.home)
         self._wake_tune()
         if v.activation == "conversation" and self.voice_mode == "live":
-            self._hold_wake_until = time.monotonic() + 45     # the session opens now; "Hey Jarvis" is for AFTER it ends
+            self._hold_wake_until = time.monotonic() + WAKE_START_HOLD_S     # the session opens now; "Hey Jarvis" is for AFTER it ends
         self.health.set("wake_word", "ok", f"say \"{v.wake_phrase}\" (detected on this device, {Path(v.wake_word).name})")
+        self._wake_note("starting", f"starting, wake word ready in {max(3, int(self._hold_wake_until - time.monotonic()) + 3)} s",
+                        ready_in_s=max(3, int(self._hold_wake_until - time.monotonic()) + 3))
         self._bg.append(asyncio.create_task(self._wake_loop()))
 
     def _quiet_now(self) -> bool:
@@ -1773,6 +1800,17 @@ class Core:
             return bool(ops is not None and calm.quiet_hours_now(ops.db, time.time()))
         except Exception:
             return False
+
+    def _idle_stop_s(self) -> float:
+        """Hidden-mode idle stop (voice.idle_stop_s): only while the window is hidden; 0 = never."""
+        try:
+            from .runtime import service as rt_service
+            rt = rt_service.current()
+            if rt is None or rt.view().get("display", {}).get("state") in ("shown", "starting"):
+                return 0.0
+        except Exception:
+            return 0.0
+        return float(self.cfg.voice.idle_stop_s)
 
     def _cue_allowed(self) -> bool:
         """The soft "working on it" cue (voice/live.py _dead_air_cue): the chime switch is on, not quiet hours."""
@@ -1822,12 +1860,21 @@ class Core:
     async def _levels(self, chunks):
         """Pass mic chunks through, sending the face a ~5 Hz mic level for the level bar."""
         from .voice.wakeword import level_meter
+        from .voice.wake_calib import MIC_CLIP_FIX, ClipMonitor
+        clip, clip_noted = ClipMonitor(), -1e9
         last = 0.0
         async for c in chunks:
             now = time.monotonic()
             if now - last > 0.2 and self.link.face is not None:
                 last = now
                 await self.link.send_face("mic.level", {"level": round(level_meter(c), 3)})
+            if clip.feed(c) and clip.clipping() and now - clip_noted > 60:
+                clip_noted = now                  # VQ-7: say the exact fix on the dashboard/status, once a minute
+                logs.warn("wake", "WAKE_MIC_CLIPPING", "the microphone level is too high (audio clips)",
+                          peak=round(clip.peak, 3), fix=MIC_CLIP_FIX)
+                from .voice.wake_record import webcam_hint
+                self._wake_note("clipping", MIC_CLIP_FIX + webcam_hint(_mic_name(self.cfg.voice.input_device)),
+                                peak=round(clip.peak, 3))
             yield c
 
     def _wake_should_listen(self) -> bool:
@@ -1843,14 +1890,17 @@ class Core:
         v = self.cfg.voice
         load = getattr(self.wake.detector, "load", None)
         if load is not None:
+            t_load = time.monotonic()
             try:
                 await load()
+                logs.info("wake", "WAKE_LOAD_DONE", "wake detector loaded", ms=int((time.monotonic() - t_load) * 1000))
             except Exception:
                 logs.error("wake", "WAKE_LOAD_FAILED", "wake listener failed to initialize", exc=True)
                 self.health.set("wake_word", "unavailable", "wake listener failed to initialize", "see logs; use Talk")
                 return
         from .voice.wake_calib import load_calibration, save_calibration
         from .voice.wake_confirm import SpeechMonitor
+        t_start = time.monotonic()
         last_report = time.monotonic()
         peak_score = 0.0
         peak_level = 0.0
@@ -1863,6 +1913,7 @@ class Core:
             if not self._wake_should_listen():
                 await asyncio.sleep(0.2)
                 continue
+            t_mic = time.monotonic()
             mic = self._wake_audio() if self._wake_audio else StreamingAudio(v.input_device, v.output_device, rate=16000)
             from .runtime.power import stall_guard          # unplugged headset / after sleep: no frames -> re-open
             chunks = self._levels(stall_guard(mic.mic_chunks(16000, 2560), self.cfg.runtime.mic_stall_s))  # 80 ms
@@ -1880,12 +1931,18 @@ class Core:
                         peak_level = max(peak_level, level_meter(chunk))
                     if first_frame:
                         first_frame = False
+                        logs.info("wake", "WAKE_MIC_OPEN", "first microphone frame arrived",
+                                  ms=int((time.monotonic() - t_mic) * 1000),
+                                  since_start_s=int(time.monotonic() - t_start))
                         self._wake_mic_ready = True
                         self._wake_mic_active = True
                         self.health.set("wake_word", "ok", "local wake microphone active")
                         await self.link.broadcast("status", self.snapshot())
                         logs.info("wake", "WAKE_LISTENING", "microphone active; waiting for Hey Jarvis",
-                                  mic=_mic_name(v.input_device), threshold=self.wake.detector.threshold)
+                                  mic=_mic_name(v.input_device), threshold=self.wake.detector.threshold,
+                                  configured_threshold=v.wake_threshold, effective_threshold=self.wake.detector.threshold,
+                                  tune_level=self.wake_log.level() if self.wake_log is not None else 0)
+                        self._wake_note("ready", "")
                     sc = self.wake.stats.last_score
                     if (not self._woke and sc >= NEAR_MISS_MIN and sc < self.wake.detector.threshold
                             and time.monotonic() - near_t > 2.0):
@@ -1927,8 +1984,8 @@ class Core:
                     if time.monotonic() - last_report >= 15:
                         logs.info("wake", "WAKE_HEALTH", "wake listener running", frames=self.wake.stats.frames,
                                   peak_score=round(peak_score, 3), peak_level=round(peak_level, 3),
-                                  threshold=self.wake.detector.threshold, near_misses=near_n,
-                                  speech_no_match=heard_n, floor_db=round(monitor.floor_db, 1),
+                                  threshold=self.wake.detector.threshold, configured_threshold=v.wake_threshold,
+                                  near_misses=near_n, speech_no_match=heard_n, floor_db=round(monitor.floor_db, 1),
                                   **({"gain_db": round(self.wake.detector.agc.gain_db, 1)}
                                      if getattr(self.wake.detector, "agc", None) is not None else {}),
                                   mic=mic_name)
@@ -1975,7 +2032,21 @@ class Core:
                 self._spawn(self._chime("wake"))
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
-                await self._start_live(ack=True)
+                # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
+                await self._start_live(ack=True, greeting=self.wake_greeting())
+
+    def wake_greeting(self) -> str | None:
+        """Short cue for a wake-opened live session; None when the greeting feature is off."""
+        if not self.cfg.voice.greeting:
+            return None
+        try:
+            from . import drive_mode
+            if self.features.active(drive_mode.FEATURE):
+                return None                # drive mode: no spoken cue (and no start-greeting claim) on a wake
+        except Exception:
+            pass
+        self._greeted = True              # the wake session greets: no second start-greeting when the face connects later
+        return "אני מקשיב." if self.cfg.voice.language == "he" else "I'm listening."
 
     # ------------------------------------------------------------------ feature switches (features.py)
     def _health_components(self) -> dict:

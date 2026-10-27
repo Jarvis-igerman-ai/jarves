@@ -49,7 +49,7 @@ def test_sheet_round_trip_and_sign_off(tmp_path):
         again.sign("4.1.0", SHA)                              # not a beta label
     with pytest.raises(so.SheetError):
         again.sign("4.1.0-beta.1", "abc")                     # not a full SHA
-    again.sign("4.1.0-beta.1", SHA, "2026-10-21")
+    again.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Owner")
     so.save(tmp_path, again)
     done = so.load(tmp_path, "4.1.0")
     assert done.problems() == [] and done.commit == SHA and done.date == "2026-10-21"
@@ -122,17 +122,14 @@ def _signed_root(tmp_path, sha=SHA):
     s = _sheet()
     s.set_result("C1", "pass")
     s.set_result("OI-02", "pass")
-    s.sign("4.1.0-beta.3", sha, "2026-10-21")
+    s.sign("4.1.0-beta.3", sha, "2026-10-21", owner="Owner")
     so.save(tmp_path, s)
-    d = tmp_path / "docs" / "release"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "SIGNED_4.1.0").write_text(SIGNED, encoding="utf-8")
     return tmp_path
 
 
 def _gate(tmp_path, **over):
     kw = dict(tag="v4.1.0", sha=SHA, verified_sha=SHA, build_version="4.1.0.77", root=_signed_root(tmp_path),
-              checklist_text="| 1 | thing | done |\n", bug_tables=[], nightly_runs=_nights(),
+              checklist_text="| 1 | thing | done |\n", bug_tables=[],
               checks_runs=[{"head_sha": SHA, "conclusion": "success", "event": "push"}],
               is_ancestor=lambda a, b: True, changed_files=lambda a, b: [], now=NOW)
     kw.update(over)
@@ -151,36 +148,29 @@ def test_gate_refuses_without_manual_sign_off(tmp_path):
 
 
 def test_gate_requires_tested_beta_sha_equals_tag_or_docs_only(tmp_path):
+    """#539: the tag commit (sha) differs from the tested commit (verified_sha = the sheet's commit)."""
     other = "b" * 40
-    assert any("code changed" in p for p in _gate(tmp_path, sha=other, verified_sha=other,
-                                                  checks_runs=[{"head_sha": other, "conclusion": "success"}],
-                                                  changed_files=lambda a, b: ["core/a.py"]))
-    assert _gate(tmp_path, sha=other, verified_sha=other, checks_runs=[{"head_sha": other, "conclusion": "success"}],
-                 changed_files=lambda a, b: ["docs/x.md"]) == []
+    assert any("code changed" in p for p in _gate(tmp_path, sha=other, changed_files=lambda a, b: ["core/a.py"]))
+    assert _gate(tmp_path, sha=other, changed_files=lambda a, b: ["docs/x.md"]) == []
 
 
-def test_gate_blocks_on_sha_mismatch_open_p0_p2_nightly_and_tag_shape(tmp_path):
+def test_gate_blocks_on_sha_mismatch_open_p0_p2_and_tag_shape(tmp_path):
     assert any("differs from the verified" in p for p in _gate(tmp_path, verified_sha="c" * 40))
-    assert any("open P0-P2" in p for p in _gate(tmp_path, checklist_text="- P1 bug still open\n"))
-    assert _gate(tmp_path, checklist_text="- zero open P0-P2\n") == []
-    assert any("checklist row 2" in p for p in _gate(tmp_path, checklist_text="| 2 | thing | pending |\n"))
-    assert any("bug B1" in p for p in _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n"]))
-    named = _gate(tmp_path, bug_tables=[("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")])
-    assert any(p.startswith("X_BUG_TABLE.md: bug B2 (P1)") for p in named)
-    assert any("latest nightly is not green" in p for p in _gate(tmp_path, nightly_runs=_nights(bad=0)))
+    # legacy checklist and bug-table rows are retired from the gate (owner 26 Oct, OD-S2): information only
+    assert _gate(tmp_path, checklist_text="- P1 bug still open\n| 2 | thing | pending |\n") == []
+    assert _gate(tmp_path, checklist_text=None) == []
+    named = ("X_BUG_TABLE.md", "| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
+    assert _gate(tmp_path, bug_tables=["| B1 | P2 | open | x |\n", named]) == []
+    shown = gate.legacy_report("| 2 | thing | pending |\n", [named])
+    assert any("checklist row 2" in x for x in shown) and any(x.startswith("X_BUG_TABLE.md: bug B2 (P1)") for x in shown)
     assert any("not a stable tag" in p for p in _gate(tmp_path, tag="v4.1.0-beta.1"))
     assert any("no green jarves-checks" in p for p in _gate(tmp_path, checks_runs=[]))
 
 
-def test_nightly_needs_only_the_latest_run_green_and_fresh(tmp_path):
-    """Owner 26 Oct: no five-green-nights rule. One fresh green run is enough, even after red nights or a short history."""
-    assert _gate(tmp_path, nightly_runs=_nights(1)) == []
-    assert _gate(tmp_path, nightly_runs=_nights(3, bad=1)) == []                       # an older red night is history
-    assert any("not green" in p for p in _gate(tmp_path, nightly_runs=_nights(3, bad=0)))
-    assert any("fresh one" in p for p in _gate(tmp_path, now=NOW + timedelta(days=5)))
-    assert any("no completed nightly" in p for p in _gate(tmp_path, nightly_runs=[]))
-    running = [{"status": "in_progress", "created_at": NOW.isoformat()}] + _nights(1)
-    assert _gate(tmp_path, nightly_runs=running) == []                                 # in-progress runs are ignored
+def test_the_gate_has_no_nightly_requirement(tmp_path):
+    """Owner 26 Oct: no nightly check at all, not even a stale one."""
+    assert not hasattr(gate, "nightly_problems")
+    assert _gate(tmp_path) == []
 
 
 def _issue(n, *labels, **kw):
@@ -189,22 +179,42 @@ def _issue(n, *labels, **kw):
 
 def test_gate_blocks_on_open_p0_p2_github_issues_but_not_planned_work(tmp_path):
     assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"),
-                                   _issue(4, "P1", "bug", pull_request={})]) == []
+                                   _issue(4, "P1", "bug", pull_request={}), _issue(7, "P1", "4.5.1")]) == []
+    # #499: a real defect that also carries a planned-work label is NOT skipped
+    both = _gate(tmp_path, issues=[_issue(8, "P1", "bug", "v7"), _issue(9, "P2", "bug", "4.5.1"), _issue(10, "P0", "bug", "enhancement")])
+    assert [p for p in both if "open P" in p] == ["open P1 issue #8: t8", "open P2 issue #9: t9", "open P0 issue #10: t10"]
     probs = _gate(tmp_path, issues=[_issue(5, "P0", "bug"), _issue(6, "P2", "ci")])
     assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5", "open P2 issue #6: t6"]
 
 
-def test_gate_refuses_a_tag_without_the_signed_file(tmp_path):
-    root = _signed_root(tmp_path)
-    check = lambda: gate.signed_problems(root, "4.1.0", SHA, lambda a, b: True, lambda a, b: [])  # noqa: E731
-    assert check() == []
-    f = root / "docs" / "release" / "SIGNED_4.1.0"
-    f.write_text("owner: Igal\n", encoding="utf-8")
-    assert len(check()) == 2                                                           # date and commit missing
-    f.write_text("owner: Igal\ndate: 2026-10-21\ncommit: abc\n", encoding="utf-8")
-    assert any("full SHA" in p for p in check())
-    f.unlink()
-    assert any("owner signature missing" in p for p in check())
+def test_known_issue_label_skips_only_with_exact_label_and_is_listed(tmp_path, capsys):
+    acc = [_issue(1, "P2", "bug", "known-issue-4.5"), _issue(2, "P1", "bug", " Known-Issue-4.5 ")]
+    assert [p for p in _gate(tmp_path, issues=acc) if "open P" in p] == []
+    assert gate.accepted_issues(acc) == ["#1 (P2): t1", "#2 (P1): t2"]
+    # a bug without it counts; planned-work labels alone never skip a bug; near-miss labels do not skip
+    rest = [_issue(3, "P1", "bug"), _issue(4, "P1", "bug", "v5"), _issue(5, "P2", "bug", "4.5.1"),
+            _issue(6, "P2", "bug", "known-issue-4.5.1"), _issue(7, "P2", "bug", "known-issue")]
+    assert [p for p in _gate(tmp_path, issues=acc + rest) if "open P" in p] == [
+        f"open {s} issue #{n}: t{n}" for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P2"), (7, "P2"))]
+    assert gate.accepted_issues(rest) == []
+    gate._print_accepted(gate.accepted_issues(acc))
+    assert "accepted known issues (2" in capsys.readouterr().out
+
+
+def test_gate_refuses_when_gh_issues_cannot_be_read(tmp_path, monkeypatch, capsys):
+    def boom(repo):
+        raise OSError("gh down")
+    monkeypatch.setattr(gate, "gh_issues", boom)
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    assert rc == 1 and "cannot read open issues" in capsys.readouterr().out
+
+
+def test_one_signature_the_signed_sheet_is_enough_and_unsigned_is_refused(tmp_path):
+    """Owner 26 Oct: ONE signature. There is no SIGNED_<version> file any more; the signed manual sheet is the signature."""
+    assert not hasattr(gate, "signed_problems")
+    assert _gate(tmp_path) == []
+    assert any("sign-off" in p for p in gate.signoff_problems(tmp_path / "none", "4.1.0", SHA, lambda a, b: True, lambda a, b: []))
 
 
 # The bug tables in docs/reviews use different column orders. A fixed `| id | sev | status |` position read the area,
@@ -264,7 +274,7 @@ def test_a_later_version_needs_its_own_checklist_not_the_4_0_0_one(tmp_path):
     assert gate.find_checklist(tmp_path, "4.0.1", None) is None
     (rev / "RELEASE_CHECKLIST_4.0.1.md").write_text("| 1 | thing | done |\n", encoding="utf-8")
     assert gate.find_checklist(tmp_path, "4.0.1", None) == rev / "RELEASE_CHECKLIST_4.0.1.md"
-    assert any("RELEASE_CHECKLIST_4.1.0.md" in p for p in _gate(tmp_path, checklist_text=None))
+    assert _gate(tmp_path, checklist_text=None) == []          # a missing checklist no longer gates (retired)
 
 
 def test_manual_sheet_is_one_row_per_entry_and_skips_what_the_app_cannot_show():
@@ -355,7 +365,62 @@ def test_main_baseline_without_resolvable_since_lists_tree_and_since_adds_rows(t
     assert "2 changed guide(s)" in next(r.todo for r in sh.rows if r.id == "G1")
 
 
-def test_signed_file_empty_field_does_not_borrow_the_next_line(tmp_path):
-    root = _signed_root(tmp_path)
-    (root / "docs" / "release" / "SIGNED_4.1.0").write_text("owner:\ndate: 2026-10-21\ncommit: " + SHA + "\n", encoding="utf-8")
-    assert any("'owner:'" in p for p in gate.signed_problems(root, "4.1.0", SHA, lambda a, b: True, lambda a, b: []))
+def test_cli_bug_tables_option_warns_and_legacy_never_gates(tmp_path, monkeypatch, capsys):
+    """Slice 3: legacy rows are printed as 'legacy, not gating'; live issues are the only issue source."""
+    (tmp_path / "docs" / "reviews").mkdir(parents=True)
+    (tmp_path / "docs" / "reviews" / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [_issue(1, "P2", "bug", "known-issue-4.5")])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--bug-tables", "docs/reviews/*BUG_TABLE*.md"])
+    out = capsys.readouterr().out
+    assert rc == 1                                            # no sheet and no green run still gate
+    assert "--bug-tables no longer gates" in out and "legacy, not gating" in out and "bug B2 (P1)" in out
+    assert "accepted known issues (1" in out
+    assert "open P1 issue" not in out
+
+
+def test_508_sign_needs_an_owner_and_a_removed_owner_or_hash_blocks_the_gate(tmp_path):
+    from jarves import release_signoff as so2
+    s = so2.Sheet(version="4.1.0", rows=[so2.Row("A1", "area", "todo", "expected", "pass")])
+    with pytest.raises(so2.SheetError):
+        s.sign("4.1.0-beta.1", SHA, "2026-10-21")                       # no owner
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="  The   Owner ")
+    assert s.owner == "The Owner" and not s.problems()
+    again = so2.Sheet.parse(s.render())
+    assert again.owner == "The Owner" and again.rows_hash == s.rows_hash and not again.problems()
+    again.owner = ""
+    assert any("Owner" in p for p in again.problems())
+    forged = so2.Sheet.parse(s.render().replace("expected", "changed"))
+    assert any("rows changed after signing" in p for p in forged.problems())
+    other = so2.Sheet.parse(s.render().replace("- Owner: The Owner", "- Owner: Someone Else"))
+    assert any("rows changed after signing" in p for p in other.problems())         # sign-off fields are hashed too
+
+
+def test_508_note_typed_in_the_finishing_run_survives_save_and_load(tmp_path):
+    from jarves import release_signoff as so2
+    so2.save(tmp_path, so2.Sheet(version="4.1.0", rows=[so2.Row("A1", "area", "todo", "expected")]))
+    s = so2.load(tmp_path, "4.1.0")
+    s.set_result("A1", "accepted-blocked", "no  phone\nhere | today")              # same run as --finish
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Owner")
+    so2.save(tmp_path, s)
+    assert so2.load(tmp_path, "4.1.0").problems() == []
+
+
+def test_606_owner_must_be_printable_notes_with_backslashes_and_nfd_text_round_trip(tmp_path):
+    from jarves import release_signoff as so2
+    bs = chr(92)
+    row = so2.Row("A1", "area", "todo", "expected", "pass", "ends with a backslash" + bs)
+    s = so2.Sheet(version="4.1.0", rows=[row, so2.Row("A2", "a", "t", "e", "pass", "pipe | and " + bs + "| both")])
+    for bad in ("Own" + chr(0x202E) + "er", "Own" + chr(0x200B) + "er", "Own" + chr(0x7F) + "er"):
+        with pytest.raises(so2.SheetError):
+            s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner=bad)
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Igal")
+    again = so2.Sheet.parse(s.render())
+    assert again.rows[0].note == "ends with a backslash" + bs and again.rows[1].note == "pipe | and " + bs + "| both"
+    assert again.rows_hash == s.rows_hash and not again.problems()
+    import unicodedata
+    row.note = "caf" + chr(0xE9)                                                  # an accented note, NFC
+    s2 = so2.Sheet(version="4.1.0", rows=[row])
+    s2.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Igal")
+    nfd_text = unicodedata.normalize("NFD", s2.render())
+    assert not so2.Sheet.parse(nfd_text).problems()                              # a rewrite in NFD does not void the signature

@@ -1,0 +1,21 @@
+{
+ "dict": {
+  "The audit was reset; the old file is kept as evidence.": "יומן הביקורת אופס; הקובץ הישן נשמר כראיה.",
+  "the write audit file was changed or shortened: all GitHub writes are stopped until the owner runs: jarvis github write reset-audit": "קובץ יומן הכתיבה שונה או קוצר: כל הכתיבות ל-GitHub נעצרו עד שהבעלים יריץ: jarvis github write reset-audit",
+  "this is not an interactive terminal (a pipe, script or agent shell)": "זה לא טרמינל אינטראקטיבי (צינור, סקריפט או מעטפת של סוכן)"
+ },
+ "rules": [
+  [
+   "^more than (\\d+) writes in (\\d+) s$",
+   "יותר מ-$1 כתיבות ב-$2 שניות"
+  ],
+  [
+   "^an agent or automation session is running this command \\((.*)\\)$",
+   "סוכן או כלי אוטומטי מריץ את הפקודה ($1)"
+  ],
+  [
+   "^refused: (.*)\\. Run this command yourself in your own terminal; the approval opens as a popup window on this computer\\.$",
+   "נדחה: $1. הריצו את הפקודה בעצמכם בטרמינל שלכם; האישור נפתח כחלון קופץ במחשב הזה."
+  ]
+ ]
+}

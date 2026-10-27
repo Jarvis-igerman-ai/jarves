@@ -8,3 +8,33 @@
 # issue  = the showstopper issue number
 # since  = date quarantined (UTC)
 # reason = one line: what flakes and where
+
+[[test]]
+id = "test_core.py::test_logs_have_correlation_ids_and_no_private_text"
+issue = 548
+since = "2026-10-26"
+reason = "failed once, same commit passed"
+
+[[test]]
+id = "test_dashboard_mic_stop_browser.py::test_mic_menu_narrow_width_stays_on_screen_and_hebrew"
+issue = 549
+since = "2026-10-26"
+reason = "failed once, same commit passed (real browser layout)"
+
+[[test]]
+id = "test_perf_probes.py::test_slow_cli_probe_never_blocks_features_list_and_its_result_lands"
+issue = 550
+since = "2026-10-26"
+reason = "failed once, same commit passed (timing probe)"
+
+[[test]]
+id = "test_say_engine.py::test_default_output_is_one_line_without_espeak_on_windows"
+issue = 551
+since = "2026-10-26"
+reason = "failed once, same commit passed"
+
+[[test]]
+id = "test_runtime.py::test_hide_terminates_a_window_that_does_not_close"
+issue = 556
+since = "2026-10-26"
+reason = "2 s wall-clock bound fails on a loaded Windows runner (2.53 s)"

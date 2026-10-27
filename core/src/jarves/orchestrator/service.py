@@ -504,6 +504,11 @@ class Orchestrator:
             return {"ok": False, "code": "BUDGET_REACHED", "text": say("BUDGET_REACHED", lang)}
         return None
 
+    def _budget_left(self) -> float:
+        """What is left of today's cost cap (0 = no cap); passed to claude as --max-budget-usd (#362). At least one cent."""
+        cap = self.acfg.max_cost_usd_per_day
+        return max(0.01, cap - self._cost_today()) if cap and cap > 0 else 0.0
+
     def _cost_today(self) -> float:
         return self.db.count("cost_microusd") / 1e6
 
@@ -798,7 +803,8 @@ class Orchestrator:
 
         def on_event(kind: str, d: dict) -> None:
             self._managed_claude_event(holder, kind, d, started)
-        m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model)
+        m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
+                                 max_budget_usd=self._budget_left())
         try:
             m.start()
         except OSError as e:
@@ -825,7 +831,8 @@ class Orchestrator:
         self.db.audit(by, "start", session_id=sid, decision="approved", result="started", detail=f"claude {proj.name}")
         logs.info("agents", "AGENTS_SESSION_STARTED", "managed coding session started", provider="claude")
         return {"ok": True, "code": "ok", "session": self.view(self.db.session(sid), lang),
-                "text": ("Started Claude in " if lang == "en" else "הפעלתי את קלוד בפרויקט ") + proj.name + "."}
+                "text": (("Started Claude in " if lang == "en" else "הפעלתי את קלוד בפרויקט ") + proj.name
+                         + (f" (session {sid[:8]})." if lang == "en" else f" (סשן {sid[:8]})."))}
 
     def _managed_claude_event(self, holder: dict, kind: str, d: dict, started: threading.Event) -> None:
         now = self.clock()

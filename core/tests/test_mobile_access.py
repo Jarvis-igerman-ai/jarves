@@ -207,6 +207,24 @@ def test_two_phones_are_independent(srv):
     assert req(srv, "GET", "/api/m/me", token=t1)[0] == 401 and req(srv, "GET", "/api/m/me", token=t2)[0] == 200
 
 
+def test_switching_from_phone_a_to_phone_b_rejects_a_for_good(srv, home):
+    """#428: pair A, switch to B (revoke A, pair B): A is rejected at once, cannot re-pair with its used code, and stays
+    rejected after the phone server restarts; B works."""
+    ta, da, code_a = pair(srv, "phone A")
+    assert req(srv, "GET", "/api/m/me", token=ta)[0] == 200
+    assert admin(srv, "POST", f"/api/mobile/devices/{da}/revoke", {})[0] == 200
+    tb, db, _ = pair(srv, "phone B")
+    assert req(srv, "GET", "/api/m/me", token=ta)[0] == 401 and req(srv, "GET", "/api/m/me", token=tb)[0] == 200
+    assert req(srv, "POST", "/api/m/pair", body={"code": code_a["code"], "name": "phone A"})[0] != 200   # the code was single use
+    assert req(srv, "GET", "/api/m/me", token=ta)[0] == 401                                              # still rejected
+    srv.stop()
+    d2 = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=FakeCore().bridge()).start()
+    try:
+        assert req(d2, "GET", "/api/m/me", token=ta)[0] == 401 and req(d2, "GET", "/api/m/me", token=tb)[0] == 200
+    finally:
+        d2.stop()
+
+
 def test_per_device_scopes(srv, fake):
     tok, dev, _ = pair(srv)
     st, _ = admin(srv, "POST", f"/api/mobile/devices/{dev}/scopes", {"scopes": ["status"]})

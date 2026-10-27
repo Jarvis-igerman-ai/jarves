@@ -43,6 +43,12 @@ PLATFORM_STATUS: dict[str, dict] = {
                     "Windows PC, 19 Oct 2026; core/tests/test_runtime.py"},
         "linux_arm64_pi": {"status": "not_applicable", "equivalent": "dashboard Home page (show/hide, mute, "
                            "pause alerts, status, quit)", "roadmap_issue": ISSUE_PI}},
+    "listening_dot": {
+        "windows": {"status": "implemented_unverified", "blocker": "state mapping, tray icon and dot logic tested with "
+                    "fakes; the real corner dot (click-through, no focus steal) and the tray icons are the owner's check",
+                    "evidence": "core/tests/test_hidden_indicator.py"},
+        "linux_arm64_pi": {"status": "not_applicable", "equivalent": "dashboard Home page shows the state",
+                           "roadmap_issue": ISSUE_PI}},
     "autostart": {
         "windows": {"status": "implemented_unverified", "blocker": "HKCU Run key written through a fake registry in "
                     "tests; a real Windows login was not exercised", "evidence": "core/tests/test_runtime.py"},
@@ -97,6 +103,8 @@ _register("display_control", "להופיע / להיעלם בפקודה", "Show /
           tools=["show_yourself", "hide_yourself"], about="\"show yourself\" / \"hide yourself\" open or close the window")
 _register("tray_icon", "סמל במגש המערכת", "Tray icon", True, probe=_probe_tray, slow=True, config="runtime.tray",
           applies="restart", about="notification-area icon: dashboard, show/hide, mute, pause alerts, status, quit")
+_register("listening_dot", "נקודת האזנה בפינת המסך", "Listening dot", True, config="runtime.listening_dot",
+          about="a tiny click-through dot near a screen corner while a conversation is open and the window is hidden")
 _register("autostart", "הפעלה עם הכניסה למחשב", "Start at login", False, probe=_probe_autostart,
           about="starts JARVES invisibly when you log in (Windows: Startup apps; Pi: systemd user service)")
 

@@ -1,0 +1,42 @@
+order = 59
+category = "system"
+features = ["browser_pilot"]
+aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
+links = ["browser", "privacy"]
+error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
+title_he = "פיילוט דפדפן (קריאה בלבד)"
+title_en = "Browser pilot (read only)"
+what_he = "ג'ארביס קורא דפים שהצבעתם עליהם: דפים מקומיים בלבד במחשב הזה או דפים ציבוריים. הוא לא מתחבר, לא שולח טפסים, לא לוחץ על דבר שמשנה מצב ולא שומר עוגיות או סיסמאות. כל פעולה נרשמת בקבלה (סוג בלבד)."
+what_en = "JARVES reads pages you point to: local pages on this computer or public pages. It does not log in, submit forms, click anything that changes state, or store cookies or passwords. Every action leaves a receipt (kind only)."
+say = [["תקרא לי מה כתוב בעמוד המקומי", "Read me what the local page says"]]
+expect_he = "הטקסט מנוקה מסודות ומסומן כלא אמין. יש מגבלה על מספר הפעולות ועל הזמן, ואפשר לעצור בכל רגע."
+expect_en = "Text is cleaned of secrets and marked untrusted. Actions and time are capped, and you can stop at any moment."
+test = "feature"
+test_he = "הבדיקה רק בודקת שהמתג קיים. היא לא פותחת דף ולא משנה כלום."
+test_en = "The check only sees that the switch exists. It opens no page and changes nothing."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "אין עוגיות, סיסמאות או טפסים. צילומי מסך לא נשמרים בשלב הזה. ביומן נרשם רק סוג הפעולה."
+privacy_en = "No cookies, passwords or forms. Screenshots are not stored at this stage. The log holds only the kind of action."
+
+[[steps]]
+he = "הדליקו את המתג \"פיילוט דפדפן\" (כבוי כברירת מחדל). זו תכונת בטא: קודם הדליקו תכונות בטא."
+en = "Switch on \"Browser pilot\" (off by default). It is a beta feature: turn on beta features first."
+action = "feature_on:browser_pilot"
+check = "active:browser_pilot"
+
+[[steps]]
+he = "לכיבוי: jarvis features off browser_pilot. הדפדפן הרגיל נשאר כפי שהיה (jarvis browser)."
+en = "To turn off: jarvis features off browser_pilot. The normal browser stays as it was (jarvis browser)."
+
+[[problems]]
+he = "הוא אומר שהפיילוט כבוי"
+en = "He says the pilot is off"
+fix_he = "הריצו jarvis features on browser_pilot (אחרי הפעלת תכונות בטא)."
+fix_en = "Run jarvis features on browser_pilot (after turning on beta features)."
+
+[[problems]]
+he = "הוא מסרב לפתוח כתובת"
+en = "He refuses to open an address"
+fix_he = "רק דפים מקומיים (localhost) וציבוריים נפתחים. כתובות פרטיות ברשת הביתית ודפי חשבון של ספקי AI חסומים."
+fix_en = "Only local (localhost) and public pages open. Private home-network addresses and AI account pages are blocked."

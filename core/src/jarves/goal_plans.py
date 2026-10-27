@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -258,19 +259,63 @@ class PlanStore:
 MAX_ATTEMPTS = 3
 
 
+STEP_SHOW_CHARS = MAX_ARGS_CHARS + 200   # the step popup shows the arguments in full (propose() caps them at MAX_ARGS_CHARS); a longer step is not run
+
+
+def _tokens(text: object) -> list[str]:
+    """One token per character; a character the owner must SEE instead of obey (format characters such as bidi overrides and
+    zero-width marks, C0/C1 controls and DEL, except plain space, newline and tab) becomes the ONE token backslash-uXXXX.
+    Hebrew and every other letter is unchanged (#565)."""
+    out = []
+    for c in str(text if text is not None else ""):
+        cat = unicodedata.category(c)
+        if cat == "Cf" or (cat == "Cc" and c not in (" ", chr(10), chr(9))):
+            out.append(f"\\u{ord(c):04x}")
+        else:
+            out.append(c)
+    return out
+
+
+def _show_text(text: object, n: int | None = None) -> str:
+    """THE one function every popup and plan text goes through: title, why, tool names, arguments. With n, the text is cut
+    at n SHOWN characters (an escape counts as its 6 characters) and only between tokens, never inside an escape; the cut is
+    marked with the number of hidden shown characters."""
+    toks = _tokens(text)
+    total = sum(len(t) for t in toks)
+    if n is None or total <= n:
+        return "".join(toks)
+    out, used = [], 0
+    for t in toks:
+        if used + len(t) > n:
+            break
+        out.append(t)
+        used += len(t)
+    return "".join(out) + f" ... [+{total - used} more characters not shown here]"
+
+
+def _args_text(args, n: int) -> str:
+    """The arguments as the owner sees them (escaped, cut only at escape boundaries, never silently: H1)."""
+    return _show_text(json.dumps(args, ensure_ascii=False), n)
+
+
+def _shown_len(args) -> int:
+    """The length of the arguments AS SHOWN (escapes are 6 characters each: up to 6 times the raw text)."""
+    return sum(len(t) for t in _tokens(json.dumps(args, ensure_ascii=False)))
+
+
 def describe(plan: dict) -> str:
     """The text the owner approves: every step with its tool, arguments and whether it asks again."""
-    lines = [f"{plan['title']} ({len(plan['steps'])} steps, up to {int(plan['timeout_s'] // 60)} min, "
+    lines = [f"{_show_text(plan['title'], MAX_TITLE)} ({len(plan['steps'])} steps, up to {int(plan['timeout_s'] // 60)} min, "
              f"{plan['max_ai']} AI requests)"]
     for s in plan["steps"]:
-        lines.append(f"{s['idx'] + 1}. {s['tool']} {_short(json.dumps(s['args'], ensure_ascii=False), 120)}"
-                     + (f"  - {s['why']}" if s["why"] else ""))
+        lines.append(f"{s['idx'] + 1}. {_show_text(s['tool'], 80)} {_args_text(s['args'], 200)}"
+                     + (f"  - {_show_text(s['why'], MAX_WHY)}" if s["why"] else ""))
     return "\n".join(lines)
 
 
 def summary(plan: dict) -> str:
     done = sum(1 for s in plan["steps"] if s["status"] in ("done", "skipped"))
-    out = f"{plan['id']}: {plan['title']} [{plan['state']}] {done}/{len(plan['steps'])}"
+    out = f"{plan['id']}: {_show_text(plan['title'], MAX_TITLE)} [{plan['state']}] {done}/{len(plan['steps'])}"
     if plan.get("note"):
         out += f" - {plan['note']}"
     return out
@@ -372,11 +417,14 @@ class PlanRunner:
                 self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
                 return st.get(pid)
             if consequential and not tool.confirm and tool.permission != "destructive":
+                if _shown_len(step["args"]) > STEP_SHOW_CHARS:         # checked on the ESCAPED text: it can be 6x longer
+                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                    return st.get(pid)
                 ok = await self.registry.ask(
-                    f"Plan '{p['title']}', step {step['idx'] + 1}/{len(st.steps(pid))}: {step['tool']} "
-                    f"{_short(json.dumps(step['args'], ensure_ascii=False), 160)}\nRun this step?",
+                    f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
+                    f"{_args_text(step['args'], STEP_SHOW_CHARS)}\nRun this step?",
                     title="goal_plan_step", risk="medium", kind="tool", pc_only=True,
-                    why=step["why"] or "A step of a plan you approved.")
+                    why=_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
                 if not ok:
                     self._block(pid, step, "the owner did not approve this step")
                     return st.get(pid)
