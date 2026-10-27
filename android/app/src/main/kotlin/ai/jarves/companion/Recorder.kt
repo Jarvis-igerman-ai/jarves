@@ -9,7 +9,7 @@ import android.media.MediaRecorder
  * Push-to-talk recording: the microphone is open only between [start] and [stop], which the screen calls while the owner HOLDS the button
  * and the app is visible. The audio lives in memory only (never a file), is capped at [VOICE_MAX_SECONDS] and goes nowhere but the paired PC.
  */
-class Recorder {
+class Recorder(private val onFull: () -> Unit = {}) : Mic {
     @Volatile private var running = false
     private var thread: Thread? = null
     private var samples = ShortArray(0)
@@ -17,8 +17,8 @@ class Recorder {
 
     /** The caller has already checked the microphone permission. False = the microphone could not be opened. */
     @SuppressLint("MissingPermission")
-    fun start(): Boolean {
-        if (running) return true
+    override fun start(): Boolean {
+        if (running || thread?.isAlive == true) return false            // never a second AudioRecord while the previous one is still closing
         val min = AudioRecord.getMinBufferSize(VOICE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         if (min <= 0) return false
         val rec = try {
@@ -44,6 +44,7 @@ class Recorder {
                     System.arraycopy(buf, 0, samples, count, c)
                     count += c
                 }
+                if (running && count >= samples.size) onFull()               // the cap: the screen treats it as letting go
             } catch (e: Exception) {
                 // the recording simply ends; whatever was captured is returned by stop()
             } finally {
@@ -59,10 +60,10 @@ class Recorder {
     }
 
     /** Closes the microphone and returns what was heard (an empty array when nothing was recorded). */
-    fun stop(): ShortArray {
+    override fun stop(): ShortArray {
         running = false
         thread?.join(1500)
-        thread = null
+        if (thread?.isAlive != true) thread = null
         val out = samples.copyOf(count)
         samples = ShortArray(0)
         count = 0

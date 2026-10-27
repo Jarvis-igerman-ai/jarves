@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,15 +49,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** The push-to-talk card: idle, listening (button held), sending, or the last answer. Nothing here is stored. */
-sealed interface Talk {
-    data object Idle : Talk
-    data object Listening : Talk
-    data object Sending : Talk
-    data object NoMic : Talk
-    data class Done(val result: Voice) : Talk
-}
-
 sealed interface Screen {
     data class Pair(val error: PairError? = null, val busy: Boolean = false) : Screen
     data class Confirm(val base: String, val name: String, val code: String, val fingerprint: String) : Screen
@@ -70,38 +62,48 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
-    private val recorder = Recorder()
+    private val recorder = Recorder { viewModelScope.launch { talkEnd() } }          // the 55 s cap counts as letting go
+    private val machine = TalkMachine(recorder)
     private val _talk = MutableStateFlow<Talk>(Talk.Idle)
     val talk: StateFlow<Talk> = _talk
 
-    /** The owner pressed and holds the button (the permission is already granted). */
-    fun talkStart() {
-        if (_talk.value is Talk.Sending || _talk.value is Talk.Listening) return
-        _talk.value = if (session != null && active && recorder.start()) Talk.Listening else Talk.NoMic
+    private fun sync() {
+        _talk.value = machine.state
     }
 
-    /** The owner let go: close the microphone at once, then send what was heard to the paired PC. */
+    /** The owner pressed and holds the button (the permission is already granted). */
+    fun talkStart() {
+        machine.press(session != null && active && (_screen.value as? Screen.Status)?.link is Link.Online)
+        sync()
+    }
+
+    /** The owner let go on the button: close the microphone at once, then send what was heard to the paired PC. */
     fun talkEnd() {
-        if (_talk.value !is Talk.Listening) return
-        val heard = recorder.stop()
+        val heard = machine.release()
+        sync()
         val s = session
-        if (s == null || heard.size < VOICE_MIN_SAMPLES) {
-            _talk.value = Talk.Idle
-            return
-        }
-        _talk.value = Talk.Sending
+        if (heard == null || s == null) return
         viewModelScope.launch {
             val r = try {
                 withContext(Dispatchers.IO) { CompanionClient(s.base, PinnedTransport(s.pin)).voice(s.token, heard) }
             } catch (e: Exception) {
                 Voice.Unreachable
             }
-            _talk.value = Talk.Done(r)
+            machine.finished(r)
+            sync()
         }
     }
 
-    init {
-        session = (screen.value as? Screen.Status)?.session
+    /** The hold ended without a release on the button (finger dragged off, card left the screen, link went down): nothing is sent. */
+    fun talkCancel() {
+        machine.cancel()
+        sync()
+    }
+
+    /** The microphone permission was refused. */
+    fun micDenied() {
+        machine.denied()
+        sync()
     }
 
     /** The screen is visible: poll. In the background nothing is polled (battery, and the PC is not asked for nothing). */
@@ -113,10 +115,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun onStop() {
         active = false
         poll?.cancel()
-        if (_talk.value is Talk.Listening) {                        // leaving the screen while holding the button: the microphone closes, nothing is sent
-            recorder.stop()
-            _talk.value = Talk.Idle
-        }
+        talkCancel()                                                  // leaving the screen while holding the button: the microphone closes, nothing is sent
     }
 
     private fun startPolling(s: Session) {
@@ -132,6 +131,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                     Link.Unreachable
                 }
                 _screen.value = Screen.Status(s, link)
+                if (link !is Link.Online) talkCancel()                       // the PC is not there: no hold may continue
                 if (link is Link.Revoked || link is Link.CertChanged) break      // nothing more to ask until the owner decides
                 delay(10_000)
             }
@@ -181,6 +181,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun unpair() {
+        machine.reset()
+        sync()
         poll?.cancel()
         session = null
         store.clear()
@@ -201,7 +203,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
-    private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) model.micDenied() }
 
     private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
@@ -231,6 +233,7 @@ class MainActivity : ComponentActivity() {
                                             }
                                         },
                                         onRelease = model::talkEnd,
+                                        onCancel = model::talkCancel,
                                     )
                                 }
                             }
@@ -315,14 +318,19 @@ fun Banner(text: String, bad: Boolean) {
 
 /** Hold to talk: the microphone is open only while the finger is down. The first press only asks for the permission. */
 @Composable
-fun TalkCard(t: Talk, onPress: () -> Boolean, onRelease: () -> Unit) {
+fun TalkCard(t: Talk, onPress: () -> Boolean, onRelease: () -> Unit, onCancel: () -> Unit) {
+    DisposableEffect(Unit) { onDispose { onCancel() } }                      // the card leaving the screen ends any hold
     Text(stringResource(R.string.talk_title), style = MaterialTheme.typography.titleMedium)
     Card(
         Modifier.fillMaxWidth().pointerInput(Unit) {
             detectTapGestures(onPress = {
                 if (onPress()) {
-                    tryAwaitRelease()
-                    onRelease()
+                    try {
+                        if (tryAwaitRelease()) onRelease() else onCancel()          // finger dragged off the card = cancel, not send
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        onCancel()
+                        throw e
+                    }
                 }
             })
         },

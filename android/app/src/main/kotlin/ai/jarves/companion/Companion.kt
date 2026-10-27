@@ -123,7 +123,7 @@ class CompanionClient(private val base: String, private val transport: Transport
             }
             401 -> Voice.Revoked
             403 -> Voice.NotAllowed
-            409 -> if (r.body.contains("BUSY")) Voice.Busy else Voice.NeedsSecureLink
+            409 -> if (codeOf(r.body) == "BUSY") Voice.Busy else Voice.NeedsSecureLink
             429 -> Voice.RateLimited
             else -> Voice.Unreachable
         }
@@ -179,6 +179,12 @@ object Wav {
         for (s in samples) out.putShort(s)
         return out.array()
     }
+}
+
+private fun codeOf(body: String): String = try {
+    JSONObject(body).optString("code", "")
+} catch (e: JSONException) {
+    ""
 }
 
 /** Clock skew in seconds between this phone and the PC (the PC's `server_time` minus ours). The app shows it when it is large. */
