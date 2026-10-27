@@ -1,0 +1,1 @@
+- Added: `jarvis release run --version X.Y.Z [--approved-by-owner "QUOTE"] [--dry-run]` collects the release evidence, refuses when main is red, a P0-P2 is open (known-issue labels excepted) or the sheet cannot be signed, signs only with the owner's explicit approval, and prints the docs PR, release gate and tag commands; it never tags or pushes. (guide release_run)
