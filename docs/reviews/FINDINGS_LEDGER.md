@@ -43,6 +43,11 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 624 | release signoff: explicit --repo that is not a checkout falls back to current folder | release signoff | Silent wrong-folder fallback | review |
 | 625 | release signoff: legacy cells with double backslash lose one on re-save | release signoff | Old sheets re-save differently, generic hash message | review |
 | 634 | flake scan reopens showstoppers for already quarantined/closed tests | CI | Noise from the flake scan | test |
+| 614a | wake gate: 30 per hour false-wake cap only checked when a baseline exists; apply always | wake | Gate can pass a model with too many false wakes | review |
+| 614b | wake gate: campaign-phrase comparison has no cap | wake | Campaign phrases can regress unnoticed | review |
+| 614c | wake: relative voice.wake_word path resolved against cwd; a missing file silently falls back to the stock model with no note | wake | Wrong model without a hint | review |
+| 614d | wake test: fph_budget assert passes when the value is None | wake | Weak test | review |
+| 614e | wake gate: recall-margin check passes trivially when the live head is for another phrase | wake | Gate weaker than it looks | review |
 
 ## Kept as issues
 
