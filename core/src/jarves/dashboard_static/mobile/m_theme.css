@@ -376,6 +376,45 @@ body.drawer-open { overflow: hidden; }
 #pairView #code { letter-spacing: .18em; font-variant-numeric: tabular-nums; direction: ltr; text-align: center; }
 #pairView .primary { min-block-size: 52px; border-radius: 14px; font-size: var(--fs-body); }
 
+/* ---- browser tab (V7 B4 #399, the Browser module in app.js): the pilot's live picture and the owner's takeover. One calm card:
+   state + time left, the picture (never cropped or letterboxed: a tap maps straight onto the page), then only the steps that
+   apply now. While the owner is in control the frame gets the accent ring and his controls open under it. */
+#browserRoot > .bv-intro { margin: 0 var(--s1) var(--s3); font-size: var(--fs-meta); }
+.bv-card { display: grid; gap: var(--s3); padding: var(--s3); border: 1px solid var(--line); background: var(--bg-2); min-inline-size: 0; }
+.bv-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); flex-wrap: wrap; padding-inline: var(--s1); min-block-size: 28px; }
+.bv-state { margin: 0; gap: 6px; color: var(--muted); }
+.bv-state.on::before { content: ""; inline-size: 7px; block-size: 7px; border-radius: 50%; background: currentColor; }
+.bv-state.s-agent { color: var(--ok); }
+.bv-state.s-human { background: var(--accent-soft); color: var(--on-accent-soft); }
+.bv-state.s-paused { background: color-mix(in srgb, var(--warn) 14%, var(--bg)); color: var(--warn); }
+.bv-left { margin: 0; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.bv-frame { position: relative; display: grid; place-items: center; min-block-size: 168px; border-radius: 12px; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--line); }
+.bv-frame.mine { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.bv-img { display: block; inline-size: 100%; block-size: auto; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  touch-action: manipulation; background: #fff; }
+.bv-frame.mine .bv-img { cursor: crosshair; }
+.bv-empty { padding: var(--s5) var(--s4); color: var(--muted); font-size: var(--fs-2); text-align: center; }
+.bv-hint { margin: calc(var(--s1) * -1) var(--s1) 0; font-size: var(--fs-meta); }
+.bv-msg { margin: 0; padding-inline: var(--s1); font-size: var(--fs-2); overflow-wrap: anywhere; }
+.bv-ctl { display: grid; gap: var(--s2); padding-block-start: var(--s3); border-block-start: 1px solid var(--line); }
+.bv-label { font-size: var(--fs-2); font-weight: 600; padding-inline: var(--s1); }
+.bv-type { display: flex; gap: var(--s2); }
+.bv-box { flex: 1; min-inline-size: 0; padding: 0 var(--s3); font-size: var(--fs-body); }
+.bv-send { min-block-size: 48px; border-radius: 12px; padding-inline: var(--s4); flex: none; }
+.bv-show { justify-self: start; min-block-size: 44px; padding: 0 var(--s3); border: 0; border-radius: 99px; background: transparent;
+  color: var(--accent); font-size: var(--fs-2); font-weight: 600; }
+.bv-show[aria-pressed="true"] { background: var(--accent-soft); color: var(--on-accent-soft); }
+.bv-keys { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); }
+.bv-key { min-block-size: 44px; padding: 0 var(--s2); border-radius: 12px; font-size: var(--fs-2); }
+.bv-give { min-block-size: 48px; border-radius: 12px; font-weight: 600; }
+.bv-private { margin: 0; padding-inline: var(--s1); font-size: var(--fs-xs); }
+.bv-acts { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.bv-acts button { flex: 1 1 30%; min-block-size: 48px; border-radius: 14px; font-weight: 600; }
+.bv-acts .bv-cont { flex-basis: 100%; }
+.bv-stop { background: transparent; color: var(--bad); border-color: var(--line-2); }
+.bv-note { margin: 0; padding-inline: var(--s1); font-size: var(--fs-meta); }
+
 /* ---- narrow phones (large display size) and the open keyboard */
 @media (max-width: 360px) {
   #tab-chat .jc-attach { display: none; }

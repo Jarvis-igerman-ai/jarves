@@ -15,6 +15,7 @@
 <script src="/m/chatview.js" defer></script>
 <script src="/m/indicator.js" defer></script>
 <script src="/m/plans.js" defer></script>
+<script src="/m/browser_view.js" defer></script>
 <script src="/m/prefs.js" defer></script>
 <script src="/m/drive.js" defer></script>
 <script src="/m/hands_free.js" defer></script>
@@ -44,6 +45,7 @@
       <button type="button" role="tab" id="tabbtn-plans" data-tab="plans" aria-selected="false" hidden><span data-t="tab_plans">Plans</span></button>
       <button type="button" role="tab" id="tabbtn-prefs" data-tab="prefs" aria-selected="false" hidden><span data-t="tab_prefs">Learned</span></button>
       <button type="button" role="tab" id="tabbtn-drive" data-tab="drive" aria-selected="false" hidden><span data-t="tab_drive">Drive</span></button>
+      <button type="button" role="tab" id="tabbtn-browser" data-tab="browser" aria-selected="false" hidden><span data-t="tab_browser">Browser</span></button>
       <button type="button" role="tab" id="tabbtn-voice" data-tab="voice" aria-selected="false"><span data-t="tab_voice">Voice</span></button>
       <button type="button" role="tab" id="tabbtn-health" data-tab="health" aria-selected="false"><span data-t="tab_health">Health &amp; speed</span></button>
       <button type="button" role="tab" id="tabbtn-home" data-tab="home" aria-selected="false"><span data-t="tab_home">This phone</span></button>
@@ -106,6 +108,10 @@
   <section id="tab-drive" class="panel" hidden>
     <div id="hfRoot"></div>
     <div id="driveRoot"></div>
+  </section>
+
+  <section id="tab-browser" class="panel" hidden>
+    <div id="browserRoot"></div>
   </section>
 
   <section id="tab-health" class="panel" hidden>

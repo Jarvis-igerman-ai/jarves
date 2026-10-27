@@ -24,8 +24,9 @@
     phone: ["M8 3h8a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z", "M11 18h2"],
     info: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 11v5", "M12 8h.01"],
     lock: ["M6 11h12v9H6z", "M8 11V8a4 4 0 0 1 8 0v3"],
+    globe: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M3 12h18", "M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9", "M12 3c-2.5 2.6-3.8 5.6-3.8 9s1.3 6.4 3.8 9"],
   };
-  const TAB_ICONS = { chat: "chat", approvals: "shield", plans: "list", prefs: "bulb", drive: "car", voice: "wave", health: "pulse", home: "phone" };
+  const TAB_ICONS = { chat: "chat", approvals: "shield", plans: "list", prefs: "bulb", drive: "car", browser: "globe", voice: "wave", health: "pulse", home: "phone" };
   function icon(name) {
     const s = document.createElementNS(NS, "svg");
     s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("width", "22"); s.setAttribute("height", "22");
