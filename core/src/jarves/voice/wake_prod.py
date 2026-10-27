@@ -41,10 +41,10 @@ NEAR_MISS_SENTENCES: list[tuple[str, str]] = [
 # The GATE list: confusable families that are NOT in the training hard negatives (wake_train.HARD_NEG_EN/HE) and not in
 # NEAR_MISS_SENTENCES, so the gate measures generalisation to unseen names, not memory. (lang, text)
 NEAR_MISS_HELDOUT: list[tuple[str, str]] = [
-    ("en", "hey Elvis"), ("en", "hi Mavis"), ("en", "hey Calvert"), ("en", "hey Dervish"), ("en", "hey Alvarez"),
-    ("en", "hey Nolan"), ("en", "hey Jervis"), ("en", "hey Bernard"), ("en", "hey Sylvester"), ("en", "hey nervous"),
-    ("en", "Hey Sarah, come here"), ("en", "Harvard is a good school"), ("en", "Marvelous weather today"),
-    ("en", "hey Kervin"), ("he", "היי מרווין"), ("he", "היי גרווי"), ("he", "הרווארד זה בית ספר")]
+    ("en", "hey Elvis"), ("en", "hi Melvin"), ("en", "hey Calvert"), ("en", "hey Dervish"), ("en", "hey Alvarez"),
+    ("en", "hey Nolan"), ("en", "hey Jervis"), ("en", "hey Bernard"), ("en", "hey Sylvester"), ("en", "hey Norton"),
+    ("en", "Hey Sarah, come here"), ("en", "Harvard is a good school"), ("en", "Carnival tickets are sold out"),
+    ("en", "hey Morgan"), ("he", "היי מלווין"), ("he", "היי אלוויס"), ("he", "הרווארד זה בית ספר")]
 # Bare name (no "hey"): reported, never gating. The stock model wakes on it too (SWV4_WAKE_TRAIN.md: score 0.99).
 BARE_NAMES = {"Jarvis", "ג'רוויס"}
 # Absolute ceilings on top of the relative gate (#595): a candidate that is merely as bad as a bad stock model on this machine
@@ -282,17 +282,27 @@ class HeadScorer:
 
 
 def phonetic_skeleton(text: str) -> str:
-    """Consonant skeleton of the name in a greeting phrase ("hey Marvis" -> "mrvs"), for the disjointness check."""
+    """Consonant skeleton of the first word after an optional greeting ("hey Marvis" -> "mrvs", "היי מרוויס" -> "מרבס"),
+    for the disjointness check. c/k and z/s sound alike; Hebrew: double vav is v, vowel letters (vav, yod, alef) drop."""
     import re
-    s = re.sub(r"^(hey|hi|hello)\s+", "", text.lower().strip())
-    s = (re.split(r"[^a-z]", s) or [""])[0]
-    return re.sub(r"(.)\1+", r"\1", re.sub(r"[aeiouy]", "", s))
+    t = text.lower().strip()
+    if re.search(r"[֐-׿]", t):
+        s = re.sub(r"^היי,?\s+", "", t)
+        s = (re.split(r"[^֐-׿]", s) or [""])[0]
+        s = s.translate(str.maketrans("ךםןףץ", "כמנפצ")).replace("וו", "ב")
+        s = re.sub(r"ה$", "", re.sub(r"[ויא]", "", s))
+    else:
+        s = re.sub(r"^(hey|hi|hello|ok|okay),?\s+", "", t)
+        s = (re.split(r"[^a-z]", s) or [""])[0].replace("c", "k").replace("z", "s")
+        s = re.sub(r"[aeiouy]", "", s)
+    return re.sub(r"(.)\1+", r"\1", s)
 
 
 def phonetic_twin(a: str, b: str) -> bool:
-    """Two names a TTS voice would render almost alike: same first two skeleton letters, skeleton edit distance <= 1."""
+    """Two names a TTS voice would render almost alike: same first skeleton letter, skeleton edit distance <= 1
+    ("Mavis" ~ "Marvis", "Kervin" ~ "Carvis"; "Elvis" and "Davis" only rhyme)."""
     sa, sb = phonetic_skeleton(a), phonetic_skeleton(b)
-    if len(sa) < 3 or len(sb) < 3 or sa[:2] != sb[:2]:
+    if len(sa) < 3 or len(sb) < 3 or sa[0] != sb[0]:
         return False
     prev = list(range(len(sb) + 1))
     for i, x in enumerate(sa, 1):

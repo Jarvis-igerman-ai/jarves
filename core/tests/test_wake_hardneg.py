@@ -172,9 +172,26 @@ def test_595_the_baseline_is_the_live_custom_head_at_the_configured_level_when_t
 
 
 def test_596_held_out_gate_list_has_no_phonetic_twin_among_the_trained_negatives():
-    trained = wt.NEG_EN + wt.NEAR_EN + wt.HARD_NEG_EN + [t for _, t in wp.NEAR_MISS_SENTENCES]
+    trained = (wt.NEG_EN + wt.NEAR_EN + wt.HARD_NEG_EN + wt.NEG_EN_LONG + wt.NEG_HE + wt.HARD_NEG_HE + wt.NEG_HE_LONG
+               + [t for _, t in wp.NEAR_MISS_SENTENCES])
     assert wp.phonetic_twin("hey Marvin", "hey Marvis") and wp.phonetic_twin("hi Gervase", "hey Gervais")
-    assert not wp.phonetic_twin("hey Elvis", "hey Davis")
-    bad = [(h, t) for _, h in wp.NEAR_MISS_HELDOUT if h.lower().startswith(("hey ", "hi ")) and wp.phonetic_skeleton(h) != "jrvs"
-           for t in trained if t.lower().startswith(("hey ", "hi ")) and wp.phonetic_twin(h, t)]
+    assert wp.phonetic_twin("hi Mavis", "hey Marvis") and wp.phonetic_twin("hey Kervin", "hey Carvis")
+    assert wp.phonetic_twin("Marvelous weather today", "hey Marvel") and wp.phonetic_twin("hey nervous", "nervous")
+    assert wp.phonetic_twin("היי מרווין", "היי מרוויס") and wp.phonetic_twin("היי גרווי", "היי גרוויס")
+    assert not wp.phonetic_twin("hey Elvis", "hey Davis") and not wp.phonetic_twin("היי מלווין", "היי מרוויס")
+    # "hey Jervis" is the wake word's own twin on purpose (the hardest near miss), every other held-out item is unseen
+    bad = [(h, t) for _, h in wp.NEAR_MISS_HELDOUT if wp.phonetic_skeleton(h) != "jrvs"
+           for t in trained if wp.phonetic_twin(h, t)]
     assert bad == []
+
+
+def test_595_threshold_choice_uses_the_same_ceilings_as_the_gate(tmp_path, monkeypatch):
+    seen, real = {}, wp.calibrate
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+    monkeypatch.setattr(wp, "calibrate", spy)
+    rep = small_train(tmp_path / "m.npz", baseline=FlatScorer(0.9))          # a baseline that wakes on all 31
+    assert rep["baseline"]["near_miss_false"] == 31 and seen["near_budget"] == wp.MAX_NEAR_MISS_WAKES
+    assert seen["fph_budget"] is None or seen["fph_budget"] <= wp.MAX_FALSE_PER_HOUR
