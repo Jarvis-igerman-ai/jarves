@@ -47,4 +47,59 @@
     <string name="talk_notallowed">This phone is not allowed to use voice. Allow it on the computer (Phone page).</string>
     <string name="talk_note">The microphone is open only while you hold the button and this screen is open. Nothing is recorded to a file; the sound goes only to your own computer.</string>
     <string name="err_store">This phone could not store the pairing safely, so nothing was saved. Try pairing again; if it keeps failing, check the phone lock screen is set.</string>
+
+    <!-- A4: approvals -->
+    <string name="appr_title">Waiting approvals</string>
+    <string name="appr_refresh">Refresh</string>
+    <string name="appr_refresh_cd">Refresh the waiting approvals</string>
+    <string name="appr_loading">Checking for waiting approvals…</string>
+    <string name="appr_none">Nothing is waiting for your answer.</string>
+    <string name="appr_list_not_allowed">This phone may not see approvals. Allow it on the computer (Phone page).</string>
+    <string name="appr_list_revoked">This phone was unpaired on the computer. Pair again.</string>
+    <string name="appr_list_unreachable">Could not read the approvals. Try Refresh.</string>
+    <string name="appr_risk_low">Low risk</string>
+    <string name="appr_risk_medium">Medium risk</string>
+    <string name="appr_risk_high">High risk</string>
+    <string name="appr_seconds_left">%1$d s left</string>
+    <string name="appr_time_up">Time is up</string>
+    <string name="appr_approve">Approve</string>
+    <string name="appr_deny">Deny</string>
+    <string name="appr_approve_cd">Approve: %1$s</string>
+    <string name="appr_deny_cd">Deny: %1$s</string>
+    <string name="appr_reason_off">Phone approvals are off on the computer. Here you can only deny.</string>
+    <string name="appr_reason_pc_only">This one must be answered on the computer. Here you can only deny.</string>
+    <string name="appr_sending">Sending your answer…</string>
+    <string name="appr_done_approved">Approved.</string>
+    <string name="appr_done_denied">Denied.</string>
+    <string name="appr_dec_off">Not done: phone approvals are off on the computer.</string>
+    <string name="appr_dec_pc_only">Not done: this one must be answered on the computer.</string>
+    <string name="appr_dec_gone">Already answered or expired.</string>
+    <string name="appr_dec_rate">Too many answers. Wait a little and try again.</string>
+    <string name="appr_dec_not_allowed">Not done: the computer does not allow this phone to answer.</string>
+    <string name="appr_dec_revoked">Not done: this phone was unpaired on the computer.</string>
+    <string name="appr_dec_unreachable">The computer did not answer. Your answer may not have arrived.</string>
+    <string name="appr_retry">Try again</string>
+    <string name="appr_retry_cd">Send the same answer again</string>
+
+    <!-- A4: share to JARVES -->
+    <string name="share_title">Send to JARVES</string>
+    <string name="share_help">Check the text. Nothing is sent until you press Send.</string>
+    <string name="share_field">Text to send</string>
+    <string name="share_count">%1$d / %2$d</string>
+    <string name="share_send">Send</string>
+    <string name="share_send_cd">Send this text to JARVES</string>
+    <string name="share_cancel">Cancel</string>
+    <string name="share_cancel_cd">Cancel and send nothing</string>
+    <string name="share_retry">Try again</string>
+    <string name="share_retry_cd">Send the same text again</string>
+    <string name="share_done">Done</string>
+    <string name="share_done_cd">Close and go back to the status</string>
+    <string name="share_sending">Sending…</string>
+    <string name="share_reply_title">JARVES answered</string>
+    <string name="share_sent_no_reply">Sent. No answer text.</string>
+    <string name="share_busy">JARVES is busy with another request. Try again in a moment.</string>
+    <string name="share_rate">Too many messages. Wait a little and try again.</string>
+    <string name="share_not_allowed">The computer does not allow this phone to send text.</string>
+    <string name="share_revoked">This phone was unpaired on the computer. Pair again.</string>
+    <string name="share_unreachable">The computer did not answer. The text may not have arrived.</string>
 </resources>

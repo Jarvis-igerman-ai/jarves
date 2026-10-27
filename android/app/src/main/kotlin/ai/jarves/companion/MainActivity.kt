@@ -3,6 +3,7 @@ package ai.jarves.companion
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -29,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +67,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val notifyPrefs = NotifyPrefs(app)
     private val _notify = MutableStateFlow(notifyPrefs.enabled && NotifyWork.permissionGranted(app))
     val notifyOn: StateFlow<Boolean> = _notify
+    val approvals = ApprovalsModel(viewModelScope)
+    val share = ShareModel(viewModelScope)
 
     init {
         if (notifyPrefs.enabled && NotifyWork.permissionGranted(app)) NotifyWork.start(app)     // the switch says ON: make sure the check is really scheduled
@@ -224,19 +228,26 @@ class MainActivity : ComponentActivity() {
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) model.micDenied() }
 
     private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        model.share.take(intent, model.screen.value is Screen.Status)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.decorView.filterTouchesWhenObscured = true // no taps through another app's overlay (Approve, Send)
+        if (savedInstanceState == null) model.share.take(intent, model.screen.value is Screen.Status)
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     val s by model.screen.collectAsStateWithLifecycle()
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (s !is Screen.Status) LaunchedEffect(Unit) { model.share.clear() } // not paired: a shared text is dropped
                         when (val x = s) {
                             is Screen.Pair -> PairScreen(x, model::check)
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
-                            is Screen.Status -> {
-                                StatusScreen(x, model::unpair)
+                            is Screen.Status -> PairedScreen(x, model.share, model.approvals, model::unpair) {
                                 val on by model.notifyOn.collectAsStateWithLifecycle()
                                 NotifyCard(on) { want ->
                                     if (!want) model.setNotify(false)
