@@ -20,6 +20,8 @@ Execution authority: [NOW](NOW.md) (the only active brief) with [AGENTS](../AGEN
 
 Current dashboard review: [23 Oct findings inventory and recheck gates](reviews/DASHBOARD_FINDINGS_23OCT2026.md) (current; owner: Python Core/runtime diagnostics).
 
+Findings ledger (P3 and nits, moved out of GitHub issues 27 Oct): [findings ledger](reviews/FINDINGS_LEDGER.md).
+
 Phone acceptance result (25 Oct): [phone sheet result](reviews/PHONE_SHEET_RESULT_2026-10-25.md).
 Self-diagnosis plan (25 Oct): [self-diagnosis plan](plans/SELF_DIAGNOSIS_PLAN_2026-10-25.md).
 
