@@ -1,0 +1,9 @@
+{
+ "dict": {
+  "a trusted https connection for the phone app, so Chrome lets the phone page install as an app. Path A: JARVES makes its own small local certificate authority (name-constrained to private-network addresses, key stays on this PC, you can revoke it) and you install its public certificate on your phone yourself. Path B: guided steps for a real Tailscale certificate. Optional and off by default": "חיבור https מהימן לאפליקציית הטלפון, כדי ש-Chrome יאפשר להתקין את עמוד הטלפון כאפליקציה. נתיב א': JARVES יוצר רשות אישורים מקומית קטנה משלו (מוגבלת לכתובות ברשת פרטית, המפתח נשאר במחשב הזה, אפשר לבטל) ואתם מתקינים בעצמכם את האישור הציבורי שלה בטלפון. נתיב ב': שלבים מודרכים לאישור אמיתי של Tailscale. אופציונלי וכבוי כברירת מחדל",
+  "NOT-RUN: never installed on a real Android phone; Chrome install criteria not yet seen to pass (owner-gated)": "לא הורץ: לא הותקן בטלפון אנדרואיד אמיתי; קריטריוני ההתקנה של Chrome עוד לא נראו עוברים (בידי הבעלים)",
+  "the phone page is hosted by the PC in V6; there is no Pi path": "עמוד הטלפון מתארח במחשב ב-V6; אין נתיב ל-Pi",
+  "UNIT test_phone_trust.py (fake clock, no network: chain validation with cryptography, name constraints, renewal, rotate, revoke, backup leaves the keys out, the paired-phone download route)": "בדיקות יחידה test_phone_trust.py (שעון מדומה, בלי רשת: אימות שרשרת עם cryptography, הגבלות שמות, חידוש, החלפה, ביטול, הגיבוי משאיר את המפתחות בחוץ, מסלול ההורדה לטלפון מצומד)",
+  "you install the JARVES certificate on your own phone (Android asks for your screen lock)": "אתם מתקינים בעצמכם את האישור של JARVES בטלפון שלכם (אנדרואיד יבקש את נעילת המסך)"
+ }
+}

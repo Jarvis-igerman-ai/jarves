@@ -217,6 +217,15 @@
   },
   {
    "method": "GET",
+   "path": "/api/m/trust/ca",
+   "scope": null,
+   "page": null,
+   "write": false,
+   "app": true,
+   "summary": "The public certificate of the JARVES local CA (PEM file) so the owner can install it on the phone himself. 404 while the phone_trust feature is off or no CA exists. Never the private key."
+  },
+  {
+   "method": "GET",
    "path": "/api/m/pages",
    "scope": null,
    "page": null,
