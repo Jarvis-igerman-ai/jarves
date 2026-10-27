@@ -303,3 +303,19 @@ def test_merge_queue_cancels_only_superseded_runs_of_the_same_pr():
     assert "gh-readonly-queue/*/pr-*-" in run and "gh run cancel" in run
     assert not any("checkout" in s.get("uses", "") for s in job["steps"])
     assert "supersede" not in load("jarves-checks.yml")["jobs"]["ci-ok"]["needs"]   # never part of the required check
+
+
+def test_merge_group_reuses_only_its_own_prs_green_proof():
+    """Lean process item 1: a queue group whose docs-free tree equals a green run of ITS OWN PR runs no heavy job."""
+    script = next(s["run"] for s in load("jarves-checks.yml")["jobs"]["changes"]["steps"] if s.get("id") == "c")
+    block = script[script.index('"$GITHUB_EVENT_NAME" = "merge_group"'):script.index('args=(--event')]
+    assert "pr-" in block and "pull_request" in block and ".head_sha" in block and "pull_requests" in block
+    assert "reused=true" in block and "reuse_tests_only=true" in block
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    code = ["core/src/jarves/cli.py"]
+    assert not any(ci_plan.classify(code, "merge_group", reused=True).values())
+    flags = ci_plan.classify(code, "merge_group", reuse_tests_only=True)
+    assert flags["installer"] and sum(flags.values()) == 1          # tests proven, installer still built and smoked
+    assert not any(ci_plan.classify(["core/tests/test_x.py"], "merge_group", reuse_tests_only=True).values())
+    assert ci_plan.classify(code, "merge_group")["full"]            # no proof: the full matrix
