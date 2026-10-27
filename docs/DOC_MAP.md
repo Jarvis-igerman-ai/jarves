@@ -46,7 +46,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 |---|---|---|---|---|
 | [RELEASE_HOSTING](RELEASE_HOSTING.md) | How signed installers and `latest.json` are published to the releases repo and how clients update | V2 on | current (the source repo is now `Jarvis-igerman-ai/jarves`; `RELEASING.md` and `CI_PERFORMANCE.md` join with PR #44) | itself |
 | [GITHUB_FLOW](GITHUB_FLOW.md) | Branch, PR, `automerge` label, post-merge package | general | current | itself |
-| [RELEASE_NOTES_4.5](RELEASE_NOTES_4.5.md) | What 4.5 (v4.0.1) changed for users since 4.0.0, upgrade notes and known issues | 4.0.1 | draft (until the v4.0.1 tag) | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
+| [RELEASE_NOTES_4.5](RELEASE_NOTES_4.5.md) | What 4.5 (v4.0.1) changed for users since 4.0.0, upgrade notes and known issues | 4.0.1 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md) | What V4 changed for users | V4 | current | itself; [CHANGELOG](../CHANGELOG.md) is the short per-version list |
 | [SWV4_RELEASE_CHECKLIST](reviews/SWV4_RELEASE_CHECKLIST.md) | 4.0.0 checklist state and evidence | V4 | current | [V4 package section 10](JARVES_SW_V4_WORK_PACKAGE.md#10-release-checklist) defines the rows |
 | [RELEASE_CHECKLIST_4.0.1](reviews/RELEASE_CHECKLIST_4.0.1.md) | 4.0.1 stable release checklist (read by the release gate) | 4.0.1 | current | [RELEASING](RELEASING.md) |

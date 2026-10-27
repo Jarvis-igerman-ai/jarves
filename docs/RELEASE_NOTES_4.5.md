@@ -2,7 +2,7 @@
 
 4.5 is the product name of this release; v4.0.1 is the technical version used by installers, updates and tags.
 
-Status (27 Oct 2026, DRAFT): prepared for the stable tag `v4.0.1`. Built from the tested beta 4.0.1-beta.195 (installer
+Status (27 Oct 2026): stable, tag `v4.0.1`. Built from the tested beta 4.0.1-beta.195 (installer
 4.0.1.1214, commit `313425ae`); only documentation changed on `main` since then. Approved by the owner in chat on 27 Oct 2026 (06:36 UTC) and signed off
 (sheet `docs/reviews/MANUAL_TEST_4.0.1.md`; rows S1-S5 accepted by that approval, not tested by hand); published by the tag `v4.0.1` ([RELEASING](RELEASING.md), [evidence](release/EVIDENCE_4.0.1.md)). This replaces 4.0.0
 (22 Oct 2026). Short per-change list: [CHANGELOG](../CHANGELOG.md) (section 4.0.1). Previous notes: [RELEASE_NOTES_4.0](RELEASE_NOTES_4.0.md).
