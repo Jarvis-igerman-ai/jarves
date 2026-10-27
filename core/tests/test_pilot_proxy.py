@@ -26,12 +26,23 @@ class Upstream:
         self.s.listen(8)
         self.port = self.s.getsockname()[1]
         self.got: list[bytes] = []
-        threading.Thread(target=self._run, daemon=True).start()
+        self.s.settimeout(0.3)
+        self._done = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+        self._t.start()
+
+    def close(self):
+        """Stop the accept thread and free the port (a leaked blocking accept thread per test is a hazard for the rest of the shard)."""
+        self._done.set()
+        self._t.join(2)
+        self.s.close()
 
     def _run(self):
-        while True:
+        while not self._done.is_set():
             try:
                 c, _ = self.s.accept()
+            except socket.timeout:
+                continue
             except OSError:
                 return
             data = b""
@@ -119,6 +130,7 @@ class Rig:
 
     def close(self):
         self.proxy.stop()
+        self.up.close()
 
 
 @pytest.fixture

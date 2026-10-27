@@ -57,6 +57,7 @@ def r2(tmp_path):
     r = Rig2(tmp_path)
     yield r
     r.proxy.stop()
+    r.up.close()
 
 
 def test_a_switched_off_session_lets_no_new_connection_out(r2):
@@ -175,6 +176,7 @@ def test_an_oversized_upstream_head_is_refused_not_truncated(tmp_path):
         assert b"body" not in out and not out.startswith(b"HTTP/1.1 200 OK\r\nX: a")
     finally:
         r.proxy.stop()
+        r.up.close()
         big.close()
 
 

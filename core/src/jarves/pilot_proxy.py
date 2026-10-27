@@ -91,6 +91,7 @@ class PilotProxy:
         self._stop = threading.Event()
         self._public_seen = False
         self._lock = threading.Lock()
+        self._accept: threading.Thread | None = None
         self._conns: set[socket.socket] = set()          # open client sockets (Stop closes them)
         self._busy_slots = threading.BoundedSemaphore(MAX_BUSY_THREADS)
         self._total = 0
@@ -174,7 +175,8 @@ class PilotProxy:
         s.listen(64)
         s.settimeout(0.5)
         self._sock, self.port = s, s.getsockname()[1]
-        threading.Thread(target=self._serve, name="pilot-proxy", daemon=True).start()
+        self._accept = threading.Thread(target=self._serve, name="pilot-proxy", daemon=True)
+        self._accept.start()
         return {"server": f"127.0.0.1:{self.port}", "username": "pilot", "password": self.secret}
 
     def stop(self) -> None:
@@ -192,6 +194,8 @@ class PilotProxy:
             except OSError:
                 pass
         end = self.clock() + 3.0
+        if self._accept is not None:
+            self._accept.join(1.0)                              # the accept loop wakes every 0.5 s and sees _stop
         for t in threads:
             t.join(max(0.0, end - self.clock()))
 
