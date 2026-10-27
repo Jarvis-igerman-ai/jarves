@@ -685,7 +685,11 @@ def _view(ctx) -> dict:
     f = feat._ctx_features(ctx)
     snap = read_snapshot(ctx.home / "health.json") or {}
     comp = ((snap.get("components") or {}).get("browser") or {}) if snap.get("age_s", 1e9) < 120 else {}
-    return {"sites": Sites(ctx.home).list(), "feature": f.status(FEATURE), "activity": comp,
+    try:
+        live = bool(f.status("browser_liveview")["active"])        # B2: shown only when the beta switch is on
+    except Exception:                                              # noqa: BLE001 - an unregistered switch = off
+        live = False
+    return {"sites": Sites(ctx.home).list(), "feature": f.status(FEATURE), "activity": comp, "live_view": live,
             "blocked_hosts": list(BLOCKED_HOSTS),
             "rules": ["Full control (open, read, click, type) only on the sites listed here.",
                       "Any other site: read-only, and only after you approve it on the screen.",
