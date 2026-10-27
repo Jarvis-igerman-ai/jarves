@@ -1393,10 +1393,18 @@ def _wake_train(a, cfg, home) -> int:
               + (f" (held out, not trained on: {ow['held_out_recall_at_threshold']:.0%})"
                  if ow["held_out_recall_at_threshold"] is not None else "") + ".")
     nm = rep["near_miss"]
-    print(f"Near-miss sentences: {len(nm['false_wakes'])} false wakes in {nm['rendered']} renderings "
-          f"(worst score {nm['worst_score']}).")
+    print(f"Near-miss sentences (held-out names, not trained on): {len(nm['false_wakes'])} false wakes in "
+          f"{nm['rendered']} renderings (worst score {nm['worst_score']}).")
     for w in nm["false_wakes"]:
         print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
+    cp = rep.get("campaign")
+    if cp:
+        print(f"Voice-campaign phrases (trained on, reported only): {len(cp['false_wakes'])} false wakes in "
+              f"{cp['rendered']} renderings; bare name woke {len(cp.get('bare_name_wakes') or [])}x (not gated).")
+    if rep.get("baseline"):
+        print("Against the model it replaces (same renderings, recordings and stream):")
+        for line in wake_prod.format_comparison(rep):
+            print(line)
     for line in rep["next"]:
         print("  " + line)
     if not a.apply and (why := wake_prod.gate(rep)):

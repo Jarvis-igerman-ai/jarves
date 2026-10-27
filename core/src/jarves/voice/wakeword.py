@@ -155,6 +155,7 @@ class HeadWakeDetector:
         self._features = None
         self._ring: np.ndarray | None = None
         self._n = 0
+        self._skip = 0
         self.last_score = 0.0
 
     def _load_sync(self) -> None:
@@ -174,6 +175,7 @@ class HeadWakeDetector:
             raise WakeWordUnavailable("WAKE_NO_ENGINE", "wake word engine (pyopen-wakeword) is not installed",
                                       "install the voice extra: uv sync --extra voice") from e
         self._ring = np.zeros((self.head["windows"], 96), np.float32)
+        self._skip = wt_startup_embeddings()
         self.name = self.head.get("phrase") or self.name
 
     async def load(self) -> None:
@@ -192,6 +194,9 @@ class HeadWakeDetector:
         best = 0.0
         for emb in self._features.process_streaming(pcm16_mono_16k):
             for row in emb.reshape(-1, 96):
+                if self._skip > 0:                  # the front end's start-up burst: not speech (wake_train.WARMUP)
+                    self._skip -= 1
+                    continue
                 self._ring = np.roll(self._ring, -1, axis=0)
                 self._ring[-1] = row
                 self._n += 1
@@ -205,6 +210,12 @@ class HeadWakeDetector:
             self._features.reset()
             self._ring[:] = 0
             self._n = 0
+            self._skip = wt_startup_embeddings()
+
+
+def wt_startup_embeddings() -> int:
+    from .wake_train import STARTUP_EMBEDDINGS
+    return STARTUP_EMBEDDINGS
 
 
 def make_detector(wake_word: str = "hey_jarvis", threshold: float = 0.5) -> WakeWordDetector:
