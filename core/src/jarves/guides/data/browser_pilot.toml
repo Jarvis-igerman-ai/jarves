@@ -1,6 +1,6 @@
 order = 59
 category = "system"
-features = ["browser_pilot", "browser_liveview", "browser_takeover"]
+features = ["browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
 error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
@@ -37,6 +37,16 @@ action = "feature_on:browser_liveview"
 [[steps]]
 he = "שליטה ידנית (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_takeover. בכרטיס התצוגה החיה לוחצים \"קחו שליטה\": הסוכן נעול בחוץ (גם אם הוא באמצע קריאה, התוצאה שלו נזרקת), ואתם לוחצים על התמונה, מקלידים בתיבה (מוסתרת כסיסמה כברירת מחדל) או לוחצים Enter ו-Tab. מה שהקלדתם הולך לדף בלבד: הוא לא נרשם ביומן, לא נשמר ולא מוצג לסוכן; אם הדף מציג אותו בחזרה אנחנו מנסים להסתיר אותו (במאמץ סביר, בלי הבטחה: הד חלקי או מוסווה לא תמיד יתפס). \"החזירו\" מחזיר את השליטה והסוכן נשאר מושהה. רק \"אפשרו לסוכן להמשיך\" (עם אישור) נותן לו לקרוא את הדף כפי שהוא עכשיו, למשל חשבון מחובר, ואז הוא קורא אותו מחדש. בזמן שאתם שולטים הדף לא יכול לשלוח בקשות לאתרים ציבוריים. זה פועל כרגע רק בדפי בדיקה מקומיים (localhost); התחברות לאתר אמיתי היא שלב נפרד שתבדקו בעצמכם בחשבון ניסיון."
 en = "Take over (beta, off by default, its own switch): jarvis features on browser_takeover. On the Live view card press Take over: the assistant is locked out (a read that was running has its result thrown away), and you click on the picture, type in the box (hidden like a password by default) or press Enter and Tab. What you type goes to the page only: it is not logged, not stored and never shown to the assistant; if the page echoes it back we try to hide it (best effort, no promise: a partial or disguised echo may get through). Give back returns control and the assistant stays paused. Only Let the assistant continue (it asks first) lets it read the page as it is now, a logged-in account for instance, with a fresh read. While you are in control the page cannot send requests to public sites. This works only on local test pages (localhost) for now; logging in to a real site is a separate step that you test yourself on a throwaway account."
+
+[[steps]]
+he = "תצוגה בטלפון (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_phone_view. במחשב, בעמוד המכשירים, מסמנים לטלפון המצומד את ההרשאה \"תצוגת הדפדפן של הפיילוט\". אחרי שהפיילוט רץ במחשב (כתובת דף בדיקה מקומי), נפתחת בטלפון לשונית \"דפדפן\": רואים את הדף כתמונה, ואם גם מתג \"שליטה ידנית\" דלוק אפשר לקחת שליטה: ללחוץ על התמונה, להקליד ולהחזיר. זה עובד רק בקישור המאובטח (https) של הטלפון. הטלפון יכול לעצור את הפיילוט אבל לא להפעיל אותו; מה שמוקלד לא נרשם ולא מוצג לסוכן."
+en = "Phone view (beta, off by default, its own switch): jarvis features on browser_phone_view. On the computer, on the Devices page, tick the permission Browser pilot view for the paired phone. Once the pilot runs on the computer (a local test page address), a Browser tab opens on the phone: you see the page as a picture, and if the Take over switch is also on you can take over: tap the picture, type and give back. It works only on the phone's secure (https) link. The phone can stop the pilot but not start it; what you type is not logged and never shown to the assistant."
+
+[[problems]]
+he = "הלשונית דפדפן לא מופיעה בטלפון"
+en = "The Browser tab does not show on the phone"
+fix_he = "צריך: המתג browser_phone_view, תצוגה חיה דלוקה, הרשאת תצוגת הדפדפן לטלפון בעמוד המכשירים, קישור https, ופיילוט שרץ במחשב. בלי אחד מהם הלשונית נסתרת."
+fix_en = "It needs: the browser_phone_view switch, the live view on, the Browser pilot view permission for this phone on the Devices page, the https link, and a pilot running on the computer. Without any one of them the tab is hidden."
 
 [[problems]]
 he = "קחו שליטה לא עובד"

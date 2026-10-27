@@ -104,7 +104,8 @@
           route(true);
         } }), " ", tx(PG[p][0], PG[p][1]))),
       el("div", { class: "muted small" }, tx("הגדרות, סודות, קבצים וניהול מכשירים תמיד רק במחשב.", "Settings, secrets, files and device management are always computer-only.")));
-    const SC = { tasks: ["יעדים והשתקת התראות", "Goals and notice snooze/stop"], prefs: ["העדפות שנלמדו (צפייה, תיקון, מחיקה)", "Learned preferences (view, correct, forget)"] };
+    const SC = { tasks: ["יעדים והשתקת התראות", "Goals and notice snooze/stop"], prefs: ["העדפות שנלמדו (צפייה, תיקון, מחיקה)", "Learned preferences (view, correct, forget)"],
+      browser: ["תצוגת הדפדפן של הפיילוט (בטא, צריך גם את המתג בתכונות)", "Browser pilot view (beta, also needs its switch in Features)"] };
     const scopesOf = (x) => el("fieldset", { class: "m4-pages" }, el("legend", { class: "small" }, tx("הרשאות נוספות (כבויות כברירת מחדל)", "Extra permissions (off by default)")),
       Object.keys(SC).map((k) => el("label", { class: "small" }, el("input", { type: "checkbox", "data-scope": k, checked: (x.scopes || []).includes(k) ? true : null,
         disabled: x.revoked ? true : null, onchange: async (ev) => {
