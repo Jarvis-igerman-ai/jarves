@@ -1399,6 +1399,13 @@ def _wake_train(a, cfg, home) -> int:
         print(f"  WOULD WAKE on \"{w['text']}\" ({w['voice']}, score {w['score']})")
     for line in rep["next"]:
         print("  " + line)
+    if not a.apply and (why := wake_prod.gate(rep)):
+        print("\nNot applied, and NOT recommended:")
+        for w in why:
+            print(f"  - {w}")
+        print("Next step: keep the current model. Record 20+ clean, short recordings of the phrase (quiet room, "
+              "one phrase per file) and train again; --apply refuses this one unless you add --accept-risk.")
+        return 0
     if not a.apply:
         print(f"\nNot applied. The active wake model is unchanged. Use it with: "
               f"jarvis wake train {' '.join(a.phrase)} --apply   (undo later with: jarvis wake train --revert)")
@@ -2010,6 +2017,7 @@ _EXT_LATE = (
     ("release_cmd", ("release",), {"release": "cmd_release"}),        # jarvis release signoff
     ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
     ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
+    ("model_lab", ("modellab",), "COMMANDS"),                          # V7 M3: jarvis modellab status | run | report
     ("budget_cli", ("budget",), "COMMANDS"),                          # SW-V4 D (#14)
     ("privacy", ("privacy",), "COMMANDS"),                            # OD-12: jarvis privacy status | full-text on|off
     ("phone_cli", ("phone",), "COMMANDS"),                            # V5: jarvis phone status | approvals | ...

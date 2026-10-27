@@ -2086,6 +2086,7 @@ class LiveVoice(SessionLifecycle):
             return
         lang = text_language(self._in_text)
         if not lang:
+            self._en_streak = 0                  # a turn with no detectable language breaks the English streak
             return
         if lang == self._reply_lang or (lang == "he" and self._reply_lang == "he"):
             self._lang_turn, self._en_streak = self._user_turn_n, 0

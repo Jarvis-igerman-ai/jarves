@@ -49,6 +49,7 @@ WARN_RMS_DB = -36.0
 MIN_SNR_DB = 10.0                   # below this "too noisy"
 WARN_SNR_DB = 18.0
 
+MIN_SYNTH_RECALL = 0.5              # a head that misses half of even its synthetic held-out phrase is broken (#issue)
 MIN_OWNER_RECALL = 0.8              # --apply is refused below this on the owner's held-out recordings (when >= 4)
 
 
@@ -259,6 +260,13 @@ def gate(report: dict) -> list[str]:
     held = own.get("held_out_recall_at_threshold")
     if held is not None and len(own.get("held_out_indices") or []) >= 1 and held < MIN_OWNER_RECALL:
         why.append(f"your held-out recordings wake it only {held:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
+    allr = own.get("recall_at_threshold")
+    if (held is None or held >= MIN_OWNER_RECALL) and allr is not None             and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES and allr < MIN_OWNER_RECALL:
+        why.append(f"your recordings wake it only {allr:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
+    syn = (report.get("eval") or {}).get("recall")
+    if syn is not None and syn < MIN_SYNTH_RECALL:
+        why.append(f"it recognises only {syn:.0%} of its own synthetic held-out phrases (need {MIN_SYNTH_RECALL:.0%}):"
+                   " the training did not work")
     return why
 
 

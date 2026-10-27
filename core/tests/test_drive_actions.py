@@ -104,3 +104,13 @@ def test_js_only_renders_whitelisted_links_and_has_en_he_parity():
     en = set(re.findall(r"(\w+): \"", js.split("he: {")[0]))
     he = set(re.findall(r"(\w+): \"", js.split("he: {")[1].split("const LINKS")[0]))
     assert en == he
+
+
+def test_rate_limit_answer_has_hebrew_text_and_a_code(rig):
+    """#326: the 429 of the action route had no error_he and no code (the briefing and journey routes have both)."""
+    tok, _ = rig.pair()
+    body = {"kind": "call", "text": "0541234567"}
+    last = (200, {})
+    for _ in range(drive_actions.RATE_PER_MIN + 1):
+        last = call(rig.d, "POST", "/api/m/drive/action", tok, body)
+    assert last[0] == 429 and last[1]["code"] == "ACTION_RATE_LIMITED" and last[1]["error_he"]

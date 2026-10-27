@@ -1,0 +1,37 @@
+order = 31
+category = "system"
+features = ["model_lab"]
+aliases = ["מעבדת מודלים", "השוואת מודלים", "model lab", "compare models", "model evaluation", "בדיקת מודלים"]
+error_codes = ["MODELLAB_OFF", "MODELLAB_NO_PROVIDER", "MODELLAB_BAD_ARGUMENT"]
+title_he = "מעבדת מודלים"
+title_en = "Model Lab"
+what_he = "השוואה בין מודלים על קבוצה קטנה וקבועה של משימות ציבוריות (עברית, קריאה לכלים, קוד). לכל מודל נרשמים איכות, מהירות ועלות, בדוח מקומי (JSON ו-CSV). רצה רק כשאתם מפעילים אותה."
+what_en = "Compare models on a small fixed set of public tasks (Hebrew, tool calls, coding). For each model quality, speed and cost are written to a local report (JSON and CSV). It runs only when you start it."
+say = [["תריץ מעבדת מודלים", "Run the model lab"], ["מה הדוח האחרון של המודלים?", "What is the latest model report?"]]
+expect_he = "כבוי כברירת מחדל (בטא). מודלים בתשלום נחסמים אלא אם הגדרתם תקרה במפורש; תקרה מרבית להרצה 2 דולר; בלי מעבר שקט למודל בתשלום. ההרצה החיה (OpenRouter) עדיין לא מחוברת: אפשר רק הרצת הדגמה מדומה."
+expect_en = "Off by default (beta). Paid models are blocked unless you set a cap explicitly; the most a run can spend is 2 USD; there is no silent switch to a paid model. The live run (OpenRouter) is not wired yet: only a scripted demo run works."
+test = "feature"
+test_he = "הבדיקה מריצה את הדגמה המדומה בלבד, בלי רשת ובלי עלות."
+test_en = "The check runs the scripted demo only, with no network and no cost."
+cost_he = "הדגמה: חינם. הרצה חיה בעתיד: רק לפי התקרה שתקבעו."
+cost_en = "Demo: free. A live run in the future: only up to the cap you set."
+privacy_he = "המשימות מובנות וציבוריות: שום קוד פרטי או שיחה לא נשלחים. הדוח שומר קטע קצר ומנוקה מכל תשובה, בלי מפתחות."
+privacy_en = "The tasks are built in and public: no private code or conversation is sent. The report keeps a short scrubbed snippet of each answer, no keys."
+
+[[steps]]
+he = "הפעילו יכולות בטא: jarvis features beta on. אחר כך: jarvis features on model_lab."
+en = "Turn on beta features: jarvis features beta on. Then: jarvis features on model_lab."
+action = "feature_on:model_lab"
+check = "active:model_lab"
+
+[[steps]]
+he = "ראו את המשימות: jarvis modellab tasks. הרצת הדגמה מדומה (בלי רשת): jarvis modellab run --models free-remote --fake."
+en = "See the tasks: jarvis modellab tasks. Scripted demo run (no network): jarvis modellab run --models free-remote --fake."
+
+[[steps]]
+he = "הדוח האחרון: jarvis modellab report. הקבצים נשמרים בתיקיית modellab בתיקיית הנתונים. מודל שהמדיניות חוסמת מדולג עם הסיבה."
+en = "The latest report: jarvis modellab report. Files are kept in the modellab folder of the data folder. A model the policy blocks is skipped with the reason."
+
+[[steps]]
+he = "תקרה: --cap-usd מאפשרת הוצאה בתשלום עד 2 דולר להרצה; ברירת המחדל 0 (רק מודלים חינמיים או מקומיים)."
+en = "Cap: --cap-usd allows paid spending up to 2 USD per run; the default is 0 (free or local models only)."

@@ -245,7 +245,7 @@ class ManagedClaude:
     callbacks run on the reader thread: on_event(kind, data)."""
 
     def __init__(self, cmd: list[str], cwd: str, *, plugin_dir: str | None, on_event: Callable[[str, dict], None],
-                 resume: str = "", model: str = "", env: dict | None = None) -> None:
+                 resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0) -> None:
         argv = [*cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "default"]
         if plugin_dir:
@@ -254,6 +254,8 @@ class ManagedClaude:
             argv += ["--resume", resume]
         if model:
             argv += ["--model", model]
+        if max_budget_usd and max_budget_usd > 0:             # #362: the daily cap also stops a single long turn
+            argv += ["--max-budget-usd", f"{max_budget_usd:.2f}"]
         policy.check_flags(argv)
         self.argv, self.cwd, self.on_event = argv, cwd, on_event
         self.env = env

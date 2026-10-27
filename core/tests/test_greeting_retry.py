@@ -163,9 +163,22 @@ async def test_no_speech_cutoff_waits_while_the_greeting_is_pending(monkeypatch)
     await lv.stop()
 
 
+def _ns(greeting=True, lang="he", drive=False):
+    feats = SimpleNamespace(active=lambda fid: drive)
+    return SimpleNamespace(_greeted=False, features=feats,
+                           cfg=SimpleNamespace(voice=SimpleNamespace(greeting=greeting, language=lang)))
+
+
 def test_wake_session_gets_a_short_greeting_when_the_feature_is_on():
     from jarves.app import Core
-    on = SimpleNamespace(_greeted=False, cfg=SimpleNamespace(voice=SimpleNamespace(greeting=True)))
-    off = SimpleNamespace(_greeted=False, cfg=SimpleNamespace(voice=SimpleNamespace(greeting=False)))
+    on, off = _ns(), _ns(greeting=False)
     assert Core.wake_greeting(on) and len(Core.wake_greeting(on)) < 20
     assert on._greeted and Core.wake_greeting(off) is None and not off._greeted
+
+
+def test_wake_greeting_follows_ui_language_and_is_silent_in_drive_mode():
+    from jarves.app import Core
+    assert Core.wake_greeting(_ns(lang="en")) == "I'm listening."
+    assert Core.wake_greeting(_ns(lang="he")) == "אני מקשיב."
+    d = _ns(drive=True)
+    assert Core.wake_greeting(d) is None and not d._greeted

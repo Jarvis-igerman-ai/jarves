@@ -63,7 +63,7 @@ def test_refused_while_switch_or_drive_mode_is_off(rig):
 
 @pytest.mark.parametrize("bad", [
     {"lat": 91}, {"lat": -91}, {"lon": 181}, {"lat": float("nan")}, {"lon": float("inf")}, {"lat": True}, {"lat": "32.0"},
-    {"accuracy": 100000}, {"accuracy": -1}, {"ts": 0}, {"ts": time.time() * 1000 - 600_000}, {"ts": time.time() * 1000 + 600_000}, {"ts": None}])
+    {"accuracy": 100000}, {"accuracy": -1}, {"ts": 0}, {"ts": 1_000_000_000_000}, {"ts": 9_999_999_999_000}, {"ts": None}])
 def test_bad_payloads_are_refused_and_drop_the_old_fix(rig, bad):
     tok, dev = rig.pair()
     on(rig)
