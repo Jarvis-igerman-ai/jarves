@@ -1,6 +1,6 @@
 order = 30
 category = "system"
-features = ["github_write", "github_approve_reviews"]
+features = ["github_write", "github_approve_reviews", "github_merge_queue"]
 aliases = ["פתח issue", "תגובה ב-github", "open an issue", "comment on github", "כתיבה ל-github", "github write", "github writes", "הרשאת כתיבה", "אישור כתיבה"]
 error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE", "GITHUB_WRITE_PERMISSION", "GITHUB_WRITE_INVALID", "GITHUB_WRITE_REDIRECT", "GITHUB_WRITE_UNKNOWN", "GITHUB_WRITE_AUDIT_TAMPERED", "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT"]
 title_he = "GitHub: כתיבה באישור"
@@ -55,6 +55,10 @@ check = "active:github_write"
 [[steps]]
 he = "לכיבוי: jarvis github write off. כל כתיבה תבקש את אישורכם בחלון, עם הפעולה המדויקת."
 en = "To turn off: jarvis github write off. Every write asks for your approval in a window, with the exact action."
+
+[[steps]]
+he = "הפעלת מיזוג אוטומטי (בטא, כבוי כברירת מחדל, מתג נפרד): jarvis features on github_merge_queue ואז jarvis github pr enqueue מספר --head-sha הקומיט-המלא --repo owner/repo. החלון הקופץ במחשב מציג את הבקשה, הקומיט ואת מצב הבדיקות, ורק אחרי האישור שלכם GitHub מפעיל מיזוג אוטומטי: הוא ממזג דרך תור המיזוג רק אחרי שכל הבדיקות הנדרשות עברו. אין מיזוג ישיר ואין עקיפה. קומיט חדש אחרי האישור מבטל את זה. הרשאת האסימון היא Pull requests: write והיא נבדקת בשימוש האמיתי הראשון."
+en = "Turn on auto-merge (beta, off by default, its own switch): jarvis features on github_merge_queue, then jarvis github pr enqueue NUMBER --head-sha FULL_COMMIT --repo owner/repo. The popup on the computer shows the pull request, the commit and the check state, and only after your approval does GitHub turn on auto-merge: it merges through the merge queue only after every required check passed. There is no direct merge and no bypass. A newer commit after the approval cancels it. The token permission is Pull requests: write and is verified on first real use."
 
 [[problems]]
 he = "הוא אומר שהכתיבה כבויה או שהמאגר לא ברשימה"

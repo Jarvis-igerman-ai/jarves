@@ -56,7 +56,7 @@ FEATURES: dict[str, object] = {
     "agent_orchestrator": "agents", "agent_opencode": "agents", "project_manager": "project",
     "assisted_dialing": "dial", "self_manage": "manage",
     "self_tests": "selftest", "text_chat": "chat", "setup_tour": "tour",
-    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo", "github": "github", "provider_openrouter": "models", "github_write": "github", "github_approve_reviews": "github", "model_lab": "modellab",
+    "issue_reports": "issues", "web_chat": "web", "anydo": "anydo", "anydo_update": "anydo", "github": "github", "provider_openrouter": "models", "github_write": "github", "github_approve_reviews": "github", "github_merge_queue": "github", "model_lab": "modellab",
     "drive_briefing": (D, "a spoken pre-drive briefing; switch it with `jarvis features`"),   # V6 P5
 }
 

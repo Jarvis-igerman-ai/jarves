@@ -79,6 +79,11 @@ _WRITE_PATHS = {                                       # each verb only on its o
     "DELETE": re.compile(rf"/repos/{_SEG}/{_SEG}/issues/[1-9]\d{{0,8}}/labels/(?!\.\.?$)[^/?#\r\n]{{1,300}}", re.ASCII),
 }
 _WRITE_VERBS = tuple(_WRITE_PATHS)
+# G5: the ONLY GraphQL mutation documents the client can send. There is no direct-merge mutation here, on purpose.
+_MUTATIONS = {"enable_auto_merge": ("mutation($id:ID!,$sha:GitObjectID!){enablePullRequestAutoMerge(input:{pullRequestId:$id,"
+                                    "expectedHeadOid:$sha}){pullRequest{number autoMergeRequest{enabledAt}}}}", {"id", "sha"})}
+_NODE = re.compile(r"[A-Za-z0-9_=-]{8,100}", re.ASCII)
+_SHA40 = re.compile(r"[0-9a-f]{40}", re.ASCII)
 
 
 def _write_allowed(method: str, path: str) -> bool:
@@ -247,6 +252,37 @@ class GitHubClient:
         except ValueError:
             return {}
 
+    def pull(self, owner: str, repo: str, number: str) -> dict:
+        """One pull request (a READ): state, draft, merged, head commit, base branch and its GraphQL node id (G5)."""
+        _name(owner, "owner"), _name(repo, "repo")
+        if not str(number).isdigit():
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "bad pull request number")
+        j = self._json("GET", f"/repos/{owner}/{repo}/pulls/{int(number)}")
+        j = j if isinstance(j, dict) else {}
+        sha = str((j.get("head") or {}).get("sha") or "").lower() if isinstance(j.get("head"), dict) else ""
+        nid = str(j.get("node_id") or "")
+        return {"state": str(j.get("state") or ""), "draft": bool(j.get("draft")), "merged": bool(j.get("merged")),
+                "head_sha": sha if _SHA40.fullmatch(sha) else "", "node_id": nid if _NODE.fullmatch(nid) else "",
+                "title": str(j.get("title") or "")[:200],
+                "base": str((j.get("base") or {}).get("ref") or "") if isinstance(j.get("base"), dict) else ""}
+
+    def graphql_write(self, name: str, variables: dict) -> dict:
+        """THE GraphQL write door (G5): only the documents in _MUTATIONS, with exactly their variables, api.github.com only.
+        Callers pass a repo already checked against the owner's allow-list by github_write.execute()."""
+        doc = _MUTATIONS.get(name)
+        if doc is None or set(variables) != doc[1]:
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "this GraphQL write is not allowed")
+        if not _NODE.fullmatch(str(variables.get("id", ""))) or not _SHA40.fullmatch(str(variables.get("sha", ""))):
+            raise GitHubError("GITHUB_BAD_ARGUMENT", "bad pull request id or commit")
+        r = self._request("POST", "/graphql", write=True, json={"query": doc[0], "variables": dict(variables)})
+        try:
+            j = r.json() if r.content else {}
+        except ValueError:
+            j = {}
+        if not isinstance(j, dict) or j.get("errors"):
+            raise GitHubError("GITHUB_WRITE_REFUSED", "GitHub refused to turn on auto-merge (not allowed on this repo, or the commit changed)")
+        return j.get("data") or {}
+
     def me(self) -> dict:
         return {"login": self._json("GET", "/user").get("login")}
 
@@ -310,6 +346,10 @@ class FakeGitHub:
         self.issue_labels, self.issue_assignees = ["bug"], ["octocat"]   # what issue N has now (GET /issues/N)
         self.pr_numbers: set[str] = {"2"}       # issue numbers that are really pull requests
         self.run_info: dict = {}                # overrides for GET /actions/runs/N (name, event, head_branch, head_repository, actor)
+        self.head_sha = "a" * 40                # head commit of every fake pull request
+        self.pull_info: dict = {}               # overrides for GET /pulls/N (state, draft, merged, head, ...)
+        self.graphql_bodies: list = []          # JSON bodies of GraphQL POSTs, in order
+        self.graphql_errors = False             # a GraphQL mutation answers with errors
         self.transport = httpx.MockTransport(self._handle)
 
     def run_json(self, repo: str, run_id: str) -> dict:
@@ -324,6 +364,13 @@ class FakeGitHub:
             return httpx.Response(self.fail[0], headers=self.fail[1], json={"message": "x"})
         p, page = req.url.path, int(req.url.params.get("page", "1"))
         hdr = {"x-ratelimit-remaining": "4999", "x-ratelimit-reset": "1790000000"}
+        if req.method == "POST" and p == "/graphql":
+            body = json.loads(req.content) if req.content else {}
+            self.graphql_bodies.append(body)
+            if "mutation" in str(body.get("query")):
+                if self.graphql_errors:
+                    return httpx.Response(200, headers=hdr, json={"errors": [{"message": "x"}]})
+                return httpx.Response(200, headers=hdr, json={"data": {"enablePullRequestAutoMerge": {"pullRequest": {"number": 2}}}})
         if req.method != "GET" and p != "/graphql":
             return self._write(req, p, hdr)
         if p.endswith("/labels"):
@@ -364,6 +411,11 @@ class FakeGitHub:
         if p.endswith("/actions/runs"):
             return httpx.Response(200, headers=hdr, json={"workflow_runs": [
                 {"id": 9, "name": "CI", "status": "completed", "conclusion": "success"}]})
+        m = re.fullmatch(r"/repos/[^/]+/[^/]+/pulls/(\d+)", p)
+        if m:
+            return httpx.Response(200, headers=hdr, json={"number": int(m.group(1)), "title": "a pr", "state": "open", "draft": False,
+                                                          "merged": False, "node_id": "PR_kwDOabcdefgh", "head": {"sha": self.head_sha},
+                                                          "base": {"ref": "main"}, **self.pull_info})
         if p == "/graphql":
             return httpx.Response(200, headers=hdr, json={"data": {"repository": {"mergeQueue": {"entries": {"nodes": [
                 {"position": 1, "state": "QUEUED", "pullRequest": {"number": 2, "title": "a pr"}}]}}}}})
@@ -411,7 +463,7 @@ def add_cli(sub) -> None:
     h.add_argument("action", choices=["status", "token", "off", "write", "issue", "pr"])
     h.add_argument("write_action", nargs="?", default=None,
                    choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove",
-                            "open", "update", "review", "rerun"],
+                            "open", "update", "review", "rerun", "enqueue"],
                    help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
                         "labels-add|labels-remove; with `pr`: open|update|comment|review|rerun (each asks your approval, shows the exact text)")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
@@ -425,6 +477,7 @@ def add_cli(sub) -> None:
     h.add_argument("--base", default=None, help="with `pr open`: the branch to merge into later (via the queue)")
     h.add_argument("--draft", action="store_true", help="with `pr open`: open as a draft")
     h.add_argument("--event", default=None, choices=["COMMENT", "REQUEST_CHANGES", "APPROVE"], help="with `pr review`")
+    h.add_argument("--head-sha", dest="head_sha", default=None, help="with `pr enqueue`: the full 40-character commit you reviewed")
     h.add_argument("--failed-only", dest="failed_only", action="store_true", help="with `pr rerun`: only the failed jobs")
 
 
@@ -433,6 +486,9 @@ def cmd_github(a, cfg, home) -> int:
         from .github_issues import cmd_github_issue
         return cmd_github_issue(a, cfg, home)
     if a.action == "pr":
+        if a.write_action == "enqueue":
+            from .github_merge import cmd_github_merge
+            return cmd_github_merge(a, cfg, home)
         from .github_prs import cmd_github_pr
         return cmd_github_pr(a, cfg, home)
     if a.action == "write":
