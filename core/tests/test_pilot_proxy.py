@@ -7,6 +7,8 @@ import socket
 import threading
 import time
 
+import ipaddress
+
 import pytest
 
 from jarves import browser_pilot as bp
@@ -283,7 +285,45 @@ def test_a_dead_upstream_is_a_502_not_a_hang(tmp_path):
         r.close()
 
 
-@pytest.mark.parametrize("addr", ["::ffff:0:a00:1", "fec0::1", "::93.184.216.34", "::ffff:10.0.0.1", "10.0.0.1"])
-def test_translated_and_deprecated_ipv6_forms_are_never_dialled_as_public(addr):
+_NOT_PUBLIC = ["::ffff:0:a00:1", "fec0::1", "::93.184.216.34", "::ffff:10.0.0.1", "10.0.0.1", "64:ff9b::a00:1", "64:ff9b:1::a00:1",
+               "2002:a00:1::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "fd00::1", "fe80::1", "ff0e::1", "ff02::1", "2001:db8::1",
+               "224.0.0.1", "127.0.0.1", "::1"]
+_PUBLIC = ["2606:4700::1", "2001:4860:4860::8888", "93.184.216.34", "64:ff9b::5db8:d822"]
+
+
+@pytest.mark.parametrize("addr", _NOT_PUBLIC)
+def test_translated_deprecated_local_and_multicast_forms_are_never_public(addr):
+    from jarves.browser_pilot import public_ip, vet_url
     from jarves.pilot_proxy import _addr_ok
+    ip = ipaddress.ip_address(addr)
+    assert public_ip(ip) is False
     assert _addr_ok(addr, "public") is False
+    assert vet_url("http://example.test/", resolver=lambda h: [addr]) == ""
+
+
+@pytest.mark.parametrize("addr", _PUBLIC)
+def test_real_global_addresses_still_pass_every_check(addr):
+    from jarves.browser_pilot import public_ip, vet_url
+    from jarves.pilot_proxy import _addr_ok
+    assert public_ip(ipaddress.ip_address(addr)) is True
+    assert _addr_ok(addr, "public") is True
+    assert vet_url("http://example.test/", resolver=lambda h: [addr]) == "public"
+
+
+def test_a_zone_id_link_local_answer_is_refused():
+    from jarves.browser_pilot import vet_url
+    assert vet_url("http://example.test/", resolver=lambda h: ["fe80::1%eth0"]) == ""
+
+
+def test_the_pin_filter_hands_the_driver_only_public_answers():
+    from jarves.browser_pilot import PilotSession
+    got = {}
+
+    class D:
+        def pin_hosts(self, m):
+            got.update(m)
+
+    s = PilotSession.__new__(PilotSession)
+    s.driver, s.pins = D(), {"a.test": ["64:ff9b::a00:1"], "b.test": ["fec0::1"], "c.test": ["ff0e::1"], "d.test": ["2606:4700::1"]}
+    s._apply_pins()
+    assert got == {"d.test": ["2606:4700::1"]}

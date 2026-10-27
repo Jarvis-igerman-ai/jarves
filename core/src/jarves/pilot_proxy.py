@@ -37,7 +37,7 @@ from typing import Callable, Iterable
 from urllib.parse import urlsplit
 
 from . import logs
-from .browser_pilot import PilotSession, _canonical_host, page_scope
+from .browser_pilot import PilotSession, _canonical_host, page_scope, public_ip
 
 MAX_HEADER_BYTES = 16 * 1024
 HEAD_DEADLINE_S = 5.0
@@ -67,12 +67,7 @@ def _addr_ok(addr: str, scope: str) -> bool:
         return False
     if scope == "local":
         return ip.is_loopback
-    from .browser_pilot import odd_v6
-    if odd_v6(ip):
-        return False
-    if ip.version == 6 and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    return ip.is_global
+    return public_ip(ip)
 
 
 def _port(v: str) -> int:

@@ -46,9 +46,28 @@ _SITE_LOCAL = ipaddress.ip_network("fec0::/10")     # deprecated site-local: ref
 _V4COMPAT = ipaddress.ip_network("::/96")        # deprecated IPv4-compatible form (::10.0.0.1): map the low 32 bits
 
 
-def odd_v6(ip) -> bool:
-    """Translated or deprecated IPv6 forms that embed an IPv4 address: never treated as a public address (#575)."""
-    return ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1))
+_NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")   # local-use NAT64: the embedded address position varies, refuse outright
+_6TO4 = ipaddress.ip_network("2002::/16")                 # 6to4 embeds an IPv4 address: refused
+_TEREDO = ipaddress.ip_network("2001::/32")               # Teredo embeds an IPv4 address: refused
+
+
+def unwrap_ip(ip):
+    """The address a connection would really reach: IPv4-mapped and NAT64 forms give the embedded IPv4; translated or
+    deprecated IPv6 forms (SIIT, site-local, IPv4-compatible, 6to4, Teredo, local NAT64) and multicast give None (#575)."""
+    if ip.version != 6:
+        return None if ip.is_multicast else ip
+    if (ip in _SIIT or ip in _SITE_LOCAL or ip in _6TO4 or ip in _TEREDO or ip in _NAT64_LOCAL
+            or (ip in _V4COMPAT and int(ip) > 1) or ip.is_multicast):
+        return None
+    if ip.ipv4_mapped or ip in _NAT64:
+        return ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return ip
+
+
+def public_ip(ip) -> bool:
+    """True only for a globally routable address, after looking through the wrapped forms. Used by every vetting place."""
+    real = unwrap_ip(ip)
+    return real is not None and real.is_global and not real.is_multicast
 
 
 def _canonical_host(host: str) -> str:
@@ -110,13 +129,12 @@ def _page_scope(url: str) -> str:
             return "local"
         odd = host.endswith((".local", ".internal", ".lan", ".home", ".arpa"))
         return "public" if "." in host and not odd else ""
-    if ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1)):
-        return ""                                    # translated / deprecated forms: never public, whatever they embed
-    if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64):
-        ip = ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
-    if ip.is_loopback:
+    real = unwrap_ip(ip)
+    if real is None:
+        return ""                                    # translated / deprecated forms and multicast: never public, whatever they embed
+    if real.is_loopback:
         return "local"
-    return "public" if ip.is_global else ""
+    return "public" if public_ip(ip) else ""
 
 
 KNOWN_KINDS = OBSERVE_KINDS | {"state:agent", "state:human", "state:paused", "state:stopped", "view:start", "view:stop", "human:click", "human:type", "human:key", "human:scroll"}
@@ -174,11 +192,7 @@ def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) ->
             ip = ipaddress.ip_address(str(a).split("%")[0])
         except ValueError:
             return ""
-        if ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1)):
-            return ""
-        if ip.version == 6 and (ip.ipv4_mapped or ip in _NAT64):
-            ip = ip.ipv4_mapped or ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
-        if not ip.is_global:
+        if not public_ip(ip):
             return ""
     return scope
 
@@ -238,7 +252,7 @@ class PilotSession:
         def good(addrs) -> bool:                              # a refused (private) answer is never handed to the driver
             try:
                 ips = [ipaddress.ip_address(str(x).split("%")[0]) for x in addrs]
-                return bool(ips) and all(i.is_global and not odd_v6(i) for i in ips)
+                return bool(ips) and all(public_ip(i) for i in ips)
             except ValueError:
                 return False
         self.driver.pin_hosts({h: list(v) for h, v in self.pins.items() if good(v)})
