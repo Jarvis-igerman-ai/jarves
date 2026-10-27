@@ -1,0 +1,44 @@
+order = 65
+category = "system"
+pages = ["signoff"]
+features = []
+aliases = ["הרצת גרסה יציבה", "שחרור גרסה", "release run", "do stable release", "stable release"]
+links = ["release_signoff", "updates", "install_latest"]
+title_he = "הרצת גרסה יציבה בפקודה אחת"
+title_en = "Run a stable release with one command"
+what_he = "פקודה אחת אוספת את ראיות השחרור, מסרבת אם main אדום, יש P0-P2 פתוח או שהגיליון לא ניתן לחתימה, ורק אחרי אישור מפורש שלכם חותמת ומדפיסה את פקודות התיוג. היא לא מתייגת ולא דוחפת בעצמה."
+what_en = "One command collects the release evidence, refuses if main is red, a P0-P2 is open or the sheet cannot be signed, and only after your explicit approval signs and prints the tag commands. It never tags or pushes by itself."
+say = [["תכין את הגרסה היציבה", "Prepare the stable release"]]
+expect_he = "בלי אישור: דוח ראיות ומה חסר, בלי חתימה. עם --approved-by-owner: הגיליון נחתם (האישור שלכם נרשם בו ובדוח), ומודפסות פקודות ה-PR, בדיקת השער והתיוג להרצה ידנית."
+expect_en = "Without approval: an evidence report and what is missing, nothing signed. With --approved-by-owner: the sheet is signed (your approval is recorded in it and in the report) and the docs PR, gate check and tag commands are printed for you to run."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "קוראת רק את מצב ההרצות והבעיות הפתוחות מ-GitHub (קריאה בלבד) ואת קובץ הגיליון בפרויקט."
+privacy_en = "It only reads the run status and open issues from GitHub (read only) and the sheet file in the project."
+
+[[steps]]
+he = "בדיקה בלי שינוי: jarvis release run --version X.Y.Z --dry-run. מציגה מה חסר, ולא כותבת ולא חותמת כלום."
+en = "A check that changes nothing: jarvis release run --version X.Y.Z --dry-run. It shows what is missing and writes and signs nothing."
+action = "command:jarvis release run --dry-run"
+
+[[steps]]
+he = "כשהכול מוכן ואתם מאשרים בצ'אט: jarvis release run --version X.Y.Z --approved-by-owner \"הציטוט או השעה ב-UTC\". הגיליון נחתם והפקודה מדפיסה את הצעדים הבאים."
+en = "When everything is ready and you approve in chat: jarvis release run --version X.Y.Z --approved-by-owner \"your words or the time in UTC\". The sheet is signed and the command prints the next steps."
+action = "command:jarvis release run"
+
+[[steps]]
+he = "הריצו ידנית את מה שהודפס: PR של מסמכים, release_gate.py ואז תיוג הקומיט החתום. אף פקודה כזו לא רצה אוטומטית, ותג לא מזיזים ולא מוחקים."
+en = "Run what was printed by hand: the docs PR, release_gate.py and then the tag on the signed commit. None of those commands runs automatically, and a tag is never moved or deleted."
+action = "command:jarvis release status"
+
+[[problems]]
+he = "הפקודה מסרבת"
+en = "The command refuses"
+fix_he = "היא מציינת את הסיבה: main אדום, P0-P2 פתוח (פרט לתווית known-issue), או שורות פתוחות בגיליון. תקנו את מה שנכתב והריצו שוב; שום דבר לא נחתם כשהיא מסרבת."
+fix_en = "It names the reason: main is red, an open P0-P2 (except a known-issue label), or open rows in the sheet. Fix what it says and run again; nothing is signed when it refuses."
+
+[[problems]]
+he = "החתימה נכשלת על הבטא או הקומיט"
+en = "Signing fails on the beta or the commit"
+fix_he = "החתימה רושמת את הבטא המותקנת ואת הקומיט שלה. התקינו את הבטא האחרונה (jarvis install-latest --channel beta) או תנו --beta ו---commit."
+fix_en = "Signing records the installed beta and its commit. Install the latest beta (jarvis install-latest --channel beta) or pass --beta and --commit."
