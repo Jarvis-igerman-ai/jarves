@@ -413,6 +413,8 @@ class GitHubWriter:
         execute(); an action that was not listed still asks again."""
         if not 1 <= len(actions) <= 10 or len({x.repo.lower() for x in actions}) != 1:
             return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="a batch is 1 to 10 actions on one repo")
+        if len({x.hash() for x in actions}) != len(actions):      # #569: the grants are keyed by hash: two equal actions would share one
+            return WriteResult(ok=False, code="GITHUB_WRITE_BAD_ARGUMENT", message="a batch cannot contain the same action twice")
         for a in actions:                     # the same gates as execute(), BEFORE the owner is asked
             r = await self._gates(a, origin, untrusted)
             if r is not None:
@@ -561,8 +563,11 @@ def _confirm_reset(cfg, home) -> bool:
     from .approvals import ApprovalService, PopupChannel
     svc = ApprovalService(home)
     svc.channels.append(PopupChannel(svc, enabled=True, lang=getattr(getattr(cfg, "ui", None), "popup_language", "en")))
+    problem = read_chain(Path(home) / "github" / "write_audit.jsonl")[1]        # #569: the owner sees why he is asked
+    state = (f"Audit state: TAMPERED ({problem[:80]}). / מצב היומן: נפגע ({problem[:80]}). " if problem
+             else "Audit state: OK (no tamper alarm; this only resets the limits). / מצב היומן: תקין (אין התראה; האיפוס רק מאפס את המגבלות). ")
     return bool(asyncio.run(svc.ask(
-        "Reset the GitHub write audit? The old file is kept as evidence; the rate limit and the duplicate guard start from zero. / "
+        state + "Reset the GitHub write audit? The old file is kept as evidence; the rate limit and the duplicate guard start from zero. / "
         "לאפס את יומן הביקורת של כתיבה ל-GitHub? הקובץ הישן נשמר כראיה; מגבלת הקצב ובדיקת הכפילות מתחילות מאפס.",
         title="GitHub: reset write audit", risk="high", kind="tool", local_only=True,
         why="the audit chain is reset by the owner only", source="user")))
