@@ -98,3 +98,38 @@ def test_ui_show_is_offered_only_when_the_words_ask_for_a_list():
         assert [t.name for t in reg.tools()] == ["ui_show"]
     reg.open_lazy("hello")
     assert reg.tools() == []
+
+
+# ---------------------------------------------------------------- S4: table and choices
+def test_table_gets_server_ids_pads_rows_and_cleans():
+    b = ub.validate_block({"v": 1, "kind": "table", "title": "Plan", "columns": [{"label": "Day"}, {"label": "Task‮"}],
+                           "rows": [{"cells": ["Mon", "call"]}, {"cells": ["Tue"]}]})
+    assert [c["id"] for c in b["columns"]] == ["c1", "c2"] and b["columns"][1]["label"] == "Task"
+    assert b["rows"][1]["cells"] == ["Tue", ""]
+    assert ub.numbered(b).splitlines()[1:] == ["Day | Task", "Mon | call", "Tue | "]
+
+
+@pytest.mark.parametrize("raw", [
+    {"v": 1, "kind": "table", "columns": [], "rows": [{"cells": ["a"]}]},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}] * 7, "rows": [{"cells": ["a"]}]},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}], "rows": []},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}], "rows": [{"cells": ["a", "b"]}]},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}], "rows": [{"cells": ["x" * 101]}]},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}], "rows": [{"cells": ["a"]}] * 31},
+    {"v": 1, "kind": "table", "columns": [{"label": "a"}], "rows": [{"cells": ["a"]}], "on": "anydo_create_tasks"},
+    {"v": 1, "kind": "choices", "options": [{"label": "only one"}]},
+    {"v": 1, "kind": "choices", "options": [{"label": "a"}] * 7},
+    {"v": 1, "kind": "choices", "options": [{"label": "a"}, {"label": "b" * 61}]},
+    {"v": 1, "kind": "choices", "options": [{"label": "a"}, {"label": "b"}], "on": "anydo_create_tasks"},
+    {"v": 1, "kind": "checklist", "items": [{"label": "a"}], "options": [{"label": "a"}, {"label": "b"}]},
+])
+def test_table_and_choices_reject_matrix(raw):
+    with pytest.raises(ValueError):
+        ub.validate_block(raw)
+
+
+def test_choices_ids_and_numbered():
+    b = ub.validate_block({"v": 1, "kind": "choices", "title": "Which?", "options": [{"label": "Tea"}, {"label": "Coffee"}]})
+    assert [o["id"] for o in b["options"]] == ["o1", "o2"]
+    assert ub.numbered(b).splitlines()[:3] == ["Which?", "1) Tea", "2) Coffee"]
+    assert ub.BlockStore().add(b) is None          # no next step: nothing to record or click

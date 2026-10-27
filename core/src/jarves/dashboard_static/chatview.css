@@ -93,3 +93,9 @@
 .jc-cardbtns button { min-block-size: 44px; min-inline-size: 44px; }
 .jc-card-in { inline-size: 100%; box-sizing: border-box; min-block-size: 44px; margin-block: 4px; font: inherit; }
 .jc-cardbtns button:focus-visible, .jc-card-in:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+.jc-table { border-collapse: collapse; inline-size: 100%; font-size: .92em; }
+.jc-table th, .jc-table td { border: 1px solid currentColor; padding: 4px 8px; text-align: start; overflow-wrap: anywhere; }
+.jc-table th { font-weight: 600; }
+.jc-choices { flex-wrap: wrap; gap: 8px; }
+.jc-choices button { min-block-size: 44px; min-inline-size: 44px; }
+.jc-choices button:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }

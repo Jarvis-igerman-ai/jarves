@@ -242,3 +242,34 @@ def test_cards_skip_all_refusal_and_rtl(browser):
     assert not blk.get_by_role("button", name="שלחו את הבחירה").is_disabled()          # refusal reopens it
     assert errs == []
     p.close()
+
+
+# ---- S4: read-only table and choices (a click sends the label as the owner's own message), text nodes only
+TC = [{"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_t", "kind": "table", "title": "Plan", "dir": "auto",
+       "columns": [{"id": "c1", "label": "Day"}, {"id": "c2", "label": "Task"}],
+       "rows": [{"id": "r1", "cells": ["Mon", "<img src=x onerror=\"window.__xss=1\">"]}, {"id": "r2", "cells": ["Tue", ""]}]}},
+      {"role": "ui_block", "turn": "t1", "block": {"v": 1, "id": "blk_o", "kind": "choices", "title": "Which?", "dir": "auto",
+       "options": [{"id": "o1", "label": "Tea"}, {"id": "o2", "label": "Coffee"}]}}]
+
+
+def test_table_and_choices_render_as_text_and_choice_sends_a_message(browser):
+    p = browser.new_page(viewport={"width": 360, "height": 800})
+    errs: list[str] = []
+    p.on("pageerror", lambda e: errs.append(str(e)))
+    p.set_content(PAGE)
+    p.add_style_tag(path=str(STATIC / "chatview.css"))
+    p.add_script_tag(path=str(STATIC / "chatview.js"))
+    boot = (BOOT.replace("messages: [", "messages: " + json.dumps(TC) + ".concat([").replace("turn: '' }] }),", "turn: '' }]) }),"))
+    p.evaluate(boot % json.dumps("x"))
+    p.wait_for_selector(".jc-block[data-kind=choices] button")
+    assert p.evaluate("window.__xss") is None and p.locator(".jc-block img").count() == 0
+    assert p.locator(".jc-block[data-kind=table] th").all_inner_texts() == ["Day", "Task"]
+    assert p.locator(".jc-block[data-kind=table] tbody tr").count() == 2
+    for b in p.locator(".jc-choices button").all():
+        assert b.bounding_box()["height"] >= 44
+    p.click(".jc-choices button >> text=Coffee")
+    p.wait_for_function("() => (window.__sent || []).length === 1")
+    assert p.evaluate("window.__sent") == ["Coffee"]
+    assert p.locator(".jc-choices button[disabled]").count() == 2
+    assert errs == []
+    p.close()
