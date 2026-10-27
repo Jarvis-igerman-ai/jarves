@@ -101,7 +101,7 @@ async def test_no_greeting_audio_leaves_an_open_usable_silent_room(home, cfg, mo
     try:
         t0 = time.monotonic()
         await core.prepare_desktop()                                   # no exception escapes
-        assert time.monotonic() - t0 < 2.0                             # never hangs past the start limit
+        assert time.monotonic() - t0 < 10.0                            # never hangs (budget is 0.4 s; a loaded Windows runner stalled 2.5 s once)
         st = core.snapshot()["startup"]
         assert st["ready"] and st["phase"] == "ready"
         voice = holder[0]
