@@ -155,3 +155,45 @@ class PinTrust(private val pin: String?) : javax.net.ssl.X509TrustManager {
 
     override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
 }
+
+/** Seals and opens bytes. [open] gives null for anything that is not a blob this sealer made with this key (tampered, other key, garbage). */
+interface Sealer {
+    fun seal(plain: ByteArray): ByteArray
+    fun open(boxed: ByteArray): ByteArray?
+}
+
+/** AES-GCM with a fresh random 12-byte nonce in front of every blob. The key comes from [key] (the Android Keystore in the app). */
+class AesGcmSealer(private val key: () -> javax.crypto.SecretKey) : Sealer {
+    override fun seal(plain: ByteArray): ByteArray {
+        val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(javax.crypto.Cipher.ENCRYPT_MODE, key())
+        return c.iv + c.doFinal(plain)
+    }
+
+    override fun open(boxed: ByteArray): ByteArray? {
+        if (boxed.size < 12 + 16) return null
+        return try {
+            val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(javax.crypto.Cipher.DECRYPT_MODE, key(), javax.crypto.spec.GCMParameterSpec(128, boxed, 0, 12))
+            c.doFinal(boxed, 12, boxed.size - 12)
+        } catch (e: java.security.GeneralSecurityException) {
+            null
+        }
+    }
+}
+
+/** The session as one sealed, base64 string. Decoding returns null (never throws) for anything that is not a complete session. */
+object SessionCodec {
+    fun encode(s: Session, sealer: Sealer): String {
+        val j = JSONObject().put("base", s.base).put("token", s.token).put("pin", s.pin).put("device", s.device)
+        return java.util.Base64.getEncoder().encodeToString(sealer.seal(j.toString().toByteArray(Charsets.UTF_8)))
+    }
+
+    fun decode(text: String, sealer: Sealer): Session? = try {
+        val plain = sealer.open(java.util.Base64.getDecoder().decode(text)) ?: return null
+        val j = JSONObject(String(plain, Charsets.UTF_8))
+        Session(j.getString("base"), j.getString("token"), j.getString("pin"), j.optString("device", ""))
+    } catch (e: Exception) {
+        null
+    }
+}

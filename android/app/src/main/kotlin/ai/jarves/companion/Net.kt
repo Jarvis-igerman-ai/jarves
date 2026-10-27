@@ -1,11 +1,14 @@
 package ai.jarves.companion
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
 import java.io.IOException
 import java.net.URL
+import java.security.KeyStore
 import java.security.cert.CertificateException
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLException
@@ -89,43 +92,57 @@ fun probeFingerprint(base: String): String? {
 
 data class Session(val base: String, val token: String, val pin: String, val device: String)
 
-/** The token lives only in Android's encrypted preferences (Keystore-backed), never in a log or a backup (allowBackup is off). */
-class SessionStore(private val context: Context) {
-    private fun prefs() = EncryptedSharedPreferences.create(
-        context, "jarves_session",
-        MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+private const val KEY_ALIAS = "jarves_session_key"
 
-    /** The library (a deprecated alpha) can fail on some devices or after a restore: then the session is dropped and the owner pairs again. */
-    private fun safe(): android.content.SharedPreferences? = try {
-        prefs()
-    } catch (e: Exception) {
-        context.deleteSharedPreferences("jarves_session")
+/** One AES-256-GCM key that lives in the Android Keystore (hardware-backed where the phone has it) and never leaves it. */
+private fun keystoreKey(): SecretKey {
+    val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+    val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+    gen.init(
+        KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .build(),
+    )
+    return gen.generateKey()
+}
+
+/**
+ * The token lives only as one AES-GCM sealed blob (key in the Keystore) in private preferences, never in a log or a backup (allowBackup is
+ * off and dataExtractionRules exclude it). If the key is gone (restore, factory reset, lock-screen change on some phones) the blob cannot
+ * be opened: the session is dropped and the owner pairs again.
+ */
+class SessionStore(private val context: Context) {
+    private val sealer = AesGcmSealer(::keystoreKey)
+
+    private fun prefs() = context.getSharedPreferences("jarves_session_v2", Context.MODE_PRIVATE)
+
+    init {
         try {
-            prefs()
-        } catch (e2: Exception) {
-            null
+            context.deleteSharedPreferences("jarves_session")             // the earlier (A2) store: pair again once
+        } catch (e: Exception) {
+            // nothing to remove
         }
     }
 
     fun load(): Session? = try {
-        val p = safe()
-        val b = p?.getString("base", null)
-        val t = p?.getString("token", null)
-        val pin = p?.getString("pin", null)
-        if (b == null || t == null || pin == null) null else Session(b, t, pin, p.getString("device", "") ?: "")
+        prefs().getString("blob", null)?.let { SessionCodec.decode(it, sealer) }
     } catch (e: Exception) {
         null
     }
 
     fun save(s: Session) {
-        safe()?.edit()?.putString("base", s.base)?.putString("token", s.token)?.putString("pin", s.pin)?.putString("device", s.device)?.apply()
+        try {
+            prefs().edit().putString("blob", SessionCodec.encode(s, sealer)).apply()
+        } catch (e: Exception) {
+            prefs().edit().clear().apply()                                  // never keep a half state: the owner pairs again
+        }
     }
 
     fun clear() {
-        safe()?.edit()?.clear()?.apply()
+        prefs().edit().clear().apply()
     }
 }
 
