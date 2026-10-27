@@ -1,0 +1,48 @@
+order = 60
+category = "start"
+pages = ["home"]
+features = ["home_setup_cards"]
+suggest = false
+aliases = ["כרטיסי הגדרה", "כרטיסי הגדרה בדף הבית", "home setup cards", "setup cards", "setup checklist"]
+links = ["guided_setup", "telegram", "music", "wake_word", "google_calendar"]
+title_he = "כרטיסי הגדרה בדף הבית"
+title_en = "Home setup cards"
+what_he = "בדף הבית מופיע כרטיס אחד לכל דבר שעוד לא הוגדר: גוגל, בוט טלגרם, תוסף Pear ודוגמאות למילת ההפעלה. בכל כרטיס שלבים קצרים וכפתורים: עובד, לא עבד, אחר כך. מה שכבר הגדרתם או דילגתם עליו לא חוזר."
+what_en = "The Home page shows one card for each thing not set up yet: Google, the Telegram bot, the Pear plugin and the wake-word samples. Each card has short steps and three buttons: Works, Did not work, Later. Anything you already set up or skipped does not come back."
+say = [["מה עוד לא הוגדר?", "What is not set up yet?"]]
+expect_he = "כרטיס נעלם כשלוחצים עובד והבדיקה מצליחה, או כשלוחצים אחר כך (חוזר אחרי שלושה ימים). לחיצה על לא עבד משאירה את הכרטיס עם קישור למדריך. אף כרטיס לא מבקש סוד בצ'אט: טוקן מדביקים רק בחלון החיבור."
+expect_en = "A card disappears when you press Works and the check succeeds, or when you press Later (it returns after three days). Did not work keeps the card with a link to the guide. No card asks for a secret in chat: a token is pasted only in the connect window."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. המצב האמיתי של כל חיבור נמצא בעמוד החיבורים או ב-jarvis connect --status."
+test_en = "The check only sees that the component is installed. The real state of each connection is on the Connections page or in jarvis connect --status."
+cost_he = "חינם. אין שום בקשה בתשלום."
+cost_en = "Free. No paid request is made."
+privacy_he = "הכרטיסים משתמשים באותה בדיקה מקומית של jarvis connect. נשמרת רק התשובה שלכם לכל כרטיס, במחשב הזה. שום דבר לא נשלח החוצה."
+privacy_en = "The cards use the same local check as jarvis connect. Only your answer to each card is stored, on this computer. Nothing is sent out."
+
+[[steps]]
+he = "הדליקו את המתג \"כרטיסי הגדרה בדף הבית\" (כבוי כברירת מחדל). זו תכונת בטא: קודם הדליקו תכונות בטא."
+en = "Switch on \"Home setup cards\" (off by default). It is a beta feature: turn on beta features first."
+action = "feature_on:home_setup_cards"
+check = "active:home_setup_cards"
+
+[[steps]]
+he = "פתחו את דף הבית ועברו על הכרטיסים. אותו מצב מופיע ב-jarvis connect --status."
+en = "Open the Home page and go through the cards. The same state shows in jarvis connect --status."
+action = "open:#/home"
+
+[[steps]]
+he = "לכיבוי: jarvis features off home_setup_cards. החיבורים עצמם לא משתנים."
+en = "To turn off: jarvis features off home_setup_cards. The connections themselves do not change."
+
+[[problems]]
+he = "כרטיס חזר אחרי שלחצתי עובד"
+en = "A card came back after I pressed Works"
+fix_he = "הבדיקה לא ראתה חיבור אמיתי. הריצו jarvis connect --status כדי לראות מה חסר."
+fix_en = "The check did not see a real connection. Run jarvis connect --status to see what is missing."
+
+[[problems]]
+he = "אני לא רואה כרטיסים"
+en = "I see no cards"
+fix_he = "או שהכול כבר מוגדר, או שבחרתם אחר כך (חוזר אחרי שלושה ימים), או שהמתג כבוי: jarvis features on home_setup_cards."
+fix_en = "Either everything is set up, or you chose Later (it returns after three days), or the switch is off: jarvis features on home_setup_cards."

@@ -281,7 +281,8 @@
       function draw() {
         body.replaceChildren();
         if (at < cards.length) {
-          const c = cards[at], meta = [c.due ? tx("לתאריך ", "due ") + c.due : "", c.person || ""].filter(Boolean).join(" · ");
+          const c = cards[at], meta = [c.due ? tx("לתאריך ", "due ") + c.due : "", c.person || "",
+            c.source === "mail" ? tx("מהמייל", "from mail") : c.source === "note" ? tx("מהערה", "from a note") : ""].filter(Boolean).join(" · ");
           const src = c.ref || c.when ? tx("מתוך וואטסאפ", "from WhatsApp") + [c.when, c.ref].filter(Boolean).map((x) => " · " + x).join("") : "";
           body.append(h("div", { class: "jc-small" }, tx(`כרטיס ${at + 1} מתוך ${cards.length} · משימה אפשרית, לא מאושרת`,
             `Card ${at + 1} of ${cards.length} · possible task, not confirmed`)));
@@ -319,10 +320,23 @@
     }
     function blockView(m) {
       const b = m.block;
-      if (!b || b.v !== 1 || (b.kind !== "text" && b.kind !== "checklist" && b.kind !== "cards")) return;     // unknown block: dropped, text stays
+      if (!b || b.v !== 1 || !["text", "checklist", "cards", "table", "choices"].includes(b.kind)) return;     // unknown block: dropped, text stays
       const wrap = h("div", { class: "jc-msg jc-block", dir: b.dir === "rtl" || b.dir === "ltr" ? b.dir : "auto", "data-kind": b.kind });
       if (b.kind === "cards") {
         cardsView(b, m, wrap);
+      } else if (b.kind === "table") {       // S4: read-only table, text cells only
+        const cols = Array.isArray(b.columns) ? b.columns : [], rows = Array.isArray(b.rows) ? b.rows : [];
+        if (b.title) wrap.append(h("b", { dir: "auto" }, b.title));
+        wrap.append(h("div", { class: "jc-tablewrap", style: "overflow-x:auto" }, h("table", { class: "jc-table" },
+          h("thead", {}, h("tr", {}, cols.map((c) => h("th", { dir: "auto", scope: "col" }, c.label)))),
+          h("tbody", {}, rows.map((r) => h("tr", {}, (r.cells || []).map((x) => h("td", { dir: "auto" }, x))))))));
+      } else if (b.kind === "choices") {     // S4: a click sends the label as the owner's own normal message (never a hidden action)
+        const opts = Array.isArray(b.options) ? b.options : [];
+        const btns = [];
+        if (b.title) wrap.append(h("b", { dir: "auto" }, b.title));
+        const row = h("div", { class: "jc-row jc-choices", role: "group", "aria-label": b.title || tx("אפשרויות", "Options") },
+          opts.map((o) => { const x = h("button", { type: "button", dir: "auto", onclick: () => { btns.forEach((y) => { y.disabled = true; }); submit(o.label); } }, o.label); btns.push(x); return x; }));
+        wrap.append(row);
       } else if (b.kind === "text") {
         if (b.title) wrap.append(h("b", { dir: "auto" }, b.title));
         String(b.text || "").split(String.fromCharCode(10)).forEach((ln) => wrap.append(h("div", { dir: "auto", style: "white-space:pre-wrap" }, ln)));

@@ -392,3 +392,37 @@ def test_ask_text_claims_nothing_is_sent_only_when_ai_wording_is_off(lang):
         await no_model.fail()
         assert no_model.asked[0][1]["why"] == fg.TEXT[lang]["why"]
     run(go())
+
+
+# ---------------------------------------------------------------- slice B: a local ticket from the report
+def test_ticket_from_report_is_local_content_free_and_sendable(tmp_path):
+    from jarves.diag import diag_ticket as dt
+    rep = areas.run("anydo", "ANYDO_AUTH_EXPIRED", home=tmp_path)
+    t = dt.make(tmp_path, rep)
+    assert t["id"].startswith("JI-") and "[diag] anydo: ANYDO_AUTH_EXPIRED" in t["title"]
+    assert "ANYDO_AUTH_EXPIRED" in t["body"] and dt.scan(t["title"] + t["body"]) == []
+    assert dt.make(tmp_path, rep)["id"] == t["id"]               # same report, same ticket (no duplicates)
+
+
+@pytest.mark.parametrize("bad, name", [(SECRET, "secret"), (MAIL, "email"), (PHONE, "phone"), ("C:\\Users\\dana\\x", "path")])
+def test_final_scan_blocks_private_text(tmp_path, bad, name):
+    from jarves.diag import diag_ticket as dt
+    assert name in dt.scan("fine " + bad)
+    rep = areas.run("anydo", "ANYDO_AUTH_EXPIRED", home=tmp_path)
+    rep.cause_en = "the sign-in failed for " + bad
+    with pytest.raises(dt.TicketBlocked) as e:
+        dt.make(tmp_path, rep)
+    assert name in e.value.reasons and bad not in str(e.value.reasons)
+    assert not (tmp_path / "issues.json").exists() or bad not in (tmp_path / "issues.json").read_text(encoding="utf-8")
+
+
+def test_cli_ticket_flag_saves_locally_and_sends_nothing(tmp_path, capsys, monkeypatch):
+    import argparse
+    from jarves import cli
+    def no_net(*a, **k):
+        raise AssertionError("network")
+    monkeypatch.setattr(socket, "create_connection", no_net)
+    a = argparse.Namespace(area="anydo", code="ANYDO_AUTH_EXPIRED", json=False, ticket=True)
+    assert cli._diagnose_area(a, None, tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "NOTHING is sent" in out and "jarvis ticket send JI-" in out

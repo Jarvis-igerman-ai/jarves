@@ -6,19 +6,19 @@ Status (22 Oct 2026): 4.0.0 is `main` after release PR #41; the installer is pub
 
 | Area | What it is | Evidence and limits |
 |---|---|---|
-| Privacy hardening | Fixed log messages, field classification, redaction of 36 sinks, `jarvis diag` strips content, privacy banner | Planted-secret audit: 0 leaks in both modes ([report](reviews/SWV4_B_PRIVACY.md)) |
+| Privacy hardening | Fixed log messages, field classification, redaction of 36 sinks, `jarvis diag` strips content, privacy banner | Planted-secret audit: 0 leaks in both modes ([report](archive/reviews/SWV4_B_PRIVACY.md)) |
 | Independent re-review | P1 fixes: voice-approved dangerous commands, data-folder refusal bypasses, untrusted Instagram DMs, cross-profile secret reach | Exploit tests ([report](reviews/SWV4_C_REVIEW.md)) |
 | Approvals popup | Compact card, Approve/Deny, hidden typed codes, signed answer files, popup nonce; spoken approvals name only the kind of action | [R-01 report](reviews/SWV4_R01_DEFENSE.md). Helper commands run in a Job Object but are not file-sandboxed |
 | Client-mode delegation | JARVES runs the backend request itself with a strict reserved budget | Live latency measured ([report](reviews/SWV4_D_DELEGATION.md)) |
 | Agent Orchestrator | Claude Code and Codex sessions: list, ask, tell, start, stop, approvals; plugin and local pipe | Fake agents only; not verified on live paid sessions ([report](reviews/SWV4_E_ORCHESTRATOR.md)) |
-| WhatsApp bridge | Go bridge (whatsmeow), read mode first, allow-listed sends with approval, kill switch | Fake bridge and the real binary offline; real account not verified ([report](reviews/SWV4_F_WHATSAPP.md)) |
+| WhatsApp bridge | Go bridge (whatsmeow), read mode first, allow-listed sends with approval, kill switch | Fake bridge and the real binary offline; real account not verified ([report](archive/reviews/SWV4_F_WHATSAPP.md)) |
 | Conversation recall | Local FTS index, Hebrew-aware, CLI and Recall page | Quality set 40/40; live voice 79-84 ([report](reviews/SWV4_G_RECALL.md)) |
 | Dashboard | English and Hebrew only, accessibility fixes, Timers, Lists, Approvals, Coding agents, Health pages | Headless browser sweep ([report](reviews/SWV4_K_DASHBOARD.md)) |
-| Performance gates | Budgets in `core/perf_budgets.toml`, `perf_gate.py`, docs-only CI skip, nightly workflow | [report](reviews/SWV4_M_PERF_CI.md), [budgets](reviews/SWV4_PERF_BUDGETS.md) |
-| Self-Diagnostics 2.0 | Monitor, baselines, version regression, root-cause hints, preflight, canaries, remediation through approvals, scheduled AI review | [report](reviews/SWV4_O_SELFDIAG2.md) |
+| Performance gates | Budgets in `core/perf_budgets.toml`, `perf_gate.py`, docs-only CI skip, nightly workflow | [report](archive/reviews/SWV4_M_PERF_CI.md), [budgets](reviews/SWV4_PERF_BUDGETS.md) |
+| Self-Diagnostics 2.0 | Monitor, baselines, version regression, root-cause hints, preflight, canaries, remediation through approvals, scheduled AI review | [report](archive/reviews/SWV4_O_SELFDIAG2.md) |
 | Wake model | Head trained on the owner's recordings, `jarvis wake train [--revert]` | Measured by cross-validation ([report](reviews/SWV4_WAKE_TRAIN.md)) |
-| Idle writes | Idle disk writes reduced from 36.5 to 4.8 KB/min | [report](reviews/SWV4_IDLE_WRITES.md) |
-| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | Off by default (`assisted_dialing`); Phone Link not verified ([report](reviews/SWV4_H_DIALING.md)) |
+| Idle writes | Idle disk writes reduced from 36.5 to 4.8 KB/min | [report](archive/reviews/SWV4_IDLE_WRITES.md) |
+| Assisted dialing | Voice, CLI and page open a `tel:` link after approval; the owner presses Call | Off by default (`assisted_dialing`); Phone Link not verified ([report](archive/reviews/SWV4_H_DIALING.md)) |
 | Installer, update, rollback | Silent upgrade, signed manifest, `jarvis update --rollback`, migrations with backup | Fake-tested; real installer round trip and upgrade matrix not run ([report](reviews/SWV4_L_INSTALLER.md)) |
 
 Not in V4: Telegram, Instagram and Home Assistant live verification, rocket alerts, a signed installer (the owner chose to stay unsigned for now), phone and robot hardware.

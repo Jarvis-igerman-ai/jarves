@@ -424,3 +424,29 @@ def test_606_owner_must_be_printable_notes_with_backslashes_and_nfd_text_round_t
     s2.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Igal")
     nfd_text = unicodedata.normalize("NFD", s2.render())
     assert not so2.Sheet.parse(nfd_text).problems()                              # a rewrite in NFD does not void the signature
+
+
+def test_gate_out_of_band_rows_hash(tmp_path):
+    """#605: a hash recorded outside the sheet (tag annotation) must match; a recomputed hash in an edited sheet fails."""
+    root = _signed_root(tmp_path)
+    good = so.load(root, "4.1.0").rows_hash
+    assert _gate(tmp_path, root=root, expect_rows_hash=good.upper()) == []
+    bad = _gate(tmp_path, root=root, expect_rows_hash="0" * 64)
+    assert any("differs from the hash recorded outside the sheet" in p for p in bad)
+    assert any("not a sha256" in p for p in _gate(tmp_path, root=root, expect_rows_hash="xyz"))
+    forged = _signed_root(tmp_path / "forged")
+    s = so.load(forged, "4.1.0")
+    s.set_result("C1", "fail")
+    s.rows_hash = s.compute_rows_hash()                      # an editor recomputes the in-sheet hash: still caught
+    so.save(forged, s)
+    assert any("differs from the hash recorded outside" in p for p in _gate(tmp_path, root=forged, expect_rows_hash=good))
+
+
+def test_release_workflow_publishes_only_inside_the_protected_environment():
+    """#544: the secrets are read only by a step of a job that names environment stable-release for real publishes."""
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "environment: ${{" in wf and "'stable-release'" in wf
+    env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
+    assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
+    assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf

@@ -148,3 +148,50 @@ def test_train_phrase_reports_the_baseline_and_the_comparison_table(tmp_path):
     assert all("near-miss" not in w for w in wp.gate(rep))                       # 0 <= the baseline's 31
     none = small_train(tmp_path / "n.npz")
     assert none["baseline"] is None and wp.format_comparison(none) == []
+
+
+def test_595_absolute_ceilings_hold_even_when_the_baseline_is_just_as_bad():
+    bad = _base(near_miss_false=40, false_per_hour=90.0)
+    assert any("ceiling" in w for w in wp.gate({**_cand(wakes=wp.MAX_NEAR_MISS_WAKES + 1), "baseline": bad}))
+    assert any("above the ceiling" in w for w in wp.gate({**_cand(fph=wp.MAX_FALSE_PER_HOUR + 1), "baseline": bad}))
+    assert wp.gate({**_cand(wakes=wp.MAX_NEAR_MISS_WAKES, fph=wp.MAX_FALSE_PER_HOUR), "baseline": bad}) == []
+
+
+def test_595_the_baseline_is_the_live_custom_head_at_the_configured_level_when_there_is_one(tmp_path):
+    live = tmp_path / "live.npz"
+    small_train(live, baseline=None)                                 # an earlier custom head
+    sc = wt.pick_baseline(fake_embedder, tmp_path / "cand.npz", live, 0.62, 0.62)
+    assert isinstance(sc, wp.HeadScorer) and sc.threshold == 0.62 and sc.name == "your current model"
+    stock = wt.pick_baseline(fake_embedder, tmp_path / "cand.npz", None, None, 0.62)         # no live head: the stock model
+    assert isinstance(stock, wp.StandardScorer) and stock.threshold == 0.62                 # at wake_accept, not a fixed 0.5
+    assert wt.pick_baseline(fake_embedder, live, live, 0.62, None).threshold == wp.BASELINE_THRESHOLD   # the file being written
+    (tmp_path / "bad.npz").write_bytes(b"not a head")
+    notes = []
+    sc = wt.pick_baseline(fake_embedder, tmp_path / "c.npz", tmp_path / "bad.npz", 0.7, 0.6, notes.append)
+    assert isinstance(sc, wp.StandardScorer) and sc.threshold == 0.6 and notes
+
+
+def test_596_held_out_gate_list_has_no_phonetic_twin_among_the_trained_negatives():
+    trained = (wt.NEG_EN + wt.NEAR_EN + wt.HARD_NEG_EN + wt.NEG_EN_LONG + wt.NEG_HE + wt.HARD_NEG_HE + wt.NEG_HE_LONG
+               + [t for _, t in wp.NEAR_MISS_SENTENCES])
+    assert wp.phonetic_twin("hey Marvin", "hey Marvis") and wp.phonetic_twin("hi Gervase", "hey Gervais")
+    assert wp.phonetic_twin("hi Mavis", "hey Marvis") and wp.phonetic_twin("hey Kervin", "hey Carvis")
+    assert wp.phonetic_twin("Marvelous weather today", "hey Marvel") and wp.phonetic_twin("hey nervous", "nervous")
+    assert wp.phonetic_twin("היי מרווין", "היי מרוויס") and wp.phonetic_twin("היי גרווי", "היי גרוויס")
+    assert not wp.phonetic_twin("hey Elvis", "hey Davis") and not wp.phonetic_twin("היי מלווין", "היי מרוויס")
+    # "hey Jervis" is the wake word's own twin on purpose (the hardest near miss), every other held-out item is unseen
+    bad = [(h, t) for _, h in wp.NEAR_MISS_HELDOUT if wp.phonetic_skeleton(h) != "jrvs"
+           for t in trained if wp.phonetic_twin(h, t)]
+    assert bad == []
+
+
+def test_595_threshold_choice_uses_the_same_ceilings_as_the_gate(tmp_path, monkeypatch):
+    seen, real = {}, wp.calibrate
+
+    def spy(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+    monkeypatch.setattr(wp, "calibrate", spy)
+    rep = small_train(tmp_path / "m.npz", baseline=FlatScorer(0.9))          # a baseline that wakes on all 31
+    assert rep["baseline"]["near_miss_false"] == 31 and seen["near_budget"] == wp.MAX_NEAR_MISS_WAKES
+    assert seen["fph_budget"] is None or seen["fph_budget"] <= wp.MAX_FALSE_PER_HOUR

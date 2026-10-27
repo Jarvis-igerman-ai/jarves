@@ -8,7 +8,7 @@ Rule changes to CLAUDE.md files are PROPOSALS for the owner (agents never edit t
 ## The idea in 5 lines
 1. **Test once, at the right place.** PR run = the full test run. The merge group only re-checks what a merge can break (Windows tests), and skips everything when its tree is the tree the PR already proved. Linux, browser, perf and the installer chain move after the merge (main push) and nightly, and they still gate the beta.
 2. **Review only what can hurt.** One Opus review, one round, only for the Tier R list. Everything else ships on green.
-3. **One PR per agent.** 3 agents, each one open PR, no stacking, small fixes bundled per area.
+3. **One open PR per agent, one batch per PR.** 3 agents, items committed one by one on a batch branch, a ready PR per batch (see PR flow).
 4. **Issues = real defects.** Nits go to one ledger file. Open P0-P2 never grows.
 5. **Scripts act, people do not poll.** A watchdog fixes queue trouble and writes one status board; the owner gets one batch of questions a day.
 
@@ -41,9 +41,11 @@ Why keep Linux on the PR: it runs in parallel (Windows sets the wall time), so d
   green + the 5-line PR checklist (what changed, test added, guide/parity/Hebrew if a feature, risk, issue link) + CI green -> `gh pr merge N --auto`.
   No separate scan agent, no reviewer.
 
-## PR flow
-- One feature = one branch = one PR, opened READY when `prepush.py` passes (no draft stage). Each agent has at most ONE open PR; the next waits for the merge.
-- Small fixes in the same area go into one PR (up to ~300 lines). No stacking: dependent work starts after the merge.
+## PR flow (BATCHING, owner rule 27 Oct)
+- Each agent works on ONE local batch branch in its worktree: one commit per item, `prepush.py` + targeted tests after each commit. ONE ready PR per batch when it holds 3+ items of one lane, or at end of day. Soft cap ~8 commits / ~800 non-test lines.
+- P0/P1 fixes and any Tier R change go ALONE and at once (own branch, own PR). Never mix lanes in a batch.
+- A red batch is fixed in place (no split, no close/reopen). While one batch PR is queued the agent keeps committing to the NEXT batch branch, cut from fresh `jarves/main`.
+- Each agent has at most ONE open PR; no stacking of dependent work.
 - Never push only to "update" a PR (no merge-main, no close/reopen). Push again only to fix a red run or a Tier R finding, max twice; then split or stop.
 - The watchdog (do-now 4) re-queues dropped PRs and toggles the label when `Auto-label policy` did not run. Agents do not babysit.
 
@@ -79,7 +81,7 @@ backup + silent install + auto-revert, installers launched from PowerShell (#349
 for every feature; the owner's chat approval before any stable tag; OWNER_OPENS.md with defaults; the hard stops (spend caps, hardware, external sends,
 alert dismissal, force push, bypassing checks, settings).
 
-## Do now (max 8, in this order)
+## Do now (max 8, in this order; items 1-6 are the unbuilt tools and come FIRST in 4.5.1 for agent 2: docs-only CI fast path, `jarvis install-latest`, `jarvis release run`, watchdog)
 | # | Item | Owner | Effort | Saves |
 |---|---|---|---|---|
 | 1 | Merge group reuses the green PR proof when the tree is identical; merge group builds the installer only on packaging changes (main push already builds it via `resolve-tests` before the beta). Tier R workflow PR | Agent 2 | M | ~7 min per group, ~10 runners per group |
@@ -90,6 +92,9 @@ alert dismissal, force push, bypassing checks, settings).
 | 6 | `jarvis release run --version X` (generated evidence page from `release status --report`, sign-off with the chat approval, local gate check, tag after approval, watch the workflow) | Agent 2 | M | ~2 h per stable release |
 | 7 | Findings ledger + issue sweep script + labels cut to P-level + area | Agent 1 | S | ~1 h/day of issue triage |
 | 8 | One-time: paste the D1 permission list, approve the delete list, OK to move open P3 into the ledger | OWNER | S (10 min) | no classifier waits; ~30 fewer open issues |
+
+## 3-day trial (owner 27 Oct)
+For 3 days each agent appends daily metrics to its STATE.md: open P0-P2, PRs merged, CI re-runs, hours from merge to the installed beta. The owner judges the process on these numbers.
 
 ## Targets (checked weekly by agent 1 on the status board)
 | Metric | Now | Target |

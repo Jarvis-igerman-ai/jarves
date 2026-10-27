@@ -22,7 +22,7 @@ from . import logs
 from .skills import Skill, Tool, ToolResult
 
 SCHEMA_VERSION = 1
-KINDS = ("text", "checklist", "cards")        # cards: S3 (app-made only, validate_block(app=True)); table / choices / form later
+KINDS = ("text", "checklist", "cards", "table", "choices")   # cards: S3 (app-made only, validate_block(app=True)); table / choices: S4; form: not built (cards have an inline Edit)
 MAX_BLOCKS_PER_MESSAGE = 4
 MAX_BYTES = 16 * 1024
 MAX_BATCH = 10                                # S2: most items one click may carry (one approval lists them all)
@@ -31,7 +31,7 @@ MAX_RECORDS = 60
 ACTION_RATE = 12                              # S2: clicks per minute per chat
 _ID = re.compile(r"i\d{1,2}")
 # offered to the model only when the owner's words ask for a list (keeps the always-on prompt small, like lazy_tools)
-LAZY = r"check-?list|tick|to-?do list|list of|רשימ|סמן|סימון|תיבות"
+LAZY = r"check-?list|tick|to-?do list|list of|table|choose|options|רשימ|סמן|סימון|תיבות|טבלה|לבחור"
 # control characters and bidi overrides (U+202A-202E, U+2066-2069); zero-width joiners stay for Hebrew
 _BAD = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\\u202a-\\u202e\\u2066-\\u2069]")
 
@@ -64,17 +64,33 @@ class Card(_Strict):
     ref: str | None = Field(None, pattern=r"^[A-Za-z0-9_.:@-]{1,40}$")
     when: str | None = Field(None, pattern=r"^(\d{4}-\d\d-\d\d( \d\d:\d\d)?|\d\d:\d\d)$")
     skip: bool = False
+    source: Literal["whatsapp", "mail", "note"] | None = None      # S4: where the message came from (a closed list, never text)
+
+
+class Column(_Strict):
+    label: str = Field(..., min_length=1, max_length=40)
+
+
+class Row(_Strict):
+    cells: list[str] = Field(..., min_length=1, max_length=6)
+
+
+class Option(_Strict):
+    label: str = Field(..., min_length=1, max_length=60)
 
 
 class Block(_Strict):
     v: Literal[1] = 1
-    kind: Literal["text", "checklist", "cards"]
+    kind: Literal["text", "checklist", "cards", "table", "choices"]
     title: str = Field("", max_length=80)
     dir: Literal["auto", "rtl", "ltr"] = "auto"
     text: str | None = Field(None, max_length=1000)
     items: list[Item] = Field(default_factory=list, max_length=30)
     actions: list[Action] = Field(default_factory=list, max_length=4)
     cards: list[Card] = Field(default_factory=list, max_length=MAX_BATCH)
+    columns: list[Column] = Field(default_factory=list, max_length=6)       # S4: table (read-only)
+    rows: list[Row] = Field(default_factory=list, max_length=30)
+    options: list[Option] = Field(default_factory=list, max_length=6)      # S4: choices (a click sends the label as the owner's message)
     on: Literal["anydo_create_tasks"] | None = None      # S2: the server-side next step of the owner's click (closed list)
 
 
@@ -95,15 +111,29 @@ def validate_block(raw: Any, *, app: bool = False) -> dict:
     if b.kind == "cards" and (not b.cards or b.text is not None or b.items or b.actions or b.on != "anydo_create_tasks"
                               or any(not clean(c.title) for c in b.cards)):
         raise ValueError("UI_BLOCK_INVALID")
-    if b.on and (b.kind == "text" or len(b.items) > MAX_BATCH):
+    extra = (b.columns or b.rows or b.options)
+    if b.kind == "table" and (not 1 <= len(b.columns) <= 6 or not b.rows or b.text is not None or b.items or b.cards or b.options
+                              or b.on or any(len(r.cells) > len(b.columns) or any(len(c) > 100 for c in r.cells) for r in b.rows)):
+        raise ValueError("UI_BLOCK_INVALID")
+    if b.kind == "choices" and (not 2 <= len(b.options) <= 6 or b.text is not None or b.items or b.cards or b.columns or b.rows or b.on):
+        raise ValueError("UI_BLOCK_INVALID")
+    if b.kind not in ("table", "choices") and extra:
+        raise ValueError("UI_BLOCK_INVALID")
+    if b.on and (b.kind in ("text", "table", "choices") or len(b.items) > MAX_BATCH):
         raise ValueError("UI_BLOCK_INVALID")
     out: dict = {"v": 1, "id": "blk_" + secrets.token_hex(4), "kind": b.kind, "title": clean(b.title), "dir": b.dir}
     if b.kind == "text":
         out["text"] = clean(b.text or "")
     elif b.kind == "cards":
         out["cards"] = [{"id": f"i{n}", "title": " ".join(clean(c.title).split()), "due": c.due or "", "person": clean(c.person or ""),
-                         "ref": c.ref or "", "when": c.when or "", "skip": c.skip} for n, c in enumerate(b.cards, 1)]
+                         "ref": c.ref or "", "when": c.when or "", "skip": c.skip, "source": c.source or ""} for n, c in enumerate(b.cards, 1)]
         out["on"] = b.on
+    elif b.kind == "table":
+        out["columns"] = [{"id": f"c{n}", "label": clean(c.label)} for n, c in enumerate(b.columns, 1)]
+        out["rows"] = [{"id": f"r{n}", "cells": [clean(x) for x in r.cells] + [""] * (len(b.columns) - len(r.cells))}
+                       for n, r in enumerate(b.rows, 1)]
+    elif b.kind == "choices":
+        out["options"] = [{"id": f"o{n}", "label": clean(o.label)} for n, o in enumerate(b.options, 1)]
     else:
         out["items"] = [{"id": f"i{n}", "label": clean(i.label), "detail": clean(i.detail or ""), "checked": i.checked}
                         for n, i in enumerate(b.items, 1)]
@@ -140,9 +170,15 @@ def numbered(block: dict) -> str:
     head = [block["title"]] if block.get("title") else []
     if block.get("kind") == "text":
         return "\n".join(head + [str(block.get("text", ""))])
+    if block.get("kind") == "table":
+        cols = [c["label"] for c in block.get("columns", [])]
+        return "\n".join(head + [" | ".join(cols)] + [" | ".join(r["cells"]) for r in block.get("rows", [])])
+    if block.get("kind") == "choices":
+        return "\n".join(head + [f"{n}) {o['label']}" for n, o in enumerate(block.get("options", []), 1)]
+                         + ["(type your choice as a normal message)"])
     if block.get("kind") == "cards":
         rows = [f"{n}) {c['title']}" + (f" ({c['due']})" if c.get("due") else "") + (f" - {c['person']}" if c.get("person") else "")
-                + (" [looks like a duplicate]" if c.get("skip") else "") for n, c in enumerate(block.get("cards", []), 1)]
+                + (f" [{c['source']}]" if c.get("source") else "") + (" [looks like a duplicate]" if c.get("skip") else "") for n, c in enumerate(block.get("cards", []), 1)]
         return "\n".join(head + rows + ["(possible tasks, not confirmed. Type the numbers to add, e.g. 1,3 or all; "
                                         "anything else is a normal message)"])
     return "\n".join(head + [f"{n}) {'[x] ' if i.get('checked') else ''}{i.get('label', '')}"
@@ -154,12 +190,12 @@ def numbered(block: dict) -> str:
 
 class UiShowArgs(BaseModel):
     blocks: list[dict] = Field(..., min_length=1, max_length=MAX_BLOCKS_PER_MESSAGE,
-                               description="v=1 blocks: {kind:'checklist',title?,items:[{label,detail?,checked?}],on?:'anydo_create_tasks'} or {kind:'text',text}")
+                               description="v=1 blocks: {kind:'checklist',title?,items:[{label,detail?,checked?}],on?:'anydo_create_tasks'}, {kind:'text',text}, {kind:'table',columns:[{label}],rows:[{cells:[..]}]} or {kind:'choices',options:[{label}]}")
 
 
 class UiBlocksSkill(Skill):
     name = "ui_blocks"
-    description = "Show the owner a small checklist or text block in the chat"
+    description = "Show the owner a small checklist, table, choices or text block in the chat"
 
     def tools(self) -> list[Tool]:
         async def ui_show(a: UiShowArgs) -> ToolResult:

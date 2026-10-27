@@ -79,7 +79,7 @@ Voice / Text / Dashboard / CLI
 
 The beta MCP server may change and the provider's **interactive edit-preview** is not necessarily embeddable in JARVES. The fastest low-risk option is **read + create + reminder** first. If the end-to-end provider approval surface cannot be implemented without unsupported APIs, retain that cut and postpone completion/clear to a later milestone. Better to report an honest limitation than silently mutate user tasks.
 
-**Related source docs:** [V4.5 stabilization package](V4_5_STABILIZATION_SECURITY_QA.md), [NOW](../NOW.md), [Skill creation and approvals](../SKILL_CREATION.md), [GitHub flow](../GITHUB_FLOW.md), [#60 release QA](https://github.com/Jarvis-igerman-ai/jarves/issues/60).
+**Related source docs:** [V4.5 stabilization package](../archive/plans/V4_5_STABILIZATION_SECURITY_QA.md), [NOW](../NOW.md), [Skill creation and approvals](../SKILL_CREATION.md), [GitHub flow](../GITHUB_FLOW.md), [#60 release QA](https://github.com/Jarvis-igerman-ai/jarves/issues/60).
 
 ## Delete task (issue #359) - status: UNAVAILABLE (26 Oct 2026)
 

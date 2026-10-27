@@ -169,13 +169,25 @@ def legacy_report(checklist_text: str | None, bug_tables: list) -> list[str]:
     return out
 
 
+HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
 def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, changed_files,
-                     verified: str | None = None) -> list[str]:
+                     verified: str | None = None, expect_rows_hash: str | None = None) -> list[str]:
     try:
         sheet = so.load(root, version)
     except so.SheetError as e:
         return [str(e)]
     probs = [f"sign-off: {p}" for p in sheet.problems()]
+    # #605: the rows hash lives in the sheet, so whoever edits the sheet can recompute it. A value the owner recorded OUTSIDE
+    # the sheet (the annotation of the annotated tag, printed by `jarvis release signoff --finish`) must match it.
+    if expect_rows_hash is not None:
+        want = expect_rows_hash.strip().lower()
+        if not HASH_RE.match(want):
+            probs.append("sign-off: the out-of-band rows hash is not a sha256 hex value")
+        elif sheet.rows_hash.strip().lower() != want:
+            probs.append("sign-off: the sheet rows hash differs from the hash recorded outside the sheet (tag annotation); "
+                         "the sheet was changed after the owner signed")
     if verified and sheet.commit and sheet.commit != verified.strip().lower():
         probs.append(f"sign-off: the sheet commit {sheet.commit[:12]} differs from the verified SHA {verified[:12]}")
     if sheet.commit and so.SHA_RE.match(sheet.commit):
@@ -244,7 +256,7 @@ def find_checklist(root: Path, version: str, explicit: str | None) -> Path | Non
 def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str | None, root: Path,
              checklist_text: str | None, bug_tables: list, checks_runs: list[dict],
              is_ancestor, changed_files, now: datetime | None = None, issues: list[dict] | None = None,
-             installer_sha: str | None = None) -> list[str]:
+             installer_sha: str | None = None, expect_rows_hash: str | None = None) -> list[str]:
     version, problems = check_tag(tag, build_version)
     problems += check_sha(installer_sha, verified_sha)
     if verified_sha:
@@ -252,7 +264,7 @@ def run_gate(*, tag: str, sha: str, verified_sha: str | None, build_version: str
     # checklist_text / bug_tables are accepted for compatibility but no longer gate (see legacy_report)
     problems += issue_problems(issues or [])
     if version:
-        problems += signoff_problems(root, version, sha, is_ancestor, changed_files, verified_sha)
+        problems += signoff_problems(root, version, sha, is_ancestor, changed_files, verified_sha, expect_rows_hash)
     return problems
 
 
@@ -281,6 +293,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--checks-json", type=Path)
     ap.add_argument("--issues-json", type=Path, help="open issues (API shape) instead of asking GitHub")
     ap.add_argument("--repo", default=REPO)
+    ap.add_argument("--expect-rows-hash", default=os.environ.get("JARVES_EXPECT_ROWS_HASH") or None,
+                    help="sha256 the owner recorded outside the sheet (annotated tag message line 'Rows hash: <sha256>'); "
+                         "refuse when it differs from the sheet (#605)")
+    ap.add_argument("--require-rows-hash", action="store_true", default=os.environ.get("JARVES_REQUIRE_ROWS_HASH") == "1",
+                    help="refuse when no out-of-band rows hash is given (a real publish; the release workflow sets it)")
     a = ap.parse_args(argv)
     verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
@@ -305,7 +322,15 @@ def main(argv: list[str] | None = None) -> int:
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
-                        changed_files=git_changed(root), issues=issues, installer_sha=installer)
+                        changed_files=git_changed(root), issues=issues, installer_sha=installer,
+                        expect_rows_hash=a.expect_rows_hash)
+    if a.expect_rows_hash is None and a.require_rows_hash:
+        problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
+                        "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
+                        "`jarvis release signoff --finish`)")
+    elif a.expect_rows_hash is None:
+        print("note: no out-of-band rows hash given (annotated tag message 'Rows hash: <sha256>'); the sheet hash alone "
+              "only catches accidental edits (#605)")
     if problems:
         print(f"RELEASE GATE FAILED for {a.tag} ({len(problems)} problem(s)):")
         for p in problems:

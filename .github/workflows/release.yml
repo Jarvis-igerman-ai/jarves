@@ -25,6 +25,9 @@ jobs:
   stable:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # #544: only a real publish (a tag push, or a dispatch on a tag ref with dry_run unticked) runs inside the protected
+    # environment that holds RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY; dry runs on main need no environment.
+    environment: ${{ (github.ref_type == 'tag' && (github.event_name == 'push' || github.event.inputs.dry_run == 'false')) && 'stable-release' || '' }}
     permissions:
       contents: read
       actions: read
@@ -76,6 +79,20 @@ jobs:
         run: |
           python3 packaging/release.py verify --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
           python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
+      - name: Rows hash recorded by the owner outside the sheet (annotated tag message, #605)
+        run: |
+          # an annotated tag message line "Rows hash: <sha256>" (printed by `jarvis release signoff --finish`); a lightweight tag
+          # or a dispatch on main has none (a dry run then only prints a note)
+          # a real release REQUIRES the hash (lightweight tag or missing line = refused by the gate)
+          [ "$DRY_RUN" = "true" ] || echo "JARVES_REQUIRE_ROWS_HASH=1" >> "$GITHUB_ENV"
+          if [ "$REF_TYPE" = "tag" ]; then
+            # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
+            if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
+              h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
+              [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"
+            fi
+          fi
       - name: Release gate (sign-off, SHA, live P0-P2 issues)
         working-directory: core
         run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)

@@ -8,7 +8,7 @@ The goal is a **safe, reliable, attractive, practical, serviceable home companio
 
 **User preference (17 Oct 2026):** avoid exploratory hardware purchases or repeated prototypes merely to decide between architectures. Prefer proven components, documented interfaces, sound engineering, conservative margins and reversible choices; only propose early experiments when a serious risk cannot be designed out. Some final physical checks will still be mandatory before using a real robot, and need separate user approval.
 
-**Current mechanical direction:** see [S1.T03R5 design decision](reviews/S1_T03R5_DESIGN_DECISION.md) (Pi in base, corrected simple build, CAD not implemented as of the recorded decision). This plan does **not** approve the estimated ~9 printed parts/~40 screws, and does **not** restart the architecture search automatically.
+**Current mechanical direction:** see [S1.T03R5 design decision](archive/reviews/S1_T03R5_DESIGN_DECISION.md) (Pi in base, corrected simple build, CAD not implemented as of the recorded decision). This plan does **not** approve the estimated ~9 printed parts/~40 screws, and does **not** restart the architecture search automatically.
 
 ## Review types — use the lightest that can catch the risk
 

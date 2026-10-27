@@ -263,7 +263,7 @@ body.drawer-open { overflow: hidden; }
 #tab-chat .jc-copy { border: 0; background: transparent; color: var(--muted); font: 600 var(--fs-xs) var(--font); border-radius: 10px; }
 #tab-chat .jc-code-block pre { padding: var(--s3) var(--s4); font: 13.5px/1.6 var(--mono); }
 #tab-chat .jc-ic { background: var(--surface-2); border: 0; padding: 1px 6px; border-radius: 6px; font-family: var(--mono); }
-#tab-chat .jc-tool summary { min-block-size: 36px; display: flex; align-items: center; background: var(--surface); border: 0; border-radius: 10px; padding-inline: var(--s3); }
+#tab-chat .jc-tool summary { min-block-size: 44px; display: flex; align-items: center; background: var(--surface); border: 0; border-radius: 10px; padding-inline: var(--s3); }
 /* under an answer: copy + time in one quiet row */
 #tab-chat .jc-acts { display: flex; align-items: center; gap: var(--s1); margin-block-start: calc(var(--s4) * -1); margin-inline-start: -10px; }
 #tab-chat .jc-act { inline-size: 44px; block-size: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
@@ -286,14 +286,25 @@ body.drawer-open { overflow: hidden; }
   border: 1px solid var(--line); box-shadow: var(--shadow-1); }
 [dir="rtl"] #tab-chat .jc-jump { transform: translateX(-50%); }
 /* inline approval cards above the composer */
-#tab-chat .jc-appr { padding: 0 var(--s3); }
-#tab-chat .jc-appr:not(:empty) { padding-block: var(--s2); max-block-size: 45vh; overflow-y: auto; }
-#tab-chat .jc-card { border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-2); box-shadow: var(--shadow-1); padding: var(--s3) var(--s4); gap: var(--s2); }
+/* #509: two waiting requests took 45% of the screen and squeezed the conversation to a strip; the box now stays under a
+   third of the visible height (dvh: the keyboard shrinks it too), scrolls inside itself and is marked off by a hairline */
+#tab-chat .jc-appr { padding: 0 max(var(--s3), env(safe-area-inset-right)) 0 max(var(--s3), env(safe-area-inset-left)); }
+#tab-chat .jc-appr:not(:empty) { padding-block: var(--s2); max-block-size: 32vh; max-block-size: min(32dvh, 280px); overflow-y: auto;
+  overscroll-behavior: contain; border-block-start: 1px solid var(--line); }
+.kb #tab-chat .jc-appr:not(:empty) { max-block-size: 26vh; max-block-size: 26dvh; }
+#tab-chat .jc-card { border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-2); box-shadow: var(--shadow-1); padding: var(--s3) var(--s4); gap: var(--s2);
+  min-inline-size: 0; overflow-wrap: anywhere; }
 #tab-chat .jc-card.risk-high { border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--line)); }
-#tab-chat .jc-card .jc-pill { border: 0; font-weight: 600; font-size: var(--fs-xs); }
+/* the risk chip was hidden by the status-pill rule above (#509): a request card always shows its risk */
+#tab-chat .jc-card .jc-pill { display: inline-flex; border: 0; font-weight: 600; font-size: var(--fs-xs); }
 #tab-chat .jc-card.risk-high .jc-pill { background: color-mix(in srgb, var(--bad) 14%, var(--bg)); color: var(--bad); }
+#tab-chat .jc-card .jc-chead b { overflow-wrap: anywhere; min-inline-size: 0; }
 #tab-chat .jc-card .jc-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: var(--s2); }
 #tab-chat .jc-card .jc-row button { min-block-size: 46px; border-radius: 14px; font-weight: 600; }
+/* the same order as the Approvals page: Deny first, Approve at the inline end */
+#tab-chat .jc-card .jc-row button.primary { order: 2; }
+/* "Details" was a 25 px tall target (#509) */
+#tab-chat .jc-rows summary { min-block-size: 44px; box-sizing: border-box; padding-block: 10px; cursor: pointer; }
 
 /* ---- empty chat: mark, question, an optional first-run hint, the main commands */
 #tab-chat .jc-empty { display: none; }
@@ -356,7 +367,9 @@ body.drawer-open { overflow: hidden; }
 #tab-chat .jc-cmd, .jc-sug b { direction: ltr; unicode-bidi: isolate; }
 
 /* ---- pairing screen */
+#pairView { padding-block-end: calc(var(--s4) + env(safe-area-inset-bottom)); }
 #pairView h1 { margin-block-start: var(--s6); }
+#pairMsg { margin: 0; }
 #pairView .card { margin-block: var(--s4); }
 #pairView label { font-size: var(--fs-2); font-weight: 600; }
 #pairView input { font-size: var(--fs-title); padding: var(--s3) var(--s4); }
