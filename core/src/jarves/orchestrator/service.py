@@ -540,7 +540,8 @@ class Orchestrator:
         if isinstance(m, _OpenCodeSession):            # D2: EVERY prompt to OpenCode is approved on screen, whoever asked
             # the EXACT string that will be sent (a status question is wrapped with its header and reply rule), cleaned
             # once with code blocks kept, shown in full and sent unchanged: shown == sent
-            if not self.opencode_profile()["ok"]:
+            prof = self.opencode_profile()
+            if not prof["ok"]:
                 return {"ok": False, "code": "MODEL_NOT_ALLOWED", "text": say("MODEL_NOT_ALLOWED", lang)}
             raw_out = wrap_for_agent([{**env.to_dict(), "payload": env.payload}]) if kind == "status_request" else text
             shown = clean(raw_out, OC_PROMPT_SHOWN + 1, keep_code=True)
@@ -548,14 +549,15 @@ class Orchestrator:
                 return {"ok": False, "code": "error", "text": f"The prompt is too long to approve on screen "
                                                               f"(max {OC_PROMPT_SHOWN} characters)."}
             text = shown
-            if not self._ask_owner(self._opencode_prompt_text(s, shown), title="agents_opencode_prompt", risk="medium",
-                                   voice=False, details=self._opencode_details(s)):
+            if not self._ask_owner(self._opencode_prompt_text(s, shown, prof), title="agents_opencode_prompt", risk="medium",
+                                   voice=False, details=self._opencode_details(s, prof)):
                 self.db.audit(by, kind, session_id=sid, decision="denied", detail="opencode prompt")
                 return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
         if m is not None:
             ok = self._managed_send(sid, m, text if isinstance(m, _OpenCodeSession) else
                                     (wrap_for_agent([{**env.to_dict(), "payload": env.payload}])
-                                     if kind == "status_request" else text), steer=(kind == "command"))
+                                     if kind == "status_request" else text), steer=(kind == "command"),
+                                    model=prof["spec"] if isinstance(m, _OpenCodeSession) else "")
             if not ok:
                 return {"ok": False, "code": "SESSION_CLOSED", "text": say("SESSION_CLOSED", lang)}
             self.db.enqueue(env)
@@ -586,7 +588,7 @@ class Orchestrator:
                 (" Install the JARVES plugin: jarvis agents install-plugin claude" if lang == "en" else
                  " אפשר להתקין את התוסף: jarvis agents install-plugin claude")}
 
-    def _managed_send(self, sid: str, m, text: str, steer: bool = False) -> bool:
+    def _managed_send(self, sid: str, m, text: str, steer: bool = False, model: str = "") -> bool:
         if isinstance(m, claude.ManagedClaude):
             ok = m.send(text)
             if ok:
@@ -611,7 +613,7 @@ class Orchestrator:
                 return False
         if isinstance(m, _OpenCodeSession):
             try:
-                self._opencode_client().prompt(m.session_id, text, m.directory, self.acfg.opencode_model)
+                self._opencode_client().prompt(m.session_id, text, m.directory, model)       # the APPROVED spec, not a re-read
                 self.db.upsert_session(sid, state="RUNNING", last_progress_at=self.clock())
                 return True
             except opencode.OpenCodeError:
@@ -839,7 +841,7 @@ class Orchestrator:
         if provider == "claude":
             r = self._start_claude(proj, cwd, task, by=by, model=model, lang=lang)
         elif provider == "opencode":
-            r = self._start_opencode(proj, cwd, task, by=by, lang=lang)
+            r = self._start_opencode(proj, cwd, task, by=by, lang=lang, model=prof["spec"])
         else:
             r = self._start_codex(proj, cwd, task, by=by, model=model, lang=lang)
         return r
@@ -859,37 +861,45 @@ class Orchestrator:
                     reg = mp.load_registry(self.home / "models.toml")
                 except mp.ModelConfigError:
                     reg = mp.ModelRegistry()
-                info = reg.get(spec) or reg.get(mid)
+                info = reg.get(spec)                       # the FULL "provider/model" id only, and the provider must match
+                if info is not None and info.provider != prov:
+                    info = None
                 out["kind"] = "unknown" if info is None else ("local" if info.local else ("paid" if info.paid else "free"))
         except opencode.OpenCodeError as e:
             out.update(kind="unknown", error=e.detail)
-        out["ok"] = out["kind"] in ("free", "local") or (bool(self.acfg.opencode_allow_paid) and not out["error"])
+        paid_ok = bool(self.acfg.opencode_allow_paid) and not out["error"] and self.acfg.max_cost_usd_per_day > 0
+        if self.acfg.opencode_allow_paid and self.acfg.max_cost_usd_per_day <= 0:
+            out["error"] = out["error"] or "agents.opencode_allow_paid needs agents.max_cost_usd_per_day above 0"
+        out["ok"] = out["kind"] in ("free", "local") or paid_ok
+        out["spec"] = spec                                  # exactly what was classified; this is what gets sent
         return out
 
     def _opencode_model_line(self, prof: dict) -> str:
-        cost = ("no cost expected" if prof["kind"] in ("free", "local") else
-                f"COST UNKNOWN to JARVES (daily agents cost cap ${prof['cap_usd_per_day']:g}, enforced on what the server reports)")
+        cost = ("no cost expected for this main model (OpenCode's own small or sub-agent models are not controlled by JARVES)"
+                if prof["kind"] in ("free", "local") else
+                "COST UNKNOWN to JARVES: it cannot measure or cap OpenCode spend (only the daily turn limit applies)")
         return f"Model: {prof['model']} ({prof['kind']}); {cost}."
 
     # ---- OpenCode (V7 D2): third harness. Approval-gated start in its own worktree; every later prompt is approved too.
-    def _opencode_details(self, s: dict) -> dict:
+    def _opencode_details(self, s: dict, prof: dict | None = None) -> dict:
+        prof = prof or self.opencode_profile()
         return {"provider": "opencode", "project": s.get("project") or "", "folder": s.get("cwd") or "",
                 "branch": s.get("branch") or "worktree branch", "session": s.get("provider_session_id") or s["id"],
-                "server": self.acfg.opencode_url, "model": self.opencode_profile()["model"],
-                "model_kind": self.opencode_profile()["kind"]}
+                "server": self.acfg.opencode_url, "model": prof["model"],
+                "model_kind": prof["kind"]}
 
-    def _opencode_prompt_text(self, s: dict, text: str) -> str:
-        return (f"{self._opencode_model_line(self.opencode_profile())}\nSend this to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
+    def _opencode_prompt_text(self, s: dict, text: str, prof: dict | None = None) -> str:
+        return (f"{self._opencode_model_line(prof or self.opencode_profile())}\nSend this to OpenCode session {s.get('provider_session_id')} (repo {s.get('project')}, "
                 f"branch {s.get('branch') or 'worktree branch'}, server {self.acfg.opencode_url})?"
                 f"\nExact text that will be sent (untrusted):\n{text}\n(folder {s.get('cwd')})")
 
-    def _start_opencode(self, proj, cwd: str, task: str, *, by: str, lang: str) -> dict:
+    def _start_opencode(self, proj, cwd: str, task: str, *, by: str, lang: str, model: str = "") -> dict:
         try:
             c = self._opencode_client()
             raw = c.create_session(cwd, task[:80])
             try:
                 if task.strip():
-                    c.prompt(raw, task, cwd, self.acfg.opencode_model)
+                    c.prompt(raw, task, cwd, model)
             except opencode.OpenCodeError:
                 try:
                     c.abort(raw, cwd)                    # never leave an unmanaged server session behind
@@ -909,6 +919,7 @@ class Orchestrator:
                                branch=branch, auth="password", started_at=now, last_seen_at=now,
                                status_source="managed", attachable=1, ended_at=None, name=clean(task, 120))
         self.db.add_event(sid, "started", "OpenCode session started under JARVES")
+        self.db.bump("turn")                               # the daily turn limit is the one real limit on OpenCode (no cost data)
         self.db.audit(by, "start", session_id=sid, decision="approved", result="started", detail=f"opencode {proj.name}")
         logs.info("agents", "AGENTS_SESSION_STARTED", "managed coding session started", provider="opencode")
         return {"ok": True, "code": "ok", "session": self.view(self.db.session(sid), lang),

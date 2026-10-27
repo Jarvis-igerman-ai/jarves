@@ -363,15 +363,23 @@ def test_wrong_folder_abort_uses_the_folder_the_server_returned(tmp_path, server
 
 
 # ---------------------------------------------------------------- D3 (#406): model profile and spend rules
+def _paid_models_toml(o):
+    (o.home / "models.toml").write_text(
+        "\n".join(['[[model]]', 'id = "openrouter/gpt-6-sol"', 'provider = "openrouter"', "paid = true",
+                   "input_per_1m = 2.0", "output_per_1m = 10.0", ""]),
+        encoding="utf-8")
+
+
 def test_model_profile_classes(tmp_path, server, monkeypatch):
     o = _orch(tmp_path, server, monkeypatch)
     assert (o.opencode_profile()["kind"], o.opencode_profile()["ok"]) == ("free", True)
-    for model, kind, ok in (("", "default", False), ("openai/gpt-6-sol", "paid", False), ("acme/never-heard", "unknown", False), ("gpt-6-sol/x", "unknown", False),
-                            ("local/local-small", "local", True), ("bad model!", "unknown", False)):
+    for model, kind, ok in (("", "default", False), ("openai/gpt-6-sol", "unknown", False), ("acme/never-heard", "unknown", False), ("gpt-6-sol/x", "unknown", False),
+                            ("local/local-small", "unknown", False), ("anthropic/free-remote", "unknown", False), ("openai/local-small", "unknown", False), ("x/openrouter/free", "unknown", False), ("bad model!", "unknown", False)):
         o.acfg.opencode_model = model
         pr = o.opencode_profile()
         assert (pr["kind"], pr["ok"]) == (kind, ok), model
-    o.acfg.opencode_model = "openrouter/gpt-6-sol"                          # a registry model that is paid
+    _paid_models_toml(o)
+    o.acfg.opencode_model = "openrouter/gpt-6-sol"                          # a paid model the owner listed in models.toml
     assert (o.opencode_profile()["kind"], o.opencode_profile()["ok"]) == ("paid", False)
     o.acfg.opencode_allow_paid = True
     assert o.opencode_profile()["ok"] is True                              # the owner allowed paid models
@@ -425,3 +433,25 @@ def test_parse_model_and_the_new_code_text():
         with pytest.raises(oc.OpenCodeError):
             oc.parse_model(bad)
     assert "MODEL_NOT_ALLOWED" in CODES and all(TEXTS["MODEL_NOT_ALLOWED"])
+
+
+def test_allow_paid_needs_a_cap_and_the_approved_model_is_what_is_sent(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, model="openrouter/gpt-6-sol", opencode_allow_paid=True, max_cost_usd_per_day=0)
+    _paid_models_toml(o)
+    pr = o.opencode_profile()
+    assert pr["kind"] == "paid" and pr["ok"] is False and "above 0" in pr["error"]      # allow_paid + no cap = refused
+    o.acfg.max_cost_usd_per_day = 5.0
+    assert o.opencode_profile()["ok"] is True
+    _git_proj(tmp_path)
+    asked = []
+
+    def ask(p, **k):
+        asked.append(p)
+        o.acfg.opencode_model = "openrouter/free"            # the config changes while the owner is deciding
+        return True
+    monkeypatch.setattr(o, "_ask_owner", ask)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["ok"] and "COST UNKNOWN" in asked[0] and "cannot measure or cap" in asked[0] and "enforced" not in asked[0]
+    assert server.posts[1][1]["model"] == {"providerID": "openrouter", "modelID": "gpt-6-sol"}   # the approved one, not a re-read
+    assert o.db.count("turn") >= 1                                                           # the start counts as a turn
+    o.db.close()
