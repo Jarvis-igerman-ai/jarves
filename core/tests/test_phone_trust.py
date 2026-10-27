@@ -254,8 +254,7 @@ def test_backup_and_diagnostics_leave_the_keys_out(ca):
 def _handshake_serial(port: int, root_pem: str) -> int:
     import socket
     from cryptography import x509
-    cl = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    cl.load_verify_locations(cadata=root_pem)                 # trusts ONLY the JARVES root; the server sends leaf + intermediate
+    cl = ssl.create_default_context(cadata=root_pem)          # trusts ONLY the JARVES root; the server sends leaf + intermediate
     with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
         with cl.wrap_socket(raw, server_hostname="127.0.0.1") as s:
             return x509.load_der_x509_certificate(s.getpeercert(binary_form=True)).serial_number
