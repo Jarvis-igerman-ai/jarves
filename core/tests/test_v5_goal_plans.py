@@ -418,3 +418,10 @@ async def test_step_popup_shows_the_arguments_in_full_and_never_cuts_silently(en
     assert "TAIL-MARK" in prompts[0] and env.ran == [("act", long_text)]
     shown = gp.describe(env.store.get(p["id"]))
     assert "more characters not shown" in shown                 # the plan text marks every cut
+
+
+def test_565_bidi_and_zero_width_characters_are_shown_escaped_in_the_popup_text():
+    t = gp._args_text({"to": "a‮b", "x": "q​z⁦"}, 500)
+    assert "‮" not in t and "​" not in t and "⁦" not in t
+    assert "\u202e" in t and "\u200b" in t and "\u2066" in t
+    assert gp._args_text({"k": "plain"}, 500) == '{"k": "plain"}'

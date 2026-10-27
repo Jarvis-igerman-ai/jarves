@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import unicodedata
 
 from pydantic import BaseModel, Field
 
@@ -263,7 +264,8 @@ STEP_SHOW_CHARS = MAX_ARGS_CHARS + 200   # the step popup shows the arguments in
 
 def _args_text(args, n: int) -> str:
     """The arguments as the owner sees them. A cut is marked with the number of hidden characters (H1: never silent)."""
-    t = json.dumps(args, ensure_ascii=False)
+    t = "".join(f"\\u{ord(c):04x}" if unicodedata.category(c) == "Cf" else c      # #565: bidi / zero-width marks shown, not obeyed
+                for c in json.dumps(args, ensure_ascii=False))
     return t if len(t) <= n else t[:n] + f" ... [+{len(t) - n} more characters not shown here]"
 
 

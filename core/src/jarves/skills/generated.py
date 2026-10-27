@@ -354,6 +354,9 @@ class GeneratedSkills:
 
     def _snapshot_taken(self) -> tuple[set[str], set[str]]:
         d = _read_json(self._names_file, {})
+        if not isinstance(d, dict) or not d:
+            logs.warn("skills", "SKILL_NAMES_SNAPSHOT_MISSING", "no built-in names snapshot: the clash check of this process is empty "
+                      "until the Core has started once")
         d = d if isinstance(d, dict) else {}
         return ({x for x in d.get("skills", []) if isinstance(x, str)}, {x for x in d.get("tools", []) if isinstance(x, str)})
 
@@ -1027,9 +1030,14 @@ def attach(core) -> GeneratedSkills:
     sync(mgr, core.registry)
 
     async def watch() -> None:
+        seen = taken()
         while True:
             await asyncio.sleep(2.0)
             try:
+                now = taken()
+                if now != seen:                  # #565: tools registered late reach the CLI and the dashboard too
+                    seen = now
+                    mgr.save_taken_snapshot()
                 if sync(mgr, core.registry):
                     _refresh_tools_md(core)
             except Exception:
