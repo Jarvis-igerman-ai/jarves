@@ -331,6 +331,7 @@ def _read_json(path: Path, default):
         return default
 
 
+_SNAPSHOT_WARNED: set[str] = set()
 _STATE_LOCKS: dict[str, threading.RLock] = {}
 _STATE_LOCKS_GUARD = threading.Lock()
 
@@ -354,7 +355,8 @@ class GeneratedSkills:
 
     def _snapshot_taken(self) -> tuple[set[str], set[str]]:
         d = _read_json(self._names_file, {})
-        if not isinstance(d, dict) or not d:
+        if (not isinstance(d, dict) or not d) and str(self.home) not in _SNAPSHOT_WARNED:     # log once per data folder
+            _SNAPSHOT_WARNED.add(str(self.home))
             logs.warn("skills", "SKILL_NAMES_SNAPSHOT_MISSING", "no built-in names snapshot: the clash check of this process is empty "
                       "until the Core has started once")
         d = d if isinstance(d, dict) else {}

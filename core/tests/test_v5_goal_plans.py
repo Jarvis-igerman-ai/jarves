@@ -420,10 +420,47 @@ async def test_step_popup_shows_the_arguments_in_full_and_never_cuts_silently(en
     assert "more characters not shown" in shown                 # the plan text marks every cut
 
 
-def test_565_bidi_and_zero_width_characters_are_shown_escaped_in_the_popup_text():
-    rlo, zwsp, lri = chr(0x202E), chr(0x200B), chr(0x2066)
-    t = gp._args_text({"to": "a" + rlo + "b", "x": "q" + zwsp + "z" + lri}, 500)
-    assert rlo not in t and zwsp not in t and lri not in t
+def test_565_one_show_text_escapes_format_and_control_characters_and_keeps_hebrew():
+    rlo, zwsp, lri, c1, dele = chr(0x202E), chr(0x200B), chr(0x2066), chr(0x85), chr(0x7F)
     bs = chr(92)
-    assert bs + "u202e" in t and bs + "u200b" in t and bs + "u2066" in t
-    assert gp._args_text({"k": "plain"}, 500) == '{"k": "plain"}'
+    t = gp._args_text({"to": "a" + rlo + "b", "x": "q" + zwsp + "z" + lri, "c": "m" + c1 + "n" + dele}, 500)
+    for bad in (rlo, zwsp, lri, c1, dele):
+        assert bad not in t
+    assert all(bs + "u" + h in t for h in ("202e", "200b", "2066", "0085", "007f"))
+    he = "שלום עולם, ירושלים"
+    assert gp._show_text(he) == he and gp._args_text({"k": he}, 500) == '{"k": "' + he + '"}'
+    assert gp._show_text("tab" + chr(9) + "nl" + chr(10) + "sp ") == "tab" + chr(9) + "nl" + chr(10) + "sp "
+
+
+def test_565_cut_never_splits_an_escape_and_is_marked():
+    bs = chr(92)
+    t = gp._show_text(chr(0x200B) * 10, 20)               # each escape is 6 shown characters: 3 fit, the 4th would be cut inside
+    assert t.startswith((bs + "u200b") * 3) and "[+42 more characters" in t and t.count(bs + "u") == 3
+    assert gp._show_text("a" * 10, 4).startswith("aaaa ... [+6 more")
+
+
+async def test_565_title_why_and_args_are_escaped_in_every_popup_and_a_long_escaped_step_is_blocked(env):
+    rlo, zwsp = chr(0x202E), chr(0x200B)
+    prompts, metas = [], []
+    real = env.reg.confirm
+
+    async def spy(prompt, **meta):
+        prompts.append(prompt)
+        metas.append(meta)
+        return await real(prompt, **meta)
+    spy.accepts_meta = True
+    env.reg.confirm = spy
+    p = env.store.propose("pay" + rlo + "now", [{"tool": "fake_act", "args": {"text": "x" + chr(0x85)}, "why": "because" + zwsp + "ok"}])
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    shown = prompts[0] + metas[0].get("why", "")
+    assert rlo not in shown and zwsp not in shown and chr(0x85) not in shown
+    assert chr(92) + "u202e" in prompts[0] and chr(92) + "u200b" in metas[0]["why"]
+    assert rlo not in gp.describe(env.store.get(p["id"])) and zwsp not in gp.describe(env.store.get(p["id"]))
+    # 6x case: 400 raw format characters are 2400 characters as shown, over the show limit: blocked, not run, nothing cut
+    env.ran.clear()
+    p2 = env.store.propose("long", [{"tool": "fake_act", "args": {"text": zwsp * 400}}])
+    env.store.approve(p2["id"])
+    await env.runner.tick()
+    d = env.store.get(p2["id"])
+    assert d["state"] == "blocked" and env.ran == [] and "too long" in d["steps"][0]["error"]
