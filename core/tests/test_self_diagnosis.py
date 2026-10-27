@@ -426,3 +426,15 @@ def test_cli_ticket_flag_saves_locally_and_sends_nothing(tmp_path, capsys, monke
     assert cli._diagnose_area(a, None, tmp_path) == 0
     out = capsys.readouterr().out
     assert "NOTHING is sent" in out and "jarvis ticket send JI-" in out
+
+
+def test_github_area_reports_state_without_the_token_and_matches_the_guide(tmp_path):
+    """#439: GITHUB_* codes resolve to the github area and a guide problem; evidence is state only, never the token."""
+    from jarves import github_client as gc
+    assert areas.area_for("GITHUB_RATE_LIMIT") == "github" and areas.area_for("", "github_issue_list") == "github"
+    gc.TokenStore(tmp_path).save("github_pat_FAKE1234567890abcdef")
+    rep = areas.run("github", "GITHUB_AUTH", home=tmp_path)
+    text = "\n".join(rep.evidence)
+    assert rep.confidence == "high" and rep.guide_id and rep.cause_he and rep.fix_en
+    assert "token_present" in text and "github_pat_" not in text and "FAKE1234" not in text
+    assert areas.run("github", "GITHUB_NOT_CONNECTED", home=tmp_path / "none").confidence == "high"
