@@ -292,6 +292,192 @@ def note_rollback(home: Path, status: str) -> dict:
     return rec
 
 
+PROGRAM_PARTS = ("python", "face", "bridge", "jarvis.cmd")
+
+
+def core_running(lock_file: Path | None = None) -> bool:
+    """True when a Core holds the per-user instance lock (same byte-0 OS lock as jarves.runtime.lock). stdlib only."""
+    if lock_file is None:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".local" / "state")
+        lock_file = Path(base) / "jarves" / "core.lock"
+    if not Path(lock_file).is_file():
+        return False
+    try:
+        fd = os.open(str(lock_file), os.O_RDWR)
+    except OSError:
+        return True
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                return False
+            except OSError:
+                return True
+        import fcntl
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        except OSError:
+            return True
+    finally:
+        os.close(fd)
+
+
+def _swap_programs(app: Path, kept: list[str], aside: Path) -> list[str]:
+    """Move each kept part rollback\\<n> -> <n> (the dead new one goes to `aside`). On any failure everything moved so far,
+    including the part in progress, is put back, and OSError is raised: never a hole. Returns the parts swapped."""
+    rollback = app / "rollback"
+    done: list[str] = []
+    for name in kept:
+        moved_aside = False
+        try:
+            if (app / name).exists():
+                (app / name).rename(aside / name)
+                moved_aside = True
+            (rollback / name).rename(app / name)
+            done.append(name)
+        except OSError:
+            if moved_aside and not (app / name).exists():
+                (aside / name).rename(app / name)
+            _unswap(app, done, aside)
+            raise
+    return done
+
+
+def _unswap(app: Path, done: list[str], aside: Path) -> None:
+    rollback = app / "rollback"
+    for name in reversed(done):
+        (app / name).rename(rollback / name)
+        if (aside / name).exists():
+            (aside / name).rename(app / name)
+
+
+def _verify_backups(home: Path, state: Path) -> None:
+    from jarves import backup
+    record = json.loads(Path(state).read_text(encoding="utf-8"))
+    if record["home"] != str(home):
+        raise ValueError("rollback data directory mismatch")
+    for item in record["backups"]:
+        if not backup.verify(Path(item["backup"]))["ok"]:
+            raise ValueError("rollback backup no longer verifies")
+
+
+def preflight(app: Path, state: Path, home: Path | None = None, running=None):
+    """(status word or None, home, parts to swap): the checks that need no approval."""
+    app = Path(app)
+    record = _read_json(Path(state))
+    home = safe_home(Path(home) if home else Path(str(record.get("home") or "")))
+    if _read_json(home / "updates" / HEALTH_FILE).get("status") != "health_failed":
+        return "not_needed", home, []
+    rollback = app / "rollback"
+    kept = [n for n in PROGRAM_PARTS if (rollback / n).exists()]
+    if not (rollback / "python").exists() or not kept:
+        return "no_previous_program", home, kept
+    if (running or core_running)():
+        return "core_running", home, kept
+    return None, home, kept
+
+
+def confirm(ask=input) -> bool:
+    return str(ask("Restore the previous JARVES version and the data backup taken before the update? "
+                   "Changes made since the update are lost. Type YES to continue: ")).strip() == "YES"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x00100000, False, pid)         # SYNCHRONIZE
+        if not h:
+            return False
+        try:
+            return k.WaitForSingleObject(h, 0) == 0x102   # WAIT_TIMEOUT: still running
+        finally:
+            k.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def wait_for_exit(pid: int, timeout_s: float = 60.0, *, alive=_pid_alive, sleep=time.sleep) -> bool:
+    """Wait until process `pid` has exited (its exe and DLLs are then no longer locked); False on timeout."""
+    end = time.monotonic() + timeout_s
+    while alive(pid):
+        if time.monotonic() > end:
+            return False
+        sleep(0.2)
+    return True
+
+
+def recover(app: Path, state: Path, *, approved: bool, home: Path | None = None, ask=input,
+            running=None) -> str:
+    """#261: the owner's way back when an update migrated the data AND the new program is dead (health_failed): the new
+    python cannot run `jarvis update --rollback`, and the Core that would offer it never starts. Runs under a COPY of the
+    kept OLD python (main() relaunches from a temp copy: Windows cannot rename a folder whose exe is running). Refuses
+    while a Core runs, unless health.json says health_failed, and without the owner's approval (--yes, or typing YES).
+    Order, so a failure can always be retried: verify every data backup, swap the program parts (the dead new parts are
+    kept in {app}\\failed-recovery-*, nothing is deleted), then restore the data; if the data restore raises, the
+    program swap is undone. Returns a short status word."""
+    app = Path(app)
+    word, home, kept = preflight(app, state, home, running)
+    if word:
+        return word
+    if not approved and not confirm(ask):
+        return "declined"
+    _verify_backups(home, Path(state))                      # raises, touches nothing, if a backup is bad
+    aside = app / ("failed-recovery-" + str(time.time_ns()))
+    aside.mkdir(parents=True)
+    try:
+        done = _swap_programs(app, kept, aside)
+    except OSError:
+        return "swap_failed"
+    try:
+        restore_data(home, Path(state))
+    except Exception:
+        _unswap(app, done, aside)
+        raise
+    note_rollback(home, "rolled_back")
+    return "recovered"
+
+
+def _relaunch_from_copy(args, spawn=None, ask=input) -> int | None:
+    """When this python lives inside {app}\\rollback its exe and DLLs are locked, and Windows cannot rename that folder
+    while we run. So: do the approval-free checks and ask for YES HERE, copy the runtime to a temp folder, start the copy as
+    a NEW-CONSOLE child that first waits for THIS process to exit (--wait-pid), then recovers; and return at once. The
+    parent never waits. None when no handoff is needed (already a copy, or not inside rollback)."""
+    import subprocess
+    import tempfile
+    rollback = (Path(args.app) / "rollback").resolve()
+    exe = Path(sys.executable).resolve()
+    if rollback not in exe.parents:
+        return None
+    word, _, _ = preflight(args.app, args.state, args.home)
+    if word:
+        print("RECOVER:", word)
+        return 6
+    if not args.yes and not confirm(ask):
+        print("RECOVER: declined")
+        return 6
+    src = next(p for p in exe.parents if p.parent == rollback)
+    tmp = Path(tempfile.mkdtemp(prefix="jarves-recover-"))
+    shutil.copytree(src, tmp / "py")                          # the child runs from here; %TEMP% cleanup removes it later
+    cmd = [str(tmp / "py" / exe.name), "-I", str(Path(__file__).resolve()), "recover", "--app", str(args.app),
+           "--state", str(args.state), "--yes", "--wait-pid", str(os.getpid())] + (["--home", str(args.home)] if args.home else [])
+    flags = (getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) if os.name == "nt" else 0
+    (spawn or subprocess.Popen)(cmd, creationflags=flags, close_fds=True)
+    print("RECOVER: continuing in a new window; this window can close.")
+    return 0
+
+
 MB = 1024 * 1024
 # What the verified backup leaves out (backup.EXCLUDE_DIRS, a superset kept here so this runs under ANY old python).
 _NOT_BACKED_UP = {"backups", "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__", "voice_cache", "whatsapp_bridge"}
@@ -349,8 +535,10 @@ def disk_check(home: Path, app: Path, *, reserve_mb: int = 0, usage=None) -> dic
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=("prepare", "complete", "open-setup", "restore-shims", "restore-data", "health",
-                                       "note-rollback", "can-program-rollback", "diskcheck"))
-    ap.add_argument("--home", type=Path, required=True)
+                                       "note-rollback", "can-program-rollback", "diskcheck", "recover"))
+    ap.add_argument("--home", type=Path)
+    ap.add_argument("--wait-pid", type=int, default=0, help="recover: wait for this process (the launcher) to exit first")
+    ap.add_argument("--yes", action="store_true", help="recover: the owner already approved (otherwise type YES)")
     ap.add_argument("--state", type=Path)
     ap.add_argument("--fresh", action="store_true")
     ap.add_argument("--timeout", type=float, default=180.0)
@@ -362,6 +550,21 @@ def main(argv=None) -> int:
     ap.add_argument("--language", choices=("en", "he"), default="en")
     args = ap.parse_args(argv)
     try:
+        if args.action == "recover":
+            # exit code: 0 recovered, 6 not needed / nothing to put back / declined / swap failed (the word is printed)
+            if args.app is None or args.state is None:
+                ap.error("recover needs --app and --state")
+            relaunched = _relaunch_from_copy(args)
+            if relaunched is not None:
+                return relaunched
+            if args.wait_pid and not wait_for_exit(args.wait_pid):
+                print("RECOVER: the launcher did not exit")
+                return 6
+            word = recover(args.app, args.state, approved=args.yes, home=args.home)
+            print("RECOVER:", word)
+            return 0 if word == "recovered" else 6
+        if args.home is None:
+            ap.error("--home is required")
         if args.action == "health":
             # exit code: 0 = ready, 3 = never became ready (the installer puts the old program back), 1 = no update record
             # (the installer treats every other exit code, e.g. a python that crashes, as "failed" too)

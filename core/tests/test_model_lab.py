@@ -278,3 +278,11 @@ def test_575_bom_zero_width_and_fullwidth_formula_cells_are_guarded():
     for c in ["\ufeff=1+1", "\u200b=cmd", "\u2060@SUM(1)", "\uff1d1+1", "\uff0b1"]:
         assert ml._cell(c).startswith("'"), c
     assert ml._cell("plain") == "plain" and ml._cell(5) == 5
+
+
+def test_575_scrub_keeps_ordinary_long_paths_but_still_hides_tokens():
+    path = "D:/Programs/Something/Folder/Subfolder/AnotherFolder/file.txt"
+    assert ml.scrub("see " + path) == "see " + path
+    tok = "Zx9Qw3Er7Ty1Ui5Op2As4Df6Gh8Jk0Lz1Xc3Vb5N"
+    assert tok not in ml.scrub("key " + tok) and "[redacted]" in ml.scrub("key " + tok)
+    assert "a" * 40 in ml.scrub("a" * 40)                       # no digit: a plain word run is not a token

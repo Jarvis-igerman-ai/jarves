@@ -45,6 +45,12 @@ fix_he = "צריך את המתג הנפרד (jarvis features on browser_takeover
 fix_en = "It needs its own switch (jarvis features on browser_takeover), an active live view and a local test page. If you clicked something that leads to another site the session was closed for safety: start again."
 
 [[problems]]
+he = "הוא מסרב לכתובת עם אותיות מיוחדות (למשל ß או ς בסוף מילה)"
+en = "He refuses an address with special letters (for example a sharp s or a final sigma)"
+fix_he = "בשלב הבטא הפיילוט דוחה כתובות שמתורגמות בשמות בינלאומיים בכוונה, כדי שלא יוחלף אתר בדומה לו. השתמשו בצורה הלטינית של הכתובת (xn-- או האיות הרגיל)."
+fix_en = "In this beta the pilot deliberately refuses internationalized names that could be swapped for a look-alike site. Use the plain Latin spelling of the address."
+
+[[problems]]
 he = "הוא אומר שהפיילוט כבוי"
 en = "He says the pilot is off"
 fix_he = "הריצו jarvis features on browser_pilot (אחרי הפעלת תכונות בטא)."

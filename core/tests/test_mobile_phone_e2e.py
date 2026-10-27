@@ -333,6 +333,7 @@ def test_approvals_list_answer_typed_refused_and_switch_off(browser, phone):
                 {"approved": True}, token(page))["json"]["code"] == "PHONE_APPROVALS_OFF" and not fut.done()
     assert p.owner("POST", "/api/mobile/settings", {"phone_approvals": True})[0] == 200
     page.wait_for_selector("#apprList button:has-text('Deny')", timeout=12000)         # within the 4 s poll (+margin)
+    until(page, "document.querySelector('#meInfo').textContent.includes('approvals are on')")      # the This-phone line is not stale
     page.tap("#apprList button:has-text('Deny')")
     assert fut.result(15) is False                                      # the PC acts on the denial
     until(page, "document.querySelector('#apprList').textContent.includes('Nothing is waiting')")
@@ -355,6 +356,7 @@ def test_approvals_list_answer_typed_refused_and_switch_off(browser, phone):
     fut = p.ask("Third request")
     until(page, "document.querySelector('#apprList').textContent.includes('Third request') && "
                            "document.querySelector('#apprNote').textContent.includes('off')", timeout=12000)
+    until(page, "document.querySelector('#meInfo').textContent.includes('approvals are off')")
     assert page.locator("#apprList button").count() == 0
     assert page.errors == []
 
