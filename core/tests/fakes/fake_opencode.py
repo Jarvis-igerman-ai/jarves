@@ -28,6 +28,7 @@ class FakeOpenCode:
     def __init__(self, directory: str = "C:/proj") -> None:
         self.keepalive = False
         self.requests: list[tuple[str, str]] = []
+        self.posts: list[tuple[str, dict]] = []             # (path, JSON body) of every POST (D2 writes)
         self.sessions = json.loads(json.dumps(SESSIONS).replace("{DIR}", directory.replace("\\", "/")))
         outer = self
 
@@ -42,6 +43,26 @@ class FakeOpenCode:
                     self.send_response(401)
                     self.send_header("Content-Length", "0")
                     self.end_headers()
+                    return
+                if self.command == "POST" and (self.path.split("?")[0] == "/session" or self.path.split("?")[0].endswith(
+                        ("/prompt_async", "/abort"))):
+                    n = int(self.headers.get("Content-Length") or 0)
+                    try:
+                        body = json.loads(self.rfile.read(n) or b"{}")
+                    except ValueError:
+                        body = {}
+                    outer.posts.append((self.path, body))
+                    if self.path.split("?")[0] == "/session":
+                        raw = json.dumps({"id": "ses_new1", "title": body.get("title", ""), "directory": "x"}).encode()
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(raw)))
+                        self.end_headers()
+                        self.wfile.write(raw)
+                    else:
+                        self.send_response(204)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
                     return
                 if self.command != "GET":
                     self.send_response(405)

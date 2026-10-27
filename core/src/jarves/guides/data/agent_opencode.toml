@@ -4,10 +4,10 @@ pages = ["agents"]
 features = ["agent_opencode"]
 aliases = ["אופןקוד", "opencode", "open code", "opencode sessions"]
 links = ["agent_orchestrator", "privacy"]
-title_he = "OpenCode (קריאה בלבד)"
-title_en = "OpenCode (read-only)"
-what_he = "ג'ארביס יכול להסתכל על סשני OpenCode שרצים אצלכם דרך השרת המקומי שלו: אילו סשנים יש, מה המצב שלהם ואילו אירועים קרו לאחרונה. הוא רק קורא. הוא לא מפעיל סשנים, לא שולח הוראות ולא משנה כלום ב-OpenCode."
-what_en = "JARVES can look at the OpenCode sessions on this computer through OpenCode's local server: which sessions exist, their state and recent events. It only reads. It does not start sessions, send prompts or change anything in OpenCode."
+title_he = "OpenCode (צפייה והפעלה באישור)"
+title_en = "OpenCode (view and start with approval)"
+what_he = "ג'ארביס יכול להסתכל על סשני OpenCode שרצים אצלכם דרך השרת המקומי שלו: אילו סשנים יש, מה המצב שלהם ואילו אירועים קרו לאחרונה. הוא יכול גם להפעיל סשן בעץ עבודה נפרד של git, לשלוח לו הוראה ולעצור אותו, אבל רק אחרי שאישרתם כל פעולה כזו במסך (האישור מציג את השרת, המאגר, הענף והסשן). הוא לא נוגע בסשנים שהפעלתם בעצמכם."
+what_en = "JARVES can look at the OpenCode sessions on this computer through OpenCode's local server: which sessions exist, their state and recent events. It can also start a session in its own git worktree, send it a prompt and stop it, but only after you approve each of those on screen (the approval shows the server, repo, branch and session). It never touches sessions you started yourself."
 say = [
   ["אילו סשנים של OpenCode פועלים?", "Which OpenCode sessions are running?"],
   ["תראה לי את הסשנים של OpenCode", "Show me the OpenCode sessions"],
@@ -28,8 +28,8 @@ he = "הגדירו את אותו משתנה OPENCODE_SERVER_PASSWORD גם לג'�
 en = "Set the same OPENCODE_SERVER_PASSWORD variable for JARVES too (the variable name can be changed in agents.opencode_password_env)."
 
 [[steps]]
-he = "הדליקו את המתג \"OpenCode (קריאה בלבד)\". הוא כבוי כברירת מחדל."
-en = "Switch on \"OpenCode (read-only)\". It is off by default."
+he = "הדליקו את המתג \"OpenCode (צפייה והפעלה באישור)\". הוא כבוי כברירת מחדל."
+en = "Switch on \"OpenCode (view and start with approval)\". It is off by default."
 action = "feature_on:agent_opencode"
 check = "enabled:agent_opencode"
 
@@ -37,6 +37,10 @@ check = "enabled:agent_opencode"
 he = "בדקו את החיבור: jarvis agents opencode status, ואז jarvis agents opencode sessions או events."
 en = "Check the connection: jarvis agents opencode status, then jarvis agents opencode sessions or events."
 action = "command:jarvis agents opencode status"
+
+[[steps]]
+he = "להפעלת סשן: jarvis agents start opencode PROJECT \"המשימה\". אשרו במסך (השרת, המאגר, הענף והסשן מוצגים). כל הוראה נוספת: jarvis agents tell SESSION \"הטקסט\", וגם היא באישור. לעצירה: jarvis agents stop SESSION."
+en = "To start a session: jarvis agents start opencode PROJECT \"the task\". Approve on screen (server, repo, branch and session are shown). Each later prompt: jarvis agents tell SESSION \"the text\", also with approval. To stop: jarvis agents stop SESSION."
 
 [[steps]]
 he = "לכיבוי: כבו את המתג (jarvis features off agent_opencode). ג'ארביס מפסיק לפנות לשרת מיד."
