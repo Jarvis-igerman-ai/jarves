@@ -400,7 +400,7 @@ async def test_dangerous_command_needs_the_code_and_timeout_kills(helper_env):
     assert e.svc.answer(a.id, True, channel="dashboard", typed="1")[0] is False
     assert e.svc.answer(a.id, True, channel="dashboard", typed=a.typed_code)[0]
     r = await call
-    assert r.ok and "piped" in r.data["output_tail"]
+    assert r.ok and "piped" in r.data["output_tail"], (r.code, r.message, r.data.get("output_tail"), r.data.get("isolation"))   # #660
     slow = f'{PY} -c "import time; time.sleep(60)"'
     e.reg.new_turn()
     e.reg._untrusted.clear()

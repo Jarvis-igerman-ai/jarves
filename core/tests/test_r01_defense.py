@@ -425,13 +425,29 @@ def test_posix_data_limit_stops_an_allocation_over_it():
     assert rc != 0 and "MemoryError" in out
 
 
+def _read_pid(stream, timeout: float = 30.0) -> int:
+    """One line from a child's stdout pipe. The pipe can be non-blocking (EAGAIN -> BlockingIOError / None) when the child
+    has not printed yet (#661): retry until the line arrives instead of failing on the race."""
+    end = time.monotonic() + timeout
+    while True:
+        try:
+            line = stream.readline()
+        except BlockingIOError:
+            line = None
+        if line:
+            return int(line)
+        if time.monotonic() > end:
+            raise TimeoutError("the child printed no pid")
+        time.sleep(0.05)
+
+
 @pytest.mark.linux_only
 async def test_posix_close_ends_the_process_group():
     code = ("import subprocess, sys\n"
             "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
             "print(c.pid, flush=True)\n")
     p, g = iso.popen([PY, "-I", "-c", code], limits=iso.Limits(), stdout=subprocess.PIPE, record=False)
-    child = int(p.stdout.readline())
+    child = _read_pid(p.stdout)
     assert p.wait(timeout=30) == 0 and _alive(child)
     g.close()
     await until(lambda: not _alive(child), timeout=15)

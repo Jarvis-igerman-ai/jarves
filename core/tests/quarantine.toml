@@ -38,3 +38,9 @@ id = "test_runtime.py::test_hide_terminates_a_window_that_does_not_close"
 issue = 556
 since = "2026-10-26"
 reason = "2 s wall-clock bound fails on a loaded Windows runner (2.53 s)"
+
+[[test]]
+id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeout_kills"
+issue = 660
+since = "2026-10-27"
+reason = "Linux: approved pipe command exited 2 in 0.03 s once (PR 658 run 40516866677), passes elsewhere"
