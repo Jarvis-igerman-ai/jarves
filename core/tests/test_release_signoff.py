@@ -404,3 +404,23 @@ def test_508_note_typed_in_the_finishing_run_survives_save_and_load(tmp_path):
     s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Owner")
     so2.save(tmp_path, s)
     assert so2.load(tmp_path, "4.1.0").problems() == []
+
+
+def test_606_owner_must_be_printable_notes_with_backslashes_and_nfd_text_round_trip(tmp_path):
+    from jarves import release_signoff as so2
+    bs = chr(92)
+    row = so2.Row("A1", "area", "todo", "expected", "pass", "ends with a backslash" + bs)
+    s = so2.Sheet(version="4.1.0", rows=[row, so2.Row("A2", "a", "t", "e", "pass", "pipe | and " + bs + "| both")])
+    for bad in ("Own" + chr(0x202E) + "er", "Own" + chr(0x200B) + "er", "Own" + chr(0x7F) + "er"):
+        with pytest.raises(so2.SheetError):
+            s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner=bad)
+    s.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Igal")
+    again = so2.Sheet.parse(s.render())
+    assert again.rows[0].note == "ends with a backslash" + bs and again.rows[1].note == "pipe | and " + bs + "| both"
+    assert again.rows_hash == s.rows_hash and not again.problems()
+    import unicodedata
+    row.note = "caf" + chr(0xE9)                                                  # an accented note, NFC
+    s2 = so2.Sheet(version="4.1.0", rows=[row])
+    s2.sign("4.1.0-beta.1", SHA, "2026-10-21", owner="Igal")
+    nfd_text = unicodedata.normalize("NFD", s2.render())
+    assert not so2.Sheet.parse(nfd_text).problems()                              # a rewrite in NFD does not void the signature
