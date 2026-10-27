@@ -35,18 +35,40 @@ def _leaf(home, now=T0, hosts=LAN):
 
 # ---------------------------------------------------------------- the CA itself
 def test_ca_shape_and_limits(ca):
+    """Root (installed on the phone): a CA, path length 1, NO name constraints (a root's constraints are ignored by some
+    verifiers). Intermediate (signs leaves): path length 0, serverAuth only, CRITICAL name constraints."""
     from cryptography import x509
-    c = pt._load_ca_cert(ca)
-    bc = c.extensions.get_extension_for_class(x509.BasicConstraints)
+    root = pt._load_ca_cert(ca)
+    bc = root.extensions.get_extension_for_class(x509.BasicConstraints)
+    assert bc.critical and bc.value.ca and bc.value.path_length == 1
+    with pytest.raises(x509.ExtensionNotFound):
+        root.extensions.get_extension_for_class(x509.NameConstraints)
+    inter = pt._load_issuer_cert(ca)
+    assert inter.issuer == root.subject and pt._signed_by(inter, root)
+    bc = inter.extensions.get_extension_for_class(x509.BasicConstraints)
     assert bc.critical and bc.value.ca and bc.value.path_length == 0
-    nc = c.extensions.get_extension_for_class(x509.NameConstraints)
-    assert nc.critical
-    assert (c.not_valid_after_utc - c.not_valid_before_utc) <= dt.timedelta(days=pt.CA_MAX_DAYS + 1)
-    ku = c.extensions.get_extension_for_class(x509.KeyUsage).value
-    assert ku.key_cert_sign and not ku.digital_signature
+    assert inter.extensions.get_extension_for_class(x509.NameConstraints).critical
+    assert list(inter.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value) == [
+        x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]
+    for c in (root, inter):
+        assert (c.not_valid_after_utc - c.not_valid_before_utc) <= dt.timedelta(days=pt.CA_MAX_DAYS + 1)
+        ku = c.extensions.get_extension_for_class(x509.KeyUsage).value
+        assert ku.key_cert_sign and not ku.digital_signature
     st = pt.status(ca, T0)
-    assert st["ca"] and not st["ca_expired"] and st["fingerprint"].count(":") == 31
+    assert st["ca"] and st["usable"] and not st["ca_expired"] and st["fingerprint"].count(":") == 31
+    assert st["warnings"] == []
 
+
+def test_the_root_key_is_never_written(ca):
+    """Only root.crt, ca.crt and ca.key exist, and ca.key is the INTERMEDIATE's key, not the root's."""
+    from cryptography.hazmat.primitives import serialization
+    names = sorted(p.name for p in pt.ca_dir(ca).iterdir())
+    assert names == ["ca.crt", "ca.key", "root.crt"]
+    key = serialization.load_pem_private_key(pt.ca_paths(ca)[1].read_bytes(), None)
+    pub = lambda k: k.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    assert pub(key.public_key()) == pub(pt._load_issuer_cert(ca).public_key())
+    assert pub(key.public_key()) != pub(pt._load_ca_cert(ca).public_key())
+    assert not any(p.suffix == ".tmp" for p in pt.tls_dir(ca).rglob("*"))
 
 def test_create_is_idempotent_and_key_is_private(ca):
     fp = pt.fingerprint(ca)
@@ -58,12 +80,25 @@ def test_create_is_idempotent_and_key_is_private(ca):
     assert b"PRIVATE KEY" not in pt.ca_certificate_pem(ca)
 
 
-def test_acl_command_is_owner_only(home, monkeypatch):
-    monkeypatch.setenv("USERNAME", "owner1")
+def test_acl_command_is_owner_only_by_sid(home, monkeypatch):
+    monkeypatch.setattr(pt, "_current_sid", lambda: "S-1-5-21-111-222-333-1001")
     seen = []
     pt.create_ca(home, T0, run=seen.append)
     cmds = [" ".join(c) for c in seen]
-    assert any(c.startswith("icacls") and "ca.key" in c and "/inheritance:r" in c and "/grant:r owner1:(F)" in c for c in cmds)
+    assert any(c.startswith("icacls") and "ca.key" in c and "/inheritance:r" in c
+               and "/grant:r *S-1-5-21-111-222-333-1001:(F)" in c for c in cmds), cmds
+    assert any(c.endswith("mobile_tls /inheritance:r /grant:r *S-1-5-21-111-222-333-1001:(OI)(CI)F")
+               or "mobile_tls /inheritance:r" in c for c in cmds)                    # the folder too, before any key
+    assert pt.status(home, T0)["permissions_tightened"] is True
+    pt.ensure_leaf(home, LAN, T0, run=seen.append)
+    assert any("leaf.key" in c for c in [" ".join(c) for c in seen])
+
+
+def test_acl_failure_is_shown_in_status(home, monkeypatch):
+    monkeypatch.setattr(pt, "_current_sid", lambda: "S-1-5-21-1")
+    pt.create_ca(home, T0, run=lambda c: SimpleNamespace(returncode=5))
+    st = pt.status(home, T0)
+    assert st["permissions_tightened"] is False and "permissions_not_tightened" in st["warnings"]
 
 
 # ---------------------------------------------------------------- chain validation with cryptography
@@ -81,23 +116,37 @@ def test_leaf_is_not_valid_for_other_hosts_or_after_expiry(ca):
 
 
 def test_name_constraints_forbid_public_names_even_with_the_key(ca):
-    """A stolen CA key still cannot vouch for a public site: sign one by hand and check the verifier refuses it."""
+    """A stolen intermediate key still cannot vouch for a public site: sign one by hand and check the verifier refuses it
+    (the constraints sit in the INTERMEDIATE, which every RFC 5280 verifier enforces)."""
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
-    cacert = pt._load_ca_cert(ca)
+    from cryptography.x509.oid import ExtendedKeyUsageOID
+    import ipaddress
+    inter = pt._load_issuer_cert(ca)
     cakey = serialization.load_pem_private_key(pt.ca_paths(ca)[1].read_bytes(), None)
-    k = ec.generate_private_key(ec.SECP256R1())
-    bad = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "bank.example.com")]))
-           .issuer_name(cacert.subject).public_key(k.public_key()).serial_number(x509.random_serial_number())
-           .not_valid_before(T0 - dt.timedelta(days=1)).not_valid_after(T0 + dt.timedelta(days=10))
-           .add_extension(x509.SubjectAlternativeName([x509.DNSName("bank.example.com"), x509.IPAddress(__import__("ipaddress").ip_address("8.8.8.8"))]), critical=False)
-           .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
-           .sign(cakey, hashes.SHA256()))
-    pem = bad.public_bytes(serialization.Encoding.PEM)
-    assert pt.verify_chain(pem, pt.ca_certificate_pem(ca), "bank.example.com", T0)[0] is False
-    assert pt.verify_chain(pem, pt.ca_certificate_pem(ca), "8.8.8.8", T0)[0] is False
+    inter_pem = inter.public_bytes(serialization.Encoding.PEM)
+
+    def forge(names):
+        k = ec.generate_private_key(ec.SECP256R1())
+        c = (x509.CertificateBuilder().subject_name(x509.Name([]))
+             .issuer_name(inter.subject).public_key(k.public_key()).serial_number(x509.random_serial_number())
+             .not_valid_before(T0 - dt.timedelta(days=1)).not_valid_after(T0 + dt.timedelta(days=10))
+             .add_extension(x509.SubjectAlternativeName(names), critical=True)
+             .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+             .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(inter.public_key()), critical=False)
+             .sign(cakey, hashes.SHA256()))
+        return c.public_bytes(serialization.Encoding.PEM) + inter_pem
+    root = pt.ca_certificate_pem(ca)
+    good = forge([x509.IPAddress(ipaddress.ip_address("192.168.1.20"))])
+    assert pt.verify_chain(good, root, "192.168.1.20", T0) == (True, "ok")              # the forge itself is sound
+    bad = forge([x509.DNSName("bank.example.com"), x509.IPAddress(ipaddress.ip_address("8.8.8.8"))])
+    assert pt.verify_chain(bad, root, "bank.example.com", T0)[0] is False
+    assert pt.verify_chain(bad, root, "8.8.8.8", T0)[0] is False
+    for other in ("pc.lan", "pc.ts.net"):
+        assert pt.verify_chain(forge([x509.DNSName(other)]), root, other, T0)[0] is False
+    assert pt.verify_chain(forge([x509.RFC822Name("a@example.com"), x509.IPAddress(ipaddress.ip_address("10.0.0.2"))]),
+                           root, "10.0.0.2", T0)[0] is False                         # no e-mail names at all
 
 
 def test_issue_drops_names_the_ca_may_not_sign(ca):
@@ -108,10 +157,10 @@ def test_issue_drops_names_the_ca_may_not_sign(ca):
 
 
 def test_permitted_rules():
-    for ok in ("localhost", "127.0.0.1", "10.1.2.3", "172.16.5.5", "172.31.255.1", "192.168.0.7", "pc.local", "nas.lan", "x.home.arpa"):
+    for ok in ("localhost", "127.0.0.1", "10.1.2.3", "172.16.5.5", "172.31.255.1", "192.168.0.7", "pc.local", "x.home.arpa"):
         assert pt.permitted(ok), ok
     assert pt.permitted("local")                                  # RFC 5280 form: the constraint "local" covers itself too
-    for no in ("8.8.8.8", "172.32.0.1", "100.64.0.1", "example.com", "notlocal", "evil-lan", "pc.ts.net", "127.0.0.2",
+    for no in ("nas.lan", "lan", "8.8.8.8", "172.32.0.1", "100.64.0.1", "example.com", "notlocal", "evil-lan", "pc.ts.net", "127.0.0.2",
                "localhost.evil.com", "pc.local.evil.com", "a_b.local", "::1", "fd00::1", ""):
         assert not pt.permitted(no), no
 
@@ -133,15 +182,18 @@ def test_leaf_is_not_a_ca_and_is_short_lived(ca):
 
 def test_ca_name_constraints_are_exactly_the_private_set(ca):
     from cryptography import x509
-    nc = pt._load_ca_cert(ca).extensions.get_extension_for_class(x509.NameConstraints).value
+    nc = pt._load_issuer_cert(ca).extensions.get_extension_for_class(x509.NameConstraints).value
     ips = sorted(str(g.value) for g in nc.permitted_subtrees if isinstance(g, x509.IPAddress))
     dns = sorted(g.value for g in nc.permitted_subtrees if isinstance(g, x509.DNSName))
     assert ips == sorted(pt.PERMITTED_NETS) and dns == sorted(pt.PERMITTED_DNS)
-    assert not any(isinstance(g, (x509.UniformResourceIdentifier, x509.RFC822Name)) for g in nc.permitted_subtrees)
+    other = sorted((type(g).__name__, g.value) for g in nc.permitted_subtrees
+                   if isinstance(g, (x509.UniformResourceIdentifier, x509.RFC822Name)))
+    assert other == [("RFC822Name", "invalid"), ("UniformResourceIdentifier", "invalid")]     # permits nothing real
+    assert not any(d.startswith(".") for d in pt.PERMITTED_DNS) and "lan" not in pt.PERMITTED_DNS
 
 
 def test_local_names_validate_and_lookalikes_do_not(ca):
-    leaf, ca_pem = _leaf(ca, hosts=["pc.local", "nas.lan", "192.168.1.20"])
+    leaf, ca_pem = _leaf(ca, hosts=["pc.local", "x.home.arpa", "192.168.1.20"])
     assert pt.verify_chain(leaf, ca_pem, "pc.local", T0)[0] is True
     assert pt.verify_chain(leaf, ca_pem, "pc.local.evil.com", T0)[0] is False
 
@@ -167,6 +219,29 @@ def test_status_never_carries_the_key(ca):
     assert pt.ensure_leaf(ca, LAN, T0) is None
 
 
+def test_status_warns_on_expiry_and_failing_renewal(ca, monkeypatch):
+    pt.ensure_leaf(ca, LAN, T0)
+    late_leaf = T0 + dt.timedelta(days=pt.LEAF_DAYS - 3)
+    assert "leaf_expiring" in pt.status(ca, late_leaf)["warnings"]
+    near_ca = T0 + dt.timedelta(days=pt.CA_MAX_DAYS - 10)
+    assert "ca_expiring" in pt.status(ca, near_ca)["warnings"]
+    gone = T0 + dt.timedelta(days=pt.CA_MAX_DAYS + 1)
+    st = pt.status(ca, gone)
+    assert st["ca_expired"] and not st["usable"] and "ca_expired" in st["warnings"]
+    assert pt.doctor_rows(ca, gone)[0][0] == "fail"
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(pt, "issue_leaf", boom)
+    assert pt.ensure_leaf(ca, LAN + ["192.168.1.99"], T0) is None                  # OSError is caught, never raised
+    st = pt.status(ca, T0)
+    assert "renew_failing" in st["warnings"] and "disk full" in st["renew_error"]
+    assert any("renewal is failing" in r[1] for r in pt.doctor_rows(ca, T0))
+    monkeypatch.undo()
+    pt.ensure_leaf(ca, LAN, T0)
+    assert pt.status(ca, T0)["renew_error"] is None
+    assert pt.doctor_rows(ca, T0)[0][0] == "ok"
+
 def test_backup_and_diagnostics_leave_the_keys_out(ca):
     from jarves import backup
     pt.ensure_leaf(ca, LAN, T0)
@@ -176,30 +251,77 @@ def test_backup_and_diagnostics_leave_the_keys_out(ca):
     assert {s["name"] for s in skipped} >= {"mobile_tls/ca/ca.key", "mobile_tls/leaf.key"}
 
 
-def test_keep_fresh_reloads_a_renewed_leaf_into_the_running_context(ca, monkeypatch):
-    import threading as th
+def _handshake_serial(port: int, root_pem: str) -> int:
+    import socket
+    from cryptography import x509
+    cl = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    cl.load_verify_locations(cadata=root_pem)                 # trusts ONLY the JARVES root; the server sends leaf + intermediate
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as raw:
+        with cl.wrap_socket(raw, server_hostname="127.0.0.1") as s:
+            return x509.load_der_x509_certificate(s.getpeercert(binary_form=True)).serial_number
+
+
+def test_keep_fresh_hands_new_handshakes_a_new_context(home, monkeypatch):
+    """Real loopback handshakes with two certificate generations: the listening context is never reloaded; the renewer builds
+    a new context and the sni_callback hands it to the next handshake (an IP address sends no SNI: it must still switch)."""
+    import socket
+    from cryptography import x509
+    monkeypatch.setattr(pt, "trust_on", lambda h: True)
+    pt.create_ca(home)
+    first = pt.ensure_leaf(home, ["localhost", "127.0.0.1"])
+    base = pt.server_context(*first)
+    stop = threading.Event()
+    t = pt.keep_fresh(home, base, interval_s=3600, stop=stop)
+    ls = socket.socket()
+    ls.bind(("127.0.0.1", 0))
+    ls.listen(4)
+    port = ls.getsockname()[1]
+
+    def serve(n):
+        for _ in range(n):
+            try:
+                c, _a = ls.accept()
+                with base.wrap_socket(c, server_side=True) as s:
+                    s.recv(1)
+            except (OSError, ssl.SSLError):
+                pass
+    th = threading.Thread(target=serve, args=(2,), daemon=True)
+    th.start()
+    root = pt.ca_certificate_pem(home).decode()
+    s1 = _handshake_serial(port, root)
+    assert s1 == x509.load_pem_x509_certificate(pt.leaf_paths(home)[0].read_bytes()).serial_number
+    pt.issue_leaf(home, ["localhost", "127.0.0.1"])                                      # generation 2
+    t.selector.swap(pt.server_context(*pt.leaf_paths(home)))
+    s2 = _handshake_serial(port, root)
+    assert s2 != s1 and s2 == x509.load_pem_x509_certificate(pt.leaf_paths(home)[0].read_bytes()).serial_number
+    stop.set()
+    th.join(5)
+    ls.close()
+
+
+def test_keep_fresh_survives_errors_and_swaps_once(ca, monkeypatch):
     monkeypatch.setattr(pt, "trust_on", lambda h: True)
     pt.ensure_leaf(ca, ["localhost", "127.0.0.1"])
-    loaded = []
-
-    class Ctx:
-        def load_cert_chain(self, c, k):
-            loaded.append((c, k))
-    calls = {"n": 0}
+    swaps, calls = [], {"n": 0}
     real = pt.ensure_leaf
+    stop = threading.Event()
 
     def fake(home, hosts=None, now=None, run=None):
         calls["n"] += 1
-        if calls["n"] == 1:                                       # the first check: the address changed, so a new leaf
-            return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])
+        if calls["n"] == 1:
+            raise ValueError("unexpected")                                          # must not kill the thread
+        if calls["n"] == 2:
+            return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])           # address changed: a new leaf
         stop.set()
-        return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])
-    stop = th.Event()
+        return real(home, ["localhost", "127.0.0.1", "192.168.1.50"])               # reused: no second swap
     monkeypatch.setattr(pt, "ensure_leaf", fake)
-    t = pt.keep_fresh(ca, Ctx(), interval_s=0.01, stop=stop)
+    monkeypatch.setattr(pt, "server_context", lambda c, k: swaps.append((str(c), str(k))) or ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER))
+    base = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    t = pt.keep_fresh(ca, base, interval_s=0.01, stop=stop)
     t.join(10)
-    assert not t.is_alive()
-    assert loaded == [tuple(str(p) for p in pt.leaf_paths(ca))]   # reloaded exactly once (the second check reused it)
+    assert not t.is_alive() and calls["n"] == 3
+    assert swaps == [tuple(str(p) for p in pt.leaf_paths(ca))]
+    assert base.sni_callback is not None                                            # set once, the context itself untouched
 
 
 # ---------------------------------------------------------------- renewal on the fake clock
@@ -243,7 +365,7 @@ def test_revoke_deletes_everything_and_falls_back(ca, monkeypatch):
     mobile.make_selfsigned(ca, "192.168.1.20")
     pt.ensure_leaf(ca, LAN, T0)
     r = pt.revoke(ca)
-    assert r["removed"] == 4
+    assert r["removed"] == 5
     assert not pt.ca_dir(ca).exists() and not pt.leaf_paths(ca)[0].exists()
     assert pt.status(ca)["ca"] is False
     assert pt.ensure_leaf(ca, LAN, T0) is None                                      # nothing can be signed any more
@@ -299,6 +421,7 @@ def test_ca_download_needs_a_paired_phone_and_the_feature(srv, home, monkeypatch
     monkeypatch.setattr(pt, "trust_on", lambda h: True)
     st, body, r = req(srv, "GET", pt.CA_ROUTE, token=tok)
     assert st == 200 and r.getheader("Content-Type") == "application/x-x509-ca-cert"
+    assert r.getheader("Cache-Control") == "no-store" and r.getheader("X-Content-Type-Options") == "nosniff"
     assert body == pt.ca_certificate_pem(home) and b"PRIVATE" not in body
     key = pt.ca_paths(home)[1].read_bytes()
     assert key not in body
@@ -350,7 +473,7 @@ def test_cli_enable_needs_the_feature_and_a_yes_then_revoke(home, monkeypatch):
     rc, out, _e = _cli(home, "enable", "--yes")                                     # idempotent: the CA is kept
     assert rc == 0 and "already exists" in out and pt.fingerprint(home) == fp
     rc, out, _e = _cli(home, "ca-path")
-    assert rc == 0 and out.strip().endswith("ca.crt")
+    assert rc == 0 and out.strip().endswith("root.crt")
     rc, out, _e = _cli(home, "status", "--json")
     assert json.loads(out)["ca"] is True and "PRIVATE" not in out
     rc, _o, err = _cli(home, "revoke")                                              # revoke also needs the yes
@@ -414,3 +537,13 @@ def test_phone_page_has_the_hint_in_both_languages():
     for k in ("trust_note:", "trust_note_ca:", "trust_dl:", "trust_dl_err:"):
         assert js.count(k) == 2, k                                                         # English and Hebrew
     assert "innerHTML" not in js.split("function trustNote")[1].split("});")[0]            # text only
+
+
+def test_doctor_shows_the_trust_rows(home, monkeypatch, capsys):
+    from jarves import cli
+    assert pt.doctor_rows(home) == []                                                  # no CA: nothing to say
+    pt.create_ca(home)
+    rows = pt.doctor_rows(home)
+    assert rows and rows[0][0] == "ok" and "trusted phone connection" in rows[0][1]
+    src = __import__("inspect").getsource(cli.cmd_doctor)
+    assert "phone_trust.doctor_rows(home)" in src

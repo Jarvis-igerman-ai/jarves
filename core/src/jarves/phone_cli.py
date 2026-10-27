@@ -27,12 +27,15 @@ def status_view(cfg, home) -> dict:
 
 
 TRUST_MEANING = (
-    ("מה זה אומר לסמוך על רשות אישורים: מי שמחזיק את המפתח שלה יכול ליצור אישורים שהטלפון יקבל. כאן המפתח נשאר במחשב הזה בלבד, "
-     "והרשות מוגבלת לכתובות ברשת פרטית ולשמות מקומיים, כך שאינה יכולה לאשר אתר ציבורי. התקינו רק בטלפון שלכם; לביטול: "
-     "jarvis phone trust revoke ואז הסרה בטלפון."),
-    ("What trusting a CA means: whoever holds its key can make certificates the phone accepts. Here the key stays on this PC only and the "
-     "CA may only vouch for private-network addresses and local names, so it cannot vouch for a public site. Install it only on your own "
-     "phone; to undo: jarvis phone trust revoke, then remove it on the phone."))
+    ("מה זה אומר לסמוך על רשות אישורים: מי שמחזיק את המפתח שלה יכול ליצור אישורים שהטלפון יקבל. כאן המפתח נשאר במחשב הזה בלבד "
+     "(הרשאות לבעלים בלבד), והרשות מוגבלת בתוך האישור שלה לכתובות ברשת פרטית ולשמות מקומיים, כך שהיא לא יכולה לאשר אתר ציבורי. "
+     "שימו לב: היא כן יכולה לאשר כל כתובת פרטית או שם מקומי, בכל רשת Wi-Fi שהטלפון מחובר אליה. Chrome ואנדרואיד אוכפים את "
+     "ההגבלה; אפליקציות מסוימות אולי לא. התקינו רק בטלפון שלכם; לביטול: \"jarvis phone trust revoke\" ואז הסרה בטלפון."),
+    ("What trusting a CA means: whoever holds its key can make certificates the phone accepts. Here the key stays on this PC only "
+     "(owner-only permissions), and the CA is limited inside its own certificate to private-network addresses and local names, so it "
+     "cannot vouch for a public site. Note: it CAN vouch for any private address or local name, on any Wi-Fi the phone joins. Chrome "
+     "and Android enforce the limit; some apps may not. Install it only on your own phone; to undo: jarvis phone trust revoke, then "
+     "remove it on the phone."))
 ANDROID_STEPS = (
     ("בטלפון (אנדרואיד): הורידו את הקובץ מעמוד הטלפון המצומד (או העבירו את הקובץ), ואז הגדרות > אבטחה (או אבטחה ופרטיות > אבטחה נוספת) > "
      "התקנת אישור (הצפנה ופרטי כניסה) > אישור CA > \"התקן בכל זאת\" ובחרו את הקובץ. אנדרואיד יציג אזהרה שהרשת עשויה להיות מנוטרת: זו "
@@ -47,18 +50,18 @@ REMOVE_STEPS = (
 # by the phone server at start (tailnet.choose_tls) once the owner enabled HTTPS certificates for the tailnet.
 TAILSCALE_STEPS = {
     "not-installed": ("נתיב ב': התקינו את Tailscale במחשב ובטלפון מהאתר או מחנות האפליקציות שלו, והתחברו בשני המכשירים לאותו חשבון "
-                      "באפליקציה של Tailscale עצמה (JARVES לא רואה את פרטי הכניסה). אחר כך הריצו שוב: jarvis phone trust tailscale",
+                      "באפליקציה של Tailscale עצמה (JARVES לא רואה את פרטי הכניסה). אחר כך הריצו שוב: \"jarvis phone trust tailscale\"",
                       "Path B: install Tailscale on the computer and on the phone (its own site or app store) and sign in on both to the "
                       "same account in Tailscale's own app (JARVES never sees the sign-in). Then run again: jarvis phone trust tailscale"),
-    "not-connected": ("Tailscale מותקן אבל לא מחובר. התחברו באפליקציה של Tailscale במחשב, ואז הריצו שוב: jarvis phone trust tailscale",
+    "not-connected": ("Tailscale מותקן אבל לא מחובר. התחברו באפליקציה של Tailscale במחשב, ואז הריצו שוב: \"jarvis phone trust tailscale\"",
                       "Tailscale is installed but not connected. Sign in in the Tailscale app on this computer, then run again: "
                       "jarvis phone trust tailscale"),
     "no-name": ("Tailscale מחובר, אבל אין שם רשת למחשב. במסוף הניהול של Tailscale (DNS) הפעילו את MagicDNS ואת \"HTTPS Certificates\", "
-                "ואז הריצו שוב: jarvis phone trust tailscale",
+                "ואז הריצו שוב: \"jarvis phone trust tailscale\"",
                 "Tailscale is connected but this computer has no tailnet name. In the Tailscale admin console (DNS) turn on MagicDNS and "
                 "\"HTTPS Certificates\", then run again: jarvis phone trust tailscale"),
     "ready": ("Tailscale מוכן. ודאו שבמסוף הניהול של Tailscale (DNS) מופעל \"HTTPS Certificates\". בהפעלה הבאה של שרת הטלפון JARVES מבקש "
-              "מ-Tailscale אישור אמיתי לשם {name} (בלי להתקין כלום בטלפון). אפשר גם: jarvis phone bind tailnet. בטלפון, כש-Tailscale "
+              "מ-Tailscale אישור אמיתי לשם {name} (בלי להתקין כלום בטלפון). אפשר גם: \"jarvis phone bind tailnet\". בטלפון, כש-Tailscale "
               "מחובר, פתחו את https://{name}:{port}/m/",
               "Tailscale is ready. Make sure \"HTTPS Certificates\" is on in the Tailscale admin console (DNS). At the next phone server "
               "start JARVES asks Tailscale for a real certificate for {name} (nothing to install on the phone). Optional: jarvis phone "
@@ -85,7 +88,7 @@ def _confirm(a, he: str, en: str) -> bool:
 
 
 def _feature_off_msg() -> None:
-    print(clilang.fmt("התכונה כבויה (בטא). הריצו: jarvis features on beta_features ואז jarvis features on phone_trust",
+    print(clilang.fmt("התכונה כבויה (בטא). הריצו: \"jarvis features on beta_features\" ואז \"jarvis features on phone_trust\"",
                       "the feature is off (beta). Run: jarvis features on beta_features, then jarvis features on phone_trust"),
           file=sys.stderr)
 
@@ -119,21 +122,24 @@ def _trust(a, cfg, home) -> int:
         if a.json:
             print(json.dumps(st, ensure_ascii=False, indent=1))
             return 0
-        on = st["ca"] and st["feature_on"]
+        on = st["usable"] and st["feature_on"]                  # an expired CA is never "on"
         print(clilang.fmt("חיבור מהימן: " + ("פועל" if on else "כבוי"), "trusted connection: " + ("on" if on else "off")))
         if st["ca"]:
             print(clilang.fmt(f"רשות אישורים תקפה עד {st['ca_expires']}; טביעת אצבע SHA-256: {st['fingerprint']}",
                               f"CA valid until {st['ca_expires']}; SHA-256 fingerprint: {st['fingerprint']}"))
-            if st["ca_expired"]:
-                print(clilang.fmt("תוקף הרשות פג: הריצו jarvis phone trust rotate", "the CA has expired: run jarvis phone trust rotate"))
             print(clilang.fmt(f"אישור השרת בתוקף עד {st['leaf_expires'] or 'יונפק בהפעלה הבאה'}",
                               f"server certificate valid until {st['leaf_expires'] or 'issued at the next phone server start'}"))
+            if st["renew_checked"]:
+                print(clilang.fmt(f"בדיקת חידוש אחרונה: {st['renew_checked'][:16]}", f"last renewal check: {st['renew_checked'][:16]}"))
+            for w in st["warnings"]:
+                he, en = pt.WARNING_TEXT[w]
+                print(clilang.fmt("אזהרה: " + he, "WARNING: " + en))
         elif st["ca_cert_without_key"]:
-            print(clilang.fmt("יש אישור בלי מפתח (למשל אחרי שחזור מגיבוי: המפתח לעולם לא נשמר בגיבוי). הריצו jarvis phone trust rotate",
+            print(clilang.fmt("יש אישור בלי מפתח (למשל אחרי שחזור מגיבוי: המפתח לעולם לא נשמר בגיבוי). הריצו \"jarvis phone trust rotate\"",
                               "a certificate without its key (for example after a restore: the key is never backed up). Run "
                               "jarvis phone trust rotate"))
         else:
-            print(clilang.fmt("אין רשות אישורים. להפעלה: jarvis features on phone_trust ואז jarvis phone trust enable",
+            print(clilang.fmt("אין רשות אישורים. להפעלה: \"jarvis features on phone_trust\" ואז \"jarvis phone trust enable\"",
                               "no CA yet. To start: jarvis features on phone_trust, then jarvis phone trust enable"))
         return 0
     if act == "tailscale":
@@ -145,7 +151,7 @@ def _trust(a, cfg, home) -> int:
         cur = pt.status(home)
         if act == "enable" and cur["ca"]:
             _print_ca(cur)
-            print(clilang.fmt("הרשות כבר קיימת; לא נוצרה חדשה. להחלפה: jarvis phone trust rotate",
+            print(clilang.fmt("הרשות כבר קיימת; לא נוצרה חדשה. להחלפה: \"jarvis phone trust rotate\"",
                               "the CA already exists; nothing new was made. To replace it: jarvis phone trust rotate"))
             pt.ensure_leaf(home)
             return 0
@@ -162,7 +168,7 @@ def _trust(a, cfg, home) -> int:
             print(clilang.fmt(f"טביעת האצבע הקודמת: {st['previous']}", f"previous fingerprint: {st['previous']}"))
             print(clilang.fmt(REMOVE_STEPS[0], REMOVE_STEPS[1]))
         print(clilang.fmt(ANDROID_STEPS[0], ANDROID_STEPS[1]))
-        print(clilang.fmt("הפעילו מחדש את שרת הטלפון כדי שישתמש באישור החדש, ואז: jarvis phone trust verify",
+        print(clilang.fmt("הפעילו מחדש את שרת הטלפון כדי שישתמש באישור החדש, ואז: \"jarvis phone trust verify\"",
                           "Restart the phone server so it uses the new certificate, then: jarvis phone trust verify"))
         return 0
     if act == "renew":
@@ -190,8 +196,10 @@ def _trust(a, cfg, home) -> int:
                         "Delete the CA and its key? The server falls back to the self-signed certificate."):
             return 1
         r = pt.revoke(home)
-        print(clilang.fmt(f"הרשות נמחקה ({r['removed']} קבצים). השרת יחזור לאישור העצמי בהפעלה הבאה.",
-                          f"CA removed ({r['removed']} files). The server falls back to the self-signed certificate at its next start."))
+        print(clilang.fmt(f"הרשות נמחקה ({r['removed']} קבצים). שרת הטלפון שכבר רץ ממשיך עם האישור הנוכחי עד שמפעילים אותו "
+                          "מחדש; אחר כך הוא חוזר לאישור העצמי.",
+                          f"CA removed ({r['removed']} files). A phone server that is already running keeps the current certificate "
+                          "until it restarts; then it falls back to the self-signed certificate."))
         print(clilang.fmt(REMOVE_STEPS[0], REMOVE_STEPS[1]))
         return 0
     return 2

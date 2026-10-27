@@ -1103,6 +1103,7 @@ class Dashboard:
             self.httpd.tls = True
             if tls_source == "localca":          # #513: the 30-day leaf is renewed and reloaded while the server runs
                 from . import phone_trust
+                self._stop_trust_renewer()
                 self._trust_renewer = phone_trust.keep_fresh(home, sctx)
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
@@ -1218,10 +1219,12 @@ class Dashboard:
             httpd.tls = True
             if src == "localca":                 # #513: renew and reload the 30-day leaf while the listener runs
                 from . import phone_trust
+                self._stop_trust_renewer()                 # one renewer per listener, never two
                 self._trust_renewer = phone_trust.keep_fresh(self.ctx.home, sctx)
             httpd.daemon_threads = True
             features.set("mobile_access", True, by="dashboard")
         except BaseException:                                           # fail closed: no listener, nothing half-enabled
+            self._stop_trust_renewer()
             httpd.server_close()
             raise
         # everything above worked: only now does the rest of the dashboard learn about the phone listener
@@ -1243,11 +1246,15 @@ class Dashboard:
         m = self.mobile
         return {"enabled": m.enabled, "host": m.host, "port": m.port, "tls": m.scheme == "https"}
 
-    def stop(self) -> None:
-        getattr(self, "_stop_evt", threading.Event()).set()
+    def _stop_trust_renewer(self) -> None:
         renewer = getattr(self, "_trust_renewer", None)
         if renewer is not None:
             renewer.stop.set()
+        self._trust_renewer = None
+
+    def stop(self) -> None:
+        getattr(self, "_stop_evt", threading.Event()).set()
+        self._stop_trust_renewer()
         from . import runmarks
         runmarks.clear_live(self.ctx.home, self.port)
         if self.phone_httpd is not None:

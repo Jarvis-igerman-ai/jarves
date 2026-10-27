@@ -768,7 +768,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(404, {"error": "no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable"})
         mob.audit("trust_ca_downloaded", device=dev["id"])
         return h._send(200, pem, "application/x-x509-ca-cert",
-                       {"Content-Disposition": 'attachment; filename="jarves-local-ca.crt"'})
+                       {"Content-Disposition": 'attachment; filename="jarves-local-ca.crt"',
+                        "Cache-Control": "no-store"})      # nosniff: _send adds it to every response
     if path == "/api/m/unpair" and method == "POST":
         mob.revoke(dev["id"], by=dev["id"])
         return h._json(200, {"ok": True})
