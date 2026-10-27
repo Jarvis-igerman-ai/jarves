@@ -1,0 +1,59 @@
+order = 70
+category = "system"
+suggest = false
+aliases = ["אפליקציית אנדרואיד", "אפליקציה בטלפון", "android companion", "android app", "jarves android", "אנדרואיד"]
+links = ["mobile_access", "phone_trust"]
+title_he = "אפליקציית אנדרואיד (ניסיונית, גרסת בדיקה)"
+title_en = "Android app (experimental, test build)"
+what_he = "אפליקציית אנדרואיד קטנה שמתחברת למחשב שלכם: שיוך עם קוד, מסך מצב, והודעה כשהמחשב כבוי. כרגע זו גרסת בדיקה בלבד (APK ללא חנות), שלא נוסתה על מכשיר אמיתי. דיבור, התראות, שיתוף ותזכורות במצב לא מקוון עדיין לא נבנו או בבדיקה."
+what_en = "A small Android app that connects to your computer: pair with a code, a status screen, and a banner when the computer is off. Today it is a test build only (a debug APK, no store), and it has not been tried on a real device. Voice, notifications, sharing and offline reminders are not built yet or are still in review."
+say = [["איך מתקינים את אפליקציית אנדרואיד?", "How do I install the Android app?"]]
+expect_he = "מסך שיוך, ואחריו מסך מצב שאומר מחובר, מחשב כבוי, או אין חיבור. אין מיקרופון, אין התראות, אין שירות ברקע."
+expect_en = "A pairing screen, then a status screen that says online, computer off, or no connection. No microphone, no notifications, no background service."
+test_he = "פתחו את גיליון הקבלה docs/reviews/ANDROID_COMPANION_ACCEPTANCE.md ועברו על שורות 1 עד 11 בטלפון אמיתי. כל שורה שלא הורצה נשארת NOT-RUN."
+test_en = "Open the acceptance sheet docs/reviews/ANDROID_COMPANION_ACCEPTANCE.md and go through rows 1 to 11 on a real phone. A row nobody ran stays NOT-RUN."
+cost_he = "אין עלות. אין שרת בענן ואין חשבון: הטלפון מדבר רק עם המחשב שלכם."
+cost_en = "No cost. There is no cloud server and no account: the phone talks only to your computer."
+privacy_he = "החיבור מוצפן ומנעול לטביעת האצבע של האישור של המחשב שלכם. האסימון נשמר רק בטלפון ואינו משוחזר מגיבוי של אנדרואיד. ביטול: לחצו על ניתוק באפליקציה ואז בטלו את הטלפון בעמוד הטלפון במחשב."
+privacy_en = "The connection is encrypted and pinned to your computer's certificate fingerprint. The token stays on the phone only and is not restored from an Android backup. To undo: unpair in the app, then revoke the phone on the Phone page on the computer."
+
+[[steps]]
+he = "במחשב: \"jarvis features on mobile_access\" ואז \"jarvis dashboard --mobile --tls-selfsigned\". בעמוד הטלפון תופיע כתובת וקוד בן 8 ספרות (בתוקף 5 דקות, לשימוש אחד)."
+en = "On the computer: jarvis features on mobile_access, then jarvis dashboard --mobile --tls-selfsigned. The Phone page shows an address and an 8-digit code (valid 5 minutes, single use)."
+action = "command:jarvis features on mobile_access"
+
+[[steps]]
+he = "התקינו את קובץ ה-APK של גרסת הבדיקה מהארטיפקט של בניית ה-CI (נדרש לאשר התקנה ממקור לא ידוע לאפליקציית הקבצים בלבד). זו לא גרסת חנות."
+en = "Install the debug APK from the CI build artifact (you must allow installs from unknown sources for the file manager only). It is not a store release."
+
+[[steps]]
+he = "באפליקציה הקלידו את כתובת המחשב ואת הקוד. האפליקציה תציג את טביעת האצבע של האישור: ודאו שהיא זהה לזו בעמוד הטלפון במחשב ורק אז אשרו."
+en = "In the app type the computer's address and the code. The app shows the certificate fingerprint: check that it equals the one on the Phone page on the computer, and only then confirm."
+
+[[steps]]
+he = "ודאו שמסך המצב אומר מחובר. כבו את הליבה במחשב (\"jarvis stop\") ובדקו שמופיעה הודעה שהמחשב כבוי."
+en = "Check that the status screen says online. Stop the Core on the computer (jarvis stop) and check that a computer-off banner appears."
+action = "command:jarvis stop"
+
+[[steps]]
+he = "לניתוק: ניתוק באפליקציה, ואז \"ביטול\" לטלפון בעמוד הטלפון במחשב. לכיבוי כל הגישה מהטלפון: \"jarvis features off mobile_access\"."
+en = "To disconnect: unpair in the app, then Revoke the phone on the Phone page. To switch off all phone access: jarvis features off mobile_access."
+action = "command:jarvis features off mobile_access"
+
+[[problems]]
+he = "האפליקציה אומרת שהאישור השתנה"
+en = "The app says the certificate changed"
+fix_he = "שרת הטלפון במחשב קיבל אישור חדש. אם אתם לא שינית משהו, אל תמשיכו: זה יכול להיות מחשב אחר ברשת. אם כן, נתקו ושייכו מחדש עם קוד חדש."
+fix_en = "The phone server on the computer got a new certificate. If you did not change anything, do not continue: it could be another computer on the network. If you did, unpair and pair again with a new code."
+
+[[problems]]
+he = "האפליקציה אומרת שהטלפון בוטל"
+en = "The app says the phone was revoked"
+fix_he = "הטלפון בוטל במחשב. שייכו מחדש עם קוד חדש מעמוד הטלפון."
+fix_en = "The phone was revoked on the computer. Pair again with a new code from the Phone page."
+
+[[problems]]
+he = "ההתראות או הסנכרון בטלפון נעצרים כשהמסך כבוי"
+en = "Updates stop when the screen is off"
+fix_he = "כרגע האפליקציה שואלת את המחשב רק כשהיא על המסך. בהמשך, ביצרנים עם חיסכון אגרסיבי בסוללה (שיאומי, סמסונג, אופפו) תצטרכו לבחור באפליקציה \"ללא הגבלה\" בהגדרות הסוללה; המדידות בטבלה במסמך הקבלה עדיין לא בוצעו."
+fix_en = "Today the app asks the computer only while it is on screen. Later, on makers with aggressive battery saving (Xiaomi, Samsung, Oppo) you will need to set the app to Unrestricted in the battery settings; the measurements in the acceptance document's table have not been done yet."

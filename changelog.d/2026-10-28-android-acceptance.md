@@ -1,0 +1,1 @@
+- Docs: Android companion acceptance sheet with a battery/OEM matrix and draft release notes (every row NOT-RUN, nothing tried on a device), plus an EN/HE guide for the experimental Android test build. (#395)
