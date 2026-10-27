@@ -176,3 +176,12 @@ def test_an_oversized_upstream_head_is_refused_not_truncated(tmp_path):
     finally:
         r.proxy.stop()
         big.close()
+
+
+def test_public_stays_closed_after_the_owner_used_the_page(r2):
+    r2.session.human_takes_over()
+    r2.session.human_returns()
+    r2.session.resume()
+    assert r2.session.after_human
+    assert status(r2.connect_("example.com:443")) == 403          # a public script in that page could read what was typed
+    assert status(r2.connect_("localhost:9999")) == 200

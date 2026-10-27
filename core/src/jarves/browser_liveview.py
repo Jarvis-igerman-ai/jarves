@@ -4,8 +4,8 @@ Frames are PNGs polled by the dashboard (no push channel, no WebSocket). The ser
 nothing: (1) loopback owner only (a paired phone or any other principal is refused); (2) a per-view token, 256 random bits,
 kept only as a hash, shown once to the dashboard that started the view, sent in a POST body (never a URL, so it is in no log),
 fixed expiry (5 minutes), one live view at a time (a new start revokes the old token); (3) TEST SITE ONLY (top-level page only: a local test page that embeds public content would show it; use test pages that do not): PilotSession.view_frame
-refuses unless the current page is a loopback page, checked on every frame; (4) no input path exists: the only routes are
-start / frame / stop, and none carries a key, a click or a URL; (5) a Stop button that stops the view AND the pilot session
+refuses unless the current page is a loopback page, checked on every frame; (4) no input path for the AGENT exists. B3 adds ONE owner path: takeover / input / return (grant required, local test
+pages only, the owner's keystrokes go to the page and nowhere else, see PilotSession.human_input); (5) a Stop button that stops the view AND the pilot session
 (driver closed). A frame is never given to a model and never stored. Beta, OFF by default (switch `browser_liveview`, needs
 `browser_pilot`)."""
 from __future__ import annotations
@@ -24,6 +24,7 @@ from .browser_pilot import PilotError, PilotSession
 from .calm import targets
 
 FEATURE = "browser_liveview"
+TAKEOVER = "browser_takeover"       # B3: a SEPARATE owner switch (beta, OFF): the owner's own clicks and typing into the pilot's page
 TTL_S = 300.0
 MIN_INTERVAL_S = 0.4
 MAX_FRAME_BYTES = 3_000_000
@@ -41,8 +42,9 @@ def _h(token: str) -> str:
 
 class LiveView:
     def __init__(self, session: PilotSession, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
-                 ttl_s: float = TTL_S) -> None:
+                 ttl_s: float = TTL_S, takeover_enabled: Callable[[], bool] = lambda: False) -> None:
         self.session, self.enabled, self.clock, self.ttl_s = session, enabled, clock, ttl_s
+        self.takeover_enabled = takeover_enabled
         self._hash = ""
         self._expires = 0.0
         self._last_at = -1e9
@@ -66,13 +68,14 @@ class LiveView:
         self._hash, self._expires, self._last, self._last_at, self.seq = _h(token), self.clock() + self.ttl_s, b"", -1e9, 0
         self.session._receipt("view:start", "ok")
         logs.info("browser", "BROWSER_LIVEVIEW", "live view started")
-        return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000}
+        return {"grant": token, "expires_in_s": int(self.ttl_s), "interval_ms": 1000, "state": self.session.state}
 
     def _check(self, token: object) -> None:
         if not self._hash or not isinstance(token, str) or not hmac.compare_digest(_h(token), self._hash):
             raise LiveError("LIVEVIEW_TOKEN", "this live view link is not valid", 403)
         if self.clock() > self._expires:
             self._revoke()
+            self.session.human_returns()                 # never leave the agent locked out behind a dead view (HUMAN -> PAUSED)
             raise LiveError("LIVEVIEW_EXPIRED", "the live view expired; start it again", 410)
         if not self.enabled():
             self._revoke()
@@ -96,6 +99,8 @@ class LiveView:
             except PilotError as e:
                 if e.code != "BROWSER_PILOT_OFF":
                     self._revoke()                                     # stopped, capped or left the test site: the view ends
+                    if e.code == "BROWSER_PILOT_VIEW_TEST_SITE" and self.session.state == "HUMAN":
+                        self.session.stop()                            # the owner was driving a page that left the test site
                 raise LiveError(e.code, e.message, 409) from None
             except Exception:                                          # noqa: BLE001 - a driver error text may carry a URL: fixed words only
                 self._revoke()
@@ -104,15 +109,52 @@ class LiveView:
             if not png or len(png) > MAX_FRAME_BYTES:
                 raise LiveError("LIVEVIEW_FRAME", "no usable frame", 502)
             self._last, self._last_at, self.seq = png, now, self.seq + 1
-        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq, "expires_in_s": max(0, int(self._expires - now))}
+        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq, "expires_in_s": max(0, int(self._expires - now)),
+                "state": self.session.state}
+
+    # ---- B3: the owner drives the page from this view, in the SAME session (local test pages only, see PilotSession.human_input)
+    def _takeover_check(self, token: object) -> None:
+        self._check(token)
+        if not self.takeover_enabled():
+            raise LiveError("LIVEVIEW_TAKEOVER_OFF", f"taking over needs its own owner switch (jarvis features on {TAKEOVER})", 403)
+
+    def takeover(self, token: object) -> dict:
+        with self._lock:
+            self._takeover_check(token)
+            if not self.session.human_takes_over():
+                raise LiveError("LIVEVIEW_TAKEOVER", "the session cannot be taken over now (is it running, and not already yours?)", 409)
+            logs.info("browser", "BROWSER_LIVEVIEW", "owner took over")
+            return {"state": self.session.state}
+
+    def give_back(self, token: object, resume: object = False) -> dict:
+        """Two explicit steps: give back (the session is PAUSED, the assistant still cannot act) and, only when `resume` is true,
+        let the assistant continue (it may then read the page as it is now, a logged-in account for instance)."""
+        with self._lock:
+            self._check(token)
+            self._last = b""                                   # the picture may show what the owner typed
+            out = self.session.human_returns()
+            if resume is True and self.session.state == "PAUSED":
+                self.session.resume()
+                out = {**out, "returned": True, "state": self.session.state}
+            return out
+
+    def human(self, token: object, kind: object, data: object) -> dict:
+        """One owner input event. The answer is {"ok": true} only: the typed text is never echoed, logged or stored here."""
+        with self._lock:
+            self._takeover_check(token)
+            try:
+                return self.session.human_input(str(kind), data if isinstance(data, dict) else {})
+            except PilotError as e:
+                if e.code in ("BROWSER_PILOT_STOPPED", "BROWSER_PILOT_CAP", "BROWSER_PILOT_VIEW_TEST_SITE"):
+                    self._revoke()
+                raise LiveError(e.code, e.message, 409) from None
 
     def stop(self) -> dict:
         """The Stop button: ends the view AND the pilot session (the driver is closed). It needs no grant: it works after the
         view expired or ended (stopping is fail-safe; the route already requires the local owner)."""
-        with self._lock:
-            self._revoke()
-            self.session._receipt("view:stop", "ok")
-            self.session.stop()
+        self._hash, self._last = "", b""                       # no view lock: Stop must work while a frame or an input hangs
+        self.session._receipt("view:stop", "ok")
+        self.session.stop()
         logs.info("browser", "BROWSER_LIVEVIEW", "live view stopped")
         return {"stopped": True}
 
@@ -141,10 +183,22 @@ def dashboard_routes(register) -> None:
     register("POST", r"/api/browser/live/start$", lambda ctx, m, b: call(ctx, lambda v: v.start()))
     register("POST", r"/api/browser/live/frame$", lambda ctx, m, b: call(ctx, lambda v: v.frame((b or {}).get("grant"))))
     register("POST", r"/api/browser/live/stop$", lambda ctx, m, b: call(ctx, lambda v: v.stop()))
+    register("POST", r"/api/browser/live/takeover$", lambda ctx, m, b: call(ctx, lambda v: v.takeover((b or {}).get("grant"))))
+    register("POST", r"/api/browser/live/return$", lambda ctx, m, b: call(ctx, lambda v: v.give_back((b or {}).get("grant"), (b or {}).get("resume"))))
+    register("POST", r"/api/browser/live/input$", lambda ctx, m, b: call(ctx, lambda v: v.human(
+        (b or {}).get("grant"), (b or {}).get("kind"), (b or {}).get("data"))))
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
     return True, ""
+
+
+feat.register(TAKEOVER, "שליטה ידנית בדפדפן הפיילוט", "Take over the browser pilot yourself", False, probe=_probe,
+              needs=["browser_liveview"], risk="high", stage="beta",
+              about="from the live view you can take over the pilot's page and click and type yourself on local test pages; the assistant "
+                    "is locked out meanwhile and never sees what you type",
+              targets=targets("test_browser_takeover.py"),
+              permissions=["your clicks and typing go to the page"], settings=f"jarvis features on {TAKEOVER}")
 
 
 feat.register(FEATURE, "תצוגה חיה של הדפדפן (קריאה בלבד)", "Browser live view (read only)", False, probe=_probe,

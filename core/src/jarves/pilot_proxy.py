@@ -7,7 +7,7 @@ workers. The proxy is the safety net under all of that: it is the only door out,
 * default deny: the target must pass `PilotSession.vet_for_proxy` (a public name is resolved ONCE per session under a lock and
   every answer vetted; private, link-local, CGNAT, metadata, SIIT and odd forms refused); public hosts only on 80 (plain GET/HEAD)
   and 443 (CONNECT tunnel); nothing unless the session is running (not paused, stopped, switched off or past its time cap) and only
-  loopback while the owner drives;
+  loopback while the owner drives or has driven;
 * it connects ONLY to the addresses vetted for that name (`session.pins`), never to a fresh DNS answer: no rebinding;
 * LOOPBACK is not "anything local": only the ports in `local_ports` (the test site's port, nothing else: never the JARVES
   dashboard, Ollama, adb, databases) and never after a public page was allowed (a public page must not reach local services);
@@ -355,7 +355,7 @@ class PilotProxy:
         s = self.session
         if self._stop.is_set() or not self._running():
             return False
-        if scope != "local" and s.state == "HUMAN":
+        if scope != "local" and (s.state == "HUMAN" or s.after_human):
             return False
         if scope == "local" and self._public_seen:             # a public page must not keep a local connection
             return False

@@ -136,6 +136,8 @@ def test_state_machine(tmp_path):
     with pytest.raises(bp.PilotError):
         s.open("https://example.com/")
     s.human_returns()
+    assert s.state == bp.PAUSED                  # B3: back from the owner is paused until the owner lets the agent continue
+    s.resume()
     assert s.state == bp.AGENT
     s.stop()
     assert s.state == bp.STOPPED and d.closed
@@ -189,7 +191,7 @@ def test_redirect_to_a_private_address_stops_the_session(tmp_path):
     with pytest.raises(bp.PilotError) as e:
         s.open("https://example.com/")
     assert e.value.code == "BROWSER_PILOT_REDIRECT" and d.closed and s.state == bp.STOPPED
-    assert s.request_allowed("https://example.com/a") is True
+    assert s.request_allowed("https://example.com/a") is False           # a stopped session allows no request at all
 
 
 def test_audit_kind_is_never_a_caller_string(tmp_path):
