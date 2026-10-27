@@ -266,3 +266,17 @@ def test_a_failed_step_error_shows_only_the_code_on_the_phone():
     assert mobile_plans._phone_error("the step timed out") == "STEP_FAILED"
     assert mobile_plans._phone_error("the owner did not approve this step") == "STEP_FAILED"
     assert mobile_plans._phone_error(None) == ""
+
+
+def test_607_brief_escapes_bidi_and_zero_width_characters_and_keeps_hebrew():
+    from jarves import mobile_plans as mp
+    rlo, zwsp = chr(0x202E), chr(0x200B)
+    p = {"id": 1, "title": "pay" + rlo + "now", "state": "draft", "progress": 0, "note": "n" + zwsp,
+         "steps": [{"idx": 0, "tool": "fake" + zwsp + "_act", "why": "because" + rlo + "ok", "status": "pending"}]}
+    b = mp.brief(p)
+    blob = repr(b)
+    assert rlo not in blob and zwsp not in blob
+    bs = chr(92)
+    assert bs + "u202e" in b["title"] and bs + "u200b" in b["steps"][0]["tool"] and bs + "u202e" in b["steps"][0]["why"]
+    he = {"id": 2, "title": "שלום עולם", "state": "draft", "steps": []}
+    assert mp.brief(he)["title"] == "שלום עולם"
