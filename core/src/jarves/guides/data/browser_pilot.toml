@@ -30,6 +30,12 @@ he = "לכיבוי: jarvis features off browser_pilot. הדפדפן הרגיל �
 en = "To turn off: jarvis features off browser_pilot. The normal browser stays as it was (jarvis browser)."
 
 [[problems]]
+he = "הוא מסרב לכתובת עם אותיות מיוחדות (למשל ß או ς בסוף מילה)"
+en = "He refuses an address with special letters (for example a sharp s or a final sigma)"
+fix_he = "בשלב הבטא הפיילוט דוחה כתובות שמתורגמות בשמות בינלאומיים בכוונה, כדי שלא יוחלף אתר בדומה לו. השתמשו בצורה הלטינית של הכתובת (xn-- או האיות הרגיל)."
+fix_en = "In this beta the pilot deliberately refuses internationalized names that could be swapped for a look-alike site. Use the plain Latin spelling of the address."
+
+[[problems]]
 he = "הוא אומר שהפיילוט כבוי"
 en = "He says the pilot is off"
 fix_he = "הריצו jarvis features on browser_pilot (אחרי הפעלת תכונות בטא)."
