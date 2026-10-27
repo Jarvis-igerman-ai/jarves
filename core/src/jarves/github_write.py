@@ -41,6 +41,7 @@ from . import github_client as gc
 from .channels_common import targets
 
 FEATURE = "github_write"
+MERGE_FEATURE = "github_merge_queue"            # G5: a SEPARATE owner switch for turning on auto-merge / queue entry: default OFF, beta
 APPROVE_FEATURE = "github_approve_reviews"      # a SEPARATE owner switch for review event APPROVE (#578): default OFF, beta
 MAX_WRITES, WINDOW_S = 10, 600.0
 GRANT_TTL_S = 300.0
@@ -63,7 +64,7 @@ MAX_APPROVAL_CHARS = 1700                  # ApprovalService.ask cuts a prompt a
 _NOT_APPROVED = frozenset({"GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_OFF", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO",
                            "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE",
                            "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_UNREADABLE", "GITHUB_WRITE_AUDIT_TAMPERED",
-                           "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF"})   # every other audited result = the owner approved it
+                           "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF", "GITHUB_WRITE_MERGE_OFF"})   # every other audited result = the owner approved it
 RESERVED = "GITHUB_WRITE_RESERVED"          # a slot taken before the approval; the final row with the same rid replaces it
 DUP_WINDOW_S = 600.0                       # the same approved action is not executed twice within this time
 _TOGGLES = frozenset({"issue.edit", "labels.add", "labels.remove", "pr.update"})   # a state: only the latest write on the target counts
@@ -370,13 +371,16 @@ class GitHubWriter:
         if not self.feats.active(FEATURE):
             return self._refuse(a, "GITHUB_WRITE_OFF", "GitHub writes are off (owner: jarvis github write on)", origin, rid)
         kind = a.kind.strip().lower()
-        if (kind.startswith("pr.") or kind.startswith("ci.")) and origin != "user":     # CLI only: held HERE, not by a source scan
+        if (kind.startswith("pr.") or kind.startswith("ci.") or kind.startswith("merge.")) and origin != "user":     # CLI only: held HERE, not by a source scan
             return self._refuse(a, "GITHUB_WRITE_FORBIDDEN", "pull request and CI actions are command line only: no model or other route",
                                 origin, rid)
         if kind == "pr.review" and str(a.payload.get("event")) == "APPROVE" and not self.feats.active(APPROVE_FEATURE):
             return self._refuse(a, "GITHUB_WRITE_APPROVE_OFF", "approving a pull request needs its own owner switch "
                                 f"(jarvis features on {APPROVE_FEATURE}); comments and change requests need only the normal approval",
                                 origin, rid)
+        if kind == "merge.enqueue" and not self.feats.active(MERGE_FEATURE):
+            return self._refuse(a, "GITHUB_WRITE_MERGE_OFF", "turning on auto-merge needs its own owner switch "
+                                f"(jarvis features on {MERGE_FEATURE}); it only ever uses the merge queue", origin, rid)
         if untrusted or origin not in ("user", "model"):
             return self._refuse(a, "GITHUB_WRITE_UNTRUSTED", "untrusted text was read this turn; no write now", origin, rid)
         if a.repo.strip().lower() not in self.repos:
@@ -501,6 +505,8 @@ class GitHubWriter:
     def _unreadable_text(a: WriteAction) -> str:
         if a.kind.strip().lower() == "ci.rerun":
             return "could not read the workflow run on GitHub to show what it is; try again"
+        if a.kind.strip().lower() == "merge.enqueue":
+            return "could not read the pull request on GitHub to show what will be merged; try again"
         return "could not read the issue on GitHub to show what the edit replaces; try again"
 
     async def _extra(self, a: WriteAction) -> str | None:
@@ -630,3 +636,4 @@ def cmd_github_write(a, cfg, home) -> int:
 
 from . import github_issues  # noqa: E402,F401  (registers the G3 kinds: HANDLERS and VALIDATORS)
 from . import github_prs  # noqa: E402,F401  (registers the G4 kinds)
+from . import github_merge  # noqa: E402,F401  (registers the G5 kind)

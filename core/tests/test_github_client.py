@@ -91,7 +91,7 @@ def test_token_store_private_and_status_hides_token(tmp_path):
 
 def test_one_write_door_with_a_fixed_endpoint_family():
     src = inspect.getsource(gh)
-    assert '"PUT"' not in src and src.count("write=True") == 1                    # only write() passes write=True
+    assert '"PUT"' not in src and src.count("write=True") == 2                    # only write() and the closed-list graphql_write() (G5) pass write=True
     c = gh.GitHubClient(token=TOKEN, transport=gh.FakeGitHub().transport)
     for m, p in [("PUT", "/repos/o/r/issues"), ("DELETE", "/repos/o/r"), ("POST", "/repos/o/r/pulls/1/merge"),
                  ("POST", "/repos/o/r/issues/1/../../merge"), ("POST", "/repos/o/r/issues/x"), ("PATCH", "/user"),
