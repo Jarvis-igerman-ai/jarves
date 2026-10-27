@@ -1,3 +1,4 @@
 {
- "turn on auto-merge for one pull request from the command line after your popup approval; only for a branch with a merge queue; there is no direct merge and no bypass": "הפעלת מיזוג אוטומטי לבקשת מיזוג אחת משורת הפקודה אחרי אישור בחלון הקופץ; רק לענף שיש לו תור מיזוג; אין מיזוג ישיר ואין עקיפה"
+ "turn on auto-merge for one pull request from the command line after your popup approval; only for a branch with a merge queue; there is no direct merge and no bypass": "הפעלת מיזוג אוטומטי לבקשת מיזוג אחת משורת הפקודה אחרי אישור בחלון הקופץ; רק לענף שיש לו תור מיזוג; אין מיזוג ישיר ואין עקיפה",
+ "enables auto-merge of a pull request after your approval each time": "מפעיל מיזוג אוטומטי של בקשת מיזוג אחרי האישור שלכם בכל פעם"
 }
