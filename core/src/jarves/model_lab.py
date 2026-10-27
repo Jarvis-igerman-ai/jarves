@@ -16,6 +16,7 @@ import csv
 import io
 import json
 import math
+import os
 import re
 import time
 from collections.abc import Callable
@@ -204,6 +205,75 @@ def archive(home: Path, report: dict, wall: Callable[[], float] = time.time) -> 
 def latest(home: Path) -> dict | None:
     files = sorted((Path(home) / "modellab").glob("*.json"))
     return json.loads(files[-1].read_text(encoding="utf-8")) if files else None
+
+
+_RUN_ID = re.compile(r"^\d{8}-\d{6}(?:-\d{1,4})?$")
+
+
+MAX_REPORT_BYTES = 1_000_000     # a report is ~10 KB; a bigger file is refused, never parsed
+MAX_SCAN = 500                   # at most this many newest file names are looked at when listing
+
+
+class ReportTooLarge(ValueError):
+    code = "MODELLAB_REPORT_TOO_LARGE"
+
+
+def _read_report(path: Path) -> dict:
+    if path.stat().st_size > MAX_REPORT_BYTES:
+        raise ReportTooLarge(f"report is larger than {MAX_REPORT_BYTES} bytes")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def list_runs(home: Path, limit: int = 50) -> list[dict]:
+    """V7 M4 store: newest first, one short line per archived run. Bounded: only the newest MAX_SCAN names are sorted
+    and at most `limit` files are opened (an oversized or damaged file is skipped, never fatal)."""
+    d = Path(home) / "modellab"
+    try:
+        names = sorted((e.name[:-5] for e in os.scandir(d) if e.name.endswith(".json") and _RUN_ID.match(e.name[:-5])),
+                       reverse=True)[:MAX_SCAN]
+    except OSError:
+        return []
+    out = []
+    for stem in names:
+        try:
+            rep = _read_report(d / f"{stem}.json")
+            summ = rep["summary"]
+            out.append(dict(id=stem, mode=rep.get("mode", ""), spent_usd=rep.get("spent_usd", 0.0),
+                            models=[x["model"] for x in summ], rows=len(rep["rows"]),
+                            accepted=sum(x["accepted"] for x in summ)))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if len(out) >= limit:
+            break
+    return out
+
+
+def load_run(home: Path, run_id: str) -> dict | None:
+    """One archived report by id (validated: no path can escape the folder). None if missing or damaged; raises
+    ReportTooLarge for a file over MAX_REPORT_BYTES."""
+    if not isinstance(run_id, str) or not _RUN_ID.match(run_id):
+        return None
+    try:
+        return _read_report(Path(home) / "modellab" / f"{run_id}.json")
+    except ReportTooLarge:
+        raise
+    except (OSError, ValueError):
+        return None
+
+
+def compare(reports: dict[str, dict], free_only: bool = True) -> dict:
+    """Per model, its summary in each given run (oldest first), for the comparison table. `free_only` (the default)
+    leaves out paid models; a model whose label is unknown is treated as paid."""
+    ids = sorted(reports)
+    models: dict[str, dict] = {}
+    for rid in ids:
+        for x in reports[rid].get("summary", []):
+            if free_only and x.get("label") not in ("free", "local"):
+                continue
+            m = models.setdefault(x["model"], dict(model=x["model"], label=x.get("label", "unknown"), runs={}))
+            m["runs"][rid] = {k: x.get(k) for k in ("quality", "avg_latency_s", "cost_usd", "cost_per_accepted_usd",
+                                                   "ran", "skipped", "errors", "accepted")}
+    return dict(run_ids=ids, free_only=free_only, models=sorted(models.values(), key=lambda m: m["model"]))
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
