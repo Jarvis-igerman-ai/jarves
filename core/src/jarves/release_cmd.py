@@ -64,6 +64,10 @@ def cmd_release(a, cfg, home) -> int:
         return 2
     if a.action in ("status", "sheet"):
         return _flow(a, home, version)
+    if a.action == "run":
+        from . import release_run
+        return release_run.cmd_run(a, home, repo_root(home, a.repo), version,
+                                   lambda sheet, owner: _finish(sheet, home, a.beta, a.commit, owner))
     try:
         root, sheet = _mine(home, a.repo, version)
         if a.row:
@@ -141,9 +145,10 @@ def _flow(a, home, version: str) -> int:
 
 def add_cli(sub) -> None:
     rp = sub.add_parser("release", help="release sign-off: record your manual test of a stable release")
-    rp.add_argument("action", nargs="?", default="status", choices=["status", "sheet", "signoff"],
+    rp.add_argument("action", nargs="?", default="status", choices=["status", "sheet", "signoff", "run"],
                     help="status: every gate + what remains (default); sheet: write the reduced owner sheet; "
-                         "signoff: show / fill / finish the manual test sheet")
+                         "signoff: show / fill / finish the manual test sheet; "
+                         "run: evidence, then (with --approved-by-owner) sign and print the tag commands")
     rp.add_argument("--version", help="the stable version being released, e.g. 4.1.0 (default: core/pyproject.toml)")
     rp.add_argument("--report", action="store_true", help="status: also write docs/release/EVIDENCE_<version>.md")
     rp.add_argument("--force", action="store_true", help="sheet: rebuild even if it holds results or a signature")
@@ -155,6 +160,9 @@ def add_cli(sub) -> None:
     rp.add_argument("--beta", help="finish: the beta tested, e.g. 4.1.0-beta.7 (default: this installed beta)")
     rp.add_argument("--commit", help="finish: full SHA of the tested beta (default: this build's commit)")
     rp.add_argument("--owner", help="finish: the owner's name recorded in the sheet (default: this account)")
+    rp.add_argument("--approved-by-owner", metavar="QUOTE", help="run: the owner's approval (chat quote or time UTC); "
+                    "without it nothing is signed")
+    rp.add_argument("--dry-run", action="store_true", help="run: same checks, writes and signs nothing")
     rp.add_argument("--repo", help="the git checkout holding docs/reviews (default: auto-detected)")
 
 
