@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 
 from . import logs
-from .goal_plans import MAX_ATTEMPTS
+from .goal_plans import MAX_ATTEMPTS, _show_text
 
 SCOPE = "tasks"
 PHONE_OPS = ("pause", "cancel", "resume", "retry")
@@ -45,7 +45,7 @@ def feature_on(mob) -> bool:
 
 
 def _short(s: object) -> str:
-    return " ".join(str(s or "").split())[:SHORT]
+    return _show_text(" ".join(str(s or "").split()), SHORT)      # same escaping as the popups: bidi/zero-width shown, not obeyed (#607)
 
 
 _CODE_HEAD = re.compile(r"([A-Z][A-Z0-9_]{2,40}): .+", re.S)
@@ -79,7 +79,7 @@ def _can(p: dict) -> list[str]:
 
 
 def brief(p: dict) -> dict:
-    steps = [{"n": int(s["idx"]) + 1, "tool": str(s["tool"])[:64], "why": _short(s.get("why")), "status": s["status"],
+    steps = [{"n": int(s["idx"]) + 1, "tool": _show_text(s["tool"], 64), "why": _short(s.get("why")), "status": s["status"],
               "consequential": bool(s.get("consequential")), "error": _phone_error(s.get("error"))} for s in p.get("steps", [])]
     can = _can(p)
     return {"id": p["id"], "title": _short(p["title"]), "state": p["state"], "progress": p.get("progress", 0),
