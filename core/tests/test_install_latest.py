@@ -80,7 +80,7 @@ def test_happy_path_order_and_report(tmp_path):
     f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
-    assert f.calls[:8] == ["set_channel", "backup", "prepare", "record", "stop", "launch restart=True", "wait_installer",
+    assert f.calls[:8] == ["backup", "prepare", "set_channel", "record", "stop", "launch restart=True", "wait_installer",
                            "cli:update status"]
     assert [c for c in f.calls if c.startswith("cli:")] == ["cli:update status", "cli:doctor", "cli:selftest",
                                                             "cli:status --brief"]
@@ -95,7 +95,7 @@ def test_failed_check_rolls_back(tmp_path):
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and "rollback" in f.calls
     assert ("selftest", False, "exit 1: selftest FAIL: database") in rep.checks
-    assert rep.render().startswith("FAIL") and "rolled back" in rep.render()
+    assert rep.render().startswith("FAIL") and "rollback started" in rep.render()
 
 
 def test_failed_installer_rolls_back_without_running_checks(tmp_path):
@@ -214,7 +214,7 @@ def test_finisher_script_quoting_and_order(tmp_path):
         assert q * 2 in s                                   # every quote character in the path is doubled
     assert "O\u2019\u2019Brien" in s and "it''s" in s
     assert s.index("cancel") < s.index("Wait-Process") < s.index("--finish")
-    assert "--installer-running" in s and "jarvis update --rollback --yes" in s and "rollback()" not in s
+    assert "jarvis update --rollback --yes" in s and "rollback()" not in s
     assert il._ps("a\nb'c") == "'ab''c'"
 
 
@@ -288,18 +288,62 @@ def test_second_begin_is_refused_while_a_run_is_pending(tmp_path):
     g = Fake(tmp=tmp_path, spawn=True)
     rep = il.begin(g.deps())
     assert not rep.ok and rep.stopped_at == "pending" and "backup" not in g.calls and "launch restart=True" not in g.calls
-    (tmp_path / "updates" / il.REPORT_FILE).write_text("PASS", encoding="utf-8")      # the first run ended
+    state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
+    il.finish(f.deps(), state)                            # the first run ends: its report frees the lock
     h = Fake(tmp=tmp_path, spawn=True)
     assert il.begin(h.deps()).pending
-    up = tmp_path / "updates"
-    os.utime(up / il.STATE_FILE, (1, 1))                  # an abandoned, very old state file does not block
-    os.utime(up / il.REPORT_FILE, (0, 0)) if (up / il.REPORT_FILE).exists() else None
+    lock = tmp_path / "updates" / il.LOCK_FILE
+    os.utime(lock, (1, 1))                                # an abandoned, very old lock does not block
     assert not il.pending_run(h.deps())
+    assert il.begin(Fake(tmp=tmp_path, spawn=True).deps()).pending
+
+
+def test_lock_is_taken_before_the_slow_steps_and_freed_on_early_failure(tmp_path):
+    seen = []
+    f = Fake(tmp=tmp_path, prep_error=UpdateError("sha", "bad hash"))
+    d = f.deps()
+    orig = d.prepare
+
+    def prepare(ch):
+        seen.append(il.begin(Fake(tmp=tmp_path).deps()).stopped_at)      # a second begin DURING the slow download
+        return orig(ch)
+    d.prepare = prepare
+    rep = il.begin(d)
+    assert seen == ["pending"] and not rep.ok
+    assert not (tmp_path / "updates" / il.LOCK_FILE).exists()
+
+
+def test_version_check_reads_the_installed_line_only(tmp_path):
+    out = "JARVES 4.5.0-beta.3 (commit abc)\nNew version 4.5.1 available"
+    f = Fake(tmp=tmp_path, core=False, cli={"update": (0, out)})
+    rep = il.run(f.deps())
+    assert not rep.ok and ("installed version", False, "JARVES 4.5.0-beta.3 (commit abc)") in rep.checks
+    assert not il._has_version("JARVES 4.5.10", {"4.5.1"}) and il._has_version("JARVES 4.5.1-beta.9", {"4.5.1-beta.9"})
+
+
+def test_hung_check_is_a_failed_check_not_a_crash(monkeypatch):
+    import subprocess
+
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired("x", 1)
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert il._cli_subprocess(["selftest"])[0] == 124
+
+
+def test_rollback_report_is_saved_before_the_old_installer_starts(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"selftest": (1, "x")})
+    d = f.deps()
+    seen = []
+    d.rollback = lambda: seen.append((tmp_path / "updates" / il.REPORT_FILE).read_text(encoding="utf-8"))
+    il.run(d)
+    assert seen and "rollback started" in seen[0] or "started: previous" in seen[0]
 
 
 def test_waiter_never_judges_when_setup_was_not_seen():
     s = il.finisher_script(Path("st.json"), "py.exe", Path("r"), Path("p"), "i.exe")
-    assert "$left = ($p -eq 0) -or" in s and "--installer-running" in s
+    assert "$left = ($p -eq 0) -or" in s and "--installer-running" not in s
+    left = s[s.index("if ($left) {"):]
+    assert left.index("exit 0") < left.index("--finish")          # setup may still own {app}\\python: never start it
     assert f"AddSeconds({il.SETUP_SEEN_S})" in s and il.SETUP_SEEN_S > 180
 
 

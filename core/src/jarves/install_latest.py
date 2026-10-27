@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -34,12 +35,13 @@ from typing import Callable
 from . import logs
 
 CHANNELS = ("stable", "beta")
+LOCK_FILE = "install-latest.lock"
 STATE_FILE = "install-latest-state.json"
 REPORT_FILE = "install-latest-report.txt"
 PID_FILE = "install-latest.pid"                   # setup process id written by the parent; "cancel" = setup never started
 SETUP_WAIT_S = 1200
 SETUP_SEEN_S = 300                                # how long the waiter looks for the setup process before it judges nothing
-PENDING_S = SETUP_WAIT_S + 600                    # a state file younger than this, without a newer report, is a run in progress
+PENDING_S = 5400                    # a state file younger than this, without a newer report, is a run in progress
 
 
 @dataclass
@@ -108,7 +110,7 @@ class Report:
         for name, ok, detail in self.checks:
             lines.append(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""))
         if self.rolled_back:
-            lines.append("rolled back to the previous version (data from before the update restored)")
+            lines.append("rollback started to the previous version (data from before the update); confirm: jarvis update status")
         elif self.changed:
             lines.append("roll back:  jarvis update --rollback --yes")
         return "\n".join(lines)
@@ -121,6 +123,11 @@ def _first_line(out: str) -> str:
     return ""
 
 
+def _has_version(line: str, shown) -> bool:
+    """The installed-version line names exactly one of the wanted versions (4.5.1 must not match 4.5.10)."""
+    return any(v and re.search(r"(?<![\w.])" + re.escape(v) + r"(?![\w.-])", line) for v in shown)
+
+
 def _updates(deps: Deps) -> Path:
     return Path(deps.home) / "updates"
 
@@ -131,6 +138,8 @@ def _save_report(deps: Deps, rep: Report) -> None:
         (_updates(deps) / REPORT_FILE).write_text(rep.render() + "\n", encoding="utf-8")
     except OSError:
         pass
+    if not rep.pending:
+        _free_lock(deps)
 
 
 def _err(e: BaseException) -> str:
@@ -152,28 +161,58 @@ def _fail_start(deps: Deps, rep: Report, e: BaseException, core_up: bool) -> Rep
 
 
 def pending_run(deps: Deps) -> bool:
-    """True while an earlier install-latest is still waiting for setup or its checks (state file without a newer report)."""
+    """True while an earlier install-latest holds the lock (taken first thing in begin, freed when its report is written;
+    a lock older than PENDING_S, longer than any run can last, is stale)."""
+    try:
+        return deps.clock() - (_updates(deps) / LOCK_FILE).stat().st_mtime <= PENDING_S
+    except OSError:
+        return False
+
+
+def _take_lock(deps: Deps) -> bool:
     up = _updates(deps)
     try:
-        st = (up / STATE_FILE).stat().st_mtime
+        up.mkdir(parents=True, exist_ok=True)
+        if not pending_run(deps):
+            (up / LOCK_FILE).unlink(missing_ok=True)      # stale or absent
+        fd = os.open(str(up / LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
     except OSError:
-        return False
-    if deps.clock() - st > PENDING_S:
-        return False
+        return True                                       # cannot lock (read-only home): do not block the run
+    with os.fdopen(fd, "w", encoding="ascii") as f:
+        f.write(f"{os.getpid()} {int(deps.clock())}")
+    return True
+
+
+def _free_lock(deps: Deps) -> None:
     try:
-        return (up / REPORT_FILE).stat().st_mtime < st
+        (_updates(deps) / LOCK_FILE).unlink(missing_ok=True)
     except OSError:
-        return True
+        pass
 
 
 def begin(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Report:
+    if not dry_run and not _take_lock(deps):
+        rep = Report(at=deps.now().strftime("%Y-%m-%d %H:%M UTC"), stopped_at="pending")
+        rep.add("no other install-latest running", False, "an earlier run is still installing or checking; wait for its "
+                                                           "report (jarvis install-latest --report)")
+        return rep
+    rep = None
+    try:
+        rep = _begin(deps, channel, dry_run)
+        return rep
+    finally:
+        if not dry_run and not (rep is not None and rep.pending):
+            _free_lock(deps)                              # a pending run keeps it until finish writes the report
+
+
+def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     rep = Report(dry_run=dry_run, at=deps.now().strftime("%Y-%m-%d %H:%M UTC"))
     ch = channel or deps.channel
     if ch not in CHANNELS:
         rep.add("channel", False, f"must be one of {', '.join(CHANNELS)}")
         return rep
-    if not dry_run and ch != deps.channel:
-        deps.set_channel(ch)                              # same switch as `jarvis update --channel`
     s = deps.check(ch)
     rep.add(f"find newest {ch} installer", not s.get("error"), str(s.get("error") or ""))
     if s.get("error"):
@@ -196,11 +235,6 @@ def begin(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Repo
             rep.add("would: " + step, True)
         rep.ok = True
         return rep
-    if pending_run(deps):
-        rep.add("no other install-latest running", False, "an earlier run is still installing or checking; wait for its "
-                                                           "report (jarvis install-latest --report)")
-        rep.stopped_at = "pending"
-        return rep
     try:
         rep.add("backup now", True, deps.backup_now().name)
     except Exception as e:                                # noqa: BLE001  (BackupError and OS errors alike)
@@ -213,6 +247,8 @@ def begin(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Repo
         rep.add("verify installer (signature, SHA256)", False, _err(e))
         rep.stopped_at = "verify"
         return rep
+    if ch != deps.channel:
+        deps.set_channel(ch)                              # same switch as `jarvis update --channel`, only once verified
     rep.add("verify installer (signature, SHA256)", True, f"{Path(prep['installer']).name}, "
                                                            f"{'signed' if prep.get('signed') else 'unsigned'}")
     rep.revert_id = Path(str(prep.get("backup") or "")).name
@@ -282,7 +318,7 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
     ok = install_ok
     if install_ok or end == "timeout":                    # a timeout is judged by the checks below
         code, out = deps.run_cli(["update", "status"])
-        ver_ok = code == 0 and any(v and v in out for v in shown)
+        ver_ok = code == 0 and _has_version(_first_line(out), shown)
         ok = rep.add("installed version", ver_ok, _first_line(out) if not ver_ok else rep.version) and ok
         for name, argv in (("doctor", ["doctor"]), ("selftest", ["selftest"]), ("status", ["status", "--brief"])):
             code, out = deps.run_cli(argv)
@@ -292,12 +328,16 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         try:
             if deps.core_running():
                 deps.stop_core()
-            deps.rollback()
             rep.rolled_back = True
-            rep.add("automatic rollback", True, "previous version + data from before the update")
+            rep.add("automatic rollback", True, "started: previous version + data from before the update")
+            rep.ok = False
+            _save_report(deps, rep)                       # the old installer may stop this process: the report exists first
+            deps.rollback()
         except UpdateError as e:
+            rep.rolled_back = False
             rep.add("automatic rollback", False, f"{e.code}: {e.message}; run: jarvis update --rollback --yes")
         except Exception as e:                            # noqa: BLE001
+            rep.rolled_back = False
             rep.add("automatic rollback", False, f"{type(e).__name__}; run: jarvis update --rollback --yes")
         rep.stopped_at = rep.stopped_at or "checks"
     rep.ok = ok
@@ -315,8 +355,13 @@ def run(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Report
 def _cli_subprocess(argv: list[str]) -> tuple[int, str]:
     """The installed program, started fresh (new code, not this old process). Silent: no window, no console flash."""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv], capture_output=True, text=True, timeout=600,
-                       creationflags=flags, errors="replace")
+    try:
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv], capture_output=True, text=True,
+                           timeout=300, creationflags=flags, errors="replace")
+    except subprocess.TimeoutExpired:
+        return 124, "timeout after 300 s"
+    except OSError as e:
+        return 127, f"cannot start: {type(e).__name__}"
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
@@ -350,8 +395,13 @@ def finisher_script(state: Path, python: str, report: Path, pid_file: Path, inst
         "}",
         f"if ($p -gt 0) {{ Wait-Process -Id $p -Timeout {SETUP_WAIT_S} -ErrorAction SilentlyContinue }}",
         "$left = ($p -eq 0) -or [bool](Get-Process -Id $p -ErrorAction SilentlyContinue)",   # never saw setup: judge nothing
-        f"$a = @('-X','utf8','-m','jarves','install-latest','--finish',{_ps(state)})",
-        "if ($left) { $a += '--installer-running' }",
+        "if ($left) {",                                  # setup may still own {app}\\python: never start it from there
+        "  'FAIL  install-latest  setup is still running or was not seen in time; nothing was judged or rolled back. "
+        "Check later: jarvis update status' | Set-Content "
+        f"-LiteralPath {_ps(report)} -Encoding UTF8",
+        "  exit 0",
+        "}",
+        f"$a = @('-I','-X','utf8','-m','jarves','install-latest','--finish',{_ps(state)})",
         f"& {_ps(python)} @a",
         f"if ($LASTEXITCODE -ne 0 -and -not (Test-Path -LiteralPath {_ps(report)})) {{",
         "  'FAIL  install-latest  setup ran, but the installed version cannot finish the checks. Run: jarvis doctor; "
@@ -442,7 +492,7 @@ def wait_report(home: Path, since: float, *, timeout_s: float = 1500.0, sleep=ti
     while clock() < end:
         try:
             if p.stat().st_mtime >= since:
-                return p.read_text(encoding="utf-8").strip()
+                return p.read_text(encoding="utf-8-sig").strip()
         except OSError:
             pass
         sleep(3)
@@ -453,7 +503,7 @@ def cmd_install_latest(a, cfg, home) -> int:
     rp = Path(home) / "updates" / REPORT_FILE
     if getattr(a, "report", False):
         try:
-            print(rp.read_text(encoding="utf-8").strip())
+            print(rp.read_text(encoding="utf-8-sig").strip())
             return 0
         except OSError:
             print("No install-latest report yet.")
