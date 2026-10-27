@@ -1,0 +1,10 @@
+{
+ "dict": {
+  "Control is back and the assistant is paused. It can read the page only after you let it continue.": "השליטה הוחזרה והסוכן מושהה. הוא יוכל לקרוא את הדף רק אחרי שתאשרו.",
+  "Give back (assistant paused)": "החזירו (הסוכן מושהה)",
+  "Let the assistant continue": "אפשרו לסוכן להמשיך",
+  "Show what I type": "הצגת מה שמוקלד",
+  "The assistant continues. It never saw what you typed.": "הסוכן ממשיך. הוא לא ראה מה שהקלדתם.",
+  "The assistant will be able to read the page as it is now (a logged-in account, for instance). Continue?": "הסוכן יוכל לקרוא את הדף כפי שהוא עכשיו (למשל חשבון מחובר). להמשיך?"
+ }
+}

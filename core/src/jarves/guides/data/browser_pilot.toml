@@ -1,6 +1,6 @@
 order = 59
 category = "system"
-features = ["browser_pilot", "browser_liveview"]
+features = ["browser_pilot", "browser_liveview", "browser_takeover"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
 error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
@@ -33,6 +33,22 @@ en = "To turn off: jarvis features off browser_pilot. The normal browser stays a
 he = "תצוגה חיה (בטא, כבויה כברירת מחדל): הדליקו את המתג \"תצוגה חיה של הדפדפן\" (jarvis features on browser_liveview). בעמוד הדפדפן בלוח הבקרה לוחצים \"תצוגה חיה\" ורואים את הדף כתמונה שמתרעננת, לקריאה בלבד: אי אפשר ללחוץ או להקליד דרכה. היא נפתחת רק במחשב עצמו, רק לדפי בדיקה מקומיים (localhost), פגה אחרי 5 דקות, ולחצן \"עצירה\" סוגר גם את הסשן."
 en = "Live view (beta, off by default): switch on \"Browser live view\" (jarvis features on browser_liveview). On the dashboard Browser page press Live view and watch the page as a refreshing picture, read only: you cannot click or type through it. It opens only on the computer itself, only for local test pages (localhost), expires after 5 minutes, and the Stop button also closes the session."
 action = "feature_on:browser_liveview"
+
+[[steps]]
+he = "שליטה ידנית (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_takeover. בכרטיס התצוגה החיה לוחצים \"קחו שליטה\": הסוכן נעול בחוץ (גם אם הוא באמצע קריאה, התוצאה שלו נזרקת), ואתם לוחצים על התמונה, מקלידים בתיבה (מוסתרת כסיסמה כברירת מחדל) או לוחצים Enter ו-Tab. מה שהקלדתם הולך לדף בלבד: הוא לא נרשם ביומן, לא נשמר ולא מוצג לסוכן; אם הדף מציג אותו בחזרה אנחנו מנסים להסתיר אותו (במאמץ סביר, בלי הבטחה: הד חלקי או מוסווה לא תמיד יתפס). \"החזירו\" מחזיר את השליטה והסוכן נשאר מושהה. רק \"אפשרו לסוכן להמשיך\" (עם אישור) נותן לו לקרוא את הדף כפי שהוא עכשיו, למשל חשבון מחובר, ואז הוא קורא אותו מחדש. בזמן שאתם שולטים הדף לא יכול לשלוח בקשות לאתרים ציבוריים. זה פועל כרגע רק בדפי בדיקה מקומיים (localhost); התחברות לאתר אמיתי היא שלב נפרד שתבדקו בעצמכם בחשבון ניסיון."
+en = "Take over (beta, off by default, its own switch): jarvis features on browser_takeover. On the Live view card press Take over: the assistant is locked out (a read that was running has its result thrown away), and you click on the picture, type in the box (hidden like a password by default) or press Enter and Tab. What you type goes to the page only: it is not logged, not stored and never shown to the assistant; if the page echoes it back we try to hide it (best effort, no promise: a partial or disguised echo may get through). Give back returns control and the assistant stays paused. Only Let the assistant continue (it asks first) lets it read the page as it is now, a logged-in account for instance, with a fresh read. While you are in control the page cannot send requests to public sites. This works only on local test pages (localhost) for now; logging in to a real site is a separate step that you test yourself on a throwaway account."
+
+[[problems]]
+he = "קחו שליטה לא עובד"
+en = "Take over does not work"
+fix_he = "צריך את המתג הנפרד (jarvis features on browser_takeover), תצוגה חיה פעילה ודף בדיקה מקומי. אם לחצתם על משהו שמוביל לאתר אחר, הסשן נסגר מטעמי בטיחות: התחילו מחדש."
+fix_en = "It needs its own switch (jarvis features on browser_takeover), an active live view and a local test page. If you clicked something that leads to another site the session was closed for safety: start again."
+
+[[problems]]
+he = "הוא מסרב לכתובת עם אותיות מיוחדות (למשל ß או ς בסוף מילה)"
+en = "He refuses an address with special letters (for example a sharp s or a final sigma)"
+fix_he = "בשלב הבטא הפיילוט דוחה כתובות שמתורגמות בשמות בינלאומיים בכוונה, כדי שלא יוחלף אתר בדומה לו. השתמשו בצורה הלטינית של הכתובת (xn-- או האיות הרגיל)."
+fix_en = "In this beta the pilot deliberately refuses internationalized names that could be swapped for a look-alike site. Use the plain Latin spelling of the address."
 
 [[problems]]
 he = "הוא אומר שהפיילוט כבוי"

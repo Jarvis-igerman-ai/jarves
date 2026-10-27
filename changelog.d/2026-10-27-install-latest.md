@@ -1,0 +1,1 @@
+- Added: `jarvis install-latest [--channel beta|stable] [--dry-run]` backs up, installs the newest signed build of the channel silently, runs doctor, selftest and status, prints one short report (version, revert id, rollback command, PASS/FAIL per check) and rolls back by itself when a check fails. (guide install_latest)

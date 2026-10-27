@@ -278,6 +278,7 @@
   function li(parent, text, cls) { const l = document.createElement("li"); const s = document.createElement("span"); s.className = "grow"; s.textContent = text; l.appendChild(s); parent.appendChild(l); return l; }
   function renderApprovals(a) {
     $("apprNote").textContent = a.phone_approvals ? t("phone_ap_on") : t("phone_ap_off");
+    if (me && !!me.phone_approvals !== !!a.phone_approvals) { me.phone_approvals = !!a.phone_approvals; info(); }   // the "This phone" line follows the switch
     const ul = $("apprList"); ul.replaceChildren();
     if (!a.pending.length) { li(ul, t("nothing")); return; }
     a.pending.forEach((p) => {                        // one card per request: title, risk + time left, a note, the answers

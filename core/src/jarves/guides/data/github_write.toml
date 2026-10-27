@@ -1,12 +1,12 @@
 order = 30
 category = "system"
-features = ["github_write", "github_approve_reviews"]
+features = ["github_write", "github_approve_reviews", "github_merge_queue"]
 aliases = ["פתח issue", "תגובה ב-github", "open an issue", "comment on github", "כתיבה ל-github", "github write", "github writes", "הרשאת כתיבה", "אישור כתיבה"]
-error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE", "GITHUB_WRITE_PERMISSION", "GITHUB_WRITE_INVALID", "GITHUB_WRITE_REDIRECT", "GITHUB_WRITE_UNKNOWN", "GITHUB_WRITE_AUDIT_TAMPERED", "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT"]
+error_codes = ["GITHUB_WRITE_OFF", "GITHUB_WRITE_FORBIDDEN", "GITHUB_WRITE_UNTRUSTED", "GITHUB_WRITE_REPO", "GITHUB_WRITE_SCOPE", "GITHUB_WRITE_RATE_LIMIT", "GITHUB_WRITE_DENIED", "GITHUB_WRITE_TIMEOUT", "GITHUB_WRITE_NOT_IMPLEMENTED", "GITHUB_WRITE_BAD_ARGUMENT", "GITHUB_WRITE_DUPLICATE", "GITHUB_WRITE_PERMISSION", "GITHUB_WRITE_INVALID", "GITHUB_WRITE_REDIRECT", "GITHUB_WRITE_UNKNOWN", "GITHUB_WRITE_AUDIT_TAMPERED", "GITHUB_WRITE_AGENT_SESSION", "GITHUB_WRITE_APPROVE_OFF", "GITHUB_RATE_LIMIT", "GITHUB_NOT_FOUND", "GITHUB_BAD_ARGUMENT", "GITHUB_WRITE_MERGE_OFF", "GITHUB_WRITE_REFUSED"]
 title_he = "GitHub: כתיבה באישור"
 title_en = "GitHub: writes with approval"
-what_he = "אפשר לבקש ממני לפתוח או לערוך issue, להגיב ולהוסיף או להסיר תוויות ב-GitHub. כל שינוי מוצג לכם בדיוק כפי שהוא (גם אם יש בו @ או קישור, עם אזהרה), ורק אחרי אישור שלכם הוא יתבצע. אפשר גם לפתוח או לעדכן בקשת מיזוג (PR), להגיב עליה, לכתוב ביקורת ולהריץ שוב בדיקת CI. מיזוג עצמו לא נעשה כאן (בהמשך, רק דרך תור המיזוג)."
-what_en = "You can ask me to open or edit an issue, comment, and add or remove labels on GitHub. Every change is shown to you exactly as it is (with a warning if it has an @ or a link), and happens only after you approve. You can also open or update a pull request, comment on it, write a review and re-run a CI run. Merging is not done here (later, only through the merge queue)."
+what_he = "אפשר לבקש ממני לפתוח או לערוך issue, להגיב ולהוסיף או להסיר תוויות ב-GitHub. כל שינוי מוצג לכם בדיוק כפי שהוא (גם אם יש בו @ או קישור, עם אזהרה), ורק אחרי אישור שלכם הוא יתבצע. אפשר גם לפתוח או לעדכן בקשת מיזוג (PR), להגיב עליה, לכתוב ביקורת ולהריץ שוב בדיקת CI. מיזוג ישיר לא נעשה כאן לעולם; אפשר רק להפעיל מיזוג אוטומטי לענף שיש לו תור מיזוג, במתג נפרד."
+what_en = "You can ask me to open or edit an issue, comment, and add or remove labels on GitHub. Every change is shown to you exactly as it is (with a warning if it has an @ or a link), and happens only after you approve. You can also open or update a pull request, comment on it, write a review and re-run a CI run. A direct merge is never done here; you can only turn on auto-merge for a branch that has a merge queue, with a separate switch."
 say = [["מה מצב הכתיבה ל-GitHub?", "What is the state of GitHub writes?"], ["פתח issue במאגר", "Open an issue in the repository"]]
 expect_he = "כבוי כברירת מחדל. עובד רק במאגרים שרשמתם ב-github_repos, בלי מיזוג ישיר, בלי force push ובלי שינוי הגדרות, סודות, הרשאות או הגנת ענפים. מגבלת קצב, ויומן ביקורת בלי טקסט ובלי אסימון."
 expect_en = "Off by default. Works only on repositories you list in github_repos, with no direct merge, no force push and no change of settings, secrets, permissions or branch protection. Rate limited, with an audit log that holds no text and no token."
@@ -56,6 +56,16 @@ check = "active:github_write"
 he = "לכיבוי: jarvis github write off. כל כתיבה תבקש את אישורכם בחלון, עם הפעולה המדויקת."
 en = "To turn off: jarvis github write off. Every write asks for your approval in a window, with the exact action."
 
+[[steps]]
+he = "הפעלת מיזוג אוטומטי (בטא, כבוי כברירת מחדל, מתג נפרד): jarvis features on github_merge_queue ואז jarvis github pr enqueue מספר --head-sha הקומיט-המלא [--base main] --repo owner/repo. עובד רק לענף שיש לו תור מיזוג (נבדק בזמן אמת). החלון הקופץ במחשב מציג את הבקשה, מי כתב אותה, ענף המקור (ואם זה פורק), הקומיט ואת מצב הבדיקות. אחרי האישור GitHub מכניס אותה לתור אחרי שהבדיקות הנדרשות עברו וממזג משם. אין מיזוג ישיר ואין עקיפה. שימו לב: הקומיט נבדק רק ברגע ההפעלה, ודחיפה מאוחרת של מי שיש לו הרשאת כתיבה, או שינוי מאוחר של ענף היעד, לא מבטלים את המיזוג האוטומטי: אם לענף החדש אין תור מיזוג, הבקשה עלולה להתמזג ישירות אחרי שהבדיקות יעברו. הרשאת האסימון (Pull requests: write, ואולי עוד לאסימון מדויק) לא אומתה מול GitHub עדיין."
+en = "Turn on auto-merge (beta, off by default, its own switch): jarvis features on github_merge_queue, then jarvis github pr enqueue NUMBER --head-sha FULL_COMMIT [--base main] --repo owner/repo. It works only for a branch that has a merge queue (checked live). The popup on the computer shows the pull request, its author, the source branch (and whether it is a FORK), the commit and the check state. After your approval GitHub queues it once the required checks pass and merges it from the queue. There is no direct merge and no bypass. Note: the commit is checked only when auto-merge is turned on, and a LATER push by someone with write access does NOT cancel it, and neither does a later change of the base branch: if that branch has no merge queue, the pull request could then merge directly once the checks pass. The token permission (Pull requests: write, and possibly more for a fine-grained token) has not been verified against GitHub yet."
+
+[[problems]]
+he = "הפעלת המיזוג האוטומטי נדחתה (GITHUB_WRITE_MERGE_OFF או GITHUB_WRITE_REFUSED)"
+en = "Turning on auto-merge was refused (GITHUB_WRITE_MERGE_OFF or GITHUB_WRITE_REFUSED)"
+fix_he = "MERGE_OFF: המתג הנפרד כבוי, הריצו jarvis features on github_merge_queue. REFUSED: ל-GitHub אין תור מיזוג לענף, הבקשה טיוטה, או שהקומיט או הענף השתנו; פתחו את הבקשה ב-GitHub ונסו שוב עם הקומיט הנוכחי."
+fix_en = "MERGE_OFF: the separate switch is off, run jarvis features on github_merge_queue. REFUSED: the branch has no merge queue, the pull request is a draft, or its commit or branch changed; open it on GitHub and try again with the current commit."
+
 [[problems]]
 he = "הוא אומר שהכתיבה כבויה או שהמאגר לא ברשימה"
 en = "He says writes are off or the repository is not in the list"
@@ -101,8 +111,8 @@ fix_en = "Before an edit I read the issue to show what it replaces; when that re
 [[problems]]
 he = "אמר שעדיין לא מומש"
 en = "He says it is not implemented yet"
-fix_he = "נכון לסוגים שעוד לא נבנו: issues, תגובות, תוויות, בקשות מיזוג, ביקורות והרצה חוזרת של CI עובדים; מיזוג דרך תור המיזוג יתווסף בגרסה הבאה."
-fix_en = "Correct for kinds not built yet: issues, comments, labels, pull requests, reviews and CI re-runs work; merging through the merge queue comes in a later version."
+fix_he = "נכון לסוגים שעוד לא נבנו: issues, תגובות, תוויות, בקשות מיזוג, ביקורות והרצה חוזרת של CI עובדים; מיזוג אוטומטי דרך תור המיזוג זמין במתג נפרד (jarvis features on github_merge_queue)."
+fix_en = "Correct for kinds not built yet: issues, comments, labels, pull requests, reviews and CI re-runs work; auto-merge through the merge queue is available with a separate switch (jarvis features on github_merge_queue)."
 
 [[problems]]
 he = "הוא אומר שיומן הכתיבה שונה או קוצר (GITHUB_WRITE_AUDIT_TAMPERED)"

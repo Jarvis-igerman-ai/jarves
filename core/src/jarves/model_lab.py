@@ -84,13 +84,20 @@ class FakeProvider:
         return Reply(self.script.get((model_id, task_id), ""), *self.tokens)
 
 
-_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|(?:AKIA|ASIA)[0-9A-Z]{16}|Bearer\s+\S+|[A-Za-z0-9_+/=\-]{32,})")
+_SECRET = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|github_pat_\w+|ghp_\w+|(?:AKIA|ASIA)[0-9A-Z]{16}|Bearer\s+\S+)")
+_LONG = re.compile(r"[A-Za-z0-9_+/=\-]{32,}")
 
 
 def scrub(text: str) -> str:
     """Own pattern for long tokens PLUS logs.redact, so every secret format the logs know (AWS keys, ...) is covered."""
     from . import logs
-    return logs.redact(_SECRET.sub("[redacted]", str(text)))[:SNIPPET]
+    text = _LONG.sub(lambda m: "[redacted]" if _tokenish(m.group(0)) else m.group(0), _SECRET.sub("[redacted]", str(text)))
+    return logs.redact(text)[:SNIPPET]
+
+
+def _tokenish(s: str) -> bool:
+    """A long run is a token when it mixes letters and digits; an ordinary long path or URL piece has no digits (#575)."""
+    return any(c.isdigit() for c in s) and any(c.isalpha() for c in s)
 
 
 def grade(task: Task, text: str) -> bool:
