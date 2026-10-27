@@ -1,0 +1,3 @@
+{
+ "for each coding-agent session that works on a branch, say whether its pull request exists, is a draft, has failing checks or is ready, and what to do next; read only": "לכל סשן של סוכן קוד שעובד על ענף, אומר אם יש בקשת מיזוג, אם היא טיוטה, אם יש בדיקות שנכשלו או שהיא מוכנה, ומה הצעד הבא; לקריאה בלבד"
+}

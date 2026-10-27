@@ -327,7 +327,7 @@ class GitHubClient:
     def pulls(self, owner: str, repo: str, state: str = "open") -> list[dict]:
         _name(owner, "owner"), _name(repo, "repo")
         return [{"number": p.get("number"), "title": p.get("title"), "draft": p.get("draft"),
-                 "head": (p.get("head") or {}).get("sha")}
+                 "head": (p.get("head") or {}).get("sha"), "ref": (p.get("head") or {}).get("ref")}
                 for p in self._pages(f"/repos/{owner}/{repo}/pulls", state=_state(state))]
 
     def check_runs(self, owner: str, repo: str, ref: str) -> list[dict]:
@@ -374,6 +374,7 @@ class FakeGitHub:
         self.issue_labels, self.issue_assignees = ["bug"], ["octocat"]   # what issue N has now (GET /issues/N)
         self.pr_numbers: set[str] = {"2"}       # issue numbers that are really pull requests
         self.run_info: dict = {}                # overrides for GET /actions/runs/N (name, event, head_branch, head_repository, actor)
+        self.pr_ref = "agent/fix-1"             # head branch of the fake open pull request list
         self.head_sha = "a" * 40                # head commit of every fake pull request
         self.pull_info: dict = {}               # overrides for GET /pulls/N (state, draft, merged, head, ...)
         self.graphql_bodies: list = []          # JSON bodies of GraphQL POSTs, in order
@@ -438,7 +439,7 @@ class FakeGitHub:
                 {"number": 2, "title": "a pr", "state": "open", "labels": [], "pull_request": {}}])
         if p.endswith("/pulls"):
             return httpx.Response(200, headers=hdr, json=[{"number": 2, "title": "a pr", "draft": False,
-                                                           "head": {"sha": "abc123"}}])
+                                                           "head": {"sha": "abc123", "ref": self.pr_ref}}])
         if p.endswith("/check-runs"):
             return httpx.Response(200, headers=hdr, json={"total_count": 1, "check_runs": [
                 {"name": "ci", "status": "completed", "conclusion": "success"}]})
@@ -495,14 +496,15 @@ feat.register("github", "GitHub (קריאה בלבד)", "GitHub (read only)", Fa
 
 
 def add_cli(sub) -> None:
-    h = sub.add_parser("github", help="GitHub (read only): `status` shows the connection; `token` saves a read-only "
+    h = sub.add_parser("github", help="GitHub (read only): `work` says what blocks the agents' pull requests; `status` shows the connection; `token` saves a read-only "
                                        "token (asked privately); `off` deletes it. Switch on: `jarvis features on github`")
-    h.add_argument("action", choices=["status", "token", "off", "write", "issue", "pr"])
+    h.add_argument("action", choices=["status", "token", "off", "write", "issue", "pr", "work"])
     h.add_argument("write_action", nargs="?", default=None,
                    choices=["status", "on", "off", "reset-audit", "create", "edit", "comment", "labels-add", "labels-remove",
                             "open", "update", "review", "rerun", "enqueue"],
                    help="with `write`: status|on|off (the GitHub write switch)|reset-audit (owner: after a tamper alarm); with `issue`: create|edit|comment|"
                         "labels-add|labels-remove; with `pr`: open|update|comment|review|rerun|enqueue (each asks your approval, shows the exact text)")
+    h.add_argument("--json", action="store_true", help="with `work`: the rows as JSON")
     h.add_argument("number", nargs="?", default=None, help="with `issue`: the issue or pull request number")
     h.add_argument("--repo", default="", help="owner/repo from github_repos (default: the only one listed)")
     h.add_argument("--title", default=None)
@@ -522,6 +524,9 @@ def cmd_github(a, cfg, home) -> int:
     if a.action == "issue":
         from .github_issues import cmd_github_issue
         return cmd_github_issue(a, cfg, home)
+    if a.action == "work":
+        from .github_work import cmd_github_work
+        return cmd_github_work(a, cfg, home)
     if a.action == "pr":
         if a.write_action == "enqueue":
             from .github_merge import cmd_github_merge
