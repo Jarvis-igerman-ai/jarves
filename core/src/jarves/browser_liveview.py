@@ -45,6 +45,7 @@ class LiveView:
                  ttl_s: float = TTL_S, takeover_enabled: Callable[[], bool] = lambda: False) -> None:
         self.session, self.enabled, self.clock, self.ttl_s = session, enabled, clock, ttl_s
         self.takeover_enabled = takeover_enabled
+        self._fl = threading.Lock()                       # one screenshot at a time (never held together with _lock across driver I/O)
         self._hash = ""
         self._expires = 0.0
         self._last_at = -1e9
@@ -85,32 +86,55 @@ class LiveView:
         self._hash, self._last = "", b""
 
     def frame(self, token: object) -> dict:
+        """The view lock is held only for this object's own fields, NEVER across the page driver: a hung screenshot must not block
+        Stop, takeover, give back or the owner's input. One screenshot at a time (`_fl`); the others get the same new frame."""
         with self._lock:
-            return self._frame(token)
-
-    def _frame(self, token: object) -> dict:
-        self._check(token)
-        now = self.clock()
-        if self._last and now - self._last_at < MIN_INTERVAL_S:       # too fast: the same frame again, no new screenshot
-            png = self._last
-        else:
+            self._check(token)
+            cached = self._cached()
+        if cached is not None:
+            return self._answer(cached)
+        if not self._fl.acquire(timeout=3.0):
+            raise LiveError("LIVEVIEW_BUSY", "the page is busy; try again", 429)
+        try:
+            with self._lock:
+                self._check(token)
+                cached = self._cached()
+            if cached is not None:                           # another request just took the picture
+                return self._answer(cached)
             try:
                 png = self.session.view_frame()
             except PilotError as e:
-                if e.code != "BROWSER_PILOT_OFF":
-                    self._revoke()                                     # stopped, capped or left the test site: the view ends
-                    if e.code == "BROWSER_PILOT_VIEW_TEST_SITE" and self.session.state == "HUMAN":
-                        self.session.stop()                            # the owner was driving a page that left the test site
+                if e.code == "BROWSER_PILOT_BUSY":
+                    raise LiveError(e.code, e.message, 429) from None
+                with self._lock:
+                    if e.code != "BROWSER_PILOT_OFF":
+                        self._revoke()                       # stopped, capped or left the test site: the view ends
+                if e.code == "BROWSER_PILOT_VIEW_TEST_SITE" and self.session.state == "HUMAN":
+                    self.session.stop()                      # the owner was driving a page that left the test site
                 raise LiveError(e.code, e.message, 409) from None
-            except Exception:                                          # noqa: BLE001 - a driver error text may carry a URL: fixed words only
-                self._revoke()
+            except Exception:                                # noqa: BLE001 - a driver error text may carry a URL: fixed words only
+                with self._lock:
+                    self._revoke()
                 logs.warn("browser", "BROWSER_LIVEVIEW_FRAME", "live view frame failed")
                 raise LiveError("LIVEVIEW_FRAME", "the page could not be captured; the live view ended", 502) from None
             if not png or len(png) > MAX_FRAME_BYTES:
                 raise LiveError("LIVEVIEW_FRAME", "no usable frame", 502)
-            self._last, self._last_at, self.seq = png, now, self.seq + 1
-        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq, "expires_in_s": max(0, int(self._expires - now)),
-                "state": self.session.state}
+            with self._lock:
+                if not self._hash:                           # revoked (Stop, give back) while the picture was taken: drop it
+                    raise LiveError("LIVEVIEW_TOKEN", "this live view link is not valid", 403)
+                self._last, self._last_at, self.seq = png, self.clock(), self.seq + 1
+            return self._answer(png)
+        finally:
+            self._fl.release()
+
+    def _cached(self) -> bytes | None:
+        if self._last and self.clock() - self._last_at < MIN_INTERVAL_S:
+            return self._last
+        return None
+
+    def _answer(self, png: bytes) -> dict:
+        return {"png_b64": base64.b64encode(png).decode("ascii"), "seq": self.seq,
+                "expires_in_s": max(0, int(self._expires - self.clock())), "state": self.session.state}
 
     # ---- B3: the owner drives the page from this view, in the SAME session (local test pages only, see PilotSession.human_input)
     def _takeover_check(self, token: object) -> None:
@@ -132,8 +156,9 @@ class LiveView:
         with self._lock:
             self._check(token)
             self._last = b""                                   # the picture may show what the owner typed
+            was_paused = self.session.state == "PAUSED"        # decided on the SERVER state, not on what the page believes
             out = self.session.human_returns()
-            if resume is True and self.session.state == "PAUSED":
+            if resume is True and was_paused and self.session.state == "PAUSED":
                 self.session.resume()
                 out = {**out, "returned": True, "state": self.session.state}
             return out
@@ -142,12 +167,13 @@ class LiveView:
         """One owner input event. The answer is {"ok": true} only: the typed text is never echoed, logged or stored here."""
         with self._lock:
             self._takeover_check(token)
-            try:
-                return self.session.human_input(str(kind), data if isinstance(data, dict) else {})
-            except PilotError as e:
-                if e.code in ("BROWSER_PILOT_STOPPED", "BROWSER_PILOT_CAP", "BROWSER_PILOT_VIEW_TEST_SITE"):
+        try:                                                   # outside the view lock: a hung page must not block the owner's other buttons
+            return self.session.human_input(str(kind), data if isinstance(data, dict) else {})
+        except PilotError as e:
+            if e.code in ("BROWSER_PILOT_STOPPED", "BROWSER_PILOT_CAP", "BROWSER_PILOT_VIEW_TEST_SITE"):
+                with self._lock:
                     self._revoke()
-                raise LiveError(e.code, e.message, 409) from None
+            raise LiveError(e.code, e.message, 409 if e.code != "BROWSER_PILOT_BUSY" else 429) from None
 
     def stop(self) -> dict:
         """The Stop button: ends the view AND the pilot session (the driver is closed). It needs no grant: it works after the
