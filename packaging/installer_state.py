@@ -295,13 +295,87 @@ def note_rollback(home: Path, status: str) -> dict:
 PROGRAM_PARTS = ("python", "face", "bridge", "jarvis.cmd")
 
 
-def recover(app: Path, state: Path, *, approved: bool, home: Path | None = None, ask=input) -> str:
+def core_running(lock_file: Path | None = None) -> bool:
+    """True when a Core holds the per-user instance lock (same byte-0 OS lock as jarves.runtime.lock). stdlib only."""
+    if lock_file is None:
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / ".local" / "state")
+        lock_file = Path(base) / "jarves" / "core.lock"
+    if not Path(lock_file).is_file():
+        return False
+    try:
+        fd = os.open(str(lock_file), os.O_RDWR)
+    except OSError:
+        return True
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                return False
+            except OSError:
+                return True
+        import fcntl
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        except OSError:
+            return True
+    finally:
+        os.close(fd)
+
+
+def _swap_programs(app: Path, kept: list[str], aside: Path) -> list[str]:
+    """Move each kept part rollback\\<n> -> <n> (the dead new one goes to `aside`). On any failure everything moved so far,
+    including the part in progress, is put back, and OSError is raised: never a hole. Returns the parts swapped."""
+    rollback = app / "rollback"
+    done: list[str] = []
+    for name in kept:
+        moved_aside = False
+        try:
+            if (app / name).exists():
+                (app / name).rename(aside / name)
+                moved_aside = True
+            (rollback / name).rename(app / name)
+            done.append(name)
+        except OSError:
+            if moved_aside and not (app / name).exists():
+                (aside / name).rename(app / name)
+            _unswap(app, done, aside)
+            raise
+    return done
+
+
+def _unswap(app: Path, done: list[str], aside: Path) -> None:
+    rollback = app / "rollback"
+    for name in reversed(done):
+        (app / name).rename(rollback / name)
+        if (aside / name).exists():
+            (aside / name).rename(app / name)
+
+
+def _verify_backups(home: Path, state: Path) -> None:
+    from jarves import backup
+    record = json.loads(Path(state).read_text(encoding="utf-8"))
+    if record["home"] != str(home):
+        raise ValueError("rollback data directory mismatch")
+    for item in record["backups"]:
+        if not backup.verify(Path(item["backup"]))["ok"]:
+            raise ValueError("rollback backup no longer verifies")
+
+
+def recover(app: Path, state: Path, *, approved: bool, home: Path | None = None, ask=input,
+            running=None) -> str:
     """#261: the owner's way back when an update migrated the data AND the new program is dead (health_failed): the new
-    python cannot run `jarvis update --rollback`, and the Core that would offer it never starts. Runs under the kept OLD
-    python ({app}\\rollback\\python). Only after the owner's approval (`approved`, or typing YES when ask() is used): the
-    verified data backup is restored (restore_data), then every program part still kept in {app}\\rollback is swapped
-    back (the dead new part is kept aside in {app}\\failed-recovery-*, nothing is deleted). Refuses unless health.json
-    says health_failed, so it is never a way to roll back a healthy install. Returns a short status word."""
+    python cannot run `jarvis update --rollback`, and the Core that would offer it never starts. Runs under a COPY of the
+    kept OLD python (main() relaunches from a temp copy: Windows cannot rename a folder whose exe is running). Refuses
+    while a Core runs, unless health.json says health_failed, and without the owner's approval (--yes, or typing YES).
+    Order, so a failure can always be retried: verify every data backup, swap the program parts (the dead new parts are
+    kept in {app}\\failed-recovery-*, nothing is deleted), then restore the data; if the data restore raises, the
+    program swap is undone. Returns a short status word."""
     app = Path(app)
     record = _read_json(Path(state))
     home = safe_home(Path(home) if home else Path(str(record.get("home") or "")))
@@ -311,27 +385,45 @@ def recover(app: Path, state: Path, *, approved: bool, home: Path | None = None,
     kept = [n for n in PROGRAM_PARTS if (rollback / n).exists()]
     if not (rollback / "python").exists() or not kept:
         return "no_previous_program"
+    if (running or core_running)():
+        return "core_running"
     if not approved and str(ask("Restore the previous JARVES version and the data backup taken before the update? "
                                 "Changes made since the update are lost. Type YES to continue: ")).strip() != "YES":
         return "declined"
-    restore_data(home, Path(state))                         # verifies every backup first; raises, touches nothing, if one is bad
+    _verify_backups(home, Path(state))                      # raises, touches nothing, if a backup is bad
     aside = app / ("failed-recovery-" + str(time.time_ns()))
     aside.mkdir(parents=True)
-    done = []
     try:
-        for name in kept:
-            if (app / name).exists():
-                (app / name).rename(aside / name)
-            (rollback / name).rename(app / name)
-            done.append(name)
+        done = _swap_programs(app, kept, aside)
     except OSError:
-        for name in done:                                   # never leave a hole: put the new parts back
-            (app / name).rename(rollback / name)
-            if (aside / name).exists():
-                (aside / name).rename(app / name)
         return "swap_failed"
+    try:
+        restore_data(home, Path(state))
+    except Exception:
+        _unswap(app, done, aside)
+        raise
     note_rollback(home, "rolled_back")
     return "recovered"
+
+
+def _relaunch_from_copy(args) -> int | None:
+    """When this python lives inside {app}\\rollback, run `recover` again from a temp copy of that runtime and return its
+    exit code; None when no relaunch is needed (already a copy, or not inside rollback)."""
+    import subprocess
+    import tempfile
+    rollback = (Path(args.app) / "rollback").resolve()
+    exe = Path(sys.executable).resolve()
+    if rollback not in exe.parents:
+        return None
+    src = next(p for p in exe.parents if p.parent == rollback)
+    tmp = Path(tempfile.mkdtemp(prefix="jarves-recover-"))
+    try:
+        shutil.copytree(src, tmp / "py")
+        cmd = [str(tmp / "py" / exe.name), "-I", str(Path(__file__).resolve()), "recover", "--app", str(args.app),
+               "--state", str(args.state)] + (["--yes"] if args.yes else []) + (["--home", str(args.home)] if args.home else [])
+        return subprocess.run(cmd).returncode
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 MB = 1024 * 1024
@@ -407,6 +499,11 @@ def main(argv=None) -> int:
     try:
         if args.action == "recover":
             # exit code: 0 recovered, 6 not needed / nothing to put back / declined / swap failed (the word is printed)
+            if args.app is None or args.state is None:
+                ap.error("recover needs --app and --state")
+            relaunched = _relaunch_from_copy(args)
+            if relaunched is not None:
+                return relaunched
             word = recover(args.app, args.state, approved=args.yes, home=args.home)
             print("RECOVER:", word)
             return 0 if word == "recovered" else 6
