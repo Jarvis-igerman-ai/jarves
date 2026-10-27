@@ -55,4 +55,6 @@ Results: `pass`, `fail`, `blocked`, `accepted-blocked` (needs a note), `pending`
 - Tested beta: 
 - Commit: 
 - Date: 
+- Owner: 
+- Rows hash: 
 - Signed: no
