@@ -43,8 +43,8 @@ A missing scope gives `403 {"error": "this device may not use <scope>"}`. Pages 
 | `GET /api/m/status` | status | `{"core": "running", "components": {"audio": "ok"}, "tls": true}` |
 | `POST /api/m/chat` | chat | `{"text": "hi", "id": "msg-0001"}` returns `{"reply": "...", "ok": true}`; same `id` replays the stored answer |
 | `GET /api/m/sync` | status | one poll: turns, notices, goals, `approvals_waiting` |
-| `GET /api/m/approvals` | approvals | `{"pending": [{"id","title","title_sha","kind","risk","seconds_left","typed","pc_only"}], "phone_approvals": false}`; `title` is the first 400 characters of the action text, `title_sha` fingerprints all of it |
-| `POST /api/m/approvals/{id}` | approvals | `{"approved": true, "id": "cmd-00001", "title_sha": "<optional, from the list>"}`; with `title_sha`, a changed action text gives `409 STALE_TITLE` and nothing is answered; see rules below |
+| `GET /api/m/approvals` | approvals | `{"pending": [{"id","title","text","text_sha","kind","risk","seconds_left","typed","pc_only"}], "phone_approvals": false}`; `title` is a short label (120 characters); `text` is the first 400 characters of the real action text (redacted); `text_sha` is 16 lower-case hex characters fingerprinting all of it (redacted prompt, kind, details) |
+| `POST /api/m/approvals/{id}` | approvals | `{"approved": true, "id": "cmd-00001", "text_sha": "<optional, from the list>"}`; with `text_sha`, a changed action text gives `409 STALE_TEXT` (and a missing one `409 APPROVAL_ALREADY_ANSWERED`) and nothing is answered; a malformed value is `400`; see rules below |
 | `GET /api/m/plans` | tasks | steps and `can` list |
 | `POST /api/m/plans/op` | tasks | `{"id": "cmd-00002", "plan": "12", "op": "pause"}`; ops: pause, cancel, resume, retry |
 | `POST /api/m/goals/op` | tasks | `{"id": "cmd-00003", "op": "status", "goal": 3, "status": "paused"}` |

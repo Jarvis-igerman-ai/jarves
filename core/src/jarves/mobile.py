@@ -1083,10 +1083,10 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if cid is not None and not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
             return h._json(400, {"error": "command id must be 8-64 letters, digits or _ . : -"})
         mob.cont.beat(dev["id"], used=True)
-        seen = d.get("title_sha")
+        seen = d.get("text_sha")
         if seen is not None and not (isinstance(seen, str) and re.fullmatch(r"[0-9a-f]{16}", seen)):
-            return h._json(400, {"error": "title_sha must be the 16 hex characters the list gave"})
-        extra = {} if seen is None else {"title_sha_seen": seen}
+            return h._json(400, {"error": "text_sha must be the 16 lower-case hex characters the list gave"})
+        extra = {} if seen is None else {"text_sha": seen}
         status, obj, again = mob.cont.execute(
             dev["id"], cid, "approval", lambda: answer_approval(mob, m.group(1), d["approved"], dev["id"], **extra),
             age_s=d.get("age_s"))
@@ -1181,21 +1181,13 @@ def signals_action(mob: MobileAccess, d: dict, device: str) -> tuple[int, dict]:
     return 400, {"error": "op must be snooze or stop (switching on is done on the computer)"}
 
 
-APPROVAL_TITLE_CHARS = 400        # what a phone is shown of an approval's action text (was 120: too little to judge a command)
-
-
-def title_sha(title: str) -> str:
-    """A short fingerprint of the FULL action text. The phone sends it back with its decision, so an answer is only taken for the text it saw."""
-    return hashlib.sha256(str(title).encode("utf-8")).hexdigest()[:16]
-
-
 def approvals_view(mob: MobileAccess) -> dict:
     from .approvals import read_pending_file
     now = time.time()
     rows = []
     for r in read_pending_file(mob.home, reveal=False):
-        full = str(r.get("title") or "")
-        rows.append({"id": r.get("id"), "title": full[:APPROVAL_TITLE_CHARS], "title_sha": title_sha(full), "kind": r.get("kind"),
+        rows.append({"id": r.get("id"), "title": str(r.get("title") or "")[:120], "text": str(r.get("shown_text") or "")[:400],
+                     "text_sha": str(r.get("text_sha") or ""), "kind": r.get("kind"),
                      "risk": r.get("risk"), "seconds_left": max(0, int(float(r.get("expires") or 0) - now)),
                      "typed": bool(r.get("typed")), "pc_only": bool(r.get("pc_only"))})
     on = mob.settings()["phone_approvals"]
@@ -1209,7 +1201,7 @@ def approvals_view(mob: MobileAccess) -> dict:
             "note": "Answer on the computer." if not on else "Typed-code and plan approvals are answered on the computer only."}
 
 
-def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str, *, title_sha_seen: str | None = None) -> tuple[int, dict]:
+def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str, *, text_sha: str | None = None) -> tuple[int, dict]:
     from .approvals import read_pending_file, submit_answer
     if not mob.settings()["phone_approvals"]:
         return 403, {"error": "phone approvals are off: answer on the computer", "code": "PHONE_APPROVALS_OFF"}
@@ -1218,9 +1210,9 @@ def answer_approval(mob: MobileAccess, aid: str, approved: bool, device: str, *,
         return 403, {"error": "this request needs the code shown on the computer", "code": "TYPED_PC_ONLY"}
     if row is not None and row.get("pc_only") and approved:
         return 403, {"error": "this approval can only be answered on the computer", "code": "PC_ONLY"}
-    if title_sha_seen is not None and row is not None and title_sha_seen != title_sha(str(row.get("title") or "")):
-        return 409, {"error": "this approval changed since you saw it: reload and read it again", "code": "STALE_TITLE"}
-    ok, why = submit_answer(mob.home, aid, approved, channel="phone")
+    if text_sha is not None and row is None:
+        return 409, {"error": "no such waiting approval (already answered or expired)", "code": "APPROVAL_ALREADY_ANSWERED"}
+    ok, why = submit_answer(mob.home, aid, approved, channel="phone", **({} if text_sha is None else {"text_sha": text_sha}))
     if ok:
         mob.audit("phone_approval", device=device, decision="approve" if approved else "deny",
                   risk=(row or {}).get("risk"), kind=(row or {}).get("kind"))    # no title, no details
