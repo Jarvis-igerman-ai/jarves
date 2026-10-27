@@ -65,6 +65,11 @@ class Feats:
         return fid in ("browser_pilot", "browser_liveview", "browser_takeover")
 
 
+@pytest.fixture(autouse=True)
+def _ci_sandbox(monkeypatch):
+    monkeypatch.setenv("JARVES_PILOT_NO_SANDBOX", "1")                 # only if the sandbox cannot start (Linux CI containers); local runs keep it ON
+
+
 @pytest.fixture
 def world(tmp_path):
     hits = Hits()
@@ -98,10 +103,14 @@ def test_a_real_browser_reads_the_test_page_only_through_the_proxy_and_cannot_re
     assert svc.start(url) == {"started": True, "state": bp.AGENT}
     s = svc.session
     text = wait_text(s, "PILOT TEST SITE")
-    assert svc.driver.proxy.connections >= 1                           # the browser really used the proxy for loopback (bypass-list contract)
+    proxy = svc.driver.proxy
+    assert proxy.connections_local >= 1                                 # the browser really used the proxy for loopback (bypass-list contract)
     wait_text(s, "net: blocked")                                        # fetch to a second local port: refused
     wait_text(s, "ws: closed")                                          # a WebSocket to it: refused
     time.sleep(0.5)
+    assert "local port refused" in proxy.denials                        # the REASON is the port rule, not a side effect
+    assert proxy.connections_public == 0 and not proxy._public_seen    # nothing public at all: not the <img>, not the browser's own calls
+    assert s.local_only
     assert hits.paths == []                                             # the other local service never saw a request
     assert "SECRET-LOCAL-SERVICE" not in text
     assert s.read()["untrusted_text"]                                   # still alive and reading
@@ -144,7 +153,7 @@ def test_a_pilot_starts_only_on_a_local_test_page_with_a_port(tmp_path, url):
     svc = bd.PilotService(tmp_path, lambda: Feats())
     with pytest.raises(bp.PilotError) as e:
         svc.start(url)
-    assert e.value.code in ("PILOT_URL",) or url.startswith("http://user")
+    assert e.value.code == "PILOT_URL"
 
 
 def test_the_switch_must_be_on(tmp_path):
@@ -165,3 +174,143 @@ def test_the_start_route_is_local_only_and_refuses_a_public_address(tmp_path):
     assert start(NS(principal={"kind": "device", "id": "phone"}, home=tmp_path), None, {"url": "http://localhost:1/"})[0] == 403
     status, body = start(NS(principal={"kind": "local"}, home=tmp_path, cfg=None), None, {"url": "https://example.com/"})
     assert status == 409 and body["code"] == "PILOT_URL"
+
+
+@pytest.mark.parametrize("port,dash", [(11434, 0), (5037, 0), (9222, 0), (5432, 0), (8765, 8765)])
+def test_service_ports_and_the_dashboard_port_are_refused(tmp_path, port, dash):
+    svc = bd.PilotService(tmp_path, lambda: Feats(), dashboard_port=dash)
+    with pytest.raises(bp.PilotError) as e:
+        svc.start(f"http://localhost:{port}/")
+    assert e.value.code == "PILOT_URL_PORT"
+
+
+def test_the_launch_keeps_the_sandbox_and_forbids_direct_dns_quic_and_prediction():
+    seen = {}
+
+    class Chromium:
+        def launch(self, **kw):
+            seen.update(kw)
+            return object()
+
+    class FakePW:
+        chromium = Chromium()
+
+    class FakeProxy:
+        credentials = {"server": "127.0.0.1:1", "username": "pilot", "password": "x"}
+
+        def launch_args(self):
+            return ["--proxy-server=http://127.0.0.1:1", "--proxy-bypass-list=<-loopback>",
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"]
+    d = bd.PlaywrightDriver.__new__(bd.PlaywrightDriver)
+    d._pw, d.proxy, d._launch = FakePW(), FakeProxy(), {}
+    d._launch_browser(True)
+    assert seen["chromium_sandbox"] is True and seen["proxy"]["bypass"] == "<-loopback>"
+    for a in bd.EXTRA_ARGS + ["--proxy-bypass-list=<-loopback>"]:
+        assert a in seen["args"]
+    assert not any(a.startswith("--proxy-server") for a in seen["args"])       # the proxy (with its password) goes through Playwright's option
+
+
+def test_the_loopback_bypass_override_variable_is_refused(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK", "1")
+    with pytest.raises(bd.DriverError):
+        bd.PlaywrightDriver(object(), lambda: None)
+
+
+def _pid_alive(pid: int) -> bool:
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        import os
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def test_a_hung_page_cannot_keep_the_browser_alive_after_stop(world, monkeypatch):
+    svc, url, _ = world
+    svc.start(url)
+    d = svc.driver
+    wait_text(svc.session, "PILOT TEST SITE")
+    pid = d._node_pid
+    assert pid and _pid_alive(pid)
+    monkeypatch.setattr(bd, "CLOSE_WAIT_S", 1.0)
+    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(40), 1.0), daemon=True).start()
+    time.sleep(0.3)
+    t0 = time.time()
+    svc.stop()
+    assert time.time() - t0 < 10
+    end = time.time() + 10
+    while time.time() < end and _pid_alive(pid):
+        time.sleep(0.3)
+    assert not _pid_alive(pid)                                          # the abandoned driver's whole process tree was killed
+
+
+def _swallow(fn, *a):
+    try:
+        fn(*a)
+    except Exception:
+        pass
+
+
+def test_a_job_that_missed_its_deadline_never_runs_late(world):
+    svc, url, _ = world
+    svc.start(url)
+    d = svc.driver
+    ran = []
+    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(1.5), 5.0), daemon=True).start()
+    time.sleep(0.2)
+    with pytest.raises(bd.DriverError):
+        d._job(lambda: ran.append(1), 0.3)                              # queued behind the slow job, gives up after 0.3 s
+    time.sleep(2.5)
+    assert ran == []                                                    # the worker skipped it instead of running it late
+
+
+def test_a_stop_during_the_start_wins(tmp_path):
+    started, release = threading.Event(), threading.Event()
+    svc = bd.PilotService(tmp_path, lambda: Feats())
+
+    class SlowDriver:
+        current_url = "http://localhost:8123/"
+
+        def __init__(self, proxy, ref):
+            started.set()
+            release.wait(10)
+            self.proxy = proxy
+
+        def pin_hosts(self, m):
+            pass
+
+        def open(self, u):
+            pass
+
+        def text(self):
+            return ""
+
+        def screenshot(self):
+            return b""
+
+        def human_input(self, k, d):
+            pass
+
+        def close(self):
+            self.proxy.stop()
+    out = {}
+    th = threading.Thread(target=lambda: out.setdefault("e", _catch(lambda: svc.start("http://localhost:8123/", driver_factory=SlowDriver))))
+    th.start()
+    assert started.wait(5)
+    t0 = time.time()
+    assert svc.stop() == {"stopped": True} and time.time() - t0 < 2      # Stop is not stuck behind the launch
+    release.set()
+    th.join(10)
+    assert out["e"] == "PILOT_SUPERSEDED" and bl.ACTIVE is None
+
+
+def _catch(fn):
+    try:
+        fn()
+    except bp.PilotError as e:
+        return e.code

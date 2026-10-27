@@ -203,6 +203,7 @@ class PilotSession:
         self.state, self.seq, self.started = AGENT, 0, clock()
         self.receipts: list[dict] = []
         self._pin_lock = threading.RLock()
+        self.local_only = False              # a LOCAL-ONLY session (the real test pilot): every public host is refused, whoever asks
         # B3 locks. _slock guards the state and is NEVER held across driver I/O (Stop and takeover never wait for a hung page).
         # _dlock serialises driver calls (an agent call holds it, the owner's input waits at most DRIVER_WAIT_S for it).
         # _gen counts state changes: an agent call that started before a change throws its result away (no stale ownership).
@@ -420,8 +421,8 @@ class PilotSession:
         scope = vet_url(url, self.resolver)
         if not scope:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
-        if self.after_human and scope != "local":
-            raise self._refuse("open", "BROWSER_PILOT_URL", "after the owner used this page only local pages can be opened")
+        if (self.after_human or self.local_only) and scope != "local":
+            raise self._refuse("open", "BROWSER_PILOT_URL", "only local test pages can be opened in this session")
         if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
             raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)
@@ -437,7 +438,7 @@ class PilotSession:
         driver must not be touched from proxy threads). Nothing after Stop; only loopback while the owner drives or has driven."""
         if self.state == STOPPED:
             return False
-        if self.state == "HUMAN" or self.after_human:        # a public script in a page the owner typed into could read the keys
+        if self.state == "HUMAN" or self.after_human or self.local_only:   # a public script in a page the owner typed into could read the keys
             return page_scope(url) == "local"
         try:
             return bool(vet_url(url, self.resolver))
@@ -450,7 +451,7 @@ class PilotSession:
         a stopped session allows nothing."""
         if self.state == STOPPED:
             return False
-        if self.state == HUMAN or self.after_human:         # a public script in a page the owner typed into could read the keys
+        if self.state == HUMAN or self.after_human or self.local_only:      # a public script in a page the owner typed into could read the keys
             return page_scope(url) == "local"
         try:
             ok = bool(vet_url(url, self.resolver))

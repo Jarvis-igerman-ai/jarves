@@ -79,10 +79,13 @@ def _port(v: str) -> int:
 
 
 class PilotProxy:
-    def __init__(self, session: PilotSession, *, local_ports: Iterable[int] = (), connect: Callable[[str, int], socket.socket] | None = None,
+    def __init__(self, session: PilotSession, *, local_ports: Iterable[int] = (), public_ok: bool = True, connect: Callable[[str, int], socket.socket] | None = None,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.session, self.clock = session, clock
         self.local_ports = frozenset(int(p) for p in local_ports)
+        self.public_ok = public_ok                       # False = a LOCAL-ONLY proxy: every public target is refused
+        self.denials: list[str] = []                     # fixed reason words of the last refusals (never a URL), for tests and status
+        self.connections_local = self.connections_public = 0
         self._connect = connect or (lambda a, p: socket.create_connection((a, p), timeout=CONNECT_TIMEOUT_S))
         self.secret = secrets.token_urlsafe(24)
         self._sock: socket.socket | None = None
@@ -114,11 +117,13 @@ class PilotProxy:
         scope = page_scope(url)
         if not scope:
             raise Denied(403, "address refused")
+        if scope == "public" and not self.public_ok:
+            self._deny("public refused")
         if scope == "public" and port != (80 if plain else 443):
             raise Denied(403, "port refused")                  # plain HTTP on 80, tunnels on 443: read-only is not enforceable in a tunnel on 80
         if scope == "local":
             if port not in self.local_ports:
-                raise Denied(403, "local port refused")        # never the dashboard, a database, Ollama, adb ...
+                self._deny("local port refused")        # never the dashboard, a database, Ollama, adb ...
             if self._public_seen:
                 raise Denied(403, "no local access after a public page")
         if not self.session.vet_for_proxy(url):                # resolves + vets a new name once, under a lock
@@ -141,7 +146,10 @@ class PilotProxy:
         with self._lock:
             self.connections += 1
             if scope == "public":
+                self.connections_public += 1
                 self._public_seen = True
+            else:
+                self.connections_local += 1
         return scope, addrs
 
     def _running(self) -> bool:
@@ -152,6 +160,11 @@ class PilotProxy:
             return bool(s.enabled()) and s.state in ("AGENT", "HUMAN") and s.clock() - s.started <= s.max_seconds
         except Exception:                                      # noqa: BLE001 - unreadable = not running
             return False
+
+    def _deny(self, why: str) -> None:
+        with self._lock:
+            self.denials = (self.denials + [why])[-50:]
+        raise Denied(403, why)
 
     def _dial(self, host: str, port: int, *, plain: bool = False) -> tuple[socket.socket, str]:
         scope, addrs = self.targets(host, port, plain=plain)
