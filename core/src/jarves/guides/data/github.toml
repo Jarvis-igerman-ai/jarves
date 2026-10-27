@@ -39,18 +39,21 @@ he = "לכיבוי: jarvis features off github. למחיקת האסימון: jar
 en = "To turn off: jarvis features off github. To delete the token: jarvis github off. For the state: jarvis github status."
 
 [[problems]]
+codes = ["GITHUB_NOT_CONNECTED", "GITHUB_AUTH"]
 he = "הוא אומר ש-GitHub לא מחובר או שהאסימון נדחה"
 en = "He says GitHub is not connected or the token was rejected"
 fix_he = "הריצו jarvis github token והדביקו אסימון חדש (ייתכן שפג תוקפו)."
 fix_en = "Run jarvis github token and paste a new token (it may have expired)."
 
 [[problems]]
+codes = ["GITHUB_FORBIDDEN", "GITHUB_NOT_FOUND"]
 he = "חסרה הרשאה, או שהמאגר לא נראה"
 en = "A permission is missing, or the repository is not visible"
 fix_he = "ודאו שהאסימון כולל את המאגר ואת הרשאות הקריאה שברשימה."
 fix_en = "Make sure the token includes the repository and the read permissions listed above."
 
 [[problems]]
+codes = ["GITHUB_RATE_LIMIT", "GITHUB_OFFLINE", "GITHUB_PROVIDER_ERROR"]
 he = "יותר מדי בקשות, או שאין חיבור"
 en = "Too many requests, or no connection"
 fix_he = "חכו מעט ונסו שוב; בדקו שיש אינטרנט."
