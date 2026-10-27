@@ -12,6 +12,7 @@ import pytest
 from jarves import browser_pilot as bp
 from jarves import pilot_proxy as pp
 
+LOCAL_PORTS = (9999, 8123)
 PUBLIC = "93.184.216.34"
 OTHER = "93.184.216.35"
 
@@ -84,7 +85,7 @@ class Rig:
         def connect(addr, port):
             self.dialed.append((addr, port))
             return socket.create_connection(("127.0.0.1", self.up.port), timeout=3)
-        self.proxy = pp.PilotProxy(self.session, connect=connect)
+        self.proxy = pp.PilotProxy(self.session, local_ports=LOCAL_PORTS, connect=connect)
         info = self.proxy.start()
         self.auth = base64.b64encode(f"pilot:{info['password']}".encode()).decode()
 
@@ -245,7 +246,8 @@ def test_the_connection_cap(rig, monkeypatch):
     held = socket.create_connection(("127.0.0.1", rig.proxy.port), timeout=5)
     held.sendall(f"CONNECT example.com:443 HTTP/1.1\r\nHost: x\r\nProxy-Authorization: Basic {rig.auth}\r\n\r\n".encode())
     assert held.recv(200).startswith(b"HTTP/1.1 200")
-    assert status(rig.connect("example.com:443")) == 503
+    for _ in range(3):
+        assert status(rig.connect("example.com:443")) == 503                # the busy answer is delivered, not swallowed by a reset
     held.close()
 
 
