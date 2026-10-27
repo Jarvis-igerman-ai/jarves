@@ -221,8 +221,13 @@ def test_revert_refuses_after_a_full_update_even_when_revert_failed(tree, monkey
     hid = hf.apply(inst, source(src), home, FakeHooks().hooks())["id"]
     real = hf._atomic_copy
 
-    def locked(*a):
-        raise PermissionError("locked")
+    n = []
+
+    def locked(*a):                                     # the first copy works, the second fails: a write had happened (#568 item 3)
+        n.append(1)
+        if len(n) > 1:
+            raise PermissionError("locked")
+        real(*a)
 
     monkeypatch.setattr(hf, "_atomic_copy", locked)
     with pytest.raises(PermissionError):
@@ -244,3 +249,22 @@ def test_revert_with_a_bad_backup_changes_nothing_and_keeps_applied(tree):
         hf.revert(inst, home, FakeHooks().hooks())
     assert json.loads((home / "hotfix" / hid / "manifest.json").read_text())["status"] == "applied"
     assert (inst / "a.py").read_text() == "A=2\n"
+
+
+def test_recover_refuses_a_read_only_file_before_any_change(tree):
+    """Review of #588 (#568 item 2): read-only is not 'Core is running', and recover must not start a half restore."""
+    import os
+    import stat
+    inst, src, home = tree
+    write(src, "a.py", "A=2\n")
+    write(src, "b.py", "B=2\n")
+    hf.apply(inst, source(src), home, FakeHooks().hooks())
+    ro = inst / "b.py"
+    os.chmod(ro, stat.S_IREAD)
+    try:
+        with pytest.raises(rec.Recover) as e:
+            rec.recover(inst, home)
+        assert e.value.code == "RECOVER_READ_ONLY" and "Core" not in e.value.message
+        assert (inst / "a.py").read_text() == "A=2\n"                       # nothing was restored
+    finally:
+        os.chmod(ro, stat.S_IWRITE | stat.S_IREAD)

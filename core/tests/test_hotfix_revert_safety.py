@@ -65,3 +65,50 @@ def test_failed_revert_marks_revert_failed_and_restarts_the_core(world, monkeypa
     man = json.loads((d / "manifest.json").read_text())
     assert man["status"] == "revert-failed" and "locked file" in man["error"]
     assert hf.status(world.inst, world.home)["latest"]["status"] == "revert-failed"
+
+
+def test_revert_failure_before_any_write_keeps_the_status_and_restarts_the_bridge(world, monkeypatch):
+    """#568 items 3 and 4."""
+    d = _bridge_hotfix(world)
+    def boom(*a, **k):
+        raise OSError("exe locked")                                          # fails after the bridge was stopped
+    monkeypatch.setattr(s2, "bridge_revert", boom)
+    f = Fake(running=False, bridge_running=True)
+    with pytest.raises(OSError):
+        hf.revert(world.inst, world.home, f.hooks())
+    assert "bstop" in f.calls and f.calls.count("bstart") >= 1 and f.bridge is True       # the bridge was brought back
+    assert json.loads((d / "manifest.json").read_text())["status"] == "applied"            # the first write failed: nothing changed
+    # the failing step had started, so it IS marked; now a failure before any step:
+    d2 = d
+    m = json.loads((d2 / "manifest.json").read_text())
+    m["status"] = "applied"
+    m.pop("error", None)
+    (d2 / "manifest.json").write_text(json.dumps(m))
+    m["bridge"] = None
+    monkeypatch.undo()
+    m["replaced"] = [{"path": "a.py", "sha256_original": "0" * 64}]          # verification fails before any write
+    (d2 / "manifest.json").write_text(json.dumps(m))
+    with pytest.raises(hf.HotfixError):
+        hf.revert(world.inst, world.home, Fake().hooks())
+    assert json.loads((d2 / "manifest.json").read_text())["status"] == "applied"
+
+
+def test_revert_failure_after_the_bridge_exe_was_put_back_is_marked(world, monkeypatch):
+    """Review of #588: bridge_revert is two writes (exe, then sidecar); a failure after the exe write is half done."""
+    d = _bridge_hotfix(world)
+    real = s2._atomic_replace_file
+    n = []
+
+    def second_fails(src, dst):
+        n.append(1)
+        if len(n) > 1:
+            raise OSError("sidecar locked")
+        real(src, dst)
+
+    monkeypatch.setattr(s2, "_atomic_replace_file", second_fails)
+    man = json.loads((d / "manifest.json").read_text())
+    if not (man["bridge"].get("sha256_original") and man["bridge"].get("had_sidecar")):
+        pytest.skip("the fixture bridge has no original exe and sidecar")
+    with pytest.raises(OSError):
+        hf.revert(world.inst, world.home, Fake(running=False, bridge_running=True).hooks())
+    assert json.loads((d / "manifest.json").read_text())["status"] == "revert-failed"

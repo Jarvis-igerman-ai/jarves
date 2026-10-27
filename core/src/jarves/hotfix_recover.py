@@ -182,13 +182,18 @@ def _check_unlocked(man: dict, install: Path) -> None:
     for e in man.get("deps") or []:
         paths += [sp / i["path"] for i in e["backed_up"]] + [sp / r for r in e["new_paths"]]
     for p in paths:
-        if p.is_file():
-            try:
-                with open(p, "r+b"):
-                    pass
-            except PermissionError:
-                raise Recover("RECOVER_CORE_RUNNING", f"{p.name} is locked: JARVES (Core or the bridge) is still running. "
-                              "Quit it from the tray and run this again. Nothing was changed.", True) from None
+        if not p.is_file():
+            continue
+        # #568 item 2: read-only is not a running Core, but os.replace cannot overwrite it either: refuse BEFORE a half restore
+        if not os.access(p, os.W_OK):
+            raise Recover("RECOVER_READ_ONLY", f"{p.name} is read-only, so it cannot be restored. Clear its read-only "
+                          "attribute (file Properties) and run this again. Nothing was changed.", True)
+        try:
+            with open(p, "r+b"):
+                pass
+        except PermissionError:
+            raise Recover("RECOVER_CORE_RUNNING", f"{p.name} is locked: JARVES (Core or the bridge) is still running. "
+                          "Quit it from the tray and run this again. Nothing was changed.", True) from None
 
 
 def recover(install: Path, home: Path, which: str | None = None, *, dry_run: bool = False) -> dict:
