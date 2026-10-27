@@ -37,6 +37,18 @@ _ID = r"[A-Za-z0-9_-]{1,64}"
 WRITE_ALLOWED = (("POST", re.compile(r"/session")), ("POST", re.compile(rf"/session/{_ID}/prompt_async")),
                  ("POST", re.compile(rf"/session/{_ID}/abort")))
 MAX_PROMPT = 20_000
+_MODEL = re.compile(r"([A-Za-z0-9._-]{1,64})/([A-Za-z0-9._:/-]{1,120})")
+
+
+def parse_model(spec: str) -> tuple[str, str]:
+    """"providerID/modelID" -> (providerID, modelID); "" -> ("", ""); anything else raises OpenCodeError."""
+    spec = str(spec or "").strip()
+    if not spec:
+        return "", ""
+    m = _MODEL.fullmatch(spec)
+    if not m or ".." in spec:
+        raise OpenCodeError("SERVER_ERROR", "agents.opencode_model must look like provider/model")
+    return m.group(1), m.group(2)
 
 
 class OpenCodeError(Exception):
@@ -159,13 +171,16 @@ class Client:
             raise OpenCodeError("SERVER_ERROR", "the session was created in another folder than the worktree")
         return sid
 
-    def prompt(self, session_id: str, text: str, directory: str) -> None:
+    def prompt(self, session_id: str, text: str, directory: str, model: str = "") -> None:
         """POST /session/:id/prompt_async: ONE text part, asynchronous (answers 204). The caller has the owner's approval."""
         text = str(text or "")
         if not text.strip() or len(text) > MAX_PROMPT:
             raise OpenCodeError("SERVER_ERROR", "empty or too long prompt")
-        self._write(f"/session/{self._sid(session_id)}/prompt_async" + self._dir(directory),
-                    {"parts": [{"type": "text", "text": text}]})
+        body: dict = {"parts": [{"type": "text", "text": text}]}
+        prov, mid = parse_model(model)
+        if prov:                                           # D3: the model JARVES classified and the owner approved
+            body["model"] = {"providerID": prov, "modelID": mid}
+        self._write(f"/session/{self._sid(session_id)}/prompt_async" + self._dir(directory), body)
 
     def abort(self, session_id: str, directory: str) -> None:
         """POST /session/:id/abort: stops the running turn."""
