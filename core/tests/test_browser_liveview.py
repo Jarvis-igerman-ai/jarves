@@ -158,7 +158,8 @@ def test_token_never_in_logs(tmp_path, caplog):
 def test_there_is_no_input_route():
     seen = []
     lv.dashboard_routes(lambda m, rx, fn: seen.append((m, rx)))
-    assert seen == [("POST", r"/api/browser/live/start$"), ("POST", r"/api/browser/live/frame$"), ("POST", r"/api/browser/live/stop$")]
+    assert seen == [("POST", r"/api/browser/live/start$"), ("POST", r"/api/browser/live/frame$"), ("POST", r"/api/browser/live/stop$"),
+                    ("POST", r"/api/browser/live/takeover$"), ("POST", r"/api/browser/live/return$"), ("POST", r"/api/browser/live/input$")]
     src = Path(lv.__file__).read_text(encoding="utf-8")
     assert not re.search(r"\.(click|fill|type|press|keyboard|mouse|evaluate|goto)\(", src)
 

@@ -1,6 +1,6 @@
 order = 59
 category = "system"
-features = ["browser_pilot", "browser_liveview"]
+features = ["browser_pilot", "browser_liveview", "browser_takeover"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
 error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
@@ -33,6 +33,16 @@ en = "To turn off: jarvis features off browser_pilot. The normal browser stays a
 he = "תצוגה חיה (בטא, כבויה כברירת מחדל): הדליקו את המתג \"תצוגה חיה של הדפדפן\" (jarvis features on browser_liveview). בעמוד הדפדפן בלוח הבקרה לוחצים \"תצוגה חיה\" ורואים את הדף כתמונה שמתרעננת, לקריאה בלבד: אי אפשר ללחוץ או להקליד דרכה. היא נפתחת רק במחשב עצמו, רק לדפי בדיקה מקומיים (localhost), פגה אחרי 5 דקות, ולחצן \"עצירה\" סוגר גם את הסשן."
 en = "Live view (beta, off by default): switch on \"Browser live view\" (jarvis features on browser_liveview). On the dashboard Browser page press Live view and watch the page as a refreshing picture, read only: you cannot click or type through it. It opens only on the computer itself, only for local test pages (localhost), expires after 5 minutes, and the Stop button also closes the session."
 action = "feature_on:browser_liveview"
+
+[[steps]]
+he = "שליטה ידנית (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_takeover. בכרטיס התצוגה החיה לוחצים \"קחו שליטה\": הסוכן נעול בחוץ, ואתם לוחצים על התמונה, מקלידים בתיבה (אפשר לסמן \"סיסמה\" כדי להסתיר) או לוחצים Enter ו-Tab. מה שהקלדתם הולך לדף בלבד: הוא לא נרשם ביומן, לא נשמר ולא מוצג לעולם לסוכן, ואם הדף מציג אותו בחזרה הוא מוסתר. \"החזירו לסוכן\" מחזיר את השליטה והסוכן קורא את הדף מחדש. זה פועל כרגע רק בדפי בדיקה מקומיים (localhost); התחברות לאתר אמיתי היא שלב נפרד שתבדקו בעצמכם בחשבון ניסיון."
+en = "Take over (beta, off by default, its own switch): jarvis features on browser_takeover. On the Live view card press Take over: the assistant is locked out, and you click on the picture, type in the box (tick Secret to hide it on screen) or press Enter and Tab. What you type goes to the page only: it is not logged, not stored and never shown to the assistant, and if the page echoes it back it is hidden. Give back returns control and the assistant re-reads the page. This works only on local test pages (localhost) for now; logging in to a real site is a separate step that you test yourself on a throwaway account."
+
+[[problems]]
+he = "קחו שליטה לא עובד"
+en = "Take over does not work"
+fix_he = "צריך את המתג הנפרד (jarvis features on browser_takeover), תצוגה חיה פעילה ודף בדיקה מקומי. אם לחצתם על משהו שמוביל לאתר אחר, הסשן נסגר מטעמי בטיחות: התחילו מחדש."
+fix_en = "It needs its own switch (jarvis features on browser_takeover), an active live view and a local test page. If you clicked something that leads to another site the session was closed for safety: start again."
 
 [[problems]]
 he = "הוא אומר שהפיילוט כבוי"

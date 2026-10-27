@@ -8,7 +8,7 @@ function liveViewCard() {
   const img = el("img", { alt: tx("תצוגה חיה של דף הבדיקה", "Live view of the test page"), style: "max-width:100%;display:none;border:1px solid currentColor" });
   const msg = el("div", { class: "small", role: "status", "aria-live": "polite" });
   let token = "", timer = 0;
-  const end = (text) => { clearInterval(timer); timer = 0; token = ""; start.disabled = false; msg.textContent = text || ""; };
+  let end = (text) => { clearInterval(timer); timer = 0; token = ""; start.disabled = false; msg.textContent = text || ""; };
   const poll = async () => {
     if (!token) return;
     if (!document.body.contains(img)) { end(""); return; }       // the owner left this page: stop polling (no hidden loop)
@@ -23,7 +23,7 @@ function liveViewCard() {
     start.disabled = true; msg.textContent = "";
     try {
       const r = await api("/api/browser/live/start", { method: "POST", body: "{}" });
-      token = r.grant; await poll();
+      token = r.grant; takeBtn.disabled = false; await poll();
       if (token) timer = setInterval(poll, Math.max(1000, r.interval_ms || 1000));
     } catch (e) { end(e.message); }
   } }, tx("תצוגה חיה", "Live view"));
@@ -31,9 +31,40 @@ function liveViewCard() {
     try { await api("/api/browser/live/stop", { method: "POST", body: "{}" }); img.style.display = "none"; end(tx("נעצר. הסשן נסגר.", "Stopped. The session is closed.")); }
     catch (e) { end(e.message); }
   } }, tx("עצירה", "Stop"));
+  // B3 (#398): the OWNER can take over the same session. While it is yours the agent is locked out; what you type goes to the page and
+  // nowhere else (not logged, not stored here, never shown to the assistant). Local test pages only.
+  const post = (path, body) => api(path, { method: "POST", body: JSON.stringify({ grant: token, ...body }) });
+  const mine = { on: false };
+  const typeBox = el("input", { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": tx("טקסט להקלדה בדף", "Text to type into the page"), disabled: true });
+  const secret = el("input", { type: "checkbox", id: "live-secret", disabled: true, onchange: () => { typeBox.type = secret.checked ? "password" : "text"; } });
+  const send = async (kind, data) => {
+    if (!token || !mine.on) return;
+    try { await post("/api/browser/live/input", { kind, data }); msg.textContent = tx("נשלח לדף.", "Sent to the page."); }
+    catch (e) { msg.textContent = e.message; }
+  };
+  const typeBtn = el("button", { type: "button", disabled: true, onclick: async () => {
+    const t = typeBox.value; typeBox.value = ""; if (t) await send("type", { text: t }); } }, tx("הקלדה בדף", "Type into the page"));
+  const keyBtns = ["Enter", "Tab"].map((k) => el("button", { type: "button", disabled: true, "data-key": k, onclick: () => send("key", { key: k }) }, k));
+  const driveBtns = [typeBtn, ...keyBtns];
+  const setMine = (on) => { mine.on = on; takeBtn.disabled = on || !token; giveBtn.disabled = !on; typeBox.disabled = secret.disabled = !on; driveBtns.forEach((b) => { b.disabled = !on; });
+    img.style.cursor = on ? "crosshair" : ""; };
+  img.addEventListener("click", (ev) => {
+    if (!mine.on || !img.naturalWidth) return;
+    const r = img.getBoundingClientRect();
+    send("click", { x: Math.round((ev.clientX - r.left) * img.naturalWidth / r.width), y: Math.round((ev.clientY - r.top) * img.naturalHeight / r.height) });
+  });
+  const takeBtn = el("button", { type: "button", disabled: true, onclick: async () => {
+    try { await post("/api/browser/live/takeover", {}); setMine(true); msg.textContent = tx("השליטה אצלכם. הסוכן נעול בחוץ.", "You are in control. The assistant is locked out."); }
+    catch (e) { msg.textContent = e.message; } } }, tx("קחו שליטה", "Take over"));
+  const giveBtn = el("button", { type: "button", disabled: true, onclick: async () => {
+    try { await post("/api/browser/live/return", {}); setMine(false); msg.textContent = tx("הוחזר לסוכן. הוא יקרא את הדף מחדש ולא יראה מה שהקלדתם.", "Given back. The assistant re-reads the page and never sees what you typed."); }
+    catch (e) { msg.textContent = e.message; } } }, tx("החזירו לסוכן", "Give back"));
+  const baseEnd = end;
+  end = (text) => { setMine(false); baseEnd(text); takeBtn.disabled = true; };
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),
-    el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים, רק לקריאה: אי אפשר ללחוץ או להקליד דרכה.", "Local test pages only, read only: you cannot click or type through it.")),
-    el("div", { class: "row" }, start, stop), msg, img);
+    el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.", "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.")),
+    el("div", { class: "row" }, start, takeBtn, giveBtn, stop), msg, img,
+    el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("סיסמה (מוסתר)", "Secret (hidden)")), typeBtn, ...keyBtns));
 }
 
 PAGES.browser = async function () {
