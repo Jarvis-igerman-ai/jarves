@@ -72,3 +72,12 @@ def test_release_publish_guarded_and_dry_run_default_true():
     assert '--tag "$TAG"' in gate["run"] and 'git rev-parse HEAD' in gate["run"]
     text = (WORKFLOWS / "release.yml").read_text(encoding="utf-8")
     assert "git tag" not in text and "git push" not in text
+
+
+def test_release_tag_comes_from_the_ref_on_a_tag_and_a_differing_input_fails():
+    """#598: on a tag-ref dispatch the free-text input cannot name another version than the commit being released."""
+    doc, job = _release()
+    assert "github.ref_type == 'tag' && github.ref_name" in job["env"]["TAG"]
+    find = next(s for s in job["steps"] if s.get("id") == "find")
+    assert '[ "$INPUT_TAG" != "$REF_NAME" ]' in find["run"] and 'REF_TYPE" = "tag"' in find["run"]
+    assert job["env"]["INPUT_TAG"] == "${{ github.event.inputs.tag }}"
