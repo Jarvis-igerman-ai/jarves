@@ -1,0 +1,10 @@
+{
+ "dict": {
+  "Live view": "תצוגה חיה",
+  "Live view (beta)": "תצוגה חיה (בטא)",
+  "Live view of the test page": "תצוגה חיה של דף הבדיקה",
+  "Local test pages only, read only: you cannot click or type through it.": "רק דפי בדיקה מקומיים, רק לקריאה: אי אפשר ללחוץ או להקליד דרכה.",
+  "Read only. Expires in ": "קריאה בלבד. פג בעוד ",
+  "Stopped. The session is closed.": "נעצר. הסשן נסגר."
+ }
+}
