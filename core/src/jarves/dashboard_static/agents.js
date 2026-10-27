@@ -31,7 +31,8 @@ async function agentPost(path, body, box) {
 }
 
 // G6 (#413): what blocks the agents' pull requests. Hidden when the switch is off or the API is not there. Text nodes only.
-async function agentsPrCard() {
+async function agentsPrCard(on) {
+  if (!on) return null;                                          // the agents answer says whether the switch exists and is on
   let r;
   try { r = await api(`/api/github/work?lang=${agentsLang()}`); } catch (e) { return null; }
   if (!r || !r.enabled) return null;
@@ -46,7 +47,8 @@ async function agentsPrCard() {
 
 PAGES.agents = async function () {
   const lang = agentsLang();
-  const [d, ap, prCard] = await Promise.all([api(`/api/agents?digest=1&lang=${lang}`), api("/api/agents/approvals"), agentsPrCard()]);
+  const [d, ap] = await Promise.all([api(`/api/agents?digest=1&lang=${lang}`), api("/api/agents/approvals")]);
+  const prCard = d.enabled === false ? null : await agentsPrCard(d.pr_card);
   if (d.enabled === false) {
     render(header(tx("סוכני קוד", "Coding agents"), tx("Claude Code ו-Codex", "Claude Code and Codex")),
       el("div", { class: "card" }, el("div", { class: "empty" }, tx("מנהל סוכני הקוד כבוי: ", "The coding-agent orchestrator is off: ") + (d.reason || "")),

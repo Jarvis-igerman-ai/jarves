@@ -27,7 +27,7 @@ def browser():
             b.close()
 
 
-def page_with(browser, dash, work):  # noqa: F811
+def page_with(browser, dash, work, flag=True):  # noqa: F811
     ctx = browser.new_context(viewport={"width": 1200, "height": 900})
     p = ctx.new_page()
     errs: list[str] = []
@@ -35,7 +35,7 @@ def page_with(browser, dash, work):  # noqa: F811
 
     def agents(route):
         route.fulfill(status=200, content_type="application/json", body=json.dumps(
-            {"enabled": True, "sessions": [], "projects": [{"name": "jarves"}], "digest": {"text": "none"}}))
+            {"enabled": True, "pr_card": flag, "sessions": [], "projects": [{"name": "jarves"}], "digest": {"text": "none"}}))
 
     def approvals(route):
         route.fulfill(status=200, content_type="application/json", body=json.dumps({"pending": [], "approvals": []}))
@@ -66,9 +66,23 @@ def test_the_card_lists_branches_states_and_next_steps_as_text(browser, dash):  
     ctx.close()
 
 
-@pytest.mark.parametrize("work", [None, {"enabled": False, "rows": [], "text": ""}])
-def test_the_card_is_absent_when_off_or_the_api_is_missing(browser, dash, work):  # noqa: F811
-    ctx, p, errs = page_with(browser, dash, work)
+@pytest.mark.parametrize("work,flag", [(None, False), ({"enabled": False, "rows": [], "text": ""}, True)])
+def test_the_card_is_absent_when_off_or_the_api_is_missing(browser, dash, work, flag):  # noqa: F811
+    ctx, p, errs = page_with(browser, dash, work, flag)
     p.wait_for_selector("text=New session", timeout=30000)
     assert p.locator("#agents-prs").count() == 0 and errs == []
+    ctx.close()
+
+
+def test_the_page_never_asks_the_pr_route_when_the_switch_is_off(browser, dash):  # noqa: F811
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900})
+    p = ctx.new_page()
+    asked = []
+    p.on("request", lambda r: asked.append(r.url) if "/api/github/work" in r.url else None)
+    p.route(re.compile(r"/api/agents/approvals(\?.*)?$"), lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"pending": []})))
+    p.route(re.compile(r"/api/agents(\?.*)?$"), lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        {"enabled": True, "pr_card": False, "sessions": [], "projects": [{"name": "jarves"}], "digest": {"text": "none"}})))
+    p.goto(dash.url + "#/agents")
+    p.wait_for_selector("text=New session", timeout=30000)
+    assert asked == []
     ctx.close()

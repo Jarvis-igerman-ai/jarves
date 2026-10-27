@@ -394,7 +394,12 @@ def dashboard_routes(register) -> None:
         lang = _q(q, "lang", "en")
         r = call(ctx, "list", all=_q(q, "all") in ("1", "true"), lang=lang)
         d = call(ctx, "digest", lang=lang) if _q(q, "digest") in ("1", "true") else None
-        return 200, {"enabled": True, **r, **({"digest": d} if d else {})}
+        try:                                              # G6: the page asks the PR route only when the switch exists and is on (no 404 on the page)
+            from .. import features as _f
+            pr_card = bool(_f._ctx_features(ctx).active("github_work"))
+        except Exception:                                 # noqa: BLE001
+            pr_card = False
+        return 200, {"enabled": True, "pr_card": pr_card, **r, **({"digest": d} if d else {})}
 
     def api_session(ctx, m, _body, q=None):
         return 200, call(ctx, "session", ref=unquote(m.group(1)), lang=_q(q, "lang", "en"))
