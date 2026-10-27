@@ -421,7 +421,9 @@ async def test_step_popup_shows_the_arguments_in_full_and_never_cuts_silently(en
 
 
 def test_565_bidi_and_zero_width_characters_are_shown_escaped_in_the_popup_text():
-    t = gp._args_text({"to": "a‮b", "x": "q​z⁦"}, 500)
-    assert "‮" not in t and "​" not in t and "⁦" not in t
-    assert "\u202e" in t and "\u200b" in t and "\u2066" in t
+    rlo, zwsp, lri = chr(0x202E), chr(0x200B), chr(0x2066)
+    t = gp._args_text({"to": "a" + rlo + "b", "x": "q" + zwsp + "z" + lri}, 500)
+    assert rlo not in t and zwsp not in t and lri not in t
+    bs = chr(92)
+    assert bs + "u202e" in t and bs + "u200b" in t and bs + "u2066" in t
     assert gp._args_text({"k": "plain"}, 500) == '{"k": "plain"}'
