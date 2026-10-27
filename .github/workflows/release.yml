@@ -82,10 +82,16 @@ jobs:
       - name: Rows hash recorded by the owner outside the sheet (annotated tag message, #605)
         run: |
           # an annotated tag message line "Rows hash: <sha256>" (printed by `jarvis release signoff --finish`); a lightweight tag
-          # or a dispatch on main has none, and the gate then only prints a note
-          if [ "$REF_TYPE" = "tag" ] && [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
-            h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -oiE '^Rows hash: [0-9a-f]{64}' | grep -oE '[0-9a-f]{64}' || true)
-            [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"
+          # or a dispatch on main has none (a dry run then only prints a note)
+          # a real release REQUIRES the hash (lightweight tag or missing line = refused by the gate)
+          [ "$DRY_RUN" = "true" ] || echo "JARVES_REQUIRE_ROWS_HASH=1" >> "$GITHUB_ENV"
+          if [ "$REF_TYPE" = "tag" ]; then
+            # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
+            if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
+              h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
+              [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"
+            fi
           fi
       - name: Release gate (sign-off, SHA, live P0-P2 issues)
         working-directory: core

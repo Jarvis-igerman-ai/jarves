@@ -296,6 +296,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--expect-rows-hash", default=os.environ.get("JARVES_EXPECT_ROWS_HASH") or None,
                     help="sha256 the owner recorded outside the sheet (annotated tag message line 'Rows hash: <sha256>'); "
                          "refuse when it differs from the sheet (#605)")
+    ap.add_argument("--require-rows-hash", action="store_true", default=os.environ.get("JARVES_REQUIRE_ROWS_HASH") == "1",
+                    help="refuse when no out-of-band rows hash is given (a real publish; the release workflow sets it)")
     a = ap.parse_args(argv)
     verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
@@ -322,7 +324,11 @@ def main(argv: list[str] | None = None) -> int:
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
-    if a.expect_rows_hash is None:
+    if a.expect_rows_hash is None and a.require_rows_hash:
+        problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
+                        "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
+                        "`jarvis release signoff --finish`)")
+    elif a.expect_rows_hash is None:
         print("note: no out-of-band rows hash given (annotated tag message 'Rows hash: <sha256>'); the sheet hash alone "
               "only catches accidental edits (#605)")
     if problems:

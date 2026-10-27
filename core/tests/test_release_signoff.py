@@ -449,4 +449,4 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     assert "environment: ${{" in wf and "'stable-release'" in wf
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
-    assert "JARVES_EXPECT_ROWS_HASH" in wf
+    assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
