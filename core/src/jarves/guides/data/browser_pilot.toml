@@ -1,6 +1,6 @@
 order = 59
 category = "system"
-features = ["browser_pilot", "browser_liveview", "browser_takeover"]
+features = ["browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
 error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
@@ -41,6 +41,16 @@ en = "Take over (beta, off by default, its own switch): jarvis features on brows
 [[steps]]
 he = "הפעלת פיילוט אמיתי על דף בדיקה מקומי: בכרטיס התצוגה החיה בעמוד הדפדפן מקלידים כתובת כמו http://localhost:8000/ (דף שרץ במחשב שלכם) ולוחצים \"הפעלת פיילוט בדף בדיקה\". נפתח דפדפן אמיתי ללא תצוגה, שיוצא לרשת רק דרך פרוקסי מקומי: הוא יכול לגשת רק לפורט הזה, לא ללוח הבקרה ולא לשירותים אחרים במחשב, ולא לאתרים ציבוריים בזמן שאתם שולטים. אחר כך לוחצים \"תצוגה חיה\". \"סגירת הפיילוט\" סוגר הכול. אתרים ציבוריים ואתרים אמיתיים עדיין לא נפתחים בשלב הזה."
 en = "Start a real pilot on a local test page: on the Live view card of the Browser page type an address like http://localhost:8000/ (a page running on your computer) and press Start a test pilot. A real headless browser opens that reaches the network only through a local proxy: it can reach that one port only, not the dashboard or any other service on this computer, and no public site while you are in control. Then press Live view. Close the pilot closes everything. Public and real sites do not open at this stage."
+
+[[steps]]
+he = "תצוגה בטלפון (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_phone_view. במחשב, בעמוד המכשירים, מסמנים לטלפון המצומד את ההרשאה \"תצוגת הדפדפן של הפיילוט\". אחרי שהפיילוט הופעל במחשב (בכרטיס התצוגה החיה בעמוד הדפדפן, עם כתובת דף בדיקה מקומי), הלשונית \"דפדפן\" בטלפון מציגה אותו: רואים את הדף כתמונה, ואם גם מתג \"שליטה ידנית\" דלוק אפשר לקחת שליטה: ללחוץ על התמונה, להקליד ולהחזיר. זה עובד רק בקישור המאובטח (https) של הטלפון. הטלפון יכול לעצור את הפיילוט אבל לא להפעיל אותו; מה שמוקלד לא נרשם ולא מוצג לסוכן."
+en = "Phone view (beta, off by default, its own switch): jarvis features on browser_phone_view. On the computer, on the Devices page, tick the permission Browser pilot view for the paired phone. Once the pilot has been started on the computer (on the Live view card of the Browser page, with a local test page address), the Browser tab on the phone shows it: you see the page as a picture, and if the Take over switch is also on you can take over: tap the picture, type and give back. It works only on the phone's secure (https) link. The phone can stop the pilot but not start it; what you type is not logged and never shown to the assistant."
+
+[[problems]]
+he = "הלשונית דפדפן לא מופיעה בטלפון או אומרת שאין פיילוט"
+en = "The Browser tab does not show on the phone, or says there is no pilot"
+fix_he = "הלשונית מופיעה רק עם המתג browser_phone_view, תצוגה חיה דלוקה והרשאת תצוגת הדפדפן לטלפון בעמוד המכשירים. היא אומרת \"אין פיילוט\" עד שמפעילים פיילוט במחשב, ודורשת קישור https; הצפייה נפתחת בטלפון אחד בכל פעם (אי אפשר לדחוק החוצה את הצפייה במחשב)."
+fix_en = "The tab shows only with the browser_phone_view switch, the live view on and the Browser pilot view permission for this phone on the Devices page. It says there is no pilot until one is started on the computer, and it needs the https link. The view is open on one device at a time (a phone cannot push the computer's view out)."
 
 [[problems]]
 he = "קחו שליטה לא עובד"
