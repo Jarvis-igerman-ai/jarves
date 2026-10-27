@@ -1,9 +1,15 @@
 package ai.jarves.companion
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.core.content.ContextCompat
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,6 +48,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** The push-to-talk card: idle, listening (button held), sending, or the last answer. Nothing here is stored. */
+sealed interface Talk {
+    data object Idle : Talk
+    data object Listening : Talk
+    data object Sending : Talk
+    data object NoMic : Talk
+    data class Done(val result: Voice) : Talk
+}
+
 sealed interface Screen {
     data class Pair(val error: PairError? = null, val busy: Boolean = false) : Screen
     data class Confirm(val base: String, val name: String, val code: String, val fingerprint: String) : Screen
@@ -55,6 +70,35 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
+    private val recorder = Recorder()
+    private val _talk = MutableStateFlow<Talk>(Talk.Idle)
+    val talk: StateFlow<Talk> = _talk
+
+    /** The owner pressed and holds the button (the permission is already granted). */
+    fun talkStart() {
+        if (_talk.value is Talk.Sending || _talk.value is Talk.Listening) return
+        _talk.value = if (session != null && active && recorder.start()) Talk.Listening else Talk.NoMic
+    }
+
+    /** The owner let go: close the microphone at once, then send what was heard to the paired PC. */
+    fun talkEnd() {
+        if (_talk.value !is Talk.Listening) return
+        val heard = recorder.stop()
+        val s = session
+        if (s == null || heard.size < VOICE_MIN_SAMPLES) {
+            _talk.value = Talk.Idle
+            return
+        }
+        _talk.value = Talk.Sending
+        viewModelScope.launch {
+            val r = try {
+                withContext(Dispatchers.IO) { CompanionClient(s.base, PinnedTransport(s.pin)).voice(s.token, heard) }
+            } catch (e: Exception) {
+                Voice.Unreachable
+            }
+            _talk.value = Talk.Done(r)
+        }
+    }
 
     init {
         session = (screen.value as? Screen.Status)?.session
@@ -69,6 +113,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     fun onStop() {
         active = false
         poll?.cancel()
+        if (_talk.value is Talk.Listening) {                        // leaving the screen while holding the button: the microphone closes, nothing is sent
+            recorder.stop()
+            _talk.value = Talk.Idle
+        }
     }
 
     private fun startPolling(s: Session) {
@@ -153,6 +201,10 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -163,7 +215,25 @@ class MainActivity : ComponentActivity() {
                         when (val x = s) {
                             is Screen.Pair -> PairScreen(x, model::check)
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
-                            is Screen.Status -> StatusScreen(x, model::unpair)
+                            is Screen.Status -> {
+                                StatusScreen(x, model::unpair)
+                                if (x.link is Link.Online) {
+                                    val t by model.talk.collectAsStateWithLifecycle()
+                                    TalkCard(
+                                        t,
+                                        onPress = {
+                                            if (micGranted()) {
+                                                model.talkStart()
+                                                true
+                                            } else {
+                                                askMic.launch(Manifest.permission.RECORD_AUDIO)
+                                                false
+                                            }
+                                        },
+                                        onRelease = model::talkEnd,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -241,4 +311,44 @@ fun Banner(text: String, bad: Boolean) {
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = if (bad) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer),
     ) { Text(text, Modifier.padding(12.dp)) }
+}
+
+/** Hold to talk: the microphone is open only while the finger is down. The first press only asks for the permission. */
+@Composable
+fun TalkCard(t: Talk, onPress: () -> Boolean, onRelease: () -> Unit) {
+    Text(stringResource(R.string.talk_title), style = MaterialTheme.typography.titleMedium)
+    Card(
+        Modifier.fillMaxWidth().pointerInput(Unit) {
+            detectTapGestures(onPress = {
+                if (onPress()) {
+                    tryAwaitRelease()
+                    onRelease()
+                }
+            })
+        },
+        colors = CardDefaults.cardColors(containerColor = if (t is Talk.Listening) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Text(
+            stringResource(if (t is Talk.Listening) R.string.talk_listening else if (t is Talk.Sending) R.string.talk_sending else R.string.talk_hold),
+            Modifier.padding(24.dp),
+        )
+    }
+    when (t) {
+        is Talk.NoMic -> Text(stringResource(R.string.talk_nomic), color = MaterialTheme.colorScheme.error)
+        is Talk.Done -> when (val r = t.result) {
+            is Voice.Heard -> {
+                Text(stringResource(R.string.talk_you_said, r.transcript))
+                Text(r.reply)
+            }
+            Voice.NoSpeech -> Text(stringResource(R.string.talk_nospeech))
+            Voice.Busy -> Text(stringResource(R.string.talk_busy))
+            Voice.RateLimited -> Text(stringResource(R.string.talk_rate))
+            Voice.NeedsSecureLink -> Text(stringResource(R.string.talk_secure))
+            Voice.NotAllowed -> Text(stringResource(R.string.talk_notallowed))
+            Voice.Revoked -> Text(stringResource(R.string.revoked))
+            Voice.Unreachable -> Text(stringResource(R.string.unreachable))
+        }
+        else -> Unit
+    }
+    Text(stringResource(R.string.talk_note), style = MaterialTheme.typography.bodySmall)
 }
