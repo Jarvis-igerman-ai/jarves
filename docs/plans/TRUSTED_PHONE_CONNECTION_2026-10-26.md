@@ -35,7 +35,7 @@ WebAPK install ("Add to Home screen" becomes a plain shortcut). Two optional way
   `jarvis phone trust status` and `jarvis doctor` warn when the leaf has < 7 days, the CA < 30 days, or renewal is failing.
 - Order of TLS sources at start: Tailscale cert, then the local CA leaf (only when `phone_trust` is on and a CA exists), then the
   old self-signed certificate (unchanged fallback).
-- Delivering the CA certificate to the phone: only to an ALREADY PAIRED phone, `GET /api/m/trust/ca.crt` (device token required,
+- Delivering the CA certificate to the phone: only to an ALREADY PAIRED phone, `GET /api/m/trust/ca` (device token required,
   rate limited, public certificate only). The first pairing happens over the old self-signed warning, as today. A one-time-code QR
   is slice 2 if the owner wants it.
 - Android steps (shown in the card and the guide): Settings > Security (or Security and privacy > More security) > Install a

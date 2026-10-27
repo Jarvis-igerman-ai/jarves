@@ -762,7 +762,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
                              "trust": phone_trust.phone_view(mob.home, mob.tls_source)})
     if path == mobile_companion.INFO_PATH and method == "GET":      # Companion API v1 (V7-A1): read-only, any paired device
         return h._json_extra(200, mobile_companion.info(mob, dev), {mobile_companion.API_HEADER: str(mobile_companion.API_VERSION)})
-    if path == phone_trust.CA_ROUTE and method == "GET":      # #513: the PUBLIC CA certificate, only to a paired phone
+    if path == phone_trust.CA_ROUTE and method == "GET":      # #513: GET /api/m/trust/ca = the PUBLIC CA certificate, only to a paired phone
         pem = phone_trust.ca_certificate_pem(mob.home) if phone_trust.trust_on(mob.home) else None
         if pem is None:
             return h._json(404, {"error": "no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable"})

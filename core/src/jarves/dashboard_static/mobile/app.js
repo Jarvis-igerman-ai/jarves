@@ -70,6 +70,7 @@
     try { r = await fetch(path, { method: opts.method || "GET", headers, body: opts.body, cache: "no-store" }); }
     catch (e) { setConn(false); throw new Error(t("offline")); }
     setConn(true);
+    if (opts.raw && r.ok) return r.blob();                       // a file download (the public CA certificate)
     const d = await r.json().catch(() => ({}));
     if (r.status === 401) { forget(); const u = new Error(t("unpaired")); u.status = 401; throw u; }
     if (!r.ok) { const e = new Error((lang === "he" && d.error_he) || d.error || ("HTTP " + r.status)); e.status = r.status; e.code = d.code; throw e; }
@@ -101,9 +102,7 @@
   $("trustCa").addEventListener("click", async () => {
     const b = $("trustCa"); b.disabled = true;
     try {
-      const r = await fetch("/api/m/trust/ca.crt", { headers: { "X-Jarves": "1", Authorization: "Bearer " + token }, cache: "no-store" });
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const url = URL.createObjectURL(await r.blob());
+      const url = URL.createObjectURL(await api("/api/m/trust/ca", { raw: true }));
       const a = document.createElement("a"); a.href = url; a.download = "jarves-local-ca.crt"; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) { $("trustNote").textContent = t("trust_dl_err"); }

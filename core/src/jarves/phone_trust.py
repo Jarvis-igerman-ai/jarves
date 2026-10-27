@@ -51,7 +51,7 @@ PERMITTED_DNS = ("localhost", "local", "home.arpa")
 NOTHING = "invalid"
 LEAF_NAME = "leaf"
 STATE_FILE = "trust_state.json"
-CA_ROUTE = "/api/m/trust/ca.crt"
+CA_ROUTE = "/api/m/trust/ca"
 
 
 def tls_dir(home: Path) -> Path:
