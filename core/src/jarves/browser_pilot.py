@@ -46,6 +46,11 @@ _SITE_LOCAL = ipaddress.ip_network("fec0::/10")     # deprecated site-local: ref
 _V4COMPAT = ipaddress.ip_network("::/96")        # deprecated IPv4-compatible form (::10.0.0.1): map the low 32 bits
 
 
+def odd_v6(ip) -> bool:
+    """Translated or deprecated IPv6 forms that embed an IPv4 address: never treated as a public address (#575)."""
+    return ip.version == 6 and (ip in _SIIT or ip in _SITE_LOCAL or (ip in _V4COMPAT and int(ip) > 1))
+
+
 def _canonical_host(host: str) -> str:
     """The host as a browser resolves it, or '' when unsure. Browsers map full-width digits and dots (IDNA), drop one
     trailing dot ('claude.ai.' = claude.ai) and read a host whose last label is numeric as IPv4 in decimal, octal or
@@ -232,7 +237,8 @@ class PilotSession:
     def _apply_pins(self) -> None:
         def good(addrs) -> bool:                              # a refused (private) answer is never handed to the driver
             try:
-                return bool(addrs) and all(ipaddress.ip_address(str(x).split("%")[0]).is_global for x in addrs)
+                ips = [ipaddress.ip_address(str(x).split("%")[0]) for x in addrs]
+                return bool(ips) and all(i.is_global and not odd_v6(i) for i in ips)
             except ValueError:
                 return False
         self.driver.pin_hosts({h: list(v) for h, v in self.pins.items() if good(v)})

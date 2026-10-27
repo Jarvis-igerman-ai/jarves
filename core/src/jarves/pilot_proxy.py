@@ -67,6 +67,9 @@ def _addr_ok(addr: str, scope: str) -> bool:
         return False
     if scope == "local":
         return ip.is_loopback
+    from .browser_pilot import odd_v6
+    if odd_v6(ip):
+        return False
     if ip.version == 6 and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
     return ip.is_global

@@ -281,3 +281,9 @@ def test_a_dead_upstream_is_a_502_not_a_hang(tmp_path):
         assert status(r.connect("example.com:443")) == 502
     finally:
         r.close()
+
+
+@pytest.mark.parametrize("addr", ["::ffff:0:a00:1", "fec0::1", "::93.184.216.34", "::ffff:10.0.0.1", "10.0.0.1"])
+def test_translated_and_deprecated_ipv6_forms_are_never_dialled_as_public(addr):
+    from jarves.pilot_proxy import _addr_ok
+    assert _addr_ok(addr, "public") is False
