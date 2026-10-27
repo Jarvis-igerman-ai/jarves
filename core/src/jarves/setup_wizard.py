@@ -62,11 +62,7 @@ ADDON_MODULES = ("jarves.telegram_channel", "jarves.instagram_channel", "jarves.
                  "jarves.recall", "jarves.diag.service", "jarves.whatsapp_bridge", "jarves.orchestrator", "jarves.dialing", "jarves.self_manage", "jarves.drive_briefing", "jarves.skills.manifest2", "jarves.hotfix", "jarves.triage") + plugin_registry.names("addons")
 # Privacy-sensitive or outward-acting: OFF on the first run whatever else says; ON only after an explicit yes.
 SAFE_OFF = frozenset({"camera", "face_recognition", "camera_when_away", "gmail_send", "calendar_write",
-<<<<<<< HEAD
-                      "dashboard_lan", "mobile_access", "phone_trust", "browser", "browser_pilot", "browser_liveview", "browser_takeover", "telegram", "home_assistant", "instagram", "helper",
-=======
-                      "dashboard_lan", "mobile_access", "browser", "browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view", "telegram", "home_assistant", "instagram", "helper",
->>>>>>> jarves/main
+                      "dashboard_lan", "mobile_access", "phone_trust", "browser", "browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view", "telegram", "home_assistant", "instagram", "helper",
                       "helper_readonly_auto", "whatsapp_bridge", "whatsapp_send", "whatsapp_archive", "agent_orchestrator", "agent_opencode",
                       "assisted_dialing", "drive_briefing", "self_diagnosis_handoff", "home_setup_cards", "anydo", "anydo_update", "github", "provider_openrouter", "github_write", "github_approve_reviews", "github_merge_queue", "model_lab", "skills_manifest2"})
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
