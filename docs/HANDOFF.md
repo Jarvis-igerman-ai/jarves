@@ -1,3 +1,4 @@
+- 27 Oct 2026: JARVES 4.5 (tag v4.0.1, installer 4.0.1.1214, tag commit `ca8eb36b`, tested beta 4.0.1-beta.195 at `313425ae`) is released. Full hand-off (shipped, state, held PRs, open issues, owner decisions, next steps for 4.5.1 / 5.0 / 6.0 / 7.0, risks, resume commands): [handoff](handoff/2026-10-27-session-45-release.md).
 - 24 Oct 2026: ReDoS alerts #8-#12, #37 fixed with linear code, see [handoff](handoff/2026-10-24-redos-pr1.md).
 
 V4.5 approved by the owner 24 Oct 2026: [NOW](NOW.md) is now the bounded V4.5 authorization (the old NOW text is kept in [reviews/NOW_SWV1_18OCT2026](reviews/NOW_SWV1_18OCT2026.md)). Open questions for the owner are listed at the end of NOW. Docs only; nothing implemented yet.

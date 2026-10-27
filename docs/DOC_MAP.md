@@ -61,6 +61,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [CI_DETERMINISM](CI_DETERMINISM.md) | Network guard, offline stub, flake retry and quarantine for deterministic CI | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [PREPUSH](PREPUSH.md) | The local gate `python core/tools/prepush.py` (same quick checks as CI), the optional pre-push hook, and the PR failure-summary comment | general | current | [CI_PERFORMANCE](CI_PERFORMANCE.md) |
 | [handoff/2026-10-23-jarvis-talk](handoff/2026-10-23-jarvis-talk.md) | Handoff: `jarvis talk` live conversation without the wake word (CLI, dashboard, tray) | voice | current | [HANDOFF](HANDOFF.md) |
+| [handoff/2026-10-27-session-45-release](handoff/2026-10-27-session-45-release.md) | Handoff after the JARVES 4.5 (v4.0.1) release: shipped, state, held PRs, issues, next steps, resume commands | 4.5 | current | [HANDOFF](HANDOFF.md) |
 | [AGENT_HANDOFF_TEMPLATE](AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
 | [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
 | [reports/README](reports/README.md) | New reports, reviews and audits, one dated file each (`docs/reports/<date>-<topic>.md`); the reports are covered by this row, so adding one does not edit this file | general | current | itself |
