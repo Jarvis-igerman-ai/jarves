@@ -170,3 +170,43 @@ def test_cli_train_revert(home, monkeypatch, capsys):
     w = Identity(home).wake()
     assert w["model"] == "hey_jarvis" and w["phrase"] == "Hey Jarvis" and w["threshold"] is None
     assert (home / "wake" / "hey_max.npz").is_file()          # the trained file is kept
+
+
+def test_594_head_detector_skips_the_burst_and_the_zero_context_embeddings_then_fills_the_ring(monkeypatch):
+    """#594: the front end emits 91 embeddings on the first chunk after a reset, then 1 per chunk. The 9 that follow are
+    zero-context embeddings (measured with the real front end: up to ~23 absolute difference per value from the
+    history-conditioned embedding the head was trained on, gone at chunk 10), so STARTUP_EMBEDDINGS stays 100 and the first
+    scored window is chunk 25 (2.0 s), after every start and reset. Pinned with a fake front end."""
+    from jarves.voice import wake_train as wt
+
+    class FakeFeatures:
+        def __init__(self):
+            self.first = True
+
+        def process_streaming(self, pcm):
+            n = 91 if self.first else 1
+            self.first = False
+            return [np.zeros((n, 96), np.float32)]
+
+        def reset(self):
+            self.first = True
+
+    scored = []
+    monkeypatch.setattr(wt, "head_score", lambda head, ring: scored.append(1) or np.array([0.0]))
+    d = HeadWakeDetector("x.npz", 0.5)
+    d.head = {"windows": wt.WINDOWS}
+    d._features = FakeFeatures()
+    d._ring = np.zeros((wt.WINDOWS, 96), np.float32)
+    d._skip = wt.STARTUP_EMBEDDINGS
+    chunk = bytes(wt.CHUNK * 2)
+
+    def first_scored_chunk():
+        scored.clear()
+        for i in range(1, 60):
+            d.feed(chunk)
+            if scored:
+                return i
+        return None
+    assert wt.STARTUP_EMBEDDINGS == 100 and first_scored_chunk() == 26        # chunk 1: 91 burst, chunks 2-10: 9 zero-context skipped, chunks 11-26 fill the ring
+    d.reset()
+    assert first_scored_chunk() == 26                                          # the same after every reset
