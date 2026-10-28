@@ -2,6 +2,7 @@ package ai.jarves.companion
 
 import android.Manifest
 import android.app.Application
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +64,8 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
+    val approvals = ApprovalsModel(viewModelScope)
+    val share = ShareModel(viewModelScope)
     private val recorder = Recorder { viewModelScope.launch { talkEnd() } }          // the 55 s cap counts as letting go
     private val machine = TalkMachine(recorder)
     private val _talk = MutableStateFlow<Talk>(Talk.Idle)
@@ -203,22 +207,30 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        model.share.take(intent, model.screen.value is Screen.Status)
+    }
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) model.micDenied() }
 
     private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.decorView.filterTouchesWhenObscured = true // no taps through another app's overlay (Approve, Send)
+        if (savedInstanceState == null) model.share.take(intent, model.screen.value is Screen.Status)
         setContent {
             MaterialTheme {
                 Surface(Modifier.fillMaxSize()) {
                     val s by model.screen.collectAsStateWithLifecycle()
                     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (s !is Screen.Status) LaunchedEffect(Unit) { model.share.clear() } // not paired: a shared text is dropped
                         when (val x = s) {
                             is Screen.Pair -> PairScreen(x, model::check)
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
                             is Screen.Status -> {
-                                StatusScreen(x, model::unpair)
+                                PairedScreen(x, model.share, model.approvals, model::unpair)
                                 if (x.link is Link.Online) {
                                     val t by model.talk.collectAsStateWithLifecycle()
                                     TalkCard(
