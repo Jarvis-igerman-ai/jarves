@@ -318,3 +318,60 @@ def _catch(fn):
         fn()
     except bp.PilotError as e:
         return e.code
+
+
+class RecFeats(Feats):
+    def active(self, fid):
+        return fid == "browser_recording" or super().active(fid)
+
+
+def _wait(cond, timeout=20):
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def test_recording_is_off_unless_the_switch_and_the_choice_are_both_on(world, tmp_path):
+    svc, url, _ = world
+    with pytest.raises(bp.PilotError) as e:
+        svc.start(url, record=True)                                            # the switch browser_recording is off in this Feats
+    assert e.value.code == "BROWSER_RECORDING_OFF"
+    out = svc.start(url)                                                       # the switch alone records nothing
+    assert "recording" not in out and svc.driver.recorder is None
+
+
+def test_a_real_recording_pauses_on_a_password_field_and_resumes_in_a_new_file(tmp_path):
+    from jarves import browser_recording as brec
+    if not brec.ffmpeg_ready():
+        pytest.skip("Playwright's ffmpeg is not installed here (python -m playwright install ffmpeg)")
+    hits = Hits()
+    other = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_other(hits))
+    site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_site(other.server_address[1]))
+    for s in (other, site):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    svc = bd.PilotService(tmp_path, lambda: RecFeats())
+    try:
+        out = svc.start(f"http://localhost:{site.server_address[1]}/", record=True)
+        rec = svc.driver.recorder
+        assert out["recording"] == rec.id
+        page = svc.driver._page
+        assert _wait(lambda: rec.state == "recording")
+        svc.driver._job(lambda: page.evaluate("document.body.insertAdjacentHTML('beforeend', '<input type=password id=pw>')"))
+        assert _wait(lambda: rec.state == "paused"), rec.view()                  # the file is closed before the field is filmed
+        svc.driver._job(lambda: page.evaluate("document.getElementById('pw').remove()"))
+        assert _wait(lambda: rec.state == "recording" and len(rec.segments) == 2), rec.view()
+        svc.stop()
+        m = brec.list_recordings(tmp_path)[0]
+        assert m["state"] == "finished" and m["pauses"] >= 1 and len(m["segments"]) == 2
+        for seg in m["segments"]:
+            data = (tmp_path / "browser" / "recordings" / m["id"] / seg["file"]).read_bytes()
+            assert data[:4] == b"\x1aE\xdf\xa3" and len(data) > 1000            # a real WebM (EBML header) with frames in it
+        assert brec.delete(tmp_path, m["id"]) is True
+    finally:
+        svc.stop()
+        bl.set_active(None)
+        for s in (other, site):
+            s.shutdown()

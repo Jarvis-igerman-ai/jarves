@@ -176,6 +176,19 @@ def test_the_total_size_cap_deletes_the_oldest_first_but_never_the_running_one(t
     assert ids[0] in left and ids[2] in left and ids[1] not in left
 
 
+def test_the_switch_reports_a_missing_ffmpeg_instead_of_failing_later(monkeypatch, tmp_path):
+    import sys
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    assert br.ffmpeg_ready() is False
+    (tmp_path / "ffmpeg-1013").mkdir()
+    assert br.ffmpeg_ready() is False                                   # an empty folder is not an install
+    (tmp_path / "ffmpeg-1013" / "ffmpeg-win64.exe").write_bytes(b"x")
+    assert br.ffmpeg_ready() is True
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "0")
+    assert br.ffmpeg_ready() is True
+
+
 def test_the_sensitive_check_and_mask_cover_the_obvious_fields():
     js = br.SENSITIVE_JS
     for needle in ("password", "one-time-code", "cc-", "cvv", "otp", "iban", "shadowRoot", "iframe", "\\\\bpin\\\\b"):

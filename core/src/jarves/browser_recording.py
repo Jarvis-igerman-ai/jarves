@@ -18,14 +18,18 @@ Privacy rules (the point of this module):
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import sys
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from . import features as feat
 from . import logs
+from .calm import targets
 
 FORMAT_LABEL = "WebM video (VP8/VP9), no audio, one file per uninterrupted stretch"
 RETENTION_DAYS = 7
@@ -66,6 +70,26 @@ MASK_CSS = ("input[type=password], input[autocomplete^=cc-], input[autocomplete=
 MASK_INIT_SCRIPT = ("(() => { const add = () => { const s = document.createElement('style'); s.textContent = %s; "
                     "(document.head || document.documentElement).appendChild(s); }; "
                     "if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add); })();" % json.dumps(MASK_CSS))
+
+
+def ffmpeg_ready() -> bool:
+    """Playwright records video with its own small ffmpeg build ("playwright install ffmpeg", about 1 MB, no system change). Without it a
+    recording cannot start, so the switch says so instead of failing later. PLAYWRIGHT_BROWSERS_PATH=0 (inside the package) is not looked up."""
+    base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
+    if base == "0":
+        return True
+    if base:
+        d = Path(base)
+    elif sys.platform == "win32":
+        d = Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright"
+    elif sys.platform == "darwin":
+        d = Path.home() / "Library" / "Caches" / "ms-playwright"
+    else:
+        d = Path.home() / ".cache" / "ms-playwright"
+    try:
+        return any(p.is_dir() and any(p.iterdir()) for p in d.glob("ffmpeg-*"))
+    except OSError:
+        return False
 
 
 def root(home: Path) -> Path:
@@ -204,3 +228,20 @@ def purge(home: Path, *, clock: Callable[[], float] = time.time, days: int = RET
         total -= m["bytes"]
         n += bool(delete(home, m["id"]))
     return n
+
+
+FEATURE = "browser_recording"
+
+
+def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
+    if not ffmpeg_ready():
+        return False, "video needs Playwright's small ffmpeg: python -m playwright install ffmpeg"
+    return True, ""
+
+
+feat.register(FEATURE, "הקלטת וידאו של הפיילוט", "Record the browser pilot (video)", False, probe=_probe,
+              needs=["browser_pilot"], risk="high", stage="beta",
+              about="optionally record a pilot session on a local test page as a WebM video kept on this computer; recording pauses on password, card "
+                    "and code fields; old recordings are deleted after 7 days; you can delete any of them",
+              targets=targets("test_browser_recording.py"),
+              permissions=["screen of the pilot page is saved to a file"], settings="jarvis features on browser_recording")

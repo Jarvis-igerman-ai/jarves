@@ -85,14 +85,35 @@ function liveViewCard() {
     "aria-label": tx("כתובת דף בדיקה מקומי", "Local test page address"), style: "min-width:260px" });
   const pilotStart = el("button", { type: "button", onclick: async () => {
     msg.textContent = "";
-    try { await api("/api/browser/pilot/start", { method: "POST", body: JSON.stringify({ url: urlBox.value.trim() }) });
-      msg.textContent = tx("פיילוט נפתח בדף הבדיקה. אפשר ללחוץ על תצוגה חיה.", "Pilot started on the test page. You can press Live view."); }
+    try { const r = await api("/api/browser/pilot/start", { method: "POST", body: JSON.stringify({ url: urlBox.value.trim(), record: recOn.checked }) });
+      msg.textContent = tx("פיילוט נפתח בדף הבדיקה. אפשר ללחוץ על תצוגה חיה.", "Pilot started on the test page. You can press Live view.")
+        + (r && r.recording ? " " + tx("ההקלטה פועלת (נעצרת לבד בשדות סיסמה, כרטיס וקוד).", "Recording is on (it pauses by itself on password, card and code fields).") : "");
+      loadRecs(); }
     catch (e) { msg.textContent = e.message; } } }, tx("הפעלת פיילוט בדף בדיקה", "Start a test pilot"));
+  // B5: recording is a second, per-session choice on top of its own switch (both default OFF).
+  const recOn = el("input", { type: "checkbox", id: "rec-on", disabled: true });
+  const recBox = el("div", { class: "small", id: "rec-list" });
+  const loadRecs = async () => {
+    try {
+      const d = await api("/api/browser/recordings");
+      recOn.disabled = !d.enabled; if (!d.enabled) recOn.checked = false;
+      const rows = (d.recordings || []).map((m) => el("li", {}, el("code", {}, m.id), " ", m.state, " · " + (m.segments || []).length + tx(" קבצים · ", " file(s) · ") + Math.round((m.bytes || 0) / 1024) + " KB · ",
+        el("button", { type: "button", class: "ghost", "aria-label": tx("מחיקת ההקלטה ", "Delete recording ") + m.id, onclick: async () => {
+          if (!window.confirm(tx("למחוק את ההקלטה הזאת לצמיתות?", "Delete this recording for good?"))) return;
+          try { await api("/api/browser/recordings/delete", { method: "POST", body: JSON.stringify({ id: m.id }) }); loadRecs(); }
+          catch (e) { msg.textContent = e.message; } } }, tx("מחיקה", "Delete"))));
+      recBox.replaceChildren(el("div", { class: "muted" }, d.enabled ? d.format + tx(". נשמר ", ". Kept ") + d.retention_days + tx(" ימים, עד ", " days, up to ") + d.max_total_mb + " MB." : tx("הקלטה כבויה: jarvis features on browser_recording", "Recording is off: jarvis features on browser_recording")),
+        rows.length ? el("ul", {}, rows) : el("div", { class: "muted" }, tx("אין הקלטות.", "No recordings.")));
+    } catch (e) { recBox.replaceChildren(); }
+  };
+  loadRecs();
   const pilotStop = el("button", { type: "button", onclick: async () => {
     try { await api("/api/browser/pilot/stop", { method: "POST", body: "{}" }); img.style.display = "none"; end(tx("הפיילוט נסגר.", "The pilot is closed.")); }
     catch (e) { msg.textContent = e.message; } } }, tx("סגירת הפיילוט", "Close the pilot"));
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),
     el("div", { class: "row" }, urlBox, pilotStart, pilotStop),
+    el("div", { class: "row small" }, el("label", { for: "rec-on" }, recOn, " ", tx("להקליט את הסשן הזה כוידאו (נעצר בשדות סיסמה, כרטיס וקוד; טקסט שמוצג בדף כן מוקלט, לכן רק דפי בדיקה)", "Record this session as video (pauses on password, card and code fields; text simply shown on a page IS recorded, so test pages only)"))),
+    recBox,
     el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.", "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.")),
     el("div", { class: "row" }, start, takeBtn, giveBtn, contBtn, stop), msg, clockEl, img,
     el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("הצגת מה שמוקלד", "Show what I type")), typeBtn, ...keyBtns));

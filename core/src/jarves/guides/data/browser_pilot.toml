@@ -1,9 +1,9 @@
 order = 59
 category = "system"
-features = ["browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view"]
+features = ["browser_pilot", "browser_liveview", "browser_takeover", "browser_phone_view", "browser_recording"]
 aliases = ["פיילוט דפדפן", "browser pilot", "read only browser", "דפדפן לקריאה בלבד"]
 links = ["browser", "privacy"]
-error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP"]
+error_codes = ["BROWSER_PILOT_OFF", "BROWSER_PILOT_NOT_AGENT", "BROWSER_PILOT_READ_ONLY", "BROWSER_PILOT_URL", "BROWSER_PILOT_CAP", "BROWSER_RECORDING_OFF"]
 title_he = "פיילוט דפדפן (קריאה בלבד)"
 title_en = "Browser pilot (read only)"
 what_he = "ג'ארביס קורא דפים שהצבעתם עליהם: דפים מקומיים בלבד במחשב הזה או דפים ציבוריים. הוא לא מתחבר, לא שולח טפסים, לא לוחץ על דבר שמשנה מצב ולא שומר עוגיות או סיסמאות. כל פעולה נרשמת בקבלה (סוג בלבד)."
@@ -16,8 +16,8 @@ test_he = "הבדיקה רק בודקת שהמתג קיים. היא לא פות�
 test_en = "The check only sees that the switch exists. It opens no page and changes nothing."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "אין עוגיות, סיסמאות או טפסים. צילומי מסך לא נשמרים בשלב הזה. ביומן נרשם רק סוג הפעולה."
-privacy_en = "No cookies, passwords or forms. Screenshots are not stored at this stage. The log holds only the kind of action."
+privacy_he = "אין עוגיות, סיסמאות או טפסים. צילומי מסך לא נשמרים בשלב הזה. ביומן נרשם רק סוג הפעולה. רק אם מדליקים את browser_recording וגם מסמנים \"להקליט\" בהפעלה, הדף נשמר כוידאו במחשב הזה (ראו שלב ההקלטה)."
+privacy_en = "No cookies, passwords or forms. Screenshots are not stored at this stage. The log holds only the kind of action. Only if you switch on browser_recording AND tick Record when you start a pilot, the page is saved as a video on this computer (see the recording step)."
 
 [[steps]]
 he = "הדליקו את המתג \"פיילוט דפדפן\" (כבוי כברירת מחדל). זו תכונת בטא: קודם הדליקו תכונות בטא."
@@ -45,6 +45,10 @@ en = "Start a real pilot on a local test page: on the Live view card of the Brow
 [[steps]]
 he = "תצוגה בטלפון (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_phone_view. במחשב, בעמוד המכשירים, מסמנים לטלפון המצומד את ההרשאה \"תצוגת הדפדפן של הפיילוט\". אחרי שהפיילוט הופעל במחשב (בכרטיס התצוגה החיה בעמוד הדפדפן, עם כתובת דף בדיקה מקומי), הלשונית \"דפדפן\" בטלפון מציגה אותו: רואים את הדף כתמונה, ואם גם מתג \"שליטה ידנית\" דלוק אפשר לקחת שליטה: ללחוץ על התמונה, להקליד ולהחזיר. זה עובד רק בקישור המאובטח (https) של הטלפון. הטלפון יכול לעצור את הפיילוט אבל לא להפעיל אותו (טלפון עם ההרשאה הזאת יכול גם לעצור את הסשן שהפעלתם במחשב: זה בטוח, זה רק מסיים את הסשן); מה שמוקלד לא נרשם ומוסתר מהסוכן (במאמץ סביר: מחרוזות קצרות מ-3 תווים לא מוסתרות, ואחרי שמאפשרים לסוכן להמשיך הוא קורא את הדף כפי שהוא)."
 en = "Phone view (beta, off by default, its own switch): jarvis features on browser_phone_view. On the computer, on the Devices page, tick the permission Browser pilot view for the paired phone. Once the pilot has been started on the computer (on the Live view card of the Browser page, with a local test page address), the Browser tab on the phone shows it: you see the page as a picture, and if the Take over switch is also on you can take over: tap the picture, type and give back. It works only on the phone's secure (https) link. The phone can stop the pilot but not start it (a phone with this permission can also stop the session you started on the computer: that is fail-safe, it only ends the session); what you type is not logged and is hidden from the assistant (best effort: strings under 3 characters are not hidden, and after you let the assistant continue it re-reads the page as it is)."
+
+[[steps]]
+he = "הקלטת וידאו (בטא, כבויה כברירת מחדל, מתג נפרד): jarvis features on browser_recording. צריך פעם אחת את כלי הווידאו הקטן של Playwright: python -m playwright install ffmpeg (בערך מגה אחת, שום דבר אחר במחשב לא משתנה); עד אז המתג יגיד שזה חסר. כשמפעילים פיילוט בדף בדיקה מקומי מסמנים \"להקליט את הסשן הזה\" (בלי הסימון לא מקליטים כלום). ההקלטה היא וידאו WebM בלי קול, שנשמר רק במחשב הזה, בקובץ נפרד לכל קטע רצוף, ואף פעם לא נשלח למודל או החוצה. ברגע שבדף יש שדה סיסמה, כרטיס אשראי או קוד חד-פעמי ההקלטה נעצרת (הקובץ נסגר) וממשיכה לבד, בקובץ חדש, כשהשדה נעלם; אם אי אפשר לבדוק, לא מקליטים. השדות האלה גם מוסתרים בדף מהפריים הראשון. מה שלא מוגבל: טקסט שפשוט מוצג בדף (למשל מספר כרטיס בקבלה) מוקלט, ולכן מקליטים רק דפי בדיקה. הקלטות נמחקות אחרי 7 ימים, הכול מוגבל ל-500 מגה, ואפשר למחוק כל הקלטה בכל רגע: jarvis browser recordings, jarvis browser recording-delete ID."
+en = "Recording (beta, off by default, its own switch): jarvis features on browser_recording. It needs Playwright's small video helper once: python -m playwright install ffmpeg (about 1 MB, nothing else on the computer changes); until then the switch says so. When you start a pilot on a local test page tick Record this session (without the tick nothing is recorded). The recording is a WebM video with no sound, kept only on this computer, one file per uninterrupted stretch, and it is never sent to a model or anywhere else. The moment the page has a password, card or one-time-code field the recording pauses (the file is closed) and resumes by itself, in a new file, when the field is gone; if the check cannot run, nothing is recorded. Those fields are also blanked on the page from the first frame. What is NOT covered: text that is simply shown on a page (a card number on a receipt) is recorded, so record test pages only. Recordings are deleted after 7 days, the total is capped at 500 MB, and you can delete any recording at any time: jarvis browser recordings, jarvis browser recording-delete ID."
 
 [[problems]]
 he = "הלשונית דפדפן לא מופיעה בטלפון או אומרת שאין פיילוט"
@@ -81,3 +85,9 @@ he = "התצוגה החיה לא נפתחת או נסגרה"
 en = "The live view will not open, or it closed"
 fix_he = "היא פועלת רק במחשב עצמו, רק כשדף בדיקה מקומי (localhost) פתוח בסשן הפיילוט, פגה אחרי 5 דקות, ונסגרת כשהסשן נעצר או עובר לדף אחר. התחילו אותה שוב מעמוד הדפדפן."
 fix_en = "It works only on the computer itself, only while a local test page (localhost) is open in the pilot session, expires after 5 minutes, and ends when the session stops or moves to another page. Start it again from the Browser page."
+
+[[problems]]
+he = "ההקלטה נעצרה או חסרים קטעים"
+en = "The recording stopped or has gaps"
+fix_he = "זה בכוונה: ההקלטה נעצרת כשבדף יש שדה סיסמה, כרטיס או קוד, כשהסשן מושהה, או כשעברו 10 דקות לקובץ או 30 דקות בסך הכול. היא ממשיכה בקובץ חדש (part-002 וכן הלאה). אם אין קבצים בכלל: בדקו שהמתג browser_recording דלוק ושסימנתם \"להקליט\" בעת ההפעלה."
+fix_en = "That is on purpose: recording pauses while the page has a password, card or code field, while the session is paused, after 10 minutes in one file and after 30 minutes in total. It resumes in a new file (part-002 and so on). If there are no files at all: check that the browser_recording switch is on and that you ticked Record when you started."
