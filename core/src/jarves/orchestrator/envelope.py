@@ -30,7 +30,7 @@ LIVE_STATES = ("RUNNING", "IDLE", "WAITING_INPUT", "WAITING_APPROVAL", "PAUSED",
 CODES = ("NO_LIVE_CHANNEL", "SESSION_CLOSED", "WAITING_FOR_APPROVAL", "AUTH_REQUIRED", "UNSUPPORTED_ATTACH",
          "BUDGET_REACHED", "AMBIGUOUS_SESSION", "NO_SUCH_SESSION", "NOT_ALLOWED_PROJECT", "SECOND_WRITER",
          "HOP_LIMIT", "CORE_NOT_RUNNING", "PROVIDER_MISSING", "NOT_APPROVED", "EXPIRED", "QUEUED", "SENT", "NOT_LOOPBACK",
-         "SERVER_ERROR", "MODEL_NOT_ALLOWED", "ok")
+         "SERVER_ERROR", "MODEL_NOT_ALLOWED", "CONFIG_NOT_VERIFIED", "ok")
 MAX_HOPS = 2
 DEFAULT_TTL_S = 6 * 3600
 TEXT_CAP = 1200                     # one payload string
@@ -220,6 +220,10 @@ TEXTS: dict[str, tuple[str, str]] = {
                           "agents.opencode_model, or allow paid models with agents.opencode_allow_paid.",
                           "המודל של OpenCode אינו חינמי או מקומי, או שהמחיר שלו לא ידוע. בחרו מודל חינמי ב-agents.opencode_model, "
                           "או אשרו מודלים בתשלום ב-agents.opencode_allow_paid."),
+    "CONFIG_NOT_VERIFIED": ("I could not confirm that OpenCode's own settings for this folder keep to a free model (an "
+                            "override or a paid agent model, or the settings could not be read), so I did not send anything.",
+                            "לא הצלחתי לוודא שהגדרות OpenCode עצמן בתיקייה הזאת נשארות במודל חינמי (עקיפה או מודל בתשלום "
+                            "לסוכן, או שלא ניתן לקרוא את ההגדרות), ולכן לא שלחתי כלום."),
     "BUDGET_REACHED": ("Today's limit of turns I may start is reached.", "הגעתי למכסה היומית של תורות שמותר לי להתחיל."),
     "AMBIGUOUS_SESSION": ("More than one session matches; which one?", "יותר מסשן אחד מתאים; לאיזה התכוונת?"),
     "NO_SUCH_SESSION": ("I don't see such a session.", "אני לא רואה סשן כזה."),

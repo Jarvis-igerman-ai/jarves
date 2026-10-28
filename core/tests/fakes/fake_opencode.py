@@ -27,6 +27,7 @@ EVENTS = [{"type": "server.connected", "properties": {}},
 class FakeOpenCode:
     def __init__(self, directory: str = "C:/proj") -> None:
         self.keepalive = False
+        self.config: dict | None = {}                       # what GET /config answers; None = the endpoint answers 404
         self.status_for_posts = 0                          # e.g. 302 to test that a redirect is no success
         self.force_dir = ""                                # set to make the fake create sessions in another folder
         self.requests: list[tuple[str, str]] = []
@@ -95,6 +96,8 @@ class FakeOpenCode:
                     return
                 body = {"/global/health": {"healthy": True, "version": "1.0.0"}, "/session": outer.sessions,
                         "/session/status": STATUS}.get(self.path)
+                if self.path.split("?")[0] == "/config":
+                    body = outer.config
                 if body is None:
                     self.send_response(404)
                     self.send_header("Content-Length", "0")

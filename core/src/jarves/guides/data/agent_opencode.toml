@@ -39,8 +39,8 @@ en = "Check the connection: jarvis agents opencode status, then jarvis agents op
 action = "command:jarvis agents opencode status"
 
 [[steps]]
-he = "בחירת מודל: הגדירו agents.opencode_model כ-ספק/מודל (למשל openrouter/free). ג'ארביס מסווג אותו לפי טבלת המודלים (חינמי, מקומי, בתשלום או לא מוכר) ושולח אותו ל-OpenCode. הסיווג והעלות מופיעים בכל חלון אישור, ו-\"jarvis agents doctor\" מציג שורת מודל."
-en = "Choose a model: set agents.opencode_model to provider/model (for example openrouter/free). JARVES classifies it from its model table (free, local, paid or unknown) and sends it to OpenCode. The class and cost show in every approval popup, and jarvis agents doctor shows a model row."
+he = "בחירת מודל: הגדירו agents.opencode_model כ-ספק/מודל (למשל openrouter/openrouter/free: הספק openrouter והמודל openrouter/free, הנתב החינמי של OpenRouter). ג'ארביס מסווג אותו לפי טבלת המודלים (חינמי, מקומי, בתשלום או לא מוכר) ושולח אותו ל-OpenCode. לפני כל חלון אישור ג'ארביס קורא את ההגדרות הסופיות של OpenCode לתיקייה (opencode.json גלובלי ושל הפרויקט) וחוסם אם הספק עוקף כתובת או מודלים, או אם small_model או מודל של סוכן או מצב מוגדר למשהו שאינו חינמי או מקומי; אם ההגדרות לא נקראות הוא חוסם. מודלים שלא הוגדרו הם בחירה של OpenCode עצמו. הסיווג והעלות מופיעים בכל חלון אישור, ו-\"jarvis agents doctor\" מציג שורת מודל."
+en = "Choose a model: set agents.opencode_model to provider/model (for example openrouter/openrouter/free: provider openrouter, model openrouter/free, OpenRouter's free router). JARVES classifies it from its model table (free, local, paid or unknown) and sends it to OpenCode. Before every approval popup JARVES reads OpenCode's resolved settings for the folder (global and project opencode.json) and refuses if the provider is overridden (base URL or models), or if small_model or an agent or mode model is set to anything that is not free or local; if the settings cannot be read it refuses. Models left unset are OpenCode's own choice. The class and cost show in every approval popup, and jarvis agents doctor shows a model row."
 action = "command:jarvis agents doctor"
 
 [[steps]]
@@ -56,6 +56,12 @@ he = "MODEL_NOT_ALLOWED: המודל לא מאושר"
 en = "MODEL_NOT_ALLOWED: the model is not allowed"
 fix_he = "המודל אינו חינמי או מקומי, או שהמחיר שלו לא ידוע (גם ברירת המחדל של OpenCode נחשבת כך). הגדירו agents.opencode_model למודל חינמי, או הדליקו agents.opencode_allow_paid אם אתם מקבלים עלות."
 fix_en = "The model is not free or local, or its price is unknown (OpenCode's own default counts as unknown). Set agents.opencode_model to a free model, or turn on agents.opencode_allow_paid if you accept a cost."
+
+[[problems]]
+he = "CONFIG_NOT_VERIFIED: לא אומתו ההגדרות של OpenCode"
+en = "CONFIG_NOT_VERIFIED: OpenCode's own settings were not confirmed"
+fix_he = "opencode.json (בתיקיית הפרויקט או הגלובלי) עוקף את הספק, מגדיר small_model או מודל סוכן שאינו חינמי, או שאי אפשר היה לקרוא את ההגדרות. הסירו את העקיפה או הגדירו מודל חינמי, או אשרו מודלים בתשלום ב-agents.opencode_allow_paid."
+fix_en = "opencode.json (in the project or global) overrides the provider, sets a small_model or agent model that is not free, or the settings could not be read. Remove the override or set a free model, or allow paid models with agents.opencode_allow_paid."
 
 [[problems]]
 he = "AUTH_REQUIRED: צריך סיסמה"

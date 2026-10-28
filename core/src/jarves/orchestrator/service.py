@@ -543,6 +543,10 @@ class Orchestrator:
             prof = self.opencode_profile()
             if not prof["ok"]:
                 return {"ok": False, "code": "MODEL_NOT_ALLOWED", "text": say("MODEL_NOT_ALLOWED", lang)}
+            why = self._verify_opencode_config(prof, m.directory)
+            if why:
+                self.db.audit(by, kind, session_id=sid, decision="refused", detail=f"opencode config: {why[:120]}")
+                return {"ok": False, "code": "CONFIG_NOT_VERIFIED", "text": say("CONFIG_NOT_VERIFIED", lang), "detail": why}
             raw_out = wrap_for_agent([{**env.to_dict(), "payload": env.payload}]) if kind == "status_request" else text
             shown = clean(raw_out, OC_PROMPT_SHOWN + 1, keep_code=True)
             if len(shown) > OC_PROMPT_SHOWN:
@@ -817,6 +821,10 @@ class Orchestrator:
                 self._opencode_client().health()
             except opencode.OpenCodeError as e:
                 return {"ok": False, "code": e.code, "text": say(e.code, lang), "detail": e.detail}
+            why = self._verify_opencode_config(prof, proj.path)      # OpenCode's resolved settings, read just before the popup
+            if why:
+                self.db.audit(by, "start", decision="refused", detail=f"opencode config: {why[:120]}")
+                return {"ok": False, "code": "CONFIG_NOT_VERIFIED", "text": say("CONFIG_NOT_VERIFIED", lang), "detail": why}
         if not approved and not self._ask_owner(
                 f"Start a new {provider} session in {proj.name}" + (" (project folder)" if here else
                                                                      " (new worktree)")
@@ -852,21 +860,11 @@ class Orchestrator:
         default (OpenCode's own choice, price unknown to JARVES) only with agents.opencode_allow_paid."""
         from .. import model_policy as mp
         spec = (self.acfg.opencode_model or "").strip()
-        out = {"model": spec or "(OpenCode's own default)", "kind": "default", "ok": False, "cap_usd_per_day": self.acfg.max_cost_usd_per_day,
+        out = {"model": spec or "(OpenCode's own default)", "kind": "default", "ok": False,
+               "cost_cap_note": "the USD cap is NOT enforced for OpenCode (it reports no cost); only the daily turn limit applies",
                "allow_paid": bool(self.acfg.opencode_allow_paid), "error": ""}
-        try:
-            if spec:
-                prov, mid = opencode.parse_model(spec)
-                try:
-                    reg = mp.load_registry(self.home / "models.toml")
-                except mp.ModelConfigError:
-                    reg = mp.ModelRegistry()
-                info = reg.get(spec)                       # the FULL "provider/model" id only, and the provider must match
-                if info is not None and info.provider != prov:
-                    info = None
-                out["kind"] = "unknown" if info is None else ("local" if info.local else ("paid" if info.paid else "free"))
-        except opencode.OpenCodeError as e:
-            out.update(kind="unknown", error=e.detail)
+        if spec:
+            out["kind"], out["error"] = self._classify_model(spec)
         paid_ok = bool(self.acfg.opencode_allow_paid) and not out["error"] and self.acfg.max_cost_usd_per_day > 0
         if self.acfg.opencode_allow_paid and self.acfg.max_cost_usd_per_day <= 0:
             out["error"] = out["error"] or "agents.opencode_allow_paid needs agents.max_cost_usd_per_day above 0"
@@ -874,9 +872,61 @@ class Orchestrator:
         out["spec"] = spec                                  # exactly what was classified; this is what gets sent
         return out
 
+    def _classify_model(self, spec: str) -> tuple[str, str]:
+        """("free"|"local"|"paid"|"unknown", error) for an OpenCode "providerID/modelID". The registry id is the MODEL part
+        (OpenCode names OpenRouter's free router providerID openrouter, modelID openrouter/free, so the spec is
+        openrouter/openrouter/free) and the registry entry's provider must equal the providerID: another provider with the
+        same model name is unknown, never free."""
+        from .. import model_policy as mp
+        try:
+            prov, mid = opencode.parse_model(spec)
+        except opencode.OpenCodeError as e:
+            return "unknown", e.detail
+        try:
+            reg = mp.load_registry(self.home / "models.toml")
+        except mp.ModelConfigError:
+            reg = mp.ModelRegistry()
+        info = reg.get(mid)
+        if info is None or info.provider.lower() != prov.lower():
+            return "unknown", ""
+        return ("local" if info.local else ("paid" if info.paid else "free")), ""
+
+    def _verify_opencode_config(self, prof: dict, directory: str) -> str:
+        """"" = OpenCode's RESOLVED config for `directory` keeps to the free model; else a short reason. Only in free mode
+        (a paid model is allowed explicitly, so there is nothing to protect). Fail closed: unreadable config = refusal.
+        Refuses when: the chosen provider has a baseURL / models override, `small_model` or any agent / mode model is set
+        to anything that is not free or local. (Models left unset are OpenCode's own choice: documented, not controlled.)"""
+        if prof["kind"] not in ("free", "local") or prof.get("allow_paid"):
+            return ""
+        try:
+            cfg = self._opencode_client().config(directory)
+        except opencode.OpenCodeError as e:
+            return f"the settings could not be read ({e.code})"
+        prov = opencode.parse_model(prof["spec"])[0].lower()
+        provs = cfg.get("provider") if isinstance(cfg.get("provider"), dict) else {}
+        for pid, pv in provs.items():
+            if str(pid).lower() != prov or not isinstance(pv, dict):
+                continue
+            opts = pv.get("options") if isinstance(pv.get("options"), dict) else {}
+            if pv.get("baseURL") or opts.get("baseURL") or pv.get("models") or pv.get("npm"):
+                return f"the provider {pid} is overridden in opencode.json (baseURL / models / package)"
+        models = [("small_model", cfg.get("small_model"))]
+        for group in ("agent", "mode"):
+            g = cfg.get(group)
+            for name, a in (g.items() if isinstance(g, dict) else []):
+                models.append((f"{group}.{name}", a.get("model") if isinstance(a, dict) else None))
+        for where, m in models:
+            if m in (None, ""):
+                continue
+            kind = self._classify_model(str(m))[0] if isinstance(m, str) else "unknown"
+            if kind not in ("free", "local"):
+                return f"{where} is set to a model that is not free or local ({str(m)[:60]})"
+        return ""
+
     def _opencode_model_line(self, prof: dict) -> str:
-        cost = ("no cost expected for this main model (OpenCode's own small or sub-agent models are not controlled by JARVES)"
-                if prof["kind"] in ("free", "local") else
+        cost = ("no cost expected: JARVES checked OpenCode's resolved settings for this folder just now (no provider "
+                "override, no paid agent model); it still cannot measure spend, and models left unset are OpenCode's choice"
+                if prof["kind"] in ("free", "local") and not prof.get("allow_paid") else
                 "COST UNKNOWN to JARVES: it cannot measure or cap OpenCode spend (only the daily turn limit applies)")
         return f"Model: {prof['model']} ({prof['kind']}); {cost}."
 

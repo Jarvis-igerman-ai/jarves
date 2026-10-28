@@ -186,6 +186,13 @@ class Client:
         """POST /session/:id/abort: stops the running turn."""
         self._write(f"/session/{self._sid(session_id)}/abort" + self._dir(directory), {})
 
+    def config(self, directory: str) -> dict:
+        """GET /config?directory=...: OpenCode's RESOLVED settings for that folder (global + project opencode.json). Read-only."""
+        d = self.get_json("/config" + self._dir(directory))
+        if not isinstance(d, dict):
+            raise OpenCodeError("SERVER_ERROR", "unexpected config shape")
+        return d
+
     def health(self) -> dict:
         d = self.get_json("/global/health")
         if not isinstance(d, dict) or not d.get("healthy"):
