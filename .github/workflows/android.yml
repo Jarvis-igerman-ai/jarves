@@ -30,7 +30,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check that the Gradle wrapper jar is an official one
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb  # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6  # v6.4.0
       - name: Build the debug APK and run the unit tests (the runner image ships JDK 21 and the Android SDK)
         shell: bash
         working-directory: android
