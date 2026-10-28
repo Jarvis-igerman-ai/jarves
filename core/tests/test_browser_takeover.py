@@ -407,9 +407,9 @@ def test_takeover_in_the_real_dashboard(browser, dash, tmp_path):  # noqa: F811
         p.click("#live-view button:has-text('Take over')")
         p.wait_for_function("() => document.querySelector('#live-view').innerText.includes('You are in control')", timeout=30000)
         assert s.state == bp.HUMAN
-        p.fill("#live-view input[autocomplete=off]", SECRET)
+        p.fill("#live-view input[aria-label^=Text]", SECRET)
         p.click("#live-view button:has-text('Type into the page')")
-        p.wait_for_function("() => !document.querySelector('#live-view input[autocomplete=off]').value", timeout=30000)
+        p.wait_for_function("() => !document.querySelector('#live-view input[aria-label^=Text]').value", timeout=30000)
         p.click("#live-view button[data-key=Enter]")
         p.click("#live-view img")
         deadline = time.time() + 15
