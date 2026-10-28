@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- The network, and (A3) the microphone for push-to-talk. No always-on listening, no notifications yet, no foreground service. -->
+    <!-- The network; the microphone for push-to-talk (A3, only while the button is held); notifications (A3b, only after the owner turns the switch on). No always-on listening, no foreground service: WorkManager's is removed below. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Push-to-talk only: asked for on the first press of the Hold to talk button, used only while the button is held and the screen is visible. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- A3b: a count of waiting approvals, never their content. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
 
     <application
         android:allowBackup="false"
@@ -21,5 +25,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- WorkManager's foreground service is not used (no expedited/long work): it is not part of this app. -->
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService" tools:node="remove" />
     </application>
 </manifest>

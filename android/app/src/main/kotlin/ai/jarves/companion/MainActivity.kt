@@ -62,6 +62,19 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
+    private val notifyPrefs = NotifyPrefs(app)
+    private val _notify = MutableStateFlow(notifyPrefs.enabled && NotifyWork.permissionGranted(app))
+    val notifyOn: StateFlow<Boolean> = _notify
+
+    init {
+        if (notifyPrefs.enabled && NotifyWork.permissionGranted(app)) NotifyWork.start(app)     // the switch says ON: make sure the check is really scheduled
+    }
+
+    fun setNotify(on: Boolean) {
+        notifyPrefs.enabled = on
+        _notify.value = on
+        if (on) NotifyWork.start(getApplication()) else NotifyWork.stop(getApplication())
+    }
     private val recorder = Recorder { viewModelScope.launch { talkEnd() } }          // the 55 s cap counts as letting go
     private val machine = TalkMachine(recorder)
     private val _talk = MutableStateFlow<Talk>(Talk.Idle)
@@ -181,6 +194,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun unpair() {
+        setNotify(false)
         machine.reset()
         sync()
         poll?.cancel()
@@ -203,6 +217,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.setNotify(granted) }
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) model.micDenied() }
 
     private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -219,6 +234,12 @@ class MainActivity : ComponentActivity() {
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
                             is Screen.Status -> {
                                 StatusScreen(x, model::unpair)
+                                val on by model.notifyOn.collectAsStateWithLifecycle()
+                                NotifyCard(on) { want ->
+                                    if (!want) model.setNotify(false)
+                                    else if (NotifyWork.permissionGranted(this@MainActivity)) model.setNotify(true)
+                                    else askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
                                 if (x.link is Link.Online) {
                                     val t by model.talk.collectAsStateWithLifecycle()
                                     TalkCard(

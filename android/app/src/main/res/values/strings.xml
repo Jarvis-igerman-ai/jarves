@@ -29,6 +29,11 @@
     <string name="err_address">Type the address as host:port, for example 192.168.1.20:8766 (no http, no path).</string>
     <string name="cert_changed">The computer\'s certificate changed. This may be a new certificate on your computer, or someone in between. Pair again only after you compare the fingerprint.</string>
     <string name="unpair_note">Unpairing here only forgets the pairing on this phone. Also remove this phone on the computer (Phone page) so its key stops working.</string>
+    <string name="notify_switch">Tell me when approvals are waiting</string>
+    <string name="notify_note">Off by default. About every 15 minutes this phone asks your computer how many approvals are waiting and shows only the number, never what they are. Turning it off or unpairing stops the check.</string>
+    <string name="notify_channel">Waiting approvals</string>
+    <string name="notify_one">1 approval is waiting on your computer</string>
+    <string name="notify_many">%1$d approvals are waiting on your computer</string>
     <string name="talk_title">Talk to JARVES</string>
     <string name="talk_hold">Hold to talk</string>
     <string name="talk_listening">Listening: let go to send</string>
