@@ -743,7 +743,7 @@ def _cmd_recordings(a, home) -> int:
     items = rec.list_recordings(home)
     print(f"pilot recordings ({len(items)}): {rec.FORMAT_LABEL}. Kept {rec.RETENTION_DAYS} days; password, card and code fields pause the recording.")
     for m in items:
-        print(f"  {m['id']}  {m.get('state', '?')}  {len(m.get('segments', []))} file(s)  {m['bytes'] // 1024} KB  {m['path']}")
+        print(f"  {m['id']}  {m.get('state', '?')}  {len(m.get('segments', []))} file(s)  {m['bytes'] // 1024} KB  {rec.root(home) / m['id']}")
     print("delete: jarvis browser recording-delete <id>   (switch: jarvis features on browser_recording; start a recorded pilot from the dashboard)")
     return 0
 

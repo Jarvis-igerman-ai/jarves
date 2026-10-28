@@ -9,7 +9,12 @@
   "Delete this recording for good?": "למחוק את ההקלטה הזאת לצמיתות?",
   "No recordings.": "אין הקלטות.",
   "Record this session as video (pauses on password, card and code fields; text simply shown on a page IS recorded, so test pages only)": "להקליט את הסשן הזה כוידאו (נעצר בשדות סיסמה, כרטיס וקוד; טקסט שמוצג בדף כן מוקלט, לכן רק דפי בדיקה)",
-  "Recording is off: jarvis features on browser_recording": "הקלטה כבויה: jarvis features on browser_recording",
-  "Recording is on (it pauses by itself on password, card and code fields).": "ההקלטה פועלת (נעצרת לבד בשדות סיסמה, כרטיס וקוד)."
+  "Recording is on (it pauses by itself on password, card and code fields).": "ההקלטה פועלת (נעצרת לבד בשדות סיסמה, כרטיס וקוד).",
+  "recording": "מקליט",
+  "finished": "הסתיים",
+  "● REC": "● מקליט",
+  "Recording paused (sensitive field or you are in control)": "הקלטה מושהית (שדה רגיש או שליטה ידנית)",
+  "Recording is off. To turn it on: ": "ההקלטה כבויה. להדלקה: ",
+  "Playwright's video helper is missing. To install it: ": "חסר כלי הווידאו של Playwright. להתקנה: "
  }
 }

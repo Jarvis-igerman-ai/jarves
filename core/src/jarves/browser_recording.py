@@ -5,15 +5,19 @@ What it records: the pilot page as a WebM video (Playwright screencast, no audio
 <home>/browser/recordings/<id>/ with a manifest. It never leaves the computer and is never given to a model.
 
 Privacy rules (the point of this module):
-  * Recording is PAUSED (the current file is closed) the moment the page has a visible password, card, one-time-code or similar field,
-    and resumes by itself when no such field is left. The check runs several times a second; a fault while checking counts as "sensitive".
-  * Pausing also happens while the pilot session itself is paused/stopped.
-  * As a second line, the page gets a style that blanks the text of those fields from the first frame (`MASK_CSS`), because a check
-    that runs a few times a second can miss the first few frames.
-  * Honest limits (shown in the guide): text that is only SHOWN on a page (a card number printed in a receipt) is not a field and is
-    recorded; use the pilot on test pages only. The first frames after a field appears are covered by the mask, not by the pause.
+  * Recording is PAUSED (the current file is closed) when the page has a visible password, card, one-time-code or similar field, and
+    resumes by itself when no such field is left. The check runs about 3 times a second while the browser is idle AND right before every
+    browser action; during one long action it does not run, so there can be a gap of up to that action's length between a field appearing
+    and the file closing. A fault while checking, or a frame that cannot be read (cross-origin, sandboxed), counts as "sensitive".
+  * Recording is only on while the ASSISTANT is driving (session state AGENT). It is paused for the whole time the owner has taken over
+    (HUMAN): what the owner types goes to ordinary fields too, and a video would show it.
+  * To cover the gap, the page gets an init script that tags matching fields (also ones added later, open shadow roots included) and a
+    style that blanks them in the very frame they appear (`MASK_INIT_SCRIPT`). The check and the mask use the same rule.
+  * Honest limits (shown in the guide): text that is only SHOWN on a page (a card number in a receipt) is not a field and is recorded;
+    closed shadow roots and contenteditable areas are not recognised; the video shows what the page shows, at 1024x768 and 10 frames
+    a second, and is not tamper-proof. Use the pilot on test pages only.
   * Retention: recordings older than RETENTION_DAYS are deleted, the total is capped, one recording has a time cap. The owner can
-    delete any recording at any time (`jarvis browser recordings delete`).
+    delete any recording at any time (`jarvis browser recording-delete ID`).
 """
 from __future__ import annotations
 
@@ -31,7 +35,7 @@ from . import features as feat
 from . import logs
 from .calm import targets
 
-FORMAT_LABEL = "WebM video (VP8/VP9), no audio, one file per uninterrupted stretch"
+FORMAT_LABEL = "WebM video (VP8/VP9), no audio, 1024x768 at 10 frames a second, one file per uninterrupted stretch; shows page content, not tamper-proof"
 RETENTION_DAYS = 7
 MAX_TOTAL_MB = 500
 MAX_RECORDING_S = 30 * 60
@@ -44,32 +48,53 @@ _ID = re.compile(r"^rec-[0-9a-f]{12}$")
 # name / id / placeholder / aria-label words for cards, codes and secrets (English and Hebrew).
 _WORDS = (r"pass(word|code)?|pwd|card|cc-?(num|number|csc|cvc|cvv|exp)|cvv|cvc|csc|otp|one.?time|2fa|mfa|token|secret|\bpin\b|iban|"
           r"ssn|security.?code|verification.?code|סיסמ|כרטיס|אשראי|קוד|תעודת.?זהות")
-SENSITIVE_JS = """() => {
+_SENSITIVE_FN = """
   const words = new RegExp(%r, 'i');
+  const skip = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'range', 'color'];
+  const isSensitive = (e) => {
+    const t = (e.type || '').toLowerCase();
+    if (skip.includes(t)) return false;
+    const ac = (e.getAttribute('autocomplete') || '').toLowerCase();
+    const label = [e.name, e.id, e.placeholder, e.getAttribute('aria-label')].join(' ');
+    return t === 'password' || /cc-|one-time-code|current-password|new-password/.test(ac) || words.test(label);
+  };
   const visible = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+""" % _WORDS
+
+# Checked from Python a few times a second and before every job: is a sensitive field visible anywhere (open shadow roots and same-origin
+# frames included)? A frame that cannot be read (cross-origin, sandboxed) counts as sensitive: nothing is filmed while one is on the page.
+SENSITIVE_JS = "() => {" + _SENSITIVE_FN + """
   const seen = (root) => {
-    for (const e of root.querySelectorAll('input, textarea')) {
-      const t = (e.type || '').toLowerCase();
-      if (['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'range', 'color'].includes(t)) continue;
-      const ac = (e.getAttribute('autocomplete') || '').toLowerCase();
-      const label = [e.name, e.id, e.placeholder, e.getAttribute('aria-label')].join(' ');
-      if ((t === 'password' || /cc-|one-time-code|current-password|new-password/.test(ac) || words.test(label)) && visible(e)) return true;
-    }
+    for (const e of root.querySelectorAll('input, textarea')) { if (isSensitive(e) && visible(e)) return true; }
     for (const h of root.querySelectorAll('*')) { if (h.shadowRoot && seen(h.shadowRoot)) return true; }
+    for (const f of root.querySelectorAll('iframe')) { let d = null; try { d = f.contentDocument; } catch (e) { return true; } if (!d || seen(d)) return true; }
     return false;
   };
-  if (seen(document)) return true;
-  for (const f of document.querySelectorAll('iframe')) { try { if (f.contentDocument && seen(f.contentDocument)) return true; } catch (e) { return true; } }
-  return false;
-}""" % _WORDS
+  return seen(document);
+}"""
 
-MASK_CSS = ("input[type=password], input[autocomplete^=cc-], input[autocomplete=one-time-code], input[autocomplete=current-password], "
-            "input[autocomplete=new-password] { color: transparent !important; text-shadow: none !important; caret-color: transparent !important; "
-            "-webkit-text-security: disc !important; background: #000 !important; }")
-MASK_INIT_SCRIPT = ("(() => { const add = () => { const s = document.createElement('style'); s.textContent = %s; "
-                    "(document.head || document.documentElement).appendChild(s); }; "
-                    "if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add); })();" % json.dumps(MASK_CSS))
+# Runs in every page from the first moment: tags matching fields (also later ones, open shadow roots) so the style blanks them at once, in
+# the very frame they appear, not only when the next check runs. Closed shadow roots and contenteditable are NOT covered (see the guide).
+MASK_INIT_SCRIPT = "(() => {" + _SENSITIVE_FN + """
+  const css = %s;
+  const tag = (root) => {
+    for (const e of root.querySelectorAll('input, textarea')) { if (isSensitive(e)) e.setAttribute('data-jarves-hide', '1'); }
+    for (const h of root.querySelectorAll('*')) { if (h.shadowRoot) watch(h.shadowRoot); }
+  };
+  const watch = (root) => {
+    if (root.__jarvesWatched) return; root.__jarvesWatched = true;
+    if (root.nodeType === 11 || root !== document) { const st = document.createElement('style'); st.textContent = css; root.appendChild(st); }
+    tag(root);
+    new MutationObserver(() => tag(root)).observe(root, { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['type', 'name', 'id', 'placeholder', 'autocomplete', 'aria-label'] });
+  };
+  const start = () => { const st = document.createElement('style'); st.textContent = css; (document.head || document.documentElement).appendChild(st); watch(document); };
+  if (document.documentElement) start(); else document.addEventListener('DOMContentLoaded', start);
+})();""" % json.dumps("[data-jarves-hide], input[type=password], input[autocomplete^=cc-], input[autocomplete=one-time-code], "
+                      "input[autocomplete=current-password], input[autocomplete=new-password] { color: transparent !important; "
+                      "text-shadow: none !important; caret-color: transparent !important; -webkit-text-security: disc !important; background: #000 !important; }")
+MASK_CSS = "[data-jarves-hide], input[type=password] { color: transparent !important; }"          # kept for the tests: the rule is in the init script
 
 
 def ffmpeg_ready() -> bool:
@@ -92,6 +117,15 @@ def ffmpeg_ready() -> bool:
         return False
 
 
+def _private(d: Path) -> None:
+    """Owner-only folder where the OS supports it (Pi/Linux/macOS); on Windows the profile folder is already private to the account."""
+    try:
+        if sys.platform != "win32":
+            d.chmod(0o700)
+    except OSError:
+        pass
+
+
 def root(home: Path) -> Path:
     return Path(home) / "browser" / "recordings"
 
@@ -105,6 +139,8 @@ class Recorder:
         self.id = rec_id or "rec-" + uuid.uuid4().hex[:12]
         self.dir = root(self.home) / self.id
         self.dir.mkdir(parents=True, exist_ok=True)
+        _private(root(self.home))
+        _private(self.dir)
         self.started = clock()
         self.segments: list[dict] = []
         self.pauses = 0
@@ -195,14 +231,14 @@ def list_recordings(home: Path) -> list[dict]:
             m = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             m = {"id": d.name, "state": "unknown", "segments": []}
-        m["path"] = str(d)
         m["bytes"] = sum(p.stat().st_size for p in d.glob("*") if p.is_file())
         out.append(m)
     return sorted(out, key=lambda m: m.get("started") or 0, reverse=True)
 
 
-def delete(home: Path, rec_id: str) -> bool:
-    if not _ID.match(str(rec_id)):
+def delete(home: Path, rec_id: str, *, running: str = "") -> bool:
+    """Delete one recording. [running] = the id of the recording that is being written right now: it cannot be deleted until it ends."""
+    if not _ID.match(str(rec_id)) or rec_id == running:
         return False
     d = root(home) / rec_id
     if not d.is_dir():
@@ -219,14 +255,14 @@ def purge(home: Path, *, clock: Callable[[], float] = time.time, days: int = RET
     items = [m for m in list_recordings(home) if m.get("id") != keep]
     for m in items[:]:
         if clock() - float(m.get("started") or 0) > days * 86400:
-            n += bool(delete(home, m["id"]))
+            n += bool(delete(home, m["id"], running=keep))
             items.remove(m)
     total = sum(m["bytes"] for m in items)
     for m in reversed(items):                                  # oldest first
         if total <= max_mb * 1024 * 1024:
             break
         total -= m["bytes"]
-        n += bool(delete(home, m["id"]))
+        n += bool(delete(home, m["id"], running=keep))
     return n
 
 

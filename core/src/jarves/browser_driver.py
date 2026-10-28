@@ -152,6 +152,7 @@ class PlaywrightDriver:
             if time.monotonic() > deadline or box.get("cancel"):    # the caller gave up: never run a stale job (a late key press)
                 done.set()
                 continue
+            self._rec_tick()                                        # look for a sensitive field right BEFORE the action, not only between actions
             try:
                 box["r"] = fn()
             except Exception as e:                                  # noqa: BLE001 - the caller decides what to say
@@ -176,7 +177,7 @@ class PlaywrightDriver:
             return
         try:
             s = self.session_ref()
-            self.recorder.tick(self._page, s is not None and s.state in ("AGENT", "HUMAN"))
+            self.recorder.tick(self._page, s is not None and s.state == "AGENT")      # never while the owner is in control (HUMAN) or paused
         except Exception:                                           # noqa: BLE001
             logs.warn("browser", "BROWSER_RECORDING_TICK_FAILED", "a recording check failed; it keeps the file closed")
 
@@ -396,16 +397,30 @@ def dashboard_routes(register) -> None:
     def stop(ctx, _m, _b):
         bad = local_only(ctx)
         return bad or (200, service(ctx).stop())
+    def running_id(ctx) -> str:
+        d = service(ctx).driver
+        r = getattr(d, "recorder", None)
+        return r.id if r is not None and r.state != "finished" else ""
+
     def recordings(ctx, _m, _b):
         bad = local_only(ctx)
-        return bad or (200, {"recordings": br.list_recordings(ctx.home), "format": br.FORMAT_LABEL, "retention_days": br.RETENTION_DAYS,
-                             "max_total_mb": br.MAX_TOTAL_MB, "enabled": service(ctx)._on("browser_recording")})
+        if bad:
+            return bad
+        br.purge(ctx.home, keep=running_id(ctx))                    # retention also runs whenever the owner looks at the list
+        d = service(ctx).driver
+        r = getattr(d, "recorder", None)
+        return 200, {"recordings": br.list_recordings(ctx.home), "format": br.FORMAT_LABEL, "retention_days": br.RETENTION_DAYS,
+                     "max_total_mb": br.MAX_TOTAL_MB, "enabled": service(ctx)._on("browser_recording"),
+                     "current": (r.view() if r is not None else None), "ffmpeg": br.ffmpeg_ready()}
 
     def delete_recording(ctx, _m, body):
         bad = local_only(ctx)
         if bad:
             return bad
-        ok = br.delete(ctx.home, str((body or {}).get("id") or ""))
+        rid = str((body or {}).get("id") or "")
+        if rid and rid == running_id(ctx):
+            return 409, {"error": "this recording is still running: close the pilot first", "code": "RECORDING_RUNNING"}
+        ok = br.delete(ctx.home, rid)
         return (200, {"deleted": True}) if ok else (404, {"error": "no such recording", "code": "RECORDING_NOT_FOUND"})
 
     register("GET", r"/api/browser/recordings$", recordings)

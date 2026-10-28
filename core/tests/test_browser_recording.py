@@ -52,7 +52,7 @@ def rec(tmp_path):
 def test_nothing_is_filmed_until_the_first_tick_and_the_format_is_labelled_honestly(rec):
     r, page, _ = rec
     assert r.view()["state"] == "waiting" and not page.recording
-    assert "WebM" in r.view()["format"] and "no audio" in r.view()["format"]
+    assert "WebM" in r.view()["format"] and "no audio" in r.view()["format"] and "not tamper-proof" in r.view()["format"]
     assert (r.dir / "manifest.json").exists()
 
 
@@ -193,4 +193,14 @@ def test_the_sensitive_check_and_mask_cover_the_obvious_fields():
     js = br.SENSITIVE_JS
     for needle in ("password", "one-time-code", "cc-", "cvv", "otp", "iban", "shadowRoot", "iframe", "\\\\bpin\\\\b"):
         assert needle in js
-    assert "type=password" in br.MASK_CSS and "one-time-code" in br.MASK_CSS and "transparent" in br.MASK_CSS
+    m = br.MASK_INIT_SCRIPT
+    assert "data-jarves-hide" in m and "type=password" in m and "one-time-code" in m and "transparent" in m
+    assert "MutationObserver" in m and "shadowRoot" in m and "isSensitive" in m                      # the same rule as the check, applied as fields appear
+    assert "contentDocument" in js and "catch (e) { return true; }" in js and "!d ||" in js          # an unreadable frame counts as sensitive
+
+
+def test_a_running_recording_cannot_be_deleted_and_the_listing_has_no_absolute_path(tmp_path):
+    r = br.Recorder(tmp_path, clock=Clock())
+    assert br.delete(tmp_path, r.id, running=r.id) is False and r.dir.exists()
+    assert all("path" not in m for m in br.list_recordings(tmp_path))
+    assert br.purge(tmp_path, clock=lambda: 9e12, keep=r.id) == 0 and r.dir.exists()                  # not even a very old running one

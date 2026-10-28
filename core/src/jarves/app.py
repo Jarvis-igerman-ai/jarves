@@ -481,6 +481,7 @@ class Core:
         # Accept the room/face connection only after audio and speech are initialized.
         await self.link.start()
         self._bg.append(asyncio.create_task(self._health_loop()))
+        self._bg.append(asyncio.create_task(self._recordings_retention_loop()))   # V7 B5: pilot videos older than 7 days go, at start and daily
         self._bg.append(asyncio.create_task(wab.run(self)))   # SW-V4 F: bridge + events (switch on only)
         if self.use_real_audio and openai_key_present() and self.cfg.ai.provider == "openai":
             self._spawn_daemon(self._prewarm, "voice-prewarm")
@@ -845,6 +846,15 @@ class Core:
             await self.dev.speaker_play(samples, r)
         except Exception as ex:       # no local engine / audio: the on-screen error above still shows
             logs.warn("limits", "LIMIT_NOTICE_NOT_SPOKEN", "could not speak the limit notice", error_type=type(ex).__name__)
+
+    async def _recordings_retention_loop(self) -> None:
+        from . import browser_recording as brec
+        while True:
+            try:
+                await asyncio.to_thread(brec.purge, self.home)
+            except Exception:                                        # noqa: BLE001 - housekeeping never stops the Core
+                logs.warn("browser", "BROWSER_RECORDING_PURGE_FAILED", "old pilot recordings could not be cleaned up")
+            await asyncio.sleep(24 * 3600)
 
     async def _health_loop(self) -> None:
         music_next, music_gap = 0.0, 10.0
