@@ -49,6 +49,7 @@ BACKUP_DIR = "backups"
 KINDS = ("auto", "manual", "pre-migration", "pre-restore")
 EXCLUDE_DIRS = {BACKUP_DIR, "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__",
                 "voice_cache", ".restore-staging",
+                "recordings",          # V7 B5: pilot videos can be hundreds of MB and must not outlive their own retention/delete: never archived
                 "whatsapp_bridge"}     # SW-V4 F: the WhatsApp session (= the whole account) + messages: never archived
 EXCLUDE_FILES = {"secrets.env", "link_token", "pear_client_id", "pear_client_id.paired", "health.json",
                  "startup_timing.json", "setup_done",

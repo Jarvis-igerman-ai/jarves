@@ -3,6 +3,7 @@ PRs only proved with fakes. Missing Playwright or browser = a failure, never a s
 from __future__ import annotations
 
 import http.server
+import os
 import threading
 import time
 
@@ -324,3 +325,135 @@ def test_the_no_sandbox_fallback_needs_ci_true_as_well(monkeypatch):
     import inspect
     src = inspect.getsource(bd.PlaywrightDriver)
     assert 'JARVES_PILOT_NO_SANDBOX") != "1" or os.environ.get("CI") != "true"' in src      # an owner PC never drops the sandbox
+
+
+class RecFeats(Feats):
+    def active(self, fid):
+        return fid == "browser_recording" or super().active(fid)
+
+
+def _wait(cond, timeout=20):
+    end = time.time() + timeout
+    while time.time() < end:
+        if cond():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def test_recording_is_off_unless_the_switch_and_the_choice_are_both_on(world, tmp_path):
+    svc, url, _ = world
+    with pytest.raises(bp.PilotError) as e:
+        svc.start(url, record=True)                                            # the switch browser_recording is off in this Feats
+    assert e.value.code == "BROWSER_RECORDING_OFF"
+    out = svc.start(url)                                                       # the switch alone records nothing
+    assert "recording" not in out and svc.driver.recorder is None
+
+
+def test_a_real_recording_pauses_on_a_password_field_and_resumes_in_a_new_file(tmp_path):
+    from jarves import browser_recording as brec
+    if not brec.ffmpeg_ready():
+        if os.environ.get("CI") == "true":
+            pytest.fail("Playwright's ffmpeg is missing in CI: the real-browser job must run `playwright install ffmpeg`")
+        pytest.skip("Playwright's ffmpeg is not installed here (python -m playwright install ffmpeg)")
+    hits = Hits()
+    other = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_other(hits))
+    site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_site(other.server_address[1]))
+    for s in (other, site):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    svc = bd.PilotService(tmp_path, lambda: RecFeats())
+    try:
+        out = svc.start(f"http://localhost:{site.server_address[1]}/", record=True)
+        rec = svc.driver.recorder
+        assert out["recording"] == rec.id
+        page = svc.driver._page
+        assert _wait(lambda: rec.state == "recording")
+        svc.driver._job(lambda: page.evaluate("document.body.insertAdjacentHTML('beforeend', '<input type=password id=pw>')"))
+        assert _wait(lambda: rec.state == "paused"), rec.view()                  # closed within one check (the mask covers the frames in between)
+        svc.driver._job(lambda: page.evaluate("document.getElementById('pw').remove()"))
+        assert _wait(lambda: rec.state == "recording" and len(rec.segments) == 2), rec.view()
+        svc.stop()
+        m = brec.list_recordings(tmp_path)[0]
+        assert m["state"] == "finished" and m["pauses"] >= 1 and len(m["segments"]) == 2
+        for seg in m["segments"]:
+            data = (tmp_path / "browser" / "recordings" / m["id"] / seg["file"]).read_bytes()
+            assert data[:4] == b"\x1aE\xdf\xa3" and len(data) > 1000            # a real WebM (EBML header) with frames in it
+        assert brec.delete(tmp_path, m["id"]) is True
+    finally:
+        svc.stop()
+        bl.set_active(None)
+        for s in (other, site):
+            s.shutdown()
+
+
+def _rec_world(tmp_path):
+    hits = Hits()
+    other = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_other(hits))
+    site = http.server.ThreadingHTTPServer(("127.0.0.1", 0), make_site(other.server_address[1]))
+    for s in (other, site):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    svc = bd.PilotService(tmp_path, lambda: RecFeats())
+    return svc, f"http://localhost:{site.server_address[1]}/", (other, site)
+
+
+@pytest.mark.parametrize("html,why", [
+    ("<input name=cardnumber>", "a card field found by its name"),
+    ("<input placeholder='קוד אימות'>", "a Hebrew code field"),
+    ("<div id=h></div><script>document.getElementById('h').attachShadow({mode:'open'}).innerHTML='<input name=cvv>'</script>", "an open shadow root"),
+    ("<iframe sandbox srcdoc='<p>x</p>'></iframe>", "a frame that cannot be read counts as sensitive"),
+])
+def test_the_real_check_pauses_for_each_kind_of_sensitive_field(tmp_path, html, why):
+    from jarves import browser_recording as brec
+    if not brec.ffmpeg_ready():
+        pytest.skip("Playwright's ffmpeg is not installed here")
+    svc, url, servers = _rec_world(tmp_path)
+    try:
+        svc.start(url, record=True)
+        rec, page = svc.driver.recorder, svc.driver._page
+        assert _wait(lambda: rec.state == "recording")
+        svc.driver._job(lambda: page.evaluate("h => document.body.insertAdjacentHTML('beforeend', h)", html))
+        # scripts do not run through insertAdjacentHTML: build the shadow case through the DOM
+        if "attachShadow" in html:
+            svc.driver._job(lambda: page.evaluate("() => { const h = document.getElementById('h'); h.attachShadow({mode:'open'}).innerHTML = '<input name=cvv>'; }"))
+        assert _wait(lambda: rec.state == "paused"), (why, rec.view())
+    finally:
+        svc.stop()
+        bl.set_active(None)
+        for s in servers:
+            s.shutdown()
+
+
+def test_the_mask_blanks_a_card_field_in_the_very_first_frames(tmp_path):
+    from jarves import browser_recording as brec
+    if not brec.ffmpeg_ready():
+        pytest.skip("Playwright's ffmpeg is not installed here")
+    svc, url, servers = _rec_world(tmp_path)
+    try:
+        svc.start(url, record=True)
+        page = svc.driver._page
+        svc.driver._job(lambda: page.evaluate("() => { const i = document.createElement('input'); i.name = 'cvv'; i.value = '123'; i.id = 'x'; document.body.appendChild(i); }"))
+        time.sleep(0.2)
+        colour = svc.driver._job(lambda: page.evaluate("() => getComputedStyle(document.getElementById('x')).color"))
+        assert colour in ("rgba(0, 0, 0, 0)", "transparent"), colour
+        shadow = svc.driver._job(lambda: page.evaluate("() => { const h = document.createElement('div'); document.body.appendChild(h); const r = h.attachShadow({mode:'open'}); r.innerHTML = '<input id=s name=otp value=999>'; return new Promise(res => setTimeout(() => res(getComputedStyle(r.getElementById('s')).color), 150)); }"))
+        assert shadow in ("rgba(0, 0, 0, 0)", "transparent"), shadow
+    finally:
+        svc.stop()
+        bl.set_active(None)
+        for s in servers:
+            s.shutdown()
+
+
+def test_only_the_assistant_is_filmed_never_the_owner_in_control():
+    class R:
+        def __init__(self): self.calls = []
+        def tick(self, page, active): self.calls.append(active)
+    d = bd.PlaywrightDriver.__new__(bd.PlaywrightDriver)
+    d.recorder, d._page = R(), object()
+    for state, filmed in (("AGENT", True), ("HUMAN", False), ("PAUSED", False), ("STOPPED", False)):
+        d.session_ref = lambda st=state: type("S", (), {"state": st})()
+        d._rec_tick()
+        assert d.recorder.calls[-1] is filmed, state
+    d.session_ref = lambda: None
+    d._rec_tick()
+    assert d.recorder.calls[-1] is False

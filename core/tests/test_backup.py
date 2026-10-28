@@ -74,6 +74,17 @@ def test_backup_contents_and_no_credentials(profile):
     assert man["contains_credentials"] is False and backup.verify(p)["ok"]
 
 
+def test_pilot_recordings_are_never_archived(profile):
+    d = profile / "browser" / "recordings" / "rec-0123456789ab"
+    d.mkdir(parents=True)
+    (d / "part-001.webm").write_bytes(b"\x1aE\xdf\xa3" + b"x" * 2000)
+    (d / "manifest.json").write_text("{}", encoding="utf-8")
+    (profile / "browser" / "sites.json").write_text("{}", encoding="utf-8")            # the rest of browser/ is still saved
+    got = names(backup.create(profile, "manual"))
+    assert not any("recordings" in n or n.endswith(".webm") for n in got)
+    assert "data/browser/sites.json" in got
+
+
 def test_paired_device_tokens_are_never_archived(profile):
     """Reviewer item 14: dashboard_devices.json holds device token HASHES and per-device CSRF secrets. It must be
     excluded from the archive (like secrets.env), not shipped where a backup could be shared."""

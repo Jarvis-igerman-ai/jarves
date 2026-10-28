@@ -722,12 +722,35 @@ def dashboard_routes(register) -> None:
 # ---------------------------------------------------------------------- CLI
 def add_cli(sub) -> None:
     b = sub.add_parser("browser", help="Browser Skill: the allow-list of sites JARVES may fully control "
-                                       "(status / sites / allow SITE / remove SITE)")
-    b.add_argument("action", nargs="?", default="status", choices=["status", "sites", "allow", "remove"])
-    b.add_argument("site", nargs="?", help="e.g. example.com (subdomains included)")
+                                       "(status / sites / allow SITE / remove SITE); pilot recordings: recordings / recording-delete ID / recordings-purge")
+    b.add_argument("action", nargs="?", default="status",
+                   choices=["status", "sites", "allow", "remove", "recordings", "recording-delete", "recordings-purge"])
+    b.add_argument("site", nargs="?", help="e.g. example.com (subdomains included); for recording-delete: the recording id")
+
+
+def _cmd_recordings(a, home) -> int:
+    from . import browser_recording as rec
+    if a.action == "recording-delete":
+        if not a.site:
+            print("usage: jarvis browser recording-delete <id>   (ids: jarvis browser recordings)", file=sys.stderr)
+            return 2
+        ok = rec.delete(home, a.site)
+        print("deleted" if ok else "no such recording")
+        return 0 if ok else 1
+    if a.action == "recordings-purge":
+        print(f"deleted {rec.purge(home)} old recording(s) (older than {rec.RETENTION_DAYS} days, or over {rec.MAX_TOTAL_MB} MB in total)")
+        return 0
+    items = rec.list_recordings(home)
+    print(f"pilot recordings ({len(items)}): {rec.FORMAT_LABEL}. Kept {rec.RETENTION_DAYS} days; password, card and code fields pause the recording.")
+    for m in items:
+        print(f"  {m['id']}  {m.get('state', '?')}  {len(m.get('segments', []))} file(s)  {m['bytes'] // 1024} KB  {rec.root(home) / m['id']}")
+    print("delete: jarvis browser recording-delete <id>   (switch: jarvis features on browser_recording; start a recorded pilot from the dashboard)")
+    return 0
 
 
 def cmd_browser(a, cfg, home) -> int:
+    if a.action in ("recordings", "recording-delete", "recordings-purge"):
+        return _cmd_recordings(a, home)
     sites = Sites(home)
     if a.action in ("allow", "remove"):
         if not a.site:
