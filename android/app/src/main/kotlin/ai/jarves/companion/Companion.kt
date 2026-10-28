@@ -129,6 +129,24 @@ class CompanionClient(private val base: String, private val transport: Transport
         }
     }
 
+    /** How many approvals wait on the PC (the length of the approvals list: unlike /api/m/sync it consumes nothing), or Unknown / Revoked. */
+    fun waiting(token: String): Waiting {
+        val r = try {
+            transport.send("GET", url("/api/m/approvals"), mapOf("Authorization" to "Bearer $token", API_HEADER to API_SUPPORTED.toString()), null)
+        } catch (e: IOException) {
+            return Waiting.Unknown
+        } catch (e: RuntimeException) {
+            return Waiting.Unknown
+        }
+        if (r.status == 401 || r.status == 403) return Waiting.Revoked           // the PC removed this phone (or took the permission): stop asking
+        if (r.status != 200) return Waiting.Unknown
+        return try {
+            Waiting.Count((JSONObject(r.body).optJSONArray("pending")?.length() ?: 0).coerceIn(0, 999))
+        } catch (e: JSONException) {
+            Waiting.Unknown
+        }
+    }
+
     /** The first call after pairing and then every few seconds: is the PC there, and is its brain running? */
     fun check(token: String): Link {
         val r = try {
@@ -185,6 +203,13 @@ private fun codeOf(body: String): String = try {
     JSONObject(body).optString("code", "")
 } catch (e: JSONException) {
     ""
+}
+
+/** The answer of the background check: a number, "the PC did not answer sensibly" (try again later) or "this phone is no longer allowed" (stop). */
+sealed interface Waiting {
+    data class Count(val n: Int) : Waiting
+    data object Unknown : Waiting
+    data object Revoked : Waiting
 }
 
 /** Clock skew in seconds between this phone and the PC (the PC's `server_time` minus ours). The app shows it when it is large. */
