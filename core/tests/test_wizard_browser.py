@@ -42,6 +42,13 @@ def site():
                     os.environ[k] = v
 
 
+def _real(errs: list[str]) -> list[str]:
+    """Console/page errors without the Windows OS socket-buffer line (net::ERR_NO_BUFFER_SPACE, #695): a runner limit, not a
+    page defect; core/tools/all_pages_check.py retries on it too. Anything else (pageerror, HTTP >= 400, other console
+    errors) still fails."""
+    return [e for e in errs if "ERR_NO_BUFFER_SPACE" not in e]
+
+
 def _page(site, lang="en", width=1024):
     d, b = site
     ctx = b.new_context(viewport={"width": width, "height": 900}, locale="he-IL",
@@ -105,7 +112,7 @@ def test_works_marks_done_and_it_survives_a_reload(site):
         assert p.inner_text(".tour-done summary").strip() == "Done (1)"
         p.click(".tour-done summary")
         assert t0 in p.inner_text(".tour-done")
-        assert errs == []
+        assert _real(errs) == []
     finally:
         ctx.close()
 
@@ -129,7 +136,7 @@ def test_keys_later_and_failed_with_a_note(site):
         assert "#/issues" in p.get_attribute("#tour-msg a", "href")      # GitHub only through the review page
         p.keyboard.press("1")
         _until(p, "d.done.length === 1")
-        assert errs == []
+        assert _real(errs) == []
     finally:
         ctx.close()
 
@@ -151,7 +158,7 @@ def test_hebrew_rtl_phone_width_and_dom_rules(site):
         p.wait_for_selector(".tour-more-body .tour-learn", timeout=15000)   # "More" loads lazily, only when opened
         r = p.evaluate(apc.RULES, {"lang": "he", "width": 390, "reduced": True})
         assert not r["issues"], json.dumps(r["issues"][:10], ensure_ascii=False)
-        assert errs == []
+        assert _real(errs) == []
     finally:
         ctx.close()
 
@@ -177,6 +184,12 @@ def test_english_dom_rules_and_first_card_timing(site):
         p.mouse.move(1, 1)
         r = p.evaluate(apc.RULES, {"lang": "en", "width": 1440, "reduced": False})
         assert not r["issues"], json.dumps(r["issues"][:10], ensure_ascii=False)
-        assert errs == []
+        assert _real(errs) == []
     finally:
         ctx.close()
+
+
+def test_real_drops_only_the_os_socket_buffer_line():
+    assert _real(["console.error: Failed to load resource: net::ERR_NO_BUFFER_SPACE"]) == []
+    other = ["pageerror: boom", "HTTP 500 http://x/api", "console.error: Failed to load resource: net::ERR_CONNECTION_RESET"]
+    assert _real(other + ["console.error: net::ERR_NO_BUFFER_SPACE"]) == other
