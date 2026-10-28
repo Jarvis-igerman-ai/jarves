@@ -97,12 +97,12 @@ function liveViewCard() {
     try {
       const d = await api("/api/browser/recordings");
       recOn.disabled = !d.enabled; if (!d.enabled) recOn.checked = false;
-      const rows = (d.recordings || []).map((m) => el("li", {}, el("code", {}, m.id), " ", m.state, " · " + (m.segments || []).length + tx(" קבצים · ", " file(s) · ") + Math.round((m.bytes || 0) / 1024) + " KB · ",
-        el("button", { type: "button", class: "ghost", "aria-label": tx("מחיקת ההקלטה ", "Delete recording ") + m.id, onclick: async () => {
+      const rows = (d.recordings || []).map((m) => el("li", {}, el("code", {}, m.id), " ", m.state, " · " + tx("{n} קבצים", "{n} file(s)").replace("{n}", (m.segments || []).length) + " · " + Math.round((m.bytes || 0) / 1024) + " KB · ",
+        el("button", { type: "button", class: "ghost", "aria-label": tx("מחיקת ההקלטה {id}", "Delete recording {id}").replace("{id}", m.id), onclick: async () => {
           if (!window.confirm(tx("למחוק את ההקלטה הזאת לצמיתות?", "Delete this recording for good?"))) return;
           try { await api("/api/browser/recordings/delete", { method: "POST", body: JSON.stringify({ id: m.id }) }); loadRecs(); }
           catch (e) { msg.textContent = e.message; } } }, tx("מחיקה", "Delete"))));
-      recBox.replaceChildren(el("div", { class: "muted" }, d.enabled ? d.format + tx(". נשמר ", ". Kept ") + d.retention_days + tx(" ימים, עד ", " days, up to ") + d.max_total_mb + " MB." : tx("הקלטה כבויה: jarvis features on browser_recording", "Recording is off: jarvis features on browser_recording")),
+      recBox.replaceChildren(el("div", { class: "muted" }, d.enabled ? d.format + ". " + tx("נשמר {d} ימים, עד {m} MB.", "Kept {d} days, up to {m} MB.").replace("{d}", d.retention_days).replace("{m}", d.max_total_mb) : tx("הקלטה כבויה: jarvis features on browser_recording", "Recording is off: jarvis features on browser_recording")),
         rows.length ? el("ul", {}, rows) : el("div", { class: "muted" }, tx("אין הקלטות.", "No recordings.")));
     } catch (e) { recBox.replaceChildren(); }
   };

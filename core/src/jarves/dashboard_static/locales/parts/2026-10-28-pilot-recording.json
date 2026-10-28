@@ -2,6 +2,14 @@
  "dict": {
   "optionally record a pilot session on a local test page as a WebM video kept on this computer; recording pauses on password, card and code fields; old recordings are deleted after 7 days; you can delete any of them": "אפשר להקליט סשן פיילוט בדף בדיקה מקומי כוידאו WebM שנשמר במחשב הזה; ההקלטה נעצרת בשדות סיסמה, כרטיס וקוד; הקלטות ישנות נמחקות אחרי 7 ימים, ואפשר למחוק כל אחת מהן",
   "screen of the pilot page is saved to a file": "מסך דף הפיילוט נשמר בקובץ",
-  "Record the browser pilot (video)": "הקלטת וידאו של הפיילוט"
+  "Record the browser pilot (video)": "הקלטת וידאו של הפיילוט",
+  "{n} file(s)": "{n} קבצים",
+  "Kept {d} days, up to {m} MB.": "נשמר {d} ימים, עד {m} MB.",
+  "Delete recording {id}": "מחיקת ההקלטה {id}",
+  "Delete this recording for good?": "למחוק את ההקלטה הזאת לצמיתות?",
+  "No recordings.": "אין הקלטות.",
+  "Record this session as video (pauses on password, card and code fields; text simply shown on a page IS recorded, so test pages only)": "להקליט את הסשן הזה כוידאו (נעצר בשדות סיסמה, כרטיס וקוד; טקסט שמוצג בדף כן מוקלט, לכן רק דפי בדיקה)",
+  "Recording is off: jarvis features on browser_recording": "הקלטה כבויה: jarvis features on browser_recording",
+  "Recording is on (it pauses by itself on password, card and code fields).": "ההקלטה פועלת (נעצרת לבד בשדות סיסמה, כרטיס וקוד)."
  }
 }
