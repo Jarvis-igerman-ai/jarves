@@ -298,6 +298,8 @@ class AgentsConfig(_Strict):
     allow_api_billing: bool = False                        # never: an API-key session is refused (AUTH_REQUIRED)
     opencode_url: str = "http://127.0.0.1:4096"            # V7 D1, read-only; loopback only (anything else: NOT_LOOPBACK)
     opencode_password_env: str = "OPENCODE_SERVER_PASSWORD"   # NAME of the env var that holds the server password
+    opencode_model: str = ""                               # V7 D3: "providerID/modelID" JARVES asks OpenCode to use; "" = OpenCode's own default
+    opencode_allow_paid: bool = False                      # V7 D3: allow a paid, unknown or default (unpriced) model; off = free/local only
 
 
 class ProjectsConfig(_Strict):
