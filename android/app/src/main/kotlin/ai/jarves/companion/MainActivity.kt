@@ -60,6 +60,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _notify = MutableStateFlow(notifyPrefs.enabled && NotifyWork.permissionGranted(app))
     val notifyOn: StateFlow<Boolean> = _notify
 
+    init {
+        if (notifyPrefs.enabled && NotifyWork.permissionGranted(app)) NotifyWork.start(app)     // the switch says ON: make sure the check is really scheduled
+    }
+
     fun setNotify(on: Boolean) {
         notifyPrefs.enabled = on
         _notify.value = on

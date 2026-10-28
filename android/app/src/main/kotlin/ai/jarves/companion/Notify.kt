@@ -22,8 +22,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import androidx.work.CoroutineWorker
 import androidx.work.Constraints
+import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
@@ -48,6 +48,19 @@ object NotifyPolicy {
     /** What to remember as "told": 0 when nothing waits (so the next one notifies again), else the count we have now seen. */
     fun nextTold(count: Int, lastTold: Int): Int = maxOf(count, 0)
 
+    sealed interface Step {
+        data object Skip : Step
+        data object Stop : Step
+        data class Use(val count: Int) : Step
+    }
+
+    /** What the worker does with the PC's answer. [stillOn] is looked up AFTER the network call (switch on, session present, work not cancelled). */
+    fun step(answer: Waiting, stillOn: Boolean): Step = when (answer) {
+        Waiting.Revoked -> Step.Stop
+        Waiting.Unknown -> Step.Skip
+        is Waiting.Count -> if (stillOn) Step.Use(answer.n) else Step.Skip
+    }
+
     fun text(count: Int): Int = if (count == 1) R.string.notify_one else R.string.notify_many
 }
 
@@ -68,7 +81,7 @@ class NotifyPrefs(private val context: Context) {
 object NotifyWork {
     fun start(context: Context) {
         val req = PeriodicWorkRequestBuilder<WaitingWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(true).build())
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, req)
     }
@@ -88,12 +101,23 @@ class WaitingWorker(private val ctx: Context, params: WorkerParameters) : Corout
         val prefs = NotifyPrefs(ctx)
         if (!prefs.enabled || !NotifyWork.permissionGranted(ctx)) return Result.success()
         val s = SessionStore(ctx).load() ?: return Result.success()                      // not paired (any more): nothing to ask
-        val count = try {
+        val answer = try {
             CompanionClient(s.base, PinnedTransport(s.pin)).waiting(s.token)
         } catch (e: Exception) {
-            null
-        } ?: return Result.success()                                                    // the PC did not answer: say nothing, try again later
+            Waiting.Unknown
+        }
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // The call above can take many seconds: the owner may have switched this off or unpaired meanwhile. Look again before touching anything.
+        val stillOn = !isStopped && prefs.enabled && SessionStore(ctx).load() != null
+        val count = when (val step = NotifyPolicy.step(answer, stillOn)) {
+            NotifyPolicy.Step.Skip -> return Result.success()                           // the PC did not answer, or the owner switched off meanwhile
+            NotifyPolicy.Step.Stop -> {                                                 // this phone was removed: no more checks, no stale notification
+                NotifyWork.stop(ctx)
+                prefs.enabled = false
+                return Result.success()
+            }
+            is NotifyPolicy.Step.Use -> step.count
+        }
         if (NotifyPolicy.shouldNotify(count, prefs.lastTold)) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL_ID, ctx.getString(R.string.notify_channel), NotificationManager.IMPORTANCE_DEFAULT))
             val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

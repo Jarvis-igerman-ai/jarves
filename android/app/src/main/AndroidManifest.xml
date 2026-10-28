@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Only the network: no microphone, no notifications, no foreground service in A2 (voice and notifications are A3). -->
+    <!-- The network, and notifications (A3b) only after the owner turns the switch on. No microphone here, no foreground service: WorkManager's is removed below. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- A3b: only after the owner turns the switch on; a count of waiting approvals, never their content. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
 
     <application
         android:allowBackup="false"
@@ -21,5 +23,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- WorkManager's foreground service is not used (no expedited/long work): it is not part of this app. -->
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService" tools:node="remove" />
     </application>
 </manifest>

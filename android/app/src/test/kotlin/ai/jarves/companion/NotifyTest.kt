@@ -2,7 +2,6 @@ package ai.jarves.companion
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -31,17 +30,32 @@ class NotifyTest {
     @Test
     fun waitingReadsOnlyTheCountFromTheStatusPoll() {
         val t = SyncFake(body = """{"pending":[{"id":"a","title":"secret"},{"id":"b"},{"id":"c"}],"phone_approvals":false}""")
-        assertEquals(3, CompanionClient("pc:1", t).waiting("tok"))
+        assertEquals(Waiting.Count(3), CompanionClient("pc:1", t).waiting("tok"))
         assertTrue(t.url.endsWith("/api/m/approvals"))
-        assertEquals(0, CompanionClient("pc:1", SyncFake(body = "{}")).waiting("tok"))
-        assertEquals(999, CompanionClient("pc:1", SyncFake(body = """{"pending":[""" + "{},".repeat(1200) + """{}]}""")).waiting("tok"))
+        assertEquals(Waiting.Count(0), CompanionClient("pc:1", SyncFake(body = "{}")).waiting("tok"))
+        assertEquals(Waiting.Count(999), CompanionClient("pc:1", SyncFake(body = """{"pending":[""" + "{},".repeat(1200) + """{}]}""")).waiting("tok"))
     }
 
     @Test
     fun whenThePcDoesNotAnswerSensiblyThereIsNoCountAndSoNoNotification() {
-        assertNull(CompanionClient("pc:1", SyncFake(401)).waiting("t"))
-        assertNull(CompanionClient("pc:1", SyncFake(500)).waiting("t"))
-        assertNull(CompanionClient("pc:1", SyncFake(body = "nope")).waiting("t"))
-        assertNull(CompanionClient("pc:1", SyncFake(boom = true)).waiting("t"))
+        assertEquals(Waiting.Unknown, CompanionClient("pc:1", SyncFake(500)).waiting("t"))
+        assertEquals(Waiting.Unknown, CompanionClient("pc:1", SyncFake(body = "nope")).waiting("t"))
+        assertEquals(Waiting.Unknown, CompanionClient("pc:1", SyncFake(boom = true)).waiting("t"))
+    }
+
+    @Test
+    fun aRemovedPhoneOrAWithdrawnPermissionIsRevokedNotOffline() {
+        assertEquals(Waiting.Revoked, CompanionClient("pc:1", SyncFake(401)).waiting("t"))     // the worker then stops itself
+        assertEquals(Waiting.Revoked, CompanionClient("pc:1", SyncFake(403)).waiting("t"))
+        assertTrue(Waiting.Revoked != Waiting.Unknown)
+    }
+
+    @Test
+    fun theWorkerStepStopsOnRevokedSkipsOnUnknownAndNeverActsAfterASwitchOff() {
+        assertEquals(NotifyPolicy.Step.Stop, NotifyPolicy.step(Waiting.Revoked, true))
+        assertEquals(NotifyPolicy.Step.Stop, NotifyPolicy.step(Waiting.Revoked, false))        // removed phone: stop even if also switched off
+        assertEquals(NotifyPolicy.Step.Skip, NotifyPolicy.step(Waiting.Unknown, true))
+        assertEquals(NotifyPolicy.Step.Use(2), NotifyPolicy.step(Waiting.Count(2), true))
+        assertEquals(NotifyPolicy.Step.Skip, NotifyPolicy.step(Waiting.Count(2), false))       // switched off / unpaired during the call: no notification
     }
 }
