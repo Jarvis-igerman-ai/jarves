@@ -97,9 +97,13 @@ function liveViewCard() {
   const recBox = el("div", { class: "small", id: "rec-list" });
   const stateText = (st) => ({ recording: tx("מקליט", "recording"), paused: tx("מושהה", "paused"), finished: tx("הסתיים", "finished"), waiting: tx("ממתין", "waiting") }[st] || st);
   // A persistent badge (text, not colour only): what the recorder is doing right now, also while the live view is open.
+  let badgeKey = "";
   const showBadge = (cur) => {
-    if (!cur || cur.state === "finished") { recBadge.replaceChildren(); return; }
-    recBadge.replaceChildren(cur.state === "recording" ? pill("fail", tx("● מקליט", "● REC")) : pill("medium", tx("הקלטה מושהית (שדה רגיש או שליטה ידנית)", "Recording paused (sensitive field or you are in control)")));
+    const key = !cur || cur.state === "finished" ? "" : cur.state === "recording" ? "rec" : "paused";
+    if (key === badgeKey) return;                           // touch the live region only when the state changes (no repeated announcements)
+    badgeKey = key;
+    recBadge.replaceChildren(...(key === "" ? [] : [key === "rec" ? pill("fail", tx("● מקליט", "● REC"))
+      : el("span", { class: "pill medium rec-paused" }, tx("הקלטה מושהית (שדה רגיש או שליטה ידנית)", "Recording paused (sensitive field or you are in control)"))]));
   };
   const loadRecs = async () => {
     try {
@@ -113,7 +117,7 @@ function liveViewCard() {
           catch (e) { msg.textContent = e.message; } } }, tx("מחיקה", "Delete"))));
       recReason.replaceChildren(!d.enabled ? el("span", {}, tx("ההקלטה כבויה. להדלקה: ", "Recording is off. To turn it on: "), el("code", { dir: "ltr" }, "jarvis features on browser_recording"))
         : !d.ffmpeg ? el("span", {}, tx("חסר כלי הווידאו של Playwright. להתקנה: ", "Playwright's video helper is missing. To install it: "), el("code", { dir: "ltr" }, "python -m playwright install ffmpeg"))
-        : el("span", {}, d.format + ". " + tx("נשמר {d} ימים, עד {m} MB.", "Kept {d} days, up to {m} MB.").replace("{d}", d.retention_days).replace("{m}", d.max_total_mb)));
+        : el("span", {}, tx("וידאו WebM בלי קול, 1024x768 ב-10 פריימים לשנייה, קובץ לכל קטע רצוף; מראה את תוכן הדף ואינו מוגן מפני שינוי", "WebM video, no audio, 1024x768 at 10 frames a second, one file per uninterrupted stretch; shows page content, not tamper-proof") + ". " + tx("נשמר {d} ימים, עד {m} MB.", "Kept {d} days, up to {m} MB.").replace("{d}", d.retention_days).replace("{m}", d.max_total_mb)));
       recBox.replaceChildren(rows.length ? el("ul", {}, rows) : el("div", { class: "muted" }, tx("אין הקלטות.", "No recordings.")));
     } catch (e) { recBox.replaceChildren(); }
   };

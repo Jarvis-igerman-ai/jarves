@@ -171,15 +171,19 @@ class PlaywrightDriver:
                 pass
 
     def _rec_tick(self) -> None:
-        """Worker thread only. Records while the session is AGENT or HUMAN; pauses (closes the file) while it is paused/stopped or the page shows a
-        password / card / code field. A fault here never reaches the pilot."""
+        """Worker thread only. Records only while the ASSISTANT drives (AGENT); pauses (closes the file) while the owner has taken over, the session
+        is paused/stopped, or the page shows a password / card / code field. A fault here never reaches the pilot and closes any open file."""
         if self.recorder is None or self._page is None:
             return
         try:
             s = self.session_ref()
             self.recorder.tick(self._page, s is not None and s.state == "AGENT")      # never while the owner is in control (HUMAN) or paused
         except Exception:                                           # noqa: BLE001
-            logs.warn("browser", "BROWSER_RECORDING_TICK_FAILED", "a recording check failed; it keeps the file closed")
+            logs.warn("browser", "BROWSER_RECORDING_TICK_FAILED", "a recording check failed; the file is closed")
+            try:
+                self.recorder.close_now(self._page)
+            except Exception:                                       # noqa: BLE001
+                pass
 
     def _route(self, route) -> None:
         """Second line (the proxy is the first): every request, redirect target and subresource must pass the session's vetting."""

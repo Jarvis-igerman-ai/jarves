@@ -15,6 +15,7 @@
   "● REC": "● מקליט",
   "Recording paused (sensitive field or you are in control)": "הקלטה מושהית (שדה רגיש או שליטה ידנית)",
   "Recording is off. To turn it on: ": "ההקלטה כבויה. להדלקה: ",
-  "Playwright's video helper is missing. To install it: ": "חסר כלי הווידאו של Playwright. להתקנה: "
+  "Playwright's video helper is missing. To install it: ": "חסר כלי הווידאו של Playwright. להתקנה: ",
+  "WebM video, no audio, 1024x768 at 10 frames a second, one file per uninterrupted stretch; shows page content, not tamper-proof": "וידאו WebM בלי קול, 1024x768 ב-10 פריימים לשנייה, קובץ לכל קטע רצוף; מראה את תוכן הדף ואינו מוגן מפני שינוי"
  }
 }

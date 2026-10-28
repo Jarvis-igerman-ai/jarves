@@ -204,3 +204,18 @@ def test_a_running_recording_cannot_be_deleted_and_the_listing_has_no_absolute_p
     assert br.delete(tmp_path, r.id, running=r.id) is False and r.dir.exists()
     assert all("path" not in m for m in br.list_recordings(tmp_path))
     assert br.purge(tmp_path, clock=lambda: 9e12, keep=r.id) == 0 and r.dir.exists()                  # not even a very old running one
+
+
+def test_close_now_fails_closed_and_the_running_recording_is_protected_from_retention(tmp_path):
+    clock = Clock()
+    r = br.Recorder(tmp_path, clock=clock)
+    page = FakePage()
+    r.tick(page, True)
+    assert page.recording
+    r.close_now(page)
+    assert not page.recording and r.state == "paused"
+    assert r.id in br.RUNNING
+    assert br.purge(tmp_path, clock=lambda: 9e12) == 0 and r.dir.exists()           # no `keep` needed: the running one is never purged
+    assert br.delete(tmp_path, r.id) is False
+    r.finish(page)
+    assert r.id not in br.RUNNING and br.delete(tmp_path, r.id) is True

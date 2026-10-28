@@ -117,6 +117,9 @@ def ffmpeg_ready() -> bool:
         return False
 
 
+RUNNING: set = set()          # ids of recordings being written in this process: retention never deletes them
+
+
 def _private(d: Path) -> None:
     """Owner-only folder where the OS supports it (Pi/Linux/macOS); on Windows the profile folder is already private to the account."""
     try:
@@ -142,6 +145,7 @@ class Recorder:
         _private(root(self.home))
         _private(self.dir)
         self.started = clock()
+        RUNNING.add(self.id)
         self.segments: list[dict] = []
         self.pauses = 0
         self.state = "waiting"                  # waiting | recording | paused | finished
@@ -156,6 +160,8 @@ class Recorder:
                 "segments": [dict(s) for s in self.segments]}
 
     def _write(self) -> None:
+        if self.state == "finished":
+            RUNNING.discard(self.id)                              # however it ended, retention may treat it as an ordinary recording again
         try:
             tmp = self.dir / "manifest.json.tmp"
             tmp.write_text(json.dumps(self.view(), ensure_ascii=False), encoding="utf-8")
@@ -213,10 +219,16 @@ class Recorder:
                 self._write()
                 logs.warn("browser", "BROWSER_RECORDING_START_FAILED", "the recording could not start; it is off for this session")
 
+    def close_now(self, page: Any) -> None:
+        """Fail closed: whatever went wrong, close the open file at once (nothing more is filmed until a check succeeds)."""
+        if self.state == "recording":
+            self._stop(page, "paused")
+
     def finish(self, page: Any) -> dict:
         if self.state == "recording":
             self._stop(page, "finished")
         self.state = "finished"
+        RUNNING.discard(self.id)
         self._write()
         return self.view()
 
@@ -238,7 +250,7 @@ def list_recordings(home: Path) -> list[dict]:
 
 def delete(home: Path, rec_id: str, *, running: str = "") -> bool:
     """Delete one recording. [running] = the id of the recording that is being written right now: it cannot be deleted until it ends."""
-    if not _ID.match(str(rec_id)) or rec_id == running:
+    if not _ID.match(str(rec_id)) or rec_id == running or rec_id in RUNNING:
         return False
     d = root(home) / rec_id
     if not d.is_dir():
@@ -252,7 +264,7 @@ def purge(home: Path, *, clock: Callable[[], float] = time.time, days: int = RET
           keep: str = "") -> int:
     """Delete recordings older than [days], then the oldest ones until the total fits [max_mb]. [keep] is the running recording."""
     n = 0
-    items = [m for m in list_recordings(home) if m.get("id") != keep]
+    items = [m for m in list_recordings(home) if m.get("id") != keep and m.get("id") not in RUNNING]
     for m in items[:]:
         if clock() - float(m.get("started") or 0) > days * 86400:
             n += bool(delete(home, m["id"], running=keep))
