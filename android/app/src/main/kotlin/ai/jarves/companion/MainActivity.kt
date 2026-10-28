@@ -180,7 +180,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             try {
                 val p = withContext(Dispatchers.IO) { CompanionClient(c.base, PinnedTransport(c.fingerprint)).pair(c.code, c.name) }
                 val s = Session(c.base, p.token, c.fingerprint, p.device)
-                store.save(s)
+                if (!store.save(s)) {                                   // the phone could not keep the pairing safely: say so, do not pretend it worked
+                    _screen.value = Screen.Pair(PairError.STORE_FAILED)
+                    return@launch
+                }
                 _screen.value = Screen.Status(s, null)
                 startPolling(s)
             } catch (e: PairFailed) {
@@ -286,6 +289,7 @@ fun PairScreen(s: Screen.Pair, onCheck: (String, String, String) -> Unit) {
 }
 
 fun errorText(e: PairError): Int = when (e) {
+    PairError.STORE_FAILED -> R.string.err_store
     PairError.BAD_ADDRESS -> R.string.err_address
     PairError.BAD_CODE -> R.string.err_code
     PairError.REFUSED -> R.string.err_refused

@@ -103,7 +103,9 @@ data class Session(val base: String, val token: String, val pin: String, val dev
 private const val KEY_ALIAS = "jarves_session_key"
 
 /** One AES-256-GCM key that lives in the Android Keystore (hardware-backed where the phone has it) and never leaves it. */
-private fun keystoreKey(): SecretKey {
+private val keyLock = Any()
+
+private fun keystoreKey(): SecretKey = synchronized(keyLock) {            // the background check and the screen may ask at the same moment: one key only
     val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
     (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
     val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
@@ -115,6 +117,15 @@ private fun keystoreKey(): SecretKey {
             .build(),
     )
     return gen.generateKey()
+}
+
+/** A broken Keystore entry (it cannot seal) is removed so the next pairing gets a fresh key instead of failing the same way again. */
+private fun dropKey() = synchronized(keyLock) {
+    try {
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KEY_ALIAS)
+    } catch (e: Exception) {
+        // nothing more to do
+    }
 }
 
 /**
@@ -141,16 +152,19 @@ class SessionStore(private val context: Context) {
         null
     }
 
-    fun save(s: Session) {
+    /** True only when the sealed session is really on disk. False = nothing is kept and the owner is told (the Keystore entry is dropped for a fresh start). */
+    fun save(s: Session): Boolean {
         try {
-            prefs().edit().putString("blob", SessionCodec.encode(s, sealer)).apply()
+            if (prefs().edit().putString("blob", SessionCodec.encode(s, sealer)).commit()) return true
         } catch (e: Exception) {
-            prefs().edit().clear().apply()                                  // never keep a half state: the owner pairs again
+            dropKey()
         }
+        prefs().edit().clear().commit()                                     // never keep a half state: the owner pairs again
+        return false
     }
 
     fun clear() {
-        prefs().edit().clear().apply()
+        prefs().edit().clear().commit()
     }
 }
 
