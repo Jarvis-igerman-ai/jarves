@@ -41,4 +41,5 @@
     <string name="talk_secure">Voice needs the secure link and the voice system running on your computer.</string>
     <string name="talk_notallowed">This phone is not allowed to use voice. Allow it on the computer (Phone page).</string>
     <string name="talk_note">The microphone is open only while you hold the button and this screen is open. Nothing is recorded to a file; the sound goes only to your own computer.</string>
+    <string name="err_store">This phone could not store the pairing safely, so nothing was saved. Try pairing again; if it keeps failing, check the phone lock screen is set.</string>
 </resources>

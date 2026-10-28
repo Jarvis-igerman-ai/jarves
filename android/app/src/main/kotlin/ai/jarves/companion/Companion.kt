@@ -49,7 +49,7 @@ sealed interface Link {
 /** Thrown by the transport when the pinned certificate did not match. */
 class CertChangedException(message: String) : IOException(message)
 
-enum class PairError { BAD_ADDRESS, BAD_CODE, REFUSED, RATE, UNREACHABLE, BAD_ANSWER }
+enum class PairError { STORE_FAILED, BAD_ADDRESS, BAD_CODE, REFUSED, RATE, UNREACHABLE, BAD_ANSWER }
 
 class PairFailed(val kind: PairError) : Exception(kind.name)
 
