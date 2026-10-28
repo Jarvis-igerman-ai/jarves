@@ -73,6 +73,8 @@ AUDIT_MAX_BYTES = 1_000_000
 RISKS = ("low", "medium", "high")
 KINDS = ("tool", "feature", "camera", "message", "shell", "install", "schedule", "call", "other")
 HASHED_DETAILS = ("number",)       # SW-V4 H: a phone number is never written to the audit file, only a keyed hash
+STALE_TEXT_MSG = "this approval changed since you saw it: reload and read it again"
+SHOWN_TEXT_CHARS = 400        # what a phone is shown of the real action text (prompt), after redaction
 PC_ONLY_MSG = "this approval can only be answered on the computer"
 CHANNELS = ("popup", "tray", "face", "dashboard", "voice", "typed", "cli", "terminal", "phone")
 LOCAL_CHANNELS = ("popup",)    # V7 G3b: a `local_only` approval is approved ONLY in the popup window. Not "terminal": that is
@@ -188,6 +190,12 @@ class Approval:
         en, he = spoken_kind(self.title, self.kind, self.details)
         return he if str(lang or "").lower().startswith("he") else en
 
+    def text_sha(self) -> str:
+        """A short lower-case hex fingerprint of what will really run: the redacted FULL prompt, the kind and the redacted details (not the
+        120-character label). A phone sends it back with its decision, so an answer only counts for the text it saw."""
+        body = json.dumps([self.kind, logs.redact(str(self.prompt)), logs.redact_deep(self.details)], sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
     def public(self) -> dict:
         """In-process view (the Core's own dashboard routes, popup): includes the code to SHOW to the owner."""
         d = asdict(self)
@@ -195,6 +203,8 @@ class Approval:
             d.pop(k, None)
         d["typed"] = bool(self.typed_code)
         d["seconds_left"] = max(0, round(self.expires - time.time()))
+        d["text_sha"] = self.text_sha()
+        d["shown_text"] = logs.redact(str(self.prompt))[:SHOWN_TEXT_CHARS]      # redact FIRST, then cut
         return d
 
     def file_row(self, key: bytes | None) -> dict:
@@ -413,7 +423,7 @@ class ApprovalService:
                           channel=str(getattr(ch, "name", ch)))
 
     # ------------------------------------------------------------------ answering
-    def answer(self, aid: str, approved: bool, *, channel: str, typed: str = "") -> tuple[bool, str]:
+    def answer(self, aid: str, approved: bool, *, channel: str, typed: str = "", text_sha: str | None = None) -> tuple[bool, str]:
         """An owner's answer from a real channel. Thread-safe (dashboard threads, popup watcher threads)."""
         tool = _in_tool()
         if tool:
@@ -426,6 +436,8 @@ class ApprovalService:
         if entry is None:
             return False, "no such waiting approval (already answered or expired)"
         a, fut, loop = entry
+        if text_sha is not None and text_sha != a.text_sha():              # the same row we resolve below: no gap between check and answer
+            return False, STALE_TEXT_MSG
         if approved is True:
             if a.typed_code and not a.code_ok(self._key, typed):
                 return False, HE["typed"] + " / Type the code shown to approve."
@@ -726,7 +738,7 @@ def read_pending_file(home: Path, *, reveal: bool = True) -> list[dict]:
     return out
 
 
-def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: str = "") -> tuple[bool, str]:
+def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: str = "", text_sha: str | None = None) -> tuple[bool, str]:
     """Answer from another process: in-process service when it serves this home, else the answers file, signed
     with the profile key (the Core ignores unsigned or wrongly signed files)."""
     if _in_tool():
@@ -735,13 +747,15 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
         return False, f"channel {channel} cannot answer through a file"
     svc = _current
     if svc is not None and svc.home.resolve() == Path(home).resolve():
-        return svc.answer(aid, approved, channel=channel, typed=typed)
+        return svc.answer(aid, approved, channel=channel, typed=typed, text_sha=text_sha)
     if not re.fullmatch(r"[0-9a-f]{16}", str(aid)):
         return False, "bad id"
     rows = {r["id"]: r for r in read_pending_file(home, reveal=False)}
     r = rows.get(str(aid))
     if r is None:
         return False, "no such waiting approval (already answered or expired)"
+    if text_sha is not None and text_sha != r.get("text_sha"):
+        return False, STALE_TEXT_MSG
     key = akeys.load(home)
     if key is None:
         return False, "the approval key of the running JARVES is missing (restart JARVES)"
@@ -1003,6 +1017,8 @@ def refusal_code(why: str) -> str:
     """Fixed code of a refused answer (the first answer already won, or the typed code is needed)."""
     if str(why).startswith("no such waiting approval"):
         return "APPROVAL_ALREADY_ANSWERED"
+    if str(why) == STALE_TEXT_MSG:
+        return "STALE_TEXT"
     if "code" in str(why).lower():
         return "APPROVAL_CODE_NEEDED"
     return "APPROVAL_REFUSED"
