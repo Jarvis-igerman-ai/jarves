@@ -176,7 +176,7 @@ def test_the_start_route_is_local_only_and_refuses_a_public_address(tmp_path):
     assert status == 409 and body["code"] == "PILOT_URL"
 
 
-@pytest.mark.parametrize("port,dash", [(11434, 0), (5037, 0), (9222, 0), (5432, 0), (8765, 8765)])
+@pytest.mark.parametrize("port,dash", [(11434, 0), (5037, 0), (9222, 0), (5432, 0), (8765, 8765), (8765, 0)])
 def test_service_ports_and_the_dashboard_port_are_refused(tmp_path, port, dash):
     svc = bd.PilotService(tmp_path, lambda: Feats(), dashboard_port=dash)
     with pytest.raises(bp.PilotError) as e:
@@ -318,6 +318,12 @@ def _catch(fn):
         fn()
     except bp.PilotError as e:
         return e.code
+
+
+def test_the_no_sandbox_fallback_needs_ci_true_as_well(monkeypatch):
+    import inspect
+    src = inspect.getsource(bd.PlaywrightDriver)
+    assert 'JARVES_PILOT_NO_SANDBOX") != "1" or os.environ.get("CI") != "true"' in src      # an owner PC never drops the sandbox
 
 
 class RecFeats(Feats):

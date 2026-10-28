@@ -37,8 +37,8 @@ CALL_TIMEOUT_S = 20.0
 CLOSE_WAIT_S = 5.0
 NAV_TIMEOUT_MS = 15000
 # local services a test page must never be pointed at (the dashboard port is added by the route): Ollama, adb, DevTools, databases ...
-SERVICE_PORTS = frozenset({22, 23, 25, 53, 80, 443, 445, 1433, 1455, 2375, 2376, 3306, 3389, 5037, 5432, 5900, 6379, 8766, 8767, 8768, 8769, 8770,
-                           8787, 9200, 9222, 9229, 11211, 11434, 27017})        # 1455 ChatGPT login callback, 8766+ JARVES dashboards, 8787 Instagram
+SERVICE_PORTS = frozenset({22, 23, 25, 53, 80, 443, 445, 1433, 1455, 2375, 2376, 3306, 3389, 5037, 5432, 5900, 6379, 8765, 8766, 8767, 8768, 8769, 8770,
+                           8787, 9200, 9222, 9229, 11211, 11434, 27017})        # 1455 ChatGPT login callback, 8765 the default dashboard port (config.py), 8766+ JARVES LAN and other dashboards, 8787 Instagram
 EXTRA_ARGS = ["--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1", "--disable-quic",
               "--disable-features=NetworkPrediction,msSmartScreenProtection"]
 
@@ -121,7 +121,7 @@ class PlaywrightDriver:
             try:
                 self._browser = self._launch_browser(True)          # the renderer sandbox stays ON
             except Exception:                                       # noqa: BLE001
-                if os.environ.get("JARVES_PILOT_NO_SANDBOX") != "1":
+                if os.environ.get("JARVES_PILOT_NO_SANDBOX") != "1" or os.environ.get("CI") != "true":   # CI containers only, never an owner PC
                     raise
                 logs.warn("browser", "BROWSER_DRIVER_NO_SANDBOX", "the pilot browser runs WITHOUT its sandbox (JARVES_PILOT_NO_SANDBOX=1)")
                 self._browser = self._launch_browser(False)
