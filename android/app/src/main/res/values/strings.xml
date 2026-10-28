@@ -34,4 +34,16 @@
     <string name="notify_channel">Waiting approvals</string>
     <string name="notify_one">1 approval is waiting on your computer</string>
     <string name="notify_many">%1$d approvals are waiting on your computer</string>
+    <string name="talk_title">Talk to JARVES</string>
+    <string name="talk_hold">Hold to talk</string>
+    <string name="talk_listening">Listening: let go to send</string>
+    <string name="talk_sending">Sending to your computer...</string>
+    <string name="talk_nomic">The microphone could not be opened. Allow the microphone for this app in the phone settings.</string>
+    <string name="talk_you_said">You said: %1$s</string>
+    <string name="talk_nospeech">Nothing was heard. Hold the button, speak, then let go.</string>
+    <string name="talk_busy">JARVES is still answering the last request. Try again in a moment.</string>
+    <string name="talk_rate">Too many voice requests. Wait a little and try again.</string>
+    <string name="talk_secure">Voice needs the secure link and the voice system running on your computer.</string>
+    <string name="talk_notallowed">This phone is not allowed to use voice. Allow it on the computer (Phone page).</string>
+    <string name="talk_note">The microphone is open only while you hold the button and this screen is open. Nothing is recorded to a file; the sound goes only to your own computer.</string>
 </resources>

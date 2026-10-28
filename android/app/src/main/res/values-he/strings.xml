@@ -34,4 +34,16 @@
     <string name="notify_channel">אישורים ממתינים</string>
     <string name="notify_one">אישור אחד ממתין במחשב שלכם</string>
     <string name="notify_many">%1$d אישורים ממתינים במחשב שלכם</string>
+    <string name="talk_title">דיבור עם JARVES</string>
+    <string name="talk_hold">לחצו והחזיקו כדי לדבר</string>
+    <string name="talk_listening">מאזין: עזבו כדי לשלוח</string>
+    <string name="talk_sending">שולח למחשב שלכם...</string>
+    <string name="talk_nomic">אי אפשר לפתוח את המיקרופון. אפשרו מיקרופון לאפליקציה בהגדרות הטלפון.</string>
+    <string name="talk_you_said">אמרתם: %1$s</string>
+    <string name="talk_nospeech">לא נשמע כלום. לוחצים על הכפתור, מדברים, ואז עוזבים.</string>
+    <string name="talk_busy">JARVES עדיין עונה על הבקשה הקודמת. נסו שוב בעוד רגע.</string>
+    <string name="talk_rate">יותר מדי בקשות קוליות. חכו מעט ונסו שוב.</string>
+    <string name="talk_secure">דיבור דורש את הקישור המאובטח ואת מערכת הקול שרצה במחשב שלכם.</string>
+    <string name="talk_notallowed">לטלפון הזה אין הרשאה לדיבור. מאפשרים במחשב (עמוד הטלפון).</string>
+    <string name="talk_note">המיקרופון פתוח רק בזמן שאתם לוחצים על הכפתור והמסך הזה פתוח. שום דבר לא נשמר בקובץ; הצליל הולך רק למחשב שלכם.</string>
 </resources>
