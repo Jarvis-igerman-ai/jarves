@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0b1416">
+  <title>JARVES — מרכז העבודה</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">דלג לתוכן</a>
+  <div class="workspace">
+    <aside class="sidebar" aria-label="ניווט ראשי">
+      <a class="brand" href="#overview" aria-label="JARVES, תמונת מצב"><span class="brand-icon" aria-hidden="true">J<span></span></span><span><b dir="ltr">JARVES</b><small>מרכז העבודה</small></span></a>
+      <div class="workspace-label"><span class="tiny-dot"></span> WORKSPACE <span class="pill subtle">BETA</span></div>
+      <nav class="main-nav">
+        <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon" aria-hidden="true">◫</span><span>תמונת מצב</span><span class="nav-shortcut">01</span></a>
+        <a href="#roadmap" data-view="roadmap" class="nav-link"><span class="nav-icon" aria-hidden="true">☷</span><span>התוכנית המלאה</span><span class="nav-shortcut">02</span></a>
+        <a href="#questions" data-view="questions" class="nav-link"><span class="nav-icon" aria-hidden="true">◇</span><span>ממתין להחלטה</span><span class="nav-count" id="questions-count">0</span></a>
+      </nav>
+      <div class="sidebar-note"><span class="rail-line"></span><p>כל משימה נשארת בתמונה.<br>העבודה ממשיכה גם כשאתה לא כאן.</p></div>
+      <div class="sidebar-bottom"><div class="watchdog-indicator" id="watchdog-indicator"><span class="status-dot"></span><span>בודק את המשגיח…</span></div><div class="sidebar-meta">LOCAL CONTROL CENTER <span dir="ltr">v1</span></div></div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar"><div class="breadcrumb"><span class="breadcrumb-project" dir="ltr">jarves</span><span aria-hidden="true">/</span><span id="breadcrumb-current">תמונת מצב</span></div><div class="topbar-status"><span id="connection" class="connection"><span class="status-dot"></span>מתחבר</span><span class="topbar-divider"></span><time id="last-update">טרם התקבל עדכון</time></div></header>
+      <div id="connection-banner" class="notice warning" hidden role="status"></div>
+      <div id="source-banner" class="notice source-notice" hidden></div>
+      <main id="main" tabindex="-1">
+        <section class="page-heading"><div><div class="eyebrow" id="page-eyebrow">DEVELOPMENT / LIVE OVERVIEW</div><h1 id="page-title">העבודה, בתמונה אחת<span>.</span></h1><p id="page-description">מי עובד, מה התקדם ומה צריך אותך — בלי לאבד את ההמשך.</p></div><div class="heading-actions"><button type="button" id="add-task" class="button secondary"><span aria-hidden="true">＋</span> משימה חדשה</button><button type="button" id="dispatch" class="button primary"><span aria-hidden="true">↗</span> הקצה עבודה</button></div></section>
+
+        <section class="owner-strip" aria-label="הזמינות שלך"><div class="owner-copy"><span class="owner-avatar" aria-hidden="true">א</span><div><b id="owner-title">איך אפשר להתקדם איתך?</b><span id="owner-description">בחר אם אתה זמין לשאלות עכשיו.</span></div></div><div class="segmented" aria-label="הזמינות שלך"><button type="button" id="owner-present" aria-pressed="false">אני כאן <span class="tiny-dot" aria-hidden="true"></span></button><button type="button" id="owner-away" aria-pressed="false">להמשיך בלעדיי <span aria-hidden="true">☾</span></button></div></section>
+
+        <section id="view-overview" class="view" aria-label="תמונת מצב">
+          <div class="metrics" id="metrics"><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div></div>
+          <section id="alerts-section" class="alerts-section" hidden aria-label="דורש תשומת לב"></section>
+          <section class="section-block"><div class="section-heading"><div><span class="section-index">01</span><h2>הצוות עכשיו</h2><span class="small-label" id="agent-summary">ממתין לנתונים</span></div><span class="live-label" id="agents-live-label"><span class="status-dot"></span>מצב מדווח</span></div><div class="agent-grid" id="agents"><div class="empty-state"><span class="empty-icon" aria-hidden="true">◌</span><h3>טוען את סביבת העבודה</h3><p>הנתונים יופיעו כאן אחרי חיבור לשירות המקומי.</p></div></div></section>
+          <div class="overview-columns"><section class="panel active-work"><div class="panel-heading"><div><span class="section-index">02</span><h2>על שולחן העבודה</h2></div><a href="#roadmap" class="text-link">לכל התוכנית <span aria-hidden="true">←</span></a></div><div id="active-tasks"></div></section><section class="panel activity-panel"><div class="panel-heading"><div><span class="section-index">03</span><h2>מה השתנה</h2></div><span class="small-label">עדכונים אחרונים</span></div><ol class="event-list" id="events"></ol></section></div>
+        </section>
+
+        <section id="view-roadmap" class="view" hidden aria-label="התוכנית המלאה"><div class="roadmap-toolbar"><div class="filter-group" role="group" aria-label="סינון משימות"><button class="filter active" data-filter="all" aria-pressed="true">כל התוכנית</button><button class="filter" data-filter="active" aria-pressed="false">בעבודה</button><button class="filter" data-filter="waiting" aria-pressed="false">ממתין</button><button class="filter" data-filter="done" aria-pressed="false">הושלם</button></div><label class="search-field"><span aria-hidden="true">⌕</span><span class="sr-only">חיפוש בתוכנית</span><input id="task-search" type="search" placeholder="חיפוש משימה או מזהה…" autocomplete="off"></label></div><div class="evidence-legend"><span><i class="legend-check">✓</i> השלמה עם ראיות ותוצר שפורסם</span><span>קוד שמוזג ≠ תרחיש שנבדק ≠ גרסה ששוחררה</span></div><div id="roadmap-context"></div><div id="roadmap"></div></section>
+
+        <section id="view-questions" class="view" hidden aria-label="שאלות והחלטות"><div class="questions-intro"><div class="questions-intro-icon" aria-hidden="true">◇</div><div><h2>כמה תשובות, והעבודה ממשיכה</h2><p>אפשר לענות עכשיו או לשמור לאחר כך. משימות אחרות שיכולות להתקדם יישארו זמינות לצוות.</p></div><span class="pill amber">שאלות תכנון</span></div><div id="questions"></div></section>
+        <footer class="footer"><span dir="ltr">JARVES / WORKFLOW</span><span id="source-detail">המצב מוצג מהשירות המקומי בלבד</span></footer>
+      </main>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="task-dialog" aria-labelledby="task-dialog-title"><div class="dialog-header"><div><div class="eyebrow">TASK DETAILS</div><h2 id="task-dialog-title"></h2></div><button class="icon-button close-dialog" type="button" aria-label="סגור פרטי משימה">×</button></div><div id="task-dialog-body"></div></dialog>
+  <dialog id="create-dialog" aria-labelledby="create-dialog-title"><form id="create-task-form"><div class="dialog-header"><div><div class="eyebrow">ADD TO THE PLAN</div><h2 id="create-dialog-title">משימה חדשה</h2></div><button class="icon-button close-dialog" type="button" aria-label="סגור יצירת משימה">×</button></div><label class="field">מה צריך להשיג?<input name="title" required maxlength="240" placeholder="למשל: המשך שיחה מהטלפון במחשב"></label><div class="field-grid"><label class="field">גרסה<select name="version"><option>V4.5.1</option><option>V5</option><option>V6</option><option>V7</option></select></label><label class="field">תחום<select name="lane"><option value="features">פיצ'רים</option><option value="bugs">תיקון באגים</option><option value="release">בדיקות ושחרור</option><option value="ops">תשתית ותהליך</option></select></label></div><div class="field-grid"><label class="field">עדיפות<select name="priority"><option value="2">P2 — רגילה</option><option value="1">P1 — גבוהה</option><option value="0">P0 — קריטית</option><option value="3">P3 — נמוכה</option></select></label><label class="field">אימות נדרש<select name="required_validation"><option value="app">תרחיש במוצר</option><option value="automated">בדיקות אוטומטיות</option><option value="device">מכשיר אמיתי</option></select></label></div><label class="field">מתי נדע שהמשימה הושלמה?<textarea name="acceptance" rows="3" required maxlength="3000" placeholder="תנאי קבלה אחד בכל שורה"></textarea></label><div class="dialog-actions"><button type="button" class="button secondary close-dialog">ביטול</button><button class="button primary" type="submit">הוסף לתוכנית <span aria-hidden="true">←</span></button></div><p class="form-error" id="create-error" role="alert" hidden></p></form></dialog>
+</body>
+</html>

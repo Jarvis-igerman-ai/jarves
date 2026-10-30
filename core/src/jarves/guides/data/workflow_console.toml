@@ -1,0 +1,40 @@
+order = 95
+category = "system"
+pages = []
+features = []
+aliases = ["תהליך פיתוח", "לוח סוכנים", "שאלות פיתוח", "workflow", "development console"]
+links = ["agent_orchestrator"]
+title_he = "מערכת העבודה והמעקב"
+title_en = "Development workflow console"
+what_he = "לוח מקומי חי של תוכנית הגרסאות, סוכנים, משימות וראיות. שאלות שמחכות לכם נשמרות, ועבודה עצמאית יכולה להמשיך. משגיח חיצוני מזהה סוכנים לא מעודכנים ומפעיל מחדש את שירות התצוגה."
+what_en = "A local live view of version scope, workers, tasks and evidence. Owner questions remain pending while independent work continues. An external supervisor detects stale workers and restarts the web service."
+expect_he = "תוכנית הגרסאות אינה הוכחת השלמה: צריך לקשר ראיות. תשובה לשאלת תכנון אינה אישור להפעלת כלי, שליחה או שחרור. עד לחיבור סוכנים אמיתיים מוצג שאין סוכנים מחוברים."
+expect_en = "Scope is not completion evidence. Planning answers never approve tools, external sends or releases. Until real workers attach, the view explicitly shows no connected workers."
+cost_he = "המעקב מקומי וללא מודל. סוכני קוד ממשיכים להשתמש במנגנוני המנוי, התקציב והאישור הקיימים."
+cost_en = "Monitoring is local and model-free. Coding sessions retain the existing subscription, budget and approval controls."
+privacy_he = "נתוני מצב ושאלות נשמרים בתיקיית המשתמש, מחוץ לריפו. הממשק דורש קישור פרטי ומאזין רק ב־127.0.0.1; אין גישה מהטלפון ללא חיבור מאובטח נוסף."
+privacy_en = "State and questions stay in the user's private data directory, outside the repository. The UI requires a private link and binds only to 127.0.0.1; phone access requires a separate secured integration."
+
+[[steps]]
+he = "מהריפו: python core/tools/workflow_console.py supervise. לחלופין: jarvis workflow supervise. המשגיח ושירות התצוגה הם תהליכים נפרדים מה־Core."
+en = "From the checkout: python core/tools/workflow_console.py supervise, or jarvis workflow supervise. The supervisor and web service are separate from the Core."
+action = "command:jarvis workflow supervise"
+
+[[steps]]
+he = "פתחו את הקישור הפרטי עם jarvis workflow open. סמנו 'אני כאן' למענה מרוכז לשאלות, או 'להמשיך בלעדיי' לשמירת השאלות. שתיקה אינה אישור."
+en = "Open the private link with jarvis workflow open. Select Present for interactive planning questions or Away to retain them. Silence is never approval."
+action = "command:jarvis workflow open"
+
+[[steps]]
+he = "סנכרון קריאה בלבד מ־GitHub: jarvis workflow sync. שיוך סוכן קיים: jarvis workflow agent --agent bugs --lane bugs --session-id ID --auto-dispatch. הקצאה חיה עדיין עוברת דרך ה־Orchestrator הקיים."
+en = "Read-only GitHub sync: jarvis workflow sync. Attach an existing session with jarvis workflow agent --agent bugs --lane bugs --session-id ID --auto-dispatch. Live assignment still uses the existing Orchestrator."
+action = "command:jarvis workflow status"
+
+[[problems]]
+he = "יש משימות אבל אף סוכן לא עובד"
+en = "Tasks exist but no worker is running"
+fix_he = "בדקו את ההתראה: משימה יכולה לחכות לכם, לתלות, למשאב תפוס או למיפוי מאושר. חברו סוכן אמיתי, דווחו heartbeat ואל תסמנו משימת מקור כמאושרת לביצוע לפני שקריטריוני הקבלה וההרשאה שלה ברורים."
+fix_en = "Read the alert: work may need an owner answer, dependency, reserved resource or scope reconciliation. Attach a real worker and report a heartbeat. Do not authorise imported scope until its acceptance and execution authority are clear."
+
+[parity.features]
+# Standalone development tooling; no assistant runtime feature switch or tool group.

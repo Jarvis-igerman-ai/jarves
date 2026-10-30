@@ -1,5 +1,11 @@
 # Release checklist: JARVES 6.0.0 (stable), DRAFT
 
+> **Historical draft, not a current release gate.** Its nightly/bug-table and
+> "V6 code not authorised" statements are dated snapshots that disagree with
+> later policy/code. Use [RELEASING](../RELEASING.md), the actual release gate,
+> [NOW](../NOW.md) and [the version mapping](../workflow/VERSION_MAPPING_2026-10-30.md).
+> Open device/owner acceptance remains open until evidence; no pass is inferred here.
+
 Draft prepared 28 Oct 2026 from the 5.0.0 checklist. Docs only: V6 code is NOT authorized yet (`docs/NOW.md`, issue #224), nothing is versioned, tagged or published. Read by `core/tools/release_gate.py` when the tag `v6.0.0` is pushed: every row must be `done`, `n/a` or `accepted`. Steps: [RELEASING](../RELEASING.md) "Stable release, step by step". Triage: [BUG_TABLE_V60_2026-10-25](BUG_TABLE_V60_2026-10-25.md). Security: [V6_SECURITY_REVIEW_2026-10-25](V6_SECURITY_REVIEW_2026-10-25.md). Safe default: 6.0.0 ships as beta with the car rows NOT-RUN; the stable tag waits for the owner's signed sheet and the parked-car session (G11).
 
 | # | Item | Status | Evidence / what is left |

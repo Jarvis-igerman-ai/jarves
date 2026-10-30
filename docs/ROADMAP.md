@@ -1,5 +1,11 @@
 # JARVES — roadmap and milestones
 
+> **Status prose below is historical and includes conflicting dated snapshots.**
+> Current scope is reconciled in [the version mapping](workflow/VERSION_MAPPING_2026-10-30.md)
+> and the live workflow view. Do not infer present implementation, verification
+> or release from an old "not authorised", "open PR" or "not released" sentence.
+> [NOW](NOW.md) and [the operating model](workflow/OPERATING_MODEL.md) define the active work contract.
+
 > Planning and status per version. **Only [docs/NOW.md](NOW.md) authorizes work.** Future Issues are NOT permission to start them. Every document is indexed in [DOC_MAP](DOC_MAP.md).
 
 ## Current milestone classification (owner decision, 24 October 2026)
