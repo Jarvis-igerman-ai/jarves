@@ -54,7 +54,15 @@ def test_off_refuses_everything(tmp_path):
 @pytest.mark.parametrize("url,scope", [
     ("http://localhost:8000/x", "local"), ("http://127.0.0.1/", "local"), ("https://example.com/a", "public"),
     ("http://192.168.1.5/", ""), ("http://10.0.0.1/", ""), ("http://169.254.169.254/", ""), ("file:///c:/x", ""),
-    ("javascript:alert(1)", ""), ("https://claude.ai/chats", ""), ("http://printer.local/", ""), ("http://intranet/", "")])
+    ("javascript:alert(1)", ""), ("https://claude.ai/chats", ""), ("http://printer.local/", ""), ("http://intranet/", ""),
+    # review #523: browser-style host forms must not pass as public
+    ("http://127.1/", "local"), ("http://0x7f.1/", "local"), ("http://0177.0.0.1/", "local"),
+    ("http://2130706433/", "local"), ("http://10.1/", ""), ("http://169.254.169.254./", ""),
+    ("http://0xa9fea9fe/", ""), ("http://chatgpt.com./", ""), ("http://localhost./", "local"),
+    ("http://①②⑦.0.0.1/", "local"), ("http://①⑨②.168.1.1/", ""),
+    ("http://[64:ff9b::a9fe:a9fe]/", ""), ("http://[2002:a00:1::]/", ""), ("http://[::ffff:10.0.0.1]/", ""),
+    ("http://1.2.3.4.5/", ""), ("http://example.com:443/", "public"), ("http://public@127.0.0.1/", "local"),
+    ("http://8.8.8.8/", "public")])
 def test_page_scope(url, scope):
     assert bp.page_scope(url) == scope
 

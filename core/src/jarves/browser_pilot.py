@@ -9,6 +9,7 @@ The owner switch `browser_pilot` is OFF by default (beta: needs the global beta 
 from __future__ import annotations
 
 import ipaddress
+import re
 import time
 from pathlib import Path
 from typing import Callable
@@ -35,18 +36,66 @@ class PilotError(Exception):
         self.code, self.message = code, message
 
 
+_NUM_LABEL = re.compile(r"0x[0-9a-f]*|[0-9]+")
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _legacy_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """Browsers (WHATWG URL) read '127.1', '0x7f.1', '0177.0.0.1' and '2130706433' as IPv4: parse them the same way,
+    so a private or loopback address cannot pass as a 'public' host name (review #523)."""
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4 or not all(_NUM_LABEL.fullmatch(p) for p in parts):
+        return None
+    nums = []
+    for p in parts:
+        if p.startswith("0x"):
+            nums.append(int(p[2:] or "0", 16))
+        elif len(p) > 1 and p.startswith("0"):
+            if not set(p) <= set("01234567"):
+                return None
+            nums.append(int(p, 8))
+        else:
+            nums.append(int(p))
+    if any(n > 255 for n in nums[:-1]) or nums[-1] >= 256 ** (5 - len(nums)):
+        return None
+    value = nums[-1]
+    for i, n in enumerate(nums[:-1]):
+        value += n << (8 * (3 - i))
+    return ipaddress.IPv4Address(value)
+
+
 def page_scope(url: str) -> str:
-    """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts)."""
+    """'local' (loopback), 'public', or '' (refused: not http(s), blocked AI account pages, private or odd hosts).
+    The host is normalised like a browser does first (IDNA/NFKC, trailing dot, legacy numeric IPv4)."""
     host = url_host(url)
+    if not host:
+        return ""
+    if ":" not in host:                              # not IPv6: IDNA maps e.g. full-width or circled digits
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return ""
+        host = host.rstrip(".")                      # 'localhost.', 'chatgpt.com.', '169.254.169.254.'
     if not host or blocked(host):
         return ""
     try:
         ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
-        if host == "localhost" or host.endswith(".localhost"):
-            return "local"
-        odd = host.endswith((".local", ".internal", ".lan", ".home"))
-        return "public" if "." in host and not odd else ""
+        last = host.rsplit(".", 1)[-1]
+        if _NUM_LABEL.fullmatch(last):               # a numeric last label = an IPv4 address in a browser
+            ip = _legacy_ipv4(host)
+            if ip is None:
+                return ""
+        else:
+            if host == "localhost" or host.endswith(".localhost"):
+                return "local"
+            odd = host.endswith((".local", ".internal", ".lan", ".home"))
+            return "public" if "." in host and not odd else ""
+    if ip.version == 6:                              # IPv4 embedded in IPv6 (mapped, NAT64, 6to4) decides
+        inner = ip.ipv4_mapped or ip.sixtofour or (
+            ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF) if ip in _NAT64 else None)
+        if inner is not None:
+            ip = inner
     if ip.is_loopback:
         return "local"
     return "public" if ip.is_global else ""
