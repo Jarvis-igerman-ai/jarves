@@ -217,3 +217,35 @@ def test_concurrent_enable_makes_one_listener(home, monkeypatch):
         assert len(out) == 4 and len({o["port"] for o in out}) == 1
     finally:
         d.stop()
+
+
+def _phone(port, method, path, token=None, body=None):
+    c = http.client.HTTPSConnection("127.0.0.1", port, timeout=10, context=ssl._create_unverified_context())
+    h = {"Host": f"127.0.0.1:{port}", "Content-Type": "application/json", "X-Jarves": "1"}
+    if token:
+        h["Authorization"] = "Bearer " + token
+    c.request(method, path, body=None if method == "GET" else json.dumps(body if body is not None else {}), headers=h)
+    r = c.getresponse()
+    data = r.read()
+    c.close()
+    return r.status, json.loads(data) if data[:1] == b"{" else data
+def test_pair_phone_a_then_switch_to_phone_b_and_a_is_rejected(home, monkeypatch):
+    """#428: over the real TLS phone listener: pair A, the owner revokes A and pairs B; A's token stops working at once
+    and A's old pairing code cannot be used again, B works."""
+    monkeypatch.setattr(tailnet, "detect", lambda *a, **k: {})
+    monkeypatch.setattr(dashboard, "lan_ip", lambda: "127.0.0.1")
+    d = dashboard.Dashboard(home, Config(), free_port()).start()
+    try:
+        port = _pc(d, "POST", "/api/mobile/enable", {"confirm": True})[1]["port"]
+        code_a = _pc(d, "POST", "/api/mobile/code")[1]["code"]
+        a = d.mobile.pair(code_a, "Phone A", "127.0.0.1")
+        assert a and _phone(port, "GET", "/api/m/me", a["token"])[0] == 200
+        assert d.mobile.pair(code_a, "Again", "127.0.0.1") is None           # single use
+        assert _pc(d, "POST", f"/api/mobile/devices/{a['device']}/revoke")[0] == 200
+        code_b = _pc(d, "POST", "/api/mobile/code")[1]["code"]
+        b = d.mobile.pair(code_b, "Phone B", "127.0.0.1")
+        assert b and b["device"] != a["device"]
+        assert _phone(port, "GET", "/api/m/me", a["token"])[0] == 401        # A is out at once
+        assert _phone(port, "GET", "/api/m/me", b["token"])[0] == 200        # B is in
+    finally:
+        d.stop()
