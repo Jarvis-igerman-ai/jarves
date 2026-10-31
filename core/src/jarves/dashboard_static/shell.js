@@ -168,6 +168,18 @@
     }
     chips();
   }
+  // ---------------------------------------------------------------- clickable table rows: keyboard (Campaign D)
+  // pages build `tr.click` rows with an onclick only (mouse); make them reachable with Tab and activate with Enter / Space
+  const main = $("main");
+  function rowsKeyboard() {
+    for (const r of main.querySelectorAll("tr.click:not([tabindex])")) { r.tabIndex = 0; r.setAttribute("role", "link"); }
+  }
+  new MutationObserver(rowsKeyboard).observe(main, { childList: true, subtree: true });
+  rowsKeyboard();
+  main.addEventListener("keydown", (ev) => {
+    const r = ev.target.closest && ev.target.closest("tr.click");
+    if (r && r === ev.target && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); r.click(); }
+  });
   window.shellOverview = () => {};          // hook for app.js refreshOverview (kept for later use)
   chips();
   poll();

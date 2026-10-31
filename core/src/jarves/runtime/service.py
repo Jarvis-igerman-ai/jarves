@@ -63,6 +63,12 @@ class Runtime:
         saved = read_state(self.home).get("prefs") or {}
         self.prefs = {k: bool(saved.get(k, False)) for k in PREFS}
         self.viewer = Viewer(core.cfg.link.port, launcher, exe=rc.viewer_exe, on_exit=self._viewer_exited)
+        # `jarvis` (desktop mode) opens the loading window before the Core exists: own it from the first moment, or a
+        # `show` during startup would not see it (its loading screen is no face yet) and open a second window.
+        pre = getattr(core, "preopened_viewer", None)
+        if pre is not None:
+            self.viewer.adopt(pre)
+        self._display_lock = asyncio.Lock()      # show / hide never interleave (tray + CLI + voice + dashboard)
         self._tray_factory = tray_factory
         self.tray = None
         self.tray_state, self.tray_reason = "off", ""
@@ -208,37 +214,44 @@ class Runtime:
         self._set_pref("mic_muted", bool(muted))
 
     async def show(self, by: str = "user") -> tuple[bool, str]:
-        self._set_pref("display_hidden", False)
-        self._display_crashed = False
-        if self.core.link.face is not None:
-            return True, "already visible"
-        if self.viewer.running:
-            return True, "already opening"
-        if not self._custom_launcher:
-            self._godot = None                # re-check: Godot may have been installed meanwhile
-        try:
-            await self.viewer.open()
-        except Exception as e:
-            logs.warn("runtime", "VIEWER_START_FAILED", f"display window could not start: {e}", by=by)
-            return False, str(e)[:160]
-        logs.info("runtime", "DISPLAY_SHOWN", "display window opened", by=by)
-        return True, "opening"
+        """Idempotent: at most ONE window process. Concurrent / repeated shows share one launch; a show while a
+        window is starting or open only reports it; a show while a window is closing waits for it, then opens one."""
+        async with self._display_lock:
+            self._set_pref("display_hidden", False)
+            self._display_crashed = False
+            if self.viewer.closing:
+                await self.viewer.settle(5.0)           # the old process is gone before a new one starts
+            if self.core.link.face is not None:
+                return True, "already visible"
+            if self.viewer.running:
+                return True, "already opening"
+            if not self._custom_launcher:
+                self._godot = None                # re-check: Godot may have been installed meanwhile
+            try:
+                await self.viewer.open()
+            except Exception as e:
+                logs.warn("runtime", "VIEWER_START_FAILED", f"display window could not start: {e}", by=by)
+                return False, str(e)[:160]
+            logs.info("runtime", "DISPLAY_SHOWN", "display window opened", by=by)
+            return True, "opening"
 
     async def hide(self, by: str = "user") -> tuple[bool, str]:
-        self._set_pref("display_hidden", True)
-        self._display_crashed = False
-        had = self.core.link.face is not None or self.viewer.running
-        if self.core.link.face is not None:
-            await self.core.link.send_face("display.close", {"reason": "hide"})
-        await self.viewer.close()
-        logs.info("runtime", "DISPLAY_HIDDEN", "display window closed; the Core keeps running", by=by)
-        return True, "hidden" if had else "already hidden"
+        async with self._display_lock:
+            self._set_pref("display_hidden", True)
+            self._display_crashed = False
+            had = self.core.link.face is not None or self.viewer.running
+            if self.core.link.face is not None:
+                await self.core.link.send_face("display.close", {"reason": "hide"})
+            await self.viewer.close()
+            logs.info("runtime", "DISPLAY_HIDDEN", "display window closed; the Core keeps running", by=by)
+            return True, "hidden" if had else "already hidden"
 
     def window_closed(self) -> bool:
         """The user closed the window (desktop.close). True = keep the Core running (policy hide)."""
         if not self.keep_running:
             return False
         self._set_pref("display_hidden", True)
+        self.viewer.expect_exit()
         self._tray_notice()
         logs.info("runtime", "DISPLAY_CLOSED_BY_USER", "window closed; JARVES keeps running in the background "
                   "(tray / \"Hey Jarvis\" / jarvis show)")

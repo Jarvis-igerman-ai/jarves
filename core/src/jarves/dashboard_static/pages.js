@@ -445,7 +445,7 @@ PAGES.settings = async function () {
   };
   const save = el("button", { type: "button", class: "primary", disabled: true, onclick: async () => {
     try { const r = await api("/api/settings", { method: "PUT", body: JSON.stringify({ values: changed }) });
-      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`; save.disabled = true; }
+      msg.textContent = `Saved ${Object.keys(r.changed).length} value(s) to config.toml${r.backup ? " (backup " + r.backup + ")" : ""}. They apply when JARVES starts next.`; save.disabled = true; undo.disabled = false; }
     catch (e) { msg.textContent = "Not saved: " + e.message; }
   } }, "Save changes");
   const undo = el("button", { type: "button", disabled: !d.backups.length, onclick: async () => {

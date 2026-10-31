@@ -103,6 +103,47 @@ TEXT: dict[str, str] = {
     "UNIT test_channels_whatsapp.py (link building, approval, fake opener)":
         "בדיקות יחידה: test_channels_whatsapp.py (בניית קישור, אישור, פותח מדומה)",
     "never opened with the real WhatsApp app/Web": "מעולם לא נפתח עם אפליקציית WhatsApp או WhatsApp Web האמיתיות",
+    "read your Instagram Business/Creator direct messages aloud and reply, only after you approve the exact text (official API; the token stays on this computer)":
+        "מקריא בקול הודעות פרטיות באינסטגרם העסקי/יוצר שלך ועונה, רק אחרי שאישרת את הנוסח המדויק (API רשמי; האסימון נשאר במחשב הזה)",
+    "UNIT test_instagram.py (local fake Graph API server)": "בדיקות יחידה: test_instagram.py (שרת Graph API מדומה מקומי)",
+    "never run against real Instagram: needs the owner's Meta app, account and token":
+        "מעולם לא הורץ מול אינסטגרם אמיתי: דרושים אפליקציית Meta, חשבון ואסימון של הבעלים",
+    "checks health, recent logs, settings and features on demand and weekly, then suggests ranked fixes; settings change only after you approve":
+        "בודק תקינות, יומנים אחרונים, הגדרות ויכולות לפי בקשה ופעם בשבוע, ומציע תיקונים לפי סדר חשיבות; הגדרות משתנות רק אחרי שאישרת",
+    "UNIT test_selfcheck.py (real store/log/scheduler/autonomy in tmp dirs, synthetic log files)":
+        "בדיקות יחידה: test_selfcheck.py (אחסון, יומן, מתזמן ועצמאות אמיתיים בתיקיות זמניות, קובצי יומן סינתטיים)",
+    "not yet run on the owner's real logs and Core": "טרם הורץ על היומנים וה-Core האמיתיים של הבעלים",
+    "one command, jarvis connect, checks every account (Google, Telegram, Pear, wake word) and walks you through only what is missing; reminds you once a day while Google is not connected":
+        "פקודה אחת, jarvis connect, בודקת כל חשבון (גוגל, טלגרם, Pear, מילת ההפעלה) ומדריכה אותך רק במה שחסר; מזכירה פעם ביום כל עוד גוגל לא מחובר",
+    "UNIT test_connect.py (real HTTP fake Telegram with getUpdates pairing, fake Pear, fake Google, fake clipboard, tmp Downloads)":
+        "בדיקות יחידה: test_connect.py (טלגרם מדומה ב-HTTP אמיתי עם התאמה דרך getUpdates, Pear מדומה, גוגל מדומה, לוח מדומה, תיקיית הורדות זמנית)",
+    "never run against the owner's real Telegram, Google or Pear accounts":
+        "מעולם לא הורץ מול חשבונות הטלגרם, הגוגל וה-Pear האמיתיים של הבעלים",
+    "pure Python + SQLite (/proc/meminfo for memory); never run on a Raspberry Pi (no device in the test setup)":
+        "Python ו-SQLite בלבד (/proc/meminfo לזיכרון); טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
+    "countdown timers and alarms; the Core rings them aloud even when the window is closed":
+        "טיימרים לספירה לאחור ושעונים מעוררים; ה-Core מצלצל בקול גם כשהחלון סגור",
+    "pure Python + SQLite + tzdata, no Windows-only code; not run on a Raspberry Pi yet (no device in the test setup); ringing needs the Pi speaker":
+        "Python, SQLite ו-tzdata בלבד, בלי קוד ייעודי ל-Windows; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה); הצלצול צריך את הרמקול של ה-Pi",
+    "shopping and to-do lists by voice: add, read back, tick off, clear":
+        "רשימות קניות ומשימות בקול: הוספה, הקראה, סימון וניקוי",
+    "opens web pages for you: full control only on your allow-list (empty at first), other sites read-only after you approve; purchases, payments and passwords always ask on the screen":
+        "פותח בשבילך דפי אינטרנט: שליטה מלאה רק באתרים שברשימת ההיתרים שלך (ריקה בהתחלה), אתרים אחרים לקריאה בלבד אחרי שאישרת; רכישות, תשלומים וסיסמאות תמיד שואלים על המסך",
+    "core/tests/test_browser.py drives the installed Edge (headless) against a local test page: allow-list, read-only ask, confirmations":
+        "core/tests/test_browser.py מפעיל את Edge המותקן (בלי חלון) מול דף בדיקה מקומי: רשימת היתרים, בקשת קריאה בלבד, אישורים",
+    "not yet used in a real spoken conversation": "עוד לא שומש בשיחה קולית אמיתית",
+    "Playwright linux-aarch64 wheel + Chromium never run on a Pi 5; RAM/CPU of a headless page not measured there":
+        "חבילת Playwright ל-linux-aarch64 ו-Chromium מעולם לא רצו על Pi 5; צריכת הזיכרון והמעבד של דף בלי חלון לא נמדדה שם",
+    "runs one command or installs software (winget / pip / npm) only after you approve the exact command on the popup; dangerous ones need a typed code; never as administrator; output is logged":
+        "מריץ פקודה אחת או מתקין תוכנה (winget / pip / npm) רק אחרי שאישרת את הפקודה המדויקת בחלון הקופץ; פקודות מסוכנות דורשות הקלדת קוד; אף פעם לא כמנהל מערכת; הפלט נרשם ביומן",
+    "UNIT test_helper_approvals.py (real harmless processes in temp folders, real approvals service)":
+        "בדיקות יחידה: test_helper_approvals.py (תהליכים אמיתיים ובלתי מזיקים בתיקיות זמניות, שירות אישורים אמיתי)",
+    "the approval popup and a real install were not tried by the owner on the desktop":
+        "חלון האישור והתקנה אמיתית עוד לא נוסו על ידי הבעלים במחשב",
+    "plain Python subprocess + Tk popup; never run on a Raspberry Pi (no device in the test setup)":
+        "תהליך משנה של Python וחלון Tk בלבד; טרם הורץ על Raspberry Pi (אין מכשיר במערך הבדיקה)",
+    "lets a short list of read-only commands (dir, git status, python --version) run without the approval popup; still logged; everything else still asks":
+        "מאפשר לרשימה קצרה של פקודות קריאה בלבד (dir, git status, python --version) לרוץ בלי חלון האישור; עדיין נרשם ביומן; כל השאר עדיין שואל",
     # --- platform blockers
     "never run on a Raspberry Pi 5 (no device yet)": "טרם הורץ על Raspberry Pi 5 (אין עדיין מכשיר)",
     "Pi audio output not tested": "פלט השמע ב-Pi לא נבדק",

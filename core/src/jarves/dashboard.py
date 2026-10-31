@@ -45,12 +45,13 @@ _ROUTES: list[tuple[str, re.Pattern, object]] = []
 PLUGIN_MODULES = ("jarves.workspace", "jarves.curator", "jarves.memory", "jarves.features", "jarves.google_auth",
                   "jarves.google_setup", "jarves.telegram_channel", "jarves.instagram_channel", "jarves.privacy", "jarves.overview",
                   "jarves.usage", "jarves.backup", "jarves.appearance", "jarves.skills.generated",
-                  "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.selfcheck",
+                  "jarves.operations", "jarves.runtime", "jarves.updates", "jarves.selfcheck", "jarves.connect",
                   "jarves.identity", "jarves.dashboard_auth", "jarves.guides",     # WP-L: Guides pages
                   "jarves.setup_wizard",                                         # SW-V3: Setup & add-ons page
                   "jarves.profiles",                                             # Issue #17: Profiles page
                   "jarves.context_trace",                                          # his context per conversation
-                  "jarves.browser")                                                # Browser allow-list page
+                  "jarves.browser",                                                # Browser allow-list page
+                  "jarves.approvals", "jarves.skills.helper")                      # V3: Approvals list, Helper switch
 MEMORY_UNDO_KEEP = 30
 MEMORY_UNDO_TTL_S = 24 * 3600                        # the undo button works for 24 h, then the entry is purged
 UNDO_PURGE_EVERY_S = 3600
@@ -783,7 +784,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden network", "text/plain")       # never answer the internet
         if not a.host_ok(self.headers.get("Host") or ""):
             return self._send(403, b"forbidden host", "text/plain")          # DNS rebinding / spoofed Host
-        if not a.rate_ok(ip):
+        if not (self.command == "GET" and urlsplit(self.path).path.startswith("/static/")) and not a.rate_ok(ip):
+            # (a page load fetches ~30 static files; they are public app code and must not eat the 240/min budget)
             return self._send(429, b"too many requests", "text/plain", {"Retry-After": "60"})
         if not a.origin_ok(self.headers, self.command):
             a.audit("refused_cross_origin", ip=ip, path=urlsplit(self.path).path)
@@ -864,6 +866,13 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = _handle
 
 
+class _Server(ThreadingHTTPServer):
+    # socketserver's default listen backlog is 5: a page load (40+ scripts) plus the 2 s polls of the strip and the
+    # approvals banner overflowed it on Windows, and the browser got ERR_CONNECTION_REFUSED for random requests.
+    request_queue_size = 128
+    daemon_threads = True
+
+
 class Dashboard:
     """Owns the HTTP server; `url` holds the one-time token. start() runs it in a daemon thread.
     workspace / memory / settings: the Core's own objects when it is opened from inside the Core.
@@ -881,8 +890,7 @@ class Dashboard:
         self.access = Access(home, token, lan=lan, lan_host=lan_host)
         self.ctx.access = self.access
         handler = type("H", (Handler,), {"ctx": self.ctx, "token": token, "access": self.access})
-        self.httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)),
-                                         handler)
+        self.httpd = _Server(("0.0.0.0" if lan else "127.0.0.1", port or (LAN_PORT if lan else 0)), handler)
         self.httpd.daemon_threads = True
         self.port = self.ctx.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/?t={token}"

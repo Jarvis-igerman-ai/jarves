@@ -1,0 +1,13 @@
+/* Approvals banner (approvals.js): fixed at the top of every page while JARVES waits for the owner. */
+.ap-banner { position: fixed; inset-inline-end: 16px; top: 64px; z-index: 50; width: min(440px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 8px; }
+.ap-card { background: var(--card, #fff); border: 2px solid #b26a00; border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25); display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.ap-card.ap-high { border-color: #c62828; }
+.ap-card.ap-low { border-color: #2e7d32; }
+.ap-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ap-title { font-weight: 600; }
+.ap-prompt { white-space: pre-wrap; }
+.ap-row code { word-break: break-all; }
+.ap-typed { color: #c62828; font-weight: 600; }
+.ap-code { width: 6em; text-align: center; margin-inline-start: 6px; }

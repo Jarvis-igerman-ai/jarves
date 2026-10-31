@@ -97,6 +97,7 @@ def messages():
     out.append(m("user.transcript", {"text": "מה השעה"}))
     out.append(m("error", {"code": "X", "message": "boom", "action": "retry"}))
     out.append(m("confirm.request", {"id": "c1", "prompt": "למחוק הכל?"}))
+    out += [m("confirm.cancel", p) for p in ({"id": "other"}, {"id": "c1"}, {"id": None}, {})]
     out += [m("dashboard.opened", p) for p in (
         {"url": "http://127.0.0.1:5000/", "browser": True}, {"url": "http://127.0.0.1:5000/", "browser": False},
         {"url": None, "browser": "yes"}, {})]

@@ -48,6 +48,9 @@ UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
 # Which conversation a tool call belongs to ("voice", "text", default "default": scheduler / other callers). The
 # untrusted-content taint is kept per route. A contextvar: tasks spawned by a route inherit it.
 ROUTE: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_skill_route", default="default")
+# The tool whose handler is running ("" = none). approvals.answer refuses inside a tool: no Skill (or text a tool
+# returned) can ever approve a request; only the owner's own channels can (approvals.py).
+IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", default="")
 
 
 async def bounded_ai(aw, timeout_s: float, registry: "SkillRegistry | None"):
@@ -172,15 +175,23 @@ class SkillRegistry:
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
             self._untrusted.pop(key, None)
 
-    async def _ask(self, prompt: str) -> bool:
-        """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout)."""
+    async def _ask(self, prompt: str, **meta) -> bool:
+        """registry.confirm, with the human's thinking time recorded (it must never count as an AI timeout).
+        `meta` (title, why, risk, kind, details, typed, timeout) reaches a confirm that declares `accepts_meta`
+        (the Core's approvals service); a plain confirm(prompt) gets the prompt only."""
         t0 = time.monotonic()
         self._confirming_since = t0
         try:
-            return await self.confirm(prompt)
+            if meta and getattr(self.confirm, "accepts_meta", False):
+                return bool(await self.confirm(prompt, **meta))
+            return bool(await self.confirm(prompt))
         finally:
             self._confirming_since = None
             self.confirm_wait_s += time.monotonic() - t0
+
+    async def ask(self, prompt: str, **meta) -> bool:
+        """For Skills that need an approval inside their handler (helper, feature_set): same accounting."""
+        return await self._ask(prompt, **meta)
 
     def confirm_elapsed(self) -> float:
         """Total human approval time so far, including an approval still open."""
@@ -250,12 +261,21 @@ class SkillRegistry:
             count, impact_prompt = (await tool.impact(args)) if tool.impact else (None, "")
             if origin == "model" or count is None or count > 1:
                 prompt = prompt or impact_prompt or f"{tool.description} - approve?"
-        if prompt and not await self._ask(prompt):
+        meta = {"title": tool.name, "risk": "high" if perm == "destructive" else "medium", "source": origin,
+                "kind": "message" if "send" in tool.name or "reply" in tool.name else "tool"}
+        if prompt and not await self._ask(prompt, **meta):
             logs.info("skills", "TOOL_DECLINED", f"{tool.name} not confirmed by user", tool=tool.name, origin=origin)
             return ToolResult(False, "cancelled: the user did not confirm", code="TOOL_DECLINED")
         return None
 
     async def _run(self, tool: Tool, args: BaseModel) -> ToolResult:
+        mark = IN_TOOL.set(tool.name)          # tasks created below copy the context: the handler runs "in a tool"
+        try:
+            return await self._run_marked(tool, args)
+        finally:
+            IN_TOOL.reset(mark)
+
+    async def _run_marked(self, tool: Tool, args: BaseModel) -> ToolResult:
         if tool.permission == "read":
             return await asyncio.wait_for(tool.handler(args), tool.timeout_s)
         # side effect: survives cancellation of the calling turn, but still honours the tool timeout

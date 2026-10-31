@@ -60,7 +60,8 @@ async def test_reminder_is_spoken_then_shown_on_the_face(core):
     face = await open_face(core)
     core.ops.alerts.raise_("test", "דוח מוכן", "אפשר לבקש הקראה", priority="normal")
     core.ops.scheduler.poke()
-    m = await face.wait("assistant.text", lambda p: p.get("source") == "alert")
+    # (other alerts may reach the face first, e.g. the once-a-day "Google not connected" popup in a fresh home)
+    m = await face.wait("assistant.text", lambda p: p.get("source") == "alert" and "דוח מוכן" in p.get("text", ""))
     assert "דוח מוכן" in m["text"]
     await face.ws.close()
 

@@ -82,6 +82,34 @@ class Viewer:
     def running(self) -> bool:
         return self._starting or (self.proc is not None and getattr(self.proc, "returncode", 0) is None)
 
+    @property
+    def closing(self) -> bool:
+        """A window is on its way out (hide asked, or the user closed it) but its process is still alive."""
+        return self._closing and self.proc is not None and getattr(self.proc, "returncode", 0) is None
+
+    def expect_exit(self) -> None:
+        """The window said it is closing (desktop.close): a show now must wait for the process to be gone."""
+        if self.proc is not None and getattr(self.proc, "returncode", 0) is None:
+            self._closing = True
+
+    async def settle(self, timeout_s: float = 5.0) -> None:
+        """Wait for a closing window to end; terminate it if it lingers. Afterwards no old process is alive."""
+        proc, watch = self.proc, self._watch
+        if proc is None or getattr(proc, "returncode", 0) is not None:
+            return
+        if watch is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(watch), timeout_s)
+                return
+            except asyncio.TimeoutError:
+                pass
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        if watch is not None:
+            await asyncio.gather(watch, return_exceptions=True)
+
     async def open(self) -> bool:
         """True when a new window was started; False when one is already open or starting."""
         if self.running:

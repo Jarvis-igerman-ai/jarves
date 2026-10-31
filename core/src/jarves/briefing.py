@@ -148,6 +148,12 @@ class BriefingSkill(Skill):
             day = self.clock().strftime("%Y-%m-%d")
             ok = [s for s in secs if s["ok"]]
             text = " ".join(s["text"] for s in secs)
+            # campaign 20 Oct (voice #41): with Google off the spoken briefing gave weather + "no reminders" and
+            # skipped calendar/mail silently. The missing parts now lead the text the voice model reads.
+            missing = [s for s in secs if not s["ok"]]
+            if missing:
+                text = ("חובה לומר למשתמש: " + " ".join(s["text"] for s in missing) + " | שאר התדריך: "
+                        + " ".join(s["text"] for s in secs if s["ok"]))
             return ToolResult(bool(ok), text, {"date": day, "sections": list(secs), "partial": len(ok) < len(secs),
                                                "rule": "Say the sections in this order, briefly. For email only the "
                                                        "count and senders; ask before reading any mail. Skip nothing "

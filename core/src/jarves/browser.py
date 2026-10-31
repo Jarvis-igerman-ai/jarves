@@ -150,6 +150,21 @@ def url_host(url: str) -> str:
     return u.hostname.lower()
 
 
+_OTHER_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d+(?:[/?#]|$))")
+
+
+def with_scheme(url: str) -> str:
+    """'shop.example.com/x' -> 'https://shop.example.com/x'. Anything that starts with another scheme and has no '//'
+    (javascript:, data:, mailto:...) is NOT a web address: it must not be 'completed' into a fake host and then asked
+    about (campaign 20 Oct, B-02); 'host:8080/x' stays a host with a port."""
+    url = (url or "").strip()
+    if url and "://" not in url:
+        if _OTHER_SCHEME.match(url):
+            raise BrowserError("BROWSER_BAD_URL", "only http/https web addresses can be opened")
+        url = "https://" + url
+    return url
+
+
 class Sites:
     """The owner's allow-list (one JSON file; re-read on every check, so a dashboard edit applies at once)."""
 
@@ -525,9 +540,7 @@ class BrowserService:
 
     # --- operations (each returns plain dicts; the Skill turns them into ToolResults)
     async def open(self, url: str) -> dict:
-        url = (url or "").strip()
-        if url and "://" not in url:
-            url = "https://" + url
+        url = with_scheme(url)
         host = url_host(url)
         if not host:
             raise BrowserError("BROWSER_BAD_URL", "only http/https web addresses can be opened")
