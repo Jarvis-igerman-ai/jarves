@@ -245,14 +245,16 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("unsupported retrospective scope")
                 result = retro_bundle(store, **data)
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/answer", path):
-                result = store.answer(m[1], data.get("answer", ""))
+                result = store.answer(m[1], data.get("answer", ""), answered_by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/ask-more", path):
                 result = store.ask_more(data.get("text", ""), question_id=m[1])
             elif path == "/api/followups":
                 # General follow-up; only the manager's CLI can store a reply, never the web surface.
                 result = store.ask_more(data.get("text", ""), task_id=data.get("task_id", ""))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
-                result = store.defer(m[1])
+                result = store.defer(m[1], channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
+                result = store.reopen(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/tasks/([A-Za-z0-9_.:-]+)/transition", path):
                 # No web input can clear a stale-worker resource lock or grant execution permission.
                 if set(data) - {"state", "implementation", "validation", "delivery", "blocker"}:

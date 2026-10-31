@@ -69,6 +69,19 @@ def agent_roster(agents: list, tasks: list, now: float, retention_s: int = AGENT
     return visible, {"live": len(visible) - offline, "offline": offline, "archived": archived,
                      "total": len(agents), "retention_s": retention_s}
 
+ANSWER_CHANNELS = ("dashboard", "terminal", "agent", "unknown")
+CONFIRMED_CHANNELS = ("dashboard", "terminal")
+
+
+def question_view(question):
+    """Old rows have no provenance: report them as unknown. An answer from agent/unknown needs owner confirmation."""
+    out = dict(question)
+    if out.get("status") == "answered":
+        out["answered_by"] = out.get("answered_by") or "unknown"
+        out["channel"] = out.get("channel") if out.get("channel") in ANSWER_CHANNELS else "unknown"
+        out["needs_owner_confirmation"] = out["channel"] not in CONFIRMED_CHANNELS
+    return out
+
 
 def _text(value, name: str, *, maximum: int = 2000, empty: bool = False) -> str:
     if not isinstance(value, str):
@@ -261,7 +274,7 @@ class Store:
                 "owner": owner, "supervisor": supervisor,
                 "tasks": tasks, "agents": agents,
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
-                "questions": self._all(db, "question"), "followups": self._all(db, "followup")[-200:],
+                "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
                 "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
@@ -657,27 +670,52 @@ class Store:
     def _has_locks(db, task_id):
         return bool(db.execute("SELECT 1 FROM workflow_resources WHERE task_id=?", (task_id,)).fetchone())
 
-    def answer(self, question_id, answer):
+    def answer(self, question_id, answer, *, answered_by="unknown", channel="unknown"):
+        """Record an owner answer with who/where. Only channel dashboard|terminal counts as confirmed."""
         answer = _text(answer, "answer", maximum=4000)
+        channel = channel if channel in ANSWER_CHANNELS else "unknown"
+        answered_by = _text(answered_by or "unknown", "answered_by", maximum=120)
         with self._tx() as db:
             question = self._get(db, "question", _id(question_id))
             if question["status"] not in ACTIVE_QUESTIONS:
                 raise ValueError("question already answered")
-            question.update(status="answered", answer=answer, answered_at=self.clock())
+            question.update(status="answered", answer=answer, answered_at=self.clock(),
+                            answered_by=answered_by, channel=channel)
             self._put(db, "question", question)
             task = self._get(db, "task", question["task_id"])
             if task["state"] == "waiting_owner" and not self._unanswered(db, task["id"]):
                 task.update(state="queued", blocker="", updated_at=self.clock())
                 self._put(db, "task", task)
-            self._event(db, "question_answered", question["title"])
-        return question
+            self._event(db, "question_answered", f"{question['title']} [{channel}]")
+        return question_view(question)
 
-    def defer(self, question_id):
+    def reopen(self, question_id, *, by="owner", channel="unknown"):
+        """Return an answered question to pending; the old answer stays in its history."""
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if question["status"] != "answered":
+                raise ValueError("only an answered question can be reopened")
+            view = question_view(question)
+            history = list(question.get("history", []))
+            history.append({k: view.get(k) for k in ("answer", "answered_at", "answered_by", "channel")}
+                           | {"reopened_at": self.clock(), "reopened_by": by, "reopened_channel": channel})
+            for key in ("answered_at", "answered_by", "channel"):
+                question.pop(key, None)
+            question.update(status="pending", answer=None, history=history[-20:])
+            self._put(db, "question", question)
+            task = self._get(db, "task", question["task_id"])
+            if question.get("blocks", True) and task["state"] == "queued":
+                task.update(state="waiting_owner", blocker=question["title"], updated_at=self.clock())
+                self._put(db, "task", task)
+            self._event(db, "question_reopened", question["title"])
+        return question_view(question)
+
+    def defer(self, question_id, *, channel="unknown"):
         with self._tx() as db:
             question = self._get(db, "question", _id(question_id))
             if question["status"] not in ACTIVE_QUESTIONS:
                 raise ValueError("question already answered")
-            question.update(status="deferred", deferred_at=self.clock())
+            question.update(status="deferred", deferred_at=self.clock(), deferred_channel=channel)
             self._put(db, "question", question)
             self._event(db, "question_deferred", question["title"])
         return question
