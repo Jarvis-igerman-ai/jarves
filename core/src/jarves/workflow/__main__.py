@@ -62,6 +62,10 @@ def utf8_streams() -> None:
 
 def main(argv=None) -> int:
     utf8_streams()
+    _av = list(sys.argv[1:] if argv is None else argv)
+    if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
+        from .autopilot_grant import run as grant_run
+        return grant_run(_av[1:])
     a = parser().parse_args(argv)
     if not 0 <= a.port <= 65535:
         parser().error("invalid port")

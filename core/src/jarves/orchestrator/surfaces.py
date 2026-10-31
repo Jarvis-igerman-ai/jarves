@@ -222,7 +222,7 @@ def attach(core) -> None:
 
 # ====================================================================== CLI
 ACTIONS = ("list", "status", "ask", "tell", "continue", "pause", "interrupt", "stop", "start", "resume", "approvals",
-           "approve", "deny", "log", "digest", "install-plugin", "doctor", "projects", "reply", "opencode")
+           "approve", "deny", "log", "digest", "install-plugin", "doctor", "projects", "reply", "opencode", "autopilot")
 
 
 def add_cli(sub) -> None:
@@ -237,6 +237,8 @@ def add_cli(sub) -> None:
     p.add_argument("--wait", type=float, default=0, help="ask: wait this many seconds for the live reply")
     p.add_argument("--here", action="store_true", help="start: in the project folder itself (no new worktree)")
     p.add_argument("--model", default="", help="start: exact requested model; does not change provider defaults")
+    p.add_argument("--days", type=float, default=7.0, help="autopilot grant: how long (at most 7)")
+    p.add_argument("--workers", type=int, default=1, help="autopilot grant: workers at once")
     p.add_argument("--code", default="", help="approve: the code shown for a risky request")
     p.add_argument("--all", action="store_true", help="list: also ended sessions")
     p.add_argument("--hours", type=float, default=0, help="digest: look back this many hours")
@@ -304,7 +306,7 @@ def _print(r: dict, a) -> None:
 
 def cmd_agents(a, cfg, home) -> int:
     from .. import features as feat
-    if a.action not in ("doctor", "projects", "install-plugin"):
+    if a.action not in ("doctor", "projects", "install-plugin", "autopilot"):
         gate = "agent_opencode" if a.action == "opencode" else FEATURE
         try:
             on = feat.Features(cfg, Path(home)).enabled(gate)
@@ -354,6 +356,9 @@ def cmd_agents(a, cfg, home) -> int:
         sub = args[0] if args else "list"
         kw.update(action=sub, path=args[1] if len(args) > 1 else "", name=a.name or
                   (args[1] if sub == "remove" and len(args) > 1 else ""), aliases=a.alias, no_start=a.no_start)
+    elif act == "autopilot":     # grant PROJECT --model a,b,c --days N --workers N | revoke | status
+        kw.update(action=args[0] if args else "status", project=args[1] if len(args) > 1 else "", models=a.model,
+                  days=a.days, max_concurrent=a.workers)
     elif act == "opencode":      # read-only: status | sessions | events
         kw.update(action=args[0] if args else "status", limit=a.n)
     elif act == "list":
