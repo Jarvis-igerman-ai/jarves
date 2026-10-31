@@ -122,7 +122,7 @@
     try { stream?.close(); } catch (_) { /* already closed */ }
     $(".workspace")?.setAttribute("hidden", "");
     $("#toast")?.setAttribute("hidden", "");
-    const page = document.createElement("main");
+    const page = document.createElement("div");
     page.id = "session-ended";
     page.className = "session-ended";
     page.setAttribute("role", "alert");
