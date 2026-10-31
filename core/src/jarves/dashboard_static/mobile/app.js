@@ -290,10 +290,14 @@
       else { mk(t("approve"), true, true); mk(t("deny"), false, false); }
     });
   }
+  const HV = { running: "רצה", stopped: "עצורה", ok: "תקין", down: "לא פעיל", off: "כבוי", on: "פועל", idle: "לא פעיל", error: "שגיאה", unknown: "לא ידוע" };
+  const HK = { audio: "שמע", core: "ליבה", model: "מודל", voice: "קול", wake: "מילת הערה", tts: "הקראה", stt: "תמלול", bridge: "גשר" };
+  const hv = (v) => (lang === "he" && HV[String(v).toLowerCase()]) || v;
+  const hk = (k) => (lang === "he" && HK[k]) || k;
   function renderHealth(s) {
     const ul = $("statusList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`);
-    Object.keys(s.components || {}).sort().forEach((k) => li(ul, `${k}: ${s.components[k]}`));
+    li(ul, `${t("core")}: ${hv(s.core)}`); li(ul, `${t("tls")}: ${s.tls ? t("yes") : t("no")}`);
+    Object.keys(s.components || {}).sort().forEach((k) => li(ul, `${hk(k)}: ${hv(s.components[k])}`));
     const tl = $("testList"); tl.replaceChildren();
     const kinds = Object.keys(s.tests || {});
     if (!kinds.length) li(tl, t("no_tests"));
@@ -301,7 +305,7 @@
   }
   function renderHome(s) {
     const ul = $("homeList"); ul.replaceChildren();
-    li(ul, `${t("core")}: ${s.core}`); li(ul, `${t("waiting")}: ${s.waiting}`);
+    li(ul, `${t("core")}: ${s.core}`); li(ul, `${tx("ממתינות לשליחה", "Waiting to send")}: ${s.waiting}`);
     li(ul, `${t("pages_you_have")}: ${s.pages.map((x) => ({ home: tx("בית", "Home"), chat: tx("שיחה", "Chat"), approvals: tx("אישורים", "Approvals"), health: tx("תקינות ומהירות", "Health & speed") }[x] || x)).join(", ")}`);
   }
   $("unpair").addEventListener("click", async () => { try { await post("/api/m/unpair"); } catch (e) { /* already gone */ } forget(); });

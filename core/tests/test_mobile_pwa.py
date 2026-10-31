@@ -326,3 +326,11 @@ def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, 
     r, body = get(srv, "/m/index.html")
     assert r.status == status
     assert b"private" not in body and b"install" not in body and b"index.html" not in body and b"boom" not in body
+
+
+def test_real_phone_fixes_idle_strip_hides_with_keyboard_and_health_is_translated():
+    css = (MOBILE_DIR / "m_theme.css").read_text(encoding="utf-8")
+    # the idle strip's grid rule comes later: the keyboard (short viewport) rule must come after it to win
+    assert css.rindex("@media (max-height: 520px) { #audioBar:not(.hot) { display: none; } }") > css.index("#audioBar:not(.hot) { display: grid;")
+    js = (MOBILE_DIR / "app.js").read_text(encoding="utf-8")
+    assert "hv(s.core)" in js and "hk(k)" in js and 'Waiting to send' in js

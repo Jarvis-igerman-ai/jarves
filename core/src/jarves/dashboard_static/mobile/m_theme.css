@@ -188,3 +188,5 @@ body.drawer-open { overflow: hidden; }
 #audioBar:not(.hot) { display: grid; grid-template-columns: 1fr; gap: 0; padding-block: 6px; line-height: 1.45; }
 #audioBar:not(.hot) .audio-row { font-size: 12px; color: var(--muted); }
 #audioBar:not(.hot) .audio-val { color: var(--fg); font-weight: 600; }
+/* keyboard open: the idle strip must really hide (the grid rule above came later and won over the first media rule) */
+@media (max-height: 520px) { #audioBar:not(.hot) { display: none; } }
