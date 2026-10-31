@@ -211,6 +211,8 @@
 
   function agentStale(agent) {
     const beat = seconds(agent.heartbeat_at);
+    const tool = seconds(agent.tool_started_at);
+    if (tool && Date.now() / 1000 - tool < 900) return false;
     return Boolean(agent.status === "running" && (!beat || Date.now() / 1000 - beat > 120));
   }
 
@@ -395,7 +397,7 @@
   function openTask(id, reopen = true) {
     const task = data?.tasks.find(item => item.id === id);
     if (!task) return;
-    const key = JSON.stringify([task, data.agents.find(item => item.id === task.agent_id) || null, data.questions.filter(q => q.task_id === task.id)]);
+    const key = JSON.stringify([task, (a => a ? [a.id, a.label] : null)(data.agents.find(item => item.id === task.agent_id)), data.questions.filter(q => q.task_id === task.id)]);
     if (!reopen && dialogTaskId === task.id && key === dialogKey) return; // unchanged: keep open <details> and focus
     dialogTaskId = task.id; dialogKey = key;
     $("#task-dialog-title").textContent = task.title;
