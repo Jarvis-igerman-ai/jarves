@@ -194,6 +194,54 @@ console.log(JSON.stringify(tasks.slice(0, 9).map(t => t.id).concat([tasks[9].ver
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertEqual(json.loads(out.stdout), ["r0", "r1", "r2", "r3", "r4", "w", "b", "v", "q012", "V4.5.1", "d"])
 
+    def test_metrics_count_truth_contract(self):
+        # #732 S1: running+claimed live workers, running and review separate, merged/verified/shipped split, no bare alerts number.
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        app = (Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC) / "app.js").read_text(encoding="utf-8")
+
+        def cut(start, end):
+            i = app.index(start)
+            return app[i:app.index(end, i)]
+        nl = chr(10)
+        code = (cut("  const esc =", nl) + nl + cut("  const validationRank", nl) + nl + cut("  function complete(task)", "  // What is working now")
+                + cut("  function agentStale", "  function renderMetrics") + cut("  function renderMetrics", "  // #730: live workers"))
+        script = """
+const $ = sel => ({set textContent(v) { out.q = v; }, set innerHTML(v) { out.html = v; }}); const out = {};
+const seconds = v => v || 0;
+let data;
+""" + code + """
+const now = Date.now() / 1000;
+const ok = {task_id: null, heartbeat_at: now};
+data = {
+  agents: [{status: "running", heartbeat_at: now}, {status: "claimed", heartbeat_at: now}, {status: "running", heartbeat_at: now - 9999}, {status: "offline"}],
+  agent_counts: {live: 3},
+  tasks: [{state: "running"}, {state: "review"}, {state: "review"}, {state: "review"}, {state: "verified", implementation: "merged"}, {state: "queued", implementation: "merged"}, {state: "queued"}],
+  questions: [{status: "pending"}, {status: "answered"}, {status: "deferred"}],
+  alerts: [],
+};
+renderMetrics();
+const calm = out.html;
+data.alerts = [{summary: "x"}, {summary: "y"}];
+renderMetrics();
+console.log(JSON.stringify({q: out.q, calm, noisy: out.html}));
+"""
+        res = subprocess.run([node, "-e", script], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        got = json.loads(res.stdout)
+        self.assertEqual(got["q"], 2)
+        html = got["calm"]
+        self.assertIn('<div class="metric-value">2<small dir="auto">3 ', html)        # 2 live workers (running + claimed), stale one excluded
+        self.assertIn('<div class="metric-value">1<small dir="auto">3 ', html)        # 1 running task, 3 in review: not added together
+        self.assertIn("מוזגו 2 · אומתו 1 · נשלחו 0", html)
+        self.assertEqual(html.count("<progress"), 3)
+        self.assertIn("הכול תקין", html)
+        self.assertIn("2 בעיות פתוחות", got["noisy"])
+        self.assertNotIn("alerts", html.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

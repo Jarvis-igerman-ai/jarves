@@ -228,23 +228,32 @@
     return Boolean(agent.status === "running" && (!beat || Date.now() / 1000 - beat > 120));
   }
 
+  // #732 S1 count truth: workers = live running+claimed agents; running and in-review tasks are never added together;
+  // required progress is merged / verified / shipped, not one flat "done".
   function renderMetrics() {
     const tasks = data.tasks;
     const required = tasks.filter(isRequired);
-    const done = required.filter(complete).length;
-    const running = data.agents.filter(agent => agent.status === "running" && !agentStale(agent)).length;
+    const merged = required.filter(task => task.implementation === "merged" || ["verified", "done"].includes(task.state)).length;
+    const verified = required.filter(task => ["verified", "done"].includes(task.state)).length;
+    const shipped = required.filter(complete).length;
+    const workers = data.agents.filter(agent => ["running", "claimed"].includes(agent.status) && !agentStale(agent)).length;
     const waiting = tasks.filter(task => task.state === "waiting_owner").length;
-    const active = tasks.filter(task => ["running", "review"].includes(task.state)).length;
+    const running = tasks.filter(task => task.state === "running").length;
+    const inReview = tasks.filter(task => task.state === "review").length;
     const ready = tasks.filter(task => task.ready === true).length;
+    const problems = (data.alerts || []).length;
     const pending = data.questions.filter(question => ["pending", "deferred", "open"].includes(question.status || "pending")).length;
     $("#questions-count").textContent = pending;
+    const total = required.length;
+    const split = [["מוזגו", merged], ["אומתו", verified], ["נשלחו", shipped]];
     const cards = [
-      {label: "סוכנים בעבודה", symbol: "◈", value: running, detail: `${(data.agent_counts || {}).live ?? data.agents.length} פעילים`, foot: data.agents.length ? "לפי דיווחי הסוכנים" : "טרם נרשמו סוכנים", cls: ""},
-      {label: "משימות פעילות", symbol: "↗", value: active, detail: `${ready} זמינות להקצאה`, foot: "בפיתוח ובבדיקה", cls: ""},
+      {label: "סוכנים בעבודה", symbol: "◈", value: workers, detail: `${(data.agent_counts || {}).live ?? data.agents.length} פעילים`, foot: problems ? (problems === 1 ? "בעיה אחת פתוחה" : `${problems} בעיות פתוחות`) : "הכול תקין", cls: problems ? "amber" : ""},
+      {label: "משימות בריצה", symbol: "↗", value: running, detail: `${inReview} בבדיקה`, foot: `${ready} זמינות להקצאה`, cls: ""},
       {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: waiting === 1 ? "משימה אחת" : `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
-      {label: "דרישות חובה שהושלמו", symbol: "✓", value: done, detail: `מתוך ${required.length}`, foot: tasks.length ? `${tasks.length} פריטים בהיקף הכולל; אופציונליים מחוץ למכנה` : "ממתין למיפוי התוכנית", cls: "done", progress: required.length ? done / required.length * 100 : 0}
+      {label: "דרישות חובה: נשלחו", symbol: "✓", value: shipped, detail: `מתוך ${total}`, foot: total ? split.map(([name, n]) => `${name} ${n}`).join(" · ") : "ממתין למיפוי התוכנית", cls: "done", split: total ? split.map(([name, n]) => [name, n / total * 100]) : null}
     ];
-    $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small>${esc(card.detail)}</small></div><p class="metric-foot">${esc(card.foot)}</p>${card.progress !== undefined ? `<div class="metric-bar" aria-hidden="true"><progress max="100" value="${card.progress}"></progress></div>` : ""}</a>`).join("");
+    const bar = card => card.split ? `<div class="metric-bar split" aria-hidden="true">${card.split.map(([name, pct]) => `<progress max="100" value="${pct}" title="${esc(name)}"></progress>`).join("")}</div>` : "";
+    $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small dir="auto">${esc(card.detail)}</small></div><p class="metric-foot" dir="auto">${esc(card.foot)}</p>${bar(card)}</a>`).join("");
   }
 
   // #730: live workers first; offline ones behind a remembered toggle; archived ones only counted.
