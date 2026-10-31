@@ -70,6 +70,11 @@ prompt for OpenCode (its full approval prompt is bounded). `requested_model` is
 not a verified effective model. Full automatic Orchestrator task/lifecycle
 integration is the prepared follow-up [#715](https://github.com/Jarvis-igerman-ai/jarves/issues/715).
 
+Claude models (verified available 31 Oct 2026): Opus 5.5 `claude-opus-5-5` for reviews,
+Tier R and design; Sonnet 5.5 `claude-sonnet-5-5` for code, fixes and docs (the
+workflow-bugs/current/qa default); Haiku 5.5 `claude-haiku-5-5` for status, the
+merge steward and cleanup; Fable 5.1 `claude-fable-5-1` only when the owner names it.
+
 `version_plan.json` defines required/optional/deferred scope and source links.
 Read-only GitHub sync adds issue/PR status, without inferring verification.
 Closed issue ≠ merged code ≠ tested user scenario ≠ shipped artifact.
@@ -88,15 +93,22 @@ runtime support; the console is not another assistant-feature registry.
 
 ## Merge steward
 
-The `workflow-merger` subagent (Haiku) runs on a schedule or on request. For each
-open PR it queues green non-Tier-R PRs with `gh pr merge N --auto`, toggles the
-`no-automerge` label (remove, add) only when the "Auto-label policy" check is
-missing on a non-Tier-R PR, reads failing log tails only, and hands red or
-conflicted PRs to a Sonnet fixer (that PR's own branch, `--force-with-lease`).
-Tier R = Gate/approvals, release/sign-off/tag, hotfix/update write paths,
-installer/packaging, browser network, wake apply, workflows/secrets: never merged
-(report "waiting for Opus sign-off"). No close/reopen, merge-main push, force on
-main, check bypass or blind rerun; flaky tests go to quarantine with an issue.
+Nobody waits on a timer. The manager reacts to events (native hooks, the
+supervisor alerts, or the Monitor tool on `gh` output) and hands PR events to
+the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
+- Worker finishes or blocks on CI or an owner question: the manager assigns the
+  next independent ready task from the ledger at once; the question persists.
+- PR green, not Tier R: `gh pr merge N --auto` (missing "Auto-label policy"
+  check on a non-Tier-R PR: remove and re-add `no-automerge`). Queued PRs are
+  merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
+- PR red: failing log tail only, then a Sonnet fixer; conflict: the fixer
+  rebases that PR's own branch (`--force-with-lease` on it only).
+- Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
+  installer/packaging, browser network, wake apply, workflows/secrets): request
+  the Opus sign-off; never merged by the steward.
+- Queue entry merged: check main CI and free the next batch.
+No close/reopen, merge-main push, force on main, check bypass or blind rerun;
+a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## External observer
 
