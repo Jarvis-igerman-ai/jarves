@@ -1,1 +1,1 @@
-- Beta publish skips a build whose number is lower than an already published beta, so merge order can no longer put older code under a newer version (#621).
+- Fixed: beta publish skips a build whose number is lower than an already published beta, so merge order can no longer put older code under a newer version (#621).
