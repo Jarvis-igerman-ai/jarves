@@ -31,6 +31,8 @@ HIGH_RISK = (
     "core/tools/release*", "core/tools/promote*", "core/tools/ci_*", "core/tools/risk_class.py", "core/tools/netguard.py",
     "core/tools/dependabot_gate.py", "core/tools/manual_test_sheet.py",
     "core/tests/conftest.py", "core/tests/_tools.py", "core/tests/durations*",
+    "core/src/jarves/hotfix*", "core/tools/hotfix.py", "core/src/jarves/install_latest.py", "core/src/jarves/release_signoff.py",
+    "core/src/jarves/browser*", "core/src/jarves/skills/browser.py", "core/src/jarves/mobile_browser.py", "core/src/jarves/voice/wake_*",
     ".claude/*", "core/src/jarves/workflow/hooks.py", "core/src/jarves/workflow/bootstrap.py",
     "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 )

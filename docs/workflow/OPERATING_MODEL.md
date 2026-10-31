@@ -99,9 +99,11 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
 - Worker finishes or blocks on CI or an owner question: the manager assigns the
   next independent ready task from the ledger at once; the question persists.
 - PR green, main not red, not Tier R: `gh pr merge N
-  --auto`. Tier R = the `no-automerge` label or a high-risk result from running
+  --auto`. Tier R = the `no-automerge` label, OR a high-risk result from running
   `core/tools/risk_class.py --files-from FILE` (`C:\work\jarvis\core\.venv\Scripts\python.exe`,
-  not bare `python`) on the PR's changed files; its HIGH_RISK list is the path source of truth.
+  not bare `python`) on the PR's changed files (HIGH_RISK is the path list, but it is not exhaustive), OR the PR
+  touches any Tier R category by judgment; when unsure, do not queue, report. The tool exits 1 for ordinary
+  Tier N code, so match the words "high-risk path" in its output, not the exit code.
   Missing "Auto-label policy" check on a non-Tier-R PR: add then remove
   `no-automerge`, so it ends absent. Queued PRs are
   merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
