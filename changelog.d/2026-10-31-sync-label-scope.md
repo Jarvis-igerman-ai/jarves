@@ -1,0 +1,1 @@
+Sync now turns open unmapped issues labelled 4.5.1/v5/v6/v7 into unauthorised ISSUE-N requirements in the matching version (bugs lane if labelled bug).

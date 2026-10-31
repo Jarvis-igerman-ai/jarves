@@ -64,8 +64,43 @@ def collect(get=public_get) -> dict:
     return {"issues": issues, "prs": prs, "sha": branch["commit"]["sha"], "truncated": truncated}
 
 
+LABEL_VERSIONS = (("4.5.1", "V4.5.1"), ("v5", "V5"), ("v6", "V6"), ("v7", "V7"))
+
+
+def with_label_scope(plan: dict, snapshot: dict) -> dict:
+    """Add open version-labelled issues that no requirement maps as new, unauthorised requirements.
+
+    Labels only place scope; imported requirements keep execution_allowed=false.
+    """
+    mapped = {n for v in plan["versions"] for r in v["requirements"] for n in r.get("issue_numbers", [])}
+    extra: dict[str, list] = {}
+    for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
+        number = int(row["number"])
+        labels = set(row.get("labels", []))
+        if row.get("state") != "open" or number in mapped:
+            continue
+        version = next((v for label, v in LABEL_VERSIONS if label in labels), None)
+        if not version:
+            continue
+        extra.setdefault(version, []).append({
+            "id": f"ISSUE-{number}", "title": str(row.get("title", ""))[:250] or f"Issue {number}",
+            "lane": "bugs" if "bug" in labels else "features", "issue_numbers": [number],
+            "required_validation": "app"})
+    if not extra:
+        return plan
+    versions = [{**v, "requirements": list(v["requirements"])} for v in plan["versions"]]
+    by_id = {v["id"]: v for v in versions}
+    for version, reqs in extra.items():
+        if version not in by_id:
+            by_id[version] = {"id": version, "title": version, "requirements": []}
+            versions.append(by_id[version])
+        by_id[version]["requirements"].extend(reqs)
+    return {**plan, "versions": versions}
+
+
 def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
+    plan = with_label_scope(plan, snapshot)
     store.seed_plan(plan)
     issues = {int(x["number"]): x for x in snapshot.get("issues", [])}
     mapped, unmapped = set(), []
