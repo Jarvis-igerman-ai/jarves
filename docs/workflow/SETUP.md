@@ -161,3 +161,15 @@ requires an already running allow-listed session and explicit
 - Present expired: select it again; polling does not count as owner activity.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
+
+## Autopilot (beta, off by default, unverified on the owner PC)
+
+Nothing starts until the owner opts in: `jarvis workflow autopilot status` shows the policy
+(`enabled=false`), `start` enables it and `stop` is the kill switch (no new starts; running
+workers finish or checkpoint). Launching workers also needs the owner start grant typed at the
+approval popup (expires within 7 days). Alerts (`lane_idle`, `worker_restarted`, `task_blocked`,
+`permission_wait`) show in the console and `status`; a permission wait over 10 minutes sends one
+away alert. While you are away, tool permission prompts still wait for you, so most lanes will
+wait; a safe project allowlist in `.claude/settings.json` is proposed by agents and applied by the
+owner. UNVERIFIED: real worker start with Claude models, hook env under Git Bash, away popup
+behaviour, Task Scheduler restart, silent beta install chain.

@@ -1,0 +1,40 @@
+order = 96
+category = "system"
+pages = []
+features = []
+aliases = ["טייס אוטומטי", "עבודה אוטומטית", "autopilot", "watchdog", "workflow autopilot"]
+links = ["workflow_console"]
+title_he = "טייס אוטומטי לעבודה (בטא)"
+title_en = "Workflow autopilot (beta)"
+what_he = "קוד דטרמיניסטי שרץ בתוך המשגיח הקיים: כשנתיב עבודה ריק ויש משימה מוכנה הוא מפעיל עובד, עובד תקוע מופעל מחדש פעם אחת ואז נחסם עם התראה, והמשימה הבאה עולה. סשן זר או המתנה לאישור רק מתריעים. בקשת מיזוג ברמת Tier R מקבלת משימת ביקורת Opus ולעולם לא ממוזגת אוטומטית. בדיקת בטא אחת ביום, ובדיקות ידניות מגיעות אליכם כפריט."
+what_en = "Deterministic code inside the existing supervisor: an idle lane with ready work gets a worker, a stalled worker is restarted once and then blocked with an alert while the lane moves to the next task. Foreign sessions and permission waits only raise alerts. Tier R pull requests get an Opus review task and are never merged automatically. One beta check a day; manual tests reach you as owner items."
+expect_he = "כבוי כברירת מחדל ובשלב בטא. הוא אינו ממזג, אינו מתייג גרסה, אינו מאשר הרשאות כלים ואינו מאשר היקף מיובא. כל ההפעלה האמיתית (מודל Claude, הרשאת התחלה שלכם) לא נבדקה עדיין במחשב שלכם."
+expect_en = "Off by default and beta. It never merges, tags a release, approves tool permissions or authorises imported scope. Real worker launches (Claude models, your start grant) are not yet verified on your PC."
+cost_he = "הניטור מקומי וללא מודל. עובדים שהוא מתחיל חיים בתוך מכסות התקציב והמעבר היומיות הקיימות."
+cost_en = "Monitoring is local and model-free. Workers it starts stay inside the existing daily budget and turn caps."
+privacy_he = "המצב וההתראות נשמרים במסד העבודה המקומי מחוץ לריפו. ההתראה לטלפון או למחשב שולחת רק משפט קצר."
+privacy_en = "State and alerts stay in the local workflow database outside the repository. Away alerts carry one short sentence only."
+
+[[steps]]
+he = "בדקו את המצב: jarvis workflow autopilot status. המדיניות כבויה כברירת מחדל (enabled=false)."
+en = "Check the state: jarvis workflow autopilot status. The policy is off by default (enabled=false)."
+action = "command:jarvis workflow autopilot status"
+
+[[steps]]
+he = "הפעלה: jarvis workflow autopilot start. עצירה מיידית של התחלות חדשות: jarvis workflow autopilot stop. עובדים רצים מסיימים או שומרים checkpoint; דבר אינו נהרג בכוח."
+en = "Turn on: jarvis workflow autopilot start. Stop new starts at once: jarvis workflow autopilot stop. Running workers finish or checkpoint; nothing is force-killed."
+action = "command:jarvis workflow autopilot start"
+
+[[steps]]
+he = "התראות מופיעות בלוח ובפקודה status: lane_idle, worker_restarted, task_blocked, permission_wait. המתנה לאישור הרשאה נמשכת מעל 10 דקות שולחת התראה אחת אליכם; יש לאשר או לדחות בחלון האישור."
+en = "Alerts show in the console and in status: lane_idle, worker_restarted, task_blocked, permission_wait. A permission wait over 10 minutes sends you one alert; approve or deny in the approval popup."
+action = "command:jarvis workflow autopilot status"
+
+[[problems]]
+he = "משימה נחסמה אחרי שני קיפאונות"
+en = "A task was blocked after two stalls"
+fix_he = "קראו את ה־blocker בלוח, תקנו את הסיבה, ואז החזירו אותה לתור עם jarvis workflow recover. המשגיח לא ינסה שוב מעצמו."
+fix_en = "Read the blocker in the console, fix the cause, then re-queue it with jarvis workflow recover. The supervisor will not retry on its own."
+
+[parity.features]
+# Standalone development tooling; no assistant runtime feature switch or tool group.
