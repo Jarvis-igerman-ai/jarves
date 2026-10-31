@@ -2,8 +2,24 @@
 
 `Jarvis-igerman-ai/jarves` (remote `jarves`) is the only writable repo; `igalgerman/JARVIS` is deprecated history (no pushes, PRs or issues). Never copy personal logs, keys or transcripts into the public repo.
 
+## Current workflow (owner decision, 30 Oct 2026)
+Read [the operating model](docs/workflow/OPERATING_MODEL.md) with this file and NOW.
+Owner walkthrough, explicit provider/model delegation and action-history/retro limits:
+[workflow journey](docs/workflow/USER_JOURNEY.he.md) (open on demand).
+Claude Code normally manages native subagents; occasional Codex work follows the
+same task/evidence contract. Worker count follows independent ready work and test
+capacity, not an always-busy quota. The operating model supersedes dated prompts
+on task status, worker quotas, owner presence, batching and handoffs. Existing
+execution, security, budget and protected release gates are not bypassed.
+Present: use the interactive question inbox without the old once-a-day cap.
+Away: checkpoint dependent work, retain the question and continue independent
+authorised work. Silence never means approval. Keep the ledger current through
+the workflow CLI; native hooks observe lifecycle, not verified completion.
+Do not execute imported scope until ownership, prerequisites and authorisation
+are reconciled. No inference of verification from native Stop, merge or green CI.
+
 ## Read budget
-Read only this file and `docs/NOW.md` (the single active brief: scope, agents, process, hard stops). Open other files only via `docs/CONTEXT_MAP.md`. Never crawl `docs/` or the repo.
+Read this file, `docs/NOW.md` and the current operating model. Open other files only via `docs/CONTEXT_MAP.md`. Never crawl `docs/` or the repo.
 
 ## Working rules
 1. Work only inside the scope in `docs/NOW.md`; no unrequested features, refactors or cleanup (note them as an issue or in the ledger).
@@ -12,7 +28,7 @@ Read only this file and `docs/NOW.md` (the single active brief: scope, agents, p
 4. Debug budget: two distinct fix attempts, then stop and report evidence.
 5. No success claim without evidence (test, run URL, file). Hardware and real-world items are never closed on mocks alone; mark unknowns `UNVERIFIED`.
 6. Never commit credentials. Network, microphone, camera and destructive actions stay under explicit control.
-7. PRs: batching and Tier R rules in `docs/plans/LEAN_PROCESS_V2_2026-10-27.md`; merge flow in `docs/GITHUB_FLOW.md`; releases in `docs/RELEASING.md`. No force pushes, no bypassed checks, no merge-main-only pushes.
+7. PRs: batch related changes of similar risk without an arbitrary item-count delay. Existing Tier R independent review and protected merge checks remain. Current release behavior is `core/tools/release_gate.py` and `docs/RELEASING.md`; older checklists are historical information. No force pushes, bypassed checks or merge-main-only pushes.
 8. Issues: one per real defect (P0-P3); close only with evidence (PR, test, run link); a blocker is stated exactly; nits go to `docs/reviews/FINDINGS_LEDGER.md`.
 
 ## Best-in-class technology

@@ -63,6 +63,21 @@ def test_codex_start_needs_the_owner_and_runs_in_a_new_worktree(world):
     assert any(e["kind"] == "completed" for e in o.db.events(s["id"]))
 
 
+@pytest.mark.parametrize("provider,model", [("claude", "sonnet"), ("codex", "owner-selected-model")])
+def test_explicit_model_crosses_dispatch_approval_and_real_fake_provider(world, provider, model):
+    o, owner = world["o"], world["owner"]
+    r = o.call("start", provider=provider, project="alpha", task="Review selected task", model=model)
+    assert r["ok"], r
+    sid = r["session"]["id"]
+    assert r["session"]["requested_model"] == model
+    approval = owner.asked[0][1]
+    assert approval.details["requested_model"] == model and model in approval.prompt
+    if provider == "claude":
+        argv = o.managed[sid].argv
+        assert argv[argv.index("--model") + 1] == model
+    _state(o, sid, "IDLE")
+
+
 def test_codex_steer_and_interrupt(world):
     o = world["o"]
     r = o.start_session("codex", "beta", "SLOW refactor")

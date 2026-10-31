@@ -77,9 +77,9 @@ def test_every_code_has_english_and_hebrew():
         assert code in CODES and all(TEXTS[code])
 
 
-def _orch(tmp_path, server, monkeypatch, on=True):
+def _orch(tmp_path, server, monkeypatch, on=True, model="openrouter/openrouter/free", **cfg_over):
     monkeypatch.setenv("FAKE_CLAUDE_DIR", str(tmp_path / "fake_claude"))      # never the owner's real claude / codex
-    cfg = agents_cfg(opencode_url=server.url, codex_observe=False)
+    cfg = agents_cfg(opencode_url=server.url, codex_observe=False, opencode_model=model, **cfg_over)
     home = tmp_path / "home"
     home.mkdir()
     proj = tmp_path / "proj"
@@ -359,4 +359,184 @@ def test_wrong_folder_abort_uses_the_folder_the_server_returned(tmp_path, server
     server.force_dir = "C:/somewhere/else"
     o.start_session("opencode", "proj", "task")
     assert "directory=C%3A%2Fsomewhere%2Felse" in server.posts[-1][0] and "/abort" in server.posts[-1][0]
+    o.db.close()
+
+
+# ---------------------------------------------------------------- D3 (#406): model profile and spend rules
+def _paid_models_toml(o):
+    (o.home / "models.toml").write_text(
+        "\n".join(['[[model]]', 'id = "gpt-6-sol"', 'provider = "openrouter"', "paid = true",
+                   "input_per_1m = 2.0", "output_per_1m = 10.0", ""]),
+        encoding="utf-8")
+
+
+def test_model_profile_classes(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    assert (o.opencode_profile()["kind"], o.opencode_profile()["ok"]) == ("free", True)
+    for model, kind, ok in (("", "default", False), ("openai/gpt-6-sol", "paid", False), ("OpenRouter/openrouter/free", "free", True), ("openrouter/free", "unknown", False), ("acme/never-heard", "unknown", False), ("gpt-6-sol/x", "unknown", False),
+                            ("local/local-small", "local", True), ("anthropic/free-remote", "unknown", False), ("openai/local-small", "unknown", False), ("x/openrouter/free", "unknown", False), ("bad model!", "unknown", False)):
+        o.acfg.opencode_model = model
+        pr = o.opencode_profile()
+        assert (pr["kind"], pr["ok"]) == (kind, ok), model
+    _paid_models_toml(o)
+    o.acfg.opencode_model = "openrouter/gpt-6-sol"                          # a paid model the owner listed in models.toml
+    assert (o.opencode_profile()["kind"], o.opencode_profile()["ok"]) == ("paid", False)
+    o.acfg.opencode_allow_paid = True
+    assert o.opencode_profile()["ok"] is True                              # the owner allowed paid models
+    o.acfg.opencode_model = "bad model!"
+    assert o.opencode_profile()["ok"] is False and o.opencode_profile()["error"]     # a malformed spec is never allowed
+    o.db.close()
+
+
+def test_default_or_paid_model_is_refused_before_any_popup_or_request(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, model="")
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["code"] == "MODEL_NOT_ALLOWED" and not asked and not server.posts
+    o.acfg.opencode_allow_paid = True                                      # allowed: the popup says the cost is unknown
+    r = o.start_session("opencode", "proj", "task")
+    assert r["ok"] and "COST UNKNOWN" in asked[0] and "(default)" in asked[0]
+    assert "model" not in server.posts[1][1]                                # no model forced: OpenCode's own default
+    o.db.close()
+
+
+def test_free_model_is_sent_and_shown_and_a_later_switch_to_paid_blocks_the_next_prompt(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append((p, k)) or True)
+    r = o.start_session("opencode", "proj", "task")
+    sid = r["session"]["id"]
+    assert "Model: openrouter/openrouter/free (free); no cost expected" in asked[0][0] and asked[0][1]["details"]["model_kind"] == "free"
+    assert server.posts[1][1]["model"] == {"providerID": "openrouter", "modelID": "openrouter/free"}
+    o.acfg.opencode_model = "openrouter/gpt-6-sol"                         # config changed to a paid model meanwhile
+    n = len(server.posts)
+    t = o.tell(sid, "more")
+    assert t["code"] == "MODEL_NOT_ALLOWED" and len(server.posts) == n and len(asked) == 1
+    o.db.close()
+
+
+def test_status_and_doctor_show_the_model_rows(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    st = o.call("opencode", action="status")
+    assert st["ok"] and st["model"]["kind"] == "free" and "NOT enforced" in st["model"]["cost_cap_note"] and "cap_usd_per_day" not in st["model"]
+    row = next(c for c in o.call("doctor")["checks"] if c["check"] == "opencode_model")
+    assert row["ok"] and "openrouter/openrouter/free (free)" in row["detail"]
+    o.db.close()
+
+
+def test_explicit_model_is_approved_pinned_and_does_not_change_global_default(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, model="")
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append((p, k)) or True)
+    r = o.call("start", provider="opencode", project="proj", task="Review task T",
+               model="openrouter/openrouter/free")
+    assert r["ok"], r
+    sid = r["session"]["id"]
+    assert r["session"]["requested_model"] == "openrouter/openrouter/free"
+    assert asked[0][1]["details"]["model"] == "openrouter/openrouter/free"
+    assert server.posts[1][1]["model"] == {"providerID": "openrouter", "modelID": "openrouter/free"}
+    assert o.acfg.opencode_model == ""
+    o.acfg.opencode_model = "openai/gpt-6-sol"
+    assert o.tell(sid, "Continue the same task")["ok"]
+    assert len(asked) == 2  # a pinned model never replaces the per-prompt owner approval
+    assert server.posts[-1][1]["model"] == {"providerID": "openrouter", "modelID": "openrouter/free"}
+    assert o.acfg.opencode_model == "openai/gpt-6-sol"
+    o.db.close()
+
+
+def test_explicit_paid_or_unknown_model_does_not_bypass_existing_model_policy(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    for model in ("openai/gpt-6-sol", "unknown/missing"):
+        result = o.call("start", provider="opencode", project="proj", task="Review T", model=model)
+        assert result["code"] == "MODEL_NOT_ALLOWED"
+    assert not asked and not server.posts and not o.managed
+    o.db.close()
+
+
+def test_parse_model_and_the_new_code_text():
+    assert oc.parse_model("openrouter/anthropic/claude-x") == ("openrouter", "anthropic/claude-x") and oc.parse_model("") == ("", "")
+    for bad in ("nomodel", "a/../b", "a b/c", "/x", "x/"):
+        with pytest.raises(oc.OpenCodeError):
+            oc.parse_model(bad)
+    assert "MODEL_NOT_ALLOWED" in CODES and all(TEXTS["MODEL_NOT_ALLOWED"])
+
+
+def test_allow_paid_needs_a_cap_and_the_approved_model_is_what_is_sent(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, model="openrouter/gpt-6-sol", opencode_allow_paid=True, max_cost_usd_per_day=0)
+    _paid_models_toml(o)
+    pr = o.opencode_profile()
+    assert pr["kind"] == "paid" and pr["ok"] is False and "above 0" in pr["error"]      # allow_paid + no cap = refused
+    o.acfg.max_cost_usd_per_day = 5.0
+    assert o.opencode_profile()["ok"] is True
+    _git_proj(tmp_path)
+    asked = []
+
+    def ask(p, **k):
+        asked.append(p)
+        o.acfg.opencode_model = "openrouter/openrouter/free"            # the config changes while the owner is deciding
+        return True
+    monkeypatch.setattr(o, "_ask_owner", ask)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["ok"] and "COST UNKNOWN" in asked[0] and "cannot measure or cap" in asked[0] and "enforced" not in asked[0]
+    assert server.posts[1][1]["model"] == {"providerID": "openrouter", "modelID": "gpt-6-sol"}   # the approved one, not a re-read
+    assert o.db.count("turn") >= 1                                                           # the start counts as a turn
+    o.db.close()
+
+
+# ---------------------------------------------------------------- D3 review round 2: OpenCode's resolved config is checked
+def _cfg_started(tmp_path, server, monkeypatch, config, **over):
+    server.config = config
+    o = _orch(tmp_path, server, monkeypatch, **over)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    return o, asked
+
+
+@pytest.mark.parametrize("config,why", [
+    ({"provider": {"openrouter": {"options": {"baseURL": "http://evil.example/v1"}}}}, "overridden"),
+    ({"provider": {"OpenRouter": {"models": {"openrouter/free": {"id": "anthropic/claude-opus"}}}}}, "overridden"),
+    ({"small_model": "anthropic/claude-haiku"}, "small_model"),
+    ({"agent": {"build": {"model": "openai/gpt-6-sol"}}}, "agent.build"),
+    ({"mode": {"plan": {"model": 7}}}, "mode.plan"),
+    (None, "could not be read"),
+])
+def test_start_refuses_when_the_resolved_opencode_config_could_use_a_paid_model(tmp_path, server, monkeypatch, config, why):
+    o, asked = _cfg_started(tmp_path, server, monkeypatch, config)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["code"] == "CONFIG_NOT_VERIFIED" and why in r["detail"] and not asked and not server.posts
+    o.db.close()
+
+
+def test_clean_config_passes_and_a_free_sub_agent_model_is_fine(tmp_path, server, monkeypatch):
+    cfg = {"small_model": "openrouter/openrouter/free", "agent": {"explore": {"model": "openrouter/openrouter/free"}},
+           "provider": {"anthropic": {"options": {"baseURL": "http://x"}}}}                  # another provider's override: irrelevant
+    o, asked = _cfg_started(tmp_path, server, monkeypatch, cfg)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["ok"] and "checked OpenCode's resolved settings" in asked[0]
+    assert any(p.startswith("/config") for _, p in server.requests if _ == "GET") and "directory=" in [q for _, q in server.requests if q.startswith("/config")][0]
+    o.db.close()
+
+
+def test_every_prompt_rechecks_the_config_and_a_change_by_the_session_is_caught(tmp_path, server, monkeypatch):
+    o, asked = _cfg_started(tmp_path, server, monkeypatch, {})
+    sid = o.start_session("opencode", "proj", "task")["session"]["id"]
+    server.config = {"agent": {"build": {"model": "anthropic/claude-opus"}}}      # the session wrote an opencode.json
+    n, a = len(server.posts), len(asked)
+    t = o.tell(sid, "go on")
+    assert t["code"] == "CONFIG_NOT_VERIFIED" and len(server.posts) == n and len(asked) == a
+    o.db.close()
+
+
+def test_paid_mode_does_not_pretend_to_check_the_config(tmp_path, server, monkeypatch):
+    o, asked = _cfg_started(tmp_path, server, monkeypatch, None, model="", opencode_allow_paid=True)
+    r = o.start_session("opencode", "proj", "task")
+    assert r["ok"] and "COST UNKNOWN" in asked[0] and "checked" not in asked[0]
     o.db.close()

@@ -62,6 +62,19 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     private val _screen = MutableStateFlow<Screen>(store.load()?.let { Screen.Status(it, null) } ?: Screen.Pair())
     val screen: StateFlow<Screen> = _screen
     private var poll: Job? = null
+    private val notifyPrefs = NotifyPrefs(app)
+    private val _notify = MutableStateFlow(notifyPrefs.enabled && NotifyWork.permissionGranted(app))
+    val notifyOn: StateFlow<Boolean> = _notify
+
+    init {
+        if (notifyPrefs.enabled && NotifyWork.permissionGranted(app)) NotifyWork.start(app)     // the switch says ON: make sure the check is really scheduled
+    }
+
+    fun setNotify(on: Boolean) {
+        notifyPrefs.enabled = on
+        _notify.value = on
+        if (on) NotifyWork.start(getApplication()) else NotifyWork.stop(getApplication())
+    }
     private val recorder = Recorder { viewModelScope.launch { talkEnd() } }          // the 55 s cap counts as letting go
     private val machine = TalkMachine(recorder)
     private val _talk = MutableStateFlow<Talk>(Talk.Idle)
@@ -167,7 +180,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
             try {
                 val p = withContext(Dispatchers.IO) { CompanionClient(c.base, PinnedTransport(c.fingerprint)).pair(c.code, c.name) }
                 val s = Session(c.base, p.token, c.fingerprint, p.device)
-                store.save(s)
+                if (!store.save(s)) {                                   // the phone could not keep the pairing safely: say so, do not pretend it worked
+                    _screen.value = Screen.Pair(PairError.STORE_FAILED)
+                    return@launch
+                }
                 _screen.value = Screen.Status(s, null)
                 startPolling(s)
             } catch (e: PairFailed) {
@@ -181,6 +197,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun unpair() {
+        setNotify(false)
         machine.reset()
         sync()
         poll?.cancel()
@@ -203,6 +220,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> model.setNotify(granted) }
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (!granted) model.micDenied() }
 
     private fun micGranted() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -219,6 +237,12 @@ class MainActivity : ComponentActivity() {
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
                             is Screen.Status -> {
                                 StatusScreen(x, model::unpair)
+                                val on by model.notifyOn.collectAsStateWithLifecycle()
+                                NotifyCard(on) { want ->
+                                    if (!want) model.setNotify(false)
+                                    else if (NotifyWork.permissionGranted(this@MainActivity)) model.setNotify(true)
+                                    else askNotify.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
                                 if (x.link is Link.Online) {
                                     val t by model.talk.collectAsStateWithLifecycle()
                                     TalkCard(
@@ -265,6 +289,7 @@ fun PairScreen(s: Screen.Pair, onCheck: (String, String, String) -> Unit) {
 }
 
 fun errorText(e: PairError): Int = when (e) {
+    PairError.STORE_FAILED -> R.string.err_store
     PairError.BAD_ADDRESS -> R.string.err_address
     PairError.BAD_CODE -> R.string.err_code
     PairError.REFUSED -> R.string.err_refused

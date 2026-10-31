@@ -1,0 +1,2530 @@
+{
+  "schema_version": 1,
+  "baseline_sha": "a966a2350cec496d27ca9ab4c86f0747bb5e2e35",
+  "scope_note": "Requirement scope baseline, not an implementation or completion snapshot. Every V7 slice and all 17 V6 work-breakdown items are included; V5 includes its mobile packages, pillars, foundations, gaps and acceptance. Optional work is explicit. Linked issue state is not proof of merged code, installed-app verification, device acceptance or release. Unmapped requirements remain visible and need evidence reconciliation; metadata is not a permission grant or automatic execution order. See docs/workflow/VERSION_MAPPING_2026-10-30.md.",
+  "versions": [
+    {
+      "id": "V4.5.1",
+      "title": "ייצוב, תיקון תקלות ושחרור מהיר",
+      "requirements": [
+        {
+          "id": "V451-RECOVERY",
+          "title": "התאוששות כשהמתקין החדש אינו מסוגל לעלות",
+          "lane": "bugs",
+          "issue_numbers": [
+            261
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-RECOVERY-C1",
+              "label": "שחזור התוכנית ונתוניה לאחר שינוי schema וכשל בריצה החדשה."
+            },
+            {
+              "id": "V451-RECOVERY-C2",
+              "label": "בדיקת upgrade ו־rollback מתוך החבילה המותקנת."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-GREETING",
+          "title": "מדידה חוזרת ותיקון פתיחת הקול",
+          "lane": "bugs",
+          "issue_numbers": [
+            179
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V451-GREETING-C1",
+              "label": "מדידה חוזרת של פתיחת קול במחשב האמיתי בתוך תקרת השימוש המאושרת."
+            },
+            {
+              "id": "V451-GREETING-C2",
+              "label": "אין דיווח שווא של הצלחה כשאודיו הברכה לא הגיע."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-FLAKES",
+          "title": "תיקון בדיקות לא יציבות",
+          "lane": "bugs",
+          "issue_numbers": [
+            441
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-FLAKES-C1",
+              "label": "סריקת flakes נקייה וראיות לתיקון גורמי הזמן/התזמון."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-HOTFIX-RESTART",
+          "title": "אתחול hotfix מתוכנן אינו מזוהה כקריסה",
+          "lane": "bugs",
+          "issue_numbers": [
+            620
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-HOTFIX-RESTART-C1",
+              "label": "עדכון מתוכנן אינו מפעיל בדיקת קריסה כאילו התהליך קרס."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V451-BUILD-ORDER",
+          "title": "סדר גרסאות beta תואם את סדר הקוד",
+          "lane": "bugs",
+          "issue_numbers": [
+            621
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-BUILD-ORDER-C1",
+              "label": "build ישן לא מוצע כחדש יותר מקוד שנבדק מאוחר יותר."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V451-WAKE",
+          "title": "החלת מודל wake לאחר בדיקת בעלים",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V451-WAKE-C1",
+              "label": "הבעלים מריץ jarvis wake test לפני החלת המודל."
+            },
+            {
+              "id": "V451-WAKE-C2",
+              "label": "שינוי היישום עובר את הביקורת ואת השער הקיימים."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "בדיקת wake במיקרופון האמיתי; #614 הוא PR ולא מזהה issue.",
+          "scope": "required",
+          "related_pr_numbers": [
+            614
+          ]
+        },
+        {
+          "id": "V451-SKILL-REDACTION",
+          "title": "הסתרת סודות בטיוטות Skills",
+          "lane": "bugs",
+          "issue_numbers": [],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-SKILL-REDACTION-C1",
+              "label": "תיקון הממצאים המזוהים כ־CodeQL alerts 46 ו־47 עם בדיקות רגרסיה."
+            },
+            {
+              "id": "V451-SKILL-REDACTION-C2",
+              "label": "מספרי alerts אינם מפורשים כמספרי GitHub Issues."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "mapping_note": "נדרש לקשר את ההתייחסות ב־issue #505 ל־PR/Issue המדויק; מספרי ההתראות אינם מספרי Issues.",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-RELEASE-LABELS",
+          "title": "labels של תכנון אינם עוקפים באגים בשער השחרור",
+          "lane": "bugs",
+          "issue_numbers": [
+            499
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-RELEASE-LABELS-C1",
+              "label": "באג P0-P2 אינו מדולג רק בגלל label של גרסה או תכנון."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-GITHUB-AUDIT",
+          "title": "שמירת רציפות audit של כתיבות GitHub",
+          "lane": "bugs",
+          "issue_numbers": [
+            497
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-GITHUB-AUDIT-C1",
+              "label": "תיקון ממצא איפוס audit ללא אובדן ראיות לפעולות כתיבה."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-HOTFIX-RECOVERY",
+          "title": "התאוששות מתקלות hotfix",
+          "lane": "bugs",
+          "issue_numbers": [
+            501
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-HOTFIX-RECOVERY-C1",
+              "label": "שחזור או תיקון תקלות hotfix המפורטות בפריט המקור, עם בדיקת שימוש."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required",
+          "source_urls": [
+            "https://github.com/Jarvis-igerman-ai/jarves/issues/505"
+          ]
+        },
+        {
+          "id": "V451-MERGE-PROOF",
+          "title": "שימוש חוזר בראיית CI ותור merge רזה",
+          "lane": "ops",
+          "issue_numbers": [],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-MERGE-PROOF-C1",
+              "label": "שימוש חוזר רק כאשר עץ הקוד הנבדק זהה בהתאם לכלל המאומת."
+            },
+            {
+              "id": "V451-MERGE-PROOF-C2",
+              "label": "בדיקות השילוב הנדרשות עדיין חוסמות שילוב שגוי."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/LEAN_PROCESS_V2_2026-10-27.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V451-INSTALL-LATEST",
+          "title": "התקנה ובדיקה של beta בפקודה אחת",
+          "lane": "release",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-INSTALL-LATEST-C1",
+              "label": "גיבוי, התקנה, doctor/selftest/speedtest ובדיקת feature diff."
+            },
+            {
+              "id": "V451-INSTALL-LATEST-C2",
+              "label": "כשל שימוש מחזיר גרסה באופן הבטוח שהוגדר."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/LEAN_PROCESS_V2_2026-10-27.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V451-RELEASE-RUN",
+          "title": "שחרור מוכן ומגובה ראיות",
+          "lane": "release",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-RELEASE-RUN-C1",
+              "label": "דוח ראיות נוצר מהמצב התקף, ולא נארז ידנית מכל מסמכי ההיסטוריה."
+            },
+            {
+              "id": "V451-RELEASE-RUN-C2",
+              "label": "stable נשאר מאחורי אישור הבעלים ושער השחרור התקף."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/LEAN_PROCESS_V2_2026-10-27.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "אישור stable של הבעלים.",
+          "scope": "required"
+        },
+        {
+          "id": "V451-WATCHDOG",
+          "title": "משגיח חיצוני לתור ולבריאות השחרור",
+          "lane": "ops",
+          "issue_numbers": [],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V451-WATCHDOG-C1",
+              "label": "תור שנפל, PR תקוע, main אדום ו־beta חסרה מוצגים במפורש."
+            },
+            {
+              "id": "V451-WATCHDOG-C2",
+              "label": "המשגיח אינו עוקף בדיקות, הרשאות או אישורי שחרור."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/LEAN_PROCESS_V2_2026-10-27.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V451-SETTINGS",
+          "title": "הגדרות GitHub הנדרשות לשערי השחרור",
+          "lane": "release",
+          "issue_numbers": [
+            543,
+            544,
+            605
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V451-SETTINGS-C1",
+              "label": "הגדרות הבעלים המתועדות נבדקות ב־GitHub עם ראיות."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "הגדרות GitHub ואישור בעלים.",
+          "scope": "required"
+        }
+      ]
+    },
+    {
+      "id": "V5",
+      "title": "JARVES Goes Mobile — טלפון ואינטליגנציה אישית",
+      "requirements": [
+        {
+          "id": "V5-PAIRING",
+          "title": "צימוד טלפון, QR, token והרשאות מצומצמות",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-PAIRING-C1",
+              "label": "צימוד ו־revoke במכשיר Android אמיתי."
+            },
+            {
+              "id": "V5-PAIRING-C2",
+              "label": "קוד שגוי או שימוש חוזר נדחים; token אינו פותח נתיבי ניהול."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/reviews/SWV5_ACCEPTANCE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "מכשיר Android והרשאותיו.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-MOBILE-API",
+          "title": "API מאומת לטלפון",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-MOBILE-API-C1",
+              "label": "chat/status/voice והפעולות המותרות עוברים דרך ה־Core הקיים."
+            },
+            {
+              "id": "V5-MOBILE-API-C2",
+              "label": "בדיקות scopes, rate limits ו־audit ללא סודות."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PWA",
+          "title": "ממשק PWA בעברית ובאנגלית",
+          "lane": "features",
+          "issue_numbers": [
+            509,
+            510
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-PWA-C1",
+              "label": "מסכים שימושיים ב־RTL ובמסך טלפון צר."
+            },
+            {
+              "id": "V5-PWA-C2",
+              "label": "התקנה למסך הבית והודעת מחשב לא זמין נבדקות במכשיר."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "מכשיר Android אמיתי.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-CORE-WIRING",
+          "title": "חיבור הטלפון ל־Core ולכלי השליטה",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-CORE-WIRING-C1",
+              "label": "feature כבוי אינו פותח נתיב טלפון או listener חיצוני."
+            },
+            {
+              "id": "V5-CORE-WIRING-C2",
+              "label": "CLI ודשבורד מציגים זמינות אמיתית של היכולת."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-TRANSPORT",
+          "title": "חיבור מוצפן ואמין בטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            194,
+            513
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-TRANSPORT-C1",
+              "label": "מיקרופון מותר רק ב־secure context."
+            },
+            {
+              "id": "V5-TRANSPORT-C2",
+              "label": "מסלול certificate שנבחר נבדק במכשיר ללא הצגת התקנה כתקינה אם הדפדפן מסרב."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "חשבון Tailscale או בחירה ואישור של מסלול תעודה.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-SECURITY",
+          "title": "סקירת אבטחה ופרטיות של כל עמודי V5",
+          "lane": "bugs",
+          "issue_numbers": [
+            189,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-SECURITY-C1",
+              "label": "סקירת phone, goals, continuity, memory, devstatus ו־project manager."
+            },
+            {
+              "id": "V5-SECURITY-C2",
+              "label": "ממצאים חוסמים נבדקים מול המימוש ולא נסגרים על סמך mocks בלבד."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-CONTINUITY",
+          "title": "שיחה משותפת והמשך מטלפון ל־Windows",
+          "lane": "features",
+          "issue_numbers": [
+            186
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-CONTINUITY-C1",
+              "label": "שיחת טלפון מסוימת נפתחת ב־Windows עם אותה היסטוריה."
+            },
+            {
+              "id": "V5-CONTINUITY-C2",
+              "label": "ניתוק וחזרה אינם מריצים פקודה או הודעה פעמיים."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "בדיקת החלפת רשת והמשך במכשיר אמיתי.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-ACCEPTANCE",
+          "title": "קבלת Android אמיתית",
+          "lane": "release",
+          "issue_numbers": [
+            193
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-ACCEPTANCE-C1",
+              "label": "18 שורות SWV5_ACCEPTANCE וכן suspend/resume, host down ושינוי Wi-Fi."
+            },
+            {
+              "id": "V5-ACCEPTANCE-C2",
+              "label": "כל שורה מזוהה REAL-PASS, נכשלת או חריג מפורש; EMU-PASS אינו REAL-PASS."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/reviews/SWV5_ACCEPTANCE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "חתימת הבעלים וטלפון אמיתי.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-ALWAYS-ON",
+          "title": "שרת הטלפון עולה עם ה־Core כשהיכולת דולקת",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-ALWAYS-ON-C1",
+              "label": "הפעלה באתחול רק כשהיכולת ON."
+            },
+            {
+              "id": "V5-ALWAYS-ON-C2",
+              "label": "הנחיית Firewall וכתובת מקומית ברורה; כיבוי מפסיק את הנתיבים."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-GOALS",
+          "title": "מטרות ותוכניות עבודה נמשכות",
+          "lane": "features",
+          "issue_numbers": [
+            184
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-GOALS-C1",
+              "label": "התקדמות נשמרת; pause/cancel/retry עובדים ומוצגים גם בטלפון."
+            },
+            {
+              "id": "V5-GOALS-C2",
+              "label": "כשל וצעד ניסיון חוזר נשארים בגבולות זמן, עלות והרשאות."
+            },
+            {
+              "id": "V5-GOALS-C3",
+              "label": "סיום מטרה נותן שורה שקטה אחת רק במצב הנוכחות והשעות המותרים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/plans/V5_PILLARS.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-MEMORY",
+          "title": "זיכרון הסתגלותי ועריכת העדפות בשני הלקוחות",
+          "lane": "features",
+          "issue_numbers": [
+            183
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-MEMORY-C1",
+              "label": "תיקון העדפה עם מקור, אישור, עריכה ומחיקה."
+            },
+            {
+              "id": "V5-MEMORY-C2",
+              "label": "השפעת התיקון זהה במחשב ובטלפון; אין פרופיל משוער סמוי."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/plans/V5_PILLARS.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "הוכחת שימוש בשני הלקוחות.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PROACTIVE",
+          "title": "הצעות יזומות שקטות עם stop ו־snooze",
+          "lane": "features",
+          "issue_numbers": [
+            185
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-PROACTIVE-C1",
+              "label": "opt-in, quiet hours, dedupe ו־stop/snooze."
+            },
+            {
+              "id": "V5-PROACTIVE-C2",
+              "label": "אין פעולה חיצונית בעלת משמעות בלי אישור."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-CLOUD-INDICATOR",
+          "title": "חיווי מיקרופון ואודיו בענן",
+          "lane": "features",
+          "issue_numbers": [
+            185,
+            204
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-CLOUD-INDICATOR-C1",
+              "label": "חיווי לא נשאר off כשאין נתון עדכני."
+            },
+            {
+              "id": "V5-CLOUD-INDICATOR-C2",
+              "label": "מיקרופון נסגר בכשל, בסירוב ובהפסקת שימוש."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "בדיקת מיקרופון והרשאות Android.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-DEVELOPMENT-STATUS",
+          "title": "מצב סוכנים, PRs ו־CI מנתונים אמיתיים",
+          "lane": "features",
+          "issue_numbers": [
+            190
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-DEVELOPMENT-STATUS-C1",
+              "label": "סטטוס Claude/Codex/GitHub אמיתי מוצג ללא כתיבה אוטומטית."
+            },
+            {
+              "id": "V5-DEVELOPMENT-STATUS-C2",
+              "label": "push/attach שאינם נתמכים מסומנים unsupported."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PROJECT-MANAGER",
+          "title": "ניהול משימות תוכנה וסוכנים ב־worktrees",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-PROJECT-MANAGER-C1",
+              "label": "משימות מוגבלות וסוכנים מבודדים ב־worktrees."
+            },
+            {
+              "id": "V5-PROJECT-MANAGER-C2",
+              "label": "הדגמה מול סוכן אמיתי, עם מדיניות הרשאות ובעלות אחת על תיקייה."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "אישור הדגמת סוכן אמיתי במינוי הבעלים; fakes בלבד אינם קבלה.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-TAILSCALE",
+          "title": "Wi-Fi ביתי ו־Tailscale לפי בחירת בעלים",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-TAILSCALE-C1",
+              "label": "זיהוי ו־bind לכתובת tailnet בלבד במצב שנבחר."
+            },
+            {
+              "id": "V5-TAILSCALE-C2",
+              "label": "היישום אינו מתקין או מתחבר ל־Tailscale בשם המשתמש."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/PHONE_ACCESS_TAILSCALE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "חשבון/חיבור Tailscale אם המסלול נבחר.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PHONE-APPROVALS",
+          "title": "אישורים מטלפון כבויים כברירת מחדל",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-PHONE-APPROVALS-C1",
+              "label": "הפעלה מפורשת עם scope מתאים ו־revoke."
+            },
+            {
+              "id": "V5-PHONE-APPROVALS-C2",
+              "label": "typed-code נשאר PC-only בכל מצב."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md",
+            "docs/reviews/SWV5_ACCEPTANCE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "הפעלה מפורשת ובדיקת אישורים אמיתית.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PRIVACY-DEFAULTS",
+          "title": "ברירות מחדל לפרטיות ולהאצלה",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V5-PRIVACY-DEFAULTS-C1",
+              "label": "בהתקנות חדשות privacy ON ו־client delegation."
+            },
+            {
+              "id": "V5-PRIVACY-DEFAULTS-C2",
+              "label": "בקשת full text פוקעת לאחר 24 שעות; הגדרות קיימות אינן נדרסות."
+            }
+          ],
+          "source_paths": [
+            "docs/JARVES_SW_V5_WORK_PACKAGE.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-SCENARIO",
+          "title": "תרחיש רוחב טלפון ומחשב",
+          "lane": "release",
+          "issue_numbers": [
+            187
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-SCENARIO-C1",
+              "label": "memory correction בשני לקוחות, goal fail/retry ו־proactive dedupe/quiet hours."
+            },
+            {
+              "id": "V5-SCENARIO-C2",
+              "label": "מציינים אילו אינטגרציות הוחלפו ב־fakes."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-CAPABILITY-EVIDENCE",
+          "title": "ראיה ייעודית לכל עמוד יכולת",
+          "lane": "ops",
+          "issue_numbers": [
+            188
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V5-CAPABILITY-EVIDENCE-C1",
+              "label": "כל יכולת מצביעה לבדיקות האמיתיות שלה וליעד שנבדק."
+            },
+            {
+              "id": "V5-CAPABILITY-EVIDENCE-C2",
+              "label": "CI אינו מסומן verified_on_device."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-DOCS",
+          "title": "מסמכי V5 תואמים למימוש ולמצב",
+          "lane": "ops",
+          "issue_numbers": [
+            181
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V5-DOCS-C1",
+              "label": "אין מצב ידני סותר במפת הדרכים, בחבילה ובמפת המסמכים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-REPO-MOVE",
+          "title": "קבועי ריפו וקישורים מצביעים לארגון",
+          "lane": "ops",
+          "issue_numbers": [
+            182
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V5-REPO-MOVE-C1",
+              "label": "devstatus, issue registry, updater וקישורי source מצביעים למקור התקף."
+            },
+            {
+              "id": "V5-REPO-MOVE-C2",
+              "label": "ריפו ההפצות נשאר נפרד כל עוד לא הוחלט להעבירו."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-BUG-TRIAGE",
+          "title": "מיון באגים וממצאי selftest/speedtest",
+          "lane": "bugs",
+          "issue_numbers": [
+            191
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-BUG-TRIAGE-C1",
+              "label": "באגים וממצאי הבדיקות מסווגים מול שער השחרור התקף."
+            },
+            {
+              "id": "V5-BUG-TRIAGE-C2",
+              "label": "אין סגירה אוטומטית רק מפני ש־PR מוזג."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V5-RELEASE",
+          "title": "חבילת V5, שדרוג ו־rollback",
+          "lane": "release",
+          "issue_numbers": [
+            192
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-RELEASE-C1",
+              "label": "חבילה מזוהה, CHANGELOG ו־release gate על ה־candidate הנבדק."
+            },
+            {
+              "id": "V5-RELEASE-C2",
+              "label": "בדיקת שדרוג מ־4.5 ו־rollback; stable רק לאחר קבלת הבעלים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md",
+            "docs/RELEASING.md"
+          ],
+          "depends_on": [
+            "V5-ACCEPTANCE"
+          ],
+          "owner_gate": "חתימת הבעלים ואישור stable.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-LIVE-AGENTS",
+          "title": "הדגמת Claude/Codex אמיתיים",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-LIVE-AGENTS-C1",
+              "label": "Dev Manager ו־project manager פועלים מול sessions אמיתיים."
+            },
+            {
+              "id": "V5-LIVE-AGENTS-C2",
+              "label": "אין חיווי הצלחה על סמך fake sessions."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "אישור שימוש במינוי ובפרויקט המותר.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-LIVE-GOAL",
+          "title": "תוכנית מטרה עם Skill אמיתי",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V5-LIVE-GOAL-C1",
+              "label": "תוכנית מטרה ותוצאתה נבדקות בפועל."
+            },
+            {
+              "id": "V5-LIVE-GOAL-C2",
+              "label": "שליחה חיצונית רק אם אושרה במפורש; ניתן לבדוק Skills מקומיים בלי שליחה."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "פעולה חיצונית דורשת אישור נפרד; אין צורך לחסום בדיקה מקומית.",
+          "scope": "required"
+        },
+        {
+          "id": "V5-PHONE-PERF",
+          "title": "מדדי שימוש אמיתיים בטלפון",
+          "lane": "release",
+          "issue_numbers": [],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V5-PHONE-PERF-C1",
+              "label": "latency, echo, עלות וסוללה נמדדים במכשיר והמסלול מזוהה."
+            },
+            {
+              "id": "V5-PHONE-PERF-C2",
+              "label": "נתון שלא נמדד מוצג כלא נמדד."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V5_INVENTORY_AND_PLAN_2026-10-24.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "טלפון אמיתי ומסגרת שימוש מאושרת.",
+          "scope": "required"
+        }
+      ]
+    },
+    {
+      "id": "V6",
+      "title": "JARVES Drive & Act — רכב, קול ו־Skills",
+      "requirements": [
+        {
+          "id": "V6-FEASIBILITY",
+          "title": "התאמת Android Auto, טלפון ו־Bluetooth",
+          "lane": "ops",
+          "issue_numbers": [
+            208
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-FEASIBILITY-C1",
+              "label": "רשומת היתכנות עם מקורות רשמיים ותאריך; כל יכולת מסומנת official/phone-mediated/blocked."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-DRIVE-POLICY",
+          "title": "מדיניות מצב נהיגה ותור לאחר עצירה",
+          "lane": "features",
+          "issue_numbers": [
+            209
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-DRIVE-POLICY-C1",
+              "label": "עצור וביטול תמיד מותרים; פעולות לא בטוחות נדחות בלי לעקוף אישורים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-JOURNEY",
+          "title": "מסלול, זמני אומדן וקישורי Maps/Waze",
+          "lane": "features",
+          "issue_numbers": [
+            210
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-JOURNEY-C1",
+              "label": "תכנון נסיעה מנתונים מותרים, provider/freshness ו־fallback שימושי; אין המצאת live traffic."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-BRIEFING",
+          "title": "תדריך טרום נסיעה ופרטיות נוסעים",
+          "lane": "features",
+          "issue_numbers": [
+            211
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-BRIEFING-C1",
+              "label": "opt-in, quiet hours, dedupe וסינון פרטיות לפי נוסעים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-SKILL-MANIFEST",
+          "title": "manifest v2, תלות וגילוי Skills",
+          "lane": "features",
+          "issue_numbers": [
+            212
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-SKILL-MANIFEST-C1",
+              "label": "גרסת Core מינימלית, תלויות, surfaces, setup ו־diagnostic hooks נבדקים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-AUDIO-ROUTES",
+          "title": "שינוי התקן ומסלול אודיו",
+          "lane": "features",
+          "issue_numbers": [
+            213
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-AUDIO-ROUTES-C1",
+              "label": "ניתוק/חיבור Bluetooth, שינוי headset ו־fallback ל־PTT נבדקים; אין טענת מכשיר על סמך סימולציה."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "מכשיר אמיתי/רכב חונה והרשאות נדרשות; אין לבצע בדיקה פיזית או שימוש בתשלום ללא הרשאה.",
+          "scope": "required"
+        },
+        {
+          "id": "V6-AUDIO-FIXTURES",
+          "title": "תרחישי תקלה מדומים לאודיו ברכב",
+          "lane": "ops",
+          "issue_numbers": [
+            214
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-AUDIO-FIXTURES-C1",
+              "label": "fixtures לניתוק Bluetooth, רעש ושינוי התקן משמשים את תרחישי הבדיקה."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-TARGETS",
+          "title": "מטריצת יכולות לטלפון ולרכב",
+          "lane": "ops",
+          "issue_numbers": [
+            215
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-TARGETS-C1",
+              "label": "יעדי phone/car מוצגים עם סטטוס אמיתי וקישור לחסימה ולראיה."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-DRIVE-WIRING",
+          "title": "חיבור מצב נהיגה לאישורים ול־SkillRegistry",
+          "lane": "features",
+          "issue_numbers": [
+            216
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-DRIVE-WIRING-C1",
+              "label": "defer queue; אישור קולי רק בתנאים המאושרים ובקשר לאיש קשר אמיתי; untrusted text אינו מאשר."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [
+            "V6-DRIVE-POLICY",
+            "V6-TARGETS"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-DRIVE-ACTIONS",
+          "title": "פעולות נהיגה והעברה לאפליקציות בטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            217
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-DRIVE-ACTIONS-C1",
+              "label": "שיחות, הודעות, תזכורות, יומן ומוזיקה/ניווט עובדים באישור מתאים או מסומנים נדחים/לא נתמכים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [
+            "V6-DRIVE-WIRING"
+          ],
+          "owner_gate": "מכשיר אמיתי/רכב חונה והרשאות נדרשות; אין לבצע בדיקה פיזית או שימוש בתשלום ללא הרשאה.",
+          "scope": "required"
+        },
+        {
+          "id": "V6-DRIVE-SCREEN",
+          "title": "מסך נהיגה בטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            218
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-DRIVE-SCREEN-C1",
+              "label": "כפתור גדול, מצב ו־stop, ללא עבודה חזותית מסיחה ותוך שימור הרשאות."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [
+            "V6-TARGETS"
+          ],
+          "owner_gate": "מכשיר אמיתי/רכב חונה והרשאות נדרשות; אין לבצע בדיקה פיזית או שימוש בתשלום ללא הרשאה.",
+          "scope": "required"
+        },
+        {
+          "id": "V6-HANDS-FREE",
+          "title": "קול hands-free בטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            219
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-HANDS-FREE-C1",
+              "label": "streaming, VAD, barge-in וחיווי ענן; ניתוק, lock/background, שיחה נכנסת ורעש נבדקים במכשיר."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "מכשיר אמיתי/רכב חונה והרשאות נדרשות; אין לבצע בדיקה פיזית או שימוש בתשלום ללא הרשאה.",
+          "scope": "required"
+        },
+        {
+          "id": "V6-SKILL-LIFECYCLE",
+          "title": "שני Skills עם הרשאות, עדכון ו־rollback",
+          "lane": "features",
+          "issue_numbers": [
+            220
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-SKILL-LIFECYCLE-C1",
+              "label": "שני Skills מנוהלים לפי manifest v2; הפרדת הרשאות, update/rollback וללא רגרסיות V4/V5."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [
+            "V6-SKILL-MANIFEST"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-GUIDES",
+          "title": "מדריכי V6, CLI parity ועברית",
+          "lane": "ops",
+          "issue_numbers": [
+            221
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V6-GUIDES-C1",
+              "label": "מדריך EN/HE, רשומת parity ויכולת מדויקת לכל פיצ׳ר."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-SCENARIO",
+          "title": "תרחיש רוחב טלפון, רכב מדומה ומחשב",
+          "lane": "release",
+          "issue_numbers": [
+            222
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-SCENARIO-C1",
+              "label": "desktop resume ללא איבוד הקשר/כפל פקודה; stop בתוך שנייה בבדיקות."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-SECURITY",
+          "title": "סקירת אבטחה ופרטיות של V6",
+          "lane": "bugs",
+          "issue_numbers": [
+            223
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-SECURITY-C1",
+              "label": "ממצאים מסווגים ומטופלים עם ראיות ושער שחרור תקף; הרשאות location/mic אינן נפתחות אוטומטית."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V6-RELEASE",
+          "title": "קבלת רכב וטלפון ושחרור V6",
+          "lane": "release",
+          "issue_numbers": [
+            224
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-RELEASE-C1",
+              "label": "שדרוג 5→6 ו־rollback, חבילה מזוהה, קבלת טלפון ורכב חונה וחתימת בעלים."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md",
+            "docs/ROADMAP.md"
+          ],
+          "depends_on": [
+            "V5-ACCEPTANCE",
+            "V6-SCENARIO",
+            "V6-SECURITY",
+            "V6-HANDS-FREE"
+          ],
+          "owner_gate": "מכשיר אמיתי/רכב חונה והרשאות נדרשות; אין לבצע בדיקה פיזית או שימוש בתשלום ללא הרשאה.",
+          "scope": "required"
+        },
+        {
+          "id": "V6-LOCATION",
+          "title": "מיקום טלפון ל־Core — אופציונלי",
+          "lane": "features",
+          "issue_numbers": [
+            339
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V6-LOCATION-C1",
+              "label": "מיקום כבוי כברירת מחדל, זמני לנסיעה ורק אחרי אישור פרטיות."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "אישור פרטיות מפורש לשיתוף מיקום.",
+          "scope": "optional"
+        },
+        {
+          "id": "V6-LIVE-TRAFFIC",
+          "title": "traffic או routing בתשלום — אופציונלי",
+          "lane": "features",
+          "issue_numbers": [],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V6-LIVE-TRAFFIC-C1",
+              "label": "ספק בתשלום רק לאחר בחירה, הרשאה ותקרת הוצאה; ברירת מחדל free route estimate ללא live traffic."
+            }
+          ],
+          "source_paths": [
+            "docs/archive/plans/V6_INVENTORY_AND_PLAN_2026-10-25.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "בחירת ספק ואישור הוצאה.",
+          "scope": "optional"
+        }
+      ]
+    },
+    {
+      "id": "V7",
+      "title": "Everyday Android, Ecosystem & Agent Studio",
+      "requirements": [
+        {
+          "id": "V7-A0",
+          "title": "החלטת ארכיטקטורה ללקוח Android",
+          "lane": "ops",
+          "issue_numbers": [
+            388
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-A0-C1",
+              "label": "Android companion ADR: native Kotlin vs reuse of the V5 phone web client; foreground-service, mic and notification limits"
+            },
+            {
+              "id": "V7-A0-C2",
+              "label": "Required source test evidence: docs links test."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V5-ACCEPTANCE"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A1",
+          "title": "חוזה API ללקוח הנלווה",
+          "lane": "features",
+          "issue_numbers": [
+            389
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-A1-C1",
+              "label": "Core companion API contract: status, tasks, approvals, reminders over the existing pairing/Tailscale link (no new auth)"
+            },
+            {
+              "id": "V7-A1-C2",
+              "label": "Required source test evidence: fake-device HTTP tests, auth/replay tests."
+            },
+            {
+              "id": "V7-A1-C3",
+              "label": "Required source review gate: Opus (touches pairing and approvals)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A0"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A2",
+          "title": "מעטפת אפליקציית Android וצימוד",
+          "lane": "features",
+          "issue_numbers": [
+            390
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-A2-C1",
+              "label": "Android app shell (Compose): pair, status, PC-offline banner; CI builds a debug APK only"
+            },
+            {
+              "id": "V7-A2-C2",
+              "label": "Required source test evidence: assembleDebug in CI; Core fake server contract test."
+            },
+            {
+              "id": "V7-A2-C3",
+              "label": "Owner-gated source condition: Device test on the dedicated test phone (adb sheet)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A0",
+            "V7-A1"
+          ],
+          "owner_gate": "Device test on the dedicated test phone (adb sheet)",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A3",
+          "title": "דיבור בלחיצה והתראות Android",
+          "lane": "features",
+          "issue_numbers": [
+            391
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-A3-C1",
+              "label": "Push-to-talk voice and notifications: mic service started only from a visible activity or notification; poll first, FCM only if the owner links Firebase"
+            },
+            {
+              "id": "V7-A3-C2",
+              "label": "Required source test evidence: unit tests with fake audio; adb sheet rows."
+            },
+            {
+              "id": "V7-A3-C3",
+              "label": "Required source review gate: Opus (mic permission)."
+            },
+            {
+              "id": "V7-A3-C4",
+              "label": "Owner-gated source condition: New permission prompts (mic, notifications) on the phone; FCM account optional."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A2"
+          ],
+          "owner_gate": "New permission prompts (mic, notifications) on the phone; FCM account optional",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A4",
+          "title": "שיתוף ל־JARVES ומסכי משימות ואישורים",
+          "lane": "features",
+          "issue_numbers": [
+            392
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-A4-C1",
+              "label": "Share-to-JARVES intent plus tasks and approvals screens (approve/skip as in V5; delete stays PC-only)"
+            },
+            {
+              "id": "V7-A4-C2",
+              "label": "Required source test evidence: JVM tests plus adb rows."
+            },
+            {
+              "id": "V7-A4-C3",
+              "label": "Owner-gated source condition: Phone rows."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A2"
+          ],
+          "owner_gate": "Phone rows",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A5",
+          "title": "סנכרון offline וכללי קונפליקט ב־Core",
+          "lane": "features",
+          "issue_numbers": [
+            393
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-A5-C1",
+              "label": "Offline basics, Core side: sync endpoint and conflict rules for reminders, timers, notes (last-writer-wins with tombstones, per-item version)"
+            },
+            {
+              "id": "V7-A5-C2",
+              "label": "Required source test evidence: property tests on merge, fake clients."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A6",
+          "title": "אחסון מקומי, תזכורות וסנכרון בטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            394
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-A6-C1",
+              "label": "Offline basics, phone side: local store, exact-alarm reminders and timers, notes; sync when the PC is reachable"
+            },
+            {
+              "id": "V7-A6-C2",
+              "label": "Required source test evidence: JVM tests, adb rows (airplane mode)."
+            },
+            {
+              "id": "V7-A6-C3",
+              "label": "Owner-gated source condition: Exact-alarm permission prompt on the phone."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A2",
+            "V7-A5"
+          ],
+          "owner_gate": "Exact-alarm permission prompt on the phone",
+          "scope": "required"
+        },
+        {
+          "id": "V7-A7",
+          "title": "קבלת Android, מדריכים ומטריצת סוללה",
+          "lane": "release",
+          "issue_numbers": [
+            395
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-A7-C1",
+              "label": "Android acceptance sheet and guide (EN/HE), release notes, battery/OEM matrix"
+            },
+            {
+              "id": "V7-A7-C2",
+              "label": "Required source test evidence: docs and guides tests."
+            },
+            {
+              "id": "V7-A7-C3",
+              "label": "Owner-gated source condition: Owner signs the phone sheet."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A3",
+            "V7-A4",
+            "V7-A5",
+            "V7-A6"
+          ],
+          "owner_gate": "Owner signs the phone sheet",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B1",
+          "title": "מצבי סשן וזרם אירועים לדפדפן",
+          "lane": "features",
+          "issue_numbers": [
+            396
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-B1-C1",
+              "label": "Session model and event stream on the existing browser skill: states AGENT/HUMAN/PAUSED/STOPPED, action receipts, no new engine"
+            },
+            {
+              "id": "V7-B1-C2",
+              "label": "Required source test evidence: fake page driver, state-machine tests."
+            },
+            {
+              "id": "V7-B1-C3",
+              "label": "Required source review gate: Opus (gate/approvals)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B2",
+          "title": "צפייה חיה לקריאה בלבד בסשן הדפדפן",
+          "lane": "features",
+          "issue_numbers": [
+            397
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-B2-C1",
+              "label": "Read-only live view pilot: screencast of the dedicated Playwright context to the dashboard, loopback plus per-session token, Stop button; test site only"
+            },
+            {
+              "id": "V7-B2-C2",
+              "label": "Required source test evidence: local test-site E2E in CI (headless), token/expiry tests."
+            },
+            {
+              "id": "V7-B2-C3",
+              "label": "Required source review gate: Opus (new network surface)."
+            },
+            {
+              "id": "V7-B2-C4",
+              "label": "Owner-gated source condition: Owner watches once on his PC."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-B1"
+          ],
+          "owner_gate": "Owner watches once on his PC",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B3",
+          "title": "העברת שליטה לאדם וחזרה באותו סשן",
+          "lane": "features",
+          "issue_numbers": [
+            398
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-B3-C1",
+              "label": "Human takeover and return in the SAME session: agent input locked while HUMAN, page re-read on return, nothing the human types reaches a model prompt"
+            },
+            {
+              "id": "V7-B3-C2",
+              "label": "Required source test evidence: fake-page and local test-site tests; stale-ownership and injection tests."
+            },
+            {
+              "id": "V7-B3-C3",
+              "label": "Required source review gate: Opus (credential handling)."
+            },
+            {
+              "id": "V7-B3-C4",
+              "label": "Owner-gated source condition: Real login test is owner-run on a throwaway account."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-B2"
+          ],
+          "owner_gate": "Real login test is owner-run on a throwaway account",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B4",
+          "title": "צפייה ושליטה בדפדפן מהטלפון",
+          "lane": "features",
+          "issue_numbers": [
+            399
+          ],
+          "required_validation": "device",
+          "acceptance": [
+            {
+              "id": "V7-B4-C1",
+              "label": "Phone viewer for live view and takeover (reuses the A2 shell or the phone web page)"
+            },
+            {
+              "id": "V7-B4-C2",
+              "label": "Required source test evidence: adb rows."
+            },
+            {
+              "id": "V7-B4-C3",
+              "label": "Owner-gated source condition: Phone rows."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-A2",
+            "V7-B3"
+          ],
+          "owner_gate": "Phone rows",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B5",
+          "title": "הקלטה בהסכמה עם הגנת שדות רגישים",
+          "lane": "features",
+          "issue_numbers": [
+            400
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-B5-C1",
+              "label": "Opt-in recording: Playwright per-context video, default OFF, pause at password/card/OTP fields, retention and delete, honest format label"
+            },
+            {
+              "id": "V7-B5-C2",
+              "label": "Required source test evidence: fake recorder, masking tests, retention tests."
+            },
+            {
+              "id": "V7-B5-C3",
+              "label": "Required source review gate: Opus (secrets)."
+            },
+            {
+              "id": "V7-B5-C4",
+              "label": "Owner-gated source condition: Owner opt-in per session."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-B3"
+          ],
+          "owner_gate": "Owner opt-in per session",
+          "scope": "required"
+        },
+        {
+          "id": "V7-B6",
+          "title": "בחינת שירותי דפדפן ענן מול Playwright מקומי",
+          "lane": "ops",
+          "issue_numbers": [
+            401
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-B6-C1",
+              "label": "ADR: Browser Use cloud, Cloudflare browser, Aether vs local Playwright (cost, privacy, lock-in); cloud stays optional and OFF"
+            },
+            {
+              "id": "V7-B6-C2",
+              "label": "Required source test evidence: docs links test."
+            },
+            {
+              "id": "V7-B6-C3",
+              "label": "Owner-gated source condition: Any cloud sign-up or spend."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-B2"
+          ],
+          "owner_gate": "Any cloud sign-up or spend",
+          "scope": "required"
+        },
+        {
+          "id": "V7-R1",
+          "title": "מחקר OpenClaw, nanobot ו־IronClaw",
+          "lane": "ops",
+          "issue_numbers": [
+            402
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-R1-C1",
+              "label": "OpenClaw, nanobot, IronClaw study: adopt/adapt/reject table for tools, skills lifecycle, approvals and sandboxing ideas (docs only, no installs)"
+            },
+            {
+              "id": "V7-R1-C2",
+              "label": "Required source test evidence: docs links test."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-R2",
+          "title": "מחקר Buzz והחלטת זהות ואינטגרציה",
+          "lane": "ops",
+          "issue_numbers": [
+            403
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-R2-C1",
+              "label": "Buzz by Block investigation: confirm identity, license, hosting burden; adopt a pattern, build a narrow ACP bridge, or reject (docs only)"
+            },
+            {
+              "id": "V7-R2-C2",
+              "label": "Required source test evidence: docs links test."
+            },
+            {
+              "id": "V7-R2-C3",
+              "label": "Owner-gated source condition: Owner confirms this is the product he meant."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "Owner confirms this is the product he meant",
+          "scope": "required"
+        },
+        {
+          "id": "V7-D1",
+          "title": "מתאם OpenCode לקריאה בלבד",
+          "lane": "features",
+          "issue_numbers": [
+            404
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-D1-C1",
+              "label": "OpenCode read-only adapter: health, sessions, event stream (SSE) against a fake server; loopback and password only"
+            },
+            {
+              "id": "V7-D1-C2",
+              "label": "Required source test evidence: fake server tests, auth-required tests."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-D2",
+          "title": "OpenCode כסוכן שלישי דרך ה־Orchestrator",
+          "lane": "features",
+          "issue_numbers": [
+            405
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-D2-C1",
+              "label": "OpenCode as third harness in the Orchestrator: start/stop session, send prompt only after approval showing target repo/branch/session; own worktree"
+            },
+            {
+              "id": "V7-D2-C2",
+              "label": "Required source test evidence: fake server tests, policy tests, cli parity."
+            },
+            {
+              "id": "V7-D2-C3",
+              "label": "Required source review gate: Opus (orchestrator gate)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-D1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-D3",
+          "title": "פרופיל מודל ותקרת עלות לכל סוכן OpenCode",
+          "lane": "features",
+          "issue_numbers": [
+            406
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-D3-C1",
+              "label": "Per-agent model/profile and cost cap for OpenCode; status page rows; guide EN/HE"
+            },
+            {
+              "id": "V7-D3-C2",
+              "label": "Required source test evidence: tests with fakes, test_guides, test_cli_parity."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-D2",
+            "V7-M1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-D4",
+          "title": "ניסוי OpenCode אמיתי ומוגבל עלות",
+          "lane": "features",
+          "issue_numbers": [
+            407
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-D4-C1",
+              "label": "Live smoke: one small real OpenCode task with a free or capped model"
+            },
+            {
+              "id": "V7-D4-C2",
+              "label": "Required source test evidence: manual run, transcript in handoff."
+            },
+            {
+              "id": "V7-D4-C3",
+              "label": "Owner-gated source condition: Owner go and cap (default 1 USD, free-only first)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-D3",
+            "V7-M2"
+          ],
+          "owner_gate": "Owner go and cap (default 1 USD, free-only first)",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G1",
+          "title": "לקוח GitHub לקריאה ואחסון token מוגן",
+          "lane": "features",
+          "issue_numbers": [
+            408
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-G1-C1",
+              "label": "Read-only GitHub client: fine-grained token store (local, redacted), repos/issues/PRs/checks reads, rate-limit handling, fake API"
+            },
+            {
+              "id": "V7-G1-C2",
+              "label": "Required source test evidence: fake API tests, redaction tests."
+            },
+            {
+              "id": "V7-G1-C3",
+              "label": "Required source review gate: Opus (token storage)."
+            },
+            {
+              "id": "V7-G1-C4",
+              "label": "Owner-gated source condition: Owner creates a read-only fine-grained token (guide)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "Owner creates a read-only fine-grained token (guide)",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G2",
+          "title": "מסגרת כתיבה, אישורים ו־audit ל־GitHub",
+          "lane": "features",
+          "issue_numbers": [
+            409
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-G2-C1",
+              "label": "Write framework, nothing written yet: write switch (default OFF), exact-action approval payload, audit log of every write, per-repo allow-list"
+            },
+            {
+              "id": "V7-G2-C2",
+              "label": "Required source test evidence: approval schema tests, audit tests, switch-off tests."
+            },
+            {
+              "id": "V7-G2-C3",
+              "label": "Required source review gate: Opus (approvals)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-G1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G3",
+          "title": "יצירה ועריכת Issues, תגובות ו־labels",
+          "lane": "features",
+          "issue_numbers": [
+            410
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-G3-C1",
+              "label": "Writes class 1: create/edit issue, comment, labels (approval each, batch per task allowed)"
+            },
+            {
+              "id": "V7-G3-C2",
+              "label": "Required source test evidence: fake API write tests, refusal tests."
+            },
+            {
+              "id": "V7-G3-C3",
+              "label": "Required source review gate: Opus first time, then Sonnet."
+            },
+            {
+              "id": "V7-G3-C4",
+              "label": "Owner-gated source condition: Token gets Issues write for the chosen repos."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-G2"
+          ],
+          "owner_gate": "Token gets Issues write for the chosen repos",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G4",
+          "title": "PRs, ביקורות ופעולות CI מאושרות",
+          "lane": "features",
+          "issue_numbers": [
+            411
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-G4-C1",
+              "label": "Writes class 2: open/update PR, PR comments and reviews, CI re-run; never touches branch protection, secrets, org or permissions"
+            },
+            {
+              "id": "V7-G4-C2",
+              "label": "Required source test evidence: fake API tests, forbidden-endpoint tests."
+            },
+            {
+              "id": "V7-G4-C3",
+              "label": "Required source review gate: Opus."
+            },
+            {
+              "id": "V7-G4-C4",
+              "label": "Owner-gated source condition: Token gets Pull requests and Actions write."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-G3"
+          ],
+          "owner_gate": "Token gets Pull requests and Actions write",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G5",
+          "title": "שילוב רק דרך merge queue",
+          "lane": "features",
+          "issue_numbers": [
+            412
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-G5-C1",
+              "label": "Merge only through the merge queue: enqueue or enable auto-merge after required checks; direct merge, force push and bypass are not implemented"
+            },
+            {
+              "id": "V7-G5-C2",
+              "label": "Required source test evidence: fake API tests assert no direct-merge call exists, bypass always false."
+            },
+            {
+              "id": "V7-G5-C3",
+              "label": "Required source review gate: Opus."
+            },
+            {
+              "id": "V7-G5-C4",
+              "label": "Owner-gated source condition: Token permission the queue call needs (verify at build time)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-G4"
+          ],
+          "owner_gate": "Token permission the queue call needs (verify at build time)",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G6",
+          "title": "קישור סוכן, branch, PR ובדיקות",
+          "lane": "features",
+          "issue_numbers": [
+            413
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-G6-C1",
+              "label": "Link agents to work: agent -> branch -> PR -> failed check -> next action, dashboard and voice question about what blocks a PR"
+            },
+            {
+              "id": "V7-G6-C2",
+              "label": "Required source test evidence: fake API and fake orchestrator tests."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-D1",
+            "V7-G1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-G7",
+          "title": "הרשאות עומדות לפי ריפו וסוג פעולה",
+          "lane": "features",
+          "issue_numbers": [
+            414
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-G7-C1",
+              "label": "Standing approvals per repo and action class (owner decision later), expiry and revoke"
+            },
+            {
+              "id": "V7-G7-C2",
+              "label": "Required source test evidence: tests for expiry, revoke, audit."
+            },
+            {
+              "id": "V7-G7-C3",
+              "label": "Required source review gate: Opus."
+            },
+            {
+              "id": "V7-G7-C4",
+              "label": "Owner-gated source condition: Owner decision (default: not enabled)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-G5"
+          ],
+          "owner_gate": "Owner decision (default: not enabled)",
+          "scope": "required"
+        },
+        {
+          "id": "V7-M1",
+          "title": "רישום מודלים ומדיניות עלות ופרטיות",
+          "lane": "features",
+          "issue_numbers": [
+            415
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-M1-C1",
+              "label": "ModelRegistry and SpendPolicy: modes balanced/best/cheap/free-only/local-only, hard caps, NO hidden paid fallback, per-project provider allow-list for private code"
+            },
+            {
+              "id": "V7-M1-C2",
+              "label": "Required source test evidence: policy tests, fake provider, cap-exceeded tests."
+            },
+            {
+              "id": "V7-M1-C3",
+              "label": "Required source review gate: Opus (cost and privacy gate)."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-M2",
+          "title": "מתאם OpenRouter ושמירת free-only",
+          "lane": "features",
+          "issue_numbers": [
+            416
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-M2-C1",
+              "label": "OpenRouter provider adapter behind the provider contract: fake-first, free-only enforcement, resolved-model logging, key stored like other keys"
+            },
+            {
+              "id": "V7-M2-C2",
+              "label": "Required source test evidence: fake HTTP tests, free-only never calls paid."
+            },
+            {
+              "id": "V7-M2-C3",
+              "label": "Required source review gate: Opus (provider, key)."
+            },
+            {
+              "id": "V7-M2-C4",
+              "label": "Owner-gated source condition: Owner OpenRouter key, only for live runs."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-M1"
+          ],
+          "owner_gate": "Owner OpenRouter key, only for live runs",
+          "scope": "required"
+        },
+        {
+          "id": "V7-M3",
+          "title": "מערכת הערכת מודלים לעברית, כלים וקוד",
+          "lane": "features",
+          "issue_numbers": [
+            417
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-M3-C1",
+              "label": "Evaluation harness: Hebrew, tool-call, coding datasets, runner, fake provider, JSON/CSV archive without secrets"
+            },
+            {
+              "id": "V7-M3-C2",
+              "label": "Required source test evidence: runner tests with fake models."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-M1"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-M4",
+          "title": "השוואת איכות, השהיה ועלות בדשבורד",
+          "lane": "features",
+          "issue_numbers": [
+            418
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-M4-C1",
+              "label": "Dashboard comparison page: quality, latency, cost per accepted task, free vs paid labelled"
+            },
+            {
+              "id": "V7-M4-C2",
+              "label": "Required source test evidence: dashboard tests, EN/HE strings."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-M3"
+          ],
+          "owner_gate": "",
+          "scope": "required"
+        },
+        {
+          "id": "V7-M5",
+          "title": "ניסוי מודלים אמיתי ומוגבל",
+          "lane": "features",
+          "issue_numbers": [
+            419
+          ],
+          "required_validation": "app",
+          "acceptance": [
+            {
+              "id": "V7-M5-C1",
+              "label": "Live trial: free-only, public non-private test cases, small cap"
+            },
+            {
+              "id": "V7-M5-C2",
+              "label": "Required source test evidence: results archive in handoff."
+            },
+            {
+              "id": "V7-M5-C3",
+              "label": "Owner-gated source condition: Owner go; default cap 2 USD total, free models first."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [
+            "V7-M2",
+            "V7-M3"
+          ],
+          "owner_gate": "Owner go; default cap 2 USD total, free models first",
+          "scope": "required"
+        },
+        {
+          "id": "V7-X1",
+          "title": "בחירת תוספות עתידיות לאחר המסלולים העיקריים",
+          "lane": "ops",
+          "issue_numbers": [
+            420
+          ],
+          "required_validation": "automated",
+          "acceptance": [
+            {
+              "id": "V7-X1-C1",
+              "label": "Extras backlog (V7.x): MCP registry checks, action receipts, workflow recipes, local-model research, skill trust profiles, dashboards; pick 1-2 only after the tracks above"
+            },
+            {
+              "id": "V7-X1-C2",
+              "label": "Owner-gated source condition: Owner picks."
+            }
+          ],
+          "source_paths": [
+            "docs/plans/V7_WORK_PACKAGE_2026-10-26.md"
+          ],
+          "depends_on": [],
+          "owner_gate": "Owner picks",
+          "scope": "optional"
+        }
+      ]
+    }
+  ]
+}

@@ -21,6 +21,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | A2-1 | Android CI: add the Gradle wrapper-validation action (needs a verified, pinned commit SHA) | android / supply chain | The wrapper jar is only checksum-pinned by distributionSha256Sum; needed before any non-debug build | review #680 |
 | A2-2 | Android: Gradle dependency verification (verification-metadata.xml) | android / supply chain | Dependencies are version-pinned but not hash-verified; needed before any signed APK | review #680 |
 | A2-3 | Android: replace the deprecated androidx security-crypto alpha (EncryptedSharedPreferences) with Keystore-backed storage | android / security | Deprecated alpha library holds the pairing token; needed before any non-debug build | review #680 |
+| A2-4 | Android: the Keystore-backed session store and the 15-minute notification check have no instrumented test | android / testing | Keystore, Doze and OEM battery limits only behave on a real device; goes on the phone sheet (A7) | review #691 #700 |
 | 425 | Windows toast fallback test when tray/popup cannot show | testing | Fallback path is untested | test |
 | 426 | Installer restart smoke: silent install restores pre-install state (#383) | testing / installer | Restart behaviour not covered by a smoke test | test |
 | 427 | Hotfix apply test on a real source tree (copy, apply, verify, rollback) | testing / hotfix | Only mocked trees are tested | test |
