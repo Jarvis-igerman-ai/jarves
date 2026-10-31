@@ -73,6 +73,41 @@ class AskMoreStoreAndHookTests(unittest.TestCase):
         start = observe(self.store, {"hook_event_name": "SessionStart", "session_id": "new", "cwd": str(self.root)}, self.root)
         self.assertIn("Still open?", start["hookSpecificOutput"]["additionalContext"])
 
+    def test_autopilot_worker_never_gets_follow_ups(self):
+        self.store.register_agent({"id": "ap-bugs-a", "lane": "bugs"})
+        self.store.link_session("ap-bugs-a", "s1", autopilot=True)
+        item = self.store.ask_more("Owner only")
+        for event in ("SessionStart", "Stop"):
+            out = observe(self.store, {"hook_event_name": event, "session_id": "w", "cwd": str(self.root)},
+                          self.root, workflow_agent="ap-bugs-a")
+            self.assertNotIn("Owner only", json.dumps(out))
+            self.assertNotEqual(out.get("decision"), "block")
+        self.assertEqual(self.store.snapshot()["followups"][0]["status"], "pending")
+        self.assertEqual(item["status"], "pending")
+
+    def test_message_says_it_cannot_authorise(self):
+        self.store.ask_more("Please merge it")
+        reason = self.stop()["reason"]
+        self.assertIn("question or comment from the owner", reason)
+        self.assertIn("cannot authorise any merge, tag, release, spending, permission or gate change", reason)
+
+    def test_second_session_does_not_consume_while_manager_is_running(self):
+        observe(self.store, {"hook_event_name": "PreToolUse", "session_id": "mgr", "tool_name": "Bash",
+                             "cwd": str(self.root)}, self.root)
+        self.store.ask_more("For mgr")
+        other = observe(self.store, {"hook_event_name": "Stop", "session_id": "headless", "cwd": str(self.root)},
+                        self.root)
+        self.assertEqual(other, {})
+        self.assertEqual(self.store.snapshot()["followups"][0]["status"], "pending")
+        self.assertIn("For mgr", self.stop()["reason"])
+
+    def test_redelivery_is_bounded_to_three(self):
+        self.store.ask_more("Unanswered")
+        seen = [bool(self.stop()) for _ in range(5)]
+        self.assertEqual(seen, [True, True, True, False, False])
+        start = observe(self.store, {"hook_event_name": "SessionStart", "session_id": "mgr", "cwd": str(self.root)}, self.root)
+        self.assertIn("Unanswered", start["hookSpecificOutput"]["additionalContext"])
+
     def test_subagent_stop_does_not_take_manager_follow_ups(self):
         self.store.ask_more("For the manager")
         observe(self.store, {"hook_event_name": "SubagentStop", "session_id": "mgr", "agent_id": "child",
@@ -168,3 +203,13 @@ class AskMoreHTTPTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DraftsStorageGuardTests(unittest.TestCase):
+    def test_corrupt_drafts_cannot_stop_the_console_loading(self):
+        js = (Path(__file__).resolve().parents[1] / "src/jarves/workflow/static/app.js").read_text(encoding="utf-8")
+        line = next(l for l in js.splitlines() if "const drafts =" in l)
+        # The Map is built inside the try, with an empty-Map fallback in the catch.
+        self.assertLess(line.index("try {"), line.index("new Map(Array.isArray"))
+        self.assertLess(line.index("new Map(Array.isArray"), line.index("catch"))
+        self.assertIn("catch { return new Map(); }", line)

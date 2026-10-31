@@ -573,22 +573,62 @@ class Store:
             self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
         return item
 
-    def take_followups(self, agent_id, limit=5):
-        """Hand pending follow-ups to one manager exactly once; the caller injects them as data."""
+    def claim_followup_manager(self, agent_id, takeover=False):
+        """Designate the one session that receives owner follow-ups; returns True if agent_id is it.
+
+        A live (running) manager is never displaced. A session start may replace an idle/offline/unknown one;
+        any other event only fills an empty slot. Delivered, unanswered items move to the new manager.
+        """
+        agent_id = _id(agent_id)
         with self._tx() as db:
-            items = [f for f in self._all(db, "followup") if f["status"] == "pending"][:limit]
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            current = json.loads(row[0]) if row else ""
+            if current == agent_id:
+                return True
+            if current:
+                other = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (current,)).fetchone()
+                running = bool(other) and json.loads(other[0]).get("status") == "running"
+                if running or not takeover:
+                    return False
+            self._set_meta(db, "followup_manager", agent_id)
+            for item in self._all(db, "followup"):
+                if item["status"] == "delivered":
+                    item["delivered_to"] = agent_id
+                    self._put(db, "followup", item)
+        return True
+
+    def take_followups(self, agent_id, limit=5, redeliver=False):
+        """Hand pending follow-ups to the designated manager as data (at-least-once, bounded).
+
+        New items are delivered once. With redeliver=True, items still unanswered are listed again, at most
+        3 deliveries in total; after that only a session start shows them.
+        """
+        agent_id = _id(agent_id)
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            if not row or json.loads(row[0]) != agent_id:
+                return []
+            items = []
+            for f in self._all(db, "followup"):
+                if len(items) >= limit:
+                    break
+                if f["status"] == "pending" or (redeliver and f["status"] == "delivered"
+                                                and f.get("delivered_to") == agent_id and f.get("deliveries", 1) < 3):
+                    items.append(f)
             for item in items:
-                item.update(status="delivered", delivered_at=self.clock(), delivered_to=_id(agent_id))
+                item.update(status="delivered", delivered_at=self.clock(), delivered_to=agent_id,
+                            deliveries=item.get("deliveries", 0) + 1)
                 self._put(db, "followup", item)
             if items:
                 self._event(db, "followup_delivered", f"{len(items)} owner follow-up(s) delivered to the manager")
             questions = {q["id"]: q for q in self._all(db, "question")}
         return [{**item, "question_title": questions.get(item["question_id"], {}).get("title", "")} for item in items]
 
-    def open_followups(self):
-        """Delivered but unanswered follow-ups (e.g. after a manager restart)."""
+    def open_followups(self, agent_id=None):
+        """Delivered but unanswered follow-ups (e.g. after a manager restart), for the receiving manager only."""
         with self._tx() as db:
-            return [f for f in self._all(db, "followup") if f["status"] == "delivered"]
+            return [f for f in self._all(db, "followup") if f["status"] == "delivered"
+                    and (agent_id is None or f.get("delivered_to") == agent_id)]
 
     def reply_followup(self, followup_id, reply):
         """The manager's reply. The linked question stays open until the owner answers it."""

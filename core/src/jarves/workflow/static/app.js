@@ -30,7 +30,7 @@
   let questionsSignature = "";
   let lastPresenceRefresh = 0;
   const DRAFTS_KEY = "jarves-workflow-question-drafts";
-  const drafts = new Map((() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return Array.isArray(saved) ? saved : []; } catch { return []; } })());
+  const drafts = (() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return new Map(Array.isArray(saved) ? saved : []); } catch { return new Map(); } })();
   const GENERAL = "__general";
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
