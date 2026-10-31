@@ -3,11 +3,11 @@ the phone saw. The check runs inside the service on the same row it resolves."""
 from __future__ import annotations
 
 import asyncio
-import time
+import threading
 
 import pytest
 
-from agents_helpers import Owner
+from agents_helpers import Owner, wait_for
 from jarves import approvals, mobile
 
 LONG = "run the build and then " + "step " * 120 + " api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789"
@@ -24,14 +24,51 @@ def owner(tmp_path):
 
 def ask(owner, prompt=LONG, details=None, kind="shell"):
     fut = asyncio.run_coroutine_threadsafe(owner.svc.ask(prompt, title="build", risk="low", kind=kind, details=details or {"cmd": "make"}, source="user"), owner.loop)
-    end = time.time() + 5
-    while time.time() < end and not any(p for p in owner.svc.pending() if p["prompt"] == prompt and p["details"] == (details or {"cmd": "make"}) and p["kind"] == kind):
-        time.sleep(0.02)
-    return fut, next(p for p in owner.svc.pending() if p["prompt"] == prompt and p["details"] == (details or {"cmd": "make"}) and p["kind"] == kind)
+    def published():
+        # Registration precedes signed-file publication. Phone routes read that
+        # file, so in-memory readiness alone races the real surface on Windows.
+        visible = {p["id"] for p in approvals.read_pending_file(owner.svc.home, reveal=False)}
+        return next((p for p in owner.svc.pending() if p["id"] in visible and p["prompt"] == prompt
+                     and p["details"] == (details or {"cmd": "make"}) and p["kind"] == kind), None)
+
+    return fut, wait_for(published, timeout=5, what="signed approval published to the phone")
 
 
 def fake_mob(tmp_path):
     return type("M", (), {"home": tmp_path, "settings": lambda self: {"phone_approvals": True}, "audit": lambda *a, **k: None})()
+
+
+def test_fixture_waits_for_the_signed_phone_row_before_returning(owner, monkeypatch):
+    registered, release, published, read_surface = (threading.Event() for _ in range(4))
+    write_pending = owner.svc._write_pending
+    read_pending = approvals.read_pending_file
+
+    def held_write():
+        registered.set()
+        assert release.wait(3), "fixture never checked the phone publication surface"
+        try:
+            return write_pending()
+        finally:
+            published.set()
+
+    def read_surface_then_release(*args, **kwargs):
+        assert registered.wait(3), "approval was not registered"
+        read_surface.set()
+        release.set()
+        return read_pending(*args, **kwargs)
+
+    monkeypatch.setattr(owner.svc, "_write_pending", held_write)
+    monkeypatch.setattr(approvals, "read_pending_file", read_surface_then_release)
+    try:
+        fut, row = ask(owner)
+        assert read_surface.is_set(), "fixture returned before observing the phone's signed-file surface"
+        assert any(p["id"] == row["id"] for p in read_pending(owner.svc.home, reveal=False))
+    finally:
+        release.set()
+        assert published.wait(3), "held publication did not finish"
+        for pending in owner.svc.pending():
+            owner.svc.answer(pending["id"], False, channel="dashboard")
+    assert fut.result(5) is False
 
 
 def test_a_real_ask_shows_400_redacted_characters_and_fingerprints_all_of_it(owner):

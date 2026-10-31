@@ -1,0 +1,1 @@
+- Fixed: phone approval fingerprint tests wait for the signed pending-file row before exercising the phone route, avoiding an in-memory/publication race on loaded Windows CI runners (#716). Runtime approval policy is unchanged.
