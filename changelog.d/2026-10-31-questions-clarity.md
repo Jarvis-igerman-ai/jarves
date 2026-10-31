@@ -1,4 +1,1 @@
-- Added: Every workflow question has a one-click 'Get more info' that asks the manager
-  to explain it, with the waiting time and an honest idle hint; owner-gate questions are
-  written in plain language (why, steps, minutes, skip effect, recommendation) with the
-  original text under Details (#744).
+- Added: Every workflow question has a one-click 'Get more info' that asks the manager to explain it, with the waiting time and an honest idle hint; owner-gate questions are written in plain language (why, steps, minutes, skip effect, recommendation) with the original text under Details (#744).
