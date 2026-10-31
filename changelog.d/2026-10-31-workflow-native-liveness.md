@@ -1,1 +1,1 @@
-Workflow: native Claude subagents get a long liveness grace, hook events count as progress, worker_offline/stalled quarantine auto-recovers when events resume, stale native agents are archived, locked-database hook errors are logged.
+- Fixed: Workflow: native Claude subagents get a long liveness grace, hook events count as progress, worker_offline/stalled quarantine auto-recovers when events resume, stale native agents are archived, locked-database hook errors are logged.
