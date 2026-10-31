@@ -317,6 +317,8 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
             out.append({"action": "review_task", "task_id": name})
         for name in watch.manual_test_step(store):
             out.append({"action": "manual_test_item", "task_id": name})
+        for name in watch.gate_questions_step(store):
+            out.append({"action": "gate_question", "task_id": name})
         # ci_green comes from sync (main check-runs, read-only).
         if source.get("ci_green") and source.get("sha"):
             import datetime
