@@ -22,7 +22,8 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro"])
+                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+    ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
@@ -61,6 +62,10 @@ def utf8_streams() -> None:
 
 def main(argv=None) -> int:
     utf8_streams()
+    _av = list(sys.argv[1:] if argv is None else argv)
+    if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
+        from .autopilot_grant import run as grant_run
+        return grant_run(_av[1:])
     a = parser().parse_args(argv)
     if not 0 <= a.port <= 65535:
         parser().error("invalid port")
@@ -81,7 +86,7 @@ def main(argv=None) -> int:
         return 0
     if a.action == "supervise":
         from .control import supervisor
-        supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync)
+        supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
     if a.action == "open":
         # Kept out of event logs and process arguments. Never use this link as a public share URL.
@@ -104,6 +109,9 @@ def main(argv=None) -> int:
                 result = settings(store, a.capture)
             else:
                 result = history(store, before=a.before, **filters)
+        elif a.action == "autopilot":
+            from .autopilot import command
+            result = command(store, home, (a.rest or ["status"])[0], a.rest[1:])
         elif a.action == "seed":
             from .sync import PLAN
             result = store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))

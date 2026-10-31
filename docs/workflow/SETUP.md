@@ -161,3 +161,27 @@ requires an already running allow-listed session and explicit
 - Present expired: select it again; polling does not count as owner activity.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
+
+## Autopilot (beta, off by default, unverified on the owner PC)
+
+Nothing starts until the owner opts in: `jarvis workflow autopilot status` shows the policy
+(`enabled=false`), `start` enables it and `stop` is the kill switch (no new starts; running
+workers finish or checkpoint). Launching workers also needs the owner start grant typed at the
+approval popup (valid up to 365 days, default 365; `autopilot grant`, `grant-status`, `autopilot revoke` ends it at once).
+The grant always needs the typed code: in the popup when the Core runs, in the terminal itself when no Core runs and a TTY exists,
+and it is refused (never downgraded to a plain yes) when neither is available. The `kill` switch also ends the grant at once.
+A start that gets no answer is looked up in the Core: a live session is adopted and tracked, otherwise the task is quarantined.
+The watchdog re-queues a stalled task only after the stop is confirmed. Alerts (`lane_idle`, `worker_restarted`, `task_blocked`,
+`permission_wait`) show in the console and `status`; a permission wait over 10 minutes sends one
+away alert. While you are away, tool permission prompts still wait for you, so most lanes will
+wait; a safe project allowlist in `.claude/settings.json` is proposed by agents and applied by the
+owner. UNVERIFIED: real worker start with Claude models, hook env under Git Bash, away popup
+behaviour, Task Scheduler restart, silent beta install chain.
+
+## Autopilot self-update
+
+When the autopilot is enabled the supervisor follows the synced main SHA: on a change it runs `git fetch jarves` and
+`git merge --ff-only` on a clean flow checkout, then restarts itself once (a detached successor takes the supervisor lock;
+ledger, policy and running worker sessions are kept). A dirty or non-fast-forwardable checkout raises one dashboard
+alert and nothing is reset. Workers always start in a new worktree cut from `jarves/main`. The autopilot never merges
+pull requests or tags.

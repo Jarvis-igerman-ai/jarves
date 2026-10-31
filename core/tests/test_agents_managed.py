@@ -265,3 +265,199 @@ def test_claude_launch_carries_the_remaining_daily_cap_as_max_budget(world):
     o = world["o"]
     cap = o.acfg.max_cost_usd_per_day
     assert cap > 0 and abs(o._budget_left() - cap) < 0.01
+
+
+# ---------------------------------------------------------------------- workflow autopilot owner grant (T2, Tier R)
+M_SON, M_OPUS = "claude-sonnet-5-5", "claude-opus-5-5"
+
+
+def _grant(o, owner, **kw):
+    owner.policy = "code"
+    args = dict(project="alpha", models=[M_SON, M_OPUS], days=2, max_concurrent=1)
+    args.update(kw)
+    return o.autopilot_op("grant", by="cli", **args)
+
+
+def test_autopilot_grant_needs_the_typed_code(world):
+    o, owner = world["o"], world["owner"]
+    owner.policy = "approve"                              # a plain yes without the code is not enough
+    r = o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])
+    assert r["code"] == "NOT_APPROVED" and o.autopilot_grant() is None
+    assert _grant(o, owner, project="alpha")["ok"] is True            # "code" policy types the shown code
+    a = owner.asked[-1][1]
+    assert a.title == "agents_autopilot_grant" and a.typed_code and a.voice_ok is False
+    owner.policy = "deny"
+    o.autopilot_op("revoke", by="cli")
+    assert o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    assert o.autopilot_grant() is None
+    assert o.autopilot_op("grant", by="autopilot", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    for bad in ({"days": 366}, {"days": 0}, {"max_concurrent": 99}, {"models": ["a", "b", "c", "d"]}, {"models": []}):
+        assert not _grant(o, owner, **bad)["ok"]
+    assert not _grant(o, owner, project="nope")["ok"]
+
+
+def test_autopilot_grant_lifetime_default_max_and_revoke(world):
+    o, owner = world["o"], world["owner"]
+    owner.policy = "code"
+    r = o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])      # no days = the 365-day default
+    assert r["ok"] and abs((r["grant"]["expires_at"] - r["grant"]["granted_at"]) / 86400 - 365) < 1e-6
+    assert o.GRANT_MAX_DAYS == 365.0
+    assert _grant(o, owner, days=365)["ok"]
+    assert not _grant(o, owner, days=366)["ok"] and not _grant(o, owner, days=1000)["ok"]
+    assert o.autopilot_grant() is not None                                       # the refused ones changed nothing
+    assert o.autopilot_op("revoke", by="cli")["ok"] and o.autopilot_grant() is None   # revoke ends it at once
+    assert _grant(o, owner, days=365)["ok"]
+    o.clock = lambda t=o.clock() + 366 * 86400: t                                # expiry is still enforced
+    assert o.autopilot_grant() is None
+
+
+def test_autopilot_grant_exact_match(world):
+    o, owner = world["o"], world["owner"]
+    task = "x"
+    assert _grant(o, owner)["ok"]
+    n = len(owner.asked)
+    owner.policy = "deny"                                  # any popup would now be denied
+    r = o.start_session("claude", "alpha", task, by="autopilot", model=M_SON, env={"JARVES_WORKFLOW_AGENT": "ap-bugs-1"})
+    assert r["ok"], r
+    assert len(owner.asked) == n                           # no popup on an exact match
+    sid = r["session"]["id"]
+    assert (o.db.session(sid)["meta"] or {}).get("autopilot") is True
+    # over max_concurrent (1): refused, no popup
+    assert o.start_session("claude", "alpha", task, by="autopilot", model=M_OPUS)["code"] == "BUDGET_REACHED"
+    # a different model / project / here / no model / other provider: popup (denied here) or refusal
+    assert o.start_session("claude", "alpha", task, by="autopilot", model="claude-haiku-5-5")["code"] == "NOT_APPROVED"
+    assert o.start_session("claude", "beta", task, by="autopilot", model=M_SON)["code"] == "NOT_APPROVED"
+    assert o.start_session("claude", "alpha", task, by="autopilot")["code"] == "NOT_APPROVED"
+    assert o.start_session("claude", "alpha", task, by="autopilot", model=M_SON, here=True)["code"] in (
+        "NOT_APPROVED", "BUDGET_REACHED")
+    for prov in ("codex", "opencode"):
+        assert o.start_session(prov, "alpha", task, by="autopilot", model=M_SON)["ok"] is False
+    assert not o.start_session("claude", "alpha", task, by="autopilot", model=M_SON,
+                               env={"PATH": "/evil"}).get("ok")
+    # a non-autopilot caller never gets the grant, and cannot pass env
+    assert o.start_session("claude", "alpha", task, by="owner", model=M_OPUS)["code"] == "NOT_APPROVED"
+    # stop: only the session the autopilot started
+    assert o.stop_session(sid, by="autopilot")["ok"]
+    owner.policy = "deny"
+    h = o.start_session("claude", "beta", task, approved=True)
+    assert h["ok"]
+    assert o.stop_session(h["session"]["id"], by="autopilot")["code"] == "NOT_APPROVED"
+    o.stop_session(h["session"]["id"], approved=True)
+
+
+def test_grant_expiry(world):
+    o, owner = world["o"], world["owner"]
+    assert _grant(o, owner)["ok"]
+    owner.policy = "deny"
+    now = o.clock()
+    o.clock = lambda: now + 3 * 86400
+    assert o.autopilot_grant() is None
+    assert o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)["code"] == "NOT_APPROVED"
+    o.clock = lambda: now
+    assert o.autopilot_grant() is not None
+
+
+def test_grant_never_covers_tool_approvals(world):
+    o, owner = world["o"], world["owner"]
+    assert _grant(o, owner)["ok"]
+    owner.policy = "approve"
+    r = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)
+    assert r["ok"], r
+    sid = r["session"]["id"]
+    before = len(owner.asked)
+    o._approval(o.db.session(sid), "req-1", tool="Bash", command="git push --force origin main", cwd=r["session"]["cwd"])
+    assert len(owner.asked) > before                       # the tool request still reaches the owner
+    o.stop_session(sid, by="autopilot")
+
+
+class _FakeTTY:
+    def __init__(self, tty=True):
+        self.tty, self.out = tty, []
+
+    def isatty(self):
+        return self.tty
+
+    def write(self, s):
+        self.out.append(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+
+def _terminal_grant(world, monkeypatch, tty, answer):
+    """The CLI path with no Core: the typed code is asked in the terminal. answer(code) -> what the owner types."""
+    import builtins
+    import sys
+    from jarves import approvals as appr
+    o = world["o"]
+    out = _FakeTTY(tty)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY(tty))
+    monkeypatch.setattr(sys, "stdout", out)
+
+    def fake_input(prompt=""):
+        code = next(x for x in "".join(out.out).split() if len(x) == 4 and x.isdigit())
+        return answer(code)
+    monkeypatch.setattr(builtins, "input", fake_input)
+    ask = appr.terminal_code_ask(world["home"])
+    if ask is not None:
+        o.terminal_ask = ask
+    return o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON], days=2, max_concurrent=1), ask
+
+
+def test_autopilot_grant_terminal_code_right_wrong_and_no_tty(world, monkeypatch):
+    o = world["o"]
+    world["owner"].policy = "deny"                       # no popup channel would ever approve
+    r, ask = _terminal_grant(world, monkeypatch, True, lambda code: "0000" if code != "0000" else "1111")
+    assert ask is not None and r["code"] == "NOT_APPROVED" and o.autopilot_grant() is None     # wrong code
+    r, _ = _terminal_grant(world, monkeypatch, True, lambda code: code)
+    assert r["ok"] and o.autopilot_grant() is not None                                           # right code
+    audit = (world["home"] / "approvals" / "audit.jsonl").read_text(encoding="utf-8")
+    assert '"channel": "terminal"' in audit and '"decision": "approved"' in audit and '"decision": "denied"' in audit
+    o.autopilot_op("revoke", by="cli")
+    o.terminal_ask = None
+    r, ask = _terminal_grant(world, monkeypatch, False, lambda code: code)                      # not a TTY: refused
+    assert ask is None and r["code"] == "NOT_APPROVED" and o.autopilot_grant() is None
+    o.terminal_ask = lambda *a, **k: True
+    assert o.autopilot_op("grant", by="autopilot", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    assert o.autopilot_op("grant", by="voice", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+
+
+def test_autopilot_grant_keeps_typed_code_without_a_core(world, monkeypatch):
+    """No Core and no TTY: the fallback must still demand the typed code (no downgrade to a plain yes)."""
+    from jarves import approvals as appr
+    o = world["o"]
+    seen = {}
+    monkeypatch.setattr(o, "approvals", None)
+    monkeypatch.setattr(appr, "current", lambda: None)
+    monkeypatch.setattr(appr, "ask_owner", lambda home, prompt, **kw: (seen.update(kw) or (False, "")))
+    assert o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    assert seen.get("typed") is True
+
+
+def test_autopilot_kill_switch_ends_the_grant(world):
+    o, owner = world["o"], world["owner"]
+    assert _grant(o, owner)["ok"]
+    owner.policy = "deny"
+    wf = world["home"] / "workflow"
+    wf.mkdir(exist_ok=True)
+    (wf / "autopilot.json").write_text('{"kill": true}', encoding="utf-8")
+    assert o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)["code"] == "NOT_APPROVED"
+    (wf / "autopilot.json").write_text('{"kill": false}', encoding="utf-8")
+    r = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON, env={"JARVES_WORKFLOW_AGENT": "ap-bugs-1"})
+    assert r["ok"], r
+    # the unconfirmed-start lookup finds exactly that worker's live session
+    assert o.call("find_worker", ref="ap-bugs-1", by="autopilot")["session_id"] == r["session"]["id"]
+    assert o.call("find_worker", ref="ap-other", by="autopilot")["session_id"] == ""
+    o.stop_session(r["session"]["id"], by="autopilot")
+
+
+def test_autopilot_notify_op_reaches_the_owner_channel(world):
+    o = world["o"]
+    got = []
+    old, o.notify = o.notify, None
+    assert o.call("notify", text="x", kind="autopilot_alert", by="autopilot")["ok"] is False
+    o.notify = lambda en, he, kind: got.append((en, kind))
+    assert o.call("notify", text="idle with work", kind="autopilot_alert", by="autopilot")["ok"] is True
+    assert got == [("idle with work", "autopilot_alert")]
+    o.notify = old

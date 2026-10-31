@@ -708,6 +708,10 @@ class Orchestrator:
                                             "summarize, and stop.", by=by, lang=lang)
             return {**r, "text": ("I can't stop a session you started yourself; " if lang == "en" else
                                   "אני לא עוצר סשן שהפעלת בעצמך; ") + r["text"]}
+        if by == "autopilot":                       # only a session the autopilot itself started; never an owner's own
+            if not (s.get("meta") or {}).get("autopilot") or s["provider"] != "claude":
+                return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
+            approved = True
         if not approved and not self._ask_owner(f"Stop the {s['provider']} session in {s.get('project')}?",
                                                 title="agents_stop", risk="medium", voice=False,
                                                 details={"project": s.get("project"), "session": s["id"]}):
@@ -726,6 +730,104 @@ class Orchestrator:
         self.db.audit(by, "stop", session_id=s["id"], decision="approved", result="stopped")
         return {"ok": True, "code": "ok", "text": "Stopped." if lang == "en" else "נעצר."}
 
+    # ---- Workflow autopilot owner grant (Tier R): lets by="autopilot" start/stop Claude workers without a popup
+    # ONLY while an unexpired owner grant matches the request exactly. Tool approvals are never covered.
+    terminal_ask = None      # set only by the CLI when no Core runs and stdin/stdout are terminals (typed code in the terminal)
+    GRANT_KEY = "autopilot_grant"
+    GRANT_MAX_DAYS = 365.0
+    GRANT_MAX_WORKERS = 5
+    GRANT_MAX_MODELS = 3
+    ENV_PREFIX = "JARVES_WORKFLOW_"
+
+    def _autopilot_env(self, env) -> dict | None:
+        if not env:
+            return {}
+        if not isinstance(env, dict) or len(env) > 4:
+            return None
+        out = {}
+        for k, v in env.items():
+            if not (isinstance(k, str) and k.startswith(self.ENV_PREFIX) and k.replace("_", "").isalnum()
+                    and isinstance(v, str) and len(v) <= 200 and not any(c in v for c in "\r\n\x00")):
+                return None
+            out[k] = v
+        return out
+
+    def autopilot_grant(self) -> dict | None:
+        """The active grant, or None (missing, malformed or expired)."""
+        try:
+            g = json.loads(self.db.get_meta(self.GRANT_KEY) or "null")
+            if not isinstance(g, dict) or g.get("provider") != "claude" or float(g.get("expires_at") or 0) <= self.clock():
+                return None
+        except (ValueError, TypeError):
+            return None
+        return g
+
+    def _autopilot_killed(self) -> bool:
+        """The kill switch in <home>/workflow/autopilot.json ends the grant at once; an unreadable file fails closed."""
+        path = self.home / "workflow" / "autopilot.json"
+        if not path.exists():
+            return False
+        try:
+            return bool(json.loads(path.read_text(encoding="utf-8")).get("kill"))
+        except (OSError, ValueError, AttributeError):
+            return True
+
+    def _grant_refusal(self, provider: str, proj, model: str, here: bool) -> str:
+        """"" = the grant covers this start exactly; "limit" = covered but at max_concurrent; else "nomatch"."""
+        g = self.autopilot_grant()
+        if g is None or provider != "claude" or here or not model or self._autopilot_killed():
+            return "nomatch"
+        if proj.name != g.get("project") or model not in (g.get("models") or []):
+            return "nomatch"
+        running = [x for x in self.db.sessions() if x["state"] in LIVE_STATES and (x.get("meta") or {}).get("autopilot")]
+        if len(running) >= int(g.get("max_concurrent") or 0):
+            return "limit"
+        return ""
+
+    def autopilot_op(self, action: str, *, by: str = "owner", project: str = "", models=None, days=None,
+                     max_concurrent=None, lang: str = "en") -> dict:
+        if action == "status":
+            g = self.autopilot_grant()
+            return {"ok": True, "code": "ok", "grant": g, "text": "grant active" if g else "no active grant"}
+        if by in ("autopilot", "voice"):
+            return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
+        if action == "revoke":
+            self.db.set_meta(self.GRANT_KEY, "")
+            self.db.audit(by, "autopilot_revoke", decision="approved")
+            return {"ok": True, "code": "ok", "text": "Autopilot grant revoked."}
+        if action != "grant":
+            return {"ok": False, "code": "error", "text": "Unknown autopilot action."}
+        projs = self.projects.by_word(project)
+        if len(projs) != 1 or not projs[0].allow_start:
+            return {"ok": False, "code": "NOT_ALLOWED_PROJECT", "text": say("NOT_ALLOWED_PROJECT", lang)}
+        ms = models if isinstance(models, (list, tuple)) else str(models or "").split(",")
+        ms = sorted({str(m).strip() for m in ms if str(m).strip()})
+        if not ms or len(ms) > self.GRANT_MAX_MODELS or any(len(m) > 200 or any(c in m for c in "\r\n\x00") for m in ms):
+            return {"ok": False, "code": "MODEL_NOT_ALLOWED", "text": say("MODEL_NOT_ALLOWED", lang)}
+        try:
+            d = float(days if days not in (None, "") else self.GRANT_MAX_DAYS)
+            n = int(max_concurrent if max_concurrent not in (None, "") else 1)
+        except (TypeError, ValueError):
+            return {"ok": False, "code": "error", "text": "Invalid days or worker count."}
+        if not 0 < d <= self.GRANT_MAX_DAYS or not 1 <= n <= self.GRANT_MAX_WORKERS:
+            return {"ok": False, "code": "error",
+                    "text": f"days must be 0-{self.GRANT_MAX_DAYS:g} and workers 1-{self.GRANT_MAX_WORKERS}."}
+        proj = projs[0]
+        ask = self.terminal_ask or self._ask_owner
+        if not ask(
+                f"Let the workflow autopilot start and stop Claude sessions without asking, for {d:g} day(s):\n"
+                f"project {proj.name}, models {', '.join(ms)}, up to {n} at once. Each runs in a new worktree; "
+                "every tool approval still asks you. Type the code to allow.",
+                title="agents_autopilot_grant", risk="high", voice=False, typed=True,
+                details={"project": proj.name, "models": ms, "days": d, "max_concurrent": n}):
+            self.db.audit(by, "autopilot_grant", decision="denied", detail=proj.name)
+            return {"ok": False, "code": "NOT_APPROVED", "text": say("NOT_APPROVED", lang)}
+        g = {"provider": "claude", "project": proj.name, "models": ms, "max_concurrent": n,
+             "granted_at": self.clock(), "expires_at": self.clock() + d * 86400}
+        self.db.set_meta(self.GRANT_KEY, json.dumps(g))
+        self.db.audit(by, "autopilot_grant", decision="approved", detail=f"{proj.name} {','.join(ms)} {d:g}d x{n}")
+        return {"ok": True, "code": "ok", "grant": g, "text": "Autopilot grant saved."}
+
     # ================================================================== start / resume
     def _ask_owner(self, prompt: str, *, title: str, risk: str = "high", voice: bool = False, typed: bool = False,
                    details: dict | None = None, kind: str = "tool", timeout: float | None = None) -> bool:
@@ -743,7 +845,7 @@ class Orchestrator:
         if svc is None or svc.loop is None or not svc.loop.is_running() or \
                 Path(svc.home).resolve() != self.home.resolve():
             ok, _ = appr.ask_owner(self.home, prompt, title=title, kind=kind, risk=risk, details=details,
-                                   timeout=timeout)
+                                   timeout=timeout, typed=typed)
             return ("approved" if ok else "denied"), ""
         try:
             if asyncio.get_running_loop() is svc.loop:
@@ -779,8 +881,17 @@ class Orchestrator:
         return ("approved" if ok else seen.get("state") or "no_channel"), seen.get("id", "")
 
     def start_session(self, provider: str, project: str, task: str, *, by: str = "owner", approved: bool = False,
-                      here: bool = False, lang: str | None = None, model: str = "") -> dict:
+                      here: bool = False, lang: str | None = None, model: str = "",
+                      env: dict | None = None) -> dict:
         lang = lang or lang_of(task)
+        if by == "autopilot" and PROVIDER_WORDS.get(provider.lower(), provider.lower()) != "claude":
+            return {"ok": False, "code": "NOT_ALLOWED_PROJECT", "text": "The autopilot may only start Claude sessions."}
+        if by != "autopilot":
+            env = None                                # env pass-through is for the autopilot only
+        else:
+            env = self._autopilot_env(env)
+            if env is None:
+                return {"ok": False, "code": "error", "text": "Invalid autopilot environment."}
         if not isinstance(model, str) or len(model) > 200 or any(c in model for c in "\r\n\x00"):
             return {"ok": False, "code": "error", "text": "Invalid model identifier."}
         model = model.strip()
@@ -829,6 +940,14 @@ class Orchestrator:
             if why:
                 self.db.audit(by, "start", decision="refused", detail=f"opencode config: {why[:120]}")
                 return {"ok": False, "code": "CONFIG_NOT_VERIFIED", "text": say("CONFIG_NOT_VERIFIED", lang), "detail": why}
+        auto = False
+        if by == "autopilot":
+            approved = False                          # a caller's flag never counts for the autopilot: only the grant does
+            why = self._grant_refusal(provider, proj, model, here)
+            if why == "limit":
+                return {"ok": False, "code": "BUDGET_REACHED", "text": "The autopilot grant's worker limit is reached."}
+            auto = why == ""                          # an exact grant match: no popup; anything else shows the normal one
+            approved = auto
         if not approved and not self._ask_owner(
                 f"Start a new {provider} session in {proj.name}" + (" (project folder)" if here else
                                                                      " (new worktree)")
@@ -851,7 +970,13 @@ class Orchestrator:
         if policy.writers_at(cwd, live):
             return {"ok": False, "code": "SECOND_WRITER", "text": say("SECOND_WRITER", lang), "offer": "worktree"}
         if provider == "claude":
-            r = self._start_claude(proj, cwd, task, by=by, model=model, lang=lang)
+            r = self._start_claude(proj, cwd, task, by=by, model=model, lang=lang, env=env)
+            if auto and r.get("ok") and r.get("session", {}).get("id"):
+                sid = r["session"]["id"]
+                cur = self.db.session(sid) or {}
+                self.db.upsert_session(sid, meta={**(cur.get("meta") or {}), "autopilot": True,
+                                                  "workflow_agent": (env or {}).get("JARVES_WORKFLOW_AGENT", "")})
+                self.db.audit(by, "start_by_grant", session_id=sid, decision="approved", detail=f"{proj.name} {model}")
         elif provider == "opencode":
             r = self._start_opencode(proj, cwd, task, by=by, lang=lang, model=prof["spec"])
         else:
@@ -998,7 +1123,17 @@ class Orchestrator:
         wt = root / ".jarves" / "worktrees" / slug
         wt.parent.mkdir(parents=True, exist_ok=True)
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        p = subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", f"jarves/{slug}", str(wt)],
+        # Workers start from the freshest jarves/main when that remote exists (best effort, never blocks a start).
+        base: list[str] = []
+        try:
+            subprocess.run(["git", "-C", str(root), "fetch", "jarves", "main"], capture_output=True, text=True,
+                           timeout=60, creationflags=flags)
+            if subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", "jarves/main"],
+                              capture_output=True, text=True, timeout=20, creationflags=flags).returncode == 0:
+                base = ["jarves/main"]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        p = subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", f"jarves/{slug}", str(wt), *base],
                            capture_output=True, text=True, timeout=120, creationflags=flags)
         if p.returncode != 0:
             raise ValueError(clean(p.stderr or p.stdout, 200))
@@ -1013,7 +1148,8 @@ class Orchestrator:
             pass
         return str(wt)
 
-    def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "") -> dict:
+    def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "",
+                      env: dict | None = None) -> dict:
         pdir = str(claude.write_plugin(self.home))
         tmp_sid = f"claude:pending-{uuid.uuid4().hex[:8]}"
         holder: dict = {"sid": tmp_sid}
@@ -1022,7 +1158,7 @@ class Orchestrator:
         def on_event(kind: str, d: dict) -> None:
             self._managed_claude_event(holder, kind, d, started)
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
-                                 max_budget_usd=self._budget_left(), restricted=(by == "diag"))
+                                 env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"))
         try:
             m.start()
         except OSError as e:
@@ -1773,7 +1909,24 @@ class Orchestrator:
             if op == "start":
                 return self.start_session(a.get("provider", ""), a.get("project", ""), a.get("task", ""), by=by,
                                           approved=bool(a.get("approved")), here=bool(a.get("here")), lang=lang,
-                                          model=a.get("model", ""))
+                                          model=a.get("model", ""), env=a.get("env"))
+            if op == "notify":                        # owner push for the workflow autopilot's away alerts
+                if self.notify is None:
+                    return {"ok": False, "code": "error", "text": "No owner notification channel."}
+                text = str(a.get("text") or "")[:500]
+                self.notify(text, text, str(a.get("kind") or "autopilot")[:40])
+                return {"ok": True, "code": "ok"}
+            if op == "find_worker":                   # the live autopilot session of one workflow agent (unconfirmed start)
+                ref = str(a.get("ref") or "")
+                for x in self.db.sessions():
+                    m = x.get("meta") or {}
+                    if ref and m.get("autopilot") and m.get("workflow_agent") == ref and x["state"] in LIVE_STATES:
+                        return {"ok": True, "code": "ok", "session_id": x["id"]}
+                return {"ok": True, "code": "ok", "session_id": ""}
+            if op == "autopilot":
+                return self.autopilot_op(a.get("action", "status"), by=by, project=a.get("project", ""),
+                                         models=a.get("models"), days=a.get("days"),
+                                         max_concurrent=a.get("max_concurrent"), lang=lang)
             if op == "resume":
                 return self.resume(a.get("ref", ""), by=by, approved=bool(a.get("approved")), lang=lang)
             if op == "approvals":
@@ -1840,11 +1993,11 @@ def current() -> Orchestrator | None:
     return _current
 
 
-REMOTE_OPS = ("start", "resume", "tell", "continue", "pause", "interrupt", "stop", "ask", "reply", "approve", "deny",
+REMOTE_OPS = ("start", "autopilot", "resume", "tell", "continue", "pause", "interrupt", "stop", "ask", "reply", "approve", "deny",
               "approvals", "list", "status", "digest", "log", "doctor", "session", "install_plugin", "projects", "opencode")
 
 
-def call(home: Path, cfg, op: str, **args) -> dict:
+def call(home: Path, cfg, op: str, terminal_ask=None, **args) -> dict:
     """The surfaces' single door: the in-process service when it serves this home, else the running Core over the
     bridge, else a local instance (read-only views, queueing for the plugin's next safe stop)."""
     o = _current
@@ -1855,6 +2008,8 @@ def call(home: Path, cfg, op: str, **args) -> dict:
         r.pop("rid", None)
         return r
     local = Orchestrator(Path(home), cfg, serve=False)
+    if terminal_ask is not None:
+        local.terminal_ask = terminal_ask
     try:
         return local.call(op, **args)
     finally:

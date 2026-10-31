@@ -63,3 +63,19 @@ action = "command:jarvis workflow trace"
 he = "לניתוח יזום לחצו הכן ל־/retro, או jarvis workflow retro --agent ID. נוצר קובץ מקומי ובקשה להעתקה לסוכן שבו ה־skill מותקן. לא מופעל מודל ולא משתנים כללים; בוחרים בנפרד אילו הצעות ליישם."
 en = "For an explicit retrospective choose Prepare /retro, or jarvis workflow retro --agent ID. This creates local evidence and a prompt for an agent with the skill installed. It starts no model and edits no rules; select proposed changes separately."
 action = "command:jarvis workflow trace"
+
+[[steps]]
+he = "מנוע אוטומטי (בטא, כבוי כברירת מחדל): קובץ מדיניות autopilot.json בתיקיית העבודה. jarvis workflow autopilot status מציג מדיניות ורשימה משותפת של באגים פתוחים ובקשות מיזוג. שינוי: jarvis workflow autopilot set KEY VALUE, למשל authorized_versions '[\"V4.5.1\",\"V5\"]'. כפתור חירום: jarvis workflow autopilot stop (וחזרה עם start). jarvis workflow autopilot once מייבא פעם אחת. הלשונית 'באגים, מיזוגים ומדיניות' בלוח מציגה את אותו מידע."
+en = "Autopilot (beta, OFF by default): policy file autopilot.json in the workflow directory. jarvis workflow autopilot status shows the policy and one list of open bugs and pull requests. Change it with jarvis workflow autopilot set KEY VALUE, for example authorized_versions '[\"V4.5.1\",\"V5\"]'. Kill switch: jarvis workflow autopilot stop (resume with start). jarvis workflow autopilot once imports one time. The Bugs, merges and policy tab in the console shows the same data."
+action = "command:jarvis workflow autopilot status"
+
+[[steps]]
+he = "מה המנוע מייבא: כל באג פתוח עם תווית bug, P0-P3 או showstopper (לא רק bug), וכל סעיף פתוח עם תווית גרסה (4.5.1, v5, v6, v7) שאינו בתוכנית. באגים נבחרים לפי עדיפות, פיצ'רים לפי סדר הגרסאות. סעיף מגרסה שלא אושרה נשאר בלתי ניתן להרצה. בשלב הזה המנוע אינו מפעיל סוכנים, ממזג או מתייג."
+en = "What it imports: every open issue labelled bug, P0-P3 or showstopper (not only bug) and every open issue with a version label (4.5.1, v5, v6, v7) that the plan lacks. Bugs go by priority, features by version order. Work from a version that is not authorized stays non-runnable. At this stage it does not start workers, merge or tag."
+action = "command:jarvis workflow autopilot status"
+
+[[problems]]
+he = "תווית באג חדשה לא מופיעה ברשימה"
+en = "A new bug label does not show in the list"
+fix_he = "הרשימה מתעדכנת בסנכרון הקריאה מ־GitHub (עד חצי שעה): הריצו jarvis workflow sync ואז jarvis workflow autopilot once. אם קובץ המדיניות פגום המנוע נשאר כבוי ומציג שגיאה."
+fix_en = "The list refreshes on the read-only GitHub sync (up to 30 minutes): run jarvis workflow sync, then jarvis workflow autopilot once. If the policy file is invalid the autopilot stays off and shows the error."

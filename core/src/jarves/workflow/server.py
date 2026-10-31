@@ -154,7 +154,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "open the private link printed by jarvis workflow open"})
             return
         if path == "/api/state":
-            self._json(200, self.server.store.snapshot())
+            from .autopilot import view
+            state = self.server.store.snapshot()
+            state["autopilot"] = view(state, self.server.home)
+            from .autopilot_watch import autopilot_alerts
+            state["alerts"] = list(state.get("alerts") or []) + [
+                {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
+                for a in autopilot_alerts(self.server.store)]
+            self._json(200, state)
         elif path == "/api/trace":
             from .trace import history
             query = parse_qs(urlsplit(self.path).query)

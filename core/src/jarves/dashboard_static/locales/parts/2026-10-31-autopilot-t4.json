@@ -1,0 +1,10 @@
+{
+ "dict": {
+  "Autopilot is off by default (beta)": "הטייס האוטומטי כבוי כברירת מחדל (בטא)",
+  "Lane idle with queued work": "נתיב ריק למרות משימות בתור",
+  "Manual test needed": "נדרשת בדיקה ידנית",
+  "Task blocked after two stalls": "המשימה נחסמה אחרי שני קיפאונות",
+  "Waiting for your approval in the popup": "ממתין לאישורכם בחלון האישור",
+  "Worker restarted once": "העובד הופעל מחדש פעם אחת"
+ }
+}

@@ -11,6 +11,9 @@ from urllib.parse import urlsplit
 REPO = "Jarvis-igerman-ai/jarves"
 PLAN = Path(__file__).with_name("version_plan.json")
 MAX_PAGES = 10
+MAX_OPEN_ROWS = 150
+BUG_LABELS = ("bug", "P0", "P1", "P2", "P3", "showstopper")
+VERSION_LABELS = ("4.5.1", "5", "5.0", "6", "6.0", "7", "7.0")
 
 
 class SameGitHubRedirect(urllib.request.HTTPRedirectHandler):
@@ -32,6 +35,47 @@ def public_get(path: str):
         if len(body) > 4 * 1024 * 1024:
             raise ValueError("GitHub metadata response exceeds the limit")
         return json.loads(body)
+
+
+MAX_FILE_FETCHES = 30
+_FILES_CACHE: dict[tuple[int, str], list[str]] = {}
+
+
+def pr_files(get, number: int, sha: str) -> list[str]:
+    """Changed file names of one open PR, cached by head sha. Unknown or too large -> [] (callers treat as Tier R)."""
+    key = (number, sha)
+    if sha and key in _FILES_CACHE:
+        return _FILES_CACHE[key]
+    names: list[str] = []
+    try:
+        for page in range(1, 4):
+            rows = get(f"/repos/{REPO}/pulls/{number}/files?per_page=100&page={page}")
+            if not isinstance(rows, list):
+                return []
+            names += [str(r["filename"]) for r in rows if isinstance(r, dict) and r.get("filename")]
+            if len(rows) < 100:
+                break
+        else:
+            return []  # 300+ files: unsure, leave unknown
+    except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
+        return []  # rate limit or outage: not cached, unknown
+    if sha:
+        if len(_FILES_CACHE) > 500:
+            _FILES_CACHE.clear()
+        _FILES_CACHE[key] = names
+    return names
+
+
+def main_ci_green(get, sha: str) -> bool:
+    """Read-only: every check run on the main commit finished and none failed. Any doubt -> False."""
+    try:
+        data = get(f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100")
+        runs = data.get("check_runs") if isinstance(data, dict) else None
+        if not runs or int(data.get("total_count", 0)) > len(runs):
+            return False
+        return all(r.get("status") == "completed" and r.get("conclusion") in ("success", "skipped", "neutral") for r in runs)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
+        return False
 
 
 def collect(get=public_get) -> dict:
@@ -61,10 +105,28 @@ def collect(get=public_get) -> dict:
         else:
             truncated = True
     branch = get(f"/repos/{REPO}/branches/main")
-    return {"issues": issues, "prs": prs, "sha": branch["commit"]["sha"], "truncated": truncated}
+    fetched = 0
+    for item in prs:
+        if item["state"] != "open":
+            continue
+        if fetched >= MAX_FILE_FETCHES and (item["number"], item["head_sha"]) not in _FILES_CACHE:
+            item["files"] = []
+            continue
+        if (item["number"], item["head_sha"]) not in _FILES_CACHE:
+            fetched += 1
+        item["files"] = pr_files(get, item["number"], item["head_sha"])
+    sha = branch["commit"]["sha"]
+    return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": main_ci_green(get, sha)}
 
 
-def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
+def tracked_issue(item: dict, bug_labels=BUG_LABELS) -> bool:
+    """An open issue the console must show: a defect label (not only `bug`) or a version label."""
+    lowered = {x.strip().lower() for x in item["labels"]}
+    return item["state"] == "open" and bool(lowered & {x.lower() for x in bug_labels}
+                                            or {x.lstrip("v") for x in lowered} & set(VERSION_LABELS))
+
+
+def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
     store.seed_plan(plan)
     issues = {int(x["number"]): x for x in snapshot.get("issues", [])}
@@ -92,8 +154,12 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
                 store.update_metadata(requirement["id"], changes)
     source = {"mode": "github", "sha": snapshot.get("sha", ""), "synced_at": store.clock(),
               "unmapped": unmapped, "truncated": bool(snapshot.get("truncated")),
-              "issue_count": len(issues), "open_bugs": sum(x["state"] == "open" and "bug" in x["labels"] for x in issues.values()),
-              "open_prs": [x for x in snapshot.get("prs", []) if x["state"] == "open"],
+              "issue_count": len(issues), "open_bugs": sum(x["state"] == "open" and bool({l.lower() for l in x["labels"]} & {b.lower() for b in bug_labels})
+                               for x in issues.values()),
+              "open_issues": [{**x, "title": x["title"][:120]} for x in sorted(issues.values(), key=lambda i: i["number"])
+                              if tracked_issue(x, bug_labels)][:MAX_OPEN_ROWS],
+              "open_prs": [{**x, "title": x["title"][:120]} for x in snapshot.get("prs", []) if x["state"] == "open"],
+              "ci_green": bool(snapshot.get("ci_green")),
               "scope_note": plan.get("scope_note", ""), "error": ""}
     store.set_source(source)
     return source

@@ -54,6 +54,48 @@ class WorkflowSyncTests(unittest.TestCase):
         self.assertIsNone(result["prs"][0]["merged_at"])
         self.assertEqual(result["prs"][0]["linked_issues"], [1])
 
+    def _fake(self, files_by_pr, runs):
+        calls = []
+
+        def get(path):
+            calls.append(path)
+            if "/issues?" in path:
+                return []
+            if "/pulls?" in path:
+                return [{"number": n, "state": "open", "head": {"sha": f"sha{n}"}, "labels": []} for n in files_by_pr]
+            if "/files?" in path:
+                n = int(path.split("/pulls/")[1].split("/")[0])
+                return [{"filename": f} for f in files_by_pr[n]]
+            if "/check-runs" in path:
+                return {"total_count": len(runs), "check_runs": runs}
+            return {"commit": {"sha": "mainsha"}}
+        return get, calls
+
+    def test_pr_files_drive_tier_r_and_are_cached_by_sha(self):
+        from jarves.workflow import autopilot_watch as watch, sync as sync_mod
+        sync_mod._FILES_CACHE.clear()
+        get, calls = self._fake({9001: ["docs/guide.md"], 9002: ["core/src/jarves/foo_plain.py"],
+                                 9003: [".claude/settings.json"], 9004: ["core/src/jarves/workflow/hooks.py"]}, [])
+        result = collect(get)
+        by = {p["number"]: p for p in result["prs"]}
+        self.assertEqual(by[9001]["files"], ["docs/guide.md"])
+        self.assertFalse(watch.is_tier_r(by[9001]["files"], []))
+        self.assertFalse(watch.is_tier_r(by[9002]["files"], []))
+        self.assertTrue(watch.is_tier_r(by[9003]["files"], []))
+        self.assertTrue(watch.is_tier_r(by[9004]["files"], []))
+        self.assertTrue(watch.is_tier_r(by[9001]["files"], ["no-automerge"]))
+        collect(get)
+        self.assertEqual(sum("/files?" in c for c in calls), 4)  # second sync used the cache
+
+    def test_ci_green_from_main_check_runs(self):
+        ok = [{"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "skipped"}]
+        self.assertTrue(collect(self._fake({}, ok)[0])["ci_green"])
+        self.assertFalse(collect(self._fake({}, ok + [{"status": "in_progress", "conclusion": None}])[0])["ci_green"])
+        self.assertFalse(collect(self._fake({}, ok + [{"status": "completed", "conclusion": "failure"}])[0])["ci_green"])
+        self.assertFalse(collect(self._fake({}, [])[0])["ci_green"])
+        apply_snapshot(self.store, collect(self._fake({}, ok)[0]))
+        self.assertTrue(self.store.snapshot()["source"]["ci_green"])
+
 
 if __name__ == "__main__":
     unittest.main()

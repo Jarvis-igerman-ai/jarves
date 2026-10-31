@@ -22,7 +22,8 @@ bridge/gates, requires explicit opt-in and is not the default native-Claude path
 
 Start with one worker and add only independent work/test capacity. Roles are not
 fixed staffing. The implementer performs relevant QA; independent review follows
-the existing risk rule. Do not add another LLM scheduler or provider launcher.
+the existing risk rule. Do not add another LLM scheduler. There is no general provider launcher: the autopilot (below) launches
+workers only under the owner's time-limited start grant.
 Use [the owner journey](USER_JOURNEY.he.md) for diagrams and the simplicity audit.
 
 1. Select a bounded authorised task with an ID, acceptance, dependencies and
@@ -145,3 +146,21 @@ First reconcile local instructions and run a harmless native-worker test,
 including owner wait/answer/resume and a stopped manager. Measure time to an
 installed working change, escaped/reopened bugs, CI retries and owner effort.
 PR count and zero open Issues are not substitutes for product quality.
+
+## Autopilot (beta, off by default)
+
+Deterministic code inside the existing supervisor, not an LLM scheduler (umbrella
+[#715](https://github.com/Jarvis-igerman-ai/jarves/issues/715)). Policy: `<home>/autopilot.json`,
+`enabled=false` and `kill` switch. It launches workers only under the owner's grant
+(exact project, models, expiry, concurrency); worker tool approvals are unchanged.
+Watchdog actions (`workflow/autopilot_watch.py`):
+- Lane idle with ready work for 300 s: start a worker; versions in policy order.
+- Stalled or offline autopilot-owned worker: stop its session, re-queue once; the
+  second stall blocks the task with an alert and the lane moves to the next task.
+- Foreign or native session, or a permission wait: alert only, never resurrect or
+  approve. A permission wait over 10 minutes sends one deduplicated Core notify.
+- Steward: a new PR head gets a Haiku steward task, but Tier R (risk_class
+  high-risk, `no-automerge`, autopilot code, or unsure) gets an Opus review task and is
+  never queued for merge. One beta-verify task per day (plus any beta with a P0/P1 fix).
+  `device` tasks become an owner test item; only that task waits.
+- Never merges, tags, promotes stable, edits settings/CLAUDE.md or authorises imported scope.
