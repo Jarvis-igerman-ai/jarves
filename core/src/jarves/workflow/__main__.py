@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap"])
+                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro"])
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
@@ -43,6 +43,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--auto-dispatch", action="store_true", help="opt in this attached session to already authorised task assignment")
     ap.add_argument("--progress", action="store_true")
     ap.add_argument("--failed", action="store_true")
+    ap.add_argument("--capture", choices=["off", "metadata", "details"], help="trace: explicit local capture mode")
+    ap.add_argument("--since", type=float, default=0, help="trace/retro: first UNIX timestamp")
+    ap.add_argument("--until", type=float, help="trace/retro: last UNIX timestamp")
+    ap.add_argument("--before", type=int, default=0, help="trace: next page cursor")
     return ap
 
 
@@ -81,6 +85,15 @@ def main(argv=None) -> int:
     try:
         if a.action == "status":
             result = store.snapshot()
+        elif a.action in {"trace", "retro"}:
+            from .trace import history, retro_bundle, settings
+            filters = {"agent_id": a.agent, "task_id": a.task, "since": a.since, "until": a.until}
+            if a.action == "retro":
+                result = retro_bundle(store, **filters)
+            elif a.capture:
+                result = settings(store, a.capture)
+            else:
+                result = history(store, before=a.before, **filters)
         elif a.action == "seed":
             from .sync import PLAN
             result = store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))

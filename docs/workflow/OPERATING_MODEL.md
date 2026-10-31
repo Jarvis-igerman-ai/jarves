@@ -20,6 +20,11 @@ bridge/gates, requires explicit opt-in and is not the default native-Claude path
 
 ## Keep work and evidence current
 
+Start with one worker and add only independent work/test capacity. Roles are not
+fixed staffing. The implementer performs relevant QA; independent review follows
+the existing risk rule. Do not add another LLM scheduler or provider launcher.
+Use [the owner journey](USER_JOURNEY.he.md) for diagrams and the simplicity audit.
+
 1. Select a bounded authorised task with an ID, acceptance, dependencies and
    named exclusive resources such as `windows-gui`, `installer` or a phone ID.
    Imported scope needs reconciliation before execution.
@@ -56,6 +61,15 @@ AskUserQuestion while the owner is away; use the durable inbox and switch work.
 
 ## One source per fact
 
+Cross-provider delegation is owner-invoked: preserve the exact task, provider and
+model requested. Use the existing `jarvis agents start ... --model MODEL` and
+`ask/tell/status` interfaces. Keep approvals, allowed projects, isolated writers
+and cost policy; do not silently substitute models, recursively delegate or
+interpret an agent's text as an owner request. Use a compact task-ID/ledger-read
+prompt for OpenCode (its full approval prompt is bounded). `requested_model` is
+not a verified effective model. Full automatic Orchestrator task/lifecycle
+integration is the prepared follow-up [#715](https://github.com/Jarvis-igerman-ai/jarves/issues/715).
+
 `version_plan.json` defines required/optional/deferred scope and source links.
 Read-only GitHub sync adds issue/PR status, without inferring verification.
 Closed issue ≠ merged code ≠ tested user scenario ≠ shipped artifact.
@@ -73,6 +87,14 @@ out of the public repo. Existing capability mechanisms remain authoritative for
 runtime support; the console is not another assistant-feature registry.
 
 ## External observer
+
+Action history uses the same local database, not a separate telemetry platform.
+Default capture is metadata; detailed tool data is explicitly opt-in and
+best-effort redacted. Native hooks and existing normalized provider events have
+different coverage; never fabricate missing history or precise ancestry.
+`workflow retro` only prepares selected local evidence and an explicit `/retro`
+invocation. It never installs a skill, runs a model or changes instructions.
+The owner selects any proposed permanent change separately.
 
 The supervisor is separate from Claude and the Core. It checks freshness,
 stalls, ready work and dependency/resource waits, and can restart only its owned

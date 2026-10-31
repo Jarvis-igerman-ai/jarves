@@ -4,6 +4,8 @@
 
 ## Current workflow (owner decision, 30 Oct 2026)
 Read [the operating model](docs/workflow/OPERATING_MODEL.md) with this file and NOW.
+Owner walkthrough, explicit provider/model delegation and action-history/retro limits:
+[workflow journey](docs/workflow/USER_JOURNEY.he.md) (open on demand).
 Claude Code normally manages native subagents; occasional Codex work follows the
 same task/evidence contract. Worker count follows independent ready work and test
 capacity, not an always-busy quota. The operating model supersedes dated prompts

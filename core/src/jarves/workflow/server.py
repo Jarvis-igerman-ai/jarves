@@ -15,7 +15,7 @@ import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .store import Store
 
@@ -155,6 +155,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/state":
             self._json(200, self.server.store.snapshot())
+        elif path == "/api/trace":
+            from .trace import history
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                filters = {k: query[k][0] for k in ("agent_id", "task_id", "since", "until", "before") if k in query}
+                self._json(200, history(self.server.store, limit=100, **filters))
+            except (ValueError, TypeError):
+                self._json(400, {"error": "invalid trace filters"})
         elif path == "/api/events":
             self._stream()
         else:
@@ -217,6 +225,14 @@ class Handler(BaseHTTPRequestHandler):
                 result = store.set_owner(data.get("mode", ""))
             elif path == "/api/tasks":
                 result = store.create_task(data)
+            elif path == "/api/trace/settings":
+                from .trace import settings
+                result = settings(store, data.get("mode"))
+            elif path == "/api/trace/retro":
+                from .trace import retro_bundle
+                if set(data) - {"agent_id", "task_id", "since", "until"}:
+                    raise ValueError("unsupported retrospective scope")
+                result = retro_bundle(store, **data)
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/answer", path):
                 result = store.answer(m[1], data.get("answer", ""))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):

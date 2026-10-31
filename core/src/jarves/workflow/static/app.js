@@ -27,6 +27,8 @@
   let questionsSignature = "";
   let lastPresenceRefresh = 0;
   const drafts = new Map();
+  views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
+  let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000;
 
   function seconds(value) {
     if (typeof value === "number") return value > 1e12 ? value / 1000 : value;
@@ -375,12 +377,59 @@
     const fields = [["מימוש", implementationLabel(task)], ["אימות", validationNames[task.validation] || task.validation || "טרם נבדק"], ["הפצה", deliveryNames[task.delivery] || task.delivery || "טרם הופץ"], ["אימות נדרש", validationNames[task.required_validation] || task.required_validation || "לא הוגדר"]];
     const agent = data.agents.find(item => item.id === task.agent_id);
     $("#task-dialog-body").innerHTML = `<div class="detail-meta">${statusPill(task.state)}<span class="pill mono">${esc(task.id)}</span><span class="pill" dir="ltr">${esc(task.version || "ללא גרסה")}</span><span class="pill">${esc(laneNames[task.lane] || task.lane || "לא שויך")}</span><span class="pill mono">P${esc(task.priority ?? 2)}</span>${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}</div>${task.blocker ? `<div class="detail-blocker"><b>מה ממתין:</b> ${esc(task.blocker)}</div>` : ""}<div class="detail-stages">${fields.map(([label, value]) => `<div class="detail-stage">${label}<strong>${esc(value)}</strong></div>`).join("")}</div><h3 class="detail-heading">גרסת הקוד והתוצר שנבדק</h3><p class="detail-list">קוד: <span class="mono">${esc(task.code_revision || "טרם זוהה")}</span><br>תוצר: ${task.artifact_ref ? evidenceHTML(task.artifact_ref) : "טרם זוהה"}</p>${sourceRecords(task)}<h3 class="detail-heading">תנאי קבלה והוכחות</h3>${acceptance.length ? `<ul class="acceptance-list">${acceptance.map(item => { const passed = criterionPassed(task, item); return `<li><span class="task-check ${passed ? "complete" : ""}" aria-hidden="true">${passed ? "✓" : ""}</span><div class="acceptance-copy">${esc(item.label || item.id)}${item.evidence ? `<br>${evidenceHTML(item.evidence)}${!passed && item.passed === true ? `<br><span class="detail-list">הראיה אינה משויכת לגרסת הקוד הנוכחית</span>` : ""}` : `<br><span class="detail-list">טרם צורפה ראיה</span>`}</div></li>`; }).join("")}</ul>` : `<p class="detail-list">עדיין לא הוגדרו תנאי קבלה. אין להסיק שהמשימה הושלמה.</p>`}<h3 class="detail-heading">בעלות ותלויות</h3><p class="detail-list">סוכן: ${esc(agent?.label || task.agent_id || "טרם הוקצה")}<br>תלויות: ${esc((task.depends_on || []).join(", ") || "אין תלויות מדווחות")}<br>משאבים: ${esc((task.resources || []).join(", ") || "אין משאב בלעדי מדווח")}<br>ביצוע: ${task.execution_allowed === false ? "רשומת דרישה למיפוי; טרם הופעלה להקצאת עבודה" : "זמינה להקצאה בכפוף לתלויות ולמשאבים"}<br>עדכון אחרון: ${esc(timestamp(task.updated_at))}</p>`;
+    const historyButton = document.createElement("button");
+    historyButton.type = "button"; historyButton.className = "button secondary";
+    historyButton.dataset.taskHistory = task.id; historyButton.textContent = "פעולות והיסטוריה של המשימה ←";
+    $("#task-dialog-body").append(historyButton);
     if (reopen && !$("#task-dialog").open) $("#task-dialog").showModal();
   }
 
   function render() {
     renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions();
+    const selected = $("#trace-agent").value;
+    const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
+    if ($("#trace-agent").innerHTML !== options) { $("#trace-agent").innerHTML = options; $("#trace-agent").value = selected; }
+    $$(".agent-card", $("#agents")).forEach((card, i) => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "text-link agent-history";
+      button.textContent = "ציר פעולות והיסטוריה ←"; button.dataset.agentHistory = data.agents[i].id; card.append(button);
+    });
+    if (view === "trace" && traceLive) loadTrace();
     if (dialogTaskId && $("#task-dialog").open) openTask(dialogTaskId, false);
+  }
+
+  function traceFilters() {
+    return {agent_id: $("#trace-agent").value, task_id: $("#trace-task").value.trim(),
+      since: traceUntil - Number($("#trace-range").value), until: traceUntil};
+  }
+
+  async function loadTrace(older = false) {
+    if (traceBusy || !connected) return;
+    traceBusy = true;
+    try {
+      if (!older && traceLive) traceUntil = Date.now() / 1000;
+      const query = new URLSearchParams({...traceFilters(), ...(older && traceBefore ? {before: traceBefore} : {})});
+      const result = await api("/api/trace?" + query);
+      traceRows = older ? [...traceRows, ...result.events] : result.events;
+      traceBefore = result.before;
+      $("#trace-mode").value = result.settings.mode;
+      const actor = data?.agents.find(a => a.id === $("#trace-agent").value);
+      const parent = data?.agents.find(a => a.id === actor?.parent_id);
+      const children = actor ? data.agents.filter(a => a.parent_id === actor.id) : [];
+      $("#trace-relations").innerHTML = actor ? `<p>${esc(actor.label || actor.id)}${actor.requested_model ? ` · מודל מבוקש: <span dir="ltr">${esc(actor.requested_model)}</span>` : ""}</p>${parent ? `<button type="button" class="text-link" data-agent-history="${esc(parent.id)}">בסשן של ${esc(parent.label || parent.id)} ←</button>` : ""}${children.map(a => `<button type="button" class="text-link" data-agent-history="${esc(a.id)}">↳ ${esc(a.label || a.id)}</button>`).join(" ")}` : '<p class="detail-list">בחרו סוכן כדי לרדת לקשרים המדווחים ולפעולות שלו.</p>';
+      $("#trace-coverage").textContent = `נשמרים עד ${result.settings.retention_days} ימים / ${result.settings.max_events} אירועים. מוצגים רק אירועים שנקלטו; תיעוד מתאמים חיצוניים עשוי להיות חלקי. סודות מסוננים, אך ייצוא דורש בדיקה שלך.`;
+      $("#trace-more").hidden = !result.more;
+      $("#trace-events").innerHTML = traceRows.length ? traceRows.map(row => {
+        const actor = data?.agents.find(a => a.id === row.agent_id);
+        const timing = row.duration_ms === null ? "" : ` · ${Math.round(row.duration_ms)} ms`;
+        return `<button type="button" class="trace-row" data-trace-id="${row.id}"><span class="trace-index" dir="ltr">#${row.id}</span><span><b>${esc(row.tool || row.event)}</b><small>${esc(actor?.label || row.agent_id)} · ${esc(row.task_id || "ללא שיוך משימה")}</small></span><span class="trace-end">${esc(row.status)}${esc(timing)}<small>${esc(timestamp(row.ts))}</small></span></button>`;
+      }).join("") : empty("אין אירועים בטווח הנבחר", "תיעוד מתחיל בחיבור בפועל. היסטוריה שלא נשמרה אינה משוחזרת בדיעבד.", true);
+    } catch (error) { toast(error.message, true); }
+    finally { traceBusy = false; }
+  }
+
+  function setTraceLive(value) {
+    traceLive = value; $("#trace-live").setAttribute("aria-pressed", String(value));
+    $("#trace-live").textContent = value ? "עדכון חי פעיל" : "היסטוריה קפואה";
   }
 
   async function renewPresence(event) {
@@ -405,6 +454,7 @@
     $("#page-description").textContent = description;
     $("#page-eyebrow").textContent = eyebrow;
     document.title = `${name} — JARVES`;
+    if (view === "trace") loadTrace();
   }
 
   async function mutate(button, path, body, message) {
@@ -424,6 +474,18 @@
   $$(".close-dialog").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
   $("#task-dialog").addEventListener("close", () => { dialogTaskId = null; });
   document.addEventListener("click", event => {
+    const taskHistory = event.target.closest("[data-task-history]");
+    if (taskHistory) {
+      $("#task-dialog").close(); $("#trace-task").value = taskHistory.dataset.taskHistory;
+      $("#trace-agent").value = ""; location.hash = "trace"; loadTrace();
+    }
+    const actorHistory = event.target.closest("[data-agent-history]");
+    if (actorHistory) { $("#trace-agent").value = actorHistory.dataset.agentHistory; $("#trace-task").value = ""; location.hash = "trace"; loadTrace(); }
+    const traceButton = event.target.closest("[data-trace-id]");
+    if (traceButton) {
+      const row = traceRows.find(r => String(r.id) === traceButton.dataset.traceId);
+      if (row) { $("#trace-dialog-body").textContent = JSON.stringify(row, null, 2); $("#trace-dialog").showModal(); }
+    }
     const taskButton = event.target.closest("[data-task]");
     if (taskButton) openTask(taskButton.dataset.task);
     const filterButton = event.target.closest("[data-filter]");
@@ -436,6 +498,24 @@
     if (deferButton) mutate(deferButton, `/api/questions/${encodeURIComponent(deferButton.dataset.defer)}/defer`, {}, "השאלה נשמרה להמשך. המשימה לא נעלמה מהתוכנית.");
   });
   $("#task-search").addEventListener("input", renderRoadmap);
+  $("#trace-refresh").addEventListener("click", () => loadTrace());
+  $("#trace-more").addEventListener("click", () => { setTraceLive(false); loadTrace(true); });
+  $("#trace-live").addEventListener("click", () => { setTraceLive(!traceLive); if (traceLive) loadTrace(); });
+  ["#trace-agent", "#trace-range", "#trace-task"].forEach(id => $(id).addEventListener("change", () => { traceUntil = Date.now() / 1000; loadTrace(); }));
+  $("#trace-mode").addEventListener("change", async event => {
+    try { await api("/api/trace/settings", {mode: event.target.value}); await loadTrace(); }
+    catch (error) { toast(error.message, true); }
+  });
+  $("#trace-retro").addEventListener("click", async event => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const result = await api("/api/trace/retro", traceFilters());
+      $("#trace-retro-prompt").value = result.result.prompt;
+      $("#trace-handoff").hidden = false;
+      toast(result.result.truncated ? "הוכן ייצוא חלקי; כדאי לצמצם את הטווח." : "הוכנה בקשה לרטרו. לא הופעל סוכן ולא שונו כללים.");
+    } catch (error) { toast(error.message, true); }
+    finally { button.disabled = false; }
+  });
   $("#questions").addEventListener("submit", async event => {
     const form = event.target.closest(".question-form");
     if (!form) return;

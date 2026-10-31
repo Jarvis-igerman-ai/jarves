@@ -53,6 +53,41 @@ Removal keeps private data and existing worker sessions.
 
 ## How to use it with Claude
 
+For the owner-facing sequence, diagrams and simplicity decisions read
+[USER_JOURNEY.he](USER_JOURNEY.he.md). Explicit external runs use the existing
+`jarvis agents start PROVIDER PROJECT "task" --model MODEL`; no additional
+launcher is installed. Those agent interfaces need the running Core and their
+existing account/project/permission prerequisites.
+
+## Action history and a manual retrospective
+
+Open **פעולות והיסטוריה** or use:
+
+```powershell
+python core/tools/workflow_console.py trace
+python core/tools/workflow_console.py trace --capture details
+python core/tools/workflow_console.py trace --agent AGENT_ID --task TASK_ID
+python core/tools/workflow_console.py retro --agent AGENT_ID
+```
+
+Capture defaults to metadata. Details apply only to future events and are
+best-effort redacted. History is bounded to 7 days / 20,000 events; retro export
+is limited to 5,000 and explicitly reports truncation. The export and invocation
+prompt stay under the private workflow directory. No model or skill executes.
+Install/verify the upstream `/retro` and its `writing-for-agents` dependency on
+the owner PC through the owner's normal agent setup, after reviewing its source;
+this PR does not install them or edit global settings. Then invoke `/retro`
+explicitly with the prepared selected log. Rule/skill changes require selection.
+
+Native hooks record their actual events. Existing Orchestrator providers mirror
+their normalized timeline only when the default `<profile>/workflow/workflow.db`
+exists; some providers have partial detail. A custom workflow `--home` does not
+automatically receive that provider mirror. Optional telemetry uses short SQLite
+timeouts and may drop an event during contention rather than stall an agent;
+the Core logs `AGENTS_WORKFLOW_TRACE_UNAVAILABLE`. Do not claim complete capture.
+
+## Native worker assignment and evidence
+
 The view imports 94 real scope requirements and public GitHub metadata. No
 workers appear until actual hooks/registration report; proof gaps stay visible.
 

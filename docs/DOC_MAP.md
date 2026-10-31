@@ -5,6 +5,8 @@
 ## Current workflow — 30 October 2026
 
 - [Operating model](workflow/OPERATING_MODEL.md): current native-manager, questions, evidence and observer contract.
+- [Validation and limits](reports/2026-10-31-workflow-history.md): action-history, model routing and deferred native acceptance.
+- [Owner journey and diagrams](workflow/USER_JOURNEY.he.md): simplicity audit, provider/model choice, action history, manual retro and future Orchestrator task #715.
 - [Local setup](workflow/SETUP.md): first-run instructions/hooks and external Windows observer.
 - [Version scope mapping](workflow/VERSION_MAPPING_2026-10-30.md): 94 requirements, unknown proof and mapping gaps.
 - [Industry research](workflow/INDUSTRY_RESEARCH_2026-10-30.md): verified official sources and compatibility limits.

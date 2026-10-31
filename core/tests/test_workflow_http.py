@@ -113,6 +113,23 @@ class WorkflowHTTPTests(unittest.TestCase):
             self.assertEqual(response.readline().strip(), b"event: change")
             self.assertTrue(response.readline().startswith(b"data: "))
 
+    def test_action_history_and_retro_keep_existing_auth_and_csrf_boundaries(self):
+        from jarves.workflow.trace import record
+        self.assertEqual(self.request("/api/trace")[0], 401)
+        self.login()
+        actor = self.server.store.register_agent({"id": "worker"})
+        record(self.server.store, actor, "PreToolUse", tool="Read", call_id="real-call")
+        status, _, data = self.request("/api/trace?agent_id=worker")
+        self.assertEqual(status, 200)
+        self.assertEqual(data["events"][0]["call_id"], "real-call")
+        self.assertEqual(self.request("/api/trace?since=nan")[0], 400)
+        self.assertEqual(self.request("/api/trace/settings", {"mode": "details"}, {"X-Workflow-Request": ""})[0], 403)
+        self.assertEqual(self.request("/api/trace/settings", {"mode": "details"})[0], 200)
+        status, _, result = self.request("/api/trace/retro", {"agent_id": "worker"})
+        self.assertEqual(status, 200)
+        self.assertFalse(result["result"]["executed"])
+        self.assertEqual(self.request("/api/trace/retro", {"output": "../../public.json"})[0], 400)
+
 
 if __name__ == "__main__":
     unittest.main()

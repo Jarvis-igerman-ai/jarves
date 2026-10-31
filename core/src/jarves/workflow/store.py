@@ -58,15 +58,17 @@ def _choice(value, allowed, name: str):
 
 
 class Store:
-    def __init__(self, path: Path | str, clock=time.time):
+    def __init__(self, path: Path | str, clock=time.time, *, timeout_s=15.0):
+        if not isinstance(timeout_s, (int, float)) or not 0 <= timeout_s <= 15:
+            raise ValueError("invalid workflow database timeout")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.clock = clock
         self._lock = threading.RLock()
-        self._db = sqlite3.connect(str(path), timeout=15, isolation_level=None, check_same_thread=False)
+        self._db = sqlite3.connect(str(path), timeout=timeout_s, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA busy_timeout=15000")
+        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS workflow_records (
@@ -76,6 +78,13 @@ class Store:
             CREATE TABLE IF NOT EXISTS workflow_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,kind TEXT NOT NULL,summary TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS workflow_resources (name TEXT PRIMARY KEY,task_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_trace (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,agent_id TEXT NOT NULL,
+                task_id TEXT NOT NULL,parent_id TEXT NOT NULL,event TEXT NOT NULL,tool TEXT NOT NULL,
+                call_id TEXT NOT NULL,status TEXT NOT NULL,duration_ms REAL,data TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS workflow_trace_agent ON workflow_trace(agent_id,id);
+            CREATE INDEX IF NOT EXISTS workflow_trace_task ON workflow_trace(task_id,id);
+            CREATE INDEX IF NOT EXISTS workflow_trace_time ON workflow_trace(ts);
         """)
         with self._tx() as db:
             for key, value in {
@@ -84,6 +93,7 @@ class Store:
                 "supervisor": {"heartbeat_at": 0, "status": "offline"},
                 "source": {"mode": "empty", "sha": "", "synced_at": 0, "unmapped": []},
                 "alerts": [],
+                "trace": {"mode": "metadata", "since": self.clock()},
             }.items():
                 db.execute("INSERT OR IGNORE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value)))
 
@@ -267,7 +277,7 @@ class Store:
             agent.update(label=_text(data.get("label", ident), "label", maximum=200),
                          lane=_choice(data.get("lane", "any"), LANES, "lane"), heartbeat_at=now,
                          auto_dispatch=auto_dispatch)
-            for key in ("session_id", "provider", "project"):
+            for key in ("session_id", "provider", "project", "parent_id", "requested_model"):
                 if key in data:
                     agent[key] = _text(data[key], key, maximum=200, empty=True)
             if old and json.loads(old[0]).get("task_id") and agent.get("session_id") != json.loads(old[0]).get("session_id"):

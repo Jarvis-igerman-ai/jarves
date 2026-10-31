@@ -12,6 +12,9 @@ work. The live view and external observer support that manager, not replace it.
   backups. Do not claim files on the owner's PC changed without actual access.
 - Map V4.5.1/V5/V6/V7 scope and GitHub state; retain unknown verification and
   missing device evidence. Exercise queue, recovery and browser user scenarios.
+- Owner additions, 31 October: audit simplicity; reuse existing agents interfaces
+  with explicit provider/model choice; add local action drill-down and manual
+  retro handoff. Prepare (do not activate) Orchestrator adoption task #715.
 
 ## Current truth
 
@@ -39,6 +42,9 @@ force pushes, bypassed checks or stable releases without owner approval.
 Permissions, privacy, budget and release gates remain unchanged.
 
 ## First local run
+
+Owner decision, 31 October: native PC acceptance runs after the code merges.
+This does not waive the existing pre-merge review/CI/protected-queue requirements.
 
 Follow [SETUP](workflow/SETUP.md). Verify installed Claude compatibility, local
 instruction imports, one native worker, an owner-wait/answer/resume scenario

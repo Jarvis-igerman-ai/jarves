@@ -1,4 +1,4 @@
-"""Claude Code native lifecycle observer. No transcripts, commands or approvals.
+"""Claude Code native lifecycle observer; bounded action history, never approvals.
 
 Hooks fail open for Claude itself and retain an error counter in the workflow
 runtime. A native Stop/SubagentStop is NEVER evidence that a requirement passed.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .store import Store
 
-EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")
+EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")
 
 
 def in_project(cwd: str, root: Path) -> bool:
@@ -46,11 +46,15 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
     lane = {"workflow-bugs": "bugs", "workflow-current": "features", "workflow-qa": "release"}.get(kind,
             "ops" if subagent == "manager" else "any")
     ident = "claude-" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest()[:20]
+    parent_agent = payload.get("parent_agent_id") or "manager"
+    if not isinstance(parent_agent, str) or len(parent_agent) > 200:
+        parent_agent = "manager"
+    parent = "claude-" + hashlib.sha256(f"{session}:{parent_agent}".encode()).hexdigest()[:20] if subagent != "manager" else ""
     # Native session identities are deliberately separate from attachable bridge sessions.
     store.register_agent({"id": ident, "label": "Claude · " + kind,
                           "lane": lane, "provider": "claude-native",
                           "session_id": "native:" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest(),
-                          "project": root.name, "auto_dispatch": False})
+                          "project": root.name, "parent_id": parent, "auto_dispatch": False})
     status = "offline" if event == "SessionEnd" else "idle" if event in {"SubagentStop", "Stop"} else "running"
     note = f"Native Claude event: {event}; completion evidence is tracked separately"
     if event == "Notification":
@@ -59,12 +63,16 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
             status, note = "blocked", "Claude permission prompt pending; answer on Claude's existing approval surface"
         elif notification == "idle_prompt":
             status, note = "idle", "Claude is idle; the external watchdog checks eligible work"
-    # Tool names describe activity only. Never retain tool_input, tool_response,
-    # last_assistant_message, transcript paths or arbitrary hook message text.
+    # Tool names describe activity only; detailed action data is explicitly opt-in.
+    # Neither capture mode reads transcripts, hidden reasoning or whole user prompts.
     tool = payload.get("tool_name")
-    if event in {"PreToolUse", "PostToolUse"} and isinstance(tool, str):
+    if event in {"PreToolUse", "PostToolUse", "PostToolUseFailure"} and isinstance(tool, str):
         note = f"Claude {'started' if event == 'PreToolUse' else 'completed'} tool {tool[:80]}; no task verification inferred"
     native = store.observe_agent(ident, status, note)
+    from .trace import record
+    record(store, native, event, tool=tool if isinstance(tool, str) else "",
+           call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
+           details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
         store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
     if event == "Stop" and subagent == "manager" and payload.get("stop_hook_active") is not True:
@@ -93,13 +101,17 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     store = None
     try:
-        raw = sys.stdin.buffer.read(65537)
-        if len(raw) > 65536:
+        raw = sys.stdin.buffer.read(1048577)
+        if len(raw) > 1048576:
+            store = Store(args.home / "workflow.db", timeout_s=0.1)
+            from .trace import record
+            record(store, {"id": "observer-gap"}, "TelemetryGap", status="payload_limit",
+                   details={"reason": "native event exceeded the 1 MiB capture limit; content not retained"})
             return 0
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             return 0
-        store = Store(args.home / "workflow.db")
+        store = Store(args.home / "workflow.db", timeout_s=0.1)
         result = observe(store, payload, args.repo_root)
         if result:
             print(json.dumps(result, ensure_ascii=False))

@@ -38,3 +38,13 @@ fix_en = "Read the alert: work may need an owner answer, dependency, reserved re
 
 [parity.features]
 # Standalone development tooling; no assistant runtime feature switch or tool group.
+
+[[steps]]
+he = "בפעולות והיסטוריה מסננים לפי סוכן, משימה ותקופה ופותחים קריאת כלי. ברירת המחדל היא metadata; פרטים מסוננים מופעלים במפורש ורק מכאן והלאה. CLI: jarvis workflow trace, ולפרטים jarvis workflow trace --capture details. היסטוריה חסרה וכיסוי ספק חלקי אינם משוחזרים."
+en = "Action history filters by agent, task and period and opens individual calls. Metadata is default; sanitized details are explicitly enabled for future events. CLI: jarvis workflow trace, or jarvis workflow trace --capture details. Missing history and partial provider coverage are not reconstructed."
+action = "command:jarvis workflow trace"
+
+[[steps]]
+he = "לניתוח יזום לחצו הכן ל־/retro, או jarvis workflow retro --agent ID. נוצר קובץ מקומי ובקשה להעתקה לסוכן שבו ה־skill מותקן. לא מופעל מודל ולא משתנים כללים; בוחרים בנפרד אילו הצעות ליישם."
+en = "For an explicit retrospective choose Prepare /retro, or jarvis workflow retro --agent ID. This creates local evidence and a prompt for an agent with the skill installed. It starts no model and edits no rules; select proposed changes separately."
+action = "command:jarvis workflow trace"

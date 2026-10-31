@@ -19,6 +19,7 @@
         <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon" aria-hidden="true">◫</span><span>תמונת מצב</span><span class="nav-shortcut">01</span></a>
         <a href="#roadmap" data-view="roadmap" class="nav-link"><span class="nav-icon" aria-hidden="true">☷</span><span>התוכנית המלאה</span><span class="nav-shortcut">02</span></a>
         <a href="#questions" data-view="questions" class="nav-link"><span class="nav-icon" aria-hidden="true">◇</span><span>ממתין להחלטה</span><span class="nav-count" id="questions-count">0</span></a>
+        <a href="#trace" data-view="trace" class="nav-link"><span class="nav-icon" aria-hidden="true">⌕</span><span>פעולות והיסטוריה</span><span class="nav-shortcut">04</span></a>
       </nav>
       <div class="sidebar-note"><span class="rail-line"></span><p>כל משימה נשארת בתמונה.<br>העבודה ממשיכה גם כשאתה לא כאן.</p></div>
       <div class="sidebar-bottom"><div class="watchdog-indicator" id="watchdog-indicator"><span class="status-dot"></span><span>בודק את המשגיח…</span></div><div class="sidebar-meta">LOCAL CONTROL CENTER <span dir="ltr">v1</span></div></div>
@@ -43,12 +44,29 @@
         <section id="view-roadmap" class="view" hidden aria-label="התוכנית המלאה"><div class="roadmap-toolbar"><div class="filter-group" role="group" aria-label="סינון משימות"><button class="filter active" data-filter="all" aria-pressed="true">כל התוכנית</button><button class="filter" data-filter="active" aria-pressed="false">בעבודה</button><button class="filter" data-filter="waiting" aria-pressed="false">ממתין</button><button class="filter" data-filter="done" aria-pressed="false">הושלם</button></div><label class="search-field"><span aria-hidden="true">⌕</span><span class="sr-only">חיפוש בתוכנית</span><input id="task-search" type="search" placeholder="חיפוש משימה או מזהה…" autocomplete="off"></label></div><div class="evidence-legend"><span><i class="legend-check">✓</i> השלמה עם ראיות ותוצר שפורסם</span><span>קוד שמוזג ≠ תרחיש שנבדק ≠ גרסה ששוחררה</span></div><div id="roadmap-context"></div><div id="roadmap"></div></section>
 
         <section id="view-questions" class="view" hidden aria-label="שאלות והחלטות"><div class="questions-intro"><div class="questions-intro-icon" aria-hidden="true">◇</div><div><h2>כמה תשובות, והעבודה ממשיכה</h2><p>אפשר לענות עכשיו או לשמור לאחר כך. משימות אחרות שיכולות להתקדם יישארו זמינות לצוות.</p></div><span class="pill amber">שאלות תכנון</span></div><div id="questions"></div></section>
+        <section id="view-trace" class="view" hidden aria-label="פעולות והיסטוריה">
+          <div class="panel trace-controls">
+            <label class="field">סוכן או סשן<select id="trace-agent"><option value="">כל הסוכנים</option></select></label>
+            <label class="field">משימה<input id="trace-task" maxlength="120" placeholder="מזהה משימה, או הכל"></label>
+            <label class="field">תקופה<select id="trace-range"><option value="86400">24 שעות</option><option value="3600">שעה</option><option value="604800">7 ימים</option></select></label>
+            <label class="field">תיעוד מקומי<select id="trace-mode"><option value="metadata">מטא־דאטה בלבד</option><option value="details">גם פרטי כלים מסוננים</option><option value="off">כבוי</option></select></label>
+            <button id="trace-refresh" type="button" class="button secondary">רענן</button>
+            <button id="trace-live" type="button" class="button secondary" aria-pressed="true">עדכון חי פעיל</button>
+            <button id="trace-retro" type="button" class="button primary">הכן ל־/retro</button>
+          </div>
+          <div class="panel trace-relations" id="trace-relations"></div>
+          <p class="detail-list" id="trace-coverage">רק אירועים שנשמרו מוצגים כאן. פרטי כלים נשמרים רק לאחר הפעלה מפורשת; מתאמים חיצוניים עשויים לדווח חלקית.</p>
+          <div class="panel" id="trace-events"></div>
+          <button id="trace-more" type="button" class="button secondary" hidden>אירועים קודמים</button>
+          <div class="panel trace-handoff" id="trace-handoff" hidden><h2>רטרו יזום — הוכן, לא הופעל</h2><p class="detail-list">הקובץ מקומי. העתיקו את הבקשה לסוכן שבו /retro מותקן. ניתוח מציע שיפורים; שינוי הוראות או skills דורש בחירה שלכם.</p><textarea id="trace-retro-prompt" class="retro-prompt" rows="5" readonly aria-label="בקשה מוכנה לרטרו"></textarea></div>
+        </section>
         <footer class="footer"><span dir="ltr">JARVES / WORKFLOW</span><span id="source-detail">המצב מוצג מהשירות המקומי בלבד</span></footer>
       </main>
     </div>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <dialog id="task-dialog" aria-labelledby="task-dialog-title"><div class="dialog-header"><div><div class="eyebrow">TASK DETAILS</div><h2 id="task-dialog-title"></h2></div><button class="icon-button close-dialog" type="button" aria-label="סגור פרטי משימה">×</button></div><div id="task-dialog-body"></div></dialog>
+  <dialog id="trace-dialog" aria-labelledby="trace-dialog-title"><div class="dialog-header"><h2 id="trace-dialog-title">פרטי פעולה</h2><button class="icon-button close-dialog" type="button" aria-label="סגור פרטי פעולה">×</button></div><pre id="trace-dialog-body" class="trace-json" dir="ltr"></pre></dialog>
   <dialog id="create-dialog" aria-labelledby="create-dialog-title"><form id="create-task-form"><div class="dialog-header"><div><div class="eyebrow">ADD TO THE PLAN</div><h2 id="create-dialog-title">משימה חדשה</h2></div><button class="icon-button close-dialog" type="button" aria-label="סגור יצירת משימה">×</button></div><label class="field">מה צריך להשיג?<input name="title" required maxlength="240" placeholder="למשל: המשך שיחה מהטלפון במחשב"></label><div class="field-grid"><label class="field">גרסה<select name="version"><option>V4.5.1</option><option>V5</option><option>V6</option><option>V7</option></select></label><label class="field">תחום<select name="lane"><option value="features">פיצ'רים</option><option value="bugs">תיקון באגים</option><option value="release">בדיקות ושחרור</option><option value="ops">תשתית ותהליך</option></select></label></div><div class="field-grid"><label class="field">עדיפות<select name="priority"><option value="2">P2 — רגילה</option><option value="1">P1 — גבוהה</option><option value="0">P0 — קריטית</option><option value="3">P3 — נמוכה</option></select></label><label class="field">אימות נדרש<select name="required_validation"><option value="app">תרחיש במוצר</option><option value="automated">בדיקות אוטומטיות</option><option value="device">מכשיר אמיתי</option></select></label></div><label class="field">מתי נדע שהמשימה הושלמה?<textarea name="acceptance" rows="3" required maxlength="3000" placeholder="תנאי קבלה אחד בכל שורה"></textarea></label><div class="dialog-actions"><button type="button" class="button secondary close-dialog">ביטול</button><button class="button primary" type="submit">הוסף לתוכנית <span aria-hidden="true">←</span></button></div><p class="form-error" id="create-error" role="alert" hidden></p></form></dialog>
 </body>
 </html>
