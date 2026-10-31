@@ -50,7 +50,17 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def utf8_streams() -> None:
+    """Piped Windows consoles default to a legacy code page; JSON output contains Hebrew."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None) -> int:
+    utf8_streams()
     a = parser().parse_args(argv)
     if not 0 <= a.port <= 65535:
         parser().error("invalid port")

@@ -91,3 +91,20 @@ class ReviewFixTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyConsoleEncodingTests(unittest.TestCase):
+    def test_cli_json_with_hebrew_survives_a_cp1252_pipe(self):
+        import os
+        import subprocess
+        import sys
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as home:
+            env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+            entry = [sys.executable, str(root / "tools" / "workflow_console.py"), "--home", home]
+            made = subprocess.run([*entry, "create", "--id", "he", "--title", "בדיקה → עברית", "--acceptance", "ok"],
+                                  capture_output=True, env=env, timeout=60)
+            self.assertEqual(made.returncode, 0, made.stderr.decode("utf-8", "replace"))
+            shown = subprocess.run([*entry, "status"], capture_output=True, env=env, timeout=60)
+            self.assertEqual(shown.returncode, 0, shown.stderr.decode("utf-8", "replace"))
+            self.assertIn("בדיקה → עברית", shown.stdout.decode("utf-8"))

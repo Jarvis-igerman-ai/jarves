@@ -103,6 +103,8 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
 
 def main(argv=None) -> int:
     import argparse
+    from .__main__ import utf8_streams
+    utf8_streams()
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--repo-root", type=Path, required=True)
