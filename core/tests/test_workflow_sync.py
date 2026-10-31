@@ -32,6 +32,24 @@ class WorkflowSyncTests(unittest.TestCase):
         self.assertFalse(task["execution_allowed"])
         self.assertIn("V5-UNMAPPED", source["unmapped"])
 
+    def test_unmapped_open_version_labels_become_unauthorised_requirements(self):
+        plan = {"baseline_sha": "b", "versions": [{"id": "V5", "requirements": [
+            {"id": "V5-ONE", "title": "One", "issue_numbers": [1]}]}]}
+        snap = {"sha": "m", "prs": [], "issues": [
+            {"number": 1, "state": "open", "title": "mapped", "labels": ["v5"]},
+            {"number": 2, "state": "open", "title": "bug", "labels": ["v7", "bug", "v6"]},
+            {"number": 3, "state": "open", "title": "feat", "labels": ["4.5.1"]},
+            {"number": 4, "state": "closed", "title": "done", "labels": ["v5"]},
+            {"number": 5, "state": "open", "title": "none", "labels": ["bug"]}]}
+        apply_snapshot(self.store, snap, plan)
+        apply_snapshot(self.store, snap, plan)
+        tasks = {t["id"]: t for t in self.store.snapshot()["tasks"]}
+        self.assertEqual(sorted(tasks), ["ISSUE-2", "ISSUE-3", "V5-ONE"])
+        self.assertEqual((tasks["ISSUE-2"]["version"], tasks["ISSUE-2"]["lane"]), ("V6", "bugs"))
+        self.assertEqual((tasks["ISSUE-3"]["version"], tasks["ISSUE-3"]["lane"]), ("V4.5.1", "features"))
+        self.assertFalse(tasks["ISSUE-2"]["execution_allowed"])
+        self.assertEqual(tasks["ISSUE-2"]["source_issues"][0]["number"], 2)
+
     def test_outage_keeps_last_snapshot_and_reports_staleness(self):
         self.store.set_source({"mode": "github", "sha": "last-good", "synced_at": 900, "unmapped": []})
         def unavailable(_):
