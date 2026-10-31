@@ -210,6 +210,19 @@ def test_audit_has_codes_not_payload_or_token(tmp_path):
     assert secret not in raw and TOKEN not in raw
 
 
+def test_deleting_both_audit_files_is_detected_and_reset_clears(tmp_path):
+    from jarves import github_write as gw
+    w, ap, _ = mk(tmp_path)
+    run(w.execute(act(), origin="user"))
+    p = tmp_path / "github" / "write_audit.jsonl"
+    assert gw.read_chain(p)[1] == ""
+    p.unlink()
+    p.with_suffix(".head").unlink()
+    assert "anchor" in gw.read_chain(p)[1], sorted(str(x) for x in tmp_path.rglob("*"))
+    gw.reset_audit(tmp_path)
+    assert gw.read_chain(p)[1] == ""
+
+
 def test_token_never_in_results_or_status(tmp_path, caplog):
     fake = gc.FakeGitHub()
     fake.fail = (401, {})
