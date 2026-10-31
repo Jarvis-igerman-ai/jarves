@@ -124,6 +124,11 @@
     } finally { clearTimeout(timeout); }
   }
 
+  function syncControls() {
+    // Offline disables mutating controls; buttons with a request in flight stay disabled.
+    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], [data-defer], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
+  }
+
   function connectionState(ok, error = "") {
     connected = ok;
     const indicator = $("#connection");
@@ -133,7 +138,7 @@
     banner.hidden = ok;
     banner.textContent = ok ? "" : `${error || "לא ניתן להגיע לשירות המקומי."}${data ? " הנתונים המוצגים הם העדכון האחרון שהתקבל; השלמות חדשות לא יוצגו עד לחיבור מחדש." : " הפעל את השירות ופתח את הקישור המאומת שהוא מציג."}`;
     $("#agents-live-label").innerHTML = `<span class="status-dot ${ok ? "good" : "warn"}" aria-hidden="true"></span>${ok ? "מצב מדווח" : "נתונים אחרונים"}`;
-    $$("#dispatch, #add-task, #owner-present, #owner-away").forEach(button => { button.disabled = !ok; });
+    syncControls();
     $$("#trace-agent, #trace-task, #trace-range, #trace-from, #trace-to, #trace-mode").forEach(field => { field.disabled = !ok; });
     updateTraceControls();
     if (!ok && !data) {
@@ -246,7 +251,7 @@
 
   function renderActive() {
     const work = data.tasks.filter(task => ["running", "review", "waiting_owner", "blocked"].includes(task.state)).sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).slice(0, 7);
-    $("#active-tasks").innerHTML = work.length ? work.map(task => `<button type="button" class="work-row" data-task="${esc(task.id)}"><span class="work-state-icon ${["waiting_owner", "blocked"].includes(task.state) ? "amber" : ""}" aria-hidden="true">${task.state === "waiting_owner" ? "◇" : task.state === "blocked" ? "!" : task.state === "review" ? "◌" : "↗"}</span><span class="work-row-main"><span class="work-row-title">${esc(task.title)}</span><span class="work-row-meta"><span class="mono">${esc(task.id)}</span><span dir="ltr">${esc(task.version || "ללא גרסה")}</span><span>${esc(stateNames[task.state] || task.state)}</span></span></span><span class="priority ${(task.priority ?? 2) < 2 ? "high" : ""}">P${esc(task.priority ?? 2)}</span></button>`).join("") : empty("אין משימות פעילות כרגע", data.tasks.length ? "משימות התור והחסימות זמינות בתוכנית המלאה. הקצאת עבודה תחבר בין סוכן פנוי למשימה מתאימה." : "הוסף משימה או ייבא את תוכנית העבודה כדי להתחיל.", true);
+    $("#active-tasks").innerHTML = work.length ? work.map(task => `<button type="button" class="work-row" data-task="${esc(task.id)}"><span class="work-state-icon ${["waiting_owner", "blocked"].includes(task.state) ? "amber" : ""}" aria-hidden="true">${task.state === "waiting_owner" ? "◇" : task.state === "blocked" ? "!" : task.state === "review" ? "◌" : "↗"}</span><span class="work-row-main"><span class="work-row-title">${esc(task.title)}</span><span class="work-row-meta"><span class="mono">${esc(task.id)}</span><span dir="ltr">${esc(task.version || "ללא גרסה")}</span><span>${esc(stateNames[task.state] || task.state)}</span></span></span><span class="priority ${(task.priority ?? 2) < 2 ? "high" : ""}">P${esc(task.priority ?? 2)}</span></button>`).join("") : empty("אין משימות פעילות כרגע", data.tasks.length ? "משימות התור והחסימות זמינות בתוכנית המלאה. הכפתור 'בדוק הקצאה' משבץ רק סשנים שחוברו עם הקצאה אוטומטית. סוכני Claude רגילים לוקחים משימות דרך המנהל." : "הוסף משימה או ייבא את תוכנית העבודה כדי להתחיל.", true);
   }
 
   function renderEvents() {
@@ -419,6 +424,7 @@
     });
     if (view === "trace" && traceLive) loadTrace();
     if (dialogTaskId && $("#task-dialog").open) openTask(dialogTaskId, false);
+    syncControls();
     if (focusKey && !focused.isConnected) $$(`[${focusKey}]`).find(el => el.getAttribute(focusKey) === focusValue)?.focus({preventScroll: true});
   }
 
@@ -521,7 +527,7 @@
   }
 
   async function renewPresence(event) {
-    if (!event.isTrusted || !connected || document.hidden || data?.owner?.mode !== "present" || Date.now() - lastPresenceRefresh < 60000) return;
+    if (!event.isTrusted || !connected || document.hidden || data?.owner?.effective_mode !== "present" || event.target.closest?.("#owner-present, #owner-away") || Date.now() - lastPresenceRefresh < 60000) return;
     lastPresenceRefresh = Date.now();
     try { await api("/api/owner", {mode: "present"}); }
     catch { /* Presence is never assumed from polling or a failed activity update. */ }
@@ -546,18 +552,24 @@
   }
 
   async function mutate(button, path, body, message) {
-    button.disabled = true;
+    button.disabled = true; busyButtons.add(button);
     try {
-      await api(path, body);
+      const result = await api(path, body);
       await refresh();
-      if (message) toast(message);
+      if (message) toast(typeof message === "function" ? message(result) : message);
     } catch (error) { toast(error.message, true); }
-    finally { button.disabled = !connected; }
+    finally { busyButtons.delete(button); button.disabled = !connected; }
   }
 
   $("#owner-present").addEventListener("click", event => mutate(event.currentTarget, "/api/owner", {mode: "present"}, "סימנת שאתה כאן. השאלות שממתינות מרוכזות בתור ההחלטות."));
   $("#owner-away").addEventListener("click", event => mutate(event.currentTarget, "/api/owner", {mode: "away"}, "השאלות נשמרות. עבודה שאינה תלויה בתשובה שלך יכולה להמשיך."));
-  $("#dispatch").addEventListener("click", event => mutate(event.currentTarget, "/api/dispatch", {}, "ההקצאה נבדקה. משימות זמינות יוקצו לסוכנים מתאימים."));
+  $("#dispatch").addEventListener("click", event => mutate(event.currentTarget, "/api/dispatch", {}, result => {
+    const list = result?.result?.assignments || [];
+    const unconfirmed = list.filter(item => item.status === "delivery_unconfirmed").length;
+    const sent = list.length - unconfirmed;
+    if (!list.length) return "לא הוקצתה עבודה: אין סשן מחובר עם הקצאה אוטומטית שפנוי ויש לו משימה זמינה. סוכני Claude רגילים לוקחים משימות דרך המנהל.";
+    return `${sent} הקצאות נשלחו${unconfirmed ? `; ${unconfirmed} ללא אישור מסירה — בדוק את הסשן המקורי לפני ניסיון חוזר` : ""}.`;
+  }));
   $("#add-task").addEventListener("click", () => { $("#create-error").hidden = true; $("#create-dialog").showModal(); });
   $$(".close-dialog").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
   $("#task-dialog").addEventListener("close", () => { dialogTaskId = null; });
@@ -634,11 +646,13 @@
     const form = event.target.closest(".question-form");
     if (!form) return;
     event.preventDefault();
-    const answer = $("textarea", form).value.trim() || $("input:checked", form)?.value;
+    const typed = $("textarea", form).value.trim(), picked = $("input:checked", form)?.value;
+    const answer = typed && picked ? `${picked} — ${typed}` : typed || picked;
     const error = $(".form-error", form);
     if (!answer) { error.textContent = "בחר תשובה או כתוב תשובה משלך."; error.hidden = false; return; }
+    if (!connected) { error.textContent = "אין חיבור לשירות; התשובה לא נשלחה."; error.hidden = false; return; }
     const button = $("button[type=submit]", form);
-    button.disabled = true;
+    button.disabled = true; busyButtons.add(button);
     error.hidden = true;
     try {
       await api(`/api/questions/${encodeURIComponent(form.dataset.question)}/answer`, {answer});
@@ -647,7 +661,8 @@
       await refresh();
       toast("התשובה נשמרה. המנהל יוכל להמשיך מההחלטה הזאת.");
       $(".question-form")?.querySelector("input[type=radio], textarea")?.focus();
-    } catch (err) { error.textContent = err.message; error.hidden = false; button.disabled = false; }
+    } catch (err) { error.textContent = err.message; error.hidden = false; }
+    finally { busyButtons.delete(button); button.disabled = !connected; }
   });
   $("#questions").addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -662,8 +677,9 @@
     const acceptance = String(values.get("acceptance") || "").split("\n").map(value => value.trim()).filter(Boolean).map((label, index) => ({id: `A${index + 1}`, label}));
     const error = $("#create-error");
     if (!acceptance.length) { error.textContent = "הוסף לפחות תנאי קבלה אחד."; error.hidden = false; return; }
+    if (!connected) { error.textContent = "אין חיבור לשירות; המשימה לא נשמרה."; error.hidden = false; return; }
     const button = $("button[type=submit]", form);
-    button.disabled = true;
+    button.disabled = true; busyButtons.add(button);
     error.hidden = true;
     try {
       await api("/api/tasks", {title: String(values.get("title")).trim(), version: values.get("version"), lane: values.get("lane"), priority: Number(values.get("priority")), required_validation: values.get("required_validation"), acceptance});
@@ -676,7 +692,7 @@
       location.hash = "roadmap";
       toast("המשימה נוספה לתוכנית עם תנאי הקבלה שלה.");
     } catch (err) { error.textContent = err.message; error.hidden = false; }
-    finally { button.disabled = false; }
+    finally { busyButtons.delete(button); button.disabled = !connected; }
   });
   window.addEventListener("hashchange", switchView);
   window.addEventListener("online", refresh);
