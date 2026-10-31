@@ -14,10 +14,12 @@ python core/tools/workflow_console.py bootstrap --repo-root . --apply
 python core/tools/workflow_console.py supervise
 ```
 
-Apply checks Claude 2.1.271+, backs up changed instructions, removes recognised
-retired workflow paragraphs, preserves unrelated rules/settings, merges observer
+Apply checks Claude 2.1.271+, backs up changed instructions, removes only recognised
+standalone retired workflow rules, preserves unrelated lines/settings and sibling hooks, merges observer
 hooks and locally ignores `CLAUDE.local.md` / `.claude/settings.local.json`.
 It does not change global Claude settings, permissions or experimental teams.
+Review warnings for ambiguous legacy wording in the dry-run; it is retained for
+manual reconciliation instead of deleting surrounding instructions.
 Restart Claude and check `/memory`; inspect additional global instructions there
 for stale JARVES rules. In worktrees confirm the imports/hooks actually load.
 

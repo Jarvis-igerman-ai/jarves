@@ -90,6 +90,34 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertEqual(local.read_text(encoding="utf-8"), old)
         self.assertFalse((self.root / ".claude" / "settings.local.json").exists())
 
+    def test_migration_keeps_state_references_and_unrelated_rules_in_a_mixed_paragraph(self):
+        local = self.root / "CLAUDE.local.md"
+        old = ("Never expose credentials. Read STATE.md for phone setup.\n\n"
+               "Use concise Hebrew.\nRequire 5 nightly runs for a JARVES release.\n"
+               "Never send messages without owner approval.\n\n"
+               "If a note says no idle agents, still preserve the security rule.\n")
+        local.write_text(old, encoding="utf-8")
+        new = prepare(self.root, self.home, "/python")[0][2]
+        self.assertIn("Never expose credentials. Read STATE.md for phone setup.", new)
+        self.assertIn("Use concise Hebrew.", new)
+        self.assertIn("Never send messages without owner approval.", new)
+        self.assertIn("If a note says no idle agents, still preserve the security rule.", new)
+        self.assertNotIn("Require 5 nightly runs", new)
+        self.assertEqual(local.read_text(encoding="utf-8"), old)
+
+    def test_reinstall_keeps_other_hooks_in_a_shared_entry_and_its_matcher(self):
+        original = settings_with_hooks({}, self.root, self.home, "/python")
+        own = original["hooks"]["Stop"][0]["hooks"][0]
+        foreign = {"type": "command", "command": "local-security-check", "timeout": 20}
+        settings = {"hooks": {"Stop": [{"matcher": "custom", "hooks": [own, foreign]}]},
+                    "permissions": {"deny": ["Bash(rm:*)"]}}
+        new = settings_with_hooks(settings, self.root, self.home, "/python")
+        self.assertEqual(new["hooks"]["Stop"][0], {"matcher": "custom", "hooks": [foreign]})
+        self.assertEqual(new["permissions"], settings["permissions"])
+        self.assertEqual(len(new["hooks"]["Stop"]), 2)
+        self.assertEqual(new, settings_with_hooks(new, self.root, self.home, "/python"))
+        self.assertEqual(settings["hooks"]["Stop"][0]["hooks"], [own, foreign])
+
 
 if __name__ == "__main__":
     unittest.main()

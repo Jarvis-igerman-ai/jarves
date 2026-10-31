@@ -19,7 +19,13 @@ from pathlib import Path
 from .hooks import EVENTS
 
 START, END = "<!-- JARVES-WORKFLOW-START -->", "<!-- JARVES-WORKFLOW-END -->"
-OBSOLETE = ("5 nightly", "five nightly", "no idle agents", "Keep 5-8", "one AskUserQuestion batch", "STATE.md")
+OBSOLETE = ("5 nightly", "five nightly", "no idle agents", "Keep 5-8", "one AskUserQuestion batch", "agentN_STATE.md")
+# Remove only complete, recognised standalone rules. A substring in a paragraph
+# (especially a STATE.md reference) cannot establish that its other rules retired.
+RETIRED_RULE = re.compile(
+    r"(?:Require (?:5|five) nightly runs for a JARVES release|"
+    r"Keep 5-8 (?:sub-agents|agents) busy|No idle agents|"
+    r"(?:At most )?one AskUserQuestion batch(?: \(<= ?4\))? a day)[.!]?", re.I)
 
 
 def local_instructions(home: Path) -> str:
@@ -47,9 +53,17 @@ def settings_with_hooks(settings: dict, root: Path, home: Path, python: str) -> 
         if not isinstance(entries, list):
             raise ValueError(f"existing {event} hook list is invalid")
         # Idempotent own-entry replacement; unrelated hooks and permissions stay byte-semantically intact.
-        entries[:] = [e for e in entries if not any(
-            h.get("type") == "command" and str(root / "core" / "tools" / "workflow_hook.py") in h.get("command", "")
-            for h in e.get("hooks", []) if isinstance(h, dict))]
+        retained = []
+        for entry in entries:
+            remaining = [h for h in entry.get("hooks", []) if not (
+                isinstance(h, dict) and h.get("type") == "command"
+                and str(root / "core" / "tools" / "workflow_hook.py") in h.get("command", ""))]
+            if len(remaining) == len(entry.get("hooks", [])):
+                retained.append(entry)
+            elif remaining:
+                entry["hooks"] = remaining
+                retained.append(entry)
+        entries[:] = retained
         entries.append({"hooks": [{"type": "command", "command": command, "timeout": 3}]})
     return result
 
@@ -60,12 +74,12 @@ def prepare(root: Path, home: Path, python: str = sys.executable) -> list[tuple[
         raise ValueError("select the JARVES checkout containing the new workflow code")
     local = root / "CLAUDE.local.md"
     old = local.read_text(encoding="utf-8") if local.exists() else ""
-    # Remove only recognisable superseded workflow paragraphs. Preserve unrelated
-    # personal instructions; the diff and backup make every removed rule visible.
+    # Preserve unrelated lines, including lines beside a retired standalone rule.
+    # Ambiguous legacy wording remains visible for the owner's dry-run review.
     if old and START not in old:
-        paragraphs = re.split(r"\n\s*\n", old.strip())
-        retained = [p for p in paragraphs if not any(word.lower() in p.lower() for word in OBSOLETE)]
-        new = ("\n\n".join(retained).rstrip() + "\n\n" if retained else "") + local_instructions(home)
+        retained = "".join(line for line in old.splitlines(True)
+                           if not RETIRED_RULE.fullmatch(line.strip().removeprefix("- ").removeprefix("* ")))
+        new = (retained.rstrip() + "\n\n" if retained.strip() else "") + local_instructions(home)
     elif START in old:
         before, _, rest = old.partition(START)
         _, marker, after = rest.partition(END)
