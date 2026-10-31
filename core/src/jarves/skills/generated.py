@@ -528,6 +528,10 @@ class GeneratedSkills:
             return {"ok": False, "errors": ["draft too large"], "warnings": [], "id": None}
         md = _lf(md)                      # #314 item 4: the draft is read back with LF endings, so hash what is stored
         py = _lf(py) if py is not None else None
+        md0, py0 = md, py
+        md = logs.redact(md)              # CodeQL 46/47: a pasted secret is never stored in clear text in a draft
+        py = logs.redact(py) if py is not None else None
+        secrets_hidden = (md, py) != (md0, py0)
         try:
             meta, _ = parse_skill_md(md)
             sid = self._id(str(meta.get("name", "")))
@@ -547,6 +551,8 @@ class GeneratedSkills:
         if py is not None and py.strip():
             (d / "skill.py").write_text(py, encoding="utf-8")
         rep["upgrade_of"] = int(self.state(sid).get("version", 0)) if upgrading else None
+        if secrets_hidden:
+            rep.setdefault("warnings", []).append("secret-like text was hidden in the draft; keep secrets in the environment")
         _write_json(d / "report.json", rep)
         _write_json(d / "meta.json", {"proposed_by": by, "ts": time.time()})
         logs.info("skills", "SKILL_PROPOSED", "generated Skill draft proposed", skill=sid,
