@@ -144,7 +144,8 @@ def followup_message(items: list, root: Path, home: Path) -> str:
             "\nReply to each briefly (clarify, check, or give options with a recommendation) and store it with: "
             f"{console_command(root, home)} reply --id FOLLOWUP_ID --answer TEXT . "
             "The question stays open until the owner answers it; then continue your work.")
-=======
+
+
 def _log_error(home: Path, exc: BaseException) -> None:
     """Bounded, content-free error counter file so dropped events are visible."""
     try:
