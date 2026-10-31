@@ -70,6 +70,15 @@ python core/tools/workflow_console.py trace --agent AGENT_ID --task TASK_ID
 python core/tools/workflow_console.py retro --agent AGENT_ID
 ```
 
+Overview counters open the matching list. The roadmap supports version/state
+filters, search and expandable version sections; each task opens its acceptance,
+evidence and history links. All four tabs remain available on narrow screens.
+Action details show readable facts with raw JSON collapsed. Custom date/time
+ranges and older-page navigation freeze history for analysis; the selected end
+second is inclusive. Live mode returns to a relative range. CLI time filters
+use Unix seconds: `trace --since SECONDS --until SECONDS`. The prepared retro
+prompt has a copy button, with manual selection if clipboard access is unavailable.
+
 Capture defaults to metadata. Details apply only to future events and are
 best-effort redacted. History is bounded to 7 days / 20,000 events; retro export
 is limited to 5,000 and explicitly reports truncation. The export and invocation

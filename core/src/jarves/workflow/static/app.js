@@ -17,6 +17,8 @@
   let data = null;
   let view = "overview";
   let filter = "all";
+  let roadmapVersion = "all";
+  const expandedVersions = new Map();
   let connected = false;
   let lastGoodAt = 0;
   let requestInFlight = null;
@@ -28,7 +30,7 @@
   let lastPresenceRefresh = 0;
   const drafts = new Map();
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
-  let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000;
+  let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
 
   function seconds(value) {
     if (typeof value === "number") return value > 1e12 ? value / 1000 : value;
@@ -131,6 +133,8 @@
     banner.textContent = ok ? "" : `${error || "לא ניתן להגיע לשירות המקומי."}${data ? " הנתונים המוצגים הם העדכון האחרון שהתקבל; השלמות חדשות לא יוצגו עד לחיבור מחדש." : " הפעל את השירות ופתח את הקישור המאומת שהוא מציג."}`;
     $("#agents-live-label").innerHTML = `<span class="status-dot ${ok ? "good" : "warn"}" aria-hidden="true"></span>${ok ? "מצב מדווח" : "נתונים אחרונים"}`;
     $$("#dispatch, #add-task, #owner-present, #owner-away").forEach(button => { button.disabled = !ok; });
+    $$("#trace-agent, #trace-task, #trace-range, #trace-from, #trace-to, #trace-mode").forEach(field => { field.disabled = !ok; });
+    updateTraceControls();
     if (!ok && !data) {
       $("#metrics").innerHTML = "";
       $("#agents").innerHTML = empty("סביבת העבודה עדיין לא מחוברת", "המסך לא ממציא סוכנים או התקדמות. אחרי חיבור לשירות המקומי יופיע כאן המצב המדווח.");
@@ -212,14 +216,14 @@
     const cards = [
       {label: "סוכנים בעבודה", symbol: "◈", value: running, detail: `${data.agents.length} נרשמו`, foot: data.agents.length ? "לפי דיווחי הסוכנים" : "טרם נרשמו סוכנים", cls: ""},
       {label: "משימות פעילות", symbol: "↗", value: active, detail: `${ready} זמינות להקצאה`, foot: "בפיתוח ובבדיקה", cls: ""},
-      {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
+      {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: waiting === 1 ? "משימה אחת" : `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
       {label: "דרישות חובה שהושלמו", symbol: "✓", value: done, detail: `מתוך ${required.length}`, foot: tasks.length ? `${tasks.length} פריטים בהיקף הכולל; אופציונליים מחוץ למכנה` : "ממתין למיפוי התוכנית", cls: "done", progress: required.length ? done / required.length * 100 : 0}
     ];
-    $("#metrics").innerHTML = cards.map(card => `<div class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small>${esc(card.detail)}</small></div><p class="metric-foot">${esc(card.foot)}</p>${card.progress !== undefined ? `<div class="metric-bar" aria-hidden="true"><progress max="100" value="${card.progress}"></progress></div>` : ""}</div>`).join("");
+    $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small>${esc(card.detail)}</small></div><p class="metric-foot">${esc(card.foot)}</p>${card.progress !== undefined ? `<div class="metric-bar" aria-hidden="true"><progress max="100" value="${card.progress}"></progress></div>` : ""}</a>`).join("");
   }
 
   function renderAgents() {
-    $("#agent-summary").textContent = `${data.agents.length} סוכנים רשומים`;
+    $("#agent-summary").textContent = data.agents.length === 1 ? "סוכן אחד רשום" : `${data.agents.length} סוכנים רשומים`;
     $("#agents").innerHTML = data.agents.length ? data.agents.map((agent, i) => {
       const task = data.tasks.find(item => item.id === agent.task_id);
       const symbols = {bugs: "⌘", features: "◇", release: "✓", ops: "◫", manager: "◎", security: "⌁"};
@@ -283,10 +287,17 @@
   function renderRoadmap() {
     if (!data) return;
     $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
+    const versionChoices = ["all", ...versions, ...new Set(data.tasks.map(t => t.version || "ללא גרסה").filter(v => !versions.includes(v)))];
+    $("#version-nav").innerHTML = versionChoices.map(v => {
+      const count = v === "all" ? data.tasks.length : data.tasks.filter(t => (t.version || "ללא גרסה") === v).length;
+      return `<button type="button" class="version-filter${roadmapVersion === v ? " active" : ""}" data-version="${esc(v)}" aria-pressed="${roadmapVersion === v}"><span dir="auto">${esc(v === "all" ? "כל הגרסאות" : v)}</span><span class="version-count">${count}</span></button>`;
+    }).join("");
     const search = $("#task-search").value.trim().toLocaleLowerCase("he-IL");
     let tasks = data.tasks.filter(task => !search || `${task.title} ${task.id} ${task.version}`.toLocaleLowerCase("he-IL").includes(search));
+    if (roadmapVersion !== "all") tasks = tasks.filter(t => (t.version || "ללא גרסה") === roadmapVersion);
+    if (filter === "queued") tasks = tasks.filter(t => t.state === "queued");
     if (filter === "active") tasks = tasks.filter(task => ["running", "review"].includes(task.state));
-    if (filter === "waiting") tasks = tasks.filter(task => ["waiting_owner", "blocked", "queued"].includes(task.state));
+    if (filter === "waiting") tasks = tasks.filter(task => ["waiting_owner", "blocked"].includes(task.state));
     if (filter === "done") tasks = tasks.filter(complete);
     if (!tasks.length) {
       $("#roadmap").innerHTML = empty(data.tasks.length ? "אין משימות שמתאימות לסינון" : "התוכנית המלאה עדיין לא מופתה", data.tasks.length ? "נסה לבחור סינון אחר או לשנות את החיפוש." : "הוסף משימות או ייבא דרישות. כל סעיף יופיע עם סטטוס קוד, אימות, הפצה ותנאי קבלה — בלי להסיק שמיזוג הוא השלמה.");
@@ -300,14 +311,15 @@
       const requiredGroup = fullGroup.filter(isRequired);
       const done = requiredGroup.filter(complete).length;
       const extraCount = fullGroup.length - requiredGroup.length;
-      return `<section class="version-section"><div class="version-heading"><div class="version-title"><h2>${esc(version)}</h2><p>${esc(versionDescriptions[version] || "משימות משויכות")}<span class="version-scope-count">${fullGroup.length} פריטים בסך הכול${extraCount ? ` · ${extraCount} אופציונליים או נדחו` : ""}</span></p></div><div class="version-completion"><span>${done} / ${requiredGroup.length} חובה הושלמו</span><progress class="version-progress" aria-label="השלמת דרישות חובה של ${esc(version)}" value="${done}" max="${Math.max(1, requiredGroup.length)}"></progress></div></div>${group.sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).map(task => {
+      const expanded = search || filter !== "all" || roadmapVersion !== "all" || (expandedVersions.get(version) ?? version === versions[0]);
+      return `<details class="version-section" ${expanded ? "open" : ""}><summary class="version-heading" data-version-toggle="${esc(version)}"><span class="version-title"><span class="version-number" role="heading" aria-level="2">${esc(version)}</span><span class="version-description">${esc(versionDescriptions[version] || "משימות משויכות")}<span class="version-scope-count">${fullGroup.length} פריטים בסך הכול${extraCount ? ` · ${extraCount} אופציונליים או נדחו` : ""}</span></span></span><span class="version-completion"><span>${done} / ${requiredGroup.length} חובה הושלמו</span><progress class="version-progress" aria-label="השלמת דרישות חובה של ${esc(version)}" value="${done}" max="${Math.max(1, requiredGroup.length)}"></progress><span class="version-chevron" aria-hidden="true">⌄</span></span></summary>${group.sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).map(task => {
         const doneTask = complete(task);
         const icon = doneTask ? "✓" : task.state === "running" ? "↗" : ["waiting_owner", "blocked"].includes(task.state) ? "◇" : "";
         const iconClass = doneTask ? "complete" : task.state === "running" ? "running" : ["waiting_owner", "blocked"].includes(task.state) ? "waiting" : "";
         const agent = data.agents.find(item => item.id === task.agent_id);
         const source = sourceSummary(task);
         return `<button type="button" class="roadmap-row" data-task="${esc(task.id)}"><span class="task-check ${iconClass}" aria-hidden="true">${icon}</span><span><span class="roadmap-task-title">${esc(task.title)}</span><span class="task-progress-fields">${taskFields(task)}</span>${source ? `<span class="source-summary">${esc(source)}</span>` : ""}</span><span class="task-row-end">${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}${task.execution_allowed === false && task.state === "queued" ? `<span class="state-pill gray">למיפוי ואימות</span>` : statusPill(task.state)}<span class="task-row-agent">${esc(agent?.label || task.agent_id || task.id)}</span></span></button>`;
-      }).join("")}</section>`;
+      }).join("")}</details>`;
     }).join("");
   }
 
@@ -326,6 +338,7 @@
     const activeDraft = focused?.matches(".question-answer") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
     stashDrafts();
     const pending = data.questions.filter(question => !["answered", "resolved", "cancelled"].includes(question.status || "pending"));
+    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות בזמן העדכון החי.` : "כל ההחלטות שנענו נשמרות בהמשך.";
     const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).slice(-5).reverse();
     const renderQuestion = question => {
       const task = data.tasks.find(item => item.id === question.task_id);
@@ -333,7 +346,7 @@
       const choices = (question.choices || []).map(choice => typeof choice === "string" ? {id: choice, label: choice} : choice);
       const answered = ["answered", "resolved"].includes(question.status);
       const id = String(question.id);
-      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3>${esc(question.title)}</h3>${question.context ? `<p class="question-context">${esc(question.context)}</p>` : ""}${task ? `<p class="question-task">משויך ל־${esc(task.title)} · <span class="mono">${esc(task.id)}</span></p>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p>` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">תשובות אפשריות ל־${esc(question.title)}</legend>${choices.map((choice, index) => `<label class="choice"><input type="radio" name="answer-${esc(id)}" value="${esc(choice.label || choice.id)}" ${draft.choice === (choice.label || choice.id) ? "checked" : ""}><span>${esc(choice.label || choice.id)}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`).join("")}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה חופשית ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="או כתוב תשובה משלך…">${esc(draft.text || "")}</textarea><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>`}</article>`;
+      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3>${esc(question.title)}</h3>${question.context ? `<p class="question-context">${esc(question.context)}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p>` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">תשובות אפשריות ל־${esc(question.title)}</legend>${choices.map((choice, index) => `<label class="choice"><input type="radio" name="answer-${esc(id)}" value="${esc(choice.label || choice.id)}" ${draft.choice === (choice.label || choice.id) ? "checked" : ""}><span>${esc(choice.label || choice.id)}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`).join("")}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה חופשית ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="או כתוב תשובה משלך…">${esc(draft.text || "")}</textarea><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>`}</article>`;
     };
     $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + (history.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${history.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
     if (activeDraft) {
@@ -376,7 +389,7 @@
     const acceptance = task.acceptance || [];
     const fields = [["מימוש", implementationLabel(task)], ["אימות", validationNames[task.validation] || task.validation || "טרם נבדק"], ["הפצה", deliveryNames[task.delivery] || task.delivery || "טרם הופץ"], ["אימות נדרש", validationNames[task.required_validation] || task.required_validation || "לא הוגדר"]];
     const agent = data.agents.find(item => item.id === task.agent_id);
-    $("#task-dialog-body").innerHTML = `<div class="detail-meta">${statusPill(task.state)}<span class="pill mono">${esc(task.id)}</span><span class="pill" dir="ltr">${esc(task.version || "ללא גרסה")}</span><span class="pill">${esc(laneNames[task.lane] || task.lane || "לא שויך")}</span><span class="pill mono">P${esc(task.priority ?? 2)}</span>${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}</div>${task.blocker ? `<div class="detail-blocker"><b>מה ממתין:</b> ${esc(task.blocker)}</div>` : ""}<div class="detail-stages">${fields.map(([label, value]) => `<div class="detail-stage">${label}<strong>${esc(value)}</strong></div>`).join("")}</div><h3 class="detail-heading">גרסת הקוד והתוצר שנבדק</h3><p class="detail-list">קוד: <span class="mono">${esc(task.code_revision || "טרם זוהה")}</span><br>תוצר: ${task.artifact_ref ? evidenceHTML(task.artifact_ref) : "טרם זוהה"}</p>${sourceRecords(task)}<h3 class="detail-heading">תנאי קבלה והוכחות</h3>${acceptance.length ? `<ul class="acceptance-list">${acceptance.map(item => { const passed = criterionPassed(task, item); return `<li><span class="task-check ${passed ? "complete" : ""}" aria-hidden="true">${passed ? "✓" : ""}</span><div class="acceptance-copy">${esc(item.label || item.id)}${item.evidence ? `<br>${evidenceHTML(item.evidence)}${!passed && item.passed === true ? `<br><span class="detail-list">הראיה אינה משויכת לגרסת הקוד הנוכחית</span>` : ""}` : `<br><span class="detail-list">טרם צורפה ראיה</span>`}</div></li>`; }).join("")}</ul>` : `<p class="detail-list">עדיין לא הוגדרו תנאי קבלה. אין להסיק שהמשימה הושלמה.</p>`}<h3 class="detail-heading">בעלות ותלויות</h3><p class="detail-list">סוכן: ${esc(agent?.label || task.agent_id || "טרם הוקצה")}<br>תלויות: ${esc((task.depends_on || []).join(", ") || "אין תלויות מדווחות")}<br>משאבים: ${esc((task.resources || []).join(", ") || "אין משאב בלעדי מדווח")}<br>ביצוע: ${task.execution_allowed === false ? "רשומת דרישה למיפוי; טרם הופעלה להקצאת עבודה" : "זמינה להקצאה בכפוף לתלויות ולמשאבים"}<br>עדכון אחרון: ${esc(timestamp(task.updated_at))}</p>`;
+    $("#task-dialog-body").innerHTML = `<div class="detail-meta">${statusPill(task.state)}<span class="pill mono">${esc(task.id)}</span><span class="pill" dir="ltr">${esc(task.version || "ללא גרסה")}</span><span class="pill">${esc(laneNames[task.lane] || task.lane || "לא שויך")}</span><span class="pill mono">P${esc(task.priority ?? 2)}</span>${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}</div>${task.blocker ? `<div class="detail-blocker"><b>מה ממתין:</b> ${esc(task.blocker)}</div>` : ""}<div class="detail-stages">${fields.map(([label, value]) => `<div class="detail-stage">${label}<strong>${esc(value)}</strong></div>`).join("")}</div><h3 class="detail-heading">גרסת הקוד והתוצר שנבדק</h3><p class="detail-list">קוד: <span class="mono">${esc(task.code_revision || "טרם זוהה")}</span><br>תוצר: ${task.artifact_ref ? evidenceHTML(task.artifact_ref) : "טרם זוהה"}</p><details class="source-disclosure"><summary>קישורי GitHub ומקור הדרישה</summary>${sourceRecords(task)}</details><h3 class="detail-heading">תנאי קבלה והוכחות</h3>${acceptance.length ? `<ul class="acceptance-list">${acceptance.map(item => { const passed = criterionPassed(task, item); return `<li><span class="task-check ${passed ? "complete" : ""}" aria-hidden="true">${passed ? "✓" : ""}</span><div class="acceptance-copy">${esc(item.label || item.id)}${item.evidence ? `<br>${evidenceHTML(item.evidence)}${!passed && item.passed === true ? `<br><span class="detail-list">הראיה אינה משויכת לגרסת הקוד הנוכחית</span>` : ""}` : `<br><span class="detail-list">טרם צורפה ראיה</span>`}</div></li>`; }).join("")}</ul>` : `<p class="detail-list">עדיין לא הוגדרו תנאי קבלה. אין להסיק שהמשימה הושלמה.</p>`}<h3 class="detail-heading">בעלות ותלויות</h3><p class="detail-list">סוכן: ${agent ? `<button type="button" class="text-link" data-agent-history="${esc(agent.id)}">${esc(agent.label || agent.id)} ←</button>` : esc(task.agent_id || "טרם הוקצה")}<br>תלויות: ${esc((task.depends_on || []).join(", ") || "אין תלויות מדווחות")}<br>משאבים: ${esc((task.resources || []).join(", ") || "אין משאב בלעדי מדווח")}<br>ביצוע: ${task.execution_allowed === false ? "רשומת דרישה למיפוי; טרם הופעלה להקצאת עבודה" : "זמינה להקצאה בכפוף לתלויות ולמשאבים"}<br>עדכון אחרון: ${esc(timestamp(task.updated_at))}</p>`;
     const historyButton = document.createElement("button");
     historyButton.type = "button"; historyButton.className = "button secondary";
     historyButton.dataset.taskHistory = task.id; historyButton.textContent = "פעולות והיסטוריה של המשימה ←";
@@ -385,6 +398,9 @@
   }
 
   function render() {
+    const focused = document.activeElement;
+    const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
+    const focusValue = focusKey && focused.getAttribute(focusKey);
     renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions();
     const selected = $("#trace-agent").value;
     const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
@@ -395,41 +411,101 @@
     });
     if (view === "trace" && traceLive) loadTrace();
     if (dialogTaskId && $("#task-dialog").open) openTask(dialogTaskId, false);
+    if (focusKey && !focused.isConnected) $$(`[${focusKey}]`).find(el => el.getAttribute(focusKey) === focusValue)?.focus({preventScroll: true});
+  }
+
+  function traceSelectionKey() {
+    return JSON.stringify([$("#trace-agent").value, $("#trace-task").value.trim(), $("#trace-range").value, $("#trace-from").value, $("#trace-to").value]);
   }
 
   function traceFilters() {
-    return {agent_id: $("#trace-agent").value, task_id: $("#trace-task").value.trim(),
-      since: traceUntil - Number($("#trace-range").value), until: traceUntil};
+    const custom = $("#trace-range").value === "custom";
+    const since = custom ? new Date($("#trace-from").value).getTime() / 1000 : traceUntil - Number($("#trace-range").value);
+    const until = custom ? new Date($("#trace-to").value).getTime() / 1000 + 0.999 : traceUntil;
+    if (!Number.isFinite(since) || !Number.isFinite(until) || since > until) throw new Error("בחרו טווח תקין: זמן ההתחלה צריך להיות לפני זמן הסיום.");
+    return {agent_id: $("#trace-agent").value, task_id: $("#trace-task").value.trim(), since, until};
+  }
+
+  function eventName(row) {
+    return {PreToolUse: "הכלי התחיל", PostToolUse: "הכלי הסתיים", PostToolUseFailure: "הכלי נכשל", SessionStart: "הסשן התחיל", SessionEnd: "הסשן הסתיים", SubagentStart: "סוכן משנה התחיל", SubagentStop: "סוכן משנה עצר", Stop: "הסוכן עצר", UserPromptSubmit: "התקבלה בקשה", Notification: "התראה", TelemetryGap: "פער בתיעוד"}[row.event] || stateNames[row.status] || "אירוע מתועד";
+  }
+
+  function updateTraceControls() {
+    $$("#trace-refresh, #trace-more, #trace-retro").forEach(button => { button.disabled = !connected || traceBusy; });
   }
 
   async function loadTrace(older = false) {
-    if (traceBusy || !connected) return;
+    if (!connected) return;
+    if (traceBusy) { if (!older && traceLive) traceRefreshPending = true; return; }
+    const selection = traceSelectionKey();
     traceBusy = true;
+    updateTraceControls();
     try {
       if (!older && traceLive) traceUntil = Date.now() / 1000;
-      const query = new URLSearchParams({...traceFilters(), ...(older && traceBefore ? {before: traceBefore} : {})});
+      const filters = traceFilters();
+      if (selection !== traceRenderedKey) {
+        traceRows = []; traceBefore = null;
+        $("#trace-events").innerHTML = empty("טוען את הפעולות שבחרת", "ממתין לתיעוד מהשירות המקומי.", true);
+        $("#trace-more").hidden = true;
+      }
+      $("#trace-feedback").textContent = "";
+      const query = new URLSearchParams({...filters, ...(older && traceBefore ? {before: traceBefore} : {})});
       const result = await api("/api/trace?" + query);
+      if (selection !== traceSelectionKey()) return;
       traceRows = older ? [...traceRows, ...result.events] : result.events;
-      traceBefore = result.before;
+      traceBefore = result.before; traceRenderedKey = selection;
       $("#trace-mode").value = result.settings.mode;
       const actor = data?.agents.find(a => a.id === $("#trace-agent").value);
       const parent = data?.agents.find(a => a.id === actor?.parent_id);
       const children = actor ? data.agents.filter(a => a.parent_id === actor.id) : [];
-      $("#trace-relations").innerHTML = actor ? `<p>${esc(actor.label || actor.id)}${actor.requested_model ? ` · מודל מבוקש: <span dir="ltr">${esc(actor.requested_model)}</span>` : ""}</p>${parent ? `<button type="button" class="text-link" data-agent-history="${esc(parent.id)}">בסשן של ${esc(parent.label || parent.id)} ←</button>` : ""}${children.map(a => `<button type="button" class="text-link" data-agent-history="${esc(a.id)}">↳ ${esc(a.label || a.id)}</button>`).join(" ")}` : '<p class="detail-list">בחרו סוכן כדי לרדת לקשרים המדווחים ולפעולות שלו.</p>';
-      $("#trace-coverage").textContent = `נשמרים עד ${result.settings.retention_days} ימים / ${result.settings.max_events} אירועים. מוצגים רק אירועים שנקלטו; תיעוד מתאמים חיצוניים עשוי להיות חלקי. סודות מסוננים, אך ייצוא דורש בדיקה שלך.`;
+      const relations = actor ? `<p>${esc(actor.label || actor.id)}${actor.requested_model ? ` · מודל מבוקש: <span dir="ltr">${esc(actor.requested_model)}</span>` : ""}</p>${parent ? `<button type="button" class="text-link" data-agent-history="${esc(parent.id)}">בסשן של ${esc(parent.label || parent.id)} ←</button>` : ""}${children.map(a => `<button type="button" class="text-link" data-agent-history="${esc(a.id)}">↳ ${esc(a.label || a.id)}</button>`).join(" ")}` : '<p class="detail-list">בחרו סוכן כדי לראות את הקשרים המדווחים ואת הפעולות שלו.</p>';
+      if ($("#trace-relations").innerHTML !== relations) $("#trace-relations").innerHTML = relations;
+      $("#trace-coverage").textContent = `נשמרים עד ${result.settings.retention_days} ימים / ${result.settings.max_events.toLocaleString("he-IL")} אירועים. מוצג רק תיעוד שנקלט; כיסוי מתאמים חיצוניים עשוי להיות חלקי. בדקו מידע רגיש לפני שיתוף ייצוא.`;
+      $("#trace-feedback").textContent = `${traceRows.length} ${traceRows.length === 1 ? "פעולה מוצגת" : "פעולות מוצגות"}${result.more ? " · אפשר לטעון פעולות קודמות" : ""} · ${traceLive ? "עדכון חי" : "תצוגה קפואה לניתוח"}`;
       $("#trace-more").hidden = !result.more;
       $("#trace-events").innerHTML = traceRows.length ? traceRows.map(row => {
         const actor = data?.agents.find(a => a.id === row.agent_id);
-        const timing = row.duration_ms === null ? "" : ` · ${Math.round(row.duration_ms)} ms`;
-        return `<button type="button" class="trace-row" data-trace-id="${row.id}"><span class="trace-index" dir="ltr">#${row.id}</span><span><b>${esc(row.tool || row.event)}</b><small>${esc(actor?.label || row.agent_id)} · ${esc(row.task_id || "ללא שיוך משימה")}</small></span><span class="trace-end">${esc(row.status)}${esc(timing)}<small>${esc(timestamp(row.ts))}</small></span></button>`;
-      }).join("") : empty("אין אירועים בטווח הנבחר", "תיעוד מתחיל בחיבור בפועל. היסטוריה שלא נשמרה אינה משוחזרת בדיעבד.", true);
-    } catch (error) { toast(error.message, true); }
-    finally { traceBusy = false; }
+        const timing = row.duration_ms == null ? "" : ` · ${Math.round(row.duration_ms)} ms`;
+        const failed = row.status === "failed" || row.event === "PostToolUseFailure";
+        return `<button type="button" class="trace-row${failed ? " trace-failed" : ""}" data-trace-id="${row.id}"><span class="trace-index" dir="ltr">#${row.id}</span><span><b>${esc(row.tool || eventName(row))}</b><small>${esc(actor?.label || row.agent_id)} · ${esc(row.task_id || "ללא שיוך משימה")}</small></span><span class="trace-end">${esc(eventName(row))}${esc(timing)}<small>${esc(timestamp(row.ts))}</small></span><span class="trace-open" aria-hidden="true">←</span></button>`;
+      }).join("") : empty("אין פעולות בטווח הנבחר", "נסו סוכן או תקופה אחרים. היסטוריה שלא נשמרה אינה משוחזרת בדיעבד.", true);
+    } catch (error) {
+      $("#trace-feedback").textContent = error.message;
+      if (selection !== traceRenderedKey) { traceRows = []; $("#trace-events").innerHTML = empty("הפעולות לא נטענו", error.message, true); }
+    } finally {
+      traceBusy = false;
+      updateTraceControls();
+      // A paused view must also apply a selection made during an in-flight request.
+      const followUp = selection !== traceSelectionKey() || (traceRefreshPending && traceLive);
+      traceRefreshPending = false;
+      if (followUp && view === "trace") loadTrace();
+    }
   }
 
   function setTraceLive(value) {
+    if (value && $("#trace-range").value === "custom") { $("#trace-range").value = "86400"; $("#trace-dates").hidden = true; }
     traceLive = value; $("#trace-live").setAttribute("aria-pressed", String(value));
     $("#trace-live").textContent = value ? "עדכון חי פעיל" : "היסטוריה קפואה";
+  }
+
+  function openTrace(row) {
+    const actor = data?.agents.find(a => a.id === row.agent_id);
+    const task = data?.tasks.find(t => t.id === row.task_id);
+    const parent = data?.agents.find(a => a.id === row.parent_id);
+    const metadataOnly = row.data?.captured === "metadata only";
+    const fields = [["סוכן", actor?.label || row.agent_id], ["כלי", row.tool || "אירוע סשן"], ["זמן", new Date(row.ts * 1000).toLocaleString("he-IL")], ["משך שנמדד", row.duration_ms == null ? "לא זמין לאירוע הזה" : `${Math.round(row.duration_ms)} ms`]];
+    $("#trace-dialog-title").textContent = `${row.tool || "פעולת סוכן"} · ${eventName(row)}`;
+    $("#trace-dialog-body").innerHTML = `<p class="action-caption">פעולה #${row.id} · תוצאה של כלי אינה הוכחת השלמת משימה.</p><div class="action-facts">${fields.map(([label, value]) => `<div><span>${esc(label)}</span><strong dir="auto">${esc(value)}</strong></div>`).join("")}</div>${task ? `<button type="button" class="button secondary" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} ←</button>` : `<p class="detail-list">משימה: ${esc(row.task_id || "לא דווח שיוך")}</p>`}${parent ? `<p class="detail-list">שיוך מדווח לסשן של ${esc(parent.label || parent.id)}</p>` : ""}${actor?.requested_model ? `<p class="detail-list">מודל מבוקש: <span dir="ltr">${esc(actor.requested_model)}</span> · אינו הוכחת מודל אפקטיבי</p>` : ""}<p class="action-capture">${metadataOnly ? "נשמר מידע תמציתי בלבד. קלט ופלט של כלים לא הוקלטו באירוע הזה." : "מוצגים הפרטים שנקלטו, לאחר סינון וקיצור אפשרי."}</p><div id="action-details"></div><details class="raw-event"><summary>פרטים טכניים מלאים של האירוע שנשמר</summary><pre class="trace-json" dir="ltr" id="trace-raw-json"></pre></details>`;
+    for (const [key, label] of [["tool_input", "קלט לכלי"], ["tool_response", "תוצאה שהתקבלה"], ["error", "שגיאה"], ["summary", "תקציר שדווח"]]) {
+      if (row.data?.[key] === undefined) continue;
+      const section = document.createElement("section"); section.className = "action-detail";
+      const heading = document.createElement("h3"); heading.textContent = label;
+      const value = document.createElement("pre"); value.dir = "auto";
+      value.textContent = typeof row.data[key] === "string" ? row.data[key] : JSON.stringify(row.data[key], null, 2);
+      section.append(heading, value); $("#action-details").append(section);
+    }
+    $("#trace-raw-json").textContent = JSON.stringify(row, null, 2);
+    $("#trace-dialog").showModal();
   }
 
   async function renewPresence(event) {
@@ -479,15 +555,25 @@
       $("#task-dialog").close(); $("#trace-task").value = taskHistory.dataset.taskHistory;
       $("#trace-agent").value = ""; location.hash = "trace"; loadTrace();
     }
+    const version = event.target.closest("[data-version]");
+    if (version) { roadmapVersion = version.dataset.version; renderRoadmap(); }
+    const versionToggle = event.target.closest("[data-version-toggle]");
+    if (versionToggle) expandedVersions.set(versionToggle.dataset.versionToggle, !versionToggle.parentElement.open);
+    const metric = event.target.closest("[data-overview-metric]");
+    if (metric) {
+      const index = Number(metric.dataset.overviewMetric);
+      if (index === 1 || index === 3) { roadmapVersion = "all"; $("#task-search").value = ""; filter = index === 1 ? "active" : "done"; $$("[data-filter]").forEach(b => { b.classList.toggle("active", b.dataset.filter === filter); b.setAttribute("aria-pressed", String(b.dataset.filter === filter)); }); renderRoadmap(); }
+      if (index === 0) $("#agents").scrollIntoView({block: "start"});
+    }
     const actorHistory = event.target.closest("[data-agent-history]");
-    if (actorHistory) { $("#trace-agent").value = actorHistory.dataset.agentHistory; $("#trace-task").value = ""; location.hash = "trace"; loadTrace(); }
+    if (actorHistory) { $$("dialog[open]").forEach(d => d.close()); $("#trace-agent").value = actorHistory.dataset.agentHistory; $("#trace-task").value = ""; location.hash = "trace"; loadTrace(); }
     const traceButton = event.target.closest("[data-trace-id]");
     if (traceButton) {
       const row = traceRows.find(r => String(r.id) === traceButton.dataset.traceId);
-      if (row) { $("#trace-dialog-body").textContent = JSON.stringify(row, null, 2); $("#trace-dialog").showModal(); }
+      if (row) openTrace(row);
     }
     const taskButton = event.target.closest("[data-task]");
-    if (taskButton) openTask(taskButton.dataset.task);
+    if (taskButton) { if ($("#trace-dialog").open) $("#trace-dialog").close(); openTask(taskButton.dataset.task); }
     const filterButton = event.target.closest("[data-filter]");
     if (filterButton) {
       filter = filterButton.dataset.filter;
@@ -501,7 +587,23 @@
   $("#trace-refresh").addEventListener("click", () => loadTrace());
   $("#trace-more").addEventListener("click", () => { setTraceLive(false); loadTrace(true); });
   $("#trace-live").addEventListener("click", () => { setTraceLive(!traceLive); if (traceLive) loadTrace(); });
-  ["#trace-agent", "#trace-range", "#trace-task"].forEach(id => $(id).addEventListener("change", () => { traceUntil = Date.now() / 1000; loadTrace(); }));
+  ["#trace-agent", "#trace-task", "#trace-from", "#trace-to"].forEach(id => $(id).addEventListener("change", () => { traceUntil = Date.now() / 1000; loadTrace(); }));
+  $("#trace-range").addEventListener("change", () => {
+    const custom = $("#trace-range").value === "custom";
+    $("#trace-dates").hidden = !custom;
+    if (custom) {
+      const localInput = ts => new Date(ts - new Date(ts).getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+      if (!$("#trace-from").value) $("#trace-from").value = localInput(Date.now() - 3600000);
+      if (!$("#trace-to").value) $("#trace-to").value = localInput(Date.now());
+      setTraceLive(false);
+    }
+    traceUntil = Date.now() / 1000; loadTrace();
+  });
+  $("#trace-copy").addEventListener("click", async () => {
+    const field = $("#trace-retro-prompt");
+    try { await navigator.clipboard.writeText(field.value); toast("הבקשה הועתקה. הדביקו אותה בסוכן שבו /retro מותקן."); }
+    catch { field.focus(); field.select(); toast("הבקשה מסומנת. אפשר להעתיק אותה עם Ctrl+C או דרך תפריט ההעתקה."); }
+  });
   $("#trace-mode").addEventListener("change", async event => {
     try { await api("/api/trace/settings", {mode: event.target.value}); await loadTrace(); }
     catch (error) { toast(error.message, true); }
@@ -532,6 +634,7 @@
       form.reset();
       await refresh();
       toast("התשובה נשמרה. המנהל יוכל להמשיך מההחלטה הזאת.");
+      $(".question-form")?.querySelector("input[type=radio], textarea")?.focus();
     } catch (err) { error.textContent = err.message; error.hidden = false; button.disabled = false; }
   });
   $("#questions").addEventListener("keydown", event => {
@@ -554,7 +657,10 @@
       await api("/api/tasks", {title: String(values.get("title")).trim(), version: values.get("version"), lane: values.get("lane"), priority: Number(values.get("priority")), required_validation: values.get("required_validation"), acceptance});
       form.reset();
       $("#create-dialog").close();
+      roadmapVersion = String(values.get("version")); filter = "all"; $("#task-search").value = "";
+      $$("[data-filter]").forEach(b => { b.classList.toggle("active", b.dataset.filter === "all"); b.setAttribute("aria-pressed", String(b.dataset.filter === "all")); });
       await refresh();
+      renderRoadmap(); // The state stream may have rendered before these local filters changed.
       location.hash = "roadmap";
       toast("המשימה נוספה לתוכנית עם תנאי הקבלה שלה.");
     } catch (err) { error.textContent = err.message; error.hidden = false; }
