@@ -29,7 +29,9 @@
   const busyButtons = new Set();
   let questionsSignature = "";
   let lastPresenceRefresh = 0;
-  const drafts = new Map();
+  const DRAFTS_KEY = "jarves-workflow-question-drafts";
+  const drafts = (() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return new Map(Array.isArray(saved) ? saved : []); } catch { return new Map(); } })();
+  const GENERAL = "__general";
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
@@ -80,6 +82,13 @@
   }
 
   function isRequired(task) { return !task.scope || task.scope === "required"; }
+  // What is working now comes first (owner, #730): running, waiting for you, blocked, review, queued, then finished.
+  const stateRank = {running: 0, waiting_owner: 1, blocked: 2, review: 3, queued: 4, verified: 5, done: 6};
+  const versionRank = version => { const i = versions.indexOf(version); return i < 0 ? versions.length : i; };
+  function taskOrder(a, b) {
+    return (stateRank[a.state] ?? 4) - (stateRank[b.state] ?? 4) || (a.priority ?? 2) - (b.priority ?? 2)
+      || versionRank(a.version) - versionRank(b.version) || String(a.id).localeCompare(String(b.id));
+  }
 
   function scopeLabel(task) {
     return {optional: "אופציונלי", deferred: "נדחה להמשך", out_of_scope: "מחוץ להיקף"}[task.scope] || (isRequired(task) ? "" : "היקף טרם סווג");
@@ -127,7 +136,7 @@
 
   function syncControls() {
     // Offline disables mutating controls; buttons with a request in flight stay disabled.
-    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], [data-defer], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
+    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], [data-reopen], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
   }
 
   function connectionState(ok, error = "") {
@@ -144,6 +153,8 @@
     updateTraceControls();
     if (!ok && !data) {
       $("#metrics").innerHTML = "";
+      $("#now-strip").innerHTML = "";
+      $("#agents-offline-wrap").innerHTML = "";
       $("#agents").innerHTML = empty("סביבת העבודה עדיין לא מחוברת", "המסך לא ממציא סוכנים או התקדמות. אחרי חיבור לשירות המקומי יופיע כאן המצב המדווח.");
       $("#active-tasks").innerHTML = empty("אין מידע זמין", "ממתינים לחיבור מאומת לשירות.", true);
       $("#events").innerHTML = "";
@@ -228,7 +239,7 @@
     const pending = data.questions.filter(question => ["pending", "deferred", "open"].includes(question.status || "pending")).length;
     $("#questions-count").textContent = pending;
     const cards = [
-      {label: "סוכנים בעבודה", symbol: "◈", value: running, detail: `${data.agents.length} נרשמו`, foot: data.agents.length ? "לפי דיווחי הסוכנים" : "טרם נרשמו סוכנים", cls: ""},
+      {label: "סוכנים בעבודה", symbol: "◈", value: running, detail: `${(data.agent_counts || {}).live ?? data.agents.length} פעילים`, foot: data.agents.length ? "לפי דיווחי הסוכנים" : "טרם נרשמו סוכנים", cls: ""},
       {label: "משימות פעילות", symbol: "↗", value: active, detail: `${ready} זמינות להקצאה`, foot: "בפיתוח ובבדיקה", cls: ""},
       {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: waiting === 1 ? "משימה אחת" : `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
       {label: "דרישות חובה שהושלמו", symbol: "✓", value: done, detail: `מתוך ${required.length}`, foot: tasks.length ? `${tasks.length} פריטים בהיקף הכולל; אופציונליים מחוץ למכנה` : "ממתין למיפוי התוכנית", cls: "done", progress: required.length ? done / required.length * 100 : 0}
@@ -236,13 +247,50 @@
     $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small>${esc(card.detail)}</small></div><p class="metric-foot">${esc(card.foot)}</p>${card.progress !== undefined ? `<div class="metric-bar" aria-hidden="true"><progress max="100" value="${card.progress}"></progress></div>` : ""}</a>`).join("");
   }
 
+  // #730: live workers first; offline ones behind a remembered toggle; archived ones only counted.
+  const OFFLINE_KEY = "jarves.workflow.showOffline";
+  let showOffline = false;
+  try { showOffline = localStorage.getItem(OFFLINE_KEY) === "1"; } catch (_) { /* storage blocked: default hidden */ }
+  const liveRank = {running: 0, blocked: 1, waiting_owner: 1, idle: 2};
+  const lastSeen = agent => Math.max(seconds(agent.heartbeat_at) || 0, seconds(agent.progress_at) || 0);
+  const countText = (n, one, many) => n === 1 ? one : `${n} ${many}`;
+
+  function agentModel(agent) {
+    const asked = agent.requested_model, seen = agent.observed_model;
+    if (!asked && !seen) return "";
+    const value = seen && asked && seen !== asked ? `${asked} → ${seen}` : (seen || asked);
+    return `<p class="agent-model"><span>${seen ? "מודל" : "מודל מבוקש"}</span> <span dir="ltr">${esc(value)}</span></p>`;
+  }
+
   function renderAgents() {
-    $("#agent-summary").textContent = data.agents.length === 1 ? "סוכן אחד רשום" : `${data.agents.length} סוכנים רשומים`;
-    $("#agents").innerHTML = data.agents.length ? data.agents.map((agent, i) => {
+    const all = data.agents;
+    const counts = data.agent_counts || {};
+    const live = all.filter(a => a.status !== "offline")
+      .sort((a, b) => (liveRank[a.status] ?? 3) - (liveRank[b.status] ?? 3) || lastSeen(b) - lastSeen(a));
+    const offline = all.filter(a => a.status === "offline").sort((a, b) => lastSeen(b) - lastSeen(a));
+    const archived = counts.archived || 0;
+    const parts = [countText(live.length, "סוכן פעיל אחד", "פעילים")];
+    if (offline.length) parts.push(countText(offline.length, "מנותק אחד", "מנותקים"));
+    if (archived) parts.push(`${archived} בארכיון`);
+    $("#agent-summary").textContent = all.length || archived ? parts.join(" · ") : "אין סוכנים רשומים";
+    const symbols = {bugs: "⌘", features: "◇", release: "✓", ops: "◫", manager: "◎", security: "⌁"};
+    $("#agents").innerHTML = live.length ? live.map((agent, i) => {
       const task = data.tasks.find(item => item.id === agent.task_id);
-      const symbols = {bugs: "⌘", features: "◇", release: "✓", ops: "◫", manager: "◎", security: "⌁"};
-      return `<article class="agent-card ${esc(agent.status)}"><div class="agent-head"><span class="agent-avatar" aria-hidden="true">${symbols[agent.lane] || "◈"}</span><div><h3 class="agent-name">${esc(agent.label || agent.id || `סוכן ${i + 1}`)}</h3><p class="agent-lane">${esc(laneNames[agent.lane] || agent.lane || "טרם שויך תחום")}</p></div>${statusPill(agentStale(agent) ? "stale" : agent.status)}</div>${task ? `<button type="button" class="agent-link" data-task="${esc(task.id)}"><p class="agent-work">${esc(task.title)}</p><p class="agent-task-id">${esc(task.id)}</p></button>` : `<p class="agent-work no-task">${agent.status === "idle" ? "פנוי למשימה הבאה" : "לא דווחה משימה פעילה"}</p>`}<p class="agent-note">${esc(agent.note || "")}</p><div class="agent-footer"><span>אות חיים ${esc(age(agent.heartbeat_at))}</span><span>התקדמות ${esc(age(agent.progress_at))}</span></div></article>`;
-    }).join("") : empty("הצוות עוד לא התחבר", "המנהל ותתי־הסוכנים של Claude Code יופיעו כאן אחרי דיווח מה־hooks המקומיים. לא מוצגים סוכנים משוערים או מחוברים למראית עין.");
+      return `<article class="agent-card ${esc(agent.status)}" data-agent-id="${esc(agent.id)}"><div class="agent-head"><span class="agent-avatar" aria-hidden="true">${symbols[agent.lane] || "◈"}</span><div><h3 class="agent-name">${esc(agent.label || agent.id || `סוכן ${i + 1}`)}</h3><p class="agent-lane">${esc(laneNames[agent.lane] || agent.lane || "טרם שויך תחום")}</p></div>${statusPill(agentStale(agent) ? "stale" : agent.status)}</div>${task ? `<button type="button" class="agent-link" data-task="${esc(task.id)}"><p class="agent-work">${esc(task.title)}</p><p class="agent-task-id">${esc(task.id)}</p></button>` : `<p class="agent-work no-task">${agent.status === "idle" ? "פנוי למשימה הבאה" : "לא דווחה משימה פעילה"}</p>`}${agentModel(agent)}<p class="agent-note">${esc(agent.note || "")}</p><div class="agent-footer"><span>אירוע אחרון ${esc(age(agent.heartbeat_at))}</span><span>התקדמות ${esc(age(agent.progress_at))}</span></div></article>`;
+    }).join("") : all.length || archived
+      ? empty("אין סוכן פעיל כרגע", "סוכנים שסיימו או התנתקו מרוכזים ברשימה המקופלת שמתחת.", true)
+      : empty("הצוות עוד לא התחבר", "המנהל ותתי־הסוכנים של Claude Code יופיעו כאן אחרי דיווח מה־hooks המקומיים. לא מוצגים סוכנים משוערים או מחוברים למראית עין.");
+    $$(".agent-card", $("#agents")).forEach(card => {
+      const button = document.createElement("button"); button.type = "button"; button.className = "text-link agent-history";
+      button.textContent = "ציר פעולות והיסטוריה ←"; button.dataset.agentHistory = card.dataset.agentId; card.append(button);
+    });
+    const wrap = $("#agents-offline-wrap");
+    if (!offline.length && !archived) { wrap.innerHTML = ""; return; }
+    const hours = Math.round((counts.retention_s || 86400) / 3600);
+    const toggle = offline.length ? `<button type="button" class="text-link agents-offline-toggle" id="agents-offline-toggle" aria-expanded="${showOffline}" aria-controls="agents-offline"><span aria-hidden="true">${showOffline ? "▾" : "▸"}</span>${showOffline ? "הסתר" : "הצג"} ${countText(offline.length, "מנותק אחד", "מנותקים")}</button>` : "";
+    const note = archived ? `<span class="small-label agents-archive-note">${archived} בארכיון (מנותקים מעל ${hours} שע׳ ושאריות בדיקה)</span>` : "";
+    const list = offline.length ? `<ul class="agent-offline-list" id="agents-offline"${showOffline ? "" : " hidden"}>${offline.map(agent => `<li><button type="button" class="agent-offline-row" data-agent-history="${esc(agent.id)}"><span class="agent-offline-name">${esc(agent.label || agent.id)}</span><span class="agent-offline-lane">${esc(laneNames[agent.lane] || agent.lane || "")}</span><span class="agent-offline-age">${esc(age(lastSeen(agent)))}</span></button></li>`).join("")}</ul>` : "";
+    wrap.innerHTML = `<div class="agents-offline-bar">${toggle}${note}</div>${list}`;
   }
 
   function renderWork() {
@@ -252,7 +300,7 @@
     $("#work-count").textContent = (ap.work || []).length;
     const state = policy.kill ? "כבוי בכפתור חירום" : policy.enabled ? "פעיל" : "כבוי (ברירת מחדל)";
     $("#autopilot-policy").innerHTML = `<h2>מדיניות המנוע האוטומטי</h2>${ap.error ? `<p class="form-error" role="alert">${esc(ap.error)}</p>` : ""}<p class="detail-list">מצב: <b>${esc(state)}</b> · גרסאות מאושרות: <span dir="ltr">${esc((policy.authorized_versions || []).join(", "))}</span> · סדר גרסאות: <span dir="ltr">${esc((policy.versions || []).join(" ← "))}</span></p><p class="detail-list">עובדים: באגים ${esc(lane("bugs").workers)}, פיצ'רים ${esc(lane("features").workers)} · מקסימום במקביל ${esc(policy.max_concurrent)} · התחלות בשעה ${esc(policy.max_starts_per_hour)}</p><p class="detail-list">תוויות באג: <span dir="ltr">${esc((policy.bug_labels || []).join(", "))}</span> · עצירה: <span dir="ltr">jarvis workflow autopilot stop</span></p>`;
-    const rows = (ap.work || []).map(w => `<a class="work-row" href="${esc(safeURL(w.url))}" target="_blank" rel="noopener noreferrer"><span class="work-state-icon ${w.priority < 2 ? "amber" : ""}" aria-hidden="true">${w.kind === "pr" ? "⇄" : "!"}</span><span class="work-row-main"><span class="work-row-title">${w.kind === "pr" ? "בקשת מיזוג" : "באג"} #${esc(w.number)} · ${esc(w.title)}</span><span class="work-row-meta"><span dir="ltr">${esc((w.labels || []).join(", "))}</span>${w.task_id ? `<span class="mono">${esc(w.task_id)}</span><span>${esc(stateNames[w.task_state] || w.task_state)}</span>` : "<span>ללא משימה</span>"}${w.kind === "pr" ? "<span>בדיקות: לא ידוע</span>" : ""}</span></span></a>`).join("");
+    const rows = [...(ap.work || [])].sort((a, b) => (stateRank[a.task_state] ?? 4) - (stateRank[b.task_state] ?? 4) || (a.priority ?? 2) - (b.priority ?? 2)).map(w => `<a class="work-row" href="${esc(safeURL(w.url))}" target="_blank" rel="noopener noreferrer"><span class="work-state-icon ${w.priority < 2 ? "amber" : ""}" aria-hidden="true">${w.kind === "pr" ? "⇄" : "!"}</span><span class="work-row-main"><span class="work-row-title">${w.kind === "pr" ? "בקשת מיזוג" : "באג"} #${esc(w.number)} · ${esc(w.title)}</span><span class="work-row-meta"><span dir="ltr">${esc((w.labels || []).join(", "))}</span>${w.task_id ? `<span class="mono">${esc(w.task_id)}</span><span>${esc(stateNames[w.task_state] || w.task_state)}</span>` : "<span>ללא משימה</span>"}${w.kind === "pr" ? "<span>בדיקות: לא ידוע</span>" : ""}</span></span></a>`).join("");
     $("#work-list").innerHTML = `<h2>באגים פתוחים ובקשות מיזוג</h2>${rows || empty("אין פריטים פתוחים בתמונה האחרונה", ap.sync_error || "הרשימה מתעדכנת בסנכרון הקריאה מ־GitHub.", true)}`;
   }
 
@@ -263,8 +311,17 @@
     section.innerHTML = list.map(alert => `<div class="alert"><span class="alert-symbol" aria-hidden="true">△</span><p>${esc(alert.summary)}</p>${alert.task_id ? `<button type="button" class="text-link" data-task="${esc(alert.task_id)}">למשימה ←</button>` : ""}</div>`).join("");
   }
 
+  function renderNow() {
+    const running = data.tasks.filter(task => task.state === "running").sort(taskOrder);
+    const queued = data.tasks.filter(task => task.state === "queued").length;
+    $("#now-strip").innerHTML = `<h2 class="now-title">עכשיו בעבודה</h2>` + (running.length ? `<ul class="now-list">${running.map(task => {
+      const agent = data.agents.find(item => item.id === task.agent_id);
+      return `<li><button type="button" class="now-item" data-task="${esc(task.id)}"><span class="status-dot good" aria-hidden="true"></span><span class="now-task">${esc(task.title)}</span><span class="now-meta">${esc(agent?.label || task.agent_id || "לא דווח עובד")} · ${esc(age(agent?.heartbeat_at))}</span></button></li>`;
+    }).join("")}</ul>` : `<p class="now-empty">שום דבר לא רץ כרגע: ${queued === 1 ? "משימה אחת בתור" : `${queued} בתור`}</p>`);
+  }
+
   function renderActive() {
-    const work = data.tasks.filter(task => ["running", "review", "waiting_owner", "blocked"].includes(task.state)).sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).slice(0, 7);
+    const work = data.tasks.filter(task => ["running", "review", "waiting_owner", "blocked"].includes(task.state)).sort(taskOrder).slice(0, 7);
     $("#active-tasks").innerHTML = work.length ? work.map(task => `<button type="button" class="work-row" data-task="${esc(task.id)}"><span class="work-state-icon ${["waiting_owner", "blocked"].includes(task.state) ? "amber" : ""}" aria-hidden="true">${task.state === "waiting_owner" ? "◇" : task.state === "blocked" ? "!" : task.state === "review" ? "◌" : "↗"}</span><span class="work-row-main"><span class="work-row-title">${esc(task.title)}</span><span class="work-row-meta"><span class="mono">${esc(task.id)}</span><span dir="ltr">${esc(task.version || "ללא גרסה")}</span><span>${esc(stateNames[task.state] || task.state)}</span></span></span><span class="priority ${(task.priority ?? 2) < 2 ? "high" : ""}">P${esc(task.priority ?? 2)}</span></button>`).join("") : empty("אין משימות פעילות כרגע", data.tasks.length ? "משימות התור והחסימות זמינות בתוכנית המלאה. הכפתור 'בדוק הקצאה' משבץ רק סשנים שחוברו עם הקצאה אוטומטית. סוכני Claude רגילים לוקחים משימות דרך המנהל." : "הוסף משימה או ייבא את תוכנית העבודה כדי להתחיל.", true);
   }
 
@@ -339,47 +396,80 @@
       const done = requiredGroup.filter(complete).length;
       const extraCount = fullGroup.length - requiredGroup.length;
       const expanded = search || filter !== "all" || roadmapVersion !== "all" || (expandedVersions.get(version) ?? version === versions[0]);
-      return `<details class="version-section" ${expanded ? "open" : ""}><summary class="version-heading" data-version-toggle="${esc(version)}"><span class="version-title"><span class="version-number" role="heading" aria-level="2">${esc(version)}</span><span class="version-description">${esc(versionDescriptions[version] || "משימות משויכות")}<span class="version-scope-count">${fullGroup.length} פריטים בסך הכול${extraCount ? ` · ${extraCount} אופציונליים או נדחו` : ""}</span></span></span><span class="version-completion"><span>${done} / ${requiredGroup.length} חובה הושלמו</span><progress class="version-progress" aria-label="השלמת דרישות חובה של ${esc(version)}" value="${done}" max="${Math.max(1, requiredGroup.length)}"></progress><span class="version-chevron" aria-hidden="true">⌄</span></span></summary>${group.sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).map(task => {
+      return `<details class="version-section" ${expanded ? "open" : ""}><summary class="version-heading" data-version-toggle="${esc(version)}"><span class="version-title"><span class="version-number" role="heading" aria-level="2">${esc(version)}</span><span class="version-description">${esc(versionDescriptions[version] || "משימות משויכות")}<span class="version-scope-count">${fullGroup.length} פריטים בסך הכול${extraCount ? ` · ${extraCount} אופציונליים או נדחו` : ""}</span></span></span><span class="version-completion"><span>${done} / ${requiredGroup.length} חובה הושלמו</span><progress class="version-progress" aria-label="השלמת דרישות חובה של ${esc(version)}" value="${done}" max="${Math.max(1, requiredGroup.length)}"></progress><span class="version-chevron" aria-hidden="true">⌄</span></span></summary>${(() => { const sorted = group.sort(taskOrder); const open = sorted.filter(t => !complete(t)); const closed = sorted.filter(complete); return [open, closed]; })().map((part, partIndex) => !part.length ? "" : (partIndex ? `<details class="done-group"${filter === "done" ? " open" : ""}><summary class="text-link">${part.length === 1 ? "משימה אחת הושלמה" : `${part.length} משימות הושלמו`}</summary>` : "") + part.map(task => {
         const doneTask = complete(task);
         const icon = doneTask ? "✓" : task.state === "running" ? "↗" : ["waiting_owner", "blocked"].includes(task.state) ? "◇" : "";
         const iconClass = doneTask ? "complete" : task.state === "running" ? "running" : ["waiting_owner", "blocked"].includes(task.state) ? "waiting" : "";
         const agent = data.agents.find(item => item.id === task.agent_id);
         const source = sourceSummary(task);
         return `<button type="button" class="roadmap-row" data-task="${esc(task.id)}"><span class="task-check ${iconClass}" aria-hidden="true">${icon}</span><span><span class="roadmap-task-title">${esc(task.title)}</span><span class="task-progress-fields">${taskFields(task)}</span>${source ? `<span class="source-summary">${esc(source)}</span>` : ""}</span><span class="task-row-end">${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}${task.execution_allowed === false && task.state === "queued" ? `<span class="state-pill gray">למיפוי ואימות</span>` : statusPill(task.state)}<span class="task-row-agent">${esc(agent?.label || task.agent_id || task.id)}</span></span></button>`;
-      }).join("")}</details>`;
+      }).join("") + (partIndex && part.length ? "</details>" : "")).join("")}</details>`;
     }).join("");
   }
 
   function stashDrafts() {
     $$(".question-form").forEach(form => {
-      const selected = $("input[type=radio]:checked", form);
-      drafts.set(form.dataset.question, {text: $("textarea", form).value, choice: selected?.value || ""});
+      const picked = $$("input[type=radio]:checked, input[type=checkbox]:checked", form).map(input => input.value);
+      drafts.set(form.dataset.question, {...(drafts.get(form.dataset.question) || {}), text: $("textarea", form).value, choice: picked});
     });
+    $$(".ask-more-form").forEach(form => {
+      drafts.set(form.dataset.followup, {...(drafts.get(form.dataset.followup) || {}), more: $("textarea", form).value});
+    });
+    for (const [key, value] of drafts) if (!value.text && !value.more && !(value.choice || []).length) drafts.delete(key);
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify([...drafts].slice(-50))); } catch { /* drafts stay in memory */ }
+  }
+
+  function clearDraft(key, field) {
+    const draft = drafts.get(key);
+    if (draft) { if (field) draft[field] = ""; else drafts.delete(key); }
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify([...drafts].slice(-50))); } catch { /* drafts stay in memory */ }
+  }
+
+  function followupThread(items) {
+    if (!items.length) return "";
+    return `<ol class="followup-thread" aria-label="שאלות המשך ותשובות המנהל">${items.map(item => `<li class="followup-item"><p class="followup-ask"><span class="followup-who">${item.channel === "dashboard" || item.channel === "terminal" ? `אתה · ${item.channel === "terminal" ? "טרמינל" : "דשבורד"}` : "ערוץ לא מאומת"}</span><span class="followup-text" dir="auto">${esc(item.text)}</span><time title="${esc(timestamp(item.created_at))}">${esc(age(item.created_at))}</time></p>${item.reply ? `<p class="followup-reply"><span class="followup-who">המנהל</span><span class="followup-text" dir="auto">${esc(item.reply)}</span><time title="${esc(timestamp(item.replied_at))}">${esc(age(item.replied_at))}</time></p>` : `<p class="followup-wait" role="status">${item.status === "delivered" ? "נמסר למנהל, ממתין לתשובה" : "נשמר, יימסר למנהל בסיום הצעד הנוכחי שלו"}</p>`}</li>`).join("")}</ol>`;
+  }
+
+  function askMoreForm(key, label, placeholder) {
+    const draft = drafts.get(key) || {};
+    const field = `more-${key}`;
+    return `<form class="ask-more-form" data-followup="${esc(key)}"><label class="ask-more-label" for="${esc(field)}">${esc(label)}</label><textarea class="ask-more-text" id="${esc(field)}" rows="2" maxlength="2000" placeholder="${esc(placeholder)}">${esc(draft.more || "")}</textarea><div class="question-actions"><button class="button secondary" type="submit">שלח למנהל <span aria-hidden="true">←</span></button><span class="question-helper">Ctrl + Enter לשליחה · השאלה נשארת פתוחה עד שתענה</span></div><p class="form-error" role="alert" hidden></p></form>`;
   }
 
   function renderQuestions() {
-    const signature = JSON.stringify(data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]));
+    const followups = Array.isArray(data.followups) ? data.followups : [];
+    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups]);
     if (signature === questionsSignature) return;
     questionsSignature = signature;
     const focused = document.activeElement;
-    const activeDraft = focused?.matches(".question-answer") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
+    const activeDraft = focused?.matches(".question-answer, .ask-more-text") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
     stashDrafts();
     const pending = data.questions.filter(question => !["answered", "resolved", "cancelled"].includes(question.status || "pending"));
-    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות בזמן העדכון החי.` : "כל ההחלטות שנענו נשמרות בהמשך.";
-    const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).slice(-5).reverse();
+    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות גם אחרי רענון.` : "כל ההחלטות שנענו נשמרות בהמשך.";
+    const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).reverse()
+    const shownHistory = history.filter((question, index) => index < 5 || question.needs_owner_confirmation);
     const renderQuestion = question => {
       const task = data.tasks.find(item => item.id === question.task_id);
       const draft = drafts.get(question.id) || {};
+      const picks = Array.isArray(draft.choice) ? draft.choice : draft.choice ? [draft.choice] : [];
       const choices = (question.choices || []).map(choice => typeof choice === "string" ? {id: choice, label: choice} : choice);
       const answered = ["answered", "resolved"].includes(question.status);
       const id = String(question.id);
-      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3>${esc(question.title)}</h3>${question.context ? `<p class="question-context">${esc(question.context)}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p>` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">תשובות אפשריות ל־${esc(question.title)}</legend>${choices.map((choice, index) => `<label class="choice"><input type="radio" name="answer-${esc(id)}" value="${esc(choice.label || choice.id)}" ${draft.choice === (choice.label || choice.id) ? "checked" : ""}><span>${esc(choice.label || choice.id)}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`).join("")}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה חופשית ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="או כתוב תשובה משלך…">${esc(draft.text || "")}</textarea><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>`}</article>`;
+      const kind = question.multi ? "checkbox" : "radio";
+      const recommended = choices.find(choice => choice.recommended);
+      const link = safeURL(question.link);
+      const why = [question.why ? `<span dir="auto">${esc(question.why)}</span>` : "", task?.version ? `<span class="pill">${esc(task.version)}</span>` : "", link ? `<a class="evidence-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">פרטים ↗</a>` : "", question.minutes ? `<span class="pill amber">כ־${esc(question.minutes)} דק׳ להחלטה</span>` : ""].filter(Boolean).join(" ");
+      const thread = followupThread(followups.filter(item => item.question_id === id));
+      const options = choices.map((choice, index) => { const value = choice.label || choice.id; return `<label class="choice${choice.recommended ? " recommended" : ""}"><input type="${kind}" name="answer-${esc(id)}" value="${esc(value)}" ${picks.includes(value) ? "checked" : ""}><span class="choice-text"><span class="choice-label" dir="auto">${esc(value)}${choice.recommended ? ` <span class="pill recommended-badge">מומלץ</span>` : ""}</span>${choice.description ? `<span class="choice-description" dir="auto">${esc(choice.description)}</span>` : ""}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`; }).join("");
+      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${why ? `<p class="question-why"><b>למה שואלים:</b> ${why}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `${recommended ? `<p class="question-recommendation"><b>ההמלצה:</b> <span dir="auto">${esc(recommended.label)}${question.recommendation ? ` · ${esc(question.recommendation)}` : ""}</span></p>` : ""}<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea><p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : ""}שום דבר לא מאושר מתוך שתיקה.</p><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
     };
-    $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + (history.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${history.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
+    const general = `<section class="question-card general-ask" aria-label="שאלה כללית למנהל"><h3>שאלה כללית למנהל</h3>${followupThread(followups.filter(item => !item.question_id))}${askMoreForm(GENERAL, "מה תרצה לשאול או לבקש?", "למשל: מה מצב הגרסה? תבדוק את…")}</section>`;
+    $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
     if (activeDraft) {
       const restored = document.getElementById(activeDraft.id);
       if (restored) { restored.focus({preventScroll: true}); restored.setSelectionRange(activeDraft.start, activeDraft.end); }
     }
+    syncControls();
   }
 
   function evidenceHTML(value) {
@@ -430,14 +520,10 @@
     const focused = document.activeElement;
     const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
     const focusValue = focusKey && focused.getAttribute(focusKey);
-    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    renderNow(); renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
     const selected = $("#trace-agent").value;
     const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
     if ($("#trace-agent").innerHTML !== options) { $("#trace-agent").innerHTML = options; $("#trace-agent").value = selected; }
-    $$(".agent-card", $("#agents")).forEach((card, i) => {
-      const button = document.createElement("button"); button.type = "button"; button.className = "text-link agent-history";
-      button.textContent = "ציר פעולות והיסטוריה ←"; button.dataset.agentHistory = data.agents[i].id; card.append(button);
-    });
     if (view === "trace" && traceLive) loadTrace();
     if (dialogTaskId && $("#task-dialog").open) openTask(dialogTaskId, false);
     syncControls();
@@ -590,6 +676,13 @@
   $$(".close-dialog").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
   $("#task-dialog").addEventListener("close", () => { dialogTaskId = null; });
   document.addEventListener("click", event => {
+    if (event.target.closest("#agents-offline-toggle")) {
+      showOffline = !showOffline;
+      try { localStorage.setItem(OFFLINE_KEY, showOffline ? "1" : "0"); } catch (_) { /* remembered for this page only */ }
+      renderAgents();
+      $("#agents-offline-toggle")?.focus({preventScroll: true});
+      return;
+    }
     const taskHistory = event.target.closest("[data-task-history]");
     if (taskHistory) {
       $("#task-dialog").close(); $("#trace-task").value = taskHistory.dataset.taskHistory;
@@ -620,6 +713,8 @@
       $$("[data-filter]").forEach(button => { button.classList.toggle("active", button === filterButton); button.setAttribute("aria-pressed", String(button === filterButton)); });
       renderRoadmap();
     }
+    const reopenButton = event.target.closest("[data-reopen]");
+    if (reopenButton) { mutate(reopenButton, `/api/questions/${encodeURIComponent(reopenButton.dataset.reopen)}/reopen`, {}, "השאלה נפתחה מחדש וממתינה לתשובה שלך."); return; }
     const deferButton = event.target.closest("[data-defer]");
     if (deferButton) mutate(deferButton, `/api/questions/${encodeURIComponent(deferButton.dataset.defer)}/defer`, {}, "השאלה נשמרה להמשך. המשימה לא נעלמה מהתוכנית.");
   });
@@ -662,7 +757,7 @@
     const form = event.target.closest(".question-form");
     if (!form) return;
     event.preventDefault();
-    const typed = $("textarea", form).value.trim(), picked = $("input:checked", form)?.value;
+    const typed = $("textarea", form).value.trim(), picked = $$("input:checked", form).map(input => input.value).join(", ");
     const answer = typed && picked ? `${picked} — ${typed}` : typed || picked;
     const error = $(".form-error", form);
     if (!answer) { error.textContent = "בחר תשובה או כתוב תשובה משלך."; error.hidden = false; return; }
@@ -672,17 +767,40 @@
     error.hidden = true;
     try {
       await api(`/api/questions/${encodeURIComponent(form.dataset.question)}/answer`, {answer});
-      drafts.delete(form.dataset.question);
-      form.reset();
+      $("textarea", form).value = "";
+      $$("input:checked", form).forEach(input => { input.checked = false; });
+      clearDraft(form.dataset.question);
       await refresh();
       toast("התשובה נשמרה. המנהל יוכל להמשיך מההחלטה הזאת.");
       $(".question-form")?.querySelector("input[type=radio], textarea")?.focus();
     } catch (err) { error.textContent = err.message; error.hidden = false; }
     finally { busyButtons.delete(button); button.disabled = !connected; }
   });
+  $("#questions").addEventListener("input", stashDrafts);
+  $("#questions").addEventListener("change", stashDrafts);
+  $("#questions").addEventListener("submit", async event => {
+    const form = event.target.closest(".ask-more-form");
+    if (!form) return;
+    event.preventDefault();
+    const text = $("textarea", form).value.trim(), key = form.dataset.followup;
+    const error = $(".form-error", form);
+    if (!text) { error.textContent = "כתוב מה תרצה לשאול."; error.hidden = false; return; }
+    if (!connected) { error.textContent = "אין חיבור לשירות; השאלה לא נשלחה."; error.hidden = false; return; }
+    const button = $("button[type=submit]", form);
+    button.disabled = true; busyButtons.add(button);
+    error.hidden = true;
+    try {
+      await api(key === GENERAL ? "/api/followups" : `/api/questions/${encodeURIComponent(key)}/ask-more`, {text});
+      $("textarea", form).value = "";  // reset() would restore the rendered draft text
+      clearDraft(key, "more");
+      await refresh();
+      toast("השאלה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.");
+    } catch (err) { error.textContent = err.message; error.hidden = false; }
+    finally { busyButtons.delete(button); button.disabled = !connected; }
+  });
   $("#questions").addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      const form = event.target.closest(".question-form");
+      const form = event.target.closest(".question-form, .ask-more-form");
       if (form) { event.preventDefault(); form.requestSubmit(); }
     }
   });

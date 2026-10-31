@@ -194,3 +194,20 @@ class StewardTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongGateIdTests(unittest.TestCase):
+    def test_long_task_id_gets_a_short_stable_gate_question(self):
+        import tempfile
+        from jarves.workflow.autopilot_watch import _gate_id, gate_questions_step
+        from jarves.workflow.store import Store
+        long_id = "x" * 119
+        self.assertLessEqual(len(_gate_id(long_id)), 120)
+        self.assertEqual(_gate_id(long_id), _gate_id(long_id))
+        self.assertNotEqual(_gate_id(long_id), _gate_id("x" * 118 + "y"))
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "workflow.db")
+            store.create_task({"id": long_id, "title": "Long", "lane": "bugs", "owner_gate": "Approve?", "execution_allowed": False})
+            self.assertEqual(gate_questions_step(store), [long_id])
+            self.assertEqual(gate_questions_step(store), [])
+            store.close()

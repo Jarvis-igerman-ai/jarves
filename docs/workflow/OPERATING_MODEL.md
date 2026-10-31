@@ -50,6 +50,10 @@ existing broad CI; do not rerun every suite at every step. Each task has one own
 The owner explicitly selects Present/Away. Present lasts ten minutes and renews
 only through actual UI activity, not background polling. Ask concise planning
 questions with choices/free text; there is no old once-a-day cap while present.
+Ask with options (`--choices`, each with what changes), one recommended option
+and reason, `--why`, `--minutes` and the `--safe-default`. Owner "ask more"
+follow-ups reach the manager once at its next native Stop; answer each with
+`workflow reply --id ID --answer TEXT`. A reply never answers the question.
 
 Away: retain the question and usable checkpoint, pause only dependent work and
 release only safely paused resources. Continue other ready tasks. A deferred

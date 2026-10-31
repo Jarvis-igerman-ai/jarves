@@ -20,6 +20,7 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.cookie = ""
 
     def tearDown(self):
+        self.doCleanups()
         self.server.shutdown()
         self.thread.join(5)
         self.server.server_close()
@@ -131,6 +132,67 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertFalse(result["result"]["executed"])
         self.assertEqual(self.request("/api/trace/retro", {"output": "../../public.json"})[0], 400)
+
+    def test_state_hides_archived_agents_but_counts_them(self):
+        # #730: offline past the retention window and test leftovers leave the console list.
+        from jarves.workflow.store import Store
+        now = [1000.0]
+        clocked = Store(Path(self.temp.name) / "workflow.db", clock=lambda: now[0])
+        original = self.server.store
+        self.addCleanup(lambda: (setattr(self.server, "store", original), clocked.close()))
+        for ident in ("old-1", "old-2", "e2e-leftover", "mgr-restart-test-3", "recent", "live"):
+            clocked.register_agent({"id": ident, "label": ident, "lane": "features"})
+        for ident in ("old-1", "old-2", "recent", "e2e-leftover"):
+            clocked.observe_agent(ident, "offline")
+        now[0] += 86400 - 60
+        clocked.observe_agent("recent", "offline")
+        clocked.observe_agent("live", "running")
+        now[0] += 120   # old-* are now past 24 h; recent is 60 s offline
+        self.server.store = clocked
+        self.login()
+        state = self.request("/api/state")[2]
+        self.assertEqual(sorted(a["id"] for a in state["agents"]), ["live", "recent"])
+        self.assertEqual(state["agent_counts"], {"live": 1, "offline": 1, "archived": 4, "total": 6, "retention_s": 86400})
+        (Path(self.temp.name) / "autopilot.json").write_text(json.dumps(
+            {**__import__("jarves.workflow.autopilot", fromlist=["x"]).DEFAULTS,
+             "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
+                          "agent_retention_s": 30 * 86400}}), encoding="utf-8")
+        state = self.request("/api/state")[2]
+        self.assertEqual(sorted(a["id"] for a in state["agents"]), ["live", "old-1", "old-2", "recent"])
+        self.assertEqual(state["agent_counts"]["archived"], 2)
+
+    def test_console_agent_list_ui_static_contract(self):
+        # #730: the toggle is keyboard reachable, remembered with guarded storage and not an aria-live region.
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        app = (static / "app.js").read_text(encoding="utf-8")
+        html = (static / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="agents-offline-wrap"', html)
+        self.assertIn('aria-expanded="${showOffline}"', app)
+        self.assertIn('aria-controls="agents-offline"', app)
+        self.assertEqual(sum(1 for l in app.splitlines() if "localStorage." in l and "OFFLINE_KEY" in l), 2)  # drafts (#731) use storage too; all guarded below
+        for line in app.splitlines():
+            if "localStorage." in line:
+                self.assertIn("try {", line)
+        self.assertNotIn("aria-live", html[html.index("agents-offline-wrap") - 200:html.index("agents-offline-wrap") + 100])
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if node:
+            self.assertEqual(subprocess.run([node, "--check", str(static / "app.js")], capture_output=True).returncode, 0)
+            # #730 owner order in the console: 5 running + 160 queued -> the list begins with the 5 running.
+            start = app.index("  const stateRank =")
+            block = app[app.index("  const versions ="):app.index("\n", app.index("  const versions ="))] + app[start:app.index("\n  }\n", start) + 4]
+            script = block + """
+const tasks = [];
+for (let i = 0; i < 160; i++) tasks.push({id: "q" + String(i).padStart(3, "0"), state: "queued", priority: i % 4, version: ["V7", "V6", "V5", "V4.5.1"][Math.floor(i / 4) % 4]});
+for (let i = 0; i < 5; i++) tasks.push({id: "r" + i, state: "running", priority: 3, version: "V7"});
+tasks.push({id: "d", state: "done", priority: 0}, {id: "w", state: "waiting_owner", priority: 3}, {id: "b", state: "blocked"}, {id: "v", state: "review"});
+tasks.sort(taskOrder);
+console.log(JSON.stringify(tasks.slice(0, 9).map(t => t.id).concat([tasks[9].version, tasks[tasks.length - 1].id])));
+"""
+            out = subprocess.run([node, "-e", script], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(json.loads(out.stdout), ["r0", "r1", "r2", "r3", "r4", "w", "b", "v", "q012", "V4.5.1", "d"])
 
 
 if __name__ == "__main__":

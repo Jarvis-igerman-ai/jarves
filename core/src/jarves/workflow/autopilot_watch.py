@@ -12,7 +12,10 @@ role stays with the manager and the owner.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import logging
+import re
 from pathlib import Path
 
 from .store import Store
@@ -272,5 +275,56 @@ def manual_test_step(store: Store) -> list[str]:
                    "context": f"Test sheet: {sheet}. Record the result with check --criterion --evidence "
                               "(an answer text is not evidence).",
                    "checkpoint": "autopilot: ready for the owner's manual test"})
+        asked.append(task["id"])
+    return asked
+
+
+GATE_CHOICES = [
+    {"id": "later-today", "label": "Schedule it for later today (Recommended)"},
+    {"id": "tell-me", "label": "Tell me when ready"},
+    {"id": "skip-version", "label": "Skip for this version"},
+]
+GATE_CAP = 15
+
+
+def _version_key(version) -> tuple:
+    return tuple(int(n) for n in re.findall(r"\d+", str(version or ""))) or (999,)
+
+
+def _gate_id(task_id: str) -> str:
+    """Stable question id for a task; long task ids are shortened with a hash so the id stays under 120 chars."""
+    task_id = str(task_id)
+    if len(task_id) <= 100:
+        return f"gate-{task_id}"
+    return f"gate-{task_id[:60]}-{hashlib.sha256(task_id.encode()).hexdigest()[:8]}"
+
+
+def gate_questions_step(store: Store) -> list[str]:
+    """One non-blocking owner question per owner-gated queued task, so 'what needs me' is visible.
+
+    Created once (any existing gate-<task> question, answered or not, stops a new one), never blocks the task
+    or its lane, at most GATE_CAP new ones per call, ordered by version then priority.
+    """
+    snap = store.snapshot()
+    known = {q["id"] for q in snap["questions"]}
+    todo = [t for t in snap["tasks"]
+            if t.get("owner_gate") and t["state"] == "queued" and t.get("execution_allowed", True) is False
+            and _gate_id(t['id']) not in known]
+    todo.sort(key=lambda t: (_version_key(t.get("version")), t.get("priority", 9), t["id"]))
+    asked = []
+    for task in todo[:GATE_CAP]:
+        link = task.get("source_url") or (
+            f"https://github.com/igalgerman/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
+        scope = task.get("scope")
+        minutes = scope.get("owner_minutes") if isinstance(scope, dict) else None
+        context = (f"Task: {task['id']} ({task['title']}). Version: {task.get('version') or '?'}. "
+                   f"{'Link: ' + link + '. ' if link else ''}Time: {minutes or 'about 15'} min. "
+                   "Safe default: nothing is done or approved without you.")
+        try:
+            store.ask({"id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False,
+                       "title": str(task["owner_gate"])[:500], "context": context, "choices": GATE_CHOICES})
+        except ValueError as exc:
+            logging.getLogger(__name__).warning("gate question for %s not created: %s", task["id"], exc)
+            continue
         asked.append(task["id"])
     return asked

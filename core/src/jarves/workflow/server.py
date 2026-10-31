@@ -154,9 +154,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "open the private link printed by jarvis workflow open"})
             return
         if path == "/api/state":
-            from .autopilot import view
-            state = self.server.store.snapshot()
+            from .autopilot import agent_retention_s, view
+            from .store import agent_roster
+            state = self.server.store.snapshot(retention_s=agent_retention_s(self.server.home))
             state["autopilot"] = view(state, self.server.home)
+            # The console list leaves out archived agents (#730); agent_counts keeps the totals.
+            state["agents"] = agent_roster(state["agents"], state["tasks"], state["observed_at"],
+                                           state["agent_counts"]["retention_s"])[0]
             from .autopilot_watch import autopilot_alerts
             state["alerts"] = list(state.get("alerts") or []) + [
                 {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
@@ -241,9 +245,16 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("unsupported retrospective scope")
                 result = retro_bundle(store, **data)
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/answer", path):
-                result = store.answer(m[1], data.get("answer", ""))
+                result = store.answer(m[1], data.get("answer", ""), answered_by="owner (dashboard session)", channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/ask-more", path):
+                result = store.ask_more(data.get("text", ""), question_id=m[1], channel="dashboard")
+            elif path == "/api/followups":
+                # General follow-up; only the manager's CLI can store a reply, never the web surface.
+                result = store.ask_more(data.get("text", ""), task_id=data.get("task_id", ""), channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
-                result = store.defer(m[1])
+                result = store.defer(m[1], channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
+                result = store.reopen(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/tasks/([A-Za-z0-9_.:-]+)/transition", path):
                 # No web input can clear a stale-worker resource lock or grant execution permission.
                 if set(data) - {"state", "implementation", "validation", "delivery", "blocker"}:

@@ -23,8 +23,64 @@ VALIDATION_RANK = {"not_run": 0, "automated": 1, "app": 2, "device": 3}
 DELIVERIES = {"none", "candidate", "beta", "stable"}
 OWNER_TTL_S = 600
 TOOL_FLIGHT_S = 900
+# A native Claude subagent has no bridge/heartbeat: only hook events. It may think or run a long
+# test without emitting any, so it gets a long grace and is judged alive until its Stop/SubagentStop.
+NATIVE_GRACE_S = 1800
+NATIVE_STUCK_S = 3600
+NATIVE_TOOL_FLIGHT_S = 3600
+ARCHIVE_OFFLINE_S = 6 * 3600
+RECOVERABLE_BLOCKERS = {"worker_offline", "worker_stalled"}
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 ACTIVE_QUESTIONS = {"pending", "deferred"}
+AGENT_RETENTION_S = 86400
+TEST_AGENT_PREFIXES = ("e2e-", "mgr-restart-test")  # test leftovers: archived at once (#730)
+
+
+STATE_ORDER = {"running": 0, "waiting_owner": 1, "blocked": 2, "review": 3, "queued": 4, "verified": 5, "done": 6}
+VERSION_ORDER = ("V4.5.1", "V5", "V6", "V7")
+
+
+def task_order(task: dict) -> tuple:
+    """What is working now first (#730): running, waiting_owner, blocked, review, queued, finished;
+    then priority, then version order. The console uses the same order."""
+    version = task.get("version", "")
+    return (STATE_ORDER.get(task.get("state"), 4), task.get("priority", 2),
+            VERSION_ORDER.index(version) if version in VERSION_ORDER else len(VERSION_ORDER), str(task.get("id", "")))
+
+
+def agent_roster(agents: list, tasks: list, now: float, retention_s: int = AGENT_RETENTION_S) -> tuple[list, dict]:
+    """Split agents for display (#730): the visible list and counts. The ledger keeps every record.
+
+    Archived = test leftovers, or offline longer than retention_s. An agent that owns a
+    running task is never archived.
+    """
+    running = {t["id"] for t in tasks if t.get("state") == "running"}
+    visible, archived = [], 0
+    for agent in agents:
+        owns_running = bool(agent.get("task_id")) and agent["task_id"] in running
+        seen = max(agent.get("heartbeat_at") or 0, agent.get("progress_at") or 0)
+        leftover = str(agent.get("id", "")).startswith(TEST_AGENT_PREFIXES)
+        expired = agent.get("status") == "offline" and now - seen > retention_s
+        if not owns_running and (leftover or expired):
+            archived += 1
+        else:
+            visible.append(agent)
+    offline = sum(1 for a in visible if a.get("status") == "offline")
+    return visible, {"live": len(visible) - offline, "offline": offline, "archived": archived,
+                     "total": len(agents), "retention_s": retention_s}
+
+ANSWER_CHANNELS = ("dashboard", "terminal", "agent", "unknown")
+CONFIRMED_CHANNELS = ("dashboard", "terminal")
+
+
+def question_view(question):
+    """Old rows have no provenance: report them as unknown. An answer from agent/unknown needs owner confirmation."""
+    out = dict(question)
+    if out.get("status") == "answered":
+        out["answered_by"] = out.get("answered_by") or "unknown"
+        out["channel"] = out.get("channel") if out.get("channel") in ANSWER_CHANNELS else "unknown"
+        out["needs_owner_confirmation"] = out["channel"] not in CONFIRMED_CHANNELS
+    return out
 
 
 def _text(value, name: str, *, maximum: int = 2000, empty: bool = False) -> str:
@@ -160,9 +216,13 @@ class Store:
             db.execute("DELETE FROM workflow_resources WHERE task_id=?", (task["id"],))
         task["agent_id"] = None
 
-    def _quarantine(self, db, task, reason):
-        """Retain the writer and locks: an absent acknowledgement is not a stop."""
-        task.update(state="blocked", blocker=reason, quarantined=True, updated_at=self.clock())
+    def _quarantine(self, db, task, reason, source=""):
+        """Retain the writer and locks: an absent acknowledgement is not a stop.
+
+        source="tick" marks a silence quarantine made by tick(); only those may auto-recover.
+        """
+        task.update(state="blocked", blocker=reason, quarantined=True, quarantine_source=source,
+                    updated_at=self.clock())
         if task.get("agent_id"):
             agent = self._get(db, "agent", task["agent_id"])
             agent["status"] = "blocked"
@@ -197,7 +257,7 @@ class Store:
                 return False
         return True
 
-    def snapshot(self):
+    def snapshot(self, retention_s: int = AGENT_RETENTION_S):
         with self._tx() as db:
             now = self.clock()
             owner = self._meta(db, "owner")
@@ -205,14 +265,17 @@ class Store:
             supervisor = self._meta(db, "supervisor")
             if now - supervisor["heartbeat_at"] > 120:
                 supervisor["status"] = "offline"
-            tasks = self._all(db, "task")
+            tasks = sorted(self._all(db, "task"), key=task_order)
             for task in tasks:
                 task["ready"] = self._ready(db, task)
+            agents = self._all(db, "agent")
             return {
                 "revision": self._meta(db, "revision"), "observed_at": now,
                 "owner": owner, "supervisor": supervisor,
-                "tasks": tasks, "agents": self._all(db, "agent"),
-                "questions": self._all(db, "question"), "alerts": self._meta(db, "alerts"),
+                "tasks": tasks, "agents": agents,
+                "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
+                "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
+                "alerts": self._meta(db, "alerts"),
                 "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
@@ -312,8 +375,24 @@ class Store:
                 # Task ownership changes only through the ledger's checkpoint/evidence paths.
                 agent["note"] = note
                 agent["heartbeat_at"] = self.clock()
+                owned = self._get(db, "task", agent["task_id"])
+                if status == "running" and agent.get("provider") == "claude-native":
+                    # A hook event from a live native worker is real progress, not only a heartbeat.
+                    # Autopilot (ap-) workers keep the strict checkpoint-only rules.
+                    agent["progress_at"] = self.clock()
+                    # tick() quarantined this task only because events paused: events resumed, so recover it.
+                    # Never recover a manual quarantine or a task whose authorisation/owner changed.
+                    if (owned["state"] == "blocked" and owned.get("quarantined")
+                            and owned.get("quarantine_source") == "tick"
+                            and owned.get("blocker") in RECOVERABLE_BLOCKERS
+                            and owned.get("execution_allowed", True)
+                            and owned.get("agent_id") == agent["id"]):
+                        owned.update(state="running", quarantined=False, blocker="", quarantine_source="",
+                                     updated_at=self.clock())
+                        self._put(db, "task", owned)
+                        self._event(db, "task_recovered", f"{owned['title']}: worker events resumed; quarantine lifted")
                 # Live activity of a task owner whose task is still running revives a stale flag.
-                if agent["status"] in {"offline", "blocked"} and self._get(db, "task", agent["task_id"])["state"] == "running":
+                if agent["status"] in {"offline", "blocked"} and owned["state"] == "running" and status == "running":
                     agent["status"] = "running"
             else:
                 agent.update(status=status, note=note, heartbeat_at=self.clock(), progress_at=self.clock())
@@ -440,11 +519,20 @@ class Store:
         choices = data.get("choices", [])
         if not isinstance(choices, list) or len(choices) > 8:
             raise ValueError("invalid choices")
-        choices = [{"id": _id(c.get("id")), "label": _text(c.get("label"), "choice", maximum=300)} for c in choices]
+        choices = [self._option(c, n) for n, c in enumerate(choices, 1)]
         if len({c["id"] for c in choices}) != len(choices):
             raise ValueError("duplicate choice")
-        if type(data.get("blocks", True)) is not bool:
-            raise ValueError("blocks must be boolean")
+        if sum(c.get("recommended", False) for c in choices) > 1:
+            raise ValueError("at most one recommended choice")
+        choices.sort(key=lambda c: not c.get("recommended", False))  # recommended first, others keep their order
+        if type(data.get("blocks", True)) is not bool or type(data.get("multi", False)) is not bool:
+            raise ValueError("blocks and multi must be boolean")
+        minutes = data.get("minutes", 0)
+        if type(minutes) is not int or not 0 <= minutes <= 480:
+            raise ValueError("minutes must be a whole number between 0 and 480")
+        # Optional explanation fields; empty when the asker gave none. None of them is an approval.
+        extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
+                 for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500))}
         with self._tx() as db:
             task = self._get(db, "task", _id(data.get("task_id")))
             if task.get("quarantined"):
@@ -460,7 +548,8 @@ class Store:
             question = {"id": ident, "task_id": task["id"], "title": title,
                         "context": _text(data.get("context", ""), "context", maximum=4000, empty=True),
                         "choices": choices, "blocks": blocks, "status": "pending", "answer": None,
-                        "created_at": self.clock(), "checkpoint": checkpoint}
+                        "created_at": self.clock(), "checkpoint": checkpoint,
+                        "multi": data.get("multi", False), "minutes": minutes, **extra}
             if blocks:
                 self._release(db, task)
                 task.update(state="waiting_owner", blocker=title, updated_at=self.clock())
@@ -470,30 +559,166 @@ class Store:
         return question
 
     @staticmethod
+    def _option(choice, number):
+        """A choice is plain text or {id?, label, description?, recommended?}; old {id, label} rows stay valid."""
+        if isinstance(choice, str):
+            choice = {"label": choice}
+        if not isinstance(choice, dict):
+            raise ValueError("invalid choice")
+        option = {"id": _id(choice.get("id") or f"o{number}", "choice id"),
+                  "label": _text(choice.get("label"), "choice", maximum=300)}
+        if choice.get("description"):
+            option["description"] = _text(choice["description"], "choice description", maximum=500)
+        if type(choice.get("recommended", False)) is not bool:
+            raise ValueError("recommended must be boolean")
+        if choice.get("recommended"):
+            option["recommended"] = True
+        return option
+
+    def ask_more(self, text, question_id="", task_id="", channel="unknown"):
+        """Owner follow-up to the manager. It never answers, defers or approves anything."""
+        text = _text(text, "follow-up", maximum=2000)
+        channel = channel if channel in ANSWER_CHANNELS else "unknown"
+        with self._tx() as db:
+            question = None
+            if question_id:
+                question = self._get(db, "question", _id(question_id))
+                if question["status"] not in ACTIVE_QUESTIONS:
+                    raise ValueError("question already answered")
+                task_id = question["task_id"]
+            elif task_id:
+                self._get(db, "task", _id(task_id))
+            pending = [f for f in self._all(db, "followup") if f["status"] != "replied"]
+            if len(pending) >= 50:
+                raise ValueError("too many open follow-ups; wait for the manager to reply")
+            item = {"id": "f-" + uuid.uuid4().hex[:12], "question_id": question["id"] if question else "",
+                    "task_id": task_id or "", "text": text, "channel": channel, "status": "pending", "created_at": self.clock(),
+                    "delivered_at": None, "reply": None, "replied_at": None}
+            self._put(db, "followup", item)
+            self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
+        return item
+
+    def claim_followup_manager(self, agent_id, takeover=False):
+        """Designate the one session that receives owner follow-ups; returns True if agent_id is it.
+
+        A live (running) manager is never displaced. A session start may replace an idle/offline/unknown one;
+        any other event only fills an empty slot. Delivered, unanswered items move to the new manager.
+        """
+        agent_id = _id(agent_id)
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            current = json.loads(row[0]) if row else ""
+            if current == agent_id:
+                return True
+            if current:
+                other = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (current,)).fetchone()
+                running = bool(other) and json.loads(other[0]).get("status") == "running"
+                if running or not takeover:
+                    return False
+            self._set_meta(db, "followup_manager", agent_id)
+            for item in self._all(db, "followup"):
+                if item["status"] == "delivered":
+                    item["delivered_to"] = agent_id
+                    self._put(db, "followup", item)
+        return True
+
+    def take_followups(self, agent_id, limit=5, redeliver=False):
+        """Hand pending follow-ups to the designated manager as data (at-least-once, bounded).
+
+        New items are delivered once. With redeliver=True, items still unanswered are listed again, at most
+        3 deliveries in total; after that only a session start shows them.
+        """
+        agent_id = _id(agent_id)
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            if not row or json.loads(row[0]) != agent_id:
+                return []
+            items = []
+            for f in self._all(db, "followup"):
+                if len(items) >= limit:
+                    break
+                if f["status"] == "pending" or (redeliver and f["status"] == "delivered"
+                                                and f.get("delivered_to") == agent_id and f.get("deliveries", 1) < 3):
+                    items.append(f)
+            for item in items:
+                item.update(status="delivered", delivered_at=self.clock(), delivered_to=agent_id,
+                            deliveries=item.get("deliveries", 0) + 1)
+                self._put(db, "followup", item)
+            if items:
+                self._event(db, "followup_delivered", f"{len(items)} owner follow-up(s) delivered to the manager")
+            questions = {q["id"]: q for q in self._all(db, "question")}
+        return [{**item, "question_title": questions.get(item["question_id"], {}).get("title", "")} for item in items]
+
+    def open_followups(self, agent_id=None):
+        """Delivered but unanswered follow-ups (e.g. after a manager restart), for the receiving manager only."""
+        with self._tx() as db:
+            return [f for f in self._all(db, "followup") if f["status"] == "delivered"
+                    and (agent_id is None or f.get("delivered_to") == agent_id)]
+
+    def reply_followup(self, followup_id, reply):
+        """The manager's reply. The linked question stays open until the owner answers it."""
+        reply = _text(reply, "reply", maximum=4000)
+        with self._tx() as db:
+            item = self._get(db, "followup", _id(followup_id))
+            if item["status"] == "replied":
+                raise ValueError("follow-up already replied")
+            item.update(status="replied", reply=reply, replied_at=self.clock())
+            self._put(db, "followup", item)
+            self._event(db, "followup_replied", "Manager replied to an owner follow-up")
+        return item
+
+    @staticmethod
     def _has_locks(db, task_id):
         return bool(db.execute("SELECT 1 FROM workflow_resources WHERE task_id=?", (task_id,)).fetchone())
 
-    def answer(self, question_id, answer):
+    def answer(self, question_id, answer, *, answered_by="unknown", channel="unknown"):
+        """Record an owner answer with who/where. Only channel dashboard|terminal counts as confirmed."""
         answer = _text(answer, "answer", maximum=4000)
+        channel = channel if channel in ANSWER_CHANNELS else "unknown"
+        answered_by = _text(answered_by or "unknown", "answered_by", maximum=120)
         with self._tx() as db:
             question = self._get(db, "question", _id(question_id))
             if question["status"] not in ACTIVE_QUESTIONS:
                 raise ValueError("question already answered")
-            question.update(status="answered", answer=answer, answered_at=self.clock())
+            question.update(status="answered", answer=answer, answered_at=self.clock(),
+                            answered_by=answered_by, channel=channel)
             self._put(db, "question", question)
             task = self._get(db, "task", question["task_id"])
             if task["state"] == "waiting_owner" and not self._unanswered(db, task["id"]):
                 task.update(state="queued", blocker="", updated_at=self.clock())
                 self._put(db, "task", task)
-            self._event(db, "question_answered", question["title"])
-        return question
+            self._event(db, "question_answered", f"{question['title']} [{channel}]")
+        return question_view(question)
 
-    def defer(self, question_id):
+    def reopen(self, question_id, *, by="owner", channel="unknown"):
+        """Return an answered question to pending; the old answer stays in its history."""
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if question["status"] != "answered":
+                raise ValueError("only an answered question can be reopened")
+            if self._get(db, "task", question["task_id"])["state"] in {"verified", "done"}:
+                raise ValueError("completed task cannot wait for a question")
+            view = question_view(question)
+            history = list(question.get("history", []))
+            history.append({k: view.get(k) for k in ("answer", "answered_at", "answered_by", "channel")}
+                           | {"reopened_at": self.clock(), "reopened_by": by, "reopened_channel": channel})
+            for key in ("answered_at", "answered_by", "channel"):
+                question.pop(key, None)
+            question.update(status="pending", answer=None, history=history[-20:])
+            self._put(db, "question", question)
+            task = self._get(db, "task", question["task_id"])
+            if question.get("blocks", True) and task["state"] == "queued":
+                task.update(state="waiting_owner", blocker=question["title"], updated_at=self.clock())
+                self._put(db, "task", task)
+            self._event(db, "question_reopened", question["title"])
+        return question_view(question)
+
+    def defer(self, question_id, *, channel="unknown"):
         with self._tx() as db:
             question = self._get(db, "question", _id(question_id))
             if question["status"] not in ACTIVE_QUESTIONS:
                 raise ValueError("question already answered")
-            question.update(status="deferred", deferred_at=self.clock())
+            question.update(status="deferred", deferred_at=self.clock(), deferred_channel=channel)
             self._put(db, "question", question)
             self._event(db, "question_deferred", question["title"])
         return question
@@ -610,10 +835,19 @@ class Store:
             # Only the actual external supervisor writes its heartbeat. A web
             # refresh/dispatch check must not impersonate a running watchdog.
             for agent in self._all(db, "agent"):
-                # A tool call in flight (long Bash/tests) emits no hook events; allow up to 15 min.
-                in_flight = now - agent.get("tool_started_at", -TOOL_FLIGHT_S) < TOOL_FLIGHT_S
-                stale = now - agent["heartbeat_at"] > stale_s and not in_flight
-                stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_s
+                native = agent.get("provider") == "claude-native"
+                # A tool call in flight (long Bash/tests) emits no hook events; allow up to 15 min (native: 1 h).
+                flight = NATIVE_TOOL_FLIGHT_S if native else TOOL_FLIGHT_S
+                in_flight = now - agent.get("tool_started_at", -flight) < flight
+                stale_after = max(stale_s, NATIVE_GRACE_S) if native and agent.get("task_id") else stale_s
+                stuck_after = max(stuck_s, NATIVE_STUCK_S) if native else stuck_s
+                if (native and not agent.get("task_id") and agent["status"] == "offline"
+                        and now - agent["heartbeat_at"] > ARCHIVE_OFFLINE_S):
+                    db.execute("DELETE FROM workflow_records WHERE kind='agent' AND id=?", (agent["id"],))
+                    changed = True
+                    continue
+                stale = now - agent["heartbeat_at"] > stale_after and not in_flight
+                stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_after and not in_flight
                 if stale and not agent.get("task_id") and not stuck and agent["status"] == "blocked":
                     alerts.append({"kind": "worker_waiting_permission",
                                    "summary": f"{agent['label']}: permission prompt pending on Claude's approval surface",
@@ -634,7 +868,7 @@ class Store:
                     if aid:
                         task = self._get(db, "task", aid)
                         if task["state"] == "running":
-                            self._quarantine(db, task, reason)
+                            self._quarantine(db, task, reason, source="tick")
                     agent["status"] = "offline" if stale else "blocked"
                     self._put(db, "agent", agent)
                     continue
