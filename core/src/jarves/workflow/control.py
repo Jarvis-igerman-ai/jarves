@@ -148,7 +148,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                 if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
                     sync_thread = threading.Thread(target=sync_background, daemon=True, name="workflow-github-read")
                     sync_thread.start()
-                    next_sync = now + 300
+                    next_sync = now + 1800
                 stop.wait(interval)
         except KeyboardInterrupt:
             pass
