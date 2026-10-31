@@ -68,7 +68,9 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
     tool = payload.get("tool_name")
     if event in {"PreToolUse", "PostToolUse", "PostToolUseFailure"} and isinstance(tool, str):
         note = f"Claude {'started' if event == 'PreToolUse' else 'completed'} tool {tool[:80]}; no task verification inferred"
-    native = store.observe_agent(ident, status, note)
+    flight = "start" if event == "PreToolUse" else "end" if event in {
+        "PostToolUse", "PostToolUseFailure", "Stop", "SubagentStop", "SessionEnd"} else None
+    native = store.observe_agent(ident, status, note, tool=flight)
     from .trace import record
     record(store, native, event, tool=tool if isinstance(tool, str) else "",
            call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
