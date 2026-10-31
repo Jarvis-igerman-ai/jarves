@@ -374,6 +374,35 @@ class Store:
             self._bump(db)
         return agent
 
+    def link_session(self, agent_id, session_id, **fields):
+        """Record the orchestrator session the autopilot started for an agent it owns.
+
+        register_agent refuses to change a session while the agent owns a task, which is
+        exactly the moment a started session must be linked. Only autopilot-flagged agents
+        may be linked; an empty session_id unlinks (after the session was stopped).
+        """
+        session_id = _text(session_id, "session_id", maximum=200, empty=True)
+        with self._tx() as db:
+            agent = self._get(db, "agent", _id(agent_id))
+            if not agent.get("autopilot") and not fields.get("autopilot"):
+                raise ValueError("only autopilot-owned agents can be linked")
+            if session_id and agent.get("session_id") and agent["session_id"] != session_id:
+                raise ValueError("agent already has a session")
+            if session_id and any(o["id"] != agent["id"] and o.get("session_id") == session_id for o in self._all(db, "agent")):
+                raise ValueError("session already attached to another workflow worker")
+            if not session_id and agent.get("task_id"):
+                raise ValueError("cannot unlink a session while it owns a task")
+            had_session = bool(agent.get("session_id"))
+            agent["session_id"] = session_id
+            for key, value in fields.items():
+                if key in {"autopilot", "provider", "project", "requested_model"}:
+                    agent[key] = value
+            if not session_id and had_session:
+                agent["status"] = "idle"   # stopped session; tick() marks it offline once its heartbeat is stale
+            self._put(db, "agent", agent)
+            self._bump(db)
+        return agent
+
     def claim(self, agent_id, task_id=None):
         agent_id = _id(agent_id)
         with self._tx() as db:

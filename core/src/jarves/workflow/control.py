@@ -145,6 +145,8 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                                       "restart_count": len(restarts)})
                 store.tick()
                 dispatch(store, profile_home)
+                from .autopilot_loop import step_safe
+                step_safe(store, profile_home)  # no-op unless <home>/autopilot.json enables it
                 if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
                     sync_thread = threading.Thread(target=sync_background, daemon=True, name="workflow-github-read")
                     sync_thread.start()
