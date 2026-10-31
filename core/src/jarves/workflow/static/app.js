@@ -30,6 +30,7 @@
   let questionsSignature = "";
   let lastPresenceRefresh = 0;
   const drafts = new Map();
+  views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
 
@@ -244,6 +245,17 @@
     }).join("") : empty("הצוות עוד לא התחבר", "המנהל ותתי־הסוכנים של Claude Code יופיעו כאן אחרי דיווח מה־hooks המקומיים. לא מוצגים סוכנים משוערים או מחוברים למראית עין.");
   }
 
+  function renderWork() {
+    const ap = data.autopilot || {policy: {lanes: {}}, work: []};
+    const policy = ap.policy || {lanes: {}};
+    const lane = name => (policy.lanes || {})[name] || {};
+    $("#work-count").textContent = (ap.work || []).length;
+    const state = policy.kill ? "כבוי בכפתור חירום" : policy.enabled ? "פעיל" : "כבוי (ברירת מחדל)";
+    $("#autopilot-policy").innerHTML = `<h2>מדיניות המנוע האוטומטי</h2>${ap.error ? `<p class="form-error" role="alert">${esc(ap.error)}</p>` : ""}<p class="detail-list">מצב: <b>${esc(state)}</b> · גרסאות מאושרות: <span dir="ltr">${esc((policy.authorized_versions || []).join(", "))}</span> · סדר גרסאות: <span dir="ltr">${esc((policy.versions || []).join(" ← "))}</span></p><p class="detail-list">עובדים: באגים ${esc(lane("bugs").workers)}, פיצ'רים ${esc(lane("features").workers)} · מקסימום במקביל ${esc(policy.max_concurrent)} · התחלות בשעה ${esc(policy.max_starts_per_hour)}</p><p class="detail-list">תוויות באג: <span dir="ltr">${esc((policy.bug_labels || []).join(", "))}</span> · עצירה: <span dir="ltr">jarvis workflow autopilot stop</span></p>`;
+    const rows = (ap.work || []).map(w => `<a class="work-row" href="${esc(safeURL(w.url))}" target="_blank" rel="noopener noreferrer"><span class="work-state-icon ${w.priority < 2 ? "amber" : ""}" aria-hidden="true">${w.kind === "pr" ? "⇄" : "!"}</span><span class="work-row-main"><span class="work-row-title">${w.kind === "pr" ? "בקשת מיזוג" : "באג"} #${esc(w.number)} · ${esc(w.title)}</span><span class="work-row-meta"><span dir="ltr">${esc((w.labels || []).join(", "))}</span>${w.task_id ? `<span class="mono">${esc(w.task_id)}</span><span>${esc(stateNames[w.task_state] || w.task_state)}</span>` : "<span>ללא משימה</span>"}${w.kind === "pr" ? "<span>בדיקות: לא ידוע</span>" : ""}</span></span></a>`).join("");
+    $("#work-list").innerHTML = `<h2>באגים פתוחים ובקשות מיזוג</h2>${rows || empty("אין פריטים פתוחים בתמונה האחרונה", ap.sync_error || "הרשימה מתעדכנת בסנכרון הקריאה מ־GitHub.", true)}`;
+  }
+
   function renderAlerts() {
     const list = data.alerts || [];
     const section = $("#alerts-section");
@@ -418,7 +430,7 @@
     const focused = document.activeElement;
     const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
     const focusValue = focusKey && focused.getAttribute(focusKey);
-    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions();
+    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
     const selected = $("#trace-agent").value;
     const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
     if ($("#trace-agent").innerHTML !== options) { $("#trace-agent").innerHTML = options; $("#trace-agent").value = selected; }

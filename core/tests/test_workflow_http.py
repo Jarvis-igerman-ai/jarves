@@ -52,6 +52,8 @@ class WorkflowHTTPTests(unittest.TestCase):
         status, _, data = self.request("/api/state")
         self.assertEqual(status, 200)
         self.assertEqual(data["agents"], [])
+        self.assertEqual(data["autopilot"]["work"], [])
+        self.assertFalse(data["autopilot"]["policy"]["enabled"])
         self.assertNotIn(self.server.token, json.dumps(data))
 
     def test_origin_host_and_request_marker_fail_closed(self):
