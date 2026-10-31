@@ -248,9 +248,15 @@ class Store:
             return {
                 "revision": self._meta(db, "revision"), "observed_at": now,
                 "owner": owner, "supervisor": supervisor,
+<<<<<<< HEAD
                 "tasks": tasks, "agents": agents,
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
                 "questions": self._all(db, "question"), "alerts": self._meta(db, "alerts"),
+=======
+                "tasks": tasks, "agents": self._all(db, "agent"),
+                "questions": self._all(db, "question"), "followups": self._all(db, "followup")[-200:],
+                "alerts": self._meta(db, "alerts"),
+>>>>>>> jarves/console-ask-more-731
                 "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
@@ -478,11 +484,20 @@ class Store:
         choices = data.get("choices", [])
         if not isinstance(choices, list) or len(choices) > 8:
             raise ValueError("invalid choices")
-        choices = [{"id": _id(c.get("id")), "label": _text(c.get("label"), "choice", maximum=300)} for c in choices]
+        choices = [self._option(c, n) for n, c in enumerate(choices, 1)]
         if len({c["id"] for c in choices}) != len(choices):
             raise ValueError("duplicate choice")
-        if type(data.get("blocks", True)) is not bool:
-            raise ValueError("blocks must be boolean")
+        if sum(c.get("recommended", False) for c in choices) > 1:
+            raise ValueError("at most one recommended choice")
+        choices.sort(key=lambda c: not c.get("recommended", False))  # recommended first, others keep their order
+        if type(data.get("blocks", True)) is not bool or type(data.get("multi", False)) is not bool:
+            raise ValueError("blocks and multi must be boolean")
+        minutes = data.get("minutes", 0)
+        if type(minutes) is not int or not 0 <= minutes <= 480:
+            raise ValueError("minutes must be a whole number between 0 and 480")
+        # Optional explanation fields; empty when the asker gave none. None of them is an approval.
+        extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
+                 for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500))}
         with self._tx() as db:
             task = self._get(db, "task", _id(data.get("task_id")))
             if task.get("quarantined"):
@@ -498,7 +513,8 @@ class Store:
             question = {"id": ident, "task_id": task["id"], "title": title,
                         "context": _text(data.get("context", ""), "context", maximum=4000, empty=True),
                         "choices": choices, "blocks": blocks, "status": "pending", "answer": None,
-                        "created_at": self.clock(), "checkpoint": checkpoint}
+                        "created_at": self.clock(), "checkpoint": checkpoint,
+                        "multi": data.get("multi", False), "minutes": minutes, **extra}
             if blocks:
                 self._release(db, task)
                 task.update(state="waiting_owner", blocker=title, updated_at=self.clock())
@@ -506,6 +522,74 @@ class Store:
             self._put(db, "question", question)
             self._event(db, "question_asked", title)
         return question
+
+    @staticmethod
+    def _option(choice, number):
+        """A choice is plain text or {id?, label, description?, recommended?}; old {id, label} rows stay valid."""
+        if isinstance(choice, str):
+            choice = {"label": choice}
+        if not isinstance(choice, dict):
+            raise ValueError("invalid choice")
+        option = {"id": _id(choice.get("id") or f"o{number}", "choice id"),
+                  "label": _text(choice.get("label"), "choice", maximum=300)}
+        if choice.get("description"):
+            option["description"] = _text(choice["description"], "choice description", maximum=500)
+        if type(choice.get("recommended", False)) is not bool:
+            raise ValueError("recommended must be boolean")
+        if choice.get("recommended"):
+            option["recommended"] = True
+        return option
+
+    def ask_more(self, text, question_id="", task_id=""):
+        """Owner follow-up to the manager. It never answers, defers or approves anything."""
+        text = _text(text, "follow-up", maximum=2000)
+        with self._tx() as db:
+            question = None
+            if question_id:
+                question = self._get(db, "question", _id(question_id))
+                if question["status"] not in ACTIVE_QUESTIONS:
+                    raise ValueError("question already answered")
+                task_id = question["task_id"]
+            elif task_id:
+                self._get(db, "task", _id(task_id))
+            pending = [f for f in self._all(db, "followup") if f["status"] != "replied"]
+            if len(pending) >= 50:
+                raise ValueError("too many open follow-ups; wait for the manager to reply")
+            item = {"id": "f-" + uuid.uuid4().hex[:12], "question_id": question["id"] if question else "",
+                    "task_id": task_id or "", "text": text, "status": "pending", "created_at": self.clock(),
+                    "delivered_at": None, "reply": None, "replied_at": None}
+            self._put(db, "followup", item)
+            self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
+        return item
+
+    def take_followups(self, agent_id, limit=5):
+        """Hand pending follow-ups to one manager exactly once; the caller injects them as data."""
+        with self._tx() as db:
+            items = [f for f in self._all(db, "followup") if f["status"] == "pending"][:limit]
+            for item in items:
+                item.update(status="delivered", delivered_at=self.clock(), delivered_to=_id(agent_id))
+                self._put(db, "followup", item)
+            if items:
+                self._event(db, "followup_delivered", f"{len(items)} owner follow-up(s) delivered to the manager")
+            questions = {q["id"]: q for q in self._all(db, "question")}
+        return [{**item, "question_title": questions.get(item["question_id"], {}).get("title", "")} for item in items]
+
+    def open_followups(self):
+        """Delivered but unanswered follow-ups (e.g. after a manager restart)."""
+        with self._tx() as db:
+            return [f for f in self._all(db, "followup") if f["status"] == "delivered"]
+
+    def reply_followup(self, followup_id, reply):
+        """The manager's reply. The linked question stays open until the owner answers it."""
+        reply = _text(reply, "reply", maximum=4000)
+        with self._tx() as db:
+            item = self._get(db, "followup", _id(followup_id))
+            if item["status"] == "replied":
+                raise ValueError("follow-up already replied")
+            item.update(status="replied", reply=reply, replied_at=self.clock())
+            self._put(db, "followup", item)
+            self._event(db, "followup_replied", "Manager replied to an owner follow-up")
+        return item
 
     @staticmethod
     def _has_locks(db, task_id):

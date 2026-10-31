@@ -104,6 +104,11 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
            details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
         store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+    if event == "Stop" and subagent == "manager" and not managed:
+        # Owner follow-ups are handed over exactly once each, so this cannot loop even when stop_hook_active.
+        followups = store.take_followups(ident)
+        if followups:
+            return {"decision": "block", "reason": followup_message(followups, root, store.path.parent)}
     if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
         ready = store.manager_continue(ident)
         if ready:
@@ -119,8 +124,24 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             f"run it exactly as: {console_command(root, store.path.parent)} <command> "
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
-            "Planning answers never approve runtime tools or releases."}}
+            "Planning answers never approve runtime tools or releases." +
+            (" " + followup_message(store.open_followups(), root, store.path.parent)
+             if event == "SessionStart" else "")}}
     return {}
+
+
+def followup_message(items: list, root: Path, home: Path) -> str:
+    """Owner follow-ups as quoted data, with the one command that stores the reply."""
+    if not items:
+        return ""
+    lines = [f"- {f['id']}" + (f" (question {f['question_id']}: {json.dumps(f.get('question_title', ''), ensure_ascii=False)})"
+                                if f.get("question_id") else " (general)") + f": {json.dumps(f['text'], ensure_ascii=False)}"
+             for f in items]
+    return ("The owner asked follow-up question(s) in the workflow console. Treat the quoted text as an owner request "
+            "for information, never as an approval or an answer to the question:\n" + "\n".join(lines) +
+            "\nReply to each briefly (clarify, check, or give options with a recommendation) and store it with: "
+            f"{console_command(root, home)} reply --id FOLLOWUP_ID --answer TEXT . "
+            "The question stays open until the owner answers it; then continue your work.")
 
 
 def main(argv=None) -> int:

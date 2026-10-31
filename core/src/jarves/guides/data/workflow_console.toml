@@ -35,6 +35,22 @@ he = "מנהל מיזוגים קבוע שמגיב לאירועים, בלי תז�
 en = "Standing event-driven merge steward, no schedule: when a PR turns green, red, conflicted or merged, the manager hands the event to the workflow-merger subagent. Green non-Tier-R PRs join the merge queue; red ones go to a Sonnet fixer; Tier R waits for Opus sign-off. A worker that finishes or waits on CI gets the next independent task at once, and owner questions persist. To stop it, ask the manager to stop handing it events. The role is defined in OPERATING_MODEL."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "שאלות: לכל שאלה יש אפשרויות כקלפים (בחירה אחת, או כמה כשהשאלה מאפשרת), האפשרות המומלצת ראשונה עם תג 'מומלץ', מה ישתנה בכל אפשרות, למה שואלים, כמה דקות זה ייקח, וברירת המחדל הבטוחה אם לא עונים. שום דבר לא מאושר מתוך שתיקה. שדה 'אחר' מוסיף הערה לבחירה. מנהל ששואל: jarvis workflow ask --task ID --title TEXT --choices JSON --why TEXT --recommendation TEXT --safe-default TEXT --minutes N (ו־--multi לבחירה מרובה)."
+en = "Questions: each question shows its options as cards (one choice, or several when allowed), the recommended option first with a Recommended badge, what changes with each option, why it is asked, minutes needed, and the safe default if you do not answer. Nothing is approved by silence. The Other field adds a comment to the selection. A manager asks with: jarvis workflow ask --task ID --title TEXT --choices JSON --why TEXT --recommendation TEXT --safe-default TEXT --minutes N (add --multi for several choices)."
+action = "command:jarvis workflow status"
+
+[[steps]]
+he = "שאל עוד: מתחת לכל שאלה (ובתיבה הכללית) כותבים שאלת המשך למנהל, למשל 'למה זה נחוץ?' או 'מה האפשרויות?'. היא נשמרת ומגיעה למנהל בסיום הצעד הנוכחי שלו; התשובה שלו מופיעה כשרשור מתחת לשאלה. השאלה נשארת פתוחה עד שתענו. טיוטות נשמרות גם אחרי רענון. CLI: jarvis workflow ask-more --id QUESTION --note TEXT (או --task ID לשאלה כללית); המנהל עונה עם jarvis workflow reply --id FOLLOWUP --answer TEXT."
+en = "Ask more: under each question (and in the general box) write a follow-up for the manager, such as 'why do you need this?' or 'what are the options?'. It is saved and reaches the manager when its current step ends; its reply shows as a thread under the question. The question stays open until you answer. Drafts survive a page refresh. CLI: jarvis workflow ask-more --id QUESTION --note TEXT (or --task ID for a general one); the manager replies with jarvis workflow reply --id FOLLOWUP --answer TEXT."
+action = "command:jarvis workflow status"
+
+[[problems]]
+he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
+en = "A follow-up stays 'saved, will reach the manager'"
+fix_he = "המסירה קורית כשהמנהל מסיים צעד (Stop hook). מנהל שעומד בלי עבודה מקבל אותה בצעד הבא שלו: כתבו לו משהו בחלון של Claude או המתינו להודעת סוכן. בדקו שה־hooks מותקנים (jarvis workflow bootstrap). מנהל שנסגר מקבל את השאלות הפתוחות כשהוא עולה מחדש."
+fix_en = "Delivery happens when the manager ends a step (its Stop hook). An idle manager receives it on its next step: type anything in its Claude window or wait for a worker notification. Check that the hooks are installed (jarvis workflow bootstrap). A restarted manager gets open follow-ups at session start."
+
 [[problems]]
 he = "יש משימות אבל אף סוכן לא עובד"
 en = "Tasks exist but no worker is running"

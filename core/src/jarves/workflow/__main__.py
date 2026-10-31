@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+                                        "create", "ask", "ask-more", "reply", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -32,12 +32,16 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--repo-root", type=Path, default=Path.cwd(), help="bootstrap: current JARVES checkout")
     ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups")
     for name in ("id", "agent", "session-id", "provider", "project", "title", "context", "checkpoint", "answer", "state",
-                 "implementation", "validation", "delivery", "criterion", "evidence", "note", "task", "version", "code-revision", "artifact-ref"):
+                 "implementation", "validation", "delivery", "criterion", "evidence", "note", "task", "version", "code-revision", "artifact-ref",
+                 "why", "recommendation", "safe-default", "link"):
         ap.add_argument("--" + name, default="")
     ap.add_argument("--lane", choices=["bugs", "features", "release", "ops", "any"], default="any")
     ap.add_argument("--priority", type=int, default=2)
     ap.add_argument("--required-validation", choices=["automated", "app", "device"], default="app")
-    ap.add_argument("--choices", default="[]", help='planning choices, JSON [{"id":"a","label":"..."}]')
+    ap.add_argument("--choices", default="[]", help='ask: options, JSON list of text or {"label","description","recommended"}; '
+                    'description = what changes if chosen; recommended = listed first with a badge')
+    ap.add_argument("--multi", action="store_true", help="ask: the owner may pick several options")
+    ap.add_argument("--minutes", type=int, default=0, help="ask: owner minutes needed to decide")
     ap.add_argument("--acceptance", action="append", default=[], help="one acceptance criterion; repeatable")
     ap.add_argument("--resource", action="append", default=[], help="exclusive resource, e.g. windows-gui")
     ap.add_argument("--depends-on", action="append", default=[])
@@ -139,7 +143,14 @@ def main(argv=None) -> int:
                                        "resources": a.resource, "depends_on": a.depends_on})
         elif a.action == "ask":
             result = store.ask({"task_id": a.task, "title": a.title, "context": a.context,
-                                "choices": json.loads(a.choices), "checkpoint": a.checkpoint})
+                                "choices": json.loads(a.choices), "checkpoint": a.checkpoint, "multi": a.multi,
+                                "minutes": a.minutes, "why": a.why, "recommendation": a.recommendation,
+                                "safe_default": a.safe_default, "link": a.link})
+        elif a.action == "ask-more":
+            # Owner follow-up; the native manager receives it at its next Stop hook. Never an answer.
+            result = store.ask_more(a.note, question_id=a.id, task_id=a.task)
+        elif a.action == "reply":
+            result = store.reply_followup(a.id, a.answer)
         elif a.action == "answer":
             result = store.answer(a.id, a.answer)
         elif a.action == "task":

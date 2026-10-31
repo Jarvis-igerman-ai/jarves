@@ -246,6 +246,11 @@ class Handler(BaseHTTPRequestHandler):
                 result = retro_bundle(store, **data)
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/answer", path):
                 result = store.answer(m[1], data.get("answer", ""))
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/ask-more", path):
+                result = store.ask_more(data.get("text", ""), question_id=m[1])
+            elif path == "/api/followups":
+                # General follow-up; only the manager's CLI can store a reply, never the web surface.
+                result = store.ask_more(data.get("text", ""), task_id=data.get("task_id", ""))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
                 result = store.defer(m[1])
             elif m := re.fullmatch(r"/api/tasks/([A-Za-z0-9_.:-]+)/transition", path):
