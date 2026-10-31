@@ -70,6 +70,37 @@ class WorkflowLivenessTests(unittest.TestCase):
         self.ev("PostToolUse", agent_id="child", agent_type="workflow-bugs", tool_name="Bash", tool_use_id="late")
         self.assertEqual(self.task()["state"], "blocked")
 
+    def test_autopilot_worker_events_without_checkpoint_still_stall(self):
+        self.store.create_task({"id": "T2", "title": "Task two", "lane": "bugs"})
+        self.store.register_agent({"id": "ap-w1", "label": "ap", "lane": "bugs", "provider": "claude"})
+        self.assertIsNotNone(self.store.claim("ap-w1", "T2"))
+        for _ in range(20):                       # 40 minutes of tool events, never a checkpoint
+            self.clock.t += 120
+            self.store.observe_agent("ap-w1", "running", "tool")
+            self.store.tick()
+        t2 = [t for t in self.store.snapshot()["tasks"] if t["id"] == "T2"][0]
+        self.assertEqual((t2["state"], t2["blocker"]), ("blocked", "worker_stalled"))
+
+    def _tick_quarantine(self):
+        self.ev("PostToolUse", agent_id="child", agent_type="workflow-bugs", tool_name="Bash", tool_use_id="a")
+        self.clock.t += 4000
+        self.store.tick()
+        self.assertEqual(self.task()["state"], "blocked")
+
+    def test_revoked_authorisation_blocks_recovery(self):
+        self._tick_quarantine()
+        self.store.transition("T1", {"state": "blocked", "execution_allowed": False})
+        self.ev("PreToolUse", agent_id="child", agent_type="workflow-bugs", tool_name="Read", tool_use_id="b")
+        task = self.task()
+        self.assertEqual(task["state"], "blocked")
+        self.assertFalse(task["execution_allowed"])
+
+    def test_manual_quarantine_with_same_text_is_not_recovered(self):
+        self.store.quarantine("T1", "worker_offline")
+        self.ev("PreToolUse", agent_id="child", agent_type="workflow-bugs", tool_name="Read", tool_use_id="b")
+        task = self.task()
+        self.assertEqual((task["state"], task["quarantined"]), ("blocked", True))
+
     def test_long_offline_native_agents_are_archived(self):
         self.ev("SubagentStart", agent_id="other", agent_type="subagent")
         self.ev("SessionEnd", agent_id="other", agent_type="subagent")

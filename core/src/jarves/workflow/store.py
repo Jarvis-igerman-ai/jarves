@@ -203,9 +203,13 @@ class Store:
             db.execute("DELETE FROM workflow_resources WHERE task_id=?", (task["id"],))
         task["agent_id"] = None
 
-    def _quarantine(self, db, task, reason):
-        """Retain the writer and locks: an absent acknowledgement is not a stop."""
-        task.update(state="blocked", blocker=reason, quarantined=True, updated_at=self.clock())
+    def _quarantine(self, db, task, reason, source=""):
+        """Retain the writer and locks: an absent acknowledgement is not a stop.
+
+        source="tick" marks a silence quarantine made by tick(); only those may auto-recover.
+        """
+        task.update(state="blocked", blocker=reason, quarantined=True, quarantine_source=source,
+                    updated_at=self.clock())
         if task.get("agent_id"):
             agent = self._get(db, "agent", task["agent_id"])
             agent["status"] = "blocked"
@@ -359,12 +363,19 @@ class Store:
                 agent["note"] = note
                 agent["heartbeat_at"] = self.clock()
                 owned = self._get(db, "task", agent["task_id"])
-                if status == "running":
+                if status == "running" and agent.get("provider") == "claude-native":
                     # A hook event from a live native worker is real progress, not only a heartbeat.
+                    # Autopilot (ap-) workers keep the strict checkpoint-only rules.
                     agent["progress_at"] = self.clock()
                     # tick() quarantined this task only because events paused: events resumed, so recover it.
-                    if owned["state"] == "blocked" and owned.get("quarantined") and owned.get("blocker") in RECOVERABLE_BLOCKERS:
-                        owned.update(state="running", quarantined=False, blocker="", updated_at=self.clock())
+                    # Never recover a manual quarantine or a task whose authorisation/owner changed.
+                    if (owned["state"] == "blocked" and owned.get("quarantined")
+                            and owned.get("quarantine_source") == "tick"
+                            and owned.get("blocker") in RECOVERABLE_BLOCKERS
+                            and owned.get("execution_allowed", True)
+                            and owned.get("agent_id") == agent["id"]):
+                        owned.update(state="running", quarantined=False, blocker="", quarantine_source="",
+                                     updated_at=self.clock())
                         self._put(db, "task", owned)
                         self._event(db, "task_recovered", f"{owned['title']}: worker events resumed; quarantine lifted")
                 # Live activity of a task owner whose task is still running revives a stale flag.
@@ -816,7 +827,7 @@ class Store:
                     if aid:
                         task = self._get(db, "task", aid)
                         if task["state"] == "running":
-                            self._quarantine(db, task, reason)
+                            self._quarantine(db, task, reason, source="tick")
                     agent["status"] = "offline" if stale else "blocked"
                     self._put(db, "agent", agent)
                     continue
