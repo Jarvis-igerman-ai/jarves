@@ -248,15 +248,10 @@ class Store:
             return {
                 "revision": self._meta(db, "revision"), "observed_at": now,
                 "owner": owner, "supervisor": supervisor,
-<<<<<<< HEAD
                 "tasks": tasks, "agents": agents,
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
-                "questions": self._all(db, "question"), "alerts": self._meta(db, "alerts"),
-=======
-                "tasks": tasks, "agents": self._all(db, "agent"),
                 "questions": self._all(db, "question"), "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
->>>>>>> jarves/console-ask-more-731
                 "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }

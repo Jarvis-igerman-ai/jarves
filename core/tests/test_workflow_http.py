@@ -169,7 +169,7 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertIn('id="agents-offline-wrap"', html)
         self.assertIn('aria-expanded="${showOffline}"', app)
         self.assertIn('aria-controls="agents-offline"', app)
-        self.assertEqual(app.count("localStorage."), 2)
+        self.assertEqual(sum(1 for l in app.splitlines() if "localStorage." in l and "OFFLINE_KEY" in l), 2)  # drafts (#731) use storage too; all guarded below
         for line in app.splitlines():
             if "localStorage." in line:
                 self.assertIn("try {", line)
