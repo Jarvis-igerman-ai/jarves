@@ -141,6 +141,6 @@ class WorkflowExactPythonTests(WorkflowNativeTests):
     def test_session_start_context_gives_exact_interpreter_prefix(self):
         import sys
         context = self.event("SessionStart")["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(f'"{sys.executable}"', context)
+        self.assertIn('"' + sys.executable.replace(chr(92), "/") + '"', context)
         self.assertIn("workflow_console.py", context)
-        self.assertIn(f'--home "{self.home}"', context)
+        self.assertIn('--home "' + str(self.home).replace(chr(92), "/") + '"', context)

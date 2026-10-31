@@ -16,7 +16,7 @@ python core/tools/workflow_console.py supervise
 
 If `python` is the Microsoft Store alias (`...\WindowsApps\python.exe`), use a real interpreter
 path instead, such as `py -3.12` or the venv python. The hooks and the worker context already
-embed the exact interpreter and script path that bootstrap ran with. Observer hooks that
+embed the exact interpreter and script path that bootstrap ran with, double-quoted with forward slashes (Claude Code runs hooks through Git Bash on Windows). Observer hooks that
 return nothing to Claude (prompt, tool, notification, session end, subagent stop) are
 installed with `"async": true`, so they never block a tool call; SessionStart, SubagentStart
 and Stop stay synchronous. A tool call in flight (for example a long test run) keeps its
