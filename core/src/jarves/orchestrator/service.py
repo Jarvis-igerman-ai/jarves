@@ -23,6 +23,7 @@ import os
 import re
 import secrets
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -1158,7 +1159,8 @@ class Orchestrator:
         def on_event(kind: str, d: dict) -> None:
             self._managed_claude_event(holder, kind, d, started)
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
-                                 env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"))
+                                 env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"),
+                                 allowed_tools=claude.autopilot_allowed_tools(sys.executable) if by == "autopilot" else None)
         try:
             m.start()
         except OSError as e:

@@ -461,3 +461,21 @@ def test_autopilot_notify_op_reaches_the_owner_channel(world):
     assert o.call("notify", text="idle with work", kind="autopilot_alert", by="autopilot")["ok"] is True
     assert got == [("idle with work", "autopilot_alert")]
     o.notify = old
+
+
+def test_autopilot_worker_launch_carries_narrow_allow_rules_never_a_bypass(world):
+    """P1: a headless autopilot worker could not run one test (popup timed out while the owner slept -> deny)."""
+    from jarves.orchestrator import claude
+    rules = claude.autopilot_allowed_tools("C:\py\python.exe")
+    assert "Bash(C:/py/python.exe:*)" in rules and "Bash(node:*)" in rules
+    assert not any(w in r for r in rules for w in ("push", "merge", "release", "tag", "gh", "git"))
+    m = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None, allowed_tools=rules)
+    i = m.argv.index("--allowedTools")
+    assert m.argv[i + 1:i + 1 + len(rules)] == rules
+    assert "--allowedTools" not in claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None).argv
+    o = world["o"]
+    r = o.start_session("claude", "alpha", "x", by="autopilot")
+    argv = o.managed[r["session"]["id"]].argv
+    assert r["ok"] and "--allowedTools" in argv and "--permission-mode" in argv
+    r2 = o.start_session("claude", "alpha", "x", by="owner")
+    assert "--allowedTools" not in o.managed[r2["session"]["id"]].argv

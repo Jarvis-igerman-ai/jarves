@@ -247,18 +247,33 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 
 
 # ---------------------------------------------------------------------- sessions JARVES starts
+def autopilot_allowed_tools(python: str = "") -> list[str]:
+    """Narrow allow rules for an autopilot worker. A headless `claude -p` worker cannot answer a permission prompt: the
+    owner's popup times out while he sleeps and every command outside his settings allow list is denied, so the worker
+    could not run one test. The owner's own list matches only a bare `python`, never the interpreter path a worker
+    actually uses, nor node or sed. These are command PREFIXES only (no bypass flag, no mode change); git push, merges
+    and releases stay on the owner's rules and the popup."""
+    py = [python, python.replace("\\", "/")] if python else []
+    pys = sorted({p for p in py if p})
+    rules = [f"Bash({p}:*)" for p in pys]
+    rules += [f"Bash({c}:*)" for c in ("python", "py", "pytest", "node", "npm", "npx", "jarvis", "ruff", "sed", "cd", "ls")]
+    return rules
+
+
 class ManagedClaude:
     """One `claude -p` stream-json process = one session JARVES started (or resumed). Thread-based reader; the
     callbacks run on the reader thread: on_event(kind, data)."""
 
     def __init__(self, cmd: list[str], cwd: str, *, plugin_dir: str | None, on_event: Callable[[str, dict], None],
                  resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0,
-                 restricted: bool = False) -> None:
+                 restricted: bool = False, allowed_tools: list[str] | None = None) -> None:
         argv = [*cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--permission-mode", "default"]
         self.restricted = restricted
         if restricted:        # a self-diagnosis hand-off (#336 C): the owner's broad allow rules do not apply, merging and pushing are denied
             argv += ["--setting-sources", "project", "--disallowedTools", *RESTRICTED_DENY]
+        if allowed_tools:     # explicit narrow allow rules for a headless worker (no one is there to answer a prompt)
+            argv += ["--allowedTools", *allowed_tools]
         if plugin_dir:
             argv += ["--plugin-dir", plugin_dir]
         if resume:
