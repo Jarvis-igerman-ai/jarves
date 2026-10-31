@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 from . import features as feat
 from . import logs
 from . import browser_liveview as bl
+from . import browser_recording as br
 from .browser import candidates
 from .browser_pilot import PilotError, PilotSession, page_scope
 from .pilot_proxy import PilotProxy
@@ -76,7 +77,7 @@ def kill_tree(pid: int) -> None:
 
 class PlaywrightDriver:
     def __init__(self, proxy: PilotProxy, session_ref: Callable[[], PilotSession | None], *, launch: dict | None = None,
-                 call_timeout: float = CALL_TIMEOUT_S) -> None:
+                 call_timeout: float = CALL_TIMEOUT_S, recorder=None) -> None:
         if os.environ.get("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK"):
             raise DriverError("loopback would bypass the proxy (PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK is set)")
         self.proxy, self.session_ref, self.call_timeout = proxy, session_ref, call_timeout
@@ -92,6 +93,7 @@ class PlaywrightDriver:
         self._closed = False
         self._node_pid = 0
         self.pins: dict = {}
+        self.recorder = recorder                                    # B5: only when the owner opted in for THIS session (and the switch is on)
         self._pw = self._browser = self._ctx = self._page = None
         self._t = threading.Thread(target=self._main, name="pilot-driver", daemon=True)
         self._t.start()
@@ -126,6 +128,8 @@ class PlaywrightDriver:
             self._ctx = self._browser.new_context(service_workers="block", accept_downloads=False, permissions=[],
                                                   viewport={"width": 1024, "height": 768}, locale="en-US")
             self._ctx.route("**/*", self._route)
+            if self.recorder is not None:
+                self._ctx.add_init_script(br.MASK_INIT_SCRIPT)      # password/card/code fields are blanked from the first frame
             self._page = self._ctx.new_page()
             self._page.on("download", lambda d: d.cancel())
             self._page.on("popup", lambda p: p.close())            # no second window: one page, one URL to judge
@@ -137,21 +141,47 @@ class PlaywrightDriver:
             return
         self._ready.set()
         while True:
-            job = self._q.get()
+            try:
+                job = self._q.get(timeout=0.3) if self.recorder is not None else self._q.get()
+            except queue.Empty:
+                self._rec_tick()
+                continue
             if job is None:
                 break
             fn, done, box, deadline = job
             if time.monotonic() > deadline or box.get("cancel"):    # the caller gave up: never run a stale job (a late key press)
                 done.set()
                 continue
+            self._rec_tick()                                        # look for a sensitive field right BEFORE the action, not only between actions
             try:
                 box["r"] = fn()
             except Exception as e:                                  # noqa: BLE001 - the caller decides what to say
                 box["e"] = e
             done.set()
+            self._rec_tick()
+        if self.recorder is not None:
+            try:
+                self.recorder.finish(self._page)
+            except Exception:                                       # noqa: BLE001
+                logs.warn("browser", "BROWSER_RECORDING_FINISH_FAILED", "the recording could not be closed cleanly")
         for closer in (lambda: self._ctx.close(), lambda: self._browser.close(), lambda: self._pw.stop()):
             try:
                 closer()
+            except Exception:                                       # noqa: BLE001
+                pass
+
+    def _rec_tick(self) -> None:
+        """Worker thread only. Records only while the ASSISTANT drives (AGENT); pauses (closes the file) while the owner has taken over, the session
+        is paused/stopped, or the page shows a password / card / code field. A fault here never reaches the pilot and closes any open file."""
+        if self.recorder is None or self._page is None:
+            return
+        try:
+            s = self.session_ref()
+            self.recorder.tick(self._page, s is not None and s.state == "AGENT")      # never while the owner is in control (HUMAN) or paused
+        except Exception:                                           # noqa: BLE001
+            logs.warn("browser", "BROWSER_RECORDING_TICK_FAILED", "a recording check failed; the file is closed")
+            try:
+                self.recorder.close_now(self._page)
             except Exception:                                       # noqa: BLE001
                 pass
 
@@ -253,7 +283,7 @@ class PilotService:
         except Exception:                                           # noqa: BLE001
             return False
 
-    def start(self, url: str, driver_factory: Callable[..., PlaywrightDriver] | None = None) -> dict:
+    def start(self, url: str, driver_factory: Callable[..., PlaywrightDriver] | None = None, *, record: bool = False) -> dict:
         """A pilot on ONE local test page (http://localhost:PORT/...). Local-only: the proxy may reach that port and nothing else."""
         u = urlsplit(url or "")
         if u.scheme != "http" or page_scope(url) != "local" or not u.port or u.username or u.password \
@@ -264,6 +294,8 @@ class PilotService:
             raise PilotError("PILOT_URL_PORT", "that port belongs to a service on this computer (the dashboard, a database, Ollama ...); use your own test page")
         if not self._on("browser_pilot"):
             raise PilotError("BROWSER_PILOT_OFF", "the browser pilot is off (jarvis features on browser_pilot)")
+        if record and not self._on("browser_recording"):
+            raise PilotError("BROWSER_RECORDING_OFF", "recording is off (jarvis features on browser_recording): start without recording or turn it on")
         with self._lock:
             self._stop_locked()
             self._gen += 1
@@ -274,10 +306,17 @@ class PilotService:
         session.local_only = True
         proxy = PilotProxy(session, local_ports=[u.port], public_ok=False)
         proxy.start()
+        recorder = None
         try:
-            driver = (driver_factory or PlaywrightDriver)(proxy, lambda: session)
+            if record:
+                br.purge(self.home)                                 # retention first: old recordings go before a new one starts
+                recorder = br.Recorder(self.home)
+            driver = (driver_factory or PlaywrightDriver)(proxy, lambda: session, **({"recorder": recorder} if recorder else {}))
         except Exception:
             proxy.stop()
+            if recorder is not None:
+                br.RUNNING.discard(recorder.id)                     # a recording that never started is not "running": delete() refuses ids in RUNNING
+                br.delete(self.home, recorder.id)
             raise
         holder["d"] = driver
         session.driver = driver
@@ -300,7 +339,7 @@ class PilotService:
             if gen != self._gen:
                 raise PilotError("PILOT_SUPERSEDED", "the pilot was stopped while it started")
             bl.set_active(bl.LiveView(session, enabled=lambda: self._on("browser_liveview"), takeover_enabled=lambda: self._on("browser_takeover")))
-        return {"started": True, "state": session.state}
+        return {"started": True, "state": session.state, **({"recording": recorder.id} if recorder else {})}
 
     def _stop_locked(self) -> None:
         bl.set_active(None)
@@ -354,7 +393,7 @@ def dashboard_routes(register) -> None:
         if bad:
             return bad
         try:
-            return 200, service(ctx).start(str((body or {}).get("url") or ""))
+            return 200, service(ctx).start(str((body or {}).get("url") or ""), record=(body or {}).get("record") is True)
         except PilotError as e:
             return 409, {"error": e.message, "code": e.code}
         except DriverError:
@@ -363,5 +402,33 @@ def dashboard_routes(register) -> None:
     def stop(ctx, _m, _b):
         bad = local_only(ctx)
         return bad or (200, service(ctx).stop())
+    def running_id(ctx) -> str:
+        d = service(ctx).driver
+        r = getattr(d, "recorder", None)
+        return r.id if r is not None and r.state != "finished" else ""
+
+    def recordings(ctx, _m, _b):
+        bad = local_only(ctx)
+        if bad:
+            return bad
+        br.purge(ctx.home, keep=running_id(ctx))                    # retention also runs whenever the owner looks at the list
+        d = service(ctx).driver
+        r = getattr(d, "recorder", None)
+        return 200, {"recordings": br.list_recordings(ctx.home), "format": br.FORMAT_LABEL, "retention_days": br.RETENTION_DAYS,
+                     "max_total_mb": br.MAX_TOTAL_MB, "enabled": service(ctx)._on("browser_recording"),
+                     "current": (r.view() if r is not None else None), "ffmpeg": br.ffmpeg_ready()}
+
+    def delete_recording(ctx, _m, body):
+        bad = local_only(ctx)
+        if bad:
+            return bad
+        rid = str((body or {}).get("id") or "")
+        if rid and rid == running_id(ctx):
+            return 409, {"error": "this recording is still running: close the pilot first", "code": "RECORDING_RUNNING"}
+        ok = br.delete(ctx.home, rid)
+        return (200, {"deleted": True}) if ok else (404, {"error": "no such recording", "code": "RECORDING_NOT_FOUND"})
+
+    register("GET", r"/api/browser/recordings$", recordings)
+    register("POST", r"/api/browser/recordings/delete$", delete_recording)
     register("POST", r"/api/browser/pilot/start$", start)
     register("POST", r"/api/browser/pilot/stop$", stop)

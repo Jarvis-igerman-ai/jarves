@@ -152,6 +152,8 @@ def plan(home: Path, settings: dict | None = None) -> tuple[list[tuple[Path, str
     for p in sorted(home.rglob("*")):
         rel = p.relative_to(home).as_posix()
         dirs = rel.split("/")[:-1]
+        if rel.startswith("browser/recordings/"):
+            continue            # V7 B5: pilot videos can be hundreds of MB and must not outlive their own retention/delete: never archived (only this folder, not user folders named recordings)
         if any(part in EXCLUDE_DIRS or part.startswith(".restore-staging") for part in dirs):
             continue
         if (dirs[:1] == ["profiles"] or rel == "profiles.json") and not (home / "profile.json").is_file():

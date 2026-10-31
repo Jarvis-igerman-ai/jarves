@@ -80,6 +80,11 @@ td.num, th.num { text-align: end; }
 .pill.low::before { background: var(--warning); }
 .pill.ok::before, .pill.live::before { background: var(--good); }
 .pill.plain::before { display: none; }
+/* B5: the "recording paused" pill is a long sentence: it wraps instead of overflowing a 390 px card, and its dot is dark enough (3:1) on white */
+.pill.rec-paused { white-space: normal; max-width: 100%; }
+.pill.rec-paused::before { background: #9a4a0f; flex: none; }
+@media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .pill.rec-paused::before { background: var(--serious); } }
+:root[data-theme="dark"] .pill.rec-paused::before { background: var(--serious); }
 .est { font-size: 11px; color: var(--muted); border: 1px dashed var(--line); border-radius: 6px; padding: 0 5px;
   margin-inline-start: 6px; vertical-align: middle; }
 button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text);

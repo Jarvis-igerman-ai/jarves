@@ -85,6 +85,7 @@ ADDON_MODULES = (
     "jarves.github_work",
     "jarves.diag.handoff",
     "jarves.browser_liveview",
+    "jarves.browser_recording",
     "jarves.profiles",
     "jarves.selfcheck",
     "jarves.connect",
@@ -113,6 +114,7 @@ SAFE_OFF = frozenset({
     "browser_liveview",
     "browser_phone_view",
     "browser_pilot",
+    "browser_recording",
     "browser_takeover",
     "calendar_write",
     "camera",
@@ -202,6 +204,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "browser_liveview",
         "browser_takeover",
         "browser_phone_view",
+        "browser_recording",
     )),
     ("automation", "אוטומציה", "Automation", (
         "scheduler",
@@ -1415,6 +1418,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     # the browser itself is the installed Edge/Chrome (Windows) or Chromium (Pi), probed by the feature
     "browser": [_mod("playwright.async_api"), _mod("jarves.browser"), _mod("jarves.skills.browser")],
     "browser_phone_view": [_mod("jarves.mobile_browser"), _mod("jarves.browser_liveview"), _data("jarves.guides", "data/browser_pilot.toml")],
+    "browser_recording": [_mod("jarves.browser_recording"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "browser_takeover": [_mod("jarves.browser_liveview"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "browser_liveview": [_mod("jarves.browser_liveview"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "home_setup_cards": [_mod("jarves.home_setup"), _mod("jarves.connect"), _data("jarves.guides", "data/home_setup_cards.toml")],

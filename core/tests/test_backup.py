@@ -74,6 +74,17 @@ def test_backup_contents_and_no_credentials(profile):
     assert man["contains_credentials"] is False and backup.verify(p)["ok"]
 
 
+def test_pilot_recordings_are_never_archived(profile):
+    d = profile / "browser" / "recordings" / "rec-0123456789ab"
+    d.mkdir(parents=True)
+    (d / "part-001.webm").write_bytes(b"\x1aE\xdf\xa3" + b"x" * 2000)
+    (d / "manifest.json").write_text("{}", encoding="utf-8")
+    (profile / "browser" / "sites.json").write_text("{}", encoding="utf-8")            # the rest of browser/ is still saved
+    got = names(backup.create(profile, "manual"))
+    assert not any("recordings" in n or n.endswith(".webm") for n in got)
+    assert "data/browser/sites.json" in got
+
+
 def test_paired_device_tokens_are_never_archived(profile):
     """Reviewer item 14: dashboard_devices.json holds device token HASHES and per-device CSRF secrets. It must be
     excluded from the archive (like secrets.env), not shipped where a backup could be shared."""
@@ -343,3 +354,13 @@ def test_cli_backup_restore_usage(profile, capsys, monkeypatch):
     assert cli.main(["usage", "thresholds", "70,100"]) == 0
     out = capsys.readouterr().out
     assert "PASSED" in out and "Unknown" in out and "[70, 100]" in out
+
+
+def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(profile):
+    (profile / "workspace" / "recordings").mkdir(parents=True)
+    (profile / "workspace" / "recordings" / "x.txt").write_text("mine", encoding="utf-8")
+    (profile / "browser" / "recordings" / "rec-0123456789ab").mkdir(parents=True)
+    (profile / "browser" / "recordings" / "rec-0123456789ab" / "part-001.webm").write_bytes(b"x" * 100)
+    got = names(backup.create(profile, "manual"))
+    assert "data/workspace/recordings/x.txt" in got
+    assert not any(n.startswith("data/browser/recordings/") for n in got)

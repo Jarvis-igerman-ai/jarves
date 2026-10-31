@@ -85,14 +85,51 @@ function liveViewCard() {
     "aria-label": tx("כתובת דף בדיקה מקומי", "Local test page address"), style: "min-width:260px" });
   const pilotStart = el("button", { type: "button", onclick: async () => {
     msg.textContent = "";
-    try { await api("/api/browser/pilot/start", { method: "POST", body: JSON.stringify({ url: urlBox.value.trim() }) });
-      msg.textContent = tx("פיילוט נפתח בדף הבדיקה. אפשר ללחוץ על תצוגה חיה.", "Pilot started on the test page. You can press Live view."); }
+    try { const r = await api("/api/browser/pilot/start", { method: "POST", body: JSON.stringify({ url: urlBox.value.trim(), record: recOn.checked }) });
+      msg.textContent = tx("פיילוט נפתח בדף הבדיקה. אפשר ללחוץ על תצוגה חיה.", "Pilot started on the test page. You can press Live view.")
+        + (r && r.recording ? " " + tx("ההקלטה פועלת (נעצרת לבד בשדות סיסמה, כרטיס וקוד).", "Recording is on (it pauses by itself on password, card and code fields).") : "");
+      loadRecs(); }
     catch (e) { msg.textContent = e.message; } } }, tx("הפעלת פיילוט בדף בדיקה", "Start a test pilot"));
+  // B5: recording is a second, per-session choice on top of its own switch (both default OFF).
+  const recOn = el("input", { type: "checkbox", id: "rec-on", disabled: true, "aria-describedby": "rec-reason" });
+  const recBadge = el("span", { id: "rec-badge", role: "status", "aria-live": "polite" });
+  const recReason = el("div", { class: "small muted", id: "rec-reason" });
+  const recBox = el("div", { class: "small", id: "rec-list" });
+  const stateText = (st) => ({ recording: tx("מקליט", "recording"), paused: tx("מושהה", "paused"), finished: tx("הסתיים", "finished"), waiting: tx("ממתין", "waiting") }[st] || st);
+  // A persistent badge (text, not colour only): what the recorder is doing right now, also while the live view is open.
+  let badgeKey = "";
+  const showBadge = (cur) => {
+    const key = !cur || cur.state === "finished" ? "" : cur.state === "recording" ? "rec" : "paused";
+    if (key === badgeKey) return;                           // touch the live region only when the state changes (no repeated announcements)
+    badgeKey = key;
+    recBadge.replaceChildren(...(key === "" ? [] : [key === "rec" ? pill("fail", tx("● מקליט", "● REC"))
+      : el("span", { class: "pill medium rec-paused" }, tx("הקלטה מושהית (שדה רגיש או שליטה ידנית)", "Recording paused (sensitive field or you are in control)"))]));
+  };
+  const loadRecs = async () => {
+    try {
+      const d = await api("/api/browser/recordings");
+      recOn.disabled = !d.enabled || !d.ffmpeg; if (recOn.disabled) recOn.checked = false;
+      showBadge(d.current);
+      const rows = (d.recordings || []).map((m) => el("li", {}, el("code", {}, m.id), " ", stateText(m.state), " · " + tx("{n} קבצים", "{n} file(s)").replace("{n}", (m.segments || []).length) + " · " + Math.round((m.bytes || 0) / 1024) + " KB · ",
+        el("button", { type: "button", class: "ghost", disabled: !!(d.current && d.current.id === m.id && d.current.state !== "finished"), "aria-label": tx("מחיקת ההקלטה {id}", "Delete recording {id}").replace("{id}", m.id), onclick: async () => {
+          if (!window.confirm(tx("למחוק את ההקלטה הזאת לצמיתות?", "Delete this recording for good?"))) return;
+          try { await api("/api/browser/recordings/delete", { method: "POST", body: JSON.stringify({ id: m.id }) }); loadRecs(); }
+          catch (e) { msg.textContent = e.message; } } }, tx("מחיקה", "Delete"))));
+      recReason.replaceChildren(!d.enabled ? el("span", {}, tx("ההקלטה כבויה. להדלקה: ", "Recording is off. To turn it on: "), el("code", { dir: "ltr" }, "jarvis features on browser_recording"))
+        : !d.ffmpeg ? el("span", {}, tx("חסר כלי הווידאו של Playwright. להתקנה: ", "Playwright's video helper is missing. To install it: "), el("code", { dir: "ltr" }, "python -m playwright install ffmpeg"))
+        : el("span", {}, tx("וידאו WebM בלי קול, 1024x768 ב-10 פריימים לשנייה, קובץ לכל קטע רצוף; מראה את תוכן הדף ואינו מוגן מפני שינוי", "WebM video, no audio, 1024x768 at 10 frames a second, one file per uninterrupted stretch; shows page content, not tamper-proof") + ". " + tx("נשמר {d} ימים, עד {m} MB.", "Kept {d} days, up to {m} MB.").replace("{d}", d.retention_days).replace("{m}", d.max_total_mb)));
+      recBox.replaceChildren(rows.length ? el("ul", {}, rows) : el("div", { class: "muted" }, tx("אין הקלטות.", "No recordings.")));
+    } catch (e) { recBox.replaceChildren(); }
+  };
+  loadRecs();
+  const recTimer = setInterval(() => { if (!document.getElementById("rec-badge")) clearInterval(recTimer); else loadRecs(); }, 3000);
   const pilotStop = el("button", { type: "button", onclick: async () => {
     try { await api("/api/browser/pilot/stop", { method: "POST", body: "{}" }); img.style.display = "none"; end(tx("הפיילוט נסגר.", "The pilot is closed.")); }
     catch (e) { msg.textContent = e.message; } } }, tx("סגירת הפיילוט", "Close the pilot"));
   return el("div", { class: "card", id: "live-view" }, el("h2", {}, tx("תצוגה חיה (בטא)", "Live view (beta)")),
     el("div", { class: "row" }, urlBox, pilotStart, pilotStop),
+    el("div", { class: "row small", style: "flex-wrap:wrap" }, el("label", { for: "rec-on", style: "max-width:100%" }, recOn, " ", tx("להקליט את הסשן הזה כוידאו (נעצר בשדות סיסמה, כרטיס וקוד; טקסט שמוצג בדף כן מוקלט, לכן רק דפי בדיקה)", "Record this session as video (pauses on password, card and code fields; text simply shown on a page IS recorded, so test pages only)")), recBadge),
+    recReason, recBox,
     el("div", { class: "small muted" }, tx("רק דפי בדיקה מקומיים. הצפייה היא לקריאה בלבד; רק אתם יכולים לקחת שליטה, והסוכן נעול בחוץ בזמן זה.", "Local test pages only. Viewing is read only; only you can take over, and the assistant is locked out while you do.")),
     el("div", { class: "row" }, start, takeBtn, giveBtn, contBtn, stop), msg, clockEl, img,
     el("div", { class: "row" }, typeBox, el("label", { for: "live-secret", class: "small" }, secret, " ", tx("הצגת מה שמוקלד", "Show what I type")), typeBtn, ...keyBtns));
