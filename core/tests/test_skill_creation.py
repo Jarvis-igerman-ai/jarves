@@ -262,6 +262,16 @@ def test_prompt_injection_wording_is_flagged(tmp_path):
     assert rep["ok"] and any("injection" in w for w in rep["warnings"])
 
 
+def test_secret_in_draft_is_not_stored_in_clear_text(tmp_path):
+    key = "sk-" + "A1b2C3d4E5f6G7h8"
+    _, mgr = setup(tmp_path)
+    rep = mgr.propose(_md(name="notes_helper", body=f"Use key {key} here."))
+    d = mgr.drafts / "notes_helper"
+    assert key not in (d / "SKILL.md").read_text(encoding="utf-8")
+    assert key not in json.dumps(rep) and any("secret" in w for w in rep["warnings"])
+    assert key not in mgr.draft("notes_helper")["skill_md"]
+
+
 async def _run(code, tool="evil_run", broker=None, **kw):
     async def deny(op, args):
         raise PermissionError(f"{op} not granted")
