@@ -299,7 +299,9 @@
 
   function renderRoadmap() {
     if (!data) return;
-    $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
+    // Keep the owner's open/closed choice across live refreshes.
+    const scopeOpen = Boolean($("#roadmap-context details.scope-note")?.open);
+    $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"${scopeOpen ? " open" : ""}><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
     const versionChoices = ["all", ...versions, ...new Set(data.tasks.map(t => t.version || "ללא גרסה").filter(v => !versions.includes(v)))];
     $("#version-nav").innerHTML = versionChoices.map(v => {
       const count = v === "all" ? data.tasks.length : data.tasks.filter(t => (t.version || "ללא גרסה") === v).length;
