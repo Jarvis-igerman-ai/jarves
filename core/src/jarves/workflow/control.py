@@ -45,7 +45,8 @@ def exclusive(path: Path):
 
 
 def task_context(store: Store, task: dict) -> dict:
-    return {**task, "owner_decisions": [{k: q.get(k) for k in ("title", "answer", "checkpoint", "decided_at")}
+    return {**task, "owner_decisions": [{**{k: q.get(k) for k in ("title", "answer", "checkpoint")},
+                                         "decided_at": q.get("answered_at")}
                                        for q in store.snapshot()["questions"]
                                        if q["task_id"] == task["id"] and q["status"] == "answered"]}
 
@@ -147,7 +148,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                 if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
                     sync_thread = threading.Thread(target=sync_background, daemon=True, name="workflow-github-read")
                     sync_thread.start()
-                    next_sync = now + 300
+                    next_sync = now + 1800
                 stop.wait(interval)
         except KeyboardInterrupt:
             pass

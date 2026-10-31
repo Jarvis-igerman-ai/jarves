@@ -14,6 +14,9 @@ if ($Remove) {
     exit 0
 }
 $python = (Get-Command $PythonExe -ErrorAction Stop).Source
+if ($python -like "*\WindowsApps\*") {
+    throw "Resolved interpreter '$python' is the Microsoft Store alias, which cannot run the observer. Pass a real interpreter, e.g. -PythonExe (py -3.12 -c 'import sys;print(sys.executable)') or the venv python."
+}
 $entry = Join-Path $PSScriptRoot "workflow_console.py"
 if (-not (Test-Path $entry)) { throw "Workflow entry point not found." }
 if ($Port -lt 1 -or $Port -gt 65535) { throw "A fixed port is required." }
@@ -23,6 +26,9 @@ if ($Install) {
         if ($value.Contains('"')) { throw "Installation paths may not contain a quote." }
     }
     $arguments = '"' + $entry + '" supervise --home "' + $WorkflowHome + '" --profile-home "' + $ProfileHome + '" --port ' + $Port
+    # Use pythonw.exe beside python.exe so logon starts no console window.
+    $pythonw = Join-Path (Split-Path $python) "pythonw.exe"
+    if (Test-Path $pythonw) { $python = $pythonw }
     $action = New-ScheduledTaskAction -Execute $python -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable

@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .hooks import EVENTS
+from .hooks import EVENTS, console_command
 
 START, END = "<!-- JARVES-WORKFLOW-START -->", "<!-- JARVES-WORKFLOW-END -->"
 OBSOLETE = ("5 nightly", "five nightly", "no idle agents", "Keep 5-8", "one AskUserQuestion batch", "agentN_STATE.md")
@@ -28,12 +28,21 @@ RETIRED_RULE = re.compile(
     r"(?:At most )?one AskUserQuestion batch(?: \(<= ?4\))? a day)[.!]?", re.I)
 
 
-def local_instructions(home: Path) -> str:
-    return (f"{START}\n@AGENTS.md\n@docs/workflow/OPERATING_MODEL.md\n\n"
+# Events whose hook output Claude Code does not use: run in the background, never block a tool call.
+# SessionStart/SubagentStart return context and Stop returns a decision, so they stay synchronous.
+ASYNC_EVENTS = frozenset({"UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+                          "Notification", "SessionEnd", "SubagentStop"})
+
+
+def local_instructions(home: Path, root: Path | None = None, python: str = "python") -> str:
+    # AGENTS.md and OPERATING_MODEL.md are already imported by the tracked CLAUDE.md.
+    prefix = console_command(root, home, python) if root else "python core/tools/workflow_console.py"
+    return (f"{START}\n"
             "# Local workflow connection\n"
             f"Private workflow directory: {home}\n"
             "Claude Code is the manager and uses its native subagents. Codex can use the same task/evidence CLI.\n"
-            "Get current state with `python core/tools/workflow_console.py status` using --home above.\n"
+            "Run the workflow CLI with exactly this prefix (the bare `python` may be a broken Store alias): "
+            f"`{prefix} status`.\n"
             "When the owner is present, use the live question inbox interactively without the old once-a-day cap.\n"
             "When absent, preserve pending questions and checkpoint only their dependent work; continue other authorised tasks.\n"
             "No answer is never approval. Stop/merge/CI green do not mean verified or released.\n"
@@ -64,7 +73,10 @@ def settings_with_hooks(settings: dict, root: Path, home: Path, python: str) -> 
                 entry["hooks"] = remaining
                 retained.append(entry)
         entries[:] = retained
-        entries.append({"hooks": [{"type": "command", "command": command, "timeout": 3}]})
+        hook = {"type": "command", "command": command, "timeout": 3}
+        if event in ASYNC_EVENTS:
+            hook["async"] = True
+        entries.append({"hooks": [hook]})
     return result
 
 
@@ -79,15 +91,15 @@ def prepare(root: Path, home: Path, python: str = sys.executable) -> list[tuple[
     if old and START not in old:
         retained = "".join(line for line in old.splitlines(True)
                            if not RETIRED_RULE.fullmatch(line.strip().removeprefix("- ").removeprefix("* ")))
-        new = (retained.rstrip() + "\n\n" if retained.strip() else "") + local_instructions(home)
+        new = (retained.rstrip() + "\n\n" if retained.strip() else "") + local_instructions(home, root, python)
     elif START in old:
         before, _, rest = old.partition(START)
         _, marker, after = rest.partition(END)
         if not marker:
             raise ValueError("local workflow instruction block is malformed")
-        new = before + local_instructions(home) + after.lstrip("\n")
+        new = before + local_instructions(home, root, python) + after.lstrip("\n")
     else:
-        new = local_instructions(home)
+        new = local_instructions(home, root, python)
     settings_file = root / ".claude" / "settings.local.json"
     raw = settings_file.read_text(encoding="utf-8") if settings_file.exists() else "{}\n"
     settings = json.loads(raw)

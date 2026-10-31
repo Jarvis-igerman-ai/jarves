@@ -109,6 +109,9 @@ def main(argv=None) -> int:
             result = store.heartbeat(a.agent, note=a.note, progress=a.progress)
         elif a.action == "next":
             result = store.claim(a.agent, task_id=a.task or None)
+            if result:
+                from .control import task_context
+                result = task_context(store, result)
         elif a.action == "create":
             result = store.create_task({**({"id": a.id} if a.id else {}), "title": a.title, "version": a.version or "V5",
                                        "lane": "features" if a.lane == "any" else a.lane,

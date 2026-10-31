@@ -22,6 +22,7 @@ IMPLEMENTATIONS = {"planned", "in_progress", "merged"}
 VALIDATION_RANK = {"not_run": 0, "automated": 1, "app": 2, "device": 3}
 DELIVERIES = {"none", "candidate", "beta", "stable"}
 OWNER_TTL_S = 600
+TOOL_FLIGHT_S = 900
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 ACTIVE_QUESTIONS = {"pending", "deferred"}
 
@@ -138,9 +139,13 @@ class Store:
     def _set_meta(db, key, value):
         db.execute("INSERT OR REPLACE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value, ensure_ascii=False)))
 
+    def _bump(self, db):
+        """Revision-only change: live views refresh, but no event row is written."""
+        self._set_meta(db, "revision", self._meta(db, "revision") + 1)
+
     def _event(self, db, kind, summary):
         db.execute("INSERT INTO workflow_events(ts,kind,summary) VALUES (?,?,?)", (self.clock(), kind, summary[:1000]))
-        self._set_meta(db, "revision", self._meta(db, "revision") + 1)
+        self._bump(db)
         db.execute("DELETE FROM workflow_events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events)")
 
     @staticmethod
@@ -289,8 +294,12 @@ class Store:
             self._event(db, "agent_registered", f"Registered {agent['label']}")
         return agent
 
-    def observe_agent(self, agent_id, status, note=""):
-        """Native lifecycle telemetry; it does not claim work or attest completion."""
+    def observe_agent(self, agent_id, status, note="", tool=None):
+        """Native lifecycle telemetry; it does not claim work or attest completion.
+
+        tool="start" marks a tool call in flight (a long Bash call emits no hooks);
+        tool="end" clears it.
+        """
         _choice(status, {"idle", "running", "blocked", "offline"}, "observed status")
         note = _text(note, "note", maximum=1000, empty=True)
         with self._tx() as db:
@@ -299,10 +308,17 @@ class Store:
                 # Task ownership changes only through the ledger's checkpoint/evidence paths.
                 agent["note"] = note
                 agent["heartbeat_at"] = self.clock()
+                # Live activity of a task owner whose task is still running revives a stale flag.
+                if agent["status"] in {"offline", "blocked"} and self._get(db, "task", agent["task_id"])["state"] == "running":
+                    agent["status"] = "running"
             else:
                 agent.update(status=status, note=note, heartbeat_at=self.clock(), progress_at=self.clock())
+            if tool == "start":
+                agent["tool_started_at"] = self.clock()
+            elif tool == "end":
+                agent.pop("tool_started_at", None)
             self._put(db, "agent", agent)
-            self._event(db, "native_lifecycle", f"{agent['label']}: {status}")
+            self._bump(db)
         return agent
 
     def manager_continue(self, agent_id):
@@ -340,7 +356,7 @@ class Store:
             if agent["status"] == "offline" and not agent.get("task_id"):
                 agent["status"] = "idle"
             self._put(db, "agent", agent)
-            self._event(db, "heartbeat", f"Heartbeat from {agent['label']}")
+            self._bump(db)
         return agent
 
     def claim(self, agent_id, task_id=None):
@@ -546,11 +562,21 @@ class Store:
         with self._tx() as db:
             now = self.clock()
             alerts = []
+            changed = False
             # Only the actual external supervisor writes its heartbeat. A web
             # refresh/dispatch check must not impersonate a running watchdog.
             for agent in self._all(db, "agent"):
-                stale = now - agent["heartbeat_at"] > stale_s
+                # A tool call in flight (long Bash/tests) emits no hook events; allow up to 15 min.
+                in_flight = now - agent.get("tool_started_at", -TOOL_FLIGHT_S) < TOOL_FLIGHT_S
+                stale = now - agent["heartbeat_at"] > stale_s and not in_flight
                 stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_s
+                if stale and not agent.get("task_id") and not stuck:
+                    # A finished agent/ended session is simply offline; nothing to alert about.
+                    if agent["status"] != "offline":
+                        agent["status"] = "offline"
+                        self._put(db, "agent", agent)
+                        changed = True
+                    continue
                 if stale or stuck:
                     reason = "worker_offline" if stale else "worker_stalled"
                     alerts.append({"kind": reason, "summary": f"{agent['label']}: {'heartbeat expired' if stale else 'no progress'}",
@@ -580,8 +606,11 @@ class Store:
             if not self._all(db, "agent") and any(self._ready(db, t) for t in tasks):
                 alerts.append({"kind": "no_workers", "summary": "Ready work exists but no workers are registered",
                                "task_id": None, "agent_id": None})
-            self._set_meta(db, "alerts", alerts)
-            self._event(db, "supervisor_tick", f"Supervisor checked work: {len(alerts)} alerts")
+            if alerts != self._meta(db, "alerts"):
+                self._set_meta(db, "alerts", alerts)
+                self._event(db, "supervisor_tick", f"Supervisor checked work: {len(alerts)} alerts")
+            elif changed:
+                self._bump(db)
         return alerts
 
     def set_source(self, data):
@@ -635,12 +664,16 @@ class Store:
         if type(heartbeat_at) not in (int, float) or not math.isfinite(heartbeat_at):
             raise ValueError("invalid supervisor heartbeat")
         with self._tx() as db:
-            supervisor = {**self._meta(db, "supervisor"), **data,
+            previous = self._meta(db, "supervisor")
+            supervisor = {**previous, **data,
                           "heartbeat_at": min(heartbeat_at, self.clock()), "status": status}
             if len(json.dumps(supervisor)) > 16000:
                 raise ValueError("supervisor metadata too large")
             self._set_meta(db, "supervisor", supervisor)
-            self._event(db, "supervisor_status", f"Supervisor {status}")
+            if previous.get("status") != status:
+                self._event(db, "supervisor_status", f"Supervisor {status}")
+            else:
+                self._bump(db)
         return supervisor
 
     def record_event(self, kind, summary):

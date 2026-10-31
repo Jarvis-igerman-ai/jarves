@@ -86,7 +86,9 @@ class WorkflowNativeTests(unittest.TestCase):
         changes = prepare(self.root, self.home, "/python")
         self.assertIn("Use concise Hebrew.", changes[0][2])
         self.assertNotIn("Require 5 nightly", changes[0][2])
-        self.assertIn("@AGENTS.md", changes[0][2])
+        self.assertNotIn("\n@AGENTS.md", changes[0][2])
+        self.assertIn("workflow_console.py", changes[0][2])
+        self.assertIn('"/python"', changes[0][2])
         self.assertEqual(local.read_text(encoding="utf-8"), old)
         self.assertFalse((self.root / ".claude" / "settings.local.json").exists())
 
@@ -121,3 +123,24 @@ class WorkflowNativeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkflowHookSettingsTests(unittest.TestCase):
+    def test_async_only_for_events_with_unused_output_and_replacement_is_idempotent(self):
+        root, home = Path("/repo"), Path("/home")
+        once = settings_with_hooks({}, root, home, "/py")
+        twice = settings_with_hooks(once, root, home, "/py")
+        self.assertEqual(once, twice)
+        for event, entries in twice["hooks"].items():
+            hook = entries[0]["hooks"][0]
+            self.assertEqual(hook.get("async", False), event not in {"SessionStart", "SubagentStart", "Stop"}, event)
+            self.assertEqual(len(entries), 1)
+
+
+class WorkflowExactPythonTests(WorkflowNativeTests):
+    def test_session_start_context_gives_exact_interpreter_prefix(self):
+        import sys
+        context = self.event("SessionStart")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f'"{sys.executable}"', context)
+        self.assertIn("workflow_console.py", context)
+        self.assertIn(f'--home "{self.home}"', context)

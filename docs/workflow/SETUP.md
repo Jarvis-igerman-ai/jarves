@@ -14,6 +14,15 @@ python core/tools/workflow_console.py bootstrap --repo-root . --apply
 python core/tools/workflow_console.py supervise
 ```
 
+If `python` is the Microsoft Store alias (`...\WindowsApps\python.exe`), use a real interpreter
+path instead, such as `py -3.12` or the venv python. The hooks and the worker context already
+embed the exact interpreter and script path that bootstrap ran with. Observer hooks that
+return nothing to Claude (prompt, tool, notification, session end, subagent stop) are
+installed with `"async": true`, so they never block a tool call; SessionStart, SubagentStart
+and Stop stay synchronous. A tool call in flight (for example a long test run) keeps its
+worker alive for up to 15 minutes without new hook events. The supervisor reads public
+GitHub metadata every 30 minutes (the unauthenticated limit is 60 requests/hour).
+
 Apply checks Claude 2.1.271+, backs up changed instructions, removes only recognised
 standalone retired workflow rules, preserves unrelated lines/settings and sibling hooks, merges observer
 hooks and locally ignores `CLAUDE.local.md` / `.claude/settings.local.json`.
@@ -39,6 +48,9 @@ JARVES, `jarvis workflow ...` is equivalent. For custom state use the same
 ```powershell
 powershell -File core/tools/workflow_service.ps1 -Install -PythonExe (Get-Command python).Source
 ```
+
+The installer refuses a `WindowsApps` interpreter and prefers `pythonw.exe` beside the
+chosen `python.exe`, so logon opens no console window.
 
 This explicitly installs/starts a per-user Task Scheduler task. Bootstrap does
 not install it. Verify on the PC: close Claude and check the observer; stop the

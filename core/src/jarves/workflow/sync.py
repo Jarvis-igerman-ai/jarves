@@ -69,6 +69,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
     store.seed_plan(plan)
     issues = {int(x["number"]): x for x in snapshot.get("issues", [])}
     mapped, unmapped = set(), []
+    existing = {t["id"]: t for t in store.snapshot()["tasks"]}
     for version in plan["versions"]:
         for requirement in version["requirements"]:
             numbers = requirement.get("issue_numbers", [])
@@ -78,14 +79,17 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
             if not numbers or missing:
                 unmapped.append(requirement["id"])
             linked = [p for p in snapshot.get("prs", []) if set(p.get("linked_issues", [])) & set(numbers)]
-            store.update_metadata(requirement["id"], {
+            changes = {
                 "source_issues": rows, "source_prs": linked,
                 "source_closed": bool(numbers and len(rows) == len(numbers) and all(x["state"] == "closed" for x in rows)),
                 "source_synced_at": store.clock(),
                 "mapping_note": "No granular issue mapped" if not numbers else
                                 "Missing GitHub metadata; state remains unknown" if missing else
                                 "Issue/PR metadata is not installed-app verification",
-            })
+            }
+            current = existing.get(requirement["id"], {})
+            if any(current.get(k) != v for k, v in changes.items() if k != "source_synced_at"):
+                store.update_metadata(requirement["id"], changes)
     source = {"mode": "github", "sha": snapshot.get("sha", ""), "synced_at": store.clock(),
               "unmapped": unmapped, "truncated": bool(snapshot.get("truncated")),
               "issue_count": len(issues), "open_bugs": sum(x["state"] == "open" and "bug" in x["labels"] for x in issues.values()),
