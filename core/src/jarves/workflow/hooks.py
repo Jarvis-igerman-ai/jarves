@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -42,7 +43,17 @@ def in_project(cwd: str, root: Path) -> bool:
         return False
 
 
-def observe(store: Store, payload: dict, root: Path) -> dict:
+def _managed(store: Store, agent_id: str | None) -> bool:
+    """An autopilot-started worker: its manager hooks belong to the ledger agent the autopilot made."""
+    if not agent_id:
+        return False
+    try:
+        return any(a["id"] == agent_id and a.get("autopilot") for a in store.snapshot()["agents"])
+    except (OSError, ValueError):
+        return False
+
+
+def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
     event = payload.get("hook_event_name", "")
     if event not in EVENTS or not in_project(str(payload.get("cwd", "")), root):
         return {}
@@ -61,11 +72,16 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
     if not isinstance(parent_agent, str) or len(parent_agent) > 200:
         parent_agent = "manager"
     parent = "claude-" + hashlib.sha256(f"{session}:{parent_agent}".encode()).hexdigest()[:20] if subagent != "manager" else ""
+    managed = subagent == "manager" and _managed(store, workflow_agent)
+    if managed:
+        # Autopilot-started worker: attribute to its ledger agent; no second native identity.
+        ident = workflow_agent
     # Native session identities are deliberately separate from attachable bridge sessions.
-    store.register_agent({"id": ident, "label": "Claude · " + kind,
-                          "lane": lane, "provider": "claude-native",
-                          "session_id": "native:" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest(),
-                          "project": root.name, "parent_id": parent, "auto_dispatch": False})
+    if not managed:
+        store.register_agent({"id": ident, "label": "Claude · " + kind,
+                            "lane": lane, "provider": "claude-native",
+                            "session_id": "native:" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest(),
+                            "project": root.name, "parent_id": parent, "auto_dispatch": False})
     status = "offline" if event == "SessionEnd" else "idle" if event in {"SubagentStop", "Stop"} else "running"
     note = f"Native Claude event: {event}; completion evidence is tracked separately"
     if event == "Notification":
@@ -88,7 +104,7 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
            details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
         store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
-    if event == "Stop" and subagent == "manager" and payload.get("stop_hook_active") is not True:
+    if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
         ready = store.manager_continue(ident)
         if ready:
             return {"decision": "block", "reason":
@@ -128,7 +144,7 @@ def main(argv=None) -> int:
         if not isinstance(payload, dict):
             return 0
         store = Store(args.home / "workflow.db", timeout_s=0.1)
-        result = observe(store, payload, args.repo_root)
+        result = observe(store, payload, args.repo_root, os.environ.get("JARVES_WORKFLOW_AGENT") or None)
         if result:
             print(json.dumps(result, ensure_ascii=False))
     except (OSError, ValueError, TypeError, KeyError):
