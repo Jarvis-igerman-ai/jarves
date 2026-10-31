@@ -16,6 +16,11 @@ from .store import Store
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")
 
 
+def console_command(root: Path, home: Path, python: str | None = None) -> str:
+    """Exact, copy-pasteable CLI prefix; the bare `python` may be the Windows Store stub."""
+    return f'"{python or sys.executable}" "{Path(root) / "core" / "tools" / "workflow_console.py"}" --home "{home}"'
+
+
 def in_project(cwd: str, root: Path) -> bool:
     """Include real git worktrees of this repo; ignore hooks from other projects."""
     current = Path(cwd).resolve()
@@ -88,7 +93,8 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
         return {"hookSpecificOutput": {"hookEventName": event, "additionalContext":
             "JARVES workflow observer is connected. Follow AGENTS.md and docs/workflow/OPERATING_MODEL.md. "
             f"Your workflow agent ID is {ident}; workflow data directory is {store.path.parent}. "
-            "Use workflow CLI to claim/checkpoint work, record evidence and queue owner planning questions. "
+            "Use workflow CLI to claim/checkpoint work, record evidence and queue owner planning questions; "
+            f"run it exactly as: {console_command(root, store.path.parent)} <command> "
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases."}}
