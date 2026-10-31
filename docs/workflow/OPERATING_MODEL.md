@@ -54,6 +54,8 @@ Ask with options (`--choices`, each with what changes), one recommended option
 and reason, `--why`, `--minutes` and the `--safe-default`. Owner "ask more"
 follow-ups reach the manager once at its next native Stop; answer each with
 `workflow reply --id ID --answer TEXT`. A reply never answers the question.
+A 'Get more info' click sends "Explain this question: ...": reply in the owner's
+language with a plain explanation, numbered steps, each option and the recommendation.
 
 Away: retain the question and usable checkpoint, pause only dependent work and
 release only safely paused resources. Continue other ready tasks. A deferred

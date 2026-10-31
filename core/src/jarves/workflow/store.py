@@ -531,8 +531,7 @@ class Store:
         if type(minutes) is not int or not 0 <= minutes <= 480:
             raise ValueError("minutes must be a whole number between 0 and 480")
         # Optional explanation fields; empty when the asker gave none. None of them is an approval.
-        extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
-                 for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500))}
+        extra = self._explain(data)
         with self._tx() as db:
             task = self._get(db, "task", _id(data.get("task_id")))
             if task.get("quarantined"):
@@ -557,6 +556,50 @@ class Store:
             self._put(db, "question", question)
             self._event(db, "question_asked", title)
         return question
+
+    @staticmethod
+    def _explain(data):
+        """Optional plain-language fields; empty when the asker gave none. None of them is an approval."""
+        extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
+                 for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500),
+                                    ("skip_effect", 1000), ("details", 4000))}
+        steps = data.get("steps", [])
+        if not isinstance(steps, list) or len(steps) > 12:
+            raise ValueError("steps must be a list of at most 12 items")
+        extra["steps"] = [_text(step, "step", maximum=500) for step in steps]
+        kind = data.get("kind", "")
+        if kind not in {"", "owner_gate"}:
+            raise ValueError("unknown question kind")
+        extra["kind"] = kind
+        return extra
+
+    def refresh_gate_question(self, question_id, data):
+        """Rewrite only the display text of a still-pending, older-format owner-gate question.
+
+        It never changes status, answer, choices' meaning, blocking or the task; answered questions stay as they were.
+        """
+        title = _text(data.get("title"), "question title", maximum=500)
+        extra = self._explain(data)
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if not question["id"].startswith("gate-") or question.get("kind") == "owner_gate":
+                return False
+            if question["status"] not in ACTIVE_QUESTIONS:
+                return False
+            question.update(title=title, context=_text(data.get("context", ""), "context", maximum=4000, empty=True),
+                            **extra)
+            if data.get("minutes") is not None:
+                minutes = data["minutes"]
+                if type(minutes) is not int or not 0 <= minutes <= 480:
+                    raise ValueError("minutes must be a whole number between 0 and 480")
+                question["minutes"] = minutes
+            if isinstance(data.get("choices"), list):
+                old_ids = [c["id"] for c in question.get("choices", [])]
+                choices = [self._option(c, n) for n, c in enumerate(data["choices"], 1)]
+                if [c["id"] for c in choices] == old_ids or not old_ids:
+                    question["choices"] = sorted(choices, key=lambda c: not c.get("recommended", False))
+            self._put(db, "question", question)
+        return True
 
     @staticmethod
     def _option(choice, number):
