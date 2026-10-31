@@ -112,6 +112,30 @@
     toastTimer = setTimeout(() => { element.hidden = true; }, error ? 9000 : 4500);
   }
 
+  // #741: a 401/403 means the private session is gone. Stop everything, drop stale data and show ONE notice, never zeros.
+  const OPEN_COMMAND = "jarvis workflow open";
+  let ended = false;
+  function sessionEnded() {
+    if (ended) return;
+    ended = true;
+    data = null;
+    try { stream?.close(); } catch (_) { /* already closed */ }
+    $(".workspace")?.setAttribute("hidden", "");
+    $("#toast")?.setAttribute("hidden", "");
+    const page = document.createElement("main");
+    page.id = "session-ended";
+    page.className = "session-ended";
+    page.setAttribute("role", "alert");
+    page.innerHTML = `<div class="session-ended-card"><span class="empty-icon" aria-hidden="true">◌</span><h1>הסשן הפרטי הסתיים</h1><p>החיבור הפרטי למרכז העבודה פג, למשל אחרי הפעלה מחדש של המשגיח. כדי להמשיך, הריצו את הפקודה הבאה בטרמינל או פתחו את הקישור ש־claude-j הדפיס.</p><div class="session-ended-cmd"><code dir="auto">${esc(OPEN_COMMAND)}</code><button type="button" class="button primary" id="session-ended-copy">העתקת הפקודה</button></div><p class="session-ended-note" id="session-ended-note" aria-live="polite"></p></div>`;
+    document.body.appendChild(page);
+    $("#session-ended-copy").addEventListener("click", async () => {
+      const note = $("#session-ended-note");
+      try { await navigator.clipboard.writeText(OPEN_COMMAND); note.textContent = "הפקודה הועתקה."; }
+      catch (_) { note.textContent = "ההעתקה נחסמה. סמנו את הפקודה והעתיקו ידנית."; }
+    });
+    $("#session-ended-copy").focus();
+  }
+
   async function api(path, body) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -127,7 +151,12 @@
       try { result = await response.json(); } catch { result = {}; }
       if (!response.ok || result.ok === false) {
         const detail = typeof result.error === "string" ? result.error : result.error?.message;
-        if (response.status === 401 || response.status === 403) throw new Error(detail || "נדרש לפתוח את הקישור המאומת שהשירות המקומי הציג.");
+        if (response.status === 401 || response.status === 403) {
+          sessionEnded();
+          const ended = new Error(detail || "נדרש לפתוח את הקישור המאומת שהשירות המקומי הציג.");
+          ended.sessionEnded = true;
+          throw ended;
+        }
         throw new Error(detail || result.message || `הבקשה לא הושלמה (${response.status}).`);
       }
       return result;
@@ -164,6 +193,7 @@
   }
 
   async function refresh() {
+    if (ended) return;
     if (requestInFlight) { refreshAgain = true; return requestInFlight; }
     requestInFlight = (async () => {
       try {
@@ -175,7 +205,7 @@
         connectionState(true);
         renderLiveStatus();
         if (changed) render();
-      } catch (error) { connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error.message); }
+      } catch (error) { if (!error.sessionEnded) connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error.message); }
       finally {
         requestInFlight = null;
         if (refreshAgain) { refreshAgain = false; queueMicrotask(refresh); }
@@ -835,6 +865,7 @@
   document.addEventListener("keydown", renewPresence, {passive: true});
 
   function connectStream() {
+    if (ended) return;
     if (!("EventSource" in window)) return;
     stream = new EventSource("/api/events", {withCredentials: true});
     stream.addEventListener("change", () => refresh());
@@ -851,13 +882,14 @@
     if (token) {
       history.replaceState(null, "", `${location.pathname}${location.search}#overview`);
       try { await api("/api/session", {token}); }
-      catch (error) { connectionState(false, error.message); switchView(); return; }
+      catch (error) { if (error.sessionEnded) return; connectionState(false, error.message); switchView(); return; }
     }
     switchView();
     await refresh();
+    if (ended) return;
     connectStream();
-    setInterval(() => { if (!document.hidden) refresh(); }, 12000);
-    setInterval(() => { renderLiveStatus(); if (lastGoodAt && Date.now() - lastGoodAt > 45000) connectionState(false, "הנתונים לא עודכנו בזמן האחרון."); }, 10000);
+    setInterval(() => { if (!document.hidden && !ended) refresh(); }, 12000);
+    setInterval(() => { if (ended) return; renderLiveStatus(); if (lastGoodAt && Date.now() - lastGoodAt > 45000) connectionState(false, "הנתונים לא עודכנו בזמן האחרון."); }, 10000);
   }
   start();
 })();
