@@ -23,6 +23,13 @@ VALIDATION_RANK = {"not_run": 0, "automated": 1, "app": 2, "device": 3}
 DELIVERIES = {"none", "candidate", "beta", "stable"}
 OWNER_TTL_S = 600
 TOOL_FLIGHT_S = 900
+# A native Claude subagent has no bridge/heartbeat: only hook events. It may think or run a long
+# test without emitting any, so it gets a long grace and is judged alive until its Stop/SubagentStop.
+NATIVE_GRACE_S = 1800
+NATIVE_STUCK_S = 3600
+NATIVE_TOOL_FLIGHT_S = 3600
+ARCHIVE_OFFLINE_S = 6 * 3600
+RECOVERABLE_BLOCKERS = {"worker_offline", "worker_stalled"}
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 ACTIVE_QUESTIONS = {"pending", "deferred"}
 AGENT_RETENTION_S = 86400
@@ -351,8 +358,17 @@ class Store:
                 # Task ownership changes only through the ledger's checkpoint/evidence paths.
                 agent["note"] = note
                 agent["heartbeat_at"] = self.clock()
+                owned = self._get(db, "task", agent["task_id"])
+                if status == "running":
+                    # A hook event from a live native worker is real progress, not only a heartbeat.
+                    agent["progress_at"] = self.clock()
+                    # tick() quarantined this task only because events paused: events resumed, so recover it.
+                    if owned["state"] == "blocked" and owned.get("quarantined") and owned.get("blocker") in RECOVERABLE_BLOCKERS:
+                        owned.update(state="running", quarantined=False, blocker="", updated_at=self.clock())
+                        self._put(db, "task", owned)
+                        self._event(db, "task_recovered", f"{owned['title']}: worker events resumed; quarantine lifted")
                 # Live activity of a task owner whose task is still running revives a stale flag.
-                if agent["status"] in {"offline", "blocked"} and self._get(db, "task", agent["task_id"])["state"] == "running":
+                if agent["status"] in {"offline", "blocked"} and owned["state"] == "running" and status == "running":
                     agent["status"] = "running"
             else:
                 agent.update(status=status, note=note, heartbeat_at=self.clock(), progress_at=self.clock())
@@ -727,10 +743,19 @@ class Store:
             # Only the actual external supervisor writes its heartbeat. A web
             # refresh/dispatch check must not impersonate a running watchdog.
             for agent in self._all(db, "agent"):
-                # A tool call in flight (long Bash/tests) emits no hook events; allow up to 15 min.
-                in_flight = now - agent.get("tool_started_at", -TOOL_FLIGHT_S) < TOOL_FLIGHT_S
-                stale = now - agent["heartbeat_at"] > stale_s and not in_flight
-                stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_s
+                native = agent.get("provider") == "claude-native"
+                # A tool call in flight (long Bash/tests) emits no hook events; allow up to 15 min (native: 1 h).
+                flight = NATIVE_TOOL_FLIGHT_S if native else TOOL_FLIGHT_S
+                in_flight = now - agent.get("tool_started_at", -flight) < flight
+                stale_after = max(stale_s, NATIVE_GRACE_S) if native and agent.get("task_id") else stale_s
+                stuck_after = max(stuck_s, NATIVE_STUCK_S) if native else stuck_s
+                if (native and not agent.get("task_id") and agent["status"] == "offline"
+                        and now - agent["heartbeat_at"] > ARCHIVE_OFFLINE_S):
+                    db.execute("DELETE FROM workflow_records WHERE kind='agent' AND id=?", (agent["id"],))
+                    changed = True
+                    continue
+                stale = now - agent["heartbeat_at"] > stale_after and not in_flight
+                stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_after and not in_flight
                 if stale and not agent.get("task_id") and not stuck and agent["status"] == "blocked":
                     alerts.append({"kind": "worker_waiting_permission",
                                    "summary": f"{agent['label']}: permission prompt pending on Claude's approval surface",
