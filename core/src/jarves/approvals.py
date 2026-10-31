@@ -840,14 +840,16 @@ def detach(svc: ApprovalService | None = None) -> None:
 
 
 def ask_owner(home: Path, prompt: str, *, title: str, why: str = "", kind: str = "tool", risk: str = "high",
-              details: dict | None = None, timeout: float | None = None, pc_only: bool = False) -> tuple[bool, str]:
+              details: dict | None = None, timeout: float | None = None, pc_only: bool = False,
+              typed: bool = False) -> tuple[bool, str]:
     """For a destructive DASHBOARD action (called from the HTTP handler thread, which blocks until the owner
     answers): the same ApprovalService the model tools use shows the popup / tray / face / dashboard banner; the
     request waits up to the popup timeout. (ok, reason): ok only on an explicit approval; a denial, timeout or
     nobody to ask is a refusal and the caller must not act. Without a running Core the request is asked by a
     service of its own (answerable from the dashboard banner or `jarvis approvals approve`)."""
     home = Path(home)
-    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout, pc_only=pc_only)
+    kw = dict(title=title, why=why, kind=kind, risk=risk, details=details, source="dashboard", timeout=timeout, pc_only=pc_only,
+              typed=typed)
     svc = _current
     try:
         if svc is not None and svc.loop is not None and svc.loop.is_running() and svc.home.resolve() == home.resolve():

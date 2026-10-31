@@ -136,7 +136,11 @@ def watchdog_step(store: Store, policy: dict, *, start, stop, notify=None, now: 
             continue
         if agent["status"] != "blocked" and agent["status"] != "offline":
             continue
-        stop(agent)
+        if stop(agent) is False:       # None = a caller with no result to report; False = stop not confirmed
+            raise_alert(store, "stop_unconfirmed", f"{task['title']}: could not stop the stalled session; not restarted",
+                        task_id=task["id"], agent_id=agent["id"], notify=notify)
+            actions.append(f"stop_unconfirmed:{task['id']}")
+            continue
         store.transition(task["id"], {"state": "queued", "recovery_confirmed": True,
                                       "checkpoint": "autopilot: stalled, session stopped"})
         state["restarts"][task["id"]] = count + 1
@@ -256,7 +260,8 @@ def manual_test_step(store: Store) -> list[str]:
     snap = store.snapshot()
     pending = {q["task_id"] for q in snap["questions"] if q["status"] in {"pending", "deferred"}}
     for task in snap["tasks"]:
-        needs = task["required_validation"] == "device" or (task.get("scope") or {}).get("owner_test")
+        scope = task.get("scope")  # plain string ("required") for imported scope, dict for autopilot-made tasks
+        needs = task["required_validation"] == "device" or (isinstance(scope, dict) and scope.get("owner_test"))
         if not needs or task["state"] != "review" or task["id"] in pending:
             continue
         if any(q["id"] == f"manual-{task['id']}" for q in snap["questions"]):

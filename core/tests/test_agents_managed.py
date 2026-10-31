@@ -421,3 +421,43 @@ def test_autopilot_grant_terminal_code_right_wrong_and_no_tty(world, monkeypatch
     o.terminal_ask = lambda *a, **k: True
     assert o.autopilot_op("grant", by="autopilot", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
     assert o.autopilot_op("grant", by="voice", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+
+
+def test_autopilot_grant_keeps_typed_code_without_a_core(world, monkeypatch):
+    """No Core and no TTY: the fallback must still demand the typed code (no downgrade to a plain yes)."""
+    from jarves import approvals as appr
+    o = world["o"]
+    seen = {}
+    monkeypatch.setattr(o, "approvals", None)
+    monkeypatch.setattr(appr, "current", lambda: None)
+    monkeypatch.setattr(appr, "ask_owner", lambda home, prompt, **kw: (seen.update(kw) or (False, "")))
+    assert o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    assert seen.get("typed") is True
+
+
+def test_autopilot_kill_switch_ends_the_grant(world):
+    o, owner = world["o"], world["owner"]
+    assert _grant(o, owner)["ok"]
+    owner.policy = "deny"
+    wf = world["home"] / "workflow"
+    wf.mkdir(exist_ok=True)
+    (wf / "autopilot.json").write_text('{"kill": true}', encoding="utf-8")
+    assert o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)["code"] == "NOT_APPROVED"
+    (wf / "autopilot.json").write_text('{"kill": false}', encoding="utf-8")
+    r = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON, env={"JARVES_WORKFLOW_AGENT": "ap-bugs-1"})
+    assert r["ok"], r
+    # the unconfirmed-start lookup finds exactly that worker's live session
+    assert o.call("find_worker", ref="ap-bugs-1", by="autopilot")["session_id"] == r["session"]["id"]
+    assert o.call("find_worker", ref="ap-other", by="autopilot")["session_id"] == ""
+    o.stop_session(r["session"]["id"], by="autopilot")
+
+
+def test_autopilot_notify_op_reaches_the_owner_channel(world):
+    o = world["o"]
+    got = []
+    old, o.notify = o.notify, None
+    assert o.call("notify", text="x", kind="autopilot_alert", by="autopilot")["ok"] is False
+    o.notify = lambda en, he, kind: got.append((en, kind))
+    assert o.call("notify", text="idle with work", kind="autopilot_alert", by="autopilot")["ok"] is True
+    assert got == [("idle with work", "autopilot_alert")]
+    o.notify = old

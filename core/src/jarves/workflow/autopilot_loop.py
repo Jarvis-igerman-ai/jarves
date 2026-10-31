@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -22,8 +23,10 @@ from .store import Store
 AGENT_PREFIX = "ap-"
 START_GRACE_S = 300          # a claim with no linked session after this long is an unconfirmed start
 PAUSE_S = 600
+START_TIMEOUT_S = 240
 CLEAN_REFUSALS = {"NOT_ALLOWED_PROJECT", "BUDGET_REACHED", "PROVIDER_MISSING", "AUTH_REQUIRED", "NO_CORE",
                   "MODEL_NOT_ALLOWED", "SECOND_WRITER", "error"}
+log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
@@ -41,10 +44,12 @@ def bridge_notify(profile_home: Path, kind: str, text: str) -> None:
     """Best effort owner push through the running Core; the console alert list is the reliable channel."""
     try:
         from ..orchestrator.bridge import try_request
-        try_request(profile_home, "call", timeout=10, name="notify",
-                    args={"kind": f"autopilot_{kind}", "text": text[:500], "by": "autopilot", "lang": "en"})
+        r = try_request(profile_home, "call", timeout=10, name="notify",
+                        args={"kind": f"autopilot_{kind}", "text": text[:500], "by": "autopilot", "lang": "en"})
+        if not r or not r.get("ok"):
+            log.warning("autopilot owner notify not delivered (%s): %s", kind, (r or {}).get("code", "no Core"))
     except Exception:  # noqa: BLE001
-        pass
+        log.exception("autopilot owner notify failed (%s)", kind)
 
 
 # ---- production bridge adapters --------------------------------------------------------------------
@@ -56,11 +61,19 @@ def bridge_start(profile_home: Path, **req) -> dict | None:
     except BridgeError:
         return {"ok": False, "code": "NO_CORE", "text": "JARVES Core is not running"}
     try:
-        return client.request("call", timeout=60, name="start", args={**req, "by": "autopilot", "lang": "en"})
+        # Longer than the worst case inside start (git fetch 60 s + rev-parse 20 s + worktree add 120 s).
+        return client.request("call", timeout=START_TIMEOUT_S, name="start", args={**req, "by": "autopilot", "lang": "en"})
     except BridgeError:
         return None
     finally:
         client.close()
+
+
+def bridge_find(profile_home: Path, agent_id: str) -> str:
+    """The live session the Core started for this workflow agent ("" when none or no Core)."""
+    from ..orchestrator.bridge import try_request
+    r = try_request(profile_home, "call", timeout=15, name="find_worker", args={"ref": agent_id, "by": "autopilot"})
+    return str((r or {}).get("session_id") or "") if r and r.get("ok") else ""
 
 
 def bridge_stop(profile_home: Path, session_id: str) -> dict | None:
@@ -115,7 +128,7 @@ def _pick(snapshot: dict, policy: dict, lane: str) -> dict | None:
 
 
 def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=bridge_start, stop=bridge_stop,
-         notify=bridge_notify, force: bool = False) -> list[dict]:
+         notify=bridge_notify, find=bridge_find, force: bool = False) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
     if not policy.get("enabled"):
@@ -125,7 +138,7 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                return _step(store, Path(profile_home), policy, start, stop, notify, force)
+                return _step(store, Path(profile_home), policy, start, stop, notify, force, find)
         except OSError:
             return []          # another process is stepping
     finally:
@@ -137,14 +150,31 @@ def step_safe(store: Store, profile_home: Path, **kw) -> list[dict]:
     try:
         return step(store, profile_home, **kw)
     except Exception as exc:  # noqa: BLE001
+        log.exception("autopilot step failed")
         try:
-            store.record_event("autopilot_error", f"autopilot step failed: {type(exc).__name__}")
+            store.record_event("autopilot_error", f"autopilot step failed: {type(exc).__name__}: {str(exc)[:200]}")
         except Exception:  # noqa: BLE001
             pass
         return []
 
 
-def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]:
+def _unconfirmed(store, profile_home, agent_id, task_id, find, actions) -> None:
+    """A start with no answer may still be running. Adopt that session so nothing runs untracked; quarantine
+    (never retry) only when the Core has no live session for this worker."""
+    try:
+        sid = find(profile_home, agent_id) if find else ""
+    except Exception:  # noqa: BLE001
+        log.exception("autopilot could not look up the unconfirmed worker %s", agent_id)
+        sid = ""
+    if sid:
+        store.link_session(agent_id, sid, provider="claude")
+        actions.append({"task_id": task_id, "agent": agent_id, "action": "started", "session": sid, "adopted": True})
+        return
+    store.quarantine(task_id, "Autopilot start unconfirmed; check the original session before retrying")
+    actions.append({"task_id": task_id, "action": "start_unconfirmed"})
+
+
+def _step(store, profile_home, policy, start, stop, notify, force, find=None) -> list[dict]:
     actions: list[dict] = []
     state = _load(store)
     now = store.clock()
@@ -163,8 +193,7 @@ def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]
         if tid and not agent.get("session_id") and now - agent.get("progress_at", now) > START_GRACE_S:
             task = next(t for t in snap["tasks"] if t["id"] == tid)
             if task["state"] == "running":
-                store.quarantine(tid, "Autopilot start unconfirmed (no session linked); inspect before retrying")
-                actions.append({"task_id": tid, "action": "start_unconfirmed"})
+                _unconfirmed(store, profile_home, agent["id"], tid, find, actions)
 
     # 2. Finished work: the worker moved its task away (review / waiting_owner / done / blocked). Close the
     #    session the autopilot started, only ever its own.
@@ -203,6 +232,9 @@ def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]
             if not task:
                 break
             agent_id = AGENT_PREFIX + _slug(f"{lane}-{task['id']}")
+            old = next((a for a in snap["agents"] if a["id"] == agent_id), None)
+            if old and old.get("session_id"):
+                break                 # its previous session is not confirmed stopped: never wipe the link or run two workers
             store.register_agent({"id": agent_id, "label": f"Autopilot {lane}: {task['title'][:80]}", "lane": lane,
                                   "provider": "claude", "project": policy.get("project", ""),
                                   "requested_model": conf.get("model", ""), "auto_dispatch": False})
@@ -223,8 +255,7 @@ def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]
             state["starts"] = starts
             _save(store, state)
             if result is None:
-                store.quarantine(task["id"], "Autopilot start unconfirmed; check the original session before retrying")
-                actions.append({"task_id": task["id"], "action": "start_unconfirmed"})
+                _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):
                 code = str(result.get("code", "error"))
                 store.transition(task["id"], {"state": "queued", "checkpoint": f"autopilot: start refused {code}",
@@ -254,8 +285,11 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
         notify(profile_home, kind, text)
 
     def _stop(agent):
-        if agent.get("session_id"):
-            stop(profile_home, agent["session_id"])
+        """False = the stop was not confirmed (the watchdog then keeps the task with its worker)."""
+        if not agent.get("session_id"):
+            return True
+        result = stop(profile_home, agent["session_id"])
+        return bool(result and result.get("ok"))
 
     try:
         for name in watch.watchdog_step(store, policy, start=lambda lane, task: None, stop=_stop, notify=_notify):
@@ -275,5 +309,6 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
                                         contains_p01_fix=bool(source.get("contains_p01_fix"))):
                 out.append({"action": "beta_verify_task", "task_id": name})
     except Exception as exc:  # noqa: BLE001
-        store.record_event("autopilot_error", f"autopilot watch failed: {type(exc).__name__}")
+        log.exception("autopilot watch failed")
+        store.record_event("autopilot_error", f"autopilot watch failed: {type(exc).__name__}: {str(exc)[:200]}")
     return out

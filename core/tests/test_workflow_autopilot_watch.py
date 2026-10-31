@@ -160,13 +160,36 @@ class StewardTests(Base):
         self.assertTrue(next(t for t in snap["tasks"] if t["id"] == "other")["ready"])
 
     def test_no_merge_or_tag_calls(self):
-        pattern = re.compile(r"pr\s+merge|git\s+tag|\.merge\(|auto-merge|--auto\b|push\s+--force|release\s+signoff", re.I)
+        """AST + token scan of every autopilot*.py plus control.py and sync.py: no push/tag/merge/PR/label/API writes,
+        in string commands or list-form argv. The only allowed git write is the local `merge --ff-only`."""
+        import ast
+        shell = re.compile(r"pr\s+merge|git\s+tag|git\s+push|\.merge\(|auto-merge|--auto\b|push\s+--force|"
+                           r"release\s+signoff|gh\s+(pr|issue|label|release)\s+(merge|edit|close|create|comment|delete)|"
+                           r"gh\s+api\b.*(-X|--method)|gh\s+label|--add-label|--remove-label", re.I)
+        verbs = {"push", "tag", "merge", "label", "release", "signoff", "--add-label", "--remove-label", "--method", "-X"}
+        gh_writes = {"merge", "edit", "close", "create", "comment", "delete", "reopen", "ready"}
         root = Path(aw.__file__).parent
-        for path in root.glob("autopilot*.py"):
-            code = "\n".join(line for line in path.read_text(encoding="utf8").splitlines()
-                            if not line.lstrip().startswith("#"))
-            code = re.sub(r'""".*?"""', "", code, flags=re.S)
-            self.assertIsNone(pattern.search(code), f"{path.name} must not integrate or tag")
+        files = sorted({*root.glob("autopilot*.py"), root / "control.py", root / "sync.py"})
+        self.assertGreaterEqual(len(files), 5)
+        for path in files:
+            tree = ast.parse(path.read_text(encoding="utf8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) < 300:
+                    self.assertIsNone(shell.search(node.value), f"{path.name}: {node.value!r}")
+                if isinstance(node, (ast.List, ast.Tuple)):
+                    items = [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+                    if len(items) != len(node.elts) or not items:
+                        continue
+                    argv = items[1:] if items[0] in {"git", "gh"} else items
+                    if items[0] == "gh" and len(argv) > 1 and argv[1] in gh_writes:
+                        self.fail(f"{path.name}: gh write {items}")
+                    if items[0] == "gh" and argv[:1] == ["api"] and {"-X", "--method", "-f", "-F"} & set(argv):
+                        self.fail(f"{path.name}: gh api write {items}")
+                    if argv and argv[0] in verbs and items[0] in {"git", "gh"} | verbs:
+                        if argv[0] == "merge" and "--ff-only" in argv:
+                            continue
+                        if argv[0] in {"push", "tag", "label", "merge", "release"}:
+                            self.fail(f"{path.name}: write command {items}")
 
 
 if __name__ == "__main__":

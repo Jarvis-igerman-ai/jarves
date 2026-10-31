@@ -762,10 +762,20 @@ class Orchestrator:
             return None
         return g
 
+    def _autopilot_killed(self) -> bool:
+        """The kill switch in <home>/workflow/autopilot.json ends the grant at once; an unreadable file fails closed."""
+        path = self.home / "workflow" / "autopilot.json"
+        if not path.exists():
+            return False
+        try:
+            return bool(json.loads(path.read_text(encoding="utf-8")).get("kill"))
+        except (OSError, ValueError, AttributeError):
+            return True
+
     def _grant_refusal(self, provider: str, proj, model: str, here: bool) -> str:
         """"" = the grant covers this start exactly; "limit" = covered but at max_concurrent; else "nomatch"."""
         g = self.autopilot_grant()
-        if g is None or provider != "claude" or here or not model:
+        if g is None or provider != "claude" or here or not model or self._autopilot_killed():
             return "nomatch"
         if proj.name != g.get("project") or model not in (g.get("models") or []):
             return "nomatch"
@@ -835,7 +845,7 @@ class Orchestrator:
         if svc is None or svc.loop is None or not svc.loop.is_running() or \
                 Path(svc.home).resolve() != self.home.resolve():
             ok, _ = appr.ask_owner(self.home, prompt, title=title, kind=kind, risk=risk, details=details,
-                                   timeout=timeout)
+                                   timeout=timeout, typed=typed)
             return ("approved" if ok else "denied"), ""
         try:
             if asyncio.get_running_loop() is svc.loop:
@@ -964,7 +974,8 @@ class Orchestrator:
             if auto and r.get("ok") and r.get("session", {}).get("id"):
                 sid = r["session"]["id"]
                 cur = self.db.session(sid) or {}
-                self.db.upsert_session(sid, meta={**(cur.get("meta") or {}), "autopilot": True})
+                self.db.upsert_session(sid, meta={**(cur.get("meta") or {}), "autopilot": True,
+                                                  "workflow_agent": (env or {}).get("JARVES_WORKFLOW_AGENT", "")})
                 self.db.audit(by, "start_by_grant", session_id=sid, decision="approved", detail=f"{proj.name} {model}")
         elif provider == "opencode":
             r = self._start_opencode(proj, cwd, task, by=by, lang=lang, model=prof["spec"])
@@ -1899,6 +1910,19 @@ class Orchestrator:
                 return self.start_session(a.get("provider", ""), a.get("project", ""), a.get("task", ""), by=by,
                                           approved=bool(a.get("approved")), here=bool(a.get("here")), lang=lang,
                                           model=a.get("model", ""), env=a.get("env"))
+            if op == "notify":                        # owner push for the workflow autopilot's away alerts
+                if self.notify is None:
+                    return {"ok": False, "code": "error", "text": "No owner notification channel."}
+                text = str(a.get("text") or "")[:500]
+                self.notify(text, text, str(a.get("kind") or "autopilot")[:40])
+                return {"ok": True, "code": "ok"}
+            if op == "find_worker":                   # the live autopilot session of one workflow agent (unconfirmed start)
+                ref = str(a.get("ref") or "")
+                for x in self.db.sessions():
+                    m = x.get("meta") or {}
+                    if ref and m.get("autopilot") and m.get("workflow_agent") == ref and x["state"] in LIVE_STATES:
+                        return {"ok": True, "code": "ok", "session_id": x["id"]}
+                return {"ok": True, "code": "ok", "session_id": ""}
             if op == "autopilot":
                 return self.autopilot_op(a.get("action", "status"), by=by, project=a.get("project", ""),
                                          models=a.get("models"), days=a.get("days"),

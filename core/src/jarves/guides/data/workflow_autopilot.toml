@@ -30,6 +30,16 @@ he = "התראות מופיעות בלוח ובפקודה status: lane_idle, wor
 en = "Alerts show in the console and in status: lane_idle, worker_restarted, task_blocked, permission_wait. A permission wait over 10 minutes sends you one alert; approve or deny in the approval popup."
 action = "command:jarvis workflow autopilot status"
 
+[[steps]]
+he = "הרשאת התחלה: jarvis workflow autopilot grant. ההרשאה מוגבלת בזמן (עד 365 יום, ברירת המחדל 365), לפרויקט, למודלים ולמספר עובדים מוגדרים. בדקו עם jarvis workflow autopilot grant-status וסיימו מיד עם jarvis workflow autopilot revoke."
+en = "Start grant: jarvis workflow autopilot grant. It is time-limited (up to 365 days, default 365) and tied to one project, the listed models and a worker count. Check it with jarvis workflow autopilot grant-status and end it at once with jarvis workflow autopilot revoke."
+action = "command:jarvis workflow autopilot grant-status"
+
+[[steps]]
+he = "ההרשאה תמיד דורשת קוד מוקלד, לא אישור פשוט. כשהליבה רצה הקוד מוצג בחלון האישור. כשהליבה כבויה והפקודה רצה בטרמינל, הקוד מוקלד בטרמינל עצמו. כשאין ליבה ואין טרמינל, ההרשאה נדחית (אין אישור בלחיצה); בקשו אותה שוב מטרמינל או כשהליבה רצה. מתג העצירה (kill) מבטל גם את ההרשאה מיד."
+en = "The grant always needs a typed code, never a plain yes. With the Core running the code is shown in the approval popup. With no Core and a terminal, the code is typed in the terminal itself. With no Core and no terminal the grant is refused (no click-to-approve downgrade); ask again from a terminal or while the Core runs. The kill switch also ends the grant at once."
+action = "command:jarvis workflow autopilot grant-status"
+
 [[problems]]
 he = "משימה נחסמה אחרי שני קיפאונות"
 en = "A task was blocked after two stalls"
