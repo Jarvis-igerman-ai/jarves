@@ -98,9 +98,12 @@ supervisor alerts, or the Monitor tool on `gh` output) and hands PR events to
 the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
 - Worker finishes or blocks on CI or an owner question: the manager assigns the
   next independent ready task from the ledger at once; the question persists.
-- PR green, main not red, not Tier R by label or changed paths: `gh pr merge N
-  --auto` (missing "Auto-label policy" check on a non-Tier-R PR: add then remove
-  `no-automerge`, so it ends absent). Queued PRs are
+- PR green, main not red, not Tier R: `gh pr merge N
+  --auto`. Tier R = the `no-automerge` label or a high-risk result from running
+  `core/tools/risk_class.py --files-from FILE` (`C:\work\jarvis\core\.venv\Scripts\python.exe`,
+  not bare `python`) on the PR's changed files; its HIGH_RISK list is the path source of truth.
+  Missing "Auto-label policy" check on a non-Tier-R PR: add then remove
+  `no-automerge`, so it ends absent. Queued PRs are
   merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
 - PR red: failing log tail only, then a Sonnet fixer; conflict: the fixer
   rebases that PR's own branch (`--force-with-lease` on it only).

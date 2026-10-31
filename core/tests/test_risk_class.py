@@ -34,6 +34,8 @@ def test_guides_and_locales_only():
     "core/src/jarves/approvals.py", "core/src/jarves/helper_approvals.py", "core/src/jarves/isolation.py",
     "core/src/jarves/winsandbox.py", "core/src/jarves/mobile_auth.py", "core/src/jarves/secrets.py",
     "core/src/jarves/dashboard_auth.py", "core/tools/release.py", "core/tools/promote.py", "core/tests/conftest.py",
+    ".claude/agents/workflow-merger.md", ".claude/settings.json", "core/src/jarves/workflow/hooks.py",
+    "core/src/jarves/workflow/bootstrap.py", "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 ])
 def test_high_risk_paths_never_label(path):
     assert cls([path, "docs/a.md"], labels={"bugfix"}, lines=3, mode="all") is None
