@@ -45,7 +45,8 @@ def exclusive(path: Path):
 
 
 def task_context(store: Store, task: dict) -> dict:
-    return {**task, "owner_decisions": [{k: q.get(k) for k in ("title", "answer", "checkpoint", "decided_at")}
+    return {**task, "owner_decisions": [{**{k: q.get(k) for k in ("title", "answer", "checkpoint")},
+                                         "decided_at": q.get("answered_at")}
                                        for q in store.snapshot()["questions"]
                                        if q["task_id"] == task["id"] and q["status"] == "answered"]}
 
