@@ -5,9 +5,8 @@ to another model/provider. Session start/stop go through injected callables (the
 in production, a fake in tests). One step at a time per profile: an in-process lock plus a kernel
 file lock make two concurrent step() calls (threads or processes) safe; claim() is atomic in SQLite.
 
-STUBS for the integrator (replace when T1/T2 land):
-  * default_policy()/load_policy()  -> T1's policy reader (same JSON keys as the plan section 2).
-  * grant: start passes approved=policy["_grant_active"] (default False); T2 supplies the real grant.
+Policy comes from autopilot.load (T1). The T2 owner grant is still a stub (grant_active): until it is wired
+every start shows the normal owner popup. The T4 watchdog/steward/manual-test passes run inside _step.
 """
 from __future__ import annotations
 
@@ -29,23 +28,28 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- STUB (T1 replaces): policy reader -------------------------------------------------------------
-def default_policy() -> dict:
-    return {"enabled": False, "kill": False, "project": "jarves",
-            "versions": ["V4.5.1", "V5", "V6", "V7"], "authorized_versions": ["V4.5.1"],
-            "lanes": {"bugs": {"workers": 1, "model": "claude-sonnet-5-5"},
-                      "features": {"workers": 1, "model": "claude-sonnet-5-5"}},
-            "max_concurrent": 3, "max_starts_per_hour": 6}
-
-
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 def load_policy(home: Path) -> dict:
-    policy = default_policy()
-    try:
-        policy.update(json.loads((Path(home) / "autopilot.json").read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        pass
+    from . import autopilot
+    policy, error = autopilot.load(home)
+    if error:
+        policy["enabled"] = False
     return policy
-# ---- end STUB --------------------------------------------------------------------------------------
+
+
+def grant_active(policy: dict) -> bool:
+    """STUB until the T2 owner grant lands: nothing is ever started as pre-approved (the owner popup shows)."""
+    return bool(policy.get("_grant_active"))
+
+
+def bridge_notify(profile_home: Path, kind: str, text: str) -> None:
+    """Best effort owner push through the running Core; the console alert list is the reliable channel."""
+    try:
+        from ..orchestrator.bridge import try_request
+        try_request(profile_home, "call", timeout=10, name="notify",
+                    args={"kind": f"autopilot_{kind}", "text": text[:500], "by": "autopilot", "lang": "en"})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 # ---- production bridge adapters --------------------------------------------------------------------
@@ -116,7 +120,7 @@ def _pick(snapshot: dict, policy: dict, lane: str) -> dict | None:
 
 
 def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=bridge_start, stop=bridge_stop,
-         force: bool = False) -> list[dict]:
+         notify=bridge_notify, force: bool = False) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
     if not policy.get("enabled"):
@@ -126,7 +130,7 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                return _step(store, Path(profile_home), policy, start, stop, force)
+                return _step(store, Path(profile_home), policy, start, stop, notify, force)
         except OSError:
             return []          # another process is stepping
     finally:
@@ -145,13 +149,13 @@ def step_safe(store: Store, profile_home: Path, **kw) -> list[dict]:
         return []
 
 
-def _step(store, profile_home, policy, start, stop, force) -> list[dict]:
+def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]:
     actions: list[dict] = []
     state = _load(store)
     now = store.clock()
     snap = store.snapshot()
     sig = (snap["revision"], hashlib.sha256(json.dumps(policy, sort_keys=True, default=str).encode()).hexdigest(),
-           now >= state.get("paused_until", 0), int(now // PAUSE_S))
+           now >= state.get("paused_until", 0), int(now // 30))
     key = str(store.path)
     if not force and _LAST_SIG.get(key) == sig:
         return actions
@@ -178,6 +182,10 @@ def _step(store, profile_home, policy, start, stop, force) -> list[dict]:
             else:
                 store.record_event("autopilot_stop", f"{agent['id']}: stop not confirmed; will retry")
                 actions.append({"agent": agent["id"], "action": "stop_unconfirmed"})
+
+    # 2b. Watchdog (stall/offline/permission/idle), steward + review tasks, manual-test owner items. All of it
+    #     only touches the ledger; launching stays in stage 3, so a stuck lane never blocks the others.
+    actions += _watch(store, profile_home, policy, stop, notify)
 
     # 3. Start the next task per lane.
     if policy.get("kill"):
@@ -210,7 +218,7 @@ def _step(store, profile_home, policy, start, stop, force) -> list[dict]:
                 break
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
-                       task=assignment(ctx, agent_id, store.path.parent), approved=bool(policy.get("_grant_active")),
+                       task=assignment(ctx, agent_id, store.path.parent), approved=grant_active(policy),
                        env={"JARVES_WORKFLOW_AGENT": agent_id})
             try:
                 result = start(profile_home, **req)
@@ -241,3 +249,36 @@ def _step(store, profile_home, policy, start, stop, force) -> list[dict]:
             running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
     _LAST_SIG[key] = (store.snapshot()["revision"],) + sig[1:]
     return actions
+
+
+def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
+    from . import autopilot_watch as watch
+    out: list[dict] = []
+
+    def _notify(kind, text):
+        notify(profile_home, kind, text)
+
+    def _stop(agent):
+        if agent.get("session_id"):
+            stop(profile_home, agent["session_id"])
+
+    try:
+        for name in watch.watchdog_step(store, policy, start=lambda lane, task: None, stop=_stop, notify=_notify):
+            out.append({"action": "watchdog", "detail": name})
+        source = store.snapshot().get("source", {})
+        # PR file lists are not in the public sync: unknown files count as Tier R (Opus review task, never steward).
+        for name in watch.steward_step(store, policy, source.get("open_prs", []),
+                                       lambda pr: list(pr.get("files") or []), notify=_notify):
+            out.append({"action": "review_task", "task_id": name})
+        for name in watch.manual_test_step(store):
+            out.append({"action": "manual_test_item", "task_id": name})
+        # Beta-verify needs a CI-green flag for main; public sync has none, so it fires only when sync provides it.
+        if source.get("ci_green") and source.get("sha"):
+            import datetime
+            day = datetime.datetime.fromtimestamp(store.clock(), datetime.timezone.utc).strftime("%Y-%m-%d")
+            for name in watch.beta_step(store, policy, source["sha"], True, day,
+                                        contains_p01_fix=bool(source.get("contains_p01_fix"))):
+                out.append({"action": "beta_verify_task", "task_id": name})
+    except Exception as exc:  # noqa: BLE001
+        store.record_event("autopilot_error", f"autopilot watch failed: {type(exc).__name__}")
+    return out

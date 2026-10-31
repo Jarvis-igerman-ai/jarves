@@ -157,6 +157,10 @@ class Handler(BaseHTTPRequestHandler):
             from .autopilot import view
             state = self.server.store.snapshot()
             state["autopilot"] = view(state, self.server.home)
+            from .autopilot_watch import autopilot_alerts
+            state["alerts"] = list(state.get("alerts") or []) + [
+                {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
+                for a in autopilot_alerts(self.server.store)]
             self._json(200, state)
         elif path == "/api/trace":
             from .trace import history
