@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
+import time
 import subprocess
 import sys
 from pathlib import Path
@@ -123,6 +125,18 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
     return {}
 
 
+def _log_error(home: Path, exc: BaseException) -> None:
+    """Bounded, content-free error counter file so dropped events are visible."""
+    try:
+        path = Path(home) / "hook_errors.log"
+        if path.exists() and path.stat().st_size > 65536:
+            path.write_text("", encoding="utf-8")
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.time():.0f} {type(exc).__name__}\n")
+    except OSError:
+        pass
+
+
 def main(argv=None) -> int:
     import argparse
     from .__main__ import utf8_streams
@@ -143,13 +157,15 @@ def main(argv=None) -> int:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             return 0
-        store = Store(args.home / "workflow.db", timeout_s=0.1)
+        store = Store(args.home / "workflow.db", timeout_s=1.5)
         result = observe(store, payload, args.repo_root, os.environ.get("JARVES_WORKFLOW_AGENT") or None)
         if result:
             print(json.dumps(result, ensure_ascii=False))
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
         # Do not block Claude or emit private input. The supervisor exposes the
-        # missing heartbeat if telemetry cannot reach the ledger.
+        # missing heartbeat if telemetry cannot reach the ledger. A locked database
+        # (sqlite3.Error) used to escape as a traceback and drop the event silently.
+        _log_error(args.home, exc)
         print("JARVES workflow observer unavailable; Claude permissions unchanged", file=sys.stderr)
     finally:
         if store:
