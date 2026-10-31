@@ -26,7 +26,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "core" / "tests"
 BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py", "test_chat_markdown_browser.py",
-                 "test_mobile_phone_e2e.py")   # same list as tests/conftest.py (test_ci_speed_tools checks it)
+                 "test_mobile_phone_e2e.py", "test_browser_driver.py")   # same list as tests/conftest.py (test_ci_speed_tools checks it)
 SECONDS_PER_TEST = 0.5          # weight of a test file that has no measurement yet (when nothing is measured at all)
 FLAGS = ("code", "full", "perf", "installer", "cad", "blender", "godot", "whatsapp", "e2e")
 

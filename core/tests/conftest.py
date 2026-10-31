@@ -34,7 +34,7 @@ def pytest_configure(config):
 # test count, the same on every shard because each shard collects the same tests. Deselected, never skipped.
 # test_mobile_phone_e2e drives a real browser too: in the browser job it gets the one retry (#89, a Windows QR flake)
 BROWSER_FILES = ("test_browser.py", "test_canary.py", "test_dashboard_a11y.py", "test_chat_markdown_browser.py",
-                 "test_mobile_phone_e2e.py")
+                 "test_mobile_phone_e2e.py", "test_browser_driver.py")
 
 
 def pytest_addoption(parser):
