@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+                                        "create", "ask", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -58,6 +58,22 @@ def utf8_streams() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+
+
+OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your own terminal"
+
+
+def owner_only_guard(action: str) -> str:
+    """Owner questions are for the owner: refuse non-interactive callers (agents, pipes, scripts)."""
+    if os.environ.get("JARVES_WORKFLOW_AGENT"):
+        raise PermissionError(f"{OWNER_ONLY_MESSAGE} ('{action}' refused: agent environment); the question stays open")
+    try:
+        interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    if not interactive:
+        raise PermissionError(f"{OWNER_ONLY_MESSAGE} ('{action}' refused: stdin and stdout must both be a terminal); the question stays open")
+    return "terminal"
 
 
 def main(argv=None) -> int:
@@ -139,8 +155,12 @@ def main(argv=None) -> int:
         elif a.action == "ask":
             result = store.ask({"task_id": a.task, "title": a.title, "context": a.context,
                                 "choices": json.loads(a.choices), "checkpoint": a.checkpoint})
-        elif a.action == "answer":
-            result = store.answer(a.id, a.answer)
+        elif a.action in {"answer", "reopen"}:
+            channel = owner_only_guard(a.action)
+            if a.action == "answer":
+                result = store.answer(a.id, a.answer, answered_by="owner (terminal)", channel=channel)
+            else:
+                result = store.reopen(a.id, by="owner (terminal)", channel=channel)
         elif a.action == "task":
             result = next((t for t in store.snapshot()["tasks"] if t["id"] == (a.id or a.task)), None)
             if result is None:
