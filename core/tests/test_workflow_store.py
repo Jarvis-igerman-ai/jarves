@@ -73,9 +73,10 @@ class WorkflowStoreTests(unittest.TestCase):
         q = self.store.ask({"task_id": "needs-owner", "title": "Which design?", "checkpoint": "Changes committed; GUI closed"})
         self.store.defer(q["id"])
         self.assertEqual(self.store.claim("worker")["id"], "independent")
-        self.assertEqual(self.store.snapshot()["tasks"][0]["state"], "waiting_owner")
+        by_id = lambda: {t["id"]: t for t in self.store.snapshot()["tasks"]}   # snapshot lists running work first (#730)
+        self.assertEqual(by_id()["needs-owner"]["state"], "waiting_owner")
         self.store.answer(q["id"], "Keep the existing design")
-        first = self.store.snapshot()["tasks"][0]
+        first = by_id()["needs-owner"]
         self.assertEqual(first["state"], "queued")
         self.assertEqual(first["implementation"], "in_progress")
         self.assertFalse(first["acceptance"][0]["passed"])
@@ -299,6 +300,39 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()["tasks"], [])
         self.task()
         self.assertTrue(any(a["kind"] == "no_workers" for a in self.store.tick()))
+
+    def test_snapshot_lists_running_work_first(self):
+        # #730 owner order: 5 running + 160 queued -> the list begins with the 5 running.
+        for i in range(160):
+            self.task(f"q{i:03d}", priority=i % 4, version=["V7", "V6", "V5", "V4.5.1"][(i // 4) % 4])
+        for i in range(5):
+            self.task(f"r{i}", priority=3)
+            self.worker(f"w{i}")
+            self.store.claim(f"w{i}", f"r{i}")
+        self.task("wait", priority=0)
+        self.store.ask({"task_id": "wait", "title": "Which?"})
+        tasks = self.store.snapshot()["tasks"]
+        self.assertEqual([t["id"] for t in tasks[:5]], [f"r{i}" for i in range(5)])
+        self.assertEqual(tasks[5]["id"], "wait")
+        queued = [t for t in tasks if t["state"] == "queued"]
+        self.assertEqual(queued[0]["priority"], 0)
+        self.assertEqual(queued[0]["version"], "V4.5.1")
+
+    def test_agent_roster_never_archives_owner_of_running_task(self):
+        # #730: a stale owner of a running task stays visible, even with a test-like id.
+        from jarves.workflow.store import agent_roster
+        self.task()
+        self.worker("e2e-owner")
+        self.assertIsNotNone(self.store.claim("e2e-owner"))
+        self.worker("gone")
+        self.store.observe_agent("gone", "offline")
+        self.now[0] += 90000
+        snap = self.store.snapshot()
+        visible, counts = agent_roster(snap["agents"], snap["tasks"], snap["observed_at"])
+        self.assertEqual([a["id"] for a in visible], ["e2e-owner"])
+        self.assertEqual(counts, snap["agent_counts"])
+        self.assertEqual((counts["archived"], counts["total"]), (1, 2))
+        self.assertEqual(len(snap["agents"]), 2)   # the ledger snapshot itself keeps every record
 
 
 if __name__ == "__main__":

@@ -25,6 +25,42 @@ OWNER_TTL_S = 600
 TOOL_FLIGHT_S = 900
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 ACTIVE_QUESTIONS = {"pending", "deferred"}
+AGENT_RETENTION_S = 86400
+TEST_AGENT_PREFIXES = ("e2e-", "mgr-restart-test")  # test leftovers: archived at once (#730)
+
+
+STATE_ORDER = {"running": 0, "waiting_owner": 1, "blocked": 2, "review": 3, "queued": 4, "verified": 5, "done": 6}
+VERSION_ORDER = ("V4.5.1", "V5", "V6", "V7")
+
+
+def task_order(task: dict) -> tuple:
+    """What is working now first (#730): running, waiting_owner, blocked, review, queued, finished;
+    then priority, then version order. The console uses the same order."""
+    version = task.get("version", "")
+    return (STATE_ORDER.get(task.get("state"), 4), task.get("priority", 2),
+            VERSION_ORDER.index(version) if version in VERSION_ORDER else len(VERSION_ORDER), str(task.get("id", "")))
+
+
+def agent_roster(agents: list, tasks: list, now: float, retention_s: int = AGENT_RETENTION_S) -> tuple[list, dict]:
+    """Split agents for display (#730): the visible list and counts. The ledger keeps every record.
+
+    Archived = test leftovers, or offline longer than retention_s. An agent that owns a
+    running task is never archived.
+    """
+    running = {t["id"] for t in tasks if t.get("state") == "running"}
+    visible, archived = [], 0
+    for agent in agents:
+        owns_running = bool(agent.get("task_id")) and agent["task_id"] in running
+        seen = max(agent.get("heartbeat_at") or 0, agent.get("progress_at") or 0)
+        leftover = str(agent.get("id", "")).startswith(TEST_AGENT_PREFIXES)
+        expired = agent.get("status") == "offline" and now - seen > retention_s
+        if not owns_running and (leftover or expired):
+            archived += 1
+        else:
+            visible.append(agent)
+    offline = sum(1 for a in visible if a.get("status") == "offline")
+    return visible, {"live": len(visible) - offline, "offline": offline, "archived": archived,
+                     "total": len(agents), "retention_s": retention_s}
 
 
 def _text(value, name: str, *, maximum: int = 2000, empty: bool = False) -> str:
@@ -197,7 +233,7 @@ class Store:
                 return False
         return True
 
-    def snapshot(self):
+    def snapshot(self, retention_s: int = AGENT_RETENTION_S):
         with self._tx() as db:
             now = self.clock()
             owner = self._meta(db, "owner")
@@ -205,13 +241,15 @@ class Store:
             supervisor = self._meta(db, "supervisor")
             if now - supervisor["heartbeat_at"] > 120:
                 supervisor["status"] = "offline"
-            tasks = self._all(db, "task")
+            tasks = sorted(self._all(db, "task"), key=task_order)
             for task in tasks:
                 task["ready"] = self._ready(db, task)
+            agents = self._all(db, "agent")
             return {
                 "revision": self._meta(db, "revision"), "observed_at": now,
                 "owner": owner, "supervisor": supervisor,
-                "tasks": tasks, "agents": self._all(db, "agent"),
+                "tasks": tasks, "agents": agents,
+                "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
                 "questions": self._all(db, "question"), "alerts": self._meta(db, "alerts"),
                 "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),

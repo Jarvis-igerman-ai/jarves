@@ -25,7 +25,8 @@ DEFAULTS = {
               "review": {"model": "claude-opus-5-5"}},
     "max_concurrent": 3, "max_starts_per_hour": 6,
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
-    "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1},
+    "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
+                 "agent_retention_s": 86400},  # console hides agents offline longer than this (#730)
 }
 
 
@@ -71,7 +72,8 @@ def validate(policy: dict) -> dict:
     if not isinstance(watchdog, dict) or set(watchdog) != set(DEFAULTS["watchdog"]):
         raise ValueError("watchdog has invalid keys")
     for key, value in watchdog.items():
-        _int(value, f"watchdog {key}", 0 if key == "max_restarts_per_task" else 1, 86400)
+        _int(value, f"watchdog {key}", 0 if key == "max_restarts_per_task" else 1,
+             30 * 86400 if key == "agent_retention_s" else 86400)
     return policy
 
 
@@ -85,9 +87,18 @@ def load(home: Path) -> tuple[dict, str]:
     if not path.exists():
         return copy.deepcopy(DEFAULTS), ""
     try:
-        return validate(json.loads(path.read_text(encoding="utf-8"))), ""
+        policy = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(policy, dict) and isinstance(policy.get("watchdog"), dict):
+            # Policy files written before #730 lack the retention key; the default keeps them valid.
+            policy["watchdog"].setdefault("agent_retention_s", DEFAULTS["watchdog"]["agent_retention_s"])
+        return validate(policy), ""
     except (OSError, ValueError) as exc:
         return {**copy.deepcopy(DEFAULTS), "enabled": False}, f"policy file invalid, autopilot stays off: {exc}"
+
+
+def agent_retention_s(home: Path) -> int:
+    """How long an offline agent stays in the console list before it is archived (display only)."""
+    return load(home)[0]["watchdog"]["agent_retention_s"]
 
 
 def save(home: Path, policy: dict) -> dict:

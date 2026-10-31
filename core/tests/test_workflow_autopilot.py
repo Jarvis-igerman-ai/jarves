@@ -29,6 +29,20 @@ class AutopilotTests(unittest.TestCase):
     def tasks(self):
         return {t["id"]: t for t in self.store.snapshot()["tasks"]}
 
+    def test_policy_without_agent_retention_stays_valid(self):
+        # #730: a policy file saved before the retention key existed still loads (autopilot does not fail closed).
+        import json
+        old = json.loads(json.dumps(autopilot.DEFAULTS))
+        del old["watchdog"]["agent_retention_s"]
+        old["enabled"] = True
+        (self.home / "autopilot.json").write_text(json.dumps(old), encoding="utf-8")
+        policy, error = autopilot.load(self.home)
+        self.assertEqual((error, policy["enabled"], autopilot.agent_retention_s(self.home)), ("", True, 86400))
+        autopilot.set_key(self.home, "watchdog.agent_retention_s", "3600")
+        self.assertEqual(autopilot.agent_retention_s(self.home), 3600)
+        with self.assertRaises(ValueError):
+            autopilot.set_key(self.home, "watchdog.agent_retention_s", str(31 * 86400))
+
     def test_policy_validation(self):
         policy, error = autopilot.load(self.home)
         self.assertEqual((error, policy["enabled"]), ("", False))

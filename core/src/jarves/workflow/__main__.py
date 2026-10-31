@@ -99,7 +99,8 @@ def main(argv=None) -> int:
     store = Store(home / "workflow.db")
     try:
         if a.action == "status":
-            result = store.snapshot()
+            from .autopilot import agent_retention_s
+            result = store.snapshot(retention_s=agent_retention_s(home))
         elif a.action in {"trace", "retro"}:
             from .trace import history, retro_bundle, settings
             filters = {"agent_id": a.agent, "task_id": a.task, "since": a.since, "until": a.until}

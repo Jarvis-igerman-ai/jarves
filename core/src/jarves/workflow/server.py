@@ -154,9 +154,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(401, {"error": "open the private link printed by jarvis workflow open"})
             return
         if path == "/api/state":
-            from .autopilot import view
-            state = self.server.store.snapshot()
+            from .autopilot import agent_retention_s, view
+            from .store import agent_roster
+            state = self.server.store.snapshot(retention_s=agent_retention_s(self.server.home))
             state["autopilot"] = view(state, self.server.home)
+            # The console list leaves out archived agents (#730); agent_counts keeps the totals.
+            state["agents"] = agent_roster(state["agents"], state["tasks"], state["observed_at"],
+                                           state["agent_counts"]["retention_s"])[0]
             from .autopilot_watch import autopilot_alerts
             state["alerts"] = list(state.get("alerts") or []) + [
                 {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
