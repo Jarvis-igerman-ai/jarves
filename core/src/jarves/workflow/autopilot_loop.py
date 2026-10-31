@@ -261,13 +261,13 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
         for name in watch.watchdog_step(store, policy, start=lambda lane, task: None, stop=_stop, notify=_notify):
             out.append({"action": "watchdog", "detail": name})
         source = store.snapshot().get("source", {})
-        # PR file lists are not in the public sync: unknown files count as Tier R (Opus review task, never steward).
+        # Sync supplies each open PR changed files (read-only); an empty list means unknown = Tier R (Opus review task, never steward).
         for name in watch.steward_step(store, policy, source.get("open_prs", []),
                                        lambda pr: list(pr.get("files") or []), notify=_notify):
             out.append({"action": "review_task", "task_id": name})
         for name in watch.manual_test_step(store):
             out.append({"action": "manual_test_item", "task_id": name})
-        # Beta-verify needs a CI-green flag for main; public sync has none, so it fires only when sync provides it.
+        # ci_green comes from sync (main check-runs, read-only).
         if source.get("ci_green") and source.get("sha"):
             import datetime
             day = datetime.datetime.fromtimestamp(store.clock(), datetime.timezone.utc).strftime("%Y-%m-%d")
