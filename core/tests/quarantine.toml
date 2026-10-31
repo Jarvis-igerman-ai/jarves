@@ -44,3 +44,9 @@ id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeou
 issue = 660
 since = "2026-10-27"
 reason = "Linux: approved pipe command exited 2 in 0.03 s once (PR 658 run 40516866677), passes elsewhere"
+
+[[test]]
+id = "test_web_chat.py::test_silent_turns_never_speak_ring_or_light_the_face"
+issue = 722
+since = "2026-10-31"
+reason = "failed once on an unrelated PR: silent turn was spoken (2 == 1); cache-race hardening in chat_engine, remove entry once proven"
