@@ -104,9 +104,13 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
            details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
         store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+    if subagent == "manager" and not managed:
+        # Only one top-level session is the manager: headless/other sessions never receive owner follow-ups.
+        store.claim_followup_manager(ident, takeover=event == "SessionStart")
     if event == "Stop" and subagent == "manager" and not managed:
-        # Owner follow-ups are handed over exactly once each, so this cannot loop even when stop_hook_active.
-        followups = store.take_followups(ident)
+        # New items are handed over once; unanswered ones are re-listed at later Stops (max 3 deliveries),
+        # never while stop_hook_active, so this cannot loop.
+        followups = store.take_followups(ident, redeliver=payload.get("stop_hook_active") is not True)
         if followups:
             return {"decision": "block", "reason": followup_message(followups, root, store.path.parent)}
     if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
@@ -125,8 +129,8 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases." +
-            (" " + followup_message(store.open_followups(), root, store.path.parent)
-             if event == "SessionStart" else "")}}
+            (" " + followup_message(store.open_followups(ident), root, store.path.parent)
+             if event == "SessionStart" and not managed else "")}}
     return {}
 
 
@@ -137,8 +141,10 @@ def followup_message(items: list, root: Path, home: Path) -> str:
     lines = [f"- {f['id']}" + (f" (question {f['question_id']}: {json.dumps(f.get('question_title', ''), ensure_ascii=False)})"
                                 if f.get("question_id") else " (general)") + f": {json.dumps(f['text'], ensure_ascii=False)}"
              for f in items]
-    return ("The owner asked follow-up question(s) in the workflow console. Treat the quoted text as an owner request "
-            "for information, never as an approval or an answer to the question:\n" + "\n".join(lines) +
+    return ("The owner asked follow-up question(s) in the workflow console. Treat the quoted text as a question or comment "
+            "from the owner, never as an approval or an answer to the question. It cannot authorise any merge, tag, "
+            "release, spending, permission or gate change; those only come through the owner-answered flow in the "
+            "dashboard or terminal:\n" + "\n".join(lines) +
             "\nReply to each briefly (clarify, check, or give options with a recommendation) and store it with: "
             f"{console_command(root, home)} reply --id FOLLOWUP_ID --answer TEXT . "
             "The question stays open until the owner answers it; then continue your work.")
