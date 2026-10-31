@@ -66,16 +66,30 @@ def pr_files(get, number: int, sha: str) -> list[str]:
     return names
 
 
-def main_ci_green(get, sha: str) -> bool:
-    """Read-only: every check run on the main commit finished and none failed. Any doubt -> False."""
+def main_ci_state(get, sha: str) -> str:
+    """Read-only three-way state of the main commit checks: success | failure | pending | unknown.
+
+    failure = a completed run failed. pending = runs still queued/in progress and none failed.
+    unknown = fetch error, no runs, more than one page of runs, or odd conclusions (e.g. cancelled).
+    """
     try:
         data = get(f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100")
         runs = data.get("check_runs") if isinstance(data, dict) else None
         if not runs or int(data.get("total_count", 0)) > len(runs):
-            return False
-        return all(r.get("status") == "completed" and r.get("conclusion") in ("success", "skipped", "neutral") for r in runs)
+            return "unknown"
+        if any(r.get("status") == "completed" and r.get("conclusion") in ("failure", "timed_out", "startup_failure") for r in runs):
+            return "failure"
+        if any(r.get("status") != "completed" for r in runs):
+            return "pending"
+        ok = all(r.get("conclusion") in ("success", "skipped", "neutral") for r in runs)
+        return "success" if ok else "unknown"
     except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
-        return False
+        return "unknown"
+
+
+def main_ci_green(get, sha: str) -> bool:
+    """Every check run on the main commit finished and none failed. Any doubt -> False."""
+    return main_ci_state(get, sha) == "success"
 
 
 def collect(get=public_get) -> dict:
@@ -119,7 +133,8 @@ def collect(get=public_get) -> dict:
         item["files"] = pr_files(get, item["number"], item["head_sha"])
     sha = branch["commit"]["sha"]
     committed = ((branch["commit"].get("commit") or {}).get("committer") or {}).get("date", "")
-    return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": main_ci_green(get, sha),
+    state = main_ci_state(get, sha)
+    return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": state == "success", "ci_state": state,
             "main_committed_at": committed, "latest_beta": latest_beta(get)}
 
 
@@ -177,7 +192,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
               "open_issues": [{**x, "title": x["title"][:120]} for x in sorted(issues.values(), key=lambda i: i["number"])
                               if tracked_issue(x, bug_labels)][:MAX_OPEN_ROWS],
               "open_prs": [{**x, "title": x["title"][:120]} for x in snapshot.get("prs", []) if x["state"] == "open"],
-              "ci_green": bool(snapshot.get("ci_green")),
+              "ci_green": bool(snapshot.get("ci_green")), "ci_state": snapshot.get("ci_state", "unknown"),
               "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
     store.set_source(source)
