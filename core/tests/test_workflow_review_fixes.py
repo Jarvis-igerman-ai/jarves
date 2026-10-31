@@ -151,3 +151,16 @@ class HookCommandAndFlightTests(ReviewFixTests):
         self.assertEqual(self.store.snapshot()["agents"][0]["status"], "blocked")
         self.assertEqual([a["kind"] for a in alerts], ["worker_waiting_permission"])
         self.assertIn("permission prompt pending", alerts[0]["summary"])
+
+
+class RegistrationNoiseTests(unittest.TestCase):
+    def test_repeat_registration_writes_one_event(self):
+        with tempfile.TemporaryDirectory() as home:
+            store = Store(Path(home) / "w.db")
+            try:
+                for _ in range(3):
+                    store.register_agent({"id": "a", "label": "a"})
+                kinds = [e["kind"] for e in store.snapshot()["events"]]
+                self.assertEqual(kinds.count("agent_registered"), 1)
+            finally:
+                store.close()

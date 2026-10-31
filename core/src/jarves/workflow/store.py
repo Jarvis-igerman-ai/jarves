@@ -291,7 +291,11 @@ class Store:
                                                for other in self._all(db, "agent")):
                 raise ValueError("session already attached to another workflow worker")
             self._put(db, "agent", agent)
-            self._event(db, "agent_registered", f"Registered {agent['label']}")
+            if old is None:
+                self._event(db, "agent_registered", f"Registered {agent['label']}")
+            else:
+                # Native hooks re-register on every event; repeats are telemetry, not news.
+                self._bump(db)
         return agent
 
     def observe_agent(self, agent_id, status, note="", tool=None, call_id=None):
