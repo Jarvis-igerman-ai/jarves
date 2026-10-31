@@ -112,7 +112,7 @@ behind main re-runs the PR checks first, about 8 minutes); a runner outage or a 
 
 ## Required status checks (branch protection) and job names
 
-Recommended: require only **`CI result (single required check)`** (job `ci-ok`, green when every other job passed or was
+Recommended: require only **`CI result`** (job `ci-ok`, green when every other job passed or was
 legitimately skipped, red on failure or cancellation). The per-job names below are stable and still valid to require:
 
 | Job id | Name |
@@ -125,7 +125,7 @@ legitimately skipped, red on failure or cancellation). The per-job names below a
 | perf | Performance gate (Windows) |
 | e2e | Core-Godot E2E (real processes) |
 | cad, blender, godot | cad, blender, godot |
-| ci-ok | CI result (single required check) |
+| ci-ok | CI result |
 
 A skipped job reports as passed. Do not require `Update the shard timing data` (job `durations`; main and manual runs only).
 Because a merge commit whose tree is proven skips every job, the push run on `main` is green in about 30 s.

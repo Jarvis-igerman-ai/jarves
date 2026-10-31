@@ -18,7 +18,9 @@ only release files (default igalgerman/jarvis-releases, no source code). Free; n
                                         RELEASES_TOKEN (fine-grained, Contents: write on that repo only) and
                                         JARVES_UPDATE_SIGNING_KEY; skips cleanly (exit 0, clear log) without them.
 
-Channels (docs/RELEASING.md): STABLE = tag-driven (`public-publish`, run by .github/workflows/release.yml after
+Release train (docs/RELEASE_TRAIN.md): ALPHA = every green main (`alpha-publish`, package.yml, ENABLE_ALPHA_PUBLISH),
+BETA = `promote-beta` (a new signed manifest pointing at the alpha's installer), STABLE = core/tools/release_train.py.
+Older text, kept for the stable/beta mechanics: STABLE = tag-driven (`public-publish`, run by .github/workflows/release.yml after
 core/tools/release_gate.py), manifest latest.json on the newest non-pre-release. BETA = after every green main
 (`beta-publish`, .github/workflows/beta.yml; DISABLED unless ENABLE_BETA_PUBLISH=true): release `beta-v<build>` marked
 pre-release (never "latest") plus the manifest latest-beta.json on the one rolling pre-release `beta-channel`.
@@ -217,8 +219,9 @@ class GitHub:
         if not url.startswith("http"):
             url = f"{self.api_base}/repos/{self.repo}{url}"
         body = json.dumps(data).encode() if isinstance(data, dict) else data
-        h = {"Authorization": f"Bearer {self.token}", "Accept": "application/vnd.github+json",
-             "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "jarves-release"}
+        h = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "jarves-release"}
+        if self.token:                      # reading the public releases repo (dry runs, status) needs no token
+            h["Authorization"] = f"Bearer {self.token}"
         if body is not None:
             h["Content-Type"] = content_type
         req = urllib.request.Request(url, data=body, method=method, headers=h)
@@ -342,6 +345,8 @@ def build_manifest(info: dict, exe: Path, url: str, now: _dt.datetime | None = N
          "installer": exe.name, "sha256": sha256(exe), "size": exe.stat().st_size, "url": url,
          "python": info.get("python"), "godot": info.get("godot"),
          "published": (now or _dt.datetime.now(_dt.timezone.utc)).isoformat(timespec="seconds")}
+    if info.get("tree"):                # the git tree the installer was proven for (promotion gates look the proof up by it)
+        m["tree"] = info["tree"]
     if previous:                       # SW-V4 L: lets `jarvis update --rollback` fetch the version before this one
         m["previous"] = previous
     return m
@@ -423,50 +428,91 @@ def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHu
     return 0
 
 
-# ---------------------------------------------------------------------- beta channel + candidate + dry run
+# ---------------------------------------------------------------------- channels alpha / beta + candidate + dry run
+# Release train (docs/RELEASE_TRAIN.md): ALPHA = every green main (published here from the PR-proven installer), BETA =
+# promotion of an alpha (a new signed manifest that points at the SAME installer, no upload, no build), STABLE =
+# promotion of a signed-off beta (core/tools/release_train.py). One installer, three labels.
+CHANNELS = {
+    "alpha": {"prefix": "alpha-v", "manifest": "latest-alpha.json", "tag": "alpha-channel", "keep": 10,
+              "flag": "ENABLE_ALPHA_PUBLISH", "title": "Alpha"},
+    "beta": {"prefix": BETA_PREFIX, "manifest": BETA_MANIFEST, "tag": BETA_TAG, "keep": BETA_KEEP,
+             "flag": "ENABLE_BETA_PUBLISH", "title": "Beta"},
+}
+SOURCE_RE = re.compile(r"(?m)^source-release: (\S+)$")      # in the notes of a promoted release: where the bytes live
+PROMOTE_FROM = {"beta": "alpha", "stable": "beta"}
+
+
 def beta_base(version: str) -> str:
     """'4.1.0.57' -> '4.1.0' (the X.Y.Z a beta is a pre-release of)."""
     return ".".join(version.split(".")[:3])
 
 
-def beta_number(rel: dict) -> tuple[str, int] | None:
-    """(X.Y.Z, N) from a beta release named 'JARVES X.Y.Z-beta.N'; None for anything else."""
-    m = re.fullmatch(r"JARVES (\d+\.\d+\.\d+)-beta\.(\d+)", str(rel.get("name") or "").strip())
-    if not m or not str(rel.get("tag_name") or "").startswith(BETA_PREFIX):
+def channel_number(rel: dict, ch: str = "beta") -> tuple[str, int] | None:
+    """(X.Y.Z, N) from a release named 'JARVES X.Y.Z-<channel>.N'; None for anything else."""
+    c = CHANNELS[ch]
+    m = re.fullmatch(rf"JARVES (\d+\.\d+\.\d+)-{ch}\.(\d+)", str(rel.get("name") or "").strip())
+    if not m or not str(rel.get("tag_name") or "").startswith(c["prefix"]):
         return None
     return m.group(1), int(m.group(2))
 
 
-def next_beta_number(releases: list[dict], base: str) -> int:
-    """Beta counter per X.Y.Z base: 1 for the first beta of a base, else the highest published + 1."""
-    ns = [b[1] for r in releases if (b := beta_number(r)) and b[0] == base]
+def beta_number(rel: dict) -> tuple[str, int] | None:
+    return channel_number(rel, "beta")
+
+
+def next_number(releases: list[dict], base: str, ch: str = "beta") -> int:
+    """Counter per X.Y.Z base and channel: 1 for the first of a base, else the highest published + 1."""
+    ns = [b[1] for r in releases if (b := channel_number(r, ch)) and b[0] == base]
     return max(ns, default=0) + 1
 
 
-def beta_for_commit(releases: list[dict], commit: str) -> dict | None:
-    """A beta release already built from this commit (re-run of the same green main is a no-op)."""
+def next_beta_number(releases: list[dict], base: str) -> int:
+    return next_number(releases, base, "beta")
+
+
+def for_commit(releases: list[dict], commit: str, ch: str = "beta") -> dict | None:
+    """A release of this channel already made from this commit (re-run of the same green main is a no-op)."""
     for r in releases:
-        if beta_number(r) and f"commit {commit}" in str(r.get("body") or ""):
+        if channel_number(r, ch) and f"commit {commit}" in str(r.get("body") or ""):
             return r
     return None
 
 
-def beta_manifest(info: dict, exe: Path, url: str, n: int, previous: dict | None, now: _dt.datetime | None = None) -> dict:
+def beta_for_commit(releases: list[dict], commit: str) -> dict | None:
+    return for_commit(releases, commit, "beta")
+
+
+def channel_manifest(info: dict, exe: Path, url: str, n: int, previous: dict | None, ch: str = "beta",
+                     now: _dt.datetime | None = None) -> dict:
     m = build_manifest(info, exe, url, now=now, previous=previous)
-    m["channel"] = "beta"
-    m["beta"] = n
-    m["display_version"] = f"{beta_base(info['version'])}-beta.{n}"
+    m["channel"] = ch
+    m[ch] = n
+    m["display_version"] = f"{beta_base(info['version'])}-{ch}.{n}"
     return m
 
 
+def beta_manifest(info: dict, exe: Path, url: str, n: int, previous: dict | None, now: _dt.datetime | None = None) -> dict:
+    return channel_manifest(info, exe, url, n, previous, "beta", now)
+
+
+def referenced_tags(releases: list[dict]) -> set[str]:
+    """Release tags whose installer another (promoted) release still points at; retention never deletes these."""
+    out: set[str] = set()
+    for r in releases:
+        if not r.get("draft"):
+            out.update(SOURCE_RE.findall(str(r.get("body") or "")))
+    return out
+
+
 def previous_any(releases: list[dict], version: str, repo: str) -> dict | None:
-    """The newest published release (stable `win-v` or beta `beta-v`) with a lower numeric version and a hashed
-    installer asset, as the manifest's `previous` block (so a bad beta can always be rolled back)."""
+    """The newest published release (stable `win-v`, `alpha-v` or `beta-v`) with a lower numeric version and a hashed
+    installer asset, as the manifest's `previous` block (so a bad build can always be rolled back)."""
     cur = version_key(f"{TAG_PREFIX}{version}")
+    prefixes = (TAG_PREFIX, CHANNELS["alpha"]["prefix"], BETA_PREFIX)
     best = None
     for r in releases:
         t = str(r.get("tag_name") or "")
-        pre = TAG_PREFIX if t.startswith(TAG_PREFIX) else BETA_PREFIX if t.startswith(BETA_PREFIX) else None
+        pre = next((p for p in prefixes if t.startswith(p)), None)
         v = version_key(TAG_PREFIX + t[len(pre):]) if pre else ()
         if r.get("draft") or not v or v >= cur:
             continue
@@ -481,14 +527,21 @@ def previous_any(releases: list[dict], version: str, repo: str) -> dict | None:
     return best[1] if best else None
 
 
-def beta_notes(info: dict, display: str) -> str:
-    return (f"JARVES {display} for Windows (64-bit), BETA channel (early build, not manually tested). "
+def channel_notes(info: dict, display: str, ch: str = "beta") -> str:
+    c = CHANNELS[ch]
+    what = ("ALPHA channel (every green main, automatic, not manually tested)" if ch == "alpha"
+            else "BETA channel (an alpha that also passed the extended gates; not manually tested)")
+    return (f"JARVES {display} for Windows (64-bit), {what}. "
             f"Built {info.get('built')} (UTC) from commit {info.get('commit')}.\n\n"
             f"- Installer: `{info['installer']}` ({round(info['size'] / 1048576)} MB)\n"
             f"- SHA256: `{info['sha256']}`\n"
-            f"- `{BETA_MANIFEST}` (on the `{BETA_TAG}` pre-release) is the Ed25519-signed manifest JARVES checks.\n\n"
-            "Only installed by JARVES copies whose owner switched to the beta channel "
-            "(`jarvis update --channel beta`). Stable users are never offered this.\n")
+            f"- `{c['manifest']}` (on the `{c['tag']}` pre-release) is the Ed25519-signed manifest JARVES checks.\n\n"
+            f"Only installed by JARVES copies whose owner chose the {ch} channel "
+            f"(`jarvis update --channel {ch}`). Stable users are never offered this.\n")
+
+
+def beta_notes(info: dict, display: str) -> str:
+    return channel_notes(info, display, "beta")
 
 
 def _read_info(dist: Path) -> tuple[dict, Path]:
@@ -504,80 +557,234 @@ def _dry_run_plan(dist: Path, env: dict, channel: str) -> int:
     info, exe = _read_info(dist)
     repo = str(env.get("RELEASES_REPO") or "").strip() or DEFAULT_RELEASES_REPO
     have_key = bool(str(env.get("JARVES_UPDATE_SIGNING_KEY") or "").strip())
-    if channel == "beta":
-        tag, name, mf = f"{BETA_PREFIX}{info['version']}", f"JARVES {beta_base(info['version'])}-beta.<next N>", BETA_MANIFEST
-        extra = f"  + pre-release {BETA_TAG}: replace asset {BETA_MANIFEST}\n  keeps the newest {BETA_KEEP} beta releases\n"
-        on = str(env.get("ENABLE_BETA_PUBLISH")).strip().lower() == "true"
-        flag = "ENABLE_BETA_PUBLISH is " + ("true" if on else "NOT true (a real run would publish nothing)")
+    if channel in CHANNELS:
+        c = CHANNELS[channel]
+        tag, name, mf = f"{c['prefix']}{info['version']}", f"JARVES {beta_base(info['version'])}-{channel}.<next N>", c["manifest"]
+        extra = f"  + pre-release {c['tag']}: replace asset {mf}\n  keeps the newest {c['keep']} {channel} releases\n"
+        on = str(env.get(c["flag"])).strip().lower() == "true"
+        flag = f"{c['flag']} is " + ("true" if on else "NOT true (a real run would publish nothing)")
     else:
         tag, name, mf, extra = f"{TAG_PREFIX}{info['version']}", f"JARVES {info['version']}", MANIFEST, ""
         flag = 'stable: made "latest"; keeps the newest 3'
     print(f"DRY RUN ({channel}): nothing is published, no network call is made.\n"
-          f"  repo      {repo}\n  release   {tag}  ({name}){' pre-release' if channel == 'beta' else ''}\n"
+          f"  repo      {repo}\n  release   {tag}  ({name}){' pre-release' if channel in CHANNELS else ''}\n"
           f"  files     {exe.name} ({info['size']} bytes), {exe.name}.sha256, {mf} (Ed25519-signed)\n{extra}"
           f"  commit    {info.get('commit')}\n  signing   {'key present' if have_key else 'JARVES_UPDATE_SIGNING_KEY not set here'}\n"
           f"  {flag}")
     return 0
 
 
-def beta_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, dry_run: bool = False) -> int:
-    """Publish the verified installer as the next beta: a pre-release `beta-v<build>` (installer + .sha256) and the
-    signed latest-beta.json on the rolling pre-release `beta-channel`. Exit 0 with a clear log when disabled
-    (ENABLE_BETA_PUBLISH is not "true") or when the secrets are missing; never touches stable releases."""
+def _prune_channel(gh: GitHub, ch: str, keep_tag: str) -> None:
+    c = CHANNELS[ch]
+    allr = gh.releases()
+    protected = referenced_tags(allr)
+    mine = sorted((r for r in allr if channel_number(r, ch) and not is_pinned(r)),
+                  key=lambda r: (version_key(TAG_PREFIX + r["tag_name"][len(c["prefix"]):]), r.get("created_at") or ""),
+                  reverse=True)
+    for r in mine[c["keep"]:]:
+        if r.get("tag_name") == keep_tag or r.get("tag_name") in protected:
+            continue
+        print(f"{c['title']} publish: delete old {r['tag_name']}")
+        gh.call("DELETE", f"/releases/{r['id']}")
+        gh.call("DELETE", f"/git/refs/tags/{r['tag_name']}", ok404=True)
+
+
+def _set_channel_manifest(gh: GitHub, ch: str, body: bytes) -> None:
+    c = CHANNELS[ch]
+    chan = gh.call("GET", f"/releases/tags/{c['tag']}", ok404=True)
+    if chan is None:
+        chan = gh.call("POST", "/releases", {"tag_name": c["tag"], "name": f"JARVES {ch} channel (manifest only)",
+                                             "body": f"Holds only {c['manifest']}, replaced after every {ch} publish.",
+                                             "draft": False, "prerelease": True, "make_latest": "false"})
+    gh.upload(chan, c["manifest"], body, "application/json")   # last: the switch
+
+
+def channel_publish(ch: str, dist: Path, env: dict | None = None, gh: GitHub | None = None, dry_run: bool = False) -> int:
+    """Publish the PROVEN installer as the next alpha (or, legacy, beta): a pre-release `<prefix><build>` (installer +
+    .sha256 + its signed manifest) and the signed manifest on the rolling pre-release of the channel. Exit 0 with a
+    clear log when disabled (ENABLE_<CH>_PUBLISH is not "true") or when the secrets are missing; never touches stable
+    releases. Refuses an installer whose build-info does not name the proven git tree (never publish unproven bytes)."""
     env = os.environ if env is None else env
+    c = CHANNELS[ch]
+    label = c["title"]
     if dry_run:
-        return _dry_run_plan(dist, env, "beta")
-    if str(env.get("ENABLE_BETA_PUBLISH") or "").strip().lower() != "true":
-        print("Beta publish: DISABLED - ENABLE_BETA_PUBLISH is not 'true'; nothing is published "
-              "(the owner enables it: docs/RELEASING.md)")
+        return _dry_run_plan(dist, env, ch)
+    if str(env.get(c["flag"]) or "").strip().lower() != "true":
+        print(f"{label} publish: DISABLED - {c['flag']} is not 'true'; nothing is published "
+              f"(enable: gh variable set {c['flag']} --body true --repo igalgerman/jarves; docs/RELEASE_TRAIN.md)")
         return 0
     missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]
     if missing:
-        print(f"::warning::Beta publish: SKIPPED - {len(missing)} required repository secret(s) not set (docs/RELEASE_HOSTING.md)")
+        print(f"::warning::{label} publish: SKIPPED - {len(missing)} required repository secret(s) not set (docs/RELEASE_HOSTING.md)")
         return 0
     repo = str(env.get("RELEASES_REPO") or "").strip() or DEFAULT_RELEASES_REPO
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
-        raise SystemExit(f"Beta publish: bad RELEASES_REPO {repo!r}")
+        raise SystemExit(f"{label} publish: bad RELEASES_REPO {repo!r}")
+    if str(env.get("GITHUB_EVENT_NAME") or "") == "pull_request":
+        raise SystemExit(f"{label} publish: refused - never publish from a pull request")
     info, exe = _read_info(dist)
+    if ch == "alpha" and not info.get("tree"):
+        raise SystemExit("Alpha publish: refused - build-info.json names no proven git tree (run `release.py stamp` first)")
     gh = gh or GitHub(repo, env["RELEASES_TOKEN"].strip())
     releases = gh.releases()
-    if beta_for_commit(releases, str(info.get("commit"))):
-        print(f"Beta publish: commit {str(info.get('commit'))[:12]} already has a beta; nothing to do")
+    if for_commit(releases, str(info.get("commit")), ch):
+        print(f"{label} publish: commit {str(info.get('commit'))[:12]} already has {"an" if ch == "alpha" else "a"} {ch}; nothing to do")
         return 0
     base = beta_base(info["version"])
-    n = next_beta_number(releases, base)
-    display = f"{base}-beta.{n}"
-    tag = f"{BETA_PREFIX}{info['version']}"
+    n = next_number(releases, base, ch)
+    display = f"{base}-{ch}.{n}"
+    tag = f"{c['prefix']}{info['version']}"
     url = f"https://github.com/{repo}/releases/download/{tag}/{exe.name}"
-    manifest = beta_manifest(info, exe, url, n, previous_any(releases, info["version"], repo))
+    manifest = channel_manifest(info, exe, url, n, previous_any(releases, info["version"], repo), ch)
     envelope = sign_manifest(manifest, env["JARVES_UPDATE_SIGNING_KEY"])
     rel = gh.call("GET", f"/releases/tags/{tag}", ok404=True)
     if rel is None:
-        rel = gh.call("POST", "/releases", {"tag_name": tag, "name": f"JARVES {display}", "body": beta_notes(info, display),
+        rel = gh.call("POST", "/releases", {"tag_name": tag, "name": f"JARVES {display}", "body": channel_notes(info, display, ch),
                                             "draft": True, "prerelease": True})
     gh.upload(rel, exe.name, exe.read_bytes(), "application/vnd.microsoft.portable-executable")
     gh.upload(rel, exe.name + ".sha256", f"{info['sha256']}  {exe.name}\n".encode(), "text/plain")
     body = json.dumps(envelope, indent=1).encode()
-    gh.upload(rel, BETA_MANIFEST, body, "application/json")        # kept per beta so a rollback can re-publish it
+    gh.upload(rel, c["manifest"], body, "application/json")        # kept per release so a rollback can re-publish it
     gh.call("PATCH", f"/releases/{rel['id']}", {"draft": False, "prerelease": True, "make_latest": "false"})
-    chan = gh.call("GET", f"/releases/tags/{BETA_TAG}", ok404=True)
-    if chan is None:
-        chan = gh.call("POST", "/releases", {"tag_name": BETA_TAG, "name": "JARVES beta channel (manifest only)",
-                                             "body": "Holds only latest-beta.json, replaced after every published beta.",
-                                             "draft": False, "prerelease": True, "make_latest": "false"})
-    gh.upload(chan, BETA_MANIFEST, body, "application/json")   # last: the switch
-    print(f"Beta publish: published {display} ({tag}) in {repo}, signed {BETA_MANIFEST} key "
-          f"{envelope['signature']['key_id']} -> https://github.com/{repo}/releases/download/{BETA_TAG}/{BETA_MANIFEST}")
-    betas = sorted((r for r in gh.releases() if beta_number(r) and not is_pinned(r)),
-                   key=lambda r: (version_key(TAG_PREFIX + r["tag_name"][len(BETA_PREFIX):]), r.get("created_at") or ""),
-                   reverse=True)
-    for r in betas[BETA_KEEP:]:
-        if r.get("tag_name") == tag:
-            continue
-        print(f"Beta publish: delete old {r['tag_name']}")
-        gh.call("DELETE", f"/releases/{r['id']}")
-        gh.call("DELETE", f"/git/refs/tags/{r['tag_name']}", ok404=True)
+    _set_channel_manifest(gh, ch, body)
+    print(f"{label} publish: published {display} ({tag}) in {repo}, signed {c['manifest']} key "
+          f"{envelope['signature']['key_id']} -> https://github.com/{repo}/releases/download/{c['tag']}/{c['manifest']}")
+    _prune_channel(gh, ch, tag)
     return 0
+
+
+def beta_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, dry_run: bool = False) -> int:
+    """Direct beta publish (legacy/manual; the train promotes alphas instead: promote_to_beta)."""
+    return channel_publish("beta", dist, env, gh, dry_run)
+
+
+def alpha_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, dry_run: bool = False) -> int:
+    return channel_publish("alpha", dist, env, gh, dry_run)
+
+
+def newest_of(releases: list[dict], ch: str) -> dict | None:
+    """Newest published (non-draft) release of an alpha/beta channel, by version then counter then creation time."""
+    c = CHANNELS[ch]
+    mine = [r for r in releases if channel_number(r, ch) and not r.get("draft")]
+    mine.sort(key=lambda r: (version_key(TAG_PREFIX + r["tag_name"][len(c["prefix"]):]), channel_number(r, ch)[1],
+                             r.get("created_at") or ""), reverse=True)
+    return mine[0] if mine else None
+
+
+def _fetch_bytes(url: str) -> bytes:
+    if not url.startswith("https://"):
+        raise ValueError("refusing a non-HTTPS download")
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "jarves-release"}), timeout=600) as r:
+        return r.read()
+
+
+def verified_alpha(releases: list[dict], source_tag: str | None, keys, fetch, out=print, repo: str = DEFAULT_RELEASES_REPO) -> tuple[dict, dict] | None:
+    """(alpha release, its verified manifest) or None after printing why not."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
+    from jarves import updates
+    return _verified(releases, source_tag, "alpha", keys, fetch, out, updates, repo)
+
+
+def verified_beta(releases: list[dict], source_tag: str | None, keys, fetch, out=print, repo: str = DEFAULT_RELEASES_REPO) -> tuple[dict, dict] | None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
+    from jarves import updates
+    return _verified(releases, source_tag, "beta", keys, fetch, out, updates, repo)
+
+
+def _verified(releases, source_tag, ch, keys, fetch, out, updates, repo):
+    src = next((r for r in releases if r.get("tag_name") == source_tag and not r.get("draft")), None) if source_tag \
+        else newest_of(releases, ch)
+    if src is None or not channel_number(src, ch):
+        out(f"PROMOTE REFUSED: no {ch} release{' ' + source_tag if source_tag else ''} to promote")
+        return None
+    asset = next((a for a in src.get("assets") or [] if a.get("name") == CHANNELS[ch]["manifest"]), None)
+    if asset is None:
+        out(f"PROMOTE REFUSED: {src['tag_name']} has no {CHANNELS[ch]['manifest']}")
+        return None
+    try:
+        url = asset.get("browser_download_url") or f"https://github.com/{repo}/releases/download/{src['tag_name']}/{asset['name']}"
+        m = updates.verify_manifest(json.loads(fetch(url).decode("utf-8")),
+                                    keys if keys is not None else updates.UPDATE_PUBLIC_KEYS)
+    except Exception as e:                                           # noqa: BLE001 - any failure refuses the promotion
+        out(f"PROMOTE REFUSED: the signed manifest of {src['tag_name']} does not verify ({type(e).__name__}: {e})")
+        return None
+    if m.get("channel") != ch or m.get("product") != "jarves":
+        out(f"PROMOTE REFUSED: {src['tag_name']} is not a {ch} manifest")
+        return None
+    return src, m
+
+
+def promote_to_beta(source_tag: str | None, repo: str, env: dict | None = None, gh: GitHub | None = None,
+                    dry_run: bool = False, fetch=None, public_keys=None, out=print) -> int:
+    """BETA = a signed manifest that points at the installer of an ALPHA. The alpha's signed manifest is verified with
+    the app's trusted keys first; the new manifest has channel "beta", the same version/sha256/size/url/commit, and a
+    `promoted_from` block. No installer is built, downloaded or uploaded. Idempotent per source alpha."""
+    env = os.environ if env is None else env
+    fetch = fetch or _fetch_bytes
+    gh = gh or GitHub(repo, str(env.get("RELEASES_TOKEN") or "").strip())
+    releases = gh.releases()
+    got = verified_alpha(releases, source_tag, public_keys, fetch, out, repo)
+    if got is None:
+        return 1
+    src, m = got
+    done = next((r for r in releases if channel_number(r, "beta") and not r.get("draft")
+                 and src["tag_name"] in SOURCE_RE.findall(str(r.get("body") or ""))), None)
+    if done:
+        out(f"Promote: {src['tag_name']} is already beta {done['tag_name']}; nothing to do")
+        return 0
+    base = beta_base(m["version"])
+    n = next_number(releases, base, "beta")
+    display = f"{base}-beta.{n}"
+    cur = newest_of(releases, "beta")
+    if cur is not None and version_key(TAG_PREFIX + m["version"]) < version_key(TAG_PREFIX + cur["tag_name"][len(BETA_PREFIX):]):
+        out(f"PROMOTE REFUSED: {m['version']} is older than the current beta {cur['tag_name']} "
+            "(to go back use core/tools/release_rollback.py)")
+        return 1
+    tag = f"{BETA_PREFIX}{m['version']}"
+    nm = {k: v for k, v in m.items() if k not in ("alpha", "display_version")}
+    nm.update({"channel": "beta", "beta": n, "display_version": display,
+               "promoted_from": {"channel": "alpha", "tag": src["tag_name"], "display": m.get("display_version"), "sha256": m["sha256"]},
+               "published": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")})
+    out(f"{'DRY RUN (nothing changed)' if dry_run else 'PROMOTE'} alpha {m.get('display_version')} ({src['tag_name']}) -> "
+        f"beta {display}: new signed {BETA_MANIFEST} -> {m['url']} (installer bytes untouched, sha256 {m['sha256'][:12]})")
+    if dry_run:
+        return 0
+    key = str(env.get("JARVES_UPDATE_SIGNING_KEY") or "").strip()
+    if not key or not getattr(gh, "token", ""):
+        out("PROMOTE REFUSED: RELEASES_TOKEN and JARVES_UPDATE_SIGNING_KEY are required")
+        return 1
+    body = json.dumps(sign_manifest(nm, key), indent=1).encode()
+    notes = (f"JARVES {display} for Windows (64-bit), BETA channel: alpha {m.get('display_version')} that also passed the "
+             f"extended gates. Same installer, no rebuild.\n\ncommit {m.get('commit')}\nsource-release: {src['tag_name']}\n"
+             f"SHA256: `{m['sha256']}`\n")
+    rel = gh.call("GET", f"/releases/tags/{tag}", ok404=True)
+    if rel is None:
+        rel = gh.call("POST", "/releases", {"tag_name": tag, "name": f"JARVES {display}", "body": notes,
+                                            "draft": True, "prerelease": True})
+    gh.upload(rel, BETA_MANIFEST, body, "application/json")
+    gh.call("PATCH", f"/releases/{rel['id']}", {"draft": False, "prerelease": True, "make_latest": "false"})
+    _set_channel_manifest(gh, "beta", body)
+    out(f"Promote: beta is now {display} ({tag})")
+    _prune_channel(gh, "beta", tag)
+    return 0
+
+
+def stage_installer(m: dict, dest: Path, fetch=None) -> dict:
+    """Download the installer a verified manifest names into `dest`, check size + SHA256 against the SIGNED values and
+    write the build-info.json/.sha256 that `public_publish` expects. For STABLE promotion only (the stable release
+    carries its own copy of the same bytes, so it survives alpha retention)."""
+    fetch = fetch or _fetch_bytes
+    data = fetch(str(m["url"]))
+    if len(data) != m["size"] or hashlib.sha256(data).hexdigest() != str(m["sha256"]).lower():
+        raise SystemExit("STAGE FAILED: the downloaded installer does not match the signed size/SHA256; not publishing")
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / m["installer"]).write_bytes(data)
+    (dest / (m["installer"] + ".sha256")).write_text(f"{m['sha256']}  {m['installer']}\n", encoding="ascii")
+    info = {"version": m["version"], "commit": m.get("commit"), "built": m.get("built"), "channel": "main",
+            "installer": m["installer"], "sha256": m["sha256"], "size": m["size"], "python": m.get("python"),
+            "godot": m.get("godot"), "tree": m.get("tree")}
+    (dest / "build-info.json").write_text(json.dumps(info, indent=1), encoding="utf-8")
+    return info
 
 
 def candidate(dist: Path, commit: str, out: Path, env: dict | None = None) -> dict:
@@ -601,7 +808,7 @@ def candidate(dist: Path, commit: str, out: Path, env: dict | None = None) -> di
     (out / "CANDIDATE.txt").write_text(
         f"Release candidate {info['version']} of commit {info['commit']}\n"
         f"manifest: {'signed' if signed else 'UNSIGNED (JARVES_UPDATE_SIGNING_KEY not available in this run)'}\n"
-        "Never published automatically. Beta: .github/workflows/beta.yml. Stable: tag vX.Y.Z (docs/RELEASING.md).\n",
+        "Never published automatically. Alpha: package.yml. Beta/stable: promote.yml. Stable: tag vX.Y.Z (docs/RELEASING.md).\n",
         encoding="utf-8")
     print(f"Candidate {info['version']} ({'signed' if signed else 'unsigned'} manifest) written to {out}")
     return {"version": info["version"], "signed": signed}
@@ -619,6 +826,12 @@ def main(argv: list[str] | None = None) -> int:
     bp = sub.add_parser("beta-publish")
     bp.add_argument("--dir", type=Path, required=True)
     bp.add_argument("--dry-run", action="store_true", help="print what would be published; touch nothing")
+    ap_ = sub.add_parser("alpha-publish", help="publish the proven installer as the next alpha (ENABLE_ALPHA_PUBLISH)")
+    ap_.add_argument("--dir", type=Path, required=True)
+    ap_.add_argument("--dry-run", action="store_true", help="print what would be published; touch nothing")
+    pb = sub.add_parser("promote-beta", help="alpha -> beta: new signed manifest, same installer (no upload, no build)")
+    pb.add_argument("--from", dest="source", help="alpha release tag (default: the newest alpha)")
+    pb.add_argument("--dry-run", action="store_true")
     cp = sub.add_parser("candidate")
     cp.add_argument("--dir", type=Path, required=True)
     cp.add_argument("--commit", required=True)
@@ -651,6 +864,10 @@ def main(argv: list[str] | None = None) -> int:
         return public_publish(a.dir, a.keep, dry_run=a.dry_run)
     if a.cmd == "beta-publish":
         return beta_publish(a.dir, dry_run=a.dry_run)
+    if a.cmd == "alpha-publish":
+        return alpha_publish(a.dir, dry_run=a.dry_run)
+    if a.cmd == "promote-beta":
+        return promote_to_beta(a.source, os.environ.get("RELEASES_REPO") or DEFAULT_RELEASES_REPO, dry_run=a.dry_run)
     if a.cmd == "candidate":
         candidate(a.dir, a.commit, a.out)
         return 0

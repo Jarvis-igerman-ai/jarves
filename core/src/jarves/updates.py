@@ -63,10 +63,16 @@ UPDATE_PUBLIC_KEYS: tuple[str, ...] = ("k95ZucnexPDgELN5ylkcxR0fy38QH5EsQs90yIpY
 DEFAULT_RELEASES_REPO = "igalgerman/jarvis-releases"   # public, release files only (same default in release.py)
 # Channels (docs/RELEASING.md): "stable" = latest.json of the newest stable release (tag-driven, manually signed off);
 # "beta" = latest-beta.json attached to the one rolling pre-release tagged BETA_TAG, written after every green main.
-CHANNELS = ("stable", "beta")
+# "alpha" = latest-alpha.json on the pre-release ALPHA_TAG, written after every green main (automatic, no manual test);
+# beta is an alpha promoted after the extended gates; stable is a beta promoted after the owner's manual sign-off. All
+# three are signed manifests for the SAME installer bytes (docs/RELEASE_TRAIN.md).
+CHANNELS = ("stable", "beta", "alpha")
 BETA_MANIFEST = "latest-beta.json"
 BETA_TAG = "beta-channel"
+ALPHA_MANIFEST = "latest-alpha.json"
+ALPHA_TAG = "alpha-channel"
 BETA_DISPLAY_RE = re.compile(r"^\d+\.\d+\.\d+-beta\.\d+$")
+PRE_DISPLAY_RE = re.compile(r"^\d+\.\d+\.\d+-(?:alpha|beta)\.\d+$")
 
 
 def public_releases_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
@@ -77,8 +83,16 @@ def public_beta_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
     return f"https://github.com/{repo}/releases/download/{BETA_TAG}"
 
 
+def public_alpha_url(repo: str = DEFAULT_RELEASES_REPO) -> str:
+    return f"https://github.com/{repo}/releases/download/{ALPHA_TAG}"
+
+
+def public_channel_url(channel: str, repo: str = DEFAULT_RELEASES_REPO) -> str:
+    return {"alpha": public_alpha_url, "beta": public_beta_url}.get(channel, public_releases_url)(repo)
+
+
 def manifest_name(channel: str) -> str:
-    return BETA_MANIFEST if channel == "beta" else MANIFEST
+    return {"alpha": ALPHA_MANIFEST, "beta": BETA_MANIFEST}.get(channel, MANIFEST)
 
 # Windows / Pi status of the M6 features (spec section 5). jarves.features has no targets field yet, so this is
 # the record the capability matrix (WP-M4) reads; the issue is real (created with `gh issue create`).
@@ -155,7 +169,7 @@ def version_line(home: Path | None = None) -> str:
              f"channel {b['channel']}"]
     shown = beta_label(home, b["version"]) if home is not None else None
     if shown:
-        extra.append("BETA")
+        extra.append("ALPHA" if "-alpha." in shown else "BETA")
     return f"JARVES {shown or b['version']} (" + ", ".join(x for x in extra if x) + ")"
 
 
@@ -171,10 +185,10 @@ def installed_record(home: Path | None) -> dict:
 
 
 def beta_label(home: Path | None, version: str | None = None) -> str | None:
-    """'4.1.0-beta.7' when this copy was installed from the beta channel, else None (status/dashboard show it)."""
+    """'4.1.0-beta.7' (or '-alpha.N') when this copy was installed from the beta/alpha channel, else None."""
     rec = installed_record(home)
     v = version or build_info()["version"]
-    if rec.get("channel") == "beta" and rec.get("version") == v and BETA_DISPLAY_RE.match(str(rec.get("display") or "")):
+    if rec.get("channel") in ("alpha", "beta") and rec.get("version") == v and PRE_DISPLAY_RE.match(str(rec.get("display") or "")):
         return rec["display"]
     return None
 
@@ -267,13 +281,13 @@ def release_from_manifest(m: dict, base_url: str, current: str, channel: str = "
     """The same release shape pick_release() returns, from a verified manifest; None when not newer."""
     v, name, url = str(m.get("version") or ""), str(m.get("installer") or ""), str(m.get("url") or "")
     sha, size = str(m.get("sha256") or "").lower(), m.get("size")
-    want = "beta" if channel == "beta" else "main"
+    want = channel if channel in ("alpha", "beta") else "main"
     if m.get("product") != "jarves" or m.get("platform") != "windows-x64" or m.get("channel") != want:
-        raise UpdateError("UPDATE_BAD_MANIFEST", f"the manifest is not a {'beta' if want == 'beta' else 'stable'} "
+        raise UpdateError("UPDATE_BAD_MANIFEST", f"the manifest is not a {'stable' if want == 'main' else want} "
                                                  "JARVES Windows release")
-    display = str(m.get("display_version") or "") if want == "beta" else ""
-    if want == "beta" and not BETA_DISPLAY_RE.match(display):
-        raise UpdateError("UPDATE_BAD_MANIFEST", "the beta manifest has no valid display_version (X.Y.Z-beta.N)")
+    display = str(m.get("display_version") or "") if want != "main" else ""
+    if want != "main" and not re.fullmatch(rf"\d+\.\d+\.\d+-{want}\.\d+", display):
+        raise UpdateError("UPDATE_BAD_MANIFEST", f"the {want} manifest has no valid display_version (X.Y.Z-{want}.N)")
     if not ASSET_RE.match(name) or ASSET_RE.match(name).group(1) != v or not re.fullmatch(r"[0-9a-f]{64}", sha) \
             or not isinstance(size, int) or size <= 0:
         raise UpdateError("UPDATE_BAD_MANIFEST", "latest.json is missing the version, installer, SHA256 or size")
@@ -313,13 +327,29 @@ def _beta_switch(home: Path, cfg) -> bool:
         return False
 
 
+def _alpha_choice(home: Path) -> bool:
+    """alpha is remembered in the updater state file (one more value of the same channel setting); beta stays the
+    `beta_channel` feature switch so older copies, the dashboard and the guides keep working."""
+    try:
+        return json.loads((Path(home) / STATE_FILE).read_text(encoding="utf-8")).get("channel") == "alpha"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def set_channel(home: Path, cfg, channel: str) -> str:
-    """Switch the update channel (stable | beta). Returns the channel now in force."""
+    """Switch the update channel (stable | beta | alpha). Returns the channel now in force."""
     if channel not in CHANNELS:
         raise UpdateError("UPDATE_BAD_CHANNEL", f"channel must be one of {', '.join(CHANNELS)}")
     from . import features
     from .config import Config
     features.Features(cfg if cfg is not None else Config(), home).set("beta_channel", channel == "beta")
+    uc = UpdateChecker(home, cfg=cfg, channel="stable")          # only to reuse the state file helpers
+    d = uc._load()
+    if channel == "alpha":
+        d["channel"] = "alpha"
+    else:
+        d.pop("channel", None)
+    uc._save(d)
     logs.info("updates", "UPDATE_CHANNEL_SET", "update channel changed", channel=channel)
     return channel
 
@@ -344,7 +374,7 @@ class UpdateChecker:
         self.public_keys = tuple(public_keys if public_keys is not None else UPDATE_PUBLIC_KEYS) + \
             ((extra,) if extra else ())
         # Channel: explicit argument > env (dev checkouts only) > the `beta_channel` feature switch > "stable".
-        ch = channel or dev_env("JARVES_UPDATE_CHANNEL") or ("beta" if _beta_switch(self.home, cfg) else "stable")
+        ch = channel or dev_env("JARVES_UPDATE_CHANNEL") or ("alpha" if _alpha_choice(self.home) else "beta" if _beta_switch(self.home, cfg) else "stable")
         self.channel = ch if ch in CHANNELS else "stable"
         # Order: explicit argument > env JARVES_UPDATE_BASE_URL > config [update] base_url > the build's default
         # (CI variable baked into _build_info.json) > the public releases repo once a signing key is trusted >
@@ -352,15 +382,15 @@ class UpdateChecker:
         base = base_url if base_url is not None else (
             os.environ.get("JARVES_UPDATE_BASE_URL") or getattr(ucfg, "base_url", "")
             or str(build_info().get("update_base_url") or "")
-            or ((public_beta_url if self.channel == "beta" else public_releases_url)(
-                dev_env("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO) if self.public_keys else ""))
+            or (public_channel_url(self.channel, dev_env("JARVES_RELEASES_REPO") or DEFAULT_RELEASES_REPO)
+                if self.public_keys else ""))
         if base and not base.strip().startswith("https://"):
             base = ""                                      # never fetch an update manifest over plain HTTP
         self.base_url = base.strip().rstrip("/")
         # A different source invalidates the cached answer (e.g. base_url was just set).
         self.source = f"hosted:{self.base_url}" if self.base_url else f"github:{self.repo}"
-        if self.channel == "beta":
-            self.source += "|beta"
+        if self.channel != "stable":
+            self.source += "|" + self.channel
 
     # --- state
     def _load(self) -> dict:
@@ -398,8 +428,8 @@ class UpdateChecker:
 
     # --- check
     def _check_github(self) -> tuple[str | None, dict | None]:
-        if self.channel == "beta":
-            return ("the beta channel needs the signed release folder (a build that trusts a signing key, or "
+        if self.channel != "stable":
+            return (f"the {self.channel} channel needs the signed release folder (a build that trusts a signing key, or "
                     "[update] base_url); it is not read from GitHub releases"), None
         url = f"https://api.github.com/repos/{self.repo}/releases?per_page=30"
         try:
@@ -887,7 +917,7 @@ def api_updates(ctx, m, body):
 
 
 def api_updates_channel(ctx, m, body):
-    """POST {"channel": "stable"|"beta"}: the dashboard switch (same switch as `jarvis update --channel`)."""
+    """POST {"channel": "stable"|"beta"|"alpha"}: the dashboard switch (same switch as `jarvis update --channel`)."""
     try:
         ch = set_channel(ctx.home, getattr(ctx, "cfg", None), str((body or {}).get("channel") or ""))
     except UpdateError as e:

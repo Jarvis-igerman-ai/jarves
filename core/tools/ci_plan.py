@@ -42,8 +42,57 @@ RULES = {
 }
 
 
-def classify(files: list[str], event: str = "pull_request", reused: bool = False) -> dict[str, bool]:
-    """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`."""
+LIGHT_OFF = ("full", "perf", "installer")      # a LIGHT run (PR into the `next` batch branch) never builds or times these
+SMOKE = ("test_guides.py", "test_cli_parity.py")
+ALL_TESTS_TRIGGER = re.compile(r"^core/(tests/(conftest|_tools)\.py|pyproject\.toml|uv\.lock)$")
+
+
+def affected_tests(files: list[str], tests_dir: Path = TESTS) -> list[str] | None:
+    """Test files a change can affect (light CI, docs/RELEASE_TRAIN.md): the changed test files themselves, tests named
+    after a changed module (core/src/jarves/foo.py -> test_foo*.py, core/tools/foo.py likewise) and every test that
+    mentions the module name. None = cannot tell (conftest, lock files, packaging...): run everything."""
+    present = {p.name for p in tests_dir.glob("test_*.py") if p.name not in BROWSER_FILES}
+    out: set[str] = set()
+    mods: set[str] = set()
+    for f in (x.strip() for x in files):
+        if not f or DOCS.match(f):
+            continue
+        if ALL_TESTS_TRIGGER.match(f) or SELF.match(f) or f.startswith(("packaging/", ".github/")):
+            return None
+        m = re.match(r"^core/tests/(test_[^/]+\.py)$", f)
+        if m:
+            if m.group(1) in present:
+                out.add(m.group(1))
+            continue
+        m = re.match(r"^core/(?:src/jarves|tools)/(?:.*/)?([A-Za-z0-9_]+)\.(?:py|toml|js)$", f)
+        if m:
+            mods.add(m.group(1))
+        elif f.startswith("core/"):
+            return None
+    for name in present:
+        stem = name[len("test_"):-3]
+        if any(stem == m or stem.startswith(m + "_") for m in mods):
+            out.add(name)
+    if mods:
+        pat = re.compile(r"\b(" + "|".join(re.escape(m) for m in sorted(mods)) + r")\b")
+        for name in present - out:
+            try:
+                if pat.search((tests_dir / name).read_text(encoding="utf-8", errors="replace")):
+                    out.add(name)
+            except OSError:
+                pass
+    if not out:
+        out = {n for n in SMOKE if n in present}
+    return sorted(out)
+
+
+def classify(files: list[str], event: str = "pull_request", reused: bool = False, light: bool = False) -> dict[str, bool]:
+    """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. `light` (a PR
+    into the `next` batch branch): quick Linux job on the affected tests plus the gates of the touched areas; the
+    installer, performance gate and Windows shards run once per batch on `next`, not per PR."""
+    if light and not reused and event == "pull_request":
+        out = classify(files, event)
+        return {**out, **{k: False for k in LIGHT_OFF}}
     if reused:
         return {k: False for k in FLAGS}
     if event != "pull_request":
@@ -154,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--files-from", help="file with one path per line, '-' for stdin; default: git diff HEAD^1 HEAD")
     c.add_argument("--durations", type=Path, default=TESTS / "durations.json")
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
+    c.add_argument("--light", action="store_true", help="PR into the `next` batch branch: affected tests + touched-area gates only")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
     s.add_argument("--os", required=True)
@@ -167,9 +217,13 @@ def main(argv: list[str] | None = None) -> int:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
             files = _git_files() if a.event == "pull_request" else []
-        for k, v in classify(files, a.event, a.reused).items():
+        for k, v in classify(files, a.event, a.reused, a.light).items():
             print(f"{k}={'true' if v else 'false'}")
-        print("plan=" + json.dumps(plan(durations=load_durations(a.durations)), separators=(",", ":")))
+        doc = plan(durations=load_durations(a.durations))
+        aff = affected_tests(files) if a.light and a.event == "pull_request" and not a.reused else None
+        if aff is not None:                    # light: ONE Linux shard with only the affected files
+            doc = {"windows": [[], [], []], "linux": [aff], "expected_s": {"windows": [0, 0, 0], "linux": [0]}, "light": True}
+        print("plan=" + json.dumps(doc, separators=(",", ":")))
         return 0
     if a.cmd == "shard-files":
         print(",".join(shard_files(json.loads(a.plan.read_text(encoding="utf-8")), a.os, a.shard)))

@@ -2,7 +2,7 @@
 
     python tools/release_rollback.py --to win-v4.0.0.12                     # DRY RUN (default): prints the plan
     python tools/release_rollback.py --to win-v4.0.0.12 --execute           # does it (needs RELEASES_TOKEN)
-    python tools/release_rollback.py --channel beta --to beta-v4.1.0.55 [--execute]
+    python tools/release_rollback.py --channel beta --to beta-v4.1.0.55 [--execute]   (also --channel alpha)
 
 Stable: the target release's own signed latest.json (every stable release carries its manifest) becomes the manifest
 JARVES downloads from `releases/latest/download/latest.json`: the target is marked "latest" and every newer stable
@@ -34,8 +34,8 @@ def _asset(r: dict, name: str) -> dict | None:
 
 def plan(releases: list[dict], target_tag: str, channel: str = "stable") -> dict:
     """What a rollback to `target_tag` would do, or {"problems": [...]}. Pure: takes the releases list."""
-    prefix = rel.BETA_PREFIX if channel == "beta" else rel.TAG_PREFIX
-    manifest = rel.BETA_MANIFEST if channel == "beta" else rel.MANIFEST
+    prefix = rel.CHANNELS[channel]["prefix"] if channel in rel.CHANNELS else rel.TAG_PREFIX
+    manifest = rel.CHANNELS[channel]["manifest"] if channel in rel.CHANNELS else rel.MANIFEST
     problems: list[str] = []
     if not target_tag.startswith(prefix):
         problems.append(f"{target_tag!r} is not a {channel} release tag ({prefix}...)")
@@ -63,7 +63,7 @@ def describe(p: dict, repo: str) -> str:
                  f"releases/latest/download/{p['manifest']})"]
         lines += [f"  demote {t} to a pre-release (kept, not deleted)" for t in p["demote"]] or ["  (no newer stable release to demote)"]
     else:
-        lines = [f"  copy the signed {p['manifest']} of {p['target']} onto the {rel.BETA_TAG} pre-release in {repo}"]
+        lines = [f"  copy the signed {p['manifest']} of {p['target']} onto the {rel.CHANNELS[p['channel']]['tag']} pre-release in {repo}"]
     return "\n".join(lines)
 
 
@@ -112,11 +112,12 @@ def rollback(target_tag: str, repo: str, *, channel: str = "stable", execute: bo
             gh.call("PATCH", f"/releases/{r['id']}", {"prerelease": True})
         gh.call("PATCH", f"/releases/{target['id']}", {"draft": False, "prerelease": False, "make_latest": "true"})
     else:
-        chan = gh.call("GET", f"/releases/tags/{rel.BETA_TAG}", ok404=True)
+        c = rel.CHANNELS[channel]
+        chan = gh.call("GET", f"/releases/tags/{c['tag']}", ok404=True)
         if chan is None:
-            out(f"ROLLBACK REFUSED: there is no {rel.BETA_TAG} release")
+            out(f"ROLLBACK REFUSED: there is no {c['tag']} release")
             return 1
-        gh.upload(chan, rel.BETA_MANIFEST, raw, "application/json")
+        gh.upload(chan, c['manifest'], raw, "application/json")
     out(f"Rolled back {channel} to {target_tag}. Copies on the bad version: `jarvis update --rollback`.")
     return 0
 
@@ -124,7 +125,7 @@ def rollback(target_tag: str, repo: str, *, channel: str = "stable", execute: bo
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release_rollback.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--to", required=True, help="release tag to go back to, e.g. win-v4.0.0.12 or beta-v4.1.0.55")
-    ap.add_argument("--channel", choices=["stable", "beta"], default="stable")
+    ap.add_argument("--channel", choices=["stable", "beta", "alpha"], default="stable")
     ap.add_argument("--repo", default=os.environ.get("RELEASES_REPO") or rel.DEFAULT_RELEASES_REPO)
     ap.add_argument("--execute", action="store_true", help="really change the releases (default is a dry run)")
     a = ap.parse_args(argv)

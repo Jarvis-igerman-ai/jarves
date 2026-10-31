@@ -62,7 +62,7 @@ PAGES.updates = async function () {
     busy(ev.currentTarget, false);
   } }, "Roll back to the previous version");
 
-  const isBeta = d.channel === "beta";
+  const isBeta = d.channel === "beta" || d.channel === "alpha";
   const chan = el("button", { type: "button", class: "ghost", "aria-pressed": isBeta ? "true" : "false", onclick: async (ev) => {
     busy(ev.currentTarget, true);
     try { await post("/api/updates/channel", { channel: isBeta ? "stable" : "beta" }); await post("/api/updates/check"); route(true); }
@@ -75,9 +75,9 @@ PAGES.updates = async function () {
     out,
     d.error ? el("div", { class: "card" }, pill("degraded", tx("בדיקה לא זמינה", "Check unavailable")), " ", el("span", { class: "small" }, updateError(d.error))) : null,
     el("div", { class: "card" }, el("div", { class: "kv" },
-      el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.beta_build || d.current), d.beta_build ? " " : "", d.beta_build ? pill("degraded", "BETA") : ""),
+      el("div", { class: "k" }, "Current version"), el("div", { class: "v" }, el("code", {}, d.beta_build || d.current), d.beta_build ? " " : "", d.beta_build ? pill("degraded", String(d.beta_build).includes("-alpha.") ? "ALPHA" : "BETA") : ""),
       el("div", { class: "k" }, "Update channel"),
-      el("div", { class: "v" }, el("code", {}, isBeta ? "beta" : "stable"), " ", chan,
+      el("div", { class: "v" }, el("code", {}, isBeta ? d.channel : "stable"), " ", chan,
         el("div", { class: "muted small" }, isBeta
           ? tx("בטא: כל בנייה ירוקה של main מגיעה אליך, חתומה. לחזרה לגרסה קודמת: כפתור החזרה למטה.", "Beta: every green main build reaches you, signed. To go back a version use the Roll back button below.")
           : tx("יציב: רק גרסאות שנבדקו ידנית ואושרו.", "Stable: only releases that were tested by hand and signed off."))),

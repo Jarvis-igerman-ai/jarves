@@ -90,6 +90,6 @@ downloads are cached; docs-only changes skip all jobs and guides-only changes ru
 weekly and on core changes; Dependabot (pip, gomod, github-actions) weekly, patch and minor updates auto-merge when green
 (`dependabot-automerge.yml`, kill switch `DEPENDABOT_AUTOMERGE=false`, majors never); see `SECURITY.md`.
 
-Branch protection: require **`CI result (single required check)`**. The individual names remain valid: `Python Core tests
+Branch protection: require **`CI result`**. The individual names remain valid: `Python Core tests
 (windows-2025 shard 1/3)` ... `3/3`, `Python Core tests (ubuntu-24.04 shard 1/1)`, `Real-browser tests (ubuntu-24.04)`,
 `Real-browser tests (windows-2025)`, `Windows installer (build + silent install smoke)`. Full list: `docs/CI_PERFORMANCE.md`.

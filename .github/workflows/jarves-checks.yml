@@ -7,6 +7,9 @@ name: jarves-checks
 #    the PR was tested on top of the current main, so the `main` push re-runs NOTHING (job `changes` finds the proof,
 #    `reused=true`) and jarves-package publishes the PR's installer;
 #  * a different tree (a direct push, a stale merge) falls back to the full matrix, including the installer build;
+#  * BATCH INTEGRATION (docs/RELEASE_TRAIN.md): a PR whose base is `next` runs LIGHT (quick Linux job on the affected tests +
+#    the gates of the touched areas, no installer/perf/Windows); `next` runs this FULL workflow once per batch (workflow_dispatch
+#    from batch.yml after merges settle); a green `next` is fast-forwarded to main, whose push finds the proof (reuse);
 #  * only `pull_request` and `push` to main trigger this workflow (a branch push has no push trigger: no duplicate run
 #    for the same commit); superseded runs of the same PR/ref are cancelled; docs/guides-only changes skip heavy jobs.
 # Python tests are sharded by MEASURED file durations (core/tools/ci_plan.py), slowest files first, with pytest-xdist
@@ -21,9 +24,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# PRs cancel only their own superseded runs. Runs on main/next (push, dispatch) have a group of their own per commit and
+# are never cancelled: they queue, so a busy day never loses the proof of a commit (docs/RELEASE_TRAIN.md).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.ref_name, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   changes:
     name: Classify the change (docs-only skips heavy jobs; reuse of the PR proof)
@@ -70,6 +75,7 @@ jobs:
           fi
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
+          [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "${{ github.base_ref }}" = "next" ] && args+=(--light)
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi
           { cat classify.out; echo "tree=$tree"; echo "reused=$reused"; } >> "$GITHUB_OUTPUT"
@@ -548,7 +554,7 @@ jobs:
   ci-ok:
     # ONE stable required check for branch protection: green when every job above passed or was legitimately skipped
     # (docs-only, reused proof). Failed or cancelled needs make it red. Per-shard names stay valid required checks too.
-    name: CI result (single required check)
+    name: CI result
     if: always()
     needs: [changes, core, browser, installer, whatsapp-bridge, perf, cad, blender, godot, e2e]
     runs-on: ubuntu-24.04

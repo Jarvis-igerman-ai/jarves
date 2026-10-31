@@ -276,7 +276,7 @@ def cmd_status(a, cfg, home) -> int:
         print("Core is NOT running (no answer on the local link).")
         from .updates import beta_label
         if beta_label(home):
-            print(f"This is a BETA build ({beta_label(home)}); `jarvis update --channel stable` goes back to stable updates.")
+            print(f"This is {'an ALPHA' if '-alpha.' in beta_label(home) else 'a BETA'} build ({beta_label(home)}); `jarvis update --channel stable` goes back to stable updates.")
         prefs = read_state(home).get("prefs") or {}
         if prefs:
             print(f"Saved choices: window {'hidden' if prefs.get('display_hidden') else 'shown'}, mic "
@@ -1471,8 +1471,10 @@ def cmd_update(a, cfg, home) -> int:
         except UpdateError as e:
             print(f"{e.code}: {e.message}")
             return 1
-        print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
-                          f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
+        he_n = {"alpha": "אלפא (כל מיזוג ירוק, אוטומטי)", "beta": "בטא (אלפא שעברה בדיקות מורחבות)", "stable": "יציב"}[ch]
+        en_n = {"alpha": "alpha (every green merge, automatic)", "beta": "beta (an alpha that passed the extended gates)",
+                "stable": "stable"}[ch]
+        print(clilang.fmt(f"ערוץ העדכונים: {he_n}.", f"Update channel: {en_n}."))
     u = UpdateChecker(home, cfg=cfg)
     print(version_line(home) + f"; update channel {u.channel}")
     if getattr(a, "rollback", False):
@@ -1732,8 +1734,8 @@ def main(argv: list[str] | None = None) -> int:
     add_selfcheck_args(dg)                    # owner request 20 Oct: jarvis diagnose --now (self-check)
     up = sub.add_parser("update", help="check GitHub for a newer JARVES; install only after you approve")
     up.add_argument("action", nargs="?", default="check", choices=["check", "install", "status"])
-    up.add_argument("--channel", choices=["stable", "beta"], help="choose the update channel: stable (default, "
-                    "tested releases) or beta (every green main build, early); then check on it")
+    up.add_argument("--channel", choices=["stable", "beta", "alpha"], help="choose the update channel: stable (default, "
+                    "tested releases) beta (an alpha that passed the extended gates) or alpha (every green merge, automatic, earliest); then check on it")
     up.add_argument("--yes", action="store_true", help="install / rollback: you already approved (no question)")
     up.add_argument("--silent", action="store_true", help="install: run setup silently (no window) and start JARVES again")
     up.add_argument("--rollback", action="store_true", help="go back to the previous version and restore the data "
