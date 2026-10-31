@@ -217,9 +217,9 @@ let data;
 const now = Date.now() / 1000;
 const ok = {task_id: null, heartbeat_at: now};
 data = {
-  agents: [{status: "running", heartbeat_at: now}, {status: "claimed", heartbeat_at: now}, {status: "running", heartbeat_at: now - 9999}, {status: "offline"}],
+  agents: [{id: "a1", status: "running", heartbeat_at: now}, {id: "a2", status: "claimed", heartbeat_at: now}, {id: "a3", status: "running", heartbeat_at: now - 9999}, {id: "h1", status: "idle"}, {id: "a4", status: "offline"}],
   agent_counts: {live: 3},
-  tasks: [{state: "running"}, {state: "review"}, {state: "review"}, {state: "review"}, {state: "verified", implementation: "merged"}, {state: "queued", implementation: "merged"}, {state: "queued"}],
+  tasks: [{state: "running", agent_id: "h1"}, {state: "running", agent_id: "h1"}, {state: "review"}, {state: "review"}, {state: "review"}, {state: "verified", implementation: "merged"}, {state: "queued", implementation: "merged"}, {state: "queued"}],
   questions: [{status: "pending"}, {status: "answered"}, {status: "deferred"}],
   alerts: [],
 };
@@ -234,8 +234,8 @@ console.log(JSON.stringify({q: out.q, calm, noisy: out.html}));
         got = json.loads(res.stdout)
         self.assertEqual(got["q"], 2)
         html = got["calm"]
-        self.assertIn('<div class="metric-value">2<small dir="auto">3 ', html)        # 2 live workers (running + claimed), stale one excluded
-        self.assertIn('<div class="metric-value">1<small dir="auto">3 ', html)        # 1 running task, 3 in review: not added together
+        self.assertIn('<div class="metric-value">3<small dir="auto">3 ', html)        # distinct task holders (h1) + live running/claimed agents without a task; stale excluded
+        self.assertIn('<div class="metric-value">2<small dir="auto">3 ', html)        # 2 running tasks, 3 in review: not added together
         self.assertIn("מוזגו 2 · אומתו 1 · נשלחו 0", html)
         self.assertEqual(html.count("<progress"), 3)
         self.assertIn("הכול תקין", html)

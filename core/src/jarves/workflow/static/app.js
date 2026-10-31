@@ -236,7 +236,9 @@
     const merged = required.filter(task => task.implementation === "merged" || ["verified", "done"].includes(task.state)).length;
     const verified = required.filter(task => ["verified", "done"].includes(task.state)).length;
     const shipped = required.filter(complete).length;
-    const workers = data.agents.filter(agent => ["running", "claimed"].includes(agent.status) && !agentStale(agent)).length;
+    // same source as the "now" strip: agents holding a running/claimed task, plus live running/claimed agents with no task
+    const holders = new Set(tasks.filter(task => ["running", "claimed"].includes(task.state) && task.agent_id).map(task => task.agent_id));
+    const workers = holders.size + data.agents.filter(agent => ["running", "claimed"].includes(agent.status) && !agentStale(agent) && !holders.has(agent.id) && !agent.task_id).length;
     const waiting = tasks.filter(task => task.state === "waiting_owner").length;
     const running = tasks.filter(task => task.state === "running").length;
     const inReview = tasks.filter(task => task.state === "review").length;
@@ -247,7 +249,7 @@
     const total = required.length;
     const split = [["מוזגו", merged], ["אומתו", verified], ["נשלחו", shipped]];
     const cards = [
-      {label: "סוכנים בעבודה", symbol: "◈", value: workers, detail: `${(data.agent_counts || {}).live ?? data.agents.length} פעילים`, foot: problems ? (problems === 1 ? "בעיה אחת פתוחה" : `${problems} בעיות פתוחות`) : "הכול תקין", cls: problems ? "amber" : ""},
+      {label: "סוכנים בעבודה", symbol: "◈", value: workers, detail: `${(data.agent_counts || {}).live ?? data.agents.length} סשנים חיים`, foot: problems ? (problems === 1 ? "בעיה אחת פתוחה" : `${problems} בעיות פתוחות`) : "הכול תקין", cls: problems ? "amber" : ""},
       {label: "משימות בריצה", symbol: "↗", value: running, detail: `${inReview} בבדיקה`, foot: `${ready} זמינות להקצאה`, cls: ""},
       {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: waiting === 1 ? "משימה אחת" : `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
       {label: "דרישות חובה: נשלחו", symbol: "✓", value: shipped, detail: `מתוך ${total}`, foot: total ? split.map(([name, n]) => `${name} ${n}`).join(" · ") : "ממתין למיפוי התוכנית", cls: "done", split: total ? split.map(([name, n]) => [name, n / total * 100]) : null}
