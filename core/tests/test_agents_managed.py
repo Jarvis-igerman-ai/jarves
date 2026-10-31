@@ -291,9 +291,24 @@ def test_autopilot_grant_needs_the_typed_code(world):
     assert o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
     assert o.autopilot_grant() is None
     assert o.autopilot_op("grant", by="autopilot", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
-    for bad in ({"days": 8}, {"max_concurrent": 99}, {"models": ["a", "b", "c", "d"]}, {"models": []}):
+    for bad in ({"days": 366}, {"days": 0}, {"max_concurrent": 99}, {"models": ["a", "b", "c", "d"]}, {"models": []}):
         assert not _grant(o, owner, **bad)["ok"]
     assert not _grant(o, owner, project="nope")["ok"]
+
+
+def test_autopilot_grant_lifetime_default_max_and_revoke(world):
+    o, owner = world["o"], world["owner"]
+    owner.policy = "code"
+    r = o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON])      # no days = the 365-day default
+    assert r["ok"] and abs((r["grant"]["expires_at"] - r["grant"]["granted_at"]) / 86400 - 365) < 1e-6
+    assert o.GRANT_MAX_DAYS == 365.0
+    assert _grant(o, owner, days=365)["ok"]
+    assert not _grant(o, owner, days=366)["ok"] and not _grant(o, owner, days=1000)["ok"]
+    assert o.autopilot_grant() is not None                                       # the refused ones changed nothing
+    assert o.autopilot_op("revoke", by="cli")["ok"] and o.autopilot_grant() is None   # revoke ends it at once
+    assert _grant(o, owner, days=365)["ok"]
+    o.clock = lambda t=o.clock() + 366 * 86400: t                                # expiry is still enforced
+    assert o.autopilot_grant() is None
 
 
 def test_autopilot_grant_exact_match(world):
@@ -353,3 +368,56 @@ def test_grant_never_covers_tool_approvals(world):
     o._approval(o.db.session(sid), "req-1", tool="Bash", command="git push --force origin main", cwd=r["session"]["cwd"])
     assert len(owner.asked) > before                       # the tool request still reaches the owner
     o.stop_session(sid, by="autopilot")
+
+
+class _FakeTTY:
+    def __init__(self, tty=True):
+        self.tty, self.out = tty, []
+
+    def isatty(self):
+        return self.tty
+
+    def write(self, s):
+        self.out.append(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+
+def _terminal_grant(world, monkeypatch, tty, answer):
+    """The CLI path with no Core: the typed code is asked in the terminal. answer(code) -> what the owner types."""
+    import builtins
+    import sys
+    from jarves import approvals as appr
+    o = world["o"]
+    out = _FakeTTY(tty)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY(tty))
+    monkeypatch.setattr(sys, "stdout", out)
+
+    def fake_input(prompt=""):
+        code = next(x for x in "".join(out.out).split() if len(x) == 4 and x.isdigit())
+        return answer(code)
+    monkeypatch.setattr(builtins, "input", fake_input)
+    ask = appr.terminal_code_ask(world["home"])
+    if ask is not None:
+        o.terminal_ask = ask
+    return o.autopilot_op("grant", by="cli", project="alpha", models=[M_SON], days=2, max_concurrent=1), ask
+
+
+def test_autopilot_grant_terminal_code_right_wrong_and_no_tty(world, monkeypatch):
+    o = world["o"]
+    world["owner"].policy = "deny"                       # no popup channel would ever approve
+    r, ask = _terminal_grant(world, monkeypatch, True, lambda code: "0000" if code != "0000" else "1111")
+    assert ask is not None and r["code"] == "NOT_APPROVED" and o.autopilot_grant() is None     # wrong code
+    r, _ = _terminal_grant(world, monkeypatch, True, lambda code: code)
+    assert r["ok"] and o.autopilot_grant() is not None                                           # right code
+    audit = (world["home"] / "approvals" / "audit.jsonl").read_text(encoding="utf-8")
+    assert '"channel": "terminal"' in audit and '"decision": "approved"' in audit and '"decision": "denied"' in audit
+    o.autopilot_op("revoke", by="cli")
+    o.terminal_ask = None
+    r, ask = _terminal_grant(world, monkeypatch, False, lambda code: code)                      # not a TTY: refused
+    assert ask is None and r["code"] == "NOT_APPROVED" and o.autopilot_grant() is None
+    o.terminal_ask = lambda *a, **k: True
+    assert o.autopilot_op("grant", by="autopilot", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"
+    assert o.autopilot_op("grant", by="voice", project="alpha", models=[M_SON])["code"] == "NOT_APPROVED"

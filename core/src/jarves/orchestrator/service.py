@@ -732,8 +732,9 @@ class Orchestrator:
 
     # ---- Workflow autopilot owner grant (Tier R): lets by="autopilot" start/stop Claude workers without a popup
     # ONLY while an unexpired owner grant matches the request exactly. Tool approvals are never covered.
+    terminal_ask = None      # set only by the CLI when no Core runs and stdin/stdout are terminals (typed code in the terminal)
     GRANT_KEY = "autopilot_grant"
-    GRANT_MAX_DAYS = 7.0
+    GRANT_MAX_DAYS = 365.0
     GRANT_MAX_WORKERS = 5
     GRANT_MAX_MODELS = 3
     ENV_PREFIX = "JARVES_WORKFLOW_"
@@ -802,7 +803,8 @@ class Orchestrator:
             return {"ok": False, "code": "error",
                     "text": f"days must be 0-{self.GRANT_MAX_DAYS:g} and workers 1-{self.GRANT_MAX_WORKERS}."}
         proj = projs[0]
-        if not self._ask_owner(
+        ask = self.terminal_ask or self._ask_owner
+        if not ask(
                 f"Let the workflow autopilot start and stop Claude sessions without asking, for {d:g} day(s):\n"
                 f"project {proj.name}, models {', '.join(ms)}, up to {n} at once. Each runs in a new worktree; "
                 "every tool approval still asks you. Type the code to allow.",
@@ -1971,7 +1973,7 @@ REMOTE_OPS = ("start", "autopilot", "resume", "tell", "continue", "pause", "inte
               "approvals", "list", "status", "digest", "log", "doctor", "session", "install_plugin", "projects", "opencode")
 
 
-def call(home: Path, cfg, op: str, **args) -> dict:
+def call(home: Path, cfg, op: str, terminal_ask=None, **args) -> dict:
     """The surfaces' single door: the in-process service when it serves this home, else the running Core over the
     bridge, else a local instance (read-only views, queueing for the plugin's next safe stop)."""
     o = _current
@@ -1982,6 +1984,8 @@ def call(home: Path, cfg, op: str, **args) -> dict:
         r.pop("rid", None)
         return r
     local = Orchestrator(Path(home), cfg, serve=False)
+    if terminal_ask is not None:
+        local.terminal_ask = terminal_ask
     try:
         return local.call(op, **args)
     finally:

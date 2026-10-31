@@ -29,7 +29,7 @@ def run(argv: list[str], profile_home: Path | None = None) -> int:
     ap.add_argument("sub", choices=["grant", "revoke", "grant-status"])
     ap.add_argument("--project", default="jarves")
     ap.add_argument("--models", default=DEFAULT_MODELS, help="comma separated, at most 3")
-    ap.add_argument("--days", type=float, default=7.0, help="at most 7")
+    ap.add_argument("--days", type=float, default=365.0, help="at most 365")
     ap.add_argument("--workers", type=int, default=3)
     a = ap.parse_args(argv)
     from ..config import load_config, state_dir
@@ -37,8 +37,12 @@ def run(argv: list[str], profile_home: Path | None = None) -> int:
     cfg, _ = load_config()
     home = state_dir()
     op = {"grant": "grant", "revoke": "revoke", "grant-status": "status"}[a.sub]
+    extra = {}
+    if op == "grant":       # no Core running: ask the typed code in the terminal itself (never without a real TTY)
+        from .. import approvals as appr
+        extra["terminal_ask"] = appr.terminal_code_ask(Path(profile_home or home))
     r = svc.call(Path(profile_home or home), cfg, "autopilot", by="cli", action=op, project=a.project,
-                 models=a.models, days=a.days, max_concurrent=a.workers)
+                 models=a.models, days=a.days, max_concurrent=a.workers, **extra)
     print(json.dumps(r, ensure_ascii=False, indent=2))
     return 0 if r.get("ok") else 1
 

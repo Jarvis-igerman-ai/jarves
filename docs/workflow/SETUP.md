@@ -167,7 +167,7 @@ requires an already running allow-listed session and explicit
 Nothing starts until the owner opts in: `jarvis workflow autopilot status` shows the policy
 (`enabled=false`), `start` enables it and `stop` is the kill switch (no new starts; running
 workers finish or checkpoint). Launching workers also needs the owner start grant typed at the
-approval popup (expires within 7 days). Alerts (`lane_idle`, `worker_restarted`, `task_blocked`,
+approval popup (valid up to 365 days, default 365; `autopilot revoke` ends it at once). Alerts (`lane_idle`, `worker_restarted`, `task_blocked`,
 `permission_wait`) show in the console and `status`; a permission wait over 10 minutes sends one
 away alert. While you are away, tool permission prompts still wait for you, so most lanes will
 wait; a safe project allowlist in `.claude/settings.json` is proposed by agents and applied by the

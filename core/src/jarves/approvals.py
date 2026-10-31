@@ -793,6 +793,33 @@ def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: s
     return wrapped
 
 
+def terminal_code_ask(home: Path) -> Callable[[str], bool] | None:
+    """Typed-code confirmation in the terminal itself, for a CLI run with no Core (no popup channel). None unless
+    stdin AND stdout are real terminals, so the autopilot, voice or a script can never grant. The owner must type
+    the random 4-digit code shown; the decision reaches the same audit log (channel "terminal")."""
+    try:
+        if not (sys.stdin and sys.stdout and sys.stdin.isatty() and sys.stdout.isatty()):
+            return None
+    except Exception:
+        return None
+
+    async def confirm(prompt: str) -> bool:
+        code = f"{secrets.randbelow(10000):04d}"
+        print(prompt + "\nCode: " + code)
+        try:
+            said = input("Type the code to allow (anything else cancels): ")
+        except EOFError:
+            return False
+        return said.strip() == code
+    wrapped = audited(Path(home), confirm, channel="terminal")
+
+    def run(prompt: str, **meta) -> bool:
+        import concurrent.futures as cf
+        with cf.ThreadPoolExecutor(1) as ex:
+            return bool(ex.submit(lambda: asyncio.run(wrapped(prompt, **meta))).result())
+    return run
+
+
 _current: ApprovalService | None = None
 
 

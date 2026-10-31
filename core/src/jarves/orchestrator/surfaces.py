@@ -237,7 +237,7 @@ def add_cli(sub) -> None:
     p.add_argument("--wait", type=float, default=0, help="ask: wait this many seconds for the live reply")
     p.add_argument("--here", action="store_true", help="start: in the project folder itself (no new worktree)")
     p.add_argument("--model", default="", help="start: exact requested model; does not change provider defaults")
-    p.add_argument("--days", type=float, default=7.0, help="autopilot grant: how long (at most 7)")
+    p.add_argument("--days", type=float, default=365.0, help="autopilot grant: how long (at most 365)")
     p.add_argument("--workers", type=int, default=1, help="autopilot grant: workers at once")
     p.add_argument("--code", default="", help="approve: the code shown for a risky request")
     p.add_argument("--all", action="store_true", help="list: also ended sessions")
@@ -372,6 +372,9 @@ def cmd_agents(a, cfg, home) -> int:
         kw["approved"] = True
     if act == "log":
         kw["limit"] = a.n
+    if act == "autopilot" and kw.get("action") == "grant":      # no Core: the typed code is asked in the terminal (TTY only)
+        from .. import approvals as appr
+        kw["terminal_ask"] = appr.terminal_code_ask(Path(home))
     r = svc.call(Path(home), cfg, op, by="cli", **kw)
     _print(r, a)
     if act in ("doctor",):
