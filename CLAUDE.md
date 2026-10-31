@@ -8,6 +8,9 @@ subagents; Codex takes explicitly assigned work under the same contract. Do not
 enable experimental agent teams or create another LLM scheduler for this view.
 Other documents are indexed in `docs/DOC_MAP.md`; open only relevant sources.
 
+The merge steward role is described once in the "Merge steward" section of
+`docs/workflow/OPERATING_MODEL.md`.
+
 Use the private workflow ledger and linked GitHub/evidence for current state.
 Imported version scope is not execution permission. Stop, issue closure, merged
 PR and green CI do not prove installed-product acceptance.

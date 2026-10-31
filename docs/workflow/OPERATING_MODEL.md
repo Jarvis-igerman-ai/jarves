@@ -86,6 +86,18 @@ complete transcripts or proof that the product works. Keep sensitive logs/screen
 out of the public repo. Existing capability mechanisms remain authoritative for
 runtime support; the console is not another assistant-feature registry.
 
+## Merge steward
+
+The `workflow-merger` subagent (Haiku) runs on a schedule or on request. For each
+open PR it queues green non-Tier-R PRs with `gh pr merge N --auto`, toggles the
+`no-automerge` label (remove, add) only when the "Auto-label policy" check is
+missing on a non-Tier-R PR, reads failing log tails only, and hands red or
+conflicted PRs to a Sonnet fixer (that PR's own branch, `--force-with-lease`).
+Tier R = Gate/approvals, release/sign-off/tag, hotfix/update write paths,
+installer/packaging, browser network, wake apply, workflows/secrets: never merged
+(report "waiting for Opus sign-off"). No close/reopen, merge-main push, force on
+main, check bypass or blind rerun; flaky tests go to quarantine with an issue.
+
 ## External observer
 
 Action history uses the same local database, not a separate telemetry platform.

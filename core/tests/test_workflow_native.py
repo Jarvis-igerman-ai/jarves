@@ -41,6 +41,10 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertFalse(agent["auto_dispatch"])
         self.assertNotIn("private message", json.dumps(self.store.snapshot()))
 
+    def test_merge_steward_shows_as_release_lane(self):
+        self.event("SubagentStart", agent_id="merger-child", agent_type="workflow-merger")
+        self.assertEqual(self.store.snapshot()["agents"][0]["lane"], "release")
+
     def test_native_stop_does_not_finish_task_or_release_unreconciled_resources(self):
         self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
         aid = self.store.snapshot()["agents"][0]["id"]

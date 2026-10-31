@@ -53,7 +53,8 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
     if not isinstance(subagent, str) or len(subagent) > 200:
         return {}
     kind = str(payload.get("agent_type") or ("manager" if subagent == "manager" else "subagent"))[:100]
-    lane = {"workflow-bugs": "bugs", "workflow-current": "features", "workflow-qa": "release"}.get(kind,
+    lane = {"workflow-bugs": "bugs", "workflow-current": "features", "workflow-qa": "release",
+                                                           "workflow-merger": "release"}.get(kind,
             "ops" if subagent == "manager" else "any")
     ident = "claude-" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest()[:20]
     parent_agent = payload.get("parent_agent_id") or "manager"
