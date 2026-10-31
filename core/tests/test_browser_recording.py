@@ -236,3 +236,12 @@ def test_a_failed_driver_start_leaves_no_empty_waiting_recording(tmp_path):
         svc.start("http://localhost:8123/", driver_factory=boom, record=True)
     assert br.list_recordings(tmp_path) == []
     assert not (tmp_path / "browser" / "recordings").exists() or not list((tmp_path / "browser" / "recordings").iterdir())
+
+
+def test_core_registers_browser_recording_before_features_md_is_written():
+    """Deterministic regardless of test order: a fresh interpreter importing jarves.app already has the feature in the catalog."""
+    import subprocess
+    import sys
+    out = subprocess.run([sys.executable, "-c", "import jarves.app, jarves.features as f; print('browser_recording' in [x if isinstance(x, str) else getattr(x, 'name', x) for x in f.CATALOG])"],
+                         capture_output=True, text=True, timeout=120, env={**__import__('os').environ, "PYTHONPATH": str(__import__('pathlib').Path(br.__file__).resolve().parents[1])})
+    assert out.stdout.strip() == "True", out.stderr

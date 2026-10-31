@@ -27,6 +27,7 @@ from .skills.settings import Settings, SettingsSkill
 from . import workspace as wsp
 from . import features as feat
 from . import browser as browser_mod            # SW-V3 P1.2: registers the `browser` switch (default OFF)
+from . import browser_recording as brec          # registers the `browser_recording` feature at import, BEFORE FEATURES.md is written
 from . import approvals as appr
 from . import chat_engine
 from . import chat_service
@@ -848,7 +849,6 @@ class Core:
             logs.warn("limits", "LIMIT_NOTICE_NOT_SPOKEN", "could not speak the limit notice", error_type=type(ex).__name__)
 
     async def _recordings_retention_loop(self) -> None:
-        from . import browser_recording as brec
         while True:
             try:
                 await asyncio.to_thread(brec.purge, self.home)
