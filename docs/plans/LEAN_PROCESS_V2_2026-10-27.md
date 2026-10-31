@@ -1,5 +1,10 @@
 # Lean process v2 (second pass, 27 Oct 2026)
 
+> Historical process experiment. Its worker quotas, task status, owner question
+> cadence, batching minimum and handoff rules are superseded by the owner's
+> [30 Oct operating model](../workflow/OPERATING_MODEL.md). Existing protected
+> security/release checks remain; historical timing targets are not new measurements.
+
 Plain words. Second pass after [PROCESS_RETRO_AND_AGENT_PLAN_2026-10-27](PROCESS_RETRO_AND_AGENT_PLAN_2026-10-27.md): cut what is still slow or ceremony.
 Facts used: `jarves-checks.yml` (PR run, merge_group run, main push reuse via `ci_reuse.py`), ruleset (required: `CI result` + `Auto-label policy`;
 queue builds 3, merges up to 4, wait 2 min), CI speed plan timings (`docs/plans/CI_SPEED_2026-10-26.md` in PR #516: 40 PR runs + 30 merge groups), retro numbers, live issue counts (P0 0, P1 16, P2 16, P3 34, 131 open).

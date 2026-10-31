@@ -1,17 +1,23 @@
-# Claude Code — JARVIS
+# Claude Code — JARVES
 
-Follow `AGENTS.md` and the single active brief in `docs/NOW.md`.
-Read extra documents only via `docs/CONTEXT_MAP.md`, on demand; `docs/DOC_MAP.md` is the index of all docs (per version, status, testing).
-Keep a 30-line `STATE.md` per agent (current task, branch, open questions); a HANDOFF note only per released version (docs/handoff/README.md). Do not start unrelated tasks.
-Every stage: research and use the newest best-in-class models/tools (see AGENTS.md "Best-in-class technology").
-Never append to a shared file: a CHANGELOG line is a new `changelog.d/<date>-<topic>.md`, a report is `docs/reports/<date>-<topic>.md`, a new dashboard/CLI module is registered by `core/src/jarves/plugins.d/<feature>.toml` and a new dashboard page (nav link + scripts) by `core/src/jarves/pages.d/<page>.toml` (see docs/handoff/2026-10-23-no-shared-append-files.md); this is what keeps parallel PRs from conflicting.
-Work through commits: commit and push all results and open questions, referencing the GitHub issue.
-Every new feature, skill, command or integration ships with a guide: a `core/src/jarves/guides/data/<feature>.toml` entry (English and Hebrew, step by step, what it does, how to turn it on/off and fix it), a CLI parity entry (`[parity.features]` / `[parity.tool_groups]` in that guide toml, not the shared tables in `cli_parity.py`), a features/capabilities row with an honest status, and Hebrew strings via `core/tools/catalog_add.py` (it writes a new `locales/parts/<date>-<topic>.json`; server-side texts go to `core/src/jarves/hebrew_parts/`; Hebrew goes in BOTH `hebrew_parts` and the dashboard locale part). `test_guides` and `test_cli_parity` must pass. A feature without its guide is not done.
-Every release from 4.1 and 5.0 on fixes all known bugs before it ships: the bug tables in `docs/reviews/*BUG_TABLE*.md`, the open GitHub issues and the problems found by `jarvis selftest`/`speedtest` are triaged. Zero open P0-P2 except owner-accepted `known-issue` labels. P3 and nits live in `docs/reviews/FINDINGS_LEDGER.md`. The release checklist records the bug-table state.
-Work with 3 agents (issues+security, next release, features), one open PR each, each in its own git worktree and branch. Agents rely on CI for full-suite evidence (targeted local tests only), never kill processes by command-line pattern, and use only the remote `Jarvis-igerman-ai/jarves` (NOTE: the remote is now this organization repo, no longer igalgerman/jarves).
-Run `python core/tools/prepush.py` before every push (docs/PREPUSH.md) and never push on a red local gate.
-Pull request flow (docs/GITHUB_FLOW.md): one open PR per agent, opened ready when `python core/tools/prepush.py` passes; it merges on green through the merge queue (`gh pr merge <n> --auto`). Only risky code (Gate, approvals, release, hotfix/update, installer, browser network, wake apply, workflows/secrets) gets an independent Opus review before queueing. Never merge `main` into a green PR except to resolve a real conflict. Small pull requests.
-Releases (docs/RELEASING.md): every green `main` publishes a beta by itself. A stable version is the owner's decision: the agent prepares `docs/reviews/RELEASE_CHECKLIST_<version>.md` and the test sheet (`python core/tools/manual_test_sheet.py --version <version>`), runs the release gate's dry run, and pushes the tag `v<version>` only after the owner's signed sheet is committed, 5 nightly runs in a row are green and the owner says go.
-Always be on the latest, at least when possible: branch every task from the freshly fetched `jarves/main`, keep tools, dependencies, models and the installed JARVES beta current (see "Best-in-class technology"), and say so when something cannot be updated and why.
-Keep the disk small: one git worktree per active feature in `C:\work\wt\<branch>`, no long-lived or "just in case" worktrees. When a PR is merged, remove its worktree and local branch the same day (`git worktree remove`, `git branch -d`, `git worktree prune`); never leave stale `C:\work\jarves-*` / `jarvis-*` copies. Check for uncommitted or unpushed work before removing anything.
-A flaky test is a show-stopper: when a test fails and then passes on rerun, pause it at once (quarantine it to the non-blocking job, never silently skip a real failure), open an issue labelled `showstopper` (P1) with the failing log and the suspect PR, and fix it as soon as possible, before new feature work on that area; the queue must not stay blocked by it.
+@AGENTS.md
+@docs/workflow/OPERATING_MODEL.md
+
+Read `docs/NOW.md` for active scope. Claude Code normally manages native
+subagents; Codex takes explicitly assigned work under the same contract. Do not
+enable experimental agent teams or create another LLM scheduler for this view.
+Other documents are indexed in `docs/DOC_MAP.md`; open only relevant sources.
+
+Use the private workflow ledger and linked GitHub/evidence for current state.
+Imported version scope is not execution permission. Stop, issue closure, merged
+PR and green CI do not prove installed-product acceptance.
+
+First local setup: `python core/tools/workflow_console.py bootstrap`, inspect
+the diff, then use `--apply`. This reconciles project-local Markdown and merges
+observer hooks with backups, preserving unrelated settings. Inspect Claude
+`/memory` for unseen machine-global instructions; the repo cannot claim those
+were changed from a remote environment.
+
+The old five-nightly rule, per-task HANDOFF updates, once-a-day question cap,
+fixed worker quotas and handwritten version-state copies are retired. Existing
+permissions, independent risky-change review and protected release gates remain.

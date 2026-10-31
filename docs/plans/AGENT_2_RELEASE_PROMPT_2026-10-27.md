@@ -1,5 +1,8 @@
 # Agent 2: RELEASES (4.5.1 -> 5.0 -> 6.0 -> 7.0)
 
+> Retired operating prompt. Use the current [operating model](../workflow/OPERATING_MODEL.md)
+> and native `workflow-qa` role; do not resume this file's quotas/question/handoff rules.
+
 Operating prompt. Process: [LEAN_PROCESS_V2_2026-10-27](LEAN_PROCESS_V2_2026-10-27.md). Copy below the line.
 
 ---

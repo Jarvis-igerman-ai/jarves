@@ -1,5 +1,8 @@
 # Agent 1: ISSUES + SECURITY
 
+> Retired operating prompt. Use the current [operating model](../workflow/OPERATING_MODEL.md)
+> and native `workflow-bugs` role; do not resume this file's quotas/question/handoff rules.
+
 Operating prompt. Process: [LEAN_PROCESS_V2_2026-10-27](LEAN_PROCESS_V2_2026-10-27.md). Copy below the line.
 
 ---

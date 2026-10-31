@@ -45,9 +45,10 @@ def make_skill(home: Path, cfg):
         text: str = Field("")
 
     class StartArgs(BaseModel):
-        provider: str = Field(..., description='claude | codex')
+        provider: str = Field(..., description='claude | codex | opencode')
         project: str = Field(..., description='allow-listed project')
         task: str = Field(...)
+        model: str = Field("", description="Exact model requested by the owner; empty uses the configured default")
 
     class DigestArgs(BaseModel):
         hours: float = Field(0, ge=0, le=168, description='0 = since the last digest')
@@ -98,7 +99,7 @@ def make_skill(home: Path, cfg):
 
             async def start_(a: StartArgs):
                 return result(await run("start", provider=a.provider, project=a.project, task=a.task,
-                                        lang=_lang(a.task)), untrusted=False)
+                                        model=a.model, lang=_lang(a.task)), untrusted=False)
 
             async def stop_(a: RefArgs):
                 return result(await run("stop", ref=a.session, lang=_lang(a.session)))
@@ -121,7 +122,7 @@ def make_skill(home: Path, cfg):
                      UNTRUSTED_NOTE, ask_, AskArgs, permission="action", timeout_s=40, untrusted_output=True),
                 Tool("agents_tell", "Tell a coding session something or ask it to continue/pause ('תגיד לו להמשיך', 'tell it to pause'). Needs the owner's yes.", tell_, TellArgs, permission="action",
                      confirm="Send this to the coding agent?", timeout_s=40),
-                Tool("agents_start", "Start a NEW Claude Code or Codex session in an allow-listed project: 'start a session on jarvis', 'תפתח סשן'. Owner approves on screen.", start_, StartArgs, permission="action",
+                Tool("agents_start", "Start a NEW Claude Code, Codex or OpenCode session in an allow-listed project, with the owner's requested model: 'start a session on jarvis', 'תפתח סשן'. Owner approves on screen.", start_, StartArgs, permission="action",
                      timeout_s=200),
                 Tool("agents_stop", "Stop a session JARVES started ('stop it', 'תעצור אותו'); owner approves on screen. An owner-started session is asked to wrap up.", stop_, RefArgs, permission="action",
                      timeout_s=200),
@@ -235,6 +236,7 @@ def add_cli(sub) -> None:
     p.add_argument("--yes", action="store_true", help="start / stop / resume / install-plugin: you approve now")
     p.add_argument("--wait", type=float, default=0, help="ask: wait this many seconds for the live reply")
     p.add_argument("--here", action="store_true", help="start: in the project folder itself (no new worktree)")
+    p.add_argument("--model", default="", help="start: exact requested model; does not change provider defaults")
     p.add_argument("--code", default="", help="approve: the code shown for a risky request")
     p.add_argument("--all", action="store_true", help="list: also ended sessions")
     p.add_argument("--hours", type=float, default=0, help="digest: look back this many hours")
@@ -329,12 +331,12 @@ def cmd_agents(a, cfg, home) -> int:
         kw.update(ref=args[0], text=" ".join(args[1:]))
     elif act == "start":
         if len(args) < 3:
-            print("usage: jarvis agents start claude|codex PROJECT \"task\" [--here] [--yes]", file=sys.stderr)
+            print("usage: jarvis agents start claude|codex|opencode PROJECT \"task\" [--model MODEL] [--here] [--yes]", file=sys.stderr)
             return 2
         if not _confirm(a, f"Start a {args[0]} session in {args[1]}?"):
             print("approval needed: add --yes (or answer yes)", file=sys.stderr)
             return 1
-        kw.update(provider=args[0], project=args[1], task=" ".join(args[2:]), here=a.here, approved=True)
+        kw.update(provider=args[0], project=args[1], task=" ".join(args[2:]), model=a.model, here=a.here, approved=True)
     elif act in ("approve", "deny"):
         if not args:
             print(f"usage: jarvis agents {act} REQUEST_ID", file=sys.stderr)

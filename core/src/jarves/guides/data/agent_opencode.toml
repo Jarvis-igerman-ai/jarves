@@ -86,3 +86,8 @@ he = "SERVER_ERROR: תשובה לא צפויה"
 en = "SERVER_ERROR: unexpected answer"
 fix_he = "השרת ענה בשגיאה או בפורמט שלא מוכר, כנראה גרסה אחרת של OpenCode. עדכנו את OpenCode והריצו jarvis agents opencode status."
 fix_en = "The server answered with an error or an unknown shape, probably another OpenCode version. Update OpenCode and run jarvis agents opencode status."
+
+[[steps]]
+he = "אפשר לבחור מודל לבקשה בודדת: jarvis agents start opencode jarves \"משימה\" --model PROVIDER/MODEL. המודל נבדק לפי מדיניות העלות וההגדרות ונשמר לסשן בלי לשנות את ברירת המחדל. כל prompt עדיין צריך את האישור המלא הקיים."
+en = "Select a model per request: jarvis agents start opencode jarves \"task\" --model PROVIDER/MODEL. Existing cost/config policy checks it and the session retains it without changing the default. Every prompt still needs the existing full owner approval."
+action = "command:jarvis agents opencode status"

@@ -52,6 +52,11 @@ en = "The session I started does not show up"
 fix_he = "בדקו שהתיקייה שלו ברשימת המותרים (jarvis agents projects list) והריצו jarvis agents doctor. סשן מחוץ לרשימה רק נספר."
 fix_en = "Check that its folder is on the allow-list (jarvis agents projects list) and run jarvis agents doctor. A session outside the list is only counted."
 
+[[steps]]
+he = "לבקשה מפורשת עם מודל: jarvis agents start claude jarves \"משימה\" --model opus. אפשר לבחור גם codex או opencode עם מודל מתאים ומותר. הבחירה לסשן אינה משנה ברירות מחדל ואינה עוקפת אישורים. requested_model מציג את הבקשה, לא הוכחת מודל בפועל."
+en = "For an explicit model request: jarvis agents start claude jarves \"task\" --model opus. Codex or OpenCode can use their allowed model IDs too. Per-session selection changes no default and bypasses no approval. requested_model is the request, not proof of the effective model."
+action = "command:jarvis agents doctor"
+
 [[problems]]
 he = "הוא אומר שאין חיבור חי"
 en = "He says there is no live channel"

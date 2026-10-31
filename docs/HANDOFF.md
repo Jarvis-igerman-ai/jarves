@@ -1,5 +1,9 @@
 # HANDOFF: latest state plus pointers
 
+> Historical release context. Current work uses the private workflow ledger and
+> [operating model](workflow/OPERATING_MODEL.md); do not resume dated worker or
+> question policies from these notes. No new device acceptance is implied.
+
 Short on purpose. The 24-27 Oct session log (many entries) is archived: [HANDOFF_2026-10-and-earlier](archive/HANDOFF_2026-10-and-earlier.md). New work records state in each agent's STATE.md; a handoff note is written once per released version.
 
 ## Latest entry: after the JARVES 4.5 release, 27 Oct 2026

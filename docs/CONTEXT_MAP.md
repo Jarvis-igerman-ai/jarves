@@ -4,6 +4,10 @@ Default inputs: `CLAUDE.md`, `AGENTS.md`, [NOW](NOW.md). Everything else on dema
 
 | Need | Read only |
 |---|---|
+| Current workflow, native Claude manager, owner inbox, external observer | [OPERATING_MODEL](workflow/OPERATING_MODEL.md), [SETUP](workflow/SETUP.md) |
+| Owner journey, diagrams, simplicity audit, model choice and action-history/retro | [USER_JOURNEY.he](workflow/USER_JOURNEY.he.md) |
+| V4.5.1/V5/V6/V7 scope mapping and evidence gaps | [VERSION_MAPPING](workflow/VERSION_MAPPING_2026-10-30.md) |
+| Official industry research and native hook/version constraints | [INDUSTRY_RESEARCH](workflow/INDUSTRY_RESEARCH_2026-10-30.md) |
 | Current brief, agents, first 10 minutes | [NOW](NOW.md) |
 | Process (batching, Tier R, issues, targets) | [plans/LEAN_PROCESS_V2_2026-10-27.md](plans/LEAN_PROCESS_V2_2026-10-27.md) |
 | Agent prompts | [AGENT_1](plans/AGENT_1_ISSUES_PROMPT_2026-10-27.md), [AGENT_2](plans/AGENT_2_RELEASE_PROMPT_2026-10-27.md), [AGENT_3](plans/AGENT_3_FEATURES_PROMPT_2026-10-27.md) |

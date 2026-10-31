@@ -189,6 +189,14 @@ class AgentDB:
                 db.execute("DELETE FROM events WHERE id IN (SELECT id FROM events WHERE session_id = ? ORDER BY id "
                            "LIMIT ?)", (sid, n - TIMELINE_KEEP))
 
+        # Optional observer only; a telemetry failure must never change agent delivery/approval.
+        try:
+            from ..workflow.trace import provider_event
+            provider_event(self.path.parent, self.session(sid), kind, summary, payload)
+        except Exception:
+            from .. import logs
+            logs.warn("agents", "AGENTS_WORKFLOW_TRACE_UNAVAILABLE", "workflow action observer unavailable")
+
     def events(self, sid: str, limit: int = 100, since: float = 0.0) -> list[dict]:
         rows = self._rows("SELECT * FROM events WHERE session_id = ? AND ts >= ? ORDER BY id DESC LIMIT ?",
                           (sid, since, int(limit)))

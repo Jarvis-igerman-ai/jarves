@@ -427,6 +427,39 @@ def test_status_and_doctor_show_the_model_rows(tmp_path, server, monkeypatch):
     o.db.close()
 
 
+def test_explicit_model_is_approved_pinned_and_does_not_change_global_default(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch, model="")
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append((p, k)) or True)
+    r = o.call("start", provider="opencode", project="proj", task="Review task T",
+               model="openrouter/openrouter/free")
+    assert r["ok"], r
+    sid = r["session"]["id"]
+    assert r["session"]["requested_model"] == "openrouter/openrouter/free"
+    assert asked[0][1]["details"]["model"] == "openrouter/openrouter/free"
+    assert server.posts[1][1]["model"] == {"providerID": "openrouter", "modelID": "openrouter/free"}
+    assert o.acfg.opencode_model == ""
+    o.acfg.opencode_model = "openai/gpt-6-sol"
+    assert o.tell(sid, "Continue the same task")["ok"]
+    assert len(asked) == 2  # a pinned model never replaces the per-prompt owner approval
+    assert server.posts[-1][1]["model"] == {"providerID": "openrouter", "modelID": "openrouter/free"}
+    assert o.acfg.opencode_model == "openai/gpt-6-sol"
+    o.db.close()
+
+
+def test_explicit_paid_or_unknown_model_does_not_bypass_existing_model_policy(tmp_path, server, monkeypatch):
+    o = _orch(tmp_path, server, monkeypatch)
+    _git_proj(tmp_path)
+    asked = []
+    monkeypatch.setattr(o, "_ask_owner", lambda p, **k: asked.append(p) or True)
+    for model in ("openai/gpt-6-sol", "unknown/missing"):
+        result = o.call("start", provider="opencode", project="proj", task="Review T", model=model)
+        assert result["code"] == "MODEL_NOT_ALLOWED"
+    assert not asked and not server.posts and not o.managed
+    o.db.close()
+
+
 def test_parse_model_and_the_new_code_text():
     assert oc.parse_model("openrouter/anthropic/claude-x") == ("openrouter", "anthropic/claude-x") and oc.parse_model("") == ("", "")
     for bad in ("nomodel", "a/../b", "a b/c", "/x", "x/"):
