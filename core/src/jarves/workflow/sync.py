@@ -97,6 +97,8 @@ def collect(get=public_get) -> dict:
                     # A closed PR is not necessarily merged. Never infer merge from state alone.
                     item["merged_at"] = row.get("merged_at")
                     item["head_sha"] = (row.get("head") or {}).get("sha", "")
+                    item["draft"] = bool(row.get("draft"))
+                    item["auto_merge"] = bool(row.get("auto_merge"))
                     item["linked_issues"] = sorted({int(n) for n in re.findall(
                         r"(?i)\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+#(\d+)\b", row.get("body") or "")})
                 dest.append(item)
@@ -116,7 +118,23 @@ def collect(get=public_get) -> dict:
             fetched += 1
         item["files"] = pr_files(get, item["number"], item["head_sha"])
     sha = branch["commit"]["sha"]
-    return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": main_ci_green(get, sha)}
+    committed = ((branch["commit"].get("commit") or {}).get("committer") or {}).get("date", "")
+    return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": main_ci_green(get, sha),
+            "main_committed_at": committed, "latest_beta": latest_beta(get)}
+
+
+def latest_beta(get) -> dict | None:
+    """Read-only: newest published prerelease. None = unknown (no beta finding is raised)."""
+    try:
+        rows = get(f"/repos/{REPO}/releases?per_page=20")
+        if not isinstance(rows, list):
+            return None
+        for r in rows:
+            if r.get("prerelease") and not r.get("draft"):
+                return {"tag": str(r.get("tag_name", ""))[:60], "published_at": r.get("published_at") or ""}
+        return {"tag": "", "published_at": ""}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
+        return None
 
 
 def tracked_issue(item: dict, bug_labels=BUG_LABELS) -> bool:
@@ -160,6 +178,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
                               if tracked_issue(x, bug_labels)][:MAX_OPEN_ROWS],
               "open_prs": [{**x, "title": x["title"][:120]} for x in snapshot.get("prs", []) if x["state"] == "open"],
               "ci_green": bool(snapshot.get("ci_green")),
+              "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
     store.set_source(source)
     return source
