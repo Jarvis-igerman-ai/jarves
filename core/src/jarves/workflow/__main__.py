@@ -22,7 +22,8 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro"])
+                                        "create", "ask", "answer", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+    ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
@@ -104,6 +105,9 @@ def main(argv=None) -> int:
                 result = settings(store, a.capture)
             else:
                 result = history(store, before=a.before, **filters)
+        elif a.action == "autopilot":
+            from .autopilot import command
+            result = command(store, home, (a.rest or ["status"])[0], a.rest[1:])
         elif a.action == "seed":
             from .sync import PLAN
             result = store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))

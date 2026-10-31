@@ -144,6 +144,11 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                 store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid,
                                       "restart_count": len(restarts)})
                 store.tick()
+                try:
+                    from .autopilot import step
+                    step(store, home)  # import-only; it never starts a worker
+                except (OSError, ValueError):
+                    pass
                 dispatch(store, profile_home)
                 if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
                     sync_thread = threading.Thread(target=sync_background, daemon=True, name="workflow-github-read")

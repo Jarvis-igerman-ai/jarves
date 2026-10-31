@@ -11,6 +11,9 @@ from urllib.parse import urlsplit
 REPO = "Jarvis-igerman-ai/jarves"
 PLAN = Path(__file__).with_name("version_plan.json")
 MAX_PAGES = 10
+MAX_OPEN_ROWS = 150
+BUG_LABELS = ("bug", "P0", "P1", "P2", "P3", "showstopper")
+VERSION_LABELS = ("4.5.1", "5", "5.0", "6", "6.0", "7", "7.0")
 
 
 class SameGitHubRedirect(urllib.request.HTTPRedirectHandler):
@@ -64,7 +67,14 @@ def collect(get=public_get) -> dict:
     return {"issues": issues, "prs": prs, "sha": branch["commit"]["sha"], "truncated": truncated}
 
 
-def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
+def tracked_issue(item: dict, bug_labels=BUG_LABELS) -> bool:
+    """An open issue the console must show: a defect label (not only `bug`) or a version label."""
+    lowered = {x.strip().lower() for x in item["labels"]}
+    return item["state"] == "open" and bool(lowered & {x.lower() for x in bug_labels}
+                                            or {x.lstrip("v") for x in lowered} & set(VERSION_LABELS))
+
+
+def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
     store.seed_plan(plan)
     issues = {int(x["number"]): x for x in snapshot.get("issues", [])}
@@ -92,8 +102,11 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None) -> dict:
                 store.update_metadata(requirement["id"], changes)
     source = {"mode": "github", "sha": snapshot.get("sha", ""), "synced_at": store.clock(),
               "unmapped": unmapped, "truncated": bool(snapshot.get("truncated")),
-              "issue_count": len(issues), "open_bugs": sum(x["state"] == "open" and "bug" in x["labels"] for x in issues.values()),
-              "open_prs": [x for x in snapshot.get("prs", []) if x["state"] == "open"],
+              "issue_count": len(issues), "open_bugs": sum(x["state"] == "open" and bool({l.lower() for l in x["labels"]} & {b.lower() for b in bug_labels})
+                               for x in issues.values()),
+              "open_issues": [{**x, "title": x["title"][:120]} for x in sorted(issues.values(), key=lambda i: i["number"])
+                              if tracked_issue(x, bug_labels)][:MAX_OPEN_ROWS],
+              "open_prs": [{**x, "title": x["title"][:120]} for x in snapshot.get("prs", []) if x["state"] == "open"],
               "scope_note": plan.get("scope_note", ""), "error": ""}
     store.set_source(source)
     return source
