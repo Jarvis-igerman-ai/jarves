@@ -96,7 +96,23 @@ def dispatch(store: Store, profile_home: Path, tell=remote_tell) -> list[dict]:
     return results
 
 
+def _self_update(store, home: Path, profile_home: Path, port: int) -> bool:
+    """Event-driven autopilot self-update; True when the checkout changed and a successor supervisor was started."""
+    try:
+        from . import autopilot
+        from .autopilot_update import relaunch, update_step
+        policy, error = autopilot.load(home)
+        if error or update_step(store, policy) != "updated":
+            return False
+        relaunch(home, profile_home, port)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        store.record_event("autopilot_error", f"autopilot update failed: {type(exc).__name__}")
+        return False
+
+
 def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: float = 10, sync_github: bool = True,
+               update_enabled: bool = False,
                stop: threading.Event | None = None, popen=subprocess.Popen, clock=time.time) -> None:
     """Own the web child; workers are never killed or blindly re-run.
 
@@ -141,7 +157,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     restarts.append(now)
                     store.record_event("supervisor", "Workflow web process started; existing worker sessions left untouched")
-                store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid,
+                store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid, "pid": os.getpid(),
                                       "restart_count": len(restarts)})
                 store.tick()
                 try:
@@ -152,6 +168,9 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                 dispatch(store, profile_home)
                 from .autopilot_loop import step_safe
                 step_safe(store, profile_home)  # no-op unless <home>/autopilot.json enables it
+                if update_enabled and _self_update(store, home, profile_home, port):
+                    stop.set()  # successor was started; this supervisor leaves cleanly (ledger/policy/sessions kept)
+                    continue
                 if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
                     sync_thread = threading.Thread(target=sync_background, daemon=True, name="workflow-github-read")
                     sync_thread.start()

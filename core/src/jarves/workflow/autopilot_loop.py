@@ -5,8 +5,8 @@ to another model/provider. Session start/stop go through injected callables (the
 in production, a fake in tests). One step at a time per profile: an in-process lock plus a kernel
 file lock make two concurrent step() calls (threads or processes) safe; claim() is atomic in SQLite.
 
-Policy comes from autopilot.load (T1). The T2 owner grant is still a stub (grant_active): until it is wired
-every start shows the normal owner popup. The T4 watchdog/steward/manual-test passes run inside _step.
+Policy comes from autopilot.load (T1). The owner grant (T2) lives in the Orchestrator: with by="autopilot" the service ignores any
+approved flag and starts without a popup only on an exact grant match, otherwise it asks/refuses as usual. The T4 watchdog/steward/manual-test passes run inside _step.
 """
 from __future__ import annotations
 
@@ -35,11 +35,6 @@ def load_policy(home: Path) -> dict:
     if error:
         policy["enabled"] = False
     return policy
-
-
-def grant_active(policy: dict) -> bool:
-    """STUB until the T2 owner grant lands: nothing is ever started as pre-approved (the owner popup shows)."""
-    return bool(policy.get("_grant_active"))
 
 
 def bridge_notify(profile_home: Path, kind: str, text: str) -> None:
@@ -218,7 +213,7 @@ def _step(store, profile_home, policy, start, stop, notify, force) -> list[dict]
                 break
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
-                       task=assignment(ctx, agent_id, store.path.parent), approved=grant_active(policy),
+                       task=assignment(ctx, agent_id, store.path.parent), approved=False,
                        env={"JARVES_WORKFLOW_AGENT": agent_id})
             try:
                 result = start(profile_home, **req)

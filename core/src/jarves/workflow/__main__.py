@@ -86,7 +86,7 @@ def main(argv=None) -> int:
         return 0
     if a.action == "supervise":
         from .control import supervisor
-        supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync)
+        supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
     if a.action == "open":
         # Kept out of event logs and process arguments. Never use this link as a public share URL.

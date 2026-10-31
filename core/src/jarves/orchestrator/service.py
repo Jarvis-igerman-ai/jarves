@@ -1110,7 +1110,17 @@ class Orchestrator:
         wt = root / ".jarves" / "worktrees" / slug
         wt.parent.mkdir(parents=True, exist_ok=True)
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-        p = subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", f"jarves/{slug}", str(wt)],
+        # Workers start from the freshest jarves/main when that remote exists (best effort, never blocks a start).
+        base: list[str] = []
+        try:
+            subprocess.run(["git", "-C", str(root), "fetch", "jarves", "main"], capture_output=True, text=True,
+                           timeout=60, creationflags=flags)
+            if subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "-q", "jarves/main"],
+                              capture_output=True, text=True, timeout=20, creationflags=flags).returncode == 0:
+                base = ["jarves/main"]
+        except (OSError, subprocess.SubprocessError):
+            pass
+        p = subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", f"jarves/{slug}", str(wt), *base],
                            capture_output=True, text=True, timeout=120, creationflags=flags)
         if p.returncode != 0:
             raise ValueError(clean(p.stderr or p.stdout, 200))

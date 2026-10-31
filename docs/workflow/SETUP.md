@@ -173,3 +173,11 @@ away alert. While you are away, tool permission prompts still wait for you, so m
 wait; a safe project allowlist in `.claude/settings.json` is proposed by agents and applied by the
 owner. UNVERIFIED: real worker start with Claude models, hook env under Git Bash, away popup
 behaviour, Task Scheduler restart, silent beta install chain.
+
+## Autopilot self-update
+
+When the autopilot is enabled the supervisor follows the synced main SHA: on a change it runs `git fetch jarves` and
+`git merge --ff-only` on a clean flow checkout, then restarts itself once (a detached successor takes the supervisor lock;
+ledger, policy and running worker sessions are kept). A dirty or non-fast-forwardable checkout raises one dashboard
+alert and nothing is reset. Workers always start in a new worktree cut from `jarves/main`. The autopilot never merges
+pull requests or tags.
