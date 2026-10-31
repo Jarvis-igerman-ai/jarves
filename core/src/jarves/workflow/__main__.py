@@ -164,7 +164,8 @@ def main(argv=None) -> int:
                                 "safe_default": a.safe_default, "link": a.link})
         elif a.action == "ask-more":
             # Owner follow-up; the native manager receives it at its next Stop hook. Never an answer.
-            result = store.ask_more(a.note, question_id=a.id, task_id=a.task)
+            channel = owner_only_guard(a.action)
+            result = store.ask_more(a.note, question_id=a.id, task_id=a.task, channel=channel)
         elif a.action == "reply":
             result = store.reply_followup(a.id, a.answer)
         elif a.action in {"answer", "reopen"}:

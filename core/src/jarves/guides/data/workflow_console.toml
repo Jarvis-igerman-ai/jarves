@@ -45,6 +45,12 @@ he = "שאל עוד: מתחת לכל שאלה (ובתיבה הכללית) כות
 en = "Ask more: under each question (and in the general box) write a follow-up for the manager, such as 'why do you need this?' or 'what are the options?'. It is saved and reaches the manager when its current step ends; its reply shows as a thread under the question. The question stays open until you answer. Drafts survive a page refresh. CLI: jarvis workflow ask-more --id QUESTION --note TEXT (or --task ID for a general one); the manager replies with jarvis workflow reply --id FOLLOWUP --answer TEXT."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "תשובות והיסטוריה: רק מהדשבורד או מטרמינל אמיתי שלכם נחשבת תשובה כמאושרת (jarvis workflow answer ו־ask-more נדחים בסוכן, בצינור או בסקריפט). תשובה שלא הגיעה מהדשבורד או מהטרמינל שלכם מסומנת 'דרוש אישור שלך' עם כפתור 'פתח מחדש' (בדשבורד, או jarvis workflow reopen --id QUESTION בטרמינל). פתיחה מחדש מחזירה את השאלה לממתינה ושומרת את התשובה הישנה בהיסטוריה; שאלה של משימה שהושלמה לא נפתחת מחדש. שאלות המשך נשלחות רק על ידיכם, והשרשור מציג מאיזה ערוץ הגיעה כל אחת. אזהרה כנה: מי ענה הוא סימן ולא גבול אבטחה. סוכן שרץ תחת אותו משתמש מערכת יכול עדיין לקרוא את אסימון הגישה או לדמות טרמינל."
+en = "Answers and history: only the dashboard or your own real terminal counts as a confirmed answer (jarvis workflow answer and ask-more are refused for an agent, a pipe or a script). An answer that did not come from your dashboard or terminal shows a 'needs your confirmation' badge and a Reopen button (in the dashboard, or jarvis workflow reopen --id QUESTION in a terminal). Reopen returns the question to pending and keeps the old answer in its history; a question of a completed task cannot be reopened. Follow-ups can only be sent by you, and the thread shows the channel of each one. Honest note: who answered is a signal, not a security boundary; an agent running as the same OS user could still read the access token or fake a terminal."
+action = "command:jarvis workflow status"
+
+
 [[problems]]
 he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
 en = "A follow-up stays 'saved, will reach the manager'"

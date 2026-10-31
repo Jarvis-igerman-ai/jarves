@@ -4,6 +4,7 @@ import json
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -133,7 +134,7 @@ class AskMoreStoreAndHookTests(unittest.TestCase):
     def test_cli_ask_more_and_reply(self):
         def run(*args):
             out = io.StringIO()
-            with redirect_stdout(out):
+            with redirect_stdout(out), patch("jarves.workflow.__main__.owner_only_guard", lambda action: "terminal"):
                 code = cli([*args, "--home", str(self.home)])
             return code, json.loads(out.getvalue())
         self.store.close()

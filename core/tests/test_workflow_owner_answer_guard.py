@@ -147,3 +147,47 @@ class DashboardAnswerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AskMoreGuardAndReopenTests(OwnerAnswerGuardTests):
+    def followups(self):
+        store = Store(self.home / "workflow.db")
+        try:
+            return store.snapshot()["followups"]
+        finally:
+            store.close()
+
+    def test_cli_ask_more_refused_for_agent_and_pipe(self):
+        for tty, env in ((False, None), (True, {"JARVES_WORKFLOW_AGENT": "a1"})):
+            code, _, err = run_cli(self.home, "ask-more", "--id", self.q, "--note", "hi", tty=tty, env=env)
+            self.assertEqual(code, 1)
+            self.assertIn("owner questions are answered", err)
+        self.assertEqual(self.followups(), [])
+
+    def test_cli_ask_more_from_terminal_records_channel_and_reply_stays_unguarded(self):
+        code, _, _ = run_cli(self.home, "ask-more", "--id", self.q, "--note", "why?", tty=True)
+        self.assertEqual(code, 0)
+        item = self.followups()[0]
+        self.assertEqual(item["channel"], "terminal")
+        code, _, _ = run_cli(self.home, "reply", "--id", item["id"], "--answer", "because", tty=False)
+        self.assertEqual(code, 0)
+
+    def test_store_ask_more_default_channel_unknown(self):
+        store = Store(self.home / "workflow.db")
+        item = store.ask_more("x", question_id=self.q)
+        store.ask_more("y", question_id=self.q, channel="dashboard")
+        store.close()
+        self.assertEqual(item["channel"], "unknown")
+        self.assertEqual(self.followups()[1]["channel"], "dashboard")
+
+    def test_reopen_refused_when_task_done(self):
+        store = Store(self.home / "workflow.db")
+        store.answer(self.q, "ok")
+        with store._tx() as db:
+            task = store._get(db, "task", "t1")
+            task["state"] = "verified"
+            store._put(db, "task", task)
+        with self.assertRaises(ValueError):
+            store.reopen(self.q)
+        store.close()
+        self.assertEqual(self.question()["status"], "answered")

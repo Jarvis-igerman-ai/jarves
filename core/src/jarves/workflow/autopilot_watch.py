@@ -12,7 +12,9 @@ role stays with the manager and the owner.
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 
@@ -289,6 +291,14 @@ def _version_key(version) -> tuple:
     return tuple(int(n) for n in re.findall(r"\d+", str(version or ""))) or (999,)
 
 
+def _gate_id(task_id: str) -> str:
+    """Stable question id for a task; long task ids are shortened with a hash so the id stays under 120 chars."""
+    task_id = str(task_id)
+    if len(task_id) <= 100:
+        return f"gate-{task_id}"
+    return f"gate-{task_id[:60]}-{hashlib.sha256(task_id.encode()).hexdigest()[:8]}"
+
+
 def gate_questions_step(store: Store) -> list[str]:
     """One non-blocking owner question per owner-gated queued task, so 'what needs me' is visible.
 
@@ -299,7 +309,7 @@ def gate_questions_step(store: Store) -> list[str]:
     known = {q["id"] for q in snap["questions"]}
     todo = [t for t in snap["tasks"]
             if t.get("owner_gate") and t["state"] == "queued" and t.get("execution_allowed", True) is False
-            and f"gate-{t['id']}" not in known]
+            and _gate_id(t['id']) not in known]
     todo.sort(key=lambda t: (_version_key(t.get("version")), t.get("priority", 9), t["id"]))
     asked = []
     for task in todo[:GATE_CAP]:
@@ -311,9 +321,10 @@ def gate_questions_step(store: Store) -> list[str]:
                    f"{'Link: ' + link + '. ' if link else ''}Time: {minutes or 'about 15'} min. "
                    "Safe default: nothing is done or approved without you.")
         try:
-            store.ask({"id": f"gate-{task['id']}", "task_id": task["id"], "blocks": False,
+            store.ask({"id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False,
                        "title": str(task["owner_gate"])[:500], "context": context, "choices": GATE_CHOICES})
-        except ValueError:
+        except ValueError as exc:
+            logging.getLogger(__name__).warning("gate question for %s not created: %s", task["id"], exc)
             continue
         asked.append(task["id"])
     return asked

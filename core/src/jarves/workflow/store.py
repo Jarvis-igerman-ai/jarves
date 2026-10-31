@@ -575,9 +575,10 @@ class Store:
             option["recommended"] = True
         return option
 
-    def ask_more(self, text, question_id="", task_id=""):
+    def ask_more(self, text, question_id="", task_id="", channel="unknown"):
         """Owner follow-up to the manager. It never answers, defers or approves anything."""
         text = _text(text, "follow-up", maximum=2000)
+        channel = channel if channel in ANSWER_CHANNELS else "unknown"
         with self._tx() as db:
             question = None
             if question_id:
@@ -591,7 +592,7 @@ class Store:
             if len(pending) >= 50:
                 raise ValueError("too many open follow-ups; wait for the manager to reply")
             item = {"id": "f-" + uuid.uuid4().hex[:12], "question_id": question["id"] if question else "",
-                    "task_id": task_id or "", "text": text, "status": "pending", "created_at": self.clock(),
+                    "task_id": task_id or "", "text": text, "channel": channel, "status": "pending", "created_at": self.clock(),
                     "delivered_at": None, "reply": None, "replied_at": None}
             self._put(db, "followup", item)
             self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
@@ -695,6 +696,8 @@ class Store:
             question = self._get(db, "question", _id(question_id))
             if question["status"] != "answered":
                 raise ValueError("only an answered question can be reopened")
+            if self._get(db, "task", question["task_id"])["state"] in {"verified", "done"}:
+                raise ValueError("completed task cannot wait for a question")
             view = question_view(question)
             history = list(question.get("history", []))
             history.append({k: view.get(k) for k in ("answer", "answered_at", "answered_by", "channel")}
