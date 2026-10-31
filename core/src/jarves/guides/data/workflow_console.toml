@@ -46,6 +46,11 @@ en = "Ask more: under each question (and in the general box) write a follow-up f
 action = "command:jarvis workflow status"
 
 [[steps]]
+he = "קבל עוד מידע: לכל שאלה פתוחה יש כפתור 'קבל עוד מידע' ליד כפתורי התשובה. לחיצה אחת שולחת למנהל בקשה קבועה להסביר: למה שואלים, מה כל אפשרות עושה, מה הוא ממליץ ומה קורה אם מדלגים. מתחת לשאלה מופיע 'נשלח למנהל, ממתין לתשובה כבר N דק׳', וההסבר שלו מופיע בשרשור. אחרי כ־3 דקות בלי תשובה מופיע רמז: המנהל כנראה במנוחה, עברו לחלון של Claude או המתינו לאירוע הבא של עובד. הודעה שמורה לא יכולה להעיר סשן Claude שעומד. שאלות של שער בעלים מוצגות בשפה פשוטה: מה צריך, למה, מה אתם עושים (צעדים), כמה דקות, מה קורה אם מדלגים וההמלצה; הטקסט המקורי נמצא תחת 'פרטים מקוריים'. מנהל ששואל יכול להוסיף --step TEXT (חוזר), --skip-effect TEXT ו־--details TEXT."
+en = "Get more info: every open question has a 'Get more info' button next to the answer buttons. One click asks the manager a fixed follow-up: why you are asked, what each option does, what it recommends and what happens if you skip it. The card shows 'Sent, waiting for the manager since N min' and the explanation appears in the thread. After about 3 minutes without a reply a hint says the manager is idle: switch to the Claude window or wait for the next worker event. A saved message cannot wake an idle Claude session. Owner-gate questions are shown in plain language: what is needed, why, what you do (steps), minutes, what happens if you skip and the recommendation; the original text is under 'Details'. A manager can add --step TEXT (repeatable), --skip-effect TEXT and --details TEXT when asking."
+action = "command:jarvis workflow status"
+
+[[steps]]
 he = "תשובות והיסטוריה: רק מהדשבורד או מטרמינל אמיתי שלכם נחשבת תשובה כמאושרת (jarvis workflow answer ו־ask-more נדחים בסוכן, בצינור או בסקריפט). תשובה שלא הגיעה מהדשבורד או מהטרמינל שלכם מסומנת 'דרוש אישור שלך' עם כפתור 'פתח מחדש' (בדשבורד, או jarvis workflow reopen --id QUESTION בטרמינל). פתיחה מחדש מחזירה את השאלה לממתינה ושומרת את התשובה הישנה בהיסטוריה; שאלה של משימה שהושלמה לא נפתחת מחדש. שאלות המשך נשלחות רק על ידיכם, והשרשור מציג מאיזה ערוץ הגיעה כל אחת. אזהרה כנה: מי ענה הוא סימן ולא גבול אבטחה. סוכן שרץ תחת אותו משתמש מערכת יכול עדיין לקרוא את אסימון הגישה או לדמות טרמינל."
 en = "Answers and history: only the dashboard or your own real terminal counts as a confirmed answer (jarvis workflow answer and ask-more are refused for an agent, a pipe or a script). An answer that did not come from your dashboard or terminal shows a 'needs your confirmation' badge and a Reopen button (in the dashboard, or jarvis workflow reopen --id QUESTION in a terminal). Reopen returns the question to pending and keeps the old answer in its history; a question of a completed task cannot be reopened. Follow-ups can only be sent by you, and the thread shows the channel of each one. Honest note: who answered is a signal, not a security boundary; an agent running as the same OS user could still read the access token or fake a terminal."
 action = "command:jarvis workflow status"
@@ -56,6 +61,12 @@ he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
 en = "A follow-up stays 'saved, will reach the manager'"
 fix_he = "המסירה קורית כשהמנהל מסיים צעד (Stop hook). מנהל שעומד בלי עבודה מקבל אותה בצעד הבא שלו: כתבו לו משהו בחלון של Claude או המתינו להודעת סוכן. בדקו שה־hooks מותקנים (jarvis workflow bootstrap). מנהל שנסגר מקבל את השאלות הפתוחות כשהוא עולה מחדש."
 fix_en = "Delivery happens when the manager ends a step (its Stop hook). An idle manager receives it on its next step: type anything in its Claude window or wait for a worker notification. Check that the hooks are installed (jarvis workflow bootstrap). A restarted manager gets open follow-ups at session start."
+
+[[problems]]
+he = "לחצתי 'קבל עוד מידע' ואין תשובה"
+en = "I clicked 'Get more info' and nothing came back"
+fix_he = "הכפתור נעול בזמן שהבקשה ממתינה, כדי לא לשלוח אותה פעמיים. המנהל מקבל אותה בסיום הצעד הבא שלו ועונה עם jarvis workflow reply. אם עברו יותר מ־3 דקות, עברו לחלון של Claude וכתבו בו משהו, או המתינו לאירוע הבא של עובד. אפשר גם לכתוב שאלה חופשית בתיבה 'שאל עוד את המנהל'."
+fix_en = "The button stays locked while the request waits, so it is not sent twice. The manager gets it at the end of its next step and replies with jarvis workflow reply. After more than 3 minutes switch to the Claude window and type anything, or wait for the next worker event. You can still write a free question in the Ask more box."
 
 [[problems]]
 he = "יש משימות אבל אף סוכן לא עובד"

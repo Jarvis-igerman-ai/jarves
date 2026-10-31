@@ -280,9 +280,12 @@ def manual_test_step(store: Store) -> list[str]:
 
 
 GATE_CHOICES = [
-    {"id": "later-today", "label": "Schedule it for later today (Recommended)"},
-    {"id": "tell-me", "label": "Tell me when ready"},
-    {"id": "skip-version", "label": "Skip for this version"},
+    {"id": "later-today", "label": "Schedule it for later today", "recommended": True,
+     "description": "The manager puts it on today's list with the steps; nothing runs until you do it."},
+    {"id": "tell-me", "label": "Tell me when ready",
+     "description": "It stays queued; the manager tells you when the rest of the version is ready for it."},
+    {"id": "skip-version", "label": "Skip for this version",
+     "description": "It moves out of this version; the version can ship without it."},
 ]
 GATE_CAP = 15
 
@@ -299,30 +302,57 @@ def _gate_id(task_id: str) -> str:
     return f"gate-{task_id[:60]}-{hashlib.sha256(task_id.encode()).hexdigest()[:8]}"
 
 
+def gate_question(task: dict) -> dict:
+    """Plain-language owner-gate question: one-sentence title, why, steps, minutes, skip effect, recommendation.
+
+    The raw owner_gate text (often Hebrew) is kept as is in ``details``; the console shows it collapsed.
+    """
+    link = task.get("source_url") or (
+        f"https://github.com/igalgerman/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
+    scope = task.get("scope")
+    minutes = scope.get("owner_minutes") if isinstance(scope, dict) else None
+    minutes = minutes if type(minutes) is int and 0 < minutes <= 480 else 15
+    version = task.get("version") or "this version"
+    steps = [str(row.get("label", "")).strip()[:500] for row in task.get("acceptance") or []
+             if isinstance(row, dict) and str(row.get("label", "")).strip()][:8]
+    return {
+        "id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False, "kind": "owner_gate",
+        "title": f"Your step is needed for: {str(task['title'])[:400]}",
+        "why": f"Task {task['id']} in {version} cannot be finished by an agent; it needs you (a real device, "
+               "a sign-in, a purchase or your decision).",
+        "link": link[:500], "steps": steps, "minutes": minutes,
+        "skip_effect": f"Nothing breaks and nothing is approved: the task stays queued and {version} "
+                       "may ship without it.",
+        "recommendation": f"it keeps {version} moving and takes about {minutes} min.",
+        "safe_default": "nothing is done or approved without you",
+        "details": str(task["owner_gate"])[:4000], "context": "", "choices": GATE_CHOICES,
+    }
+
+
 def gate_questions_step(store: Store) -> list[str]:
     """One non-blocking owner question per owner-gated queued task, so 'what needs me' is visible.
 
     Created once (any existing gate-<task> question, answered or not, stops a new one), never blocks the task
-    or its lane, at most GATE_CAP new ones per call, ordered by version then priority.
+    or its lane, at most GATE_CAP new ones per call, ordered by version then priority. Pending questions in the
+    older raw-text format get the plain-language text once; their status and answer are never touched.
     """
     snap = store.snapshot()
-    known = {q["id"] for q in snap["questions"]}
-    todo = [t for t in snap["tasks"]
-            if t.get("owner_gate") and t["state"] == "queued" and t.get("execution_allowed", True) is False
-            and _gate_id(t['id']) not in known]
+    questions = {q["id"]: q for q in snap["questions"]}
+    gated = [t for t in snap["tasks"]
+             if t.get("owner_gate") and t["state"] == "queued" and t.get("execution_allowed", True) is False]
+    for task in gated:
+        old = questions.get(_gate_id(task["id"]))
+        if old and old.get("kind") != "owner_gate" and old.get("status") in {"pending", "deferred"}:
+            try:
+                store.refresh_gate_question(old["id"], gate_question(task))
+            except ValueError as exc:
+                logging.getLogger(__name__).warning("gate question %s not refreshed: %s", old["id"], exc)
+    todo = [t for t in gated if _gate_id(t["id"]) not in questions]
     todo.sort(key=lambda t: (_version_key(t.get("version")), t.get("priority", 9), t["id"]))
     asked = []
     for task in todo[:GATE_CAP]:
-        link = task.get("source_url") or (
-            f"https://github.com/igalgerman/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
-        scope = task.get("scope")
-        minutes = scope.get("owner_minutes") if isinstance(scope, dict) else None
-        context = (f"Task: {task['id']} ({task['title']}). Version: {task.get('version') or '?'}. "
-                   f"{'Link: ' + link + '. ' if link else ''}Time: {minutes or 'about 15'} min. "
-                   "Safe default: nothing is done or approved without you.")
         try:
-            store.ask({"id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False,
-                       "title": str(task["owner_gate"])[:500], "context": context, "choices": GATE_CHOICES})
+            store.ask(gate_question(task))
         except ValueError as exc:
             logging.getLogger(__name__).warning("gate question for %s not created: %s", task["id"], exc)
             continue

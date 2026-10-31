@@ -32,6 +32,25 @@
   const DRAFTS_KEY = "jarves-workflow-question-drafts";
   const drafts = (() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return new Map(Array.isArray(saved) ? saved : []); } catch { return new Map(); } })();
   const GENERAL = "__general";
+  // One-click "Get more info": a fixed follow-up the manager recognises and answers with `workflow reply`.
+  const INFO_TEXT = "Explain this question: why am I asked, what each option does, what you recommend, and what happens if I skip it.";
+  const INFO_IDLE_S = 180;
+  // Console locale part for the question explanation labels (page language: <html lang>, Hebrew by default).
+  const I18N = {
+    he: {moreInfo: "קבל עוד מידע", moreInfoTitle: "המנהל יסביר: למה שואלים, מה כל אפשרות עושה, מה הוא ממליץ ומה קורה אם מדלגים",
+      waiting: n => n < 1 ? "נשלח למנהל · ממתין לתשובה (פחות מדקה)" : `נשלח למנהל · ממתין לתשובה כבר ${n} דק׳`,
+      idle: "המנהל כנראה במנוחה. עברו לחלון של Claude, או המתינו לאירוע הבא של עובד. ההודעה נשמרה ותימסר בסיום הצעד הבא שלו.",
+      replied: "המנהל הסביר. התשובה מופיעה בשרשור למטה.", sent: "הבקשה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.",
+      why: "למה שואלים", steps: "מה אתה עושה", noSteps: "אין עדיין צעדים כתובים. לחצו על ״קבל עוד מידע״ והמנהל יכתוב אותם.",
+      minutes: "זמן", about: n => `כ־${n} דק׳`, skip: "אם תדלג", recommended: "ההמלצה", details: "פרטים מקוריים", link: "פרטים ↗"},
+    en: {moreInfo: "Get more info", moreInfoTitle: "The manager explains why you are asked, what each option does, what it recommends and what happens if you skip",
+      waiting: n => n < 1 ? "Sent, waiting for the manager (under a minute)" : `Sent, waiting for the manager since ${n} min`,
+      idle: "The manager is idle. Switch to the Claude window or wait for the next worker event. The message is saved and is delivered at its next step.",
+      replied: "The manager explained. The reply is in the thread below.", sent: "Saved; the manager gets it when its current step ends. Nothing was approved.",
+      why: "Why", steps: "What you do", noSteps: "No written steps yet. Click Get more info and the manager writes them.",
+      minutes: "Minutes", about: n => `About ${n} min`, skip: "If you skip it", recommended: "Recommended", details: "Details", link: "Details ↗"},
+  };
+  const L = I18N[String(document.documentElement.lang || "he").toLowerCase().startsWith("en") ? "en" : "he"];
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
@@ -136,7 +155,7 @@
 
   function syncControls() {
     // Offline disables mutating controls; buttons with a request in flight stay disabled.
-    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], [data-reopen], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
+    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], [data-reopen], [data-more-info], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button) || button.dataset.waiting === "1"; });
   }
 
   function connectionState(ok, error = "") {
@@ -436,9 +455,41 @@
     return `<form class="ask-more-form" data-followup="${esc(key)}"><label class="ask-more-label" for="${esc(field)}">${esc(label)}</label><textarea class="ask-more-text" id="${esc(field)}" rows="2" maxlength="2000" placeholder="${esc(placeholder)}">${esc(draft.more || "")}</textarea><div class="question-actions"><button class="button secondary" type="submit">שלח למנהל <span aria-hidden="true">←</span></button><span class="question-helper">Ctrl + Enter לשליחה · השאלה נשארת פתוחה עד שתענה</span></div><p class="form-error" role="alert" hidden></p></form>`;
   }
 
+  function infoState(followups, id) {
+    const asks = followups.filter(item => item.question_id === id && item.text === INFO_TEXT);
+    const last = asks[asks.length - 1];
+    if (!last) return null;
+    if (last.reply) return {replied: true};
+    const waited = Math.max(0, Date.now() / 1000 - seconds(last.created_at));
+    return {waiting: true, minutes: Math.floor(waited / 60), idle: waited >= INFO_IDLE_S};
+  }
+
+  function infoStatusHTML(state) {
+    if (!state) return "";
+    if (state.replied) return `<p class="info-status replied" role="status">${esc(L.replied)}</p>`;
+    return `<p class="info-status" role="status">${esc(L.waiting(state.minutes))}</p>${state.idle ? `<p class="info-idle">${esc(L.idle)}</p>` : ""}`;
+  }
+
+  function explainHTML(question, task, recommended) {
+    const link = safeURL(question.link);
+    const whyBits = [question.why ? `<span dir="auto">${esc(question.why)}</span>` : "", task?.version ? `<span class="pill">${esc(task.version)}</span>` : "", link ? `<a class="evidence-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(L.link)}</a>` : ""].filter(Boolean).join(" ");
+    const steps = Array.isArray(question.steps) ? question.steps.filter(Boolean) : [];
+    const rows = [];
+    if (whyBits) rows.push([L.why, whyBits]);
+    if (steps.length) rows.push([L.steps, `<ol class="question-steps" dir="auto">${steps.map(step => `<li dir="auto">${esc(step)}</li>`).join("")}</ol>`]);
+    else if (question.kind === "owner_gate") rows.push([L.steps, `<span>${esc(L.noSteps)}</span>`]);
+    if (question.minutes) rows.push([L.minutes, `<span class="pill amber">${esc(L.about(question.minutes))}</span>`]);
+    if (question.skip_effect) rows.push([L.skip, `<span dir="auto">${esc(question.skip_effect)}</span>`]);
+    if (recommended || question.recommendation) rows.push([L.recommended, `<span dir="auto">${recommended ? `<b>${esc(recommended.label)}</b>` : ""}${recommended && question.recommendation ? " · " : ""}${question.recommendation ? esc(question.recommendation) : ""}</span>`]);
+    const list = rows.length ? `<dl class="question-explain">${rows.map(([label, value]) => `<div class="explain-row"><dt>${esc(label)}</dt><dd>${value}</dd></div>`).join("")}</dl>` : "";
+    const details = question.details ? `<details class="question-details"><summary>${esc(L.details)}</summary><p dir="auto">${esc(question.details)}</p></details>` : "";
+    return list + details;
+  }
+
   function renderQuestions() {
     const followups = Array.isArray(data.followups) ? data.followups : [];
-    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups]);
+    const infoTick = followups.some(item => item.text === INFO_TEXT && !item.reply) ? Math.floor(Date.now() / 60000) : 0;
+    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups, infoTick]);
     if (signature === questionsSignature) return;
     questionsSignature = signature;
     const focused = document.activeElement;
@@ -457,11 +508,11 @@
       const id = String(question.id);
       const kind = question.multi ? "checkbox" : "radio";
       const recommended = choices.find(choice => choice.recommended);
-      const link = safeURL(question.link);
-      const why = [question.why ? `<span dir="auto">${esc(question.why)}</span>` : "", task?.version ? `<span class="pill">${esc(task.version)}</span>` : "", link ? `<a class="evidence-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">פרטים ↗</a>` : "", question.minutes ? `<span class="pill amber">כ־${esc(question.minutes)} דק׳ להחלטה</span>` : ""].filter(Boolean).join(" ");
+      const explain = explainHTML(question, task, answered ? null : recommended);
+      const info = answered ? null : infoState(followups, id);
       const thread = followupThread(followups.filter(item => item.question_id === id));
       const options = choices.map((choice, index) => { const value = choice.label || choice.id; return `<label class="choice${choice.recommended ? " recommended" : ""}"><input type="${kind}" name="answer-${esc(id)}" value="${esc(value)}" ${picks.includes(value) ? "checked" : ""}><span class="choice-text"><span class="choice-label" dir="auto">${esc(value)}${choice.recommended ? ` <span class="pill recommended-badge">מומלץ</span>` : ""}</span>${choice.description ? `<span class="choice-description" dir="auto">${esc(choice.description)}</span>` : ""}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`; }).join("");
-      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${why ? `<p class="question-why"><b>למה שואלים:</b> ${why}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `${recommended ? `<p class="question-recommendation"><b>ההמלצה:</b> <span dir="auto">${esc(recommended.label)}${question.recommendation ? ` · ${esc(question.recommendation)}` : ""}</span></p>` : ""}<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea><p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : ""}שום דבר לא מאושר מתוך שתיקה.</p><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
+      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${explain}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea><p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : ""}שום דבר לא מאושר מתוך שתיקה.</p><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary more-info" type="button" data-more-info="${esc(id)}" data-waiting="${info?.waiting ? "1" : "0"}" title="${esc(L.moreInfoTitle)}" ${info?.waiting ? "disabled" : ""}><span aria-hidden="true">?</span> ${esc(L.moreInfo)}</button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div>${infoStatusHTML(info)}<p class="form-error" role="alert" hidden></p></form>${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
     };
     const general = `<section class="question-card general-ask" aria-label="שאלה כללית למנהל"><h3>שאלה כללית למנהל</h3>${followupThread(followups.filter(item => !item.question_id))}${askMoreForm(GENERAL, "מה תרצה לשאול או לבקש?", "למשל: מה מצב הגרסה? תבדוק את…")}</section>`;
     $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
@@ -713,6 +764,11 @@
       $$("[data-filter]").forEach(button => { button.classList.toggle("active", button === filterButton); button.setAttribute("aria-pressed", String(button === filterButton)); });
       renderRoadmap();
     }
+    const infoButton = event.target.closest("[data-more-info]");
+    if (infoButton) {
+      if (infoButton.dataset.waiting !== "1") mutate(infoButton, `/api/questions/${encodeURIComponent(infoButton.dataset.moreInfo)}/ask-more`, {text: INFO_TEXT}, L.sent);
+      return;
+    }
     const reopenButton = event.target.closest("[data-reopen]");
     if (reopenButton) { mutate(reopenButton, `/api/questions/${encodeURIComponent(reopenButton.dataset.reopen)}/reopen`, {}, "השאלה נפתחה מחדש וממתינה לתשובה שלך."); return; }
     const deferButton = event.target.closest("[data-defer]");
@@ -857,6 +913,7 @@
     await refresh();
     connectStream();
     setInterval(() => { if (!document.hidden) refresh(); }, 12000);
+    setInterval(() => { if (data && !document.hidden) renderQuestions(); }, 20000);
     setInterval(() => { renderLiveStatus(); if (lastGoodAt && Date.now() - lastGoodAt > 45000) connectionState(false, "הנתונים לא עודכנו בזמן האחרון."); }, 10000);
   }
   start();

@@ -33,7 +33,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups")
     for name in ("id", "agent", "session-id", "provider", "project", "title", "context", "checkpoint", "answer", "state",
                  "implementation", "validation", "delivery", "criterion", "evidence", "note", "task", "version", "code-revision", "artifact-ref",
-                 "why", "recommendation", "safe-default", "link"):
+                 "why", "recommendation", "safe-default", "link", "skip-effect", "details"):
         ap.add_argument("--" + name, default="")
     ap.add_argument("--lane", choices=["bugs", "features", "release", "ops", "any"], default="any")
     ap.add_argument("--priority", type=int, default=2)
@@ -42,6 +42,7 @@ def parser() -> argparse.ArgumentParser:
                     'description = what changes if chosen; recommended = listed first with a badge')
     ap.add_argument("--multi", action="store_true", help="ask: the owner may pick several options")
     ap.add_argument("--minutes", type=int, default=0, help="ask: owner minutes needed to decide")
+    ap.add_argument("--step", action="append", default=[], help="ask: one plain step the owner does; repeatable, in order")
     ap.add_argument("--acceptance", action="append", default=[], help="one acceptance criterion; repeatable")
     ap.add_argument("--resource", action="append", default=[], help="exclusive resource, e.g. windows-gui")
     ap.add_argument("--depends-on", action="append", default=[])
@@ -161,7 +162,8 @@ def main(argv=None) -> int:
             result = store.ask({"task_id": a.task, "title": a.title, "context": a.context,
                                 "choices": json.loads(a.choices), "checkpoint": a.checkpoint, "multi": a.multi,
                                 "minutes": a.minutes, "why": a.why, "recommendation": a.recommendation,
-                                "safe_default": a.safe_default, "link": a.link})
+                                "safe_default": a.safe_default, "link": a.link, "skip_effect": a.skip_effect,
+                                "details": a.details, "steps": a.step})
         elif a.action == "ask-more":
             # Owner follow-up; the native manager receives it at its next Stop hook. Never an answer.
             channel = owner_only_guard(a.action)
