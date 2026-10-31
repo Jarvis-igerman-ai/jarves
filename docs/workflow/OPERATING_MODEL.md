@@ -70,6 +70,11 @@ prompt for OpenCode (its full approval prompt is bounded). `requested_model` is
 not a verified effective model. Full automatic Orchestrator task/lifecycle
 integration is the prepared follow-up [#715](https://github.com/Jarvis-igerman-ai/jarves/issues/715).
 
+Claude models (verified available 31 Oct 2026): Opus 5.5 `claude-opus-5-5` for reviews,
+Tier R and design; Sonnet 5.5 `claude-sonnet-5-5` for code, fixes and docs (the
+workflow-bugs/current/qa default); Haiku 5.5 `claude-haiku-5-5` for status, the
+merge steward and cleanup; Fable 5.1 `claude-fable-5-1` only when the owner names it.
+
 `version_plan.json` defines required/optional/deferred scope and source links.
 Read-only GitHub sync adds issue/PR status, without inferring verification.
 Closed issue ≠ merged code ≠ tested user scenario ≠ shipped artifact.
@@ -85,6 +90,31 @@ the same private database. Hooks report minimal lifecycle IDs/timestamps, never
 complete transcripts or proof that the product works. Keep sensitive logs/screens
 out of the public repo. Existing capability mechanisms remain authoritative for
 runtime support; the console is not another assistant-feature registry.
+
+## Merge steward
+
+Nobody waits on a timer. The manager reacts to events (native hooks, the
+supervisor alerts, or the Monitor tool on `gh` output) and hands PR events to
+the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
+- Worker finishes or blocks on CI or an owner question: the manager assigns the
+  next independent ready task from the ledger at once; the question persists.
+- PR green, main not red, not Tier R: `gh pr merge N
+  --auto`. Tier R = the `no-automerge` label, OR a high-risk result from running
+  `core/tools/risk_class.py --files-from FILE` (`C:\work\jarvis\core\.venv\Scripts\python.exe`,
+  not bare `python`) on the PR's changed files (HIGH_RISK is the path list, but it is not exhaustive), OR the PR
+  touches any Tier R category by judgment; when unsure, do not queue, report. The tool exits 1 for ordinary
+  Tier N code, so match the words "high-risk path" in its output, not the exit code.
+  Missing "Auto-label policy" check on a non-Tier-R PR: add then remove
+  `no-automerge`, so it ends absent. Queued PRs are
+  merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
+- PR red: failing log tail only, then a Sonnet fixer; conflict: the fixer
+  rebases that PR's own branch (`--force-with-lease` on it only).
+- Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
+  installer/packaging, browser network, wake apply, workflows/secrets): request
+  the Opus sign-off; never merged by the steward.
+- Queue entry merged: check main CI and free the next batch.
+No close/reopen, merge-main push, force on main, check bypass or blind rerun;
+a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## External observer
 

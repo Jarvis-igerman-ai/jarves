@@ -18,7 +18,12 @@ EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Post
 
 def console_command(root: Path, home: Path, python: str | None = None) -> str:
     """Exact, copy-pasteable CLI prefix; the bare `python` may be the Windows Store stub."""
-    return f'"{python or sys.executable}" "{Path(root) / "core" / "tools" / "workflow_console.py"}" --home "{home}"'
+    def q(value):
+        text = str(value).replace("\\", "/")
+        if any(c in text for c in '"$`%'):
+            raise ValueError(f"unsafe character in path: {text}")
+        return f'"{text}"'
+    return f'{q(python or sys.executable)} {q(Path(root) / "core" / "tools" / "workflow_console.py")} --home {q(home)}'
 
 
 def in_project(cwd: str, root: Path) -> bool:
@@ -48,7 +53,8 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
     if not isinstance(subagent, str) or len(subagent) > 200:
         return {}
     kind = str(payload.get("agent_type") or ("manager" if subagent == "manager" else "subagent"))[:100]
-    lane = {"workflow-bugs": "bugs", "workflow-current": "features", "workflow-qa": "release"}.get(kind,
+    lane = {"workflow-bugs": "bugs", "workflow-current": "features", "workflow-qa": "release",
+                                                           "workflow-merger": "release"}.get(kind,
             "ops" if subagent == "manager" else "any")
     ident = "claude-" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest()[:20]
     parent_agent = payload.get("parent_agent_id") or "manager"
@@ -75,7 +81,7 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
         note = f"Claude {'started' if event == 'PreToolUse' else 'completed'} tool {tool[:80]}; no task verification inferred"
     flight = "start" if event == "PreToolUse" else "end" if event in {
         "PostToolUse", "PostToolUseFailure", "Stop", "SubagentStop", "SessionEnd"} else None
-    native = store.observe_agent(ident, status, note, tool=flight)
+    native = store.observe_agent(ident, status, note, tool=flight, call_id=payload.get("tool_use_id"))
     from .trace import record
     record(store, native, event, tool=tool if isinstance(tool, str) else "",
            call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
@@ -103,6 +109,8 @@ def observe(store: Store, payload: dict, root: Path) -> dict:
 
 def main(argv=None) -> int:
     import argparse
+    from .__main__ import utf8_streams
+    utf8_streams()
     ap = argparse.ArgumentParser()
     ap.add_argument("--home", type=Path, required=True)
     ap.add_argument("--repo-root", type=Path, required=True)

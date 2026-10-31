@@ -31,6 +31,10 @@ HIGH_RISK = (
     "core/tools/release*", "core/tools/promote*", "core/tools/ci_*", "core/tools/risk_class.py", "core/tools/netguard.py",
     "core/tools/dependabot_gate.py", "core/tools/manual_test_sheet.py",
     "core/tests/conftest.py", "core/tests/_tools.py", "core/tests/durations*",
+    "core/src/jarves/hotfix*", "core/tools/hotfix.py", "core/src/jarves/install_latest.py", "core/src/jarves/release_signoff.py",
+    "core/src/jarves/browser*", "core/src/jarves/skills/browser.py", "core/src/jarves/mobile_browser.py", "core/src/jarves/voice/wake_*",
+    ".claude/*", "core/src/jarves/workflow/hooks.py", "core/src/jarves/workflow/bootstrap.py",
+    "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 )
 BLOCKING_LABELS = {"needs-review", "no-automerge", "do-not-merge", "wip"}
 GUIDES = ("core/src/jarves/guides/data/*.toml",)
@@ -49,7 +53,7 @@ def is_high_risk(path: str) -> bool:
 
 def is_docs(path: str) -> bool:
     name = path.rsplit("/", 1)[-1].lower()
-    if name in ("claude.md", "agents.md"):
+    if name in ("claude.md", "agents.md") or path.startswith(".claude/"):
         return False                      # instruction files steer agents: never "just docs"
     return path.startswith("docs/") or name.endswith(".md") or name.startswith("changelog") or name == "doc_map.md"
 

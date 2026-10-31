@@ -50,13 +50,29 @@ def local_instructions(home: Path, root: Path | None = None, python: str = "pyth
             f"{END}\n")
 
 
+def windows_command(argv) -> str:
+    """Claude Code runs hooks through Git Bash on Windows: double-quoted forward-slash paths work there and in cmd."""
+    parts = []
+    for item in argv:
+        text = str(item).replace("\\", "/")
+        if any(c in text for c in '"$`%'):
+            raise ValueError(f"unsafe character in hook path: {text}")
+        parts.append(f'"{text}"')
+    return " ".join(parts)
+
+
+def is_own_hook(command: str, root: Path) -> bool:
+    script = str(root / "core" / "tools" / "workflow_hook.py")
+    return script in command or script.replace("\\", "/") in command
+
+
 def settings_with_hooks(settings: dict, root: Path, home: Path, python: str) -> dict:
     result = json.loads(json.dumps(settings))
     hooks = result.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise ValueError("existing hooks settings is not an object")
     argv = [python, str(root / "core" / "tools" / "workflow_hook.py"), "--home", str(home), "--repo-root", str(root)]
-    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    command = windows_command(argv) if os.name == "nt" else shlex.join(argv)
     for event in EVENTS:
         entries = hooks.setdefault(event, [])
         if not isinstance(entries, list):
@@ -66,7 +82,7 @@ def settings_with_hooks(settings: dict, root: Path, home: Path, python: str) -> 
         for entry in entries:
             remaining = [h for h in entry.get("hooks", []) if not (
                 isinstance(h, dict) and h.get("type") == "command"
-                and str(root / "core" / "tools" / "workflow_hook.py") in h.get("command", ""))]
+                and is_own_hook(h.get("command", ""), root))]
             if len(remaining) == len(entry.get("hooks", [])):
                 retained.append(entry)
             elif remaining:

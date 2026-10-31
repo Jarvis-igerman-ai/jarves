@@ -15,7 +15,7 @@ if ($Remove) {
 }
 $python = (Get-Command $PythonExe -ErrorAction Stop).Source
 if ($python -like "*\WindowsApps\*") {
-    throw "Resolved interpreter '$python' is the Microsoft Store alias, which cannot run the observer. Pass a real interpreter, e.g. -PythonExe (py -3.12 -c 'import sys;print(sys.executable)') or the venv python."
+    throw "Resolved interpreter '$python' is the Windows App Execution Alias (a launcher stub), not a real python.exe. Pass -PythonExe with the full path to a real python.exe, e.g. the output of: py -3.12 -c 'import sys;print(sys.executable)'"
 }
 $entry = Join-Path $PSScriptRoot "workflow_console.py"
 if (-not (Test-Path $entry)) { throw "Workflow entry point not found." }

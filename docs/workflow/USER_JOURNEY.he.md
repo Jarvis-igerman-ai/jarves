@@ -118,7 +118,7 @@ sequenceDiagram
 על ידי המנהל כדי שהפקודה תצליח.
 
 ```powershell
-jarvis agents start claude jarves "Review task T; follow repository rules" --model opus --json
+jarvis agents start claude jarves "Review task T; follow repository rules" --model claude-opus-5-5 --json
 jarvis agents start codex jarves "Implement task T; follow repository rules" --model YOUR_CODEX_MODEL --json
 jarvis agents start opencode jarves "Implement task T" --model PROVIDER/MODEL --json
 ```

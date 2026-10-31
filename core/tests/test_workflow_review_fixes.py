@@ -1,6 +1,7 @@
 """Regression tests for the 31 Oct workflow review: long tools, noise, resume, sync."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -91,3 +92,75 @@ class ReviewFixTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyConsoleEncodingTests(unittest.TestCase):
+    def test_cli_json_with_hebrew_survives_a_cp1252_pipe(self):
+        import os
+        import subprocess
+        import sys
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as home:
+            env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+            entry = [sys.executable, str(root / "tools" / "workflow_console.py"), "--home", home]
+            made = subprocess.run([*entry, "create", "--id", "he", "--title", "בדיקה → עברית", "--acceptance", "ok"],
+                                  capture_output=True, env=env, timeout=60)
+            self.assertEqual(made.returncode, 0, made.stderr.decode("utf-8", "replace"))
+            shown = subprocess.run([*entry, "status"], capture_output=True, env=env, timeout=60)
+            self.assertEqual(shown.returncode, 0, shown.stderr.decode("utf-8", "replace"))
+            self.assertIn("בדיקה → עברית", shown.stdout.decode("utf-8"))
+
+
+class HookCommandAndFlightTests(ReviewFixTests):
+    def test_windows_hook_command_is_quoted_forward_slash(self):
+        from jarves.workflow.bootstrap import windows_command, is_own_hook
+        cmd = windows_command([r"C:\Users\x\miniforge3\python.exe", r"C:\work\j\core\tools\workflow_hook.py", "--home", r"C:\h"])
+        self.assertNotIn("\\", cmd)
+        self.assertEqual(cmd.split(" ")[0], '"C:/Users/x/miniforge3/python.exe"')
+        self.assertIn('"--home"', cmd)
+        for bad in ('C:\a"b', "C:\a$b", "C:\a`b", "C:\a%b"):
+            with self.assertRaises(ValueError):
+                windows_command([bad])
+        root = Path(r"C:\work\j")
+        old = r"C:\py.exe C:\work\j\core\tools\workflow_hook.py --home C:\h"
+        if os.name == "nt":
+            self.assertTrue(is_own_hook(old, root))
+            self.assertTrue(is_own_hook(cmd, root))
+
+    def test_out_of_order_tool_hooks_keyed_by_call(self):
+        self.running()
+        obs = self.store.observe_agent
+        agent = lambda: self.store.snapshot()["agents"][0]
+        obs("w", "running", "x", tool="end", call_id="c1")
+        obs("w", "running", "x", tool="start", call_id="c1")  # late Pre for ended call
+        self.assertNotIn("tool_started_at", agent())
+        obs("w", "running", "x", tool="start", call_id="c2")
+        obs("w", "running", "x", tool="end", call_id="c3")  # other call must not clear
+        self.assertIn("tool_started_at", agent())
+        obs("w", "running", "x", tool="end", call_id="c2")
+        self.assertNotIn("tool_started_at", agent())
+        obs("w", "running", "x", tool="start", call_id="c4")
+        obs("w", "idle", "x", tool="end")  # Stop clears unconditionally
+        self.assertNotIn("tool_started_at", agent())
+
+    def test_blocked_stale_agent_without_task_alerts_not_offline(self):
+        self.store.register_agent({"id": "p", "label": "Claude · m", "lane": "any"})
+        self.store.observe_agent("p", "blocked", "permission")
+        self.now[0] += 500
+        alerts = self.store.tick()
+        self.assertEqual(self.store.snapshot()["agents"][0]["status"], "blocked")
+        self.assertEqual([a["kind"] for a in alerts], ["worker_waiting_permission"])
+        self.assertIn("permission prompt pending", alerts[0]["summary"])
+
+
+class RegistrationNoiseTests(unittest.TestCase):
+    def test_repeat_registration_writes_one_event(self):
+        with tempfile.TemporaryDirectory() as home:
+            store = Store(Path(home) / "w.db")
+            try:
+                for _ in range(3):
+                    store.register_agent({"id": "a", "label": "a"})
+                kinds = [e["kind"] for e in store.snapshot()["events"]]
+                self.assertEqual(kinds.count("agent_registered"), 1)
+            finally:
+                store.close()

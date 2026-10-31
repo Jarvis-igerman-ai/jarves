@@ -30,6 +30,11 @@ he = "סנכרון קריאה בלבד מ־GitHub: jarvis workflow sync. שיו�
 en = "Read-only GitHub sync: jarvis workflow sync. Attach an existing session with jarvis workflow agent --agent bugs --lane bugs --session-id ID --auto-dispatch. Live assignment still uses the existing Orchestrator."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "מנהל מיזוגים קבוע שמגיב לאירועים, בלי תזמון: כשבקשת מיזוג ירוקה, אדומה, בקונפליקט או מוזגה, המנהל מעביר את האירוע לתת־הסוכן workflow-merger. ירוקה שאינה Tier R נכנסת לתור המיזוג; אדומה עוברת למתקן Sonnet; Tier R ממתינה לאישור Opus. עובד שסיים או ממתין ל־CI מקבל מיד את המשימה העצמאית הבאה, ושאלה אליכם נשמרת. כדי לעצור, בקשו מהמנהל להפסיק להעביר אירועים. התפקיד מתואר ב־OPERATING_MODEL."
+en = "Standing event-driven merge steward, no schedule: when a PR turns green, red, conflicted or merged, the manager hands the event to the workflow-merger subagent. Green non-Tier-R PRs join the merge queue; red ones go to a Sonnet fixer; Tier R waits for Opus sign-off. A worker that finishes or waits on CI gets the next independent task at once, and owner questions persist. To stop it, ask the manager to stop handing it events. The role is defined in OPERATING_MODEL."
+action = "command:jarvis workflow status"
+
 [[problems]]
 he = "יש משימות אבל אף סוכן לא עובד"
 en = "Tasks exist but no worker is running"

@@ -291,10 +291,14 @@ class Store:
                                                for other in self._all(db, "agent")):
                 raise ValueError("session already attached to another workflow worker")
             self._put(db, "agent", agent)
-            self._event(db, "agent_registered", f"Registered {agent['label']}")
+            if old is None:
+                self._event(db, "agent_registered", f"Registered {agent['label']}")
+            else:
+                # Native hooks re-register on every event; repeats are telemetry, not news.
+                self._bump(db)
         return agent
 
-    def observe_agent(self, agent_id, status, note="", tool=None):
+    def observe_agent(self, agent_id, status, note="", tool=None, call_id=None):
         """Native lifecycle telemetry; it does not claim work or attest completion.
 
         tool="start" marks a tool call in flight (a long Bash call emits no hooks);
@@ -313,10 +317,21 @@ class Store:
                     agent["status"] = "running"
             else:
                 agent.update(status=status, note=note, heartbeat_at=self.clock(), progress_at=self.clock())
+            call_id = call_id if isinstance(call_id, str) and call_id else None
             if tool == "start":
-                agent["tool_started_at"] = self.clock()
+                # Async Pre/Post hooks can arrive out of order: a late Pre for an ended call is ignored.
+                if not (call_id and call_id == agent.get("last_ended_call")):
+                    agent["tool_started_at"] = self.clock()
+                    agent["tool_call_id"] = call_id
             elif tool == "end":
-                agent.pop("tool_started_at", None)
+                if call_id:
+                    agent["last_ended_call"] = call_id
+                    if agent.get("tool_call_id") == call_id:
+                        agent.pop("tool_started_at", None)
+                        agent.pop("tool_call_id", None)
+                else:
+                    agent.pop("tool_started_at", None)
+                    agent.pop("tool_call_id", None)
             self._put(db, "agent", agent)
             self._bump(db)
         return agent
@@ -570,6 +585,11 @@ class Store:
                 in_flight = now - agent.get("tool_started_at", -TOOL_FLIGHT_S) < TOOL_FLIGHT_S
                 stale = now - agent["heartbeat_at"] > stale_s and not in_flight
                 stuck = bool(agent.get("task_id")) and now - agent["progress_at"] > stuck_s
+                if stale and not agent.get("task_id") and not stuck and agent["status"] == "blocked":
+                    alerts.append({"kind": "worker_waiting_permission",
+                                   "summary": f"{agent['label']}: permission prompt pending on Claude's approval surface",
+                                   "agent_id": agent["id"], "task_id": None})
+                    continue
                 if stale and not agent.get("task_id") and not stuck:
                     # A finished agent/ended session is simply offline; nothing to alert about.
                     if agent["status"] != "offline":

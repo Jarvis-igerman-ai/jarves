@@ -41,6 +41,10 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertFalse(agent["auto_dispatch"])
         self.assertNotIn("private message", json.dumps(self.store.snapshot()))
 
+    def test_merge_steward_shows_as_release_lane(self):
+        self.event("SubagentStart", agent_id="merger-child", agent_type="workflow-merger")
+        self.assertEqual(self.store.snapshot()["agents"][0]["lane"], "release")
+
     def test_native_stop_does_not_finish_task_or_release_unreconciled_resources(self):
         self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
         aid = self.store.snapshot()["agents"][0]["id"]
@@ -141,6 +145,6 @@ class WorkflowExactPythonTests(WorkflowNativeTests):
     def test_session_start_context_gives_exact_interpreter_prefix(self):
         import sys
         context = self.event("SessionStart")["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(f'"{sys.executable}"', context)
+        self.assertIn('"' + sys.executable.replace(chr(92), "/") + '"', context)
         self.assertIn("workflow_console.py", context)
-        self.assertIn(f'--home "{self.home}"', context)
+        self.assertIn('--home "' + str(self.home).replace(chr(92), "/") + '"', context)

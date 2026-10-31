@@ -211,6 +211,8 @@
 
   function agentStale(agent) {
     const beat = seconds(agent.heartbeat_at);
+    const tool = seconds(agent.tool_started_at);
+    if (tool && Date.now() / 1000 - tool < 900) return false;
     return Boolean(agent.status === "running" && (!beat || Date.now() / 1000 - beat > 120));
   }
 
@@ -297,7 +299,9 @@
 
   function renderRoadmap() {
     if (!data) return;
-    $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
+    // Keep the owner's open/closed choice across live refreshes.
+    const scopeOpen = Boolean($("#roadmap-context details.scope-note")?.open);
+    $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"${scopeOpen ? " open" : ""}><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
     const versionChoices = ["all", ...versions, ...new Set(data.tasks.map(t => t.version || "ללא גרסה").filter(v => !versions.includes(v)))];
     $("#version-nav").innerHTML = versionChoices.map(v => {
       const count = v === "all" ? data.tasks.length : data.tasks.filter(t => (t.version || "ללא גרסה") === v).length;
@@ -395,7 +399,7 @@
   function openTask(id, reopen = true) {
     const task = data?.tasks.find(item => item.id === id);
     if (!task) return;
-    const key = JSON.stringify([task, data.agents.find(item => item.id === task.agent_id) || null, data.questions.filter(q => q.task_id === task.id)]);
+    const key = JSON.stringify([task, (a => a ? [a.id, a.label] : null)(data.agents.find(item => item.id === task.agent_id)), data.questions.filter(q => q.task_id === task.id)]);
     if (!reopen && dialogTaskId === task.id && key === dialogKey) return; // unchanged: keep open <details> and focus
     dialogTaskId = task.id; dialogKey = key;
     $("#task-dialog-title").textContent = task.title;
