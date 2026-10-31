@@ -219,3 +219,20 @@ def test_close_now_fails_closed_and_the_running_recording_is_protected_from_rete
     assert br.delete(tmp_path, r.id) is False
     r.finish(page)
     assert r.id not in br.RUNNING and br.delete(tmp_path, r.id) is True
+
+
+def test_a_failed_driver_start_leaves_no_empty_waiting_recording(tmp_path):
+    from jarves.browser_driver import PilotService
+
+    class On:
+        def active(self, fid):
+            return True
+
+    def boom(*a, **kw):
+        raise RuntimeError("browser did not start")
+
+    svc = PilotService(tmp_path, lambda: On())
+    with pytest.raises(RuntimeError):
+        svc.start("http://localhost:8123/", driver_factory=boom, record=True)
+    assert br.list_recordings(tmp_path) == []
+    assert not (tmp_path / "browser" / "recordings").exists() or not list((tmp_path / "browser" / "recordings").iterdir())

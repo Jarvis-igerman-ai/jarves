@@ -315,6 +315,7 @@ class PilotService:
         except Exception:
             proxy.stop()
             if recorder is not None:
+                br.RUNNING.discard(recorder.id)                     # a recording that never started is not "running": delete() refuses ids in RUNNING
                 br.delete(self.home, recorder.id)
             raise
         holder["d"] = driver

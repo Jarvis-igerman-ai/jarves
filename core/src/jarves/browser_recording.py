@@ -15,7 +15,8 @@ Privacy rules (the point of this module):
     style that blanks them in the very frame they appear (`MASK_INIT_SCRIPT`). The check and the mask use the same rule.
   * Honest limits (shown in the guide): text that is only SHOWN on a page (a card number in a receipt) is not a field and is recorded;
     closed shadow roots and contenteditable areas are not recognised; the video shows what the page shows, at 1024x768 and 10 frames
-    a second, and is not tamper-proof. Use the pilot on test pages only.
+    a second, and is not tamper-proof. Text typed during a takeover can still be filmed after control returns to the assistant if the field
+    is not matched as sensitive. Use the pilot on test pages only.
   * Retention: recordings older than RETENTION_DAYS are deleted, the total is capped, one recording has a time cap. The owner can
     delete any recording at any time (`jarvis browser recording-delete ID`).
 """

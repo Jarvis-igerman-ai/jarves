@@ -354,3 +354,13 @@ def test_cli_backup_restore_usage(profile, capsys, monkeypatch):
     assert cli.main(["usage", "thresholds", "70,100"]) == 0
     out = capsys.readouterr().out
     assert "PASSED" in out and "Unknown" in out and "[70, 100]" in out
+
+
+def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(profile):
+    (profile / "workspace" / "recordings").mkdir(parents=True)
+    (profile / "workspace" / "recordings" / "x.txt").write_text("mine", encoding="utf-8")
+    (profile / "browser" / "recordings" / "rec-0123456789ab").mkdir(parents=True)
+    (profile / "browser" / "recordings" / "rec-0123456789ab" / "part-001.webm").write_bytes(b"x" * 100)
+    got = names(backup.create(profile, "manual"))
+    assert "data/workspace/recordings/x.txt" in got
+    assert not any(n.startswith("data/browser/recordings/") for n in got)

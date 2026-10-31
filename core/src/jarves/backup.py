@@ -49,7 +49,6 @@ BACKUP_DIR = "backups"
 KINDS = ("auto", "manual", "pre-migration", "pre-restore")
 EXCLUDE_DIRS = {BACKUP_DIR, "logs", "chatgpt", "google", "cache", "caches", "models", "tmp", "temp", "__pycache__",
                 "voice_cache", ".restore-staging",
-                "recordings",          # V7 B5: pilot videos can be hundreds of MB and must not outlive their own retention/delete: never archived
                 "whatsapp_bridge"}     # SW-V4 F: the WhatsApp session (= the whole account) + messages: never archived
 EXCLUDE_FILES = {"secrets.env", "link_token", "pear_client_id", "pear_client_id.paired", "health.json",
                  "startup_timing.json", "setup_done",
@@ -153,6 +152,8 @@ def plan(home: Path, settings: dict | None = None) -> tuple[list[tuple[Path, str
     for p in sorted(home.rglob("*")):
         rel = p.relative_to(home).as_posix()
         dirs = rel.split("/")[:-1]
+        if rel.startswith("browser/recordings/"):
+            continue            # V7 B5: pilot videos can be hundreds of MB and must not outlive their own retention/delete: never archived (only this folder, not user folders named recordings)
         if any(part in EXCLUDE_DIRS or part.startswith(".restore-staging") for part in dirs):
             continue
         if (dirs[:1] == ["profiles"] or rel == "profiles.json") and not (home / "profile.json").is_file():
