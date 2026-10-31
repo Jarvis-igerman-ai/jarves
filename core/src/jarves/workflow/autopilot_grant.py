@@ -9,6 +9,20 @@ from pathlib import Path
 DEFAULT_MODELS = "claude-sonnet-5-5,claude-haiku-5-5,claude-opus-5-5"
 
 
+def grant_state(status, now: float, margin: float = 86400.0) -> tuple[str, float]:
+    """Classify a `grant-status` answer: none | expired | soon (expires within margin) | valid; plus expires_at."""
+    grant = status.get("grant") if isinstance(status, dict) else None
+    if not isinstance(grant, dict):
+        return "none", 0.0
+    try:
+        exp = float(grant.get("expires_at") or 0)
+    except (TypeError, ValueError):
+        return "none", 0.0
+    if exp <= now:
+        return "expired", exp
+    return ("soon" if exp - now < margin else "valid"), exp
+
+
 def run(argv: list[str], profile_home: Path | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="workflow autopilot")
