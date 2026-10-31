@@ -29,7 +29,9 @@
   const busyButtons = new Set();
   let questionsSignature = "";
   let lastPresenceRefresh = 0;
-  const drafts = new Map();
+  const DRAFTS_KEY = "jarves-workflow-question-drafts";
+  const drafts = new Map((() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return Array.isArray(saved) ? saved : []; } catch { return []; } })());
+  const GENERAL = "__general";
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
@@ -127,7 +129,7 @@
 
   function syncControls() {
     // Offline disables mutating controls; buttons with a request in flight stay disabled.
-    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], [data-defer], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
+    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button); });
   }
 
   function connectionState(ok, error = "") {
@@ -352,34 +354,66 @@
 
   function stashDrafts() {
     $$(".question-form").forEach(form => {
-      const selected = $("input[type=radio]:checked", form);
-      drafts.set(form.dataset.question, {text: $("textarea", form).value, choice: selected?.value || ""});
+      const picked = $$("input[type=radio]:checked, input[type=checkbox]:checked", form).map(input => input.value);
+      drafts.set(form.dataset.question, {...(drafts.get(form.dataset.question) || {}), text: $("textarea", form).value, choice: picked});
     });
+    $$(".ask-more-form").forEach(form => {
+      drafts.set(form.dataset.followup, {...(drafts.get(form.dataset.followup) || {}), more: $("textarea", form).value});
+    });
+    for (const [key, value] of drafts) if (!value.text && !value.more && !(value.choice || []).length) drafts.delete(key);
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify([...drafts].slice(-50))); } catch { /* drafts stay in memory */ }
+  }
+
+  function clearDraft(key, field) {
+    const draft = drafts.get(key);
+    if (draft) { if (field) draft[field] = ""; else drafts.delete(key); }
+    try { localStorage.setItem(DRAFTS_KEY, JSON.stringify([...drafts].slice(-50))); } catch { /* drafts stay in memory */ }
+  }
+
+  function followupThread(items) {
+    if (!items.length) return "";
+    return `<ol class="followup-thread" aria-label="שאלות המשך ותשובות המנהל">${items.map(item => `<li class="followup-item"><p class="followup-ask"><span class="followup-who">אתה</span><span class="followup-text" dir="auto">${esc(item.text)}</span><time title="${esc(timestamp(item.created_at))}">${esc(age(item.created_at))}</time></p>${item.reply ? `<p class="followup-reply"><span class="followup-who">המנהל</span><span class="followup-text" dir="auto">${esc(item.reply)}</span><time title="${esc(timestamp(item.replied_at))}">${esc(age(item.replied_at))}</time></p>` : `<p class="followup-wait" role="status">${item.status === "delivered" ? "נמסר למנהל, ממתין לתשובה" : "נשמר, יימסר למנהל בסיום הצעד הנוכחי שלו"}</p>`}</li>`).join("")}</ol>`;
+  }
+
+  function askMoreForm(key, label, placeholder) {
+    const draft = drafts.get(key) || {};
+    const field = `more-${key}`;
+    return `<form class="ask-more-form" data-followup="${esc(key)}"><label class="ask-more-label" for="${esc(field)}">${esc(label)}</label><textarea class="ask-more-text" id="${esc(field)}" rows="2" maxlength="2000" placeholder="${esc(placeholder)}">${esc(draft.more || "")}</textarea><div class="question-actions"><button class="button secondary" type="submit">שלח למנהל <span aria-hidden="true">←</span></button><span class="question-helper">Ctrl + Enter לשליחה · השאלה נשארת פתוחה עד שתענה</span></div><p class="form-error" role="alert" hidden></p></form>`;
   }
 
   function renderQuestions() {
-    const signature = JSON.stringify(data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]));
+    const followups = Array.isArray(data.followups) ? data.followups : [];
+    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups]);
     if (signature === questionsSignature) return;
     questionsSignature = signature;
     const focused = document.activeElement;
-    const activeDraft = focused?.matches(".question-answer") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
+    const activeDraft = focused?.matches(".question-answer, .ask-more-text") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
     stashDrafts();
     const pending = data.questions.filter(question => !["answered", "resolved", "cancelled"].includes(question.status || "pending"));
-    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות בזמן העדכון החי.` : "כל ההחלטות שנענו נשמרות בהמשך.";
+    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות גם אחרי רענון.` : "כל ההחלטות שנענו נשמרות בהמשך.";
     const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).slice(-5).reverse();
     const renderQuestion = question => {
       const task = data.tasks.find(item => item.id === question.task_id);
       const draft = drafts.get(question.id) || {};
+      const picks = Array.isArray(draft.choice) ? draft.choice : draft.choice ? [draft.choice] : [];
       const choices = (question.choices || []).map(choice => typeof choice === "string" ? {id: choice, label: choice} : choice);
       const answered = ["answered", "resolved"].includes(question.status);
       const id = String(question.id);
-      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3>${esc(question.title)}</h3>${question.context ? `<p class="question-context">${esc(question.context)}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p>` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">תשובות אפשריות ל־${esc(question.title)}</legend>${choices.map((choice, index) => `<label class="choice"><input type="radio" name="answer-${esc(id)}" value="${esc(choice.label || choice.id)}" ${draft.choice === (choice.label || choice.id) ? "checked" : ""}><span>${esc(choice.label || choice.id)}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`).join("")}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה חופשית ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="או כתוב תשובה משלך…">${esc(draft.text || "")}</textarea><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>`}</article>`;
+      const kind = question.multi ? "checkbox" : "radio";
+      const recommended = choices.find(choice => choice.recommended);
+      const link = safeURL(question.link);
+      const why = [question.why ? `<span dir="auto">${esc(question.why)}</span>` : "", task?.version ? `<span class="pill">${esc(task.version)}</span>` : "", link ? `<a class="evidence-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">פרטים ↗</a>` : "", question.minutes ? `<span class="pill amber">כ־${esc(question.minutes)} דק׳ להחלטה</span>` : ""].filter(Boolean).join(" ");
+      const thread = followupThread(followups.filter(item => item.question_id === id));
+      const options = choices.map((choice, index) => { const value = choice.label || choice.id; return `<label class="choice${choice.recommended ? " recommended" : ""}"><input type="${kind}" name="answer-${esc(id)}" value="${esc(value)}" ${picks.includes(value) ? "checked" : ""}><span class="choice-text"><span class="choice-label" dir="auto">${esc(value)}${choice.recommended ? ` <span class="pill recommended-badge">מומלץ</span>` : ""}</span>${choice.description ? `<span class="choice-description" dir="auto">${esc(choice.description)}</span>` : ""}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`; }).join("");
+      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${why ? `<p class="question-why"><b>למה שואלים:</b> ${why}</p>` : ""}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p>${thread}` : `${recommended ? `<p class="question-recommendation"><b>ההמלצה:</b> <span dir="auto">${esc(recommended.label)}${question.recommendation ? ` · ${esc(question.recommendation)}` : ""}</span></p>` : ""}<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea><p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : ""}שום דבר לא מאושר מתוך שתיקה.</p><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div><p class="form-error" role="alert" hidden></p></form>${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
     };
-    $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + (history.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${history.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
+    const general = `<section class="question-card general-ask" aria-label="שאלה כללית למנהל"><h3>שאלה כללית למנהל</h3>${followupThread(followups.filter(item => !item.question_id))}${askMoreForm(GENERAL, "מה תרצה לשאול או לבקש?", "למשל: מה מצב הגרסה? תבדוק את…")}</section>`;
+    $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (history.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${history.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
     if (activeDraft) {
       const restored = document.getElementById(activeDraft.id);
       if (restored) { restored.focus({preventScroll: true}); restored.setSelectionRange(activeDraft.start, activeDraft.end); }
     }
+    syncControls();
   }
 
   function evidenceHTML(value) {
@@ -662,7 +696,7 @@
     const form = event.target.closest(".question-form");
     if (!form) return;
     event.preventDefault();
-    const typed = $("textarea", form).value.trim(), picked = $("input:checked", form)?.value;
+    const typed = $("textarea", form).value.trim(), picked = $$("input:checked", form).map(input => input.value).join(", ");
     const answer = typed && picked ? `${picked} — ${typed}` : typed || picked;
     const error = $(".form-error", form);
     if (!answer) { error.textContent = "בחר תשובה או כתוב תשובה משלך."; error.hidden = false; return; }
@@ -672,17 +706,40 @@
     error.hidden = true;
     try {
       await api(`/api/questions/${encodeURIComponent(form.dataset.question)}/answer`, {answer});
-      drafts.delete(form.dataset.question);
-      form.reset();
+      $("textarea", form).value = "";
+      $$("input:checked", form).forEach(input => { input.checked = false; });
+      clearDraft(form.dataset.question);
       await refresh();
       toast("התשובה נשמרה. המנהל יוכל להמשיך מההחלטה הזאת.");
       $(".question-form")?.querySelector("input[type=radio], textarea")?.focus();
     } catch (err) { error.textContent = err.message; error.hidden = false; }
     finally { busyButtons.delete(button); button.disabled = !connected; }
   });
+  $("#questions").addEventListener("input", stashDrafts);
+  $("#questions").addEventListener("change", stashDrafts);
+  $("#questions").addEventListener("submit", async event => {
+    const form = event.target.closest(".ask-more-form");
+    if (!form) return;
+    event.preventDefault();
+    const text = $("textarea", form).value.trim(), key = form.dataset.followup;
+    const error = $(".form-error", form);
+    if (!text) { error.textContent = "כתוב מה תרצה לשאול."; error.hidden = false; return; }
+    if (!connected) { error.textContent = "אין חיבור לשירות; השאלה לא נשלחה."; error.hidden = false; return; }
+    const button = $("button[type=submit]", form);
+    button.disabled = true; busyButtons.add(button);
+    error.hidden = true;
+    try {
+      await api(key === GENERAL ? "/api/followups" : `/api/questions/${encodeURIComponent(key)}/ask-more`, {text});
+      $("textarea", form).value = "";  // reset() would restore the rendered draft text
+      clearDraft(key, "more");
+      await refresh();
+      toast("השאלה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.");
+    } catch (err) { error.textContent = err.message; error.hidden = false; }
+    finally { busyButtons.delete(button); button.disabled = !connected; }
+  });
   $("#questions").addEventListener("keydown", event => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      const form = event.target.closest(".question-form");
+      const form = event.target.closest(".question-form, .ask-more-form");
       if (form) { event.preventDefault(); form.requestSubmit(); }
     }
   });
