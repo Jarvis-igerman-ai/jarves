@@ -76,6 +76,12 @@ def bridge_find(profile_home: Path, agent_id: str) -> str:
     return str((r or {}).get("session_id") or "") if r and r.get("ok") else ""
 
 
+def stop_confirmed(result: dict | None) -> bool:
+    """True when the session is stopped: the Core said ok, or it has no LIVE session by that id any more (already
+    stopped or dead). A real failed stop of a live session (or no answer at all) is NOT confirmed."""
+    return bool(result and (result.get("ok") or result.get("code") == "NO_SUCH_SESSION"))
+
+
 def bridge_stop(profile_home: Path, session_id: str) -> dict | None:
     from ..orchestrator.bridge import try_request
     return try_request(profile_home, "call", timeout=30, name="stop",
@@ -200,7 +206,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
     for agent in owned:
         if agent.get("session_id") and not agent.get("task_id"):
             result = stop(profile_home, agent["session_id"])
-            if result and result.get("ok"):
+            if stop_confirmed(result):
                 store.link_session(agent["id"], "")
                 actions.append({"agent": agent["id"], "action": "stopped"})
             else:
@@ -284,16 +290,26 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
     def _notify(kind, text):
         notify(profile_home, kind, text)
 
+    stopped_ids: list[str] = []
+
     def _stop(agent):
         """False = the stop was not confirmed (the watchdog then keeps the task with its worker)."""
         if not agent.get("session_id"):
             return True
         result = stop(profile_home, agent["session_id"])
-        return bool(result and result.get("ok"))
+        if not stop_confirmed(result):
+            return False
+        stopped_ids.append(agent["id"])           # unlinked below, once the watchdog has released the task
+        return True
 
     try:
         for name in watch.watchdog_step(store, policy, start=lambda lane, task: None, stop=_stop, notify=_notify):
             out.append({"action": "watchdog", "detail": name})
+        # Confirmed-stopped workers whose task went back to the queue: drop the dead link so it can be restarted.
+        # Never touches an agent that still owns a task (link_session refuses) or whose stop was not confirmed.
+        for agent in store.snapshot()["agents"]:
+            if agent["id"] in stopped_ids and agent.get("session_id") and not agent.get("task_id"):
+                store.link_session(agent["id"], "")
         source = store.snapshot().get("source", {})
         # Sync supplies each open PR changed files (read-only); an empty list means unknown = Tier R (Opus review task, never steward).
         for name in watch.steward_step(store, policy, source.get("open_prs", []),
