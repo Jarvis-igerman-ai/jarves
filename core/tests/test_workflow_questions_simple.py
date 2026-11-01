@@ -182,7 +182,9 @@ class FakeLauncher:
 class DiscussHTTP(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.server = Server(Path(self.temp.name), 0)
+        # Windows CI temp dirs are 8.3 short names (RUNNER~1) that SAFE_ARG rightly refuses: use the long form
+        self.home = Path(self.temp.name).resolve()
+        self.server = Server(self.home, 0)
         self.launcher = FakeLauncher()
         self.now = [100.0]
         helper = self.server.discuss
@@ -234,7 +236,7 @@ class DiscussHTTP(unittest.TestCase):
         self.assertEqual(env["JARVES_WORKFLOW_AGENT"], "1")
         self.assertEqual(env["JARVES_WORKFLOW_HELPER"], "1")
         path = Path(result["prompt_file"])
-        self.assertEqual(path, Path(self.temp.name) / "discuss" / "gate-V5-PWA.md")
+        self.assertEqual(path, self.home / "discuss" / "gate-V5-PWA.md")
         text = path.read_text(encoding="utf-8")
         self.assertIn(discuss.RULE, text)
         self.assertIn("צריך אותך: ממשק PWA בעברית ובאנגלית", text)
@@ -255,6 +257,10 @@ class DiscussHTTP(unittest.TestCase):
         self.request("/api/questions/gate-V5-PWA/discuss", {})
         self.assertIsNone(self.server.discuss.last)
         self.server.discuss.launcher = original
+        # the slot is still free: the next try launches; a successful launch then uses the slot
+        self.assertEqual(self.request("/api/questions/gate-V5-PWA/discuss", {})[0], 200)
+        self.assertIsNotNone(self.server.discuss.last)
+        self.assertEqual(self.request("/api/questions/gate-V5-PAIRING/discuss", {})[0], 429)
 
     def test_rate_limit_one_launch_per_ten_seconds(self):
         self.assertEqual(self.request("/api/questions/gate-V5-PWA/discuss", {})[0], 200)

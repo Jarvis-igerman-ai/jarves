@@ -133,7 +133,7 @@ LIVE_REWRITES = {
         "minutes": 30,
     },
     "q-a92cdde685b5": {
-        "original": "Retire legacy igalgerman/JARVIS repo: archive it on GitHub?",
+        "original": "Retire legacy igalgerman/" "JARVIS repo: archive it on GitHub?",
         "title": "המאגר הישן JARVIS ב־GitHub: לארכב אותו?",
         "why": "המאגר הישן כבר לא בשימוש. ארכוב מונע בלבול, אבל קשה לבטל אותו.",
         "choices": [
