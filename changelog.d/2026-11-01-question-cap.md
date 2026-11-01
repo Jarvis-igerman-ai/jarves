@@ -1,0 +1,1 @@
+- Changed: The workflow dashboard shows at most 5 open owner questions at once, most blocking first; the rest wait folded under 'N more waiting', none dropped (#760).

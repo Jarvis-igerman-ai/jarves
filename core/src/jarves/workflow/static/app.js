@@ -43,6 +43,7 @@
       waiting: n => n < 1 ? "נשלח למנהל · ממתין לתשובה (פחות מדקה)" : `נשלח למנהל · ממתין לתשובה כבר ${n} דק׳`,
       idle: "המנהל כנראה במנוחה. עברו לחלון של Claude, או המתינו לאירוע הבא של עובד. ההודעה נשמרה ותימסר בסיום הצעד הבא שלו.",
       replied: "המנהל הסביר. התשובה מופיעה בשרשור למטה.", sent: "הבקשה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.",
+      laterCount: n => `עוד ${n} ממתינות`,
       why: "למה שואלים", steps: "מה אתה עושה",
       minutes: "זמן", about: n => `כ־${n} דק׳`, skip: "אם תדלג", recommended: "ההמלצה", details: "פרטים", link: "פרטים ↗",
       discuss: "עזרה מ־Claude", discussTitle: "פותח חלון Claude חדש שעוזר לך להבין ולהחליט. הוא לא עונה במקומך.",
@@ -63,6 +64,7 @@
       waiting: n => n < 1 ? "Sent, waiting for the manager (under a minute)" : `Sent, waiting for the manager since ${n} min`,
       idle: "The manager is idle. Switch to the Claude window or wait for the next worker event. The message is saved and is delivered at its next step.",
       replied: "The manager explained. The reply is in the thread below.", sent: "Saved; the manager gets it when its current step ends. Nothing was approved.",
+      laterCount: n => `${n} more waiting`,
       why: "Why", steps: "What you do",
       minutes: "Minutes", about: n => `About ${n} min`, skip: "If you skip it", recommended: "Recommended", details: "Details", link: "Details ↗",
       discuss: "Help from Claude", discussTitle: "Opens a new Claude window that helps you understand and decide. It never answers for you.",
@@ -596,6 +598,14 @@
 
   // Questions that are the same decision (group = gate:<version>) show as ONE card with a checklist. Each task keeps
   // its own question: saving answers every ticked question with the same choice through the normal answer endpoint.
+  let laterOpen = false;
+  // Server order (questions_view: most blocked tasks, then oldest); the cap hides nothing, the rest sit in a folded list.
+  function orderUnits(units) {
+    const order = new Map([...(data.questions_view?.shown || []), ...(data.questions_view?.later || [])].map((card, index) => [card.key, index]));
+    const rank = unit => order.has(unit.single ? "q:" + unit.single.id : "group:" + unit.group) ? order.get(unit.single ? "q:" + unit.single.id : "group:" + unit.group) : 1e9;
+    return units.map((unit, index) => [unit, index]).sort((x, y) => rank(x[0]) - rank(y[0]) || x[1] - y[1]).map(pair => pair[0]);
+  }
+
   function questionUnits(pending) {
     const counts = new Map();
     pending.forEach(q => { if (q.group) counts.set(q.group, (counts.get(q.group) || 0) + 1); });
@@ -641,7 +651,7 @@
   function renderQuestions() {
     const followups = Array.isArray(data.followups) ? data.followups : [];
     const infoTick = followups.some(item => item.text === INFO_TEXT && !item.reply) ? Math.floor(Date.now() / 60000) : 0;
-    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups, infoTick, discussTick]);
+    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups, infoTick, discussTick, data.questions_view]);
     if (signature === questionsSignature) return;
     questionsSignature = signature;
     const focused = document.activeElement;
@@ -649,7 +659,9 @@
     stashDrafts();
     stashGroups();
     const pending = data.questions.filter(question => !["answered", "resolved", "cancelled"].includes(question.status || "pending"));
-    const units = questionUnits(pending);
+    const units = orderUnits(questionUnits(pending));
+    const cap = data.questions_view?.cap || 5, later = units.slice(cap);
+    const renderUnit = unit => unit.single ? renderQuestion(unit.single) : renderGroup(unit);
     const decisions = units.length === pending.length ? "" : ` · ${units.length} החלטות`;
     $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`}${decisions} · אפשר לענות ברצף. טיוטות נשמרות גם אחרי רענון.` : "כל ההחלטות שנענו נשמרות בהמשך.";
     const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).reverse()
@@ -670,7 +682,7 @@
       return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span>${!answered && question.minutes ? `<span>${esc(L.about(question.minutes))}</span>` : ""}<bdi class="mono" dir="ltr">${esc(id)}</bdi></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${explain}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" dir="auto" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea>${defaultLine(question)}<div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary more-info" type="button" data-more-info="${esc(id)}" data-waiting="${info?.waiting ? "1" : "0"}" title="${esc(L.moreInfoTitle)}" ${info?.waiting ? "disabled" : ""}><span aria-hidden="true">?</span> ${esc(L.moreInfo)}</button>${discussButton(id)}<button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div>${infoStatusHTML(info)}<p class="form-error" role="alert" hidden></p></form>${discussHTML(id)}${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
     };
     const general = `<section class="question-card general-ask" aria-label="שאלה כללית למנהל"><h3>שאלה כללית למנהל</h3>${followupThread(followups.filter(item => !item.question_id))}${askMoreForm(GENERAL, "מה תרצה לשאול או לבקש?", "למשל: מה מצב הגרסה? תבדוק את…")}</section>`;
-    $("#questions").innerHTML = (pending.length ? units.map(unit => unit.single ? renderQuestion(unit.single) : renderGroup(unit)).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
+    $("#questions").innerHTML = (pending.length ? units.slice(0, cap).map(renderUnit).join("") + (later.length ? `<details class="questions-later"${laterOpen ? " open" : ""}><summary>${esc(L.laterCount(later.length))}</summary>${later.map(renderUnit).join("")}</details>` : "") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
     if (activeDraft) {
       const restored = document.getElementById(activeDraft.id);
       if (restored) { restored.focus({preventScroll: true}); restored.setSelectionRange(activeDraft.start, activeDraft.end); }
@@ -978,6 +990,7 @@
     } catch (error) { toast(error.message, true); }
     finally { button.disabled = false; }
   });
+  $("#questions").addEventListener("toggle", event => { if (event.target.matches?.(".questions-later")) laterOpen = event.target.open; }, true);
   $("#questions").addEventListener("submit", async event => {
     const form = event.target.closest(".question-form");
     if (!form) return;

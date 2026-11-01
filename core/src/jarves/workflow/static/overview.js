@@ -17,7 +17,7 @@
   // Page language: <html lang>, Hebrew by default. Each number keeps its own label; nothing is added together.
   const T = EN ? {
     allWorking: n => `Everything is working: ${n === 1 ? "1 worker is active" : `${n} workers are active`}`,
-    needsYou: (q, n) => `Needs you: ${q === 1 ? "1 question" : `${q} questions`}${n ? ` · ${n === 1 ? "1 worker is active" : `${n} workers are active`}` : ""}`,
+    needsYou: (q, n, shown) => `Needs you: ${q === 1 ? "1 question" : shown && shown < q ? `${shown} of ${q} questions` : `${q} questions`}${n ? ` · ${n === 1 ? "1 worker is active" : `${n} workers are active`}` : ""}`,
     stoppedFor: (d, why) => `Stopped for ${d}: ${why}`, stopped: why => `The factory is not working: ${why}`,
     whyAnswers: "waiting for your answers", whyQueued: n => `${n} tasks queued, no active worker`, whyEmpty: "nothing is queued",
     supervisorDown: "The supervisor is not running: no new work starts", noData: t => t ? `No fresh data since ${t}` : "No fresh data yet",
@@ -32,7 +32,7 @@
       more: "More details: team, active tasks, events and alerts"},
   } : {
     allWorking: n => `הכול עובד: ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}`,
-    needsYou: (q, n) => `צריך אותך: ${q === 1 ? "שאלה אחת" : `${q} שאלות`}${n ? ` · ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}` : ""}`,
+    needsYou: (q, n, shown) => `צריך אותך: ${q === 1 ? "שאלה אחת" : shown && shown < q ? `${shown} מתוך ${q} שאלות` : `${q} שאלות`}${n ? ` · ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}` : ""}`,
     stoppedFor: (d, why) => `עצר מזה ${d}: ${why}`, stopped: why => `המפעל לא עובד: ${why}`,
     whyAnswers: "מחכה לתשובות שלך", whyQueued: n => `${n} משימות בתור ואין עובד פעיל`, whyEmpty: "אין משימות בתור",
     supervisorDown: "המשגיח לא פעיל: עבודה חדשה לא מתחילה", noData: t => t ? `אין נתונים טריים מאז ${t}` : "עדיין אין נתונים טריים",
@@ -87,13 +87,13 @@
     const verdict = dataAge > 180 ? "unknown" : !supOk ? "bad" : !active ? "stopped" : questions ? "needs" : "ok";
     const tone = {unknown: "unknown", bad: "bad", stopped: "attention", needs: "attention", ok: "ok"}[verdict];
     const freshness = dataAge > 180 ? "bad" : dataAge > 60 ? "attention" : "ok";
-    return {active, supOk, last, observed, verdict, tone, freshness, questions, blocked: count("blocked"), review: count("review"), queued};
+    return {active, supOk, last, observed, verdict, tone, freshness, questions, shown: data.questions_view ? data.questions_view.shown_open : 0, blocked: count("blocked"), review: count("review"), queued};
   }
 
   function verdictText(f, now = Date.now() / 1000) {
     const why = f.questions ? T.whyAnswers : f.queued ? T.whyQueued(f.queued) : T.whyEmpty;
     return {unknown: () => T.noData(clock(f.observed)), bad: () => T.supervisorDown, ok: () => T.allWorking(f.active),
-      needs: () => T.needsYou(f.questions, f.active),
+      needs: () => T.needsYou(f.questions, f.active, f.shown),
       stopped: () => f.last ? T.stoppedFor(duration(now - f.last), why) : T.stopped(why)}[f.verdict]();
   }
 
