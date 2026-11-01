@@ -116,19 +116,29 @@ class UnlockTests(unittest.TestCase):
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
         self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
+        self.server.unlock_attempts.clear()
         unlock.issue(self.home)
         text = (self.home / unlock.FILE).read_text(encoding="ascii")
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_are_per_session_and_two_correct_requests_unlock_once(self):
+    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        statuses = []
+        for _ in range(5):                                             # a different session for every try
+            self.cookie = ""
+            self.login()
+            statuses.append(self.request("/api/unlock", {"code": wrong})[0])
+        self.assertEqual(statuses, [403] * 5)
+        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+
+    def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
-        first = self.cookie
-        for _ in range(4):
-            self.request("/api/unlock", {"code": "zzzz"})
-        self.cookie = ""
-        self.login()                                                   # another session is not locked out
         shown = unlock.issue(self.home)
         results = []
         def go():
@@ -138,7 +148,6 @@ class UnlockTests(unittest.TestCase):
         [t.join(10) for t in threads]
         self.assertEqual(sorted(results), [200, 403])
         self.assertEqual(len(self.server.unlocked), 1)
-        self.assertNotEqual(first, self.cookie)
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
