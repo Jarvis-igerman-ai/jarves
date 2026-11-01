@@ -13,7 +13,7 @@
   const versionDescriptions = {"V4.5.1": "ייצוב, תיקונים ותהליך שחרור", V5: "אותו JARVES, גם בטלפון", V6: "קול, נסיעות ושימוש ברכב", V7: "Android, דפדפן וכלי פיתוח"};
   const versions = ["V4.5.1", "V5", "V6", "V7"];
   const validationRank = {not_run: 0, automated: 1, app: 2, device: 3};
-  const views = {overview: ["תמונת מצב", "העבודה, בתמונה אחת", "מי עובד, מה התקדם ומה צריך אותך — בלי לאבד את ההמשך.", "DEVELOPMENT / LIVE OVERVIEW"], roadmap: ["התוכנית המלאה", "כל הדרך קדימה", "מה מומש, מה נבדק ומה שוחרר — כל שלב עם ההוכחה שלו.", "DEVELOPMENT / FULL ROADMAP"], questions: ["ממתין להחלטה", "התשובות שמקדמות", "כל השאלות במקום אחד. תשובה עכשיו, או שמירה להמשך בלי לאבד משימה.", "DEVELOPMENT / DECISIONS"]};
+  const views = {overview: ["תמונת מצב", "תמונת מצב", "", ""], roadmap: ["התוכנית המלאה", "כל הדרך קדימה", "מה מומש, מה נבדק ומה שוחרר — כל שלב עם ההוכחה שלו.", "DEVELOPMENT / FULL ROADMAP"], questions: ["ממתין להחלטה", "התשובות שמקדמות", "כל השאלות במקום אחד. תשובה עכשיו, או שמירה להמשך בלי לאבד משימה.", "DEVELOPMENT / DECISIONS"]};
   let data = null;
   let view = "overview";
   let filter = "all";

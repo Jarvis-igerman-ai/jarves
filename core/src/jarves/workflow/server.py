@@ -144,7 +144,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                  "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),
-                 "/timeline.js": ("timeline.js", "text/javascript"),
+                 "/timeline.js": ("timeline.js", "text/javascript"), "/overview.js": ("overview.js", "text/javascript"),
                  "/style.css": ("style.css", "text/css")}
         if path in files:
             name, mime = files[path]

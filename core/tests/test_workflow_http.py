@@ -381,6 +381,96 @@ console.log(timelineText(data, 24, now));
                 "  2026-11-01 20:33  T-2  review -> merged  [bugs]  w  B",
                 "  2026-11-01 20:23  T-1  - -> queued  [ops]  -  A"])
 
+    def test_overview_redesign_static_contract(self):
+        # Owner redesign: overview.js is served, CSP-safe, read-only, escaped, bilingual; shell ids other tabs use stay.
+        import re
+        import shutil
+        import subprocess
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        html = (static / "index.html").read_text(encoding="utf-8")
+        js = (static / "overview.js").read_text(encoding="utf-8")
+        today = (static / "today.js").read_text(encoding="utf-8")
+        css = (static / "style.css").read_text(encoding="utf-8")
+        status, headers, _ = self.request("/overview.js")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
+        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn('<script src="/overview.js"></script>', html)  # not deferred: theme before first paint
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("style=", html)
+        for banned in ("style=", "onclick", "fetch(", "/api/", "XMLHttpRequest", "EventSource"):
+            self.assertNotIn(banned, js)
+        for line in js.splitlines():  # the theme choice is the only stored thing; storage is always guarded
+            if "localStorage." in line:
+                self.assertIn("try {", line)
+        self.assertIn("esc(label)", js)
+        # One status bar, one place for each answer; the nav ids other tabs rely on stay.
+        for needle in ('id="ov-status"', 'id="ov-status-title" aria-live="polite"', 'id="ov-facts"', 'id="ov-done"',
+                       'id="ov-more"', 'id="ov-fresh"', 'id="theme-toggle" aria-pressed="false"', 'href="#questions"', 'data-view="questions"',
+                       'id="metrics"', 'id="agents"', 'id="events"', 'id="active-tasks"', 'id="alerts-section"'):
+            self.assertIn(needle, html)
+        self.assertLess(html.index('id="ov-status"'), html.index('id="today"'))
+        self.assertLess(html.index('id="today"'), html.index('id="metrics"'))  # old cards live in the collapsed details
+        self.assertNotIn("WORKSPACE", html)
+        self.assertNotIn("LOCAL CONTROL CENTER", html)
+        # Both locales for every new label, Hebrew default.
+        for he, en in (("הכול עובד", "Everything is working"), ("עצר מזה", "Stopped for"), ("צריך אותך:", "Needs you:"),
+                       ("אין נתונים טריים מאז", "No fresh data since"), ("הושלם היום", "Done today"), ("ממתין לך", "Waiting for you"),
+                       ("מוזגו היום", "Merged today"), ("עוד לא הושלם דבר היום", "Nothing was finished yet today")):
+            self.assertIn(he, js)
+            self.assertIn(en, js)
+        for he, en in (("שום דבר לא תקוע", "Nothing is stuck"), ("ללא התקדמות מאז ${a}", "no progress since ${a}"), ("התחיל ${a}", "started ${a}")):
+            self.assertIn(he, today)
+            self.assertIn(en, today)
+        # Tokens: dark default, light by system and by explicit choice; reduced motion respected.
+        self.assertIn(":root{--s1:4px", css)
+        self.assertIn('@media(prefers-color-scheme:light){:root:not([data-theme="dark"])', css)
+        self.assertIn(':root[data-theme="light"]', css)
+        self.assertIn("prefers-reduced-motion:reduce){.ov-more", css)
+        self.assertEqual(len(re.findall(r"--tap:44px", css)), 1)
+        node = shutil.which("node")
+        if node:
+            self.assertEqual(subprocess.run([node, "--check", str(static / "overview.js")], capture_output=True).returncode, 0)
+            start = js.index("  function factory(")
+            script = js[js.index("  const seconds ="):js.index("  const clock =")] + js[start:js.index("\n  }\n", start) + 4] \
+                + js[js.index("  function doneToday("):js.index("  function renderDone(")] + """
+const now = 1000000;
+const data = {
+  observed_at: now - 5,
+  supervisor: {heartbeat_at: now - 10, status: "running"},
+  agents: [{id: "a", status: "running", task_id: "t1", heartbeat_at: now - 5}, {id: "b", status: "running", heartbeat_at: now - 999},
+           {id: "c", status: "offline", heartbeat_at: now - 50}],
+  tasks: [{id: "t1", state: "running"}, {id: "t2", state: "blocked"}, {id: "t3", state: "queued"}, {id: "t4", state: "queued", execution_allowed: false},
+          {id: "t5", state: "review"}],
+  questions: [{status: "pending"}, {status: "answered"}, {status: "deferred"}],
+};
+const busy = factory(data, now);
+data.agents[0].heartbeat_at = now - 500;
+const idle = factory(data, now);
+data.supervisor.heartbeat_at = now - 999;
+const down = factory(data, now);
+data.observed_at = now - 600;
+const stale = factory(data, now);
+data.observed_at = now - 5; data.supervisor.heartbeat_at = now - 10; data.agents[0].heartbeat_at = now - 5; data.questions = [];
+const calm = factory(data, now);
+const today = new Date(); today.setHours(12, 0, 0, 0);
+const t = today.getTime() / 1000;
+const done = doneToday({tasks: [{implementation: "merged", updated_at: t}, {state: "verified", updated_at: t}, {state: "done", updated_at: t, ok: 1},
+                                 {implementation: "merged", updated_at: t - 3 * 86400}]}, task => Boolean(task.ok), today.getTime());
+console.log(JSON.stringify({busy, idle: [idle.active, idle.tone, idle.verdict], down: down.tone, stale: [stale.tone, stale.freshness], calm: [calm.verdict, calm.tone], done}));
+"""
+            out = subprocess.run([node, "-e", script], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            got = json.loads(out.stdout)
+            self.assertEqual(got["busy"]["active"], 1)          # the stale running agent is not counted
+            self.assertEqual([got["busy"]["verdict"], got["busy"]["tone"]], ["needs", "attention"])  # worst state wins
+            self.assertEqual([got["busy"][k] for k in ("questions", "blocked", "review", "queued")], [2, 1, 1, 1])
+            self.assertEqual(got["idle"], [0, "attention", "stopped"])
+            self.assertEqual(got["down"], "bad")
+            self.assertEqual(got["stale"], ["unknown", "bad"])        # stale data never looks green
+            self.assertEqual(got["calm"], ["ok", "ok"])
+            self.assertEqual(got["done"], {"merged": 3, "verified": 2, "shipped": 1})  # separate counts, yesterday excluded
+
 
 if __name__ == "__main__":
     unittest.main()
