@@ -81,6 +81,13 @@ class Wiring(unittest.TestCase):
         self.assertEqual(agent["session_id"], "live-1")
         self.assertEqual(next(t for t in self.store.snapshot()["tasks"] if t["id"] == "a")["state"], "running")
 
+    def test_refused_start_does_not_consume_the_hourly_start_budget(self):
+        # #763: a clean refusal (NO_CORE) launched nothing, so it must not count toward max_starts_per_hour.
+        self.task("a")
+        actions = self.step(start=lambda h, **r: {"ok": False, "code": "NO_CORE"})
+        self.assertIn("refused", [x["action"] for x in actions])
+        self.assertEqual(ap._load(self.store).get("starts", []), [])
+
     def test_unconfirmed_start_without_a_session_is_quarantined_not_retried(self):
         self.task("a")
         actions = self.step(start=lambda h, **r: None, find=lambda h, agent: "")

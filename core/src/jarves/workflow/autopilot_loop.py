@@ -31,7 +31,7 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 _CLAIM_FAILED: set = set()
 
 def load_policy(home: Path) -> dict:
@@ -266,9 +266,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            starts.append(now)
-            state["starts"] = starts
-            _save(store, state)
+            if result is None or result.get("ok"):
+                # Only real launches use the hourly budget; a clean refusal (NO_CORE, ...) started nothing (#763).
+                starts.append(now)
+                state["starts"] = starts
+                _save(store, state)
             if result is None:
                 _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):
