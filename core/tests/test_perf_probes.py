@@ -109,8 +109,17 @@ def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cf
     _import_all()
     _prime_process(cfg, home)
     calls = slow_cli_feature
-    f = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
-    ms, rows = _timed_list(f)                                  # cold: nothing checked yet
+    # cold: nothing checked yet. One scheduler stall on a shared Windows runner can push a single call over the budget
+    # (223 ms vs 150 ms once, #481), so allow up to 3 fresh instances; a real regression (a probe running in line) is
+    # slow on every try. Extra tries' background probes are drained and not counted in the call total below.
+    extra = 0
+    for attempt in range(3):
+        f = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
+        ms, rows = _timed_list(f)
+        if ms < BUDGET_MS or attempt == 2:
+            break
+        assert _wait(lambda: not f._pending), "the background check never finished"
+        extra = len(calls)
     assert ms < BUDGET_MS, ms
     r = rows[FID]
     assert (r["available"], r["check"], r["health"], r["reason"]) == (False, "checking", "checking",
@@ -141,7 +150,7 @@ def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cf
     ms, rows = _timed_list(f)
     assert (rows[FID]["available"], rows[FID]["check"], rows[FID]["reason"]) == (False, "fresh",
                                                                                "claude agents failed")
-    assert threading.get_ident() not in calls and len(calls) == 5   # cold, 3 stale samples, broken-claude
+    assert threading.get_ident() not in calls and len(calls) - extra == 5   # cold, 3 stale samples, broken-claude
 
 
 def test_an_undeclared_probe_measured_slow_is_rechecked_in_the_background(home, cfg):
