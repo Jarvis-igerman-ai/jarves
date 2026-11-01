@@ -1,6 +1,7 @@
 """End-to-end Core tests over the real localhost WebSocket with a fake Godot client and simulated devices."""
 import asyncio
 import json
+import uuid
 
 import pytest
 import websockets
@@ -139,10 +140,14 @@ async def test_memory_survives_restart(home, cfg):
 
 async def test_logs_have_correlation_ids_and_no_private_text(core, home):
     f = await open_face(core)
-    await f.send("user.text", {"text": "תזכור שהקוד של הכספת 4321"})
+    # A long unique marker: a bare "4321" can occur by chance in a timestamp/id/port in the log (flake #481), so a hit
+    # on this token is always a real leak of the private text.
+    secret = "zq" + uuid.uuid4().hex
+    await f.send("user.text", {"text": f"תזכור שהקוד של הכספת {secret}"})
     await f.wait("assistant.text")
-    lines = [json.loads(l) for l in (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
-    assert "4321" not in (home / "logs" / "jarves.log").read_text(encoding="utf-8")
+    raw = (home / "logs" / "jarves.log").read_text(encoding="utf-8")
+    lines = [json.loads(l) for l in raw.splitlines()]
+    assert secret not in raw
     reply = [l for l in lines if l["code"] == "REPLY"][-1]
     tool = [l for l in lines if l["code"] == "TOOL_RESULT"][-1]
     assert reply["cid"] == tool["cid"] != "-"

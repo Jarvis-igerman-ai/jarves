@@ -64,16 +64,31 @@ class FakeCore:
 
 
 def open_page(browser, dash, fake, *, width=1440, lang="en"):  # noqa: F811
-    ctx = browser.new_context(viewport={"width": width, "height": 800})
-    p = ctx.new_page()
-    errs: list[str] = []
-    p.on("pageerror", lambda e: errs.append(str(e)))
-    p.route(re.compile(r"/api/runtime(/stop|/start)?(\?.*)?$"), fake.handle)
-    p.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
-    p.goto(dash.url + "#/home")
-    p.wait_for_selector("#micPill", timeout=30000)
-    p.wait_for_function("() => !!document.querySelector('.schip-stop, .schip-start')", timeout=30000)
-    return ctx, p, errs
+    """Load the dashboard. A static script whose TCP connection is reset by the loaded Windows runner (WinError 10053,
+    flake #488) leaves pages.js unloaded, and every later script then throws "PAGES is not defined" - a transport
+    failure, not a product bug. A load in which any /static/ request FAILED is therefore discarded and repeated (at most
+    3 loads); a page error on a load where every asset arrived still fails the test."""
+    for attempt in range(3):
+        ctx = browser.new_context(viewport={"width": width, "height": 800})
+        p = ctx.new_page()
+        errs: list[str] = []
+        failed: list[str] = []
+        p.on("pageerror", lambda e: errs.append(str(e)))
+        p.on("requestfailed", lambda r: failed.append(r.url) if "/static/" in r.url else None)
+        p.route(re.compile(r"/api/runtime(/stop|/start)?(\?.*)?$"), fake.handle)
+        p.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
+        p.goto(dash.url + "#/home")
+        try:
+            p.wait_for_selector("#micPill", timeout=30000)
+            p.wait_for_function("() => !!document.querySelector('.schip-stop, .schip-start')", timeout=30000)
+        except Exception:
+            if not failed or attempt == 2:
+                raise
+        if not failed:
+            return ctx, p, errs
+        ctx.close()
+        assert attempt < 2, f"static assets kept failing to load: {failed}"
+    raise AssertionError("unreachable")
 
 
 def pill_text(p):
