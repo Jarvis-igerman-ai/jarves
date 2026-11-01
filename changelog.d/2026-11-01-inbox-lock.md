@@ -1,0 +1,1 @@
+- Fixed: workflow inbox, unread notice and claim lookups are read-only with a short retry, so a busy ledger writer no longer fails hooks or `msg inbox`; `msg inbox` defaults to the manager role (#786).

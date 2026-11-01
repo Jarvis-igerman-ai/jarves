@@ -90,10 +90,13 @@ def release(store, agent_id, resource, force=False):
 
 def owners(store, resource=None):
     now = store.clock()
-    with store._tx() as db:
-        rows = db.execute("SELECT * FROM workflow_claims" + (" WHERE name=?" if resource else "") + " ORDER BY name",
-                          (_res(resource),) if resource else ()).fetchall()
+    res = _res(resource) if resource else None
+
+    def run(db):
+        rows = db.execute("SELECT * FROM workflow_claims" + (" WHERE name=?" if res else "") + " ORDER BY name",
+                          (res,) if res else ()).fetchall()
         return [_claim_view(r, now) for r in rows]
+    return store.read(run)
 
 
 def check_touch(store, agent_id, resource, notify=False):
@@ -149,18 +152,39 @@ def _load(db, limit):
 def inbox(store, agent_id, unread=False, limit=50):
     from .store import _id
     agent_id = _id(agent_id)
-    with store._tx() as db:
-        row = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (agent_id,)).fetchone()
-        roles = _roles(json.loads(row[0])) if row else set()
+    def run(db):
+        roles = _agent_roles(db, agent_id)
         read = {r[0] for r in db.execute("SELECT msg_id FROM workflow_msg_reads WHERE agent_id=?", (agent_id,))}
-        items = [dict(m, read=m["id"] in read) for m in _load(db, 300) if _matches(m, agent_id, roles)]
+        return [dict(m, read=m["id"] in read) for m in _load(db, 300) if _matches(m, agent_id, roles)]
+    items = store.read(run)
     if unread:
         items = [m for m in items if not m["read"]]
     return {"notice": NOTICE, "agent": agent_id, "messages": items[:limit]}
 
 
+def _agent_roles(db, agent_id):
+    """Role names an id answers to: its label role, and the id itself when it is a role name ('manager')."""
+    row = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (agent_id,)).fetchone()
+    roles = _roles(json.loads(row[0])) if row else set()
+    return roles | {agent_id.lower()}
+
+
 def unread_count(store, agent_id):
-    return len(inbox(store, agent_id, unread=True)["messages"])
+    """Cheap hook-path count: one indexed SQL COUNT over the last 300 messages, no event loading, no write lock."""
+    from .store import _id
+    agent_id = _id(agent_id)
+
+    def run(db):
+        roles = sorted(_agent_roles(db, agent_id))
+        marks = ",".join("?" * len(roles))
+        return db.execute(
+            "SELECT COUNT(*) FROM (SELECT id,CASE WHEN json_valid(summary) THEN summary END AS j FROM workflow_events "
+            "WHERE kind=? ORDER BY id DESC LIMIT 300) "
+            "WHERE j IS NOT NULL AND json_extract(j,'$.from')!=? "
+            f"AND (json_extract(j,'$.to') IN ('*',?) OR lower(json_extract(j,'$.to')) IN ({marks})) "
+            "AND id NOT IN (SELECT msg_id FROM workflow_msg_reads WHERE agent_id=?)",
+            (KIND, agent_id, agent_id, *roles, agent_id)).fetchone()[0]
+    return store.read(run)
 
 
 def ack(store, msg_id, agent_id):
@@ -181,6 +205,5 @@ def notice_line(count):
 
 def overview(store, limit=20):
     """Read-only dashboard data: open claims and the latest messages."""
-    with store._tx() as db:
-        msgs = _load(db, limit)
+    msgs = store.read(lambda db: _load(db, limit))
     return {"notice": NOTICE, "claims": owners(store), "messages": msgs}

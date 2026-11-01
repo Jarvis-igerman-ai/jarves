@@ -162,6 +162,56 @@ class MessageTests(unittest.TestCase):
         self.assertEqual(len(data["messages"]), 20)
         self.assertEqual(data["claims"][0]["resource"], "file:core/x.py")
 
+    def _hold_writer(self):
+        import sqlite3
+        other = sqlite3.connect(str(self.home / "workflow.db"), isolation_level=None)
+        other.execute("BEGIN IMMEDIATE")
+        return other
+
+    def test_reads_succeed_while_writer_holds_lock(self):
+        from jarves.workflow.messages import unread_count, overview
+        self.store.send_message("a1", "a2", "hi", "b")
+        self.store.send_message("a1", "*", "all", "b")
+        writer = self._hold_writer()
+        try:
+            self.assertEqual(unread_count(self.store, "a2"), 2)
+            self.assertEqual(len(self.store.inbox("a2", unread=True)["messages"]), 2)
+            self.assertEqual(self.store.owners(), [])
+            self.assertEqual(len(overview(self.store)["messages"]), 2)
+        finally:
+            writer.execute("ROLLBACK")
+            writer.close()
+        self.store.ack_message(self.store.inbox("a2")["messages"][0]["id"], "a2")
+        self.assertEqual(unread_count(self.store, "a2"), 1)
+
+    def test_unread_count_matches_inbox_and_roles(self):
+        from jarves.workflow.messages import unread_count
+        self.store.send_message("a1", "workflow-merger", "role", "b")
+        self.store.send_message("a2", "manager", "to manager role", "b")
+        self.assertEqual(unread_count(self.store, "a2"), 1)
+        self.assertEqual(unread_count(self.store, "a1"), 0)
+        self.assertEqual(unread_count(self.store, "manager"), 1)
+
+    def test_inbox_accepts_manager_role_and_default(self):
+        self.store.send_message("a1", "manager", "hello", "b")
+        self.assertEqual(len(self.store.inbox("manager", unread=True)["messages"]), 1)
+        with patch.dict("os.environ", {"JARVES_WORKFLOW_AGENT": ""}):
+            code, out, _ = self.run_cli("msg", "inbox", "--unread")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(json.loads(out)["messages"]), 1)
+
+    def test_hook_notice_never_raises_under_busy_writer(self):
+        import sqlite3
+        from jarves.workflow import hooks
+        writer = self._hold_writer()
+        try:
+            with patch.object(self.store, "read", side_effect=sqlite3.OperationalError("database is locked")):
+                self.assertEqual(hooks._unread(self.store, "a1"), 0)
+            self.assertEqual(hooks._unread(self.store, "a1"), 0)
+        finally:
+            writer.execute("ROLLBACK")
+            writer.close()
+
 
 if __name__ == "__main__":
     unittest.main()

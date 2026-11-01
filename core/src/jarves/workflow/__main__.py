@@ -94,6 +94,8 @@ def agent_messages(store, a) -> int:
     """Ownership claims and agent messages. Exit 3 = the resource is owned by another agent (see AGENT_MESSAGES.md)."""
     from .messages import ClaimConflict
     agent = a.agent or os.environ.get("JARVES_WORKFLOW_AGENT", "")
+    if not agent and a.action == "msg" and (a.rest or [""])[0] == "inbox":
+        agent = "manager"      # the top-level native manager has no env id: read the manager role inbox
     resource = a.resource[0] if a.resource else ""
     try:
         if a.action == "own":
