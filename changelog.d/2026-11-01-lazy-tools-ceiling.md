@@ -1,1 +1,1 @@
-Lazy tool exposure by group: prompt tools+rules 37.2k chars on the client-delegation call; perf tests back at the -30% ceilings (#71).
+- Changed: Lazy tool exposure by group: prompt tools+rules 37.2k chars on the client-delegation call; perf tests back at the -30% ceilings (#71).
