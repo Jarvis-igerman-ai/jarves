@@ -1,0 +1,1 @@
+- Added: one trusted "is the factory working" verdict (workflow status, /api/health, the Overview bar and the status line) and a morning report (`jarvis workflow report`, /api/report, Overview block, written daily at 08:00 Israel time). (guide: workflow_console)

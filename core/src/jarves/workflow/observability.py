@@ -335,7 +335,7 @@ def health(store, now: float | None = None) -> dict:
     now = store.clock() if now is None else now
     state = _meta(store, INCIDENT_KEY, {})
     incidents = [{**i, "task_id": state.get(i["key"], {}).get("task_id")} for i in detect_incidents(store, now)]
-    return {"layers": layers(store, now), "incidents": incidents, "now": now}
+    return {"layers": layers(store, now), "incidents": incidents, "now": now, "verdict": verdict(store, now)}
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------
@@ -466,3 +466,77 @@ def on_stop(home: Path, cause: str, store=None) -> None:
             beat(store, "supervisor", "stopped", cause[:100])
         except Exception:  # noqa: BLE001
             pass
+
+
+# ---- one trusted verdict (#758) -----------------------------------------------------------------------------------
+VERDICTS = ("working", "idle_with_work", "stopped", "owner_wait", "unknown")
+ACTIVE_FRESH_S = 900
+# code -> English short text; the dashboard maps the same codes to Hebrew (static/overview.js).
+VERDICT_TEXT = {
+    "working": "{active} worker(s) active", "supervisor_dead": "supervisor dead", "supervisor_late": "supervisor heartbeat late",
+    "no_data": "no heartbeat data yet", "no_core": "NO_CORE: the Core is not reachable", "usage_stop": "usage stop: {why}",
+    "idle_ready": "idle with {ready} ready task(s)", "owner_wait": "waiting for owner questions only ({questions})",
+    "nothing_queued": "nothing is queued",
+}
+
+
+def read_usage(store, now: float) -> dict | None:
+    """Claude usage written by the status line (<home>/usage.json: weekly_pct, five_hour_pct, ts); None when absent or older than 1 h."""
+    try:
+        data = json.loads((store.path.parent / "usage.json").read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) and now - float(data.get("ts", 0)) <= 3600 else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def verdict(store, now: float | None = None) -> dict:
+    """The ONE answer to 'is the factory working'. Derived from layers, incidents, running tasks and queued work."""
+    now = store.clock() if now is None else now
+    rows = {r["layer"]: r for r in layers(store, now)}
+    sup = rows["supervisor"]
+    with store._tx() as db:
+        agents = store._all(db, "agent")
+        tasks = store._all(db, "task")
+        questions = [q for q in store._all(db, "question") if (q.get("status") or "pending") in {"pending", "deferred", "open"}]
+        ready = ready_count(store, db)
+        last = _last_activity(store, db)
+    running = {t["id"] for t in tasks if t["state"] == "running"}
+    active = sum(1 for a in agents if a.get("task_id") in running and a.get("status") != "offline"
+                 and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S)
+    decision = _meta(store, DECISION_KEY, {})
+    from . import autopilot_loop as loop
+    pause = loop._load(store)
+    pause_code = str(pause.get("pause_reason", "")) if now < pause.get("paused_until", 0) else ""
+    try:
+        incidents = [i["key"] for i in detect_incidents(store, now)]
+    except Exception:  # noqa: BLE001
+        incidents = []
+    detail = {"active": active, "ready": ready, "questions": len(questions), "incidents": incidents,
+              "layers": {k: v["status"] for k, v in rows.items()}, "autopilot_reason": decision.get("reason", "")}
+    oldest_q = min(q.get("created_at") or now for q in questions) if questions else None
+
+    def out(kind, code, since, **fmt):
+        detail.update(code=code, **fmt)
+        return {"verdict": kind, "reason": VERDICT_TEXT[code].format(**fmt), "since": since,
+                "since_min": None if since is None else max(0, int((now - since) // 60)), "detail": detail}
+
+    if not any(r["last_beat_at"] for r in rows.values()):
+        return out("unknown", "no_data", None)
+    if sup["status"] == "dead":
+        return out("stopped", "supervisor_dead", sup["last_beat_at"])
+    if sup["status"] == "stale":
+        return out("unknown", "supervisor_late", sup["last_beat_at"])
+    if decision.get("reason") == "NO_CORE" or pause_code == "NO_CORE":
+        return out("stopped", "no_core", decision.get("since") or None)
+    if pause_code and re.search(r"usage|limit|budget", pause_code, re.I):
+        return out("stopped", "usage_stop", decision.get("since") or None, why=pause_code)
+    used = read_usage(store, now)
+    if used and not active and max(used.get("weekly_pct", 0), used.get("five_hour_pct", 0)) >= 99:
+        return out("stopped", "usage_stop", None, why=f"{max(used.get('weekly_pct', 0), used.get('five_hour_pct', 0)):.0f}% used")
+    if active:
+        return out("working", "working", None, active=active)
+    if ready:
+        return out("idle_with_work", "idle_ready", last or None, ready=ready)
+    if questions:
+        return out("owner_wait", "owner_wait", oldest_q, questions=len(questions))
+    return out("stopped", "nothing_queued", last or None)

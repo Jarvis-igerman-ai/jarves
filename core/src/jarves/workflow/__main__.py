@@ -173,6 +173,16 @@ def main(argv=None) -> int:
         if a.action == "status":
             from .autopilot import agent_retention_s
             result = store.snapshot(retention_s=agent_retention_s(home))
+            from .observability import verdict
+            result["verdict"] = verdict(store)
+        elif a.action == "report" and not a.agent:
+            from .report import build
+            rep = build(store, a.hours)
+            if a.json:
+                result = rep
+            else:
+                print(rep["he"])
+                return 0
         elif a.action in {"trace", "retro"}:
             from .trace import history, retro_bundle, settings
             filters = {"agent_id": a.agent, "task_id": a.task, "since": a.since, "until": a.until}

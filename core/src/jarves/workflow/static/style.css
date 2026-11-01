@@ -293,3 +293,5 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 .ov-fresh[data-age="attention"]{color:var(--warn)}.ov-fresh[data-age="attention"]:before{content:"!";font-weight:700;color:var(--warn)}
 .ov-fresh[data-age="bad"]{color:var(--bad)}.ov-fresh[data-age="bad"]:before{content:"✕";color:var(--bad)}
 .status-dot.today-pulse{background:var(--busy)}
+
+.ov-report{white-space:pre-wrap;margin:0;padding:var(--s3) var(--s4);font:inherit;font-size:var(--fs-2);line-height:1.6;color:var(--text)}

@@ -193,6 +193,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "hours must be between 0 and 336"})
                 return
             self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
+        elif path == "/api/report":
+            from .report import build
+            try:
+                hours = float(parse_qs(urlsplit(self.path).query).get("hours", ["24"])[0])
+                if not 0 < hours <= 24 * 14:
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": "hours must be between 0 and 336"})
+                return
+            self._json(200, build(self.server.store, hours))   # read-only: ledger + gh metadata
         elif path == "/api/messages":
             from .messages import overview
             self._json(200, overview(self.server.store))   # read-only: open claims + last 20 agent messages
