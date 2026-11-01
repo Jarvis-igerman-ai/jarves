@@ -188,7 +188,17 @@ def cmd_about(a, cfg, home, *, out=print) -> int:
 
 
 def cmd_whatsnew(a, cfg, home, *, out=print) -> int:
-    ok, lines = whatsnew_lines(getattr(a, "version", None), he=bool(getattr(a, "he", False)))
+    he = bool(getattr(a, "he", False))
+    if getattr(a, "dismiss", False):                    # the Home card (#167): close it until the next release
+        from . import whats_new_card
+        out(("כרטיס מה השתנה נסגר עד הגרסה הבאה: " if he else "What-changed card closed until the next release: ")
+            + whats_new_card.dismiss(home)["dismissed"])
+        return 0
+    if getattr(a, "since", None):                       # the same items as the Home card (#167)
+        from . import whats_new_card
+        ok, lines = whats_new_card.since_lines(a.since, he=he)
+    else:
+        ok, lines = whatsnew_lines(getattr(a, "version", None), he=he)
     for line in lines:
         out(line)
     return 0 if ok else 1
@@ -206,6 +216,8 @@ def add_cli(sub) -> None:
     w = sub.add_parser("whatsnew", help="what changed in this version (release notes; --version V for another)")
     w.add_argument("--version", default=None)
     w.add_argument("--he", action="store_true", help="Hebrew labels")
+    w.add_argument("--since", default=None, help="every user-facing change after version V up to this one (the Home card)")
+    w.add_argument("--dismiss", action="store_true", help="close the Home 'what changed' card until the next release")
     sub.add_parser("roadmap", help="short milestone status from ROADMAP.md")
     t = sub.add_parser("ticket", help="improvement ticket: jarvis ticket \"idea\" (saved locally, nothing sent) | list | "
                                       "send ID (shows the exact text, asks first)")
