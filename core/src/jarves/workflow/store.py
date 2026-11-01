@@ -84,6 +84,49 @@ def question_view(question):
     return out
 
 
+QUESTION_CAP = 5
+CLOSED_QUESTIONS = {"answered", "resolved", "cancelled"}
+
+
+def questions_view(questions: list, tasks: list, cap: int = QUESTION_CAP) -> dict:
+    """Display order and cap for open owner questions (#760). One card = one question, or one gate group of 2+.
+
+    Cards are ordered by how many tasks they hold up (their own task plus everything that depends on it), then oldest
+    first. `shown` holds the first `cap` cards, `later` the rest: both list every open question id, nothing is dropped,
+    and no status, answer or blocking flag is touched. The dashboard, the Overview and the status line all use this."""
+    open_qs = [q for q in questions if (q.get("status") or "pending") not in CLOSED_QUESTIONS]
+    counts: dict = {}
+    for q in open_qs:
+        if q.get("group"):
+            counts[q["group"]] = counts.get(q["group"], 0) + 1
+    dependents: dict = {}
+    for t in tasks:
+        for dep in t.get("depends_on") or []:
+            dependents.setdefault(dep, []).append(t["id"])
+
+    def held_up(task_ids: set) -> int:
+        seen, stack = set(task_ids), list(task_ids)
+        while stack:
+            for nxt in dependents.get(stack.pop(), []):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return len(seen)
+
+    cards: dict = {}
+    for q in open_qs:
+        key = "group:" + q["group"] if q.get("group") and counts[q["group"]] > 1 else "q:" + q["id"]
+        card = cards.setdefault(key, {"key": key, "ids": [], "tasks": set(), "created_at": q.get("created_at") or 0})
+        card["ids"].append(q["id"])
+        card["created_at"] = min(card["created_at"], q.get("created_at") or 0)
+        if q.get("blocks", True) and q.get("task_id"):
+            card["tasks"].add(q["task_id"])
+    ordered = sorted(cards.values(), key=lambda c: (-held_up(c["tasks"]), c["created_at"], c["key"]))
+    out = [{"key": c["key"], "ids": c["ids"], "blocked_tasks": held_up(c["tasks"]), "created_at": c["created_at"]} for c in ordered]
+    return {"cap": cap, "cards": len(out), "open": len(open_qs), "shown": out[:cap], "later": out[cap:],
+            "shown_open": sum(len(c["ids"]) for c in out[:cap]), "later_open": sum(len(c["ids"]) for c in out[cap:])}
+
+
 def _text(value, name: str, *, maximum: int = 2000, empty: bool = False) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{name} must be text")
@@ -329,12 +372,14 @@ class Store:
             for task in tasks:
                 task["ready"] = self._ready(db, task)
             agents = self._all(db, "agent")
+            questions = [question_view(q) for q in self._all(db, "question")]
             return {
+                "questions_view": questions_view(questions, tasks),
                 "revision": self._meta(db, "revision"), "observed_at": now,
                 "owner": owner, "supervisor": supervisor,
                 "tasks": tasks, "agents": agents,
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
-                "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
+                "questions": questions, "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
                 "events": [dict(r) for r in db.execute(
                     "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow','agent_message') ORDER BY id DESC LIMIT 100")],
