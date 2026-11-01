@@ -143,8 +143,11 @@ def test_live_failure_is_shown_and_mode_unchanged(browser, dash):  # noqa: F811
 def test_mic_menu_narrow_width_stays_on_screen_and_hebrew(browser, dash):  # noqa: F811
     fake = FakeCore()
     ctx, p, errs = open_page(browser, dash, fake, width=360, lang="he")
+    # The pill is re-rendered by the status poll and the language switch: wait for the final text instead of racing it.
+    p.wait_for_function("() => document.getElementById('micPill').innerText.trim() === 'רק מילת הפעלה'", timeout=15000)
     assert pill_text(p) == "רק מילת הפעלה"
     p.click("#micPill")
+    p.wait_for_function("() => (document.querySelector('#micMenu [data-mode=\"muted\"]') || {innerText: ''}).innerText.includes('מושתק')", timeout=15000)
     box = p.eval_on_selector("#micMenu", "e => { const r = e.getBoundingClientRect(); return [r.left, r.right, innerWidth]; }")
     assert box[0] >= 0 and box[1] <= box[2]
     assert p.locator("#micMenu .mm-item").nth(0).inner_text().startswith("✓") is False

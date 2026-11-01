@@ -16,12 +16,6 @@ since = "2026-10-26"
 reason = "failed once, same commit passed"
 
 [[test]]
-id = "test_dashboard_mic_stop_browser.py::test_mic_menu_narrow_width_stays_on_screen_and_hebrew"
-issue = 549
-since = "2026-10-26"
-reason = "failed once, same commit passed (real browser layout)"
-
-[[test]]
 id = "test_perf_probes.py::test_slow_cli_probe_never_blocks_features_list_and_its_result_lands"
 issue = 550
 since = "2026-10-26"
