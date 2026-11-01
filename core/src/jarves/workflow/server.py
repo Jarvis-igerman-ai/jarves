@@ -139,7 +139,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "service": "jarves-workflow"})
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-                 "/today.js": ("today.js", "text/javascript"),
+                 "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),
+                 "/timeline.js": ("timeline.js", "text/javascript"),
                  "/style.css": ("style.css", "text/css")}
         if path in files:
             name, mime = files[path]
