@@ -49,6 +49,9 @@ def say_env(monkeypatch, tmp_path):
         monkeypatch.setattr(eng, "check", lambda self: (True, "voice X"))
         monkeypatch.setattr(eng, "synth", synth)
     monkeypatch.setattr(audio.SoundDeviceAudio, "play", no_play)
+    # cmd_say -> logs.setup installs process-wide crash hooks; a thread of an EARLIER test on this xdist worker dying
+    # late would then be logged as "unhandled exception" into this test's output (flake #422, like #474). Not installed.
+    monkeypatch.setattr("jarves.logs.install_crash_hooks", lambda: None)
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     (tmp_path / "config.toml").write_text('[ai]\nconnection = "api_key"\n', encoding="utf-8")
