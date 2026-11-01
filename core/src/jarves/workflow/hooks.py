@@ -14,6 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .messages import notice_line, unread_count
 from .store import Store
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")
@@ -117,6 +118,10 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
         followups = store.take_followups(ident, redeliver=payload.get("stop_hook_active") is not True)
         if followups:
             return {"decision": "block", "reason": followup_message(followups, root, store.path.parent)}
+    unread = _unread(store, ident)
+    if event == "Stop" and unread and payload.get("stop_hook_active") is not True:
+        # One line, only when mail exists; stop_hook_active prevents any loop. Messages are data, never approvals.
+        return {"decision": "block", "reason": notice_line(unread)}
     if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
         ready = store.manager_continue(ident)
         if ready:
@@ -133,9 +138,17 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases." +
+            (" " + notice_line(unread) if unread else "") +
             (" " + followup_message(store.open_followups(ident), root, store.path.parent)
              if event == "SessionStart" and not managed else "")}}
     return {}
+
+
+def _unread(store: Store, ident: str) -> int:
+    try:
+        return unread_count(store, ident)
+    except (sqlite3.Error, ValueError, KeyError):
+        return 0
 
 
 def followup_message(items: list, root: Path, home: Path) -> str:

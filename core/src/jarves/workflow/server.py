@@ -193,6 +193,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "hours must be between 0 and 336"})
                 return
             self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
+        elif path == "/api/messages":
+            from .messages import overview
+            self._json(200, overview(self.server.store))   # read-only: open claims + last 20 agent messages
         elif path == "/api/events":
             self._stream()
         else:
