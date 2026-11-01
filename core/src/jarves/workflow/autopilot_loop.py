@@ -24,14 +24,17 @@ AGENT_PREFIX = "ap-"
 START_GRACE_S = 300          # a claim with no linked session after this long is an unconfirmed start
 PAUSE_S = 600
 START_TIMEOUT_S = 240
-CLEAN_REFUSALS = {"NOT_ALLOWED_PROJECT", "BUDGET_REACHED", "PROVIDER_MISSING", "AUTH_REQUIRED", "NO_CORE",
-                  "MODEL_NOT_ALLOWED", "SECOND_WRITER", "error"}
+# Refusals returned BEFORE any worker process exists: they launched nothing, so they do not use the hourly
+# start budget (#763). Anything else (SESSION_CLOSED, AUTH_REQUIRED api_key, ...) may have started a paid worker.
+PRE_START_REFUSALS = frozenset({"NO_CORE", "CORE_NOT_RUNNING", "NOT_ALLOWED_PROJECT", "BUDGET_REACHED",
+                                "MODEL_NOT_ALLOWED", "SECOND_WRITER", "NOT_APPROVED", "CONFIG_NOT_VERIFIED",
+                                "PROVIDER_MISSING", "error"})
 log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 _CLAIM_FAILED: set = set()
 
 def load_policy(home: Path) -> dict:
@@ -266,8 +269,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            if result is None or result.get("ok"):
-                # Only real launches use the hourly budget; a clean refusal (NO_CORE, ...) started nothing (#763).
+            if result is None or str(result.get("code", "")) not in PRE_START_REFUSALS:
                 starts.append(now)
                 state["starts"] = starts
                 _save(store, state)

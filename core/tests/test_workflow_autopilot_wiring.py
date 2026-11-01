@@ -88,6 +88,26 @@ class Wiring(unittest.TestCase):
         self.assertIn("refused", [x["action"] for x in actions])
         self.assertEqual(ap._load(self.store).get("starts", []), [])
 
+    def test_pre_start_refusals_do_not_count_but_post_start_ones_do(self):
+        # SESSION_CLOSED / AUTH_REQUIRED are returned after a worker process exists: they still use the budget.
+        for code in ("NOT_ALLOWED_PROJECT", "BUDGET_REACHED", "MODEL_NOT_ALLOWED", "SECOND_WRITER", "NOT_APPROVED",
+                     "CONFIG_NOT_VERIFIED", "CORE_NOT_RUNNING", "PROVIDER_MISSING", "error"):
+            self.assertIn(code, ap.PRE_START_REFUSALS)
+        for code, counted in (("SESSION_CLOSED", 1), ("AUTH_REQUIRED", 1), ("NO_CORE", 0), ("PROVIDER_MISSING", 0)):
+            ap._LAST_SIG.clear()
+            if not any(t["id"] == "a" for t in self.store.snapshot()["tasks"]):
+                self.task("a")
+            state = ap._load(self.store)
+            state.update(starts=[], paused_until=0)
+            ap._save(self.store, state)
+            self.step(start=lambda h, c=code, **r: {"ok": False, "code": c})
+            self.assertEqual(len(ap._load(self.store).get("starts", [])), counted, code)
+
+    def test_ok_and_unconfirmed_starts_still_count(self):
+        self.task("a")
+        self.step()
+        self.assertEqual(len(ap._load(self.store).get("starts", [])), 1)
+
     def test_unconfirmed_start_without_a_session_is_quarantined_not_retried(self):
         self.task("a")
         actions = self.step(start=lambda h, **r: None, find=lambda h, agent: "")
