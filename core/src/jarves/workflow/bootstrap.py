@@ -29,8 +29,9 @@ RETIRED_RULE = re.compile(
 
 
 # Events whose hook output Claude Code does not use: run in the background, never block a tool call.
-# SessionStart/SubagentStart return context and Stop returns a decision, so they stay synchronous.
-ASYNC_EVENTS = frozenset({"UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+# SessionStart/SubagentStart return context; Stop and UserPromptSubmit (typed owner answer, #797) return a
+# decision, so they stay synchronous.
+ASYNC_EVENTS = frozenset({"PreToolUse", "PostToolUse", "PostToolUseFailure",
                           "Notification", "SessionEnd", "SubagentStop"})
 
 
