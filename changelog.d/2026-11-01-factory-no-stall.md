@@ -1,0 +1,1 @@
+- Fixed: the workflow factory no longer stalls: autopilot reuses a leftover offline worker and skips a task it cannot claim, the supervisor survives a locked database, and the Stop hook waits longer and retries once.

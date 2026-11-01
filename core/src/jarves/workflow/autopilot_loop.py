@@ -117,8 +117,8 @@ def _slug(text: str) -> str:
     return "".join(c if c.isalnum() or c in "_.-" else "-" for c in text)[:60]
 
 
-def _pick(snapshot: dict, policy: dict, lane: str) -> dict | None:
-    tasks = [t for t in snapshot["tasks"] if t["lane"] == lane]
+def _pick(snapshot: dict, policy: dict, lane: str, skip=()) -> dict | None:
+    tasks = [t for t in snapshot["tasks"] if t["lane"] == lane and t["id"] not in skip]
     ready = [t for t in tasks if t.get("ready") and t.get("execution_allowed", True)]
     if lane == "features":
         # Imported/planned scope runs only for versions the owner authorised in the policy.
@@ -137,14 +137,18 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
          notify=bridge_notify, find=bridge_find, force: bool = False) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
+    from .observability import record_decision
     if not policy.get("enabled"):
+        record_decision(store, policy, [])
         return []
     if not _LOCK.acquire(blocking=False):
         return []
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                return _step(store, Path(profile_home), policy, start, stop, notify, force, find)
+                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find)
+                record_decision(store, policy, done)   # why nothing started (deduplicated)
+                return done
         except OSError:
             return []          # another process is stepping
     finally:
@@ -231,10 +235,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
             continue
         if now < state.get("paused_until", 0):
             break
+        skipped: set[str] = set()
         while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
                and len(running) < int(policy.get("max_concurrent", 1))
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
-            task = _pick(snap, policy, lane)
+            task = _pick(snap, policy, lane, skipped)
             if not task:
                 break
             agent_id = AGENT_PREFIX + _slug(f"{lane}-{task['id']}")
@@ -245,10 +250,15 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                                   "provider": "claude", "project": policy.get("project", ""),
                                   "requested_model": conf.get("model", ""), "auto_dispatch": False})
             store.link_session(agent_id, "", autopilot=True)
+            if old and old.get("status") != "idle":
+                store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
-            if not claimed:           # lost the race or no longer ready: no start
+            if not claimed:           # lost the race or no longer ready: record it and try the next candidate
+                store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
-                break
+                skipped.add(task["id"])
+                actions.append({"task_id": task["id"], "action": "claim_failed"})
+                continue
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
                        task=assignment(ctx, agent_id, store.path.parent), approved=False,
@@ -257,9 +267,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            starts.append(now)
-            state["starts"] = starts
-            _save(store, state)
+            if result is None or result.get("ok"):
+                # Only a start the bridge accepted (or an unknown outcome) uses the hourly budget (#763).
+                starts.append(now)
+                state["starts"] = starts
+                _save(store, state)
             if result is None:
                 _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):
@@ -269,6 +281,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 state["paused_until"] = now + PAUSE_S
                 state["pause_reason"] = code
                 _save(store, state)
+                store.record_event("autopilot_idle", f"start refused ({code}); not counted against max_starts_per_hour")
                 store.record_event("autopilot_paused", f"Autopilot start refused ({code}); paused for {PAUSE_S // 60} min")
                 actions.append({"task_id": task["id"], "action": "refused", "code": code})
                 break

@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -53,6 +53,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--since", type=float, default=0, help="trace/retro: first UNIX timestamp")
     ap.add_argument("--until", type=float, help="trace/retro: last UNIX timestamp")
     ap.add_argument("--before", type=int, default=0, help="trace: next page cursor")
+    ap.add_argument("--layer", default="", help="layer-beat: supervisor|autopilot|wrapper|manager|core|bridge")
+    ap.add_argument("--hours", type=float, default=24, help="timeline: how many hours back")
+    ap.add_argument("--json", action="store_true", help="timeline: print JSON instead of text")
     return ap
 
 
@@ -107,6 +110,8 @@ def main(argv=None) -> int:
         return 0
     if a.action == "supervise":
         from .control import supervisor
+        from .observability import capture_stderr
+        capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
     if a.action == "open":
@@ -131,6 +136,19 @@ def main(argv=None) -> int:
                 result = settings(store, a.capture)
             else:
                 result = history(store, before=a.before, **filters)
+        elif a.action == "layer-beat":
+            result = store.beat(a.layer, a.state or "ok", a.note)
+        elif a.action == "health":
+            from .observability import health
+            result = health(store)
+        elif a.action == "timeline":
+            from . import observability as obs
+            tl = obs.timeline(store, since=store.clock() - a.hours * 3600)
+            if a.json:
+                result = tl
+            else:
+                print(obs.timeline_text(tl, obs.layers(store)))
+                return 0
         elif a.action == "autopilot":
             from .autopilot import command
             result = command(store, home, (a.rest or ["status"])[0], a.rest[1:])
