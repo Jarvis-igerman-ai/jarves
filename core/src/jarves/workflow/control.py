@@ -179,6 +179,11 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                     store.tick()
                     obs.supervisor_tick(store, home, profile_home)
                     try:
+                        from .report import daily_tick
+                        daily_tick(store, home)  # once per Israel day at/after 08:00; a file, a ledger event, a manager message
+                    except Exception as exc:  # noqa: BLE001
+                        obs.log_line(home, f"daily report failed: {type(exc).__name__}")
+                    try:
                         from .autopilot import step
                         step(store, home)  # import-only; it never starts a worker
                     except (OSError, ValueError, sqlite3.Error):

@@ -1,6 +1,7 @@
 /* JARVES workflow Overview (owner redesign): one factory status bar, "done today", theme and shell state.
-   Read-only: it renders from the state app.js already fetched (the "workflow:render" event); it never calls the
-   service. The only thing it stores is the viewer's theme choice, in guarded browser storage. */
+   Read-only: it renders from the state app.js already fetched (the "workflow:render" event) and reads only GET
+   /api/health (the verdict) and GET /api/report (the morning report). The only thing it stores is the viewer's
+   theme choice, in guarded browser storage. */
 "use strict";
 
 (() => {
@@ -27,9 +28,15 @@
     doneMerged: "Merged", doneVerified: "Verified", doneShipped: "Shipped",
     doneEmpty: "Nothing was finished yet today.", doneNote: "Each number is counted on its own, by the task's last update today.",
     alerts: n => n === 1 ? "1 alert" : `${n} alerts`, themeLight: "Light theme", themeDark: "Dark theme",
+    reportLoading: "Loading the report", reportFailed: "The report is not available now.",
+    // Same codes as observability.VERDICT_TEXT (the server also sends the English reason).
+    v: {working: d => `Everything is working: ${d.active} worker(s) active`, supervisor_dead: () => "The supervisor is not running: no new work starts",
+      supervisor_late: () => "The supervisor heartbeat is late", no_data: () => "No heartbeat data yet", no_core: () => "The Core is not reachable (NO_CORE): no new work starts",
+      usage_stop: d => `Stopped by usage: ${d.why}`, idle_ready: d => `Idle with ${d.ready} ready task(s) and no active worker`,
+      owner_wait: d => `Waiting for your answers only (${d.questions})`, nothing_queued: () => "Nothing is queued"},
     static: {needs: "Needs you", all_questions: "All questions", running: "Working now", blocked: "Stuck", done_today: "Done today",
       versions: "Progress by version", shipped: "Shipped", verified: "Verified", merged: "Merged",
-      more: "More details: team, active tasks, events and alerts"},
+      more: "More details: team, active tasks, events and alerts", report: "Morning report"},
   } : {
     allWorking: n => `הכול עובד: ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}`,
     needsYou: (q, n) => `צריך אותך: ${q === 1 ? "שאלה אחת" : `${q} שאלות`}${n ? ` · ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}` : ""}`,
@@ -42,6 +49,11 @@
     doneMerged: "מוזגו", doneVerified: "נבדקו", doneShipped: "שוחררו",
     doneEmpty: "עוד לא הושלם דבר היום.", doneNote: "כל מספר נספר בנפרד, לפי העדכון האחרון של המשימה היום.",
     alerts: n => n === 1 ? "התראה אחת" : `${n} התראות`, themeLight: "ערכה בהירה", themeDark: "ערכה כהה",
+    reportLoading: "טוען את הדוח", reportFailed: "הדוח לא זמין כרגע.",
+    v: {working: d => `הכול עובד: ${d.active === 1 ? "עובד אחד פעיל" : `${d.active} עובדים פעילים`}`, supervisor_dead: () => "המשגיח לא פעיל: עבודה חדשה לא מתחילה",
+      supervisor_late: () => "פעימת המשגיח מאחרת", no_data: () => "עדיין אין נתוני דופק", no_core: () => "הליבה לא זמינה (NO_CORE): עבודה חדשה לא מתחילה",
+      usage_stop: d => `נעצר בגלל שימוש: ${d.why}`, idle_ready: d => `בטלה: ${d.ready} משימות מוכנות ואין עובד פעיל`,
+      owner_wait: d => `מחכה רק לתשובות שלך (${d.questions})`, nothing_queued: () => "אין משימות בתור"},
     static: {needs: "צריך אותך", all_questions: "לכל השאלות", running: "עובד עכשיו", blocked: "תקוע", done_today: "הושלם היום",
       versions: "התקדמות לפי גרסה", shipped: "שוחרר", verified: "נבדק", merged: "מוזג",
       more: "עוד פרטים: הצוות, משימות פעילות, אירועים והתראות"},
@@ -97,14 +109,38 @@
       stopped: () => f.last ? T.stoppedFor(duration(now - f.last), why) : T.stopped(why)}[f.verdict]();
   }
 
+  // The one trusted verdict comes from GET /api/health (observability.verdict). Without it (old service, fetch
+  // failed, or older than 2 min) the local logic above is used unchanged.
+  const REMOTE_TONE = {working: "ok", idle_with_work: "attention", owner_wait: "attention", stopped: "bad", unknown: "unknown"};
+  let remote = null, remoteAt = 0, remoteBusy = false;
+  async function loadVerdict() {
+    if (remoteBusy || typeof fetch !== "function") return;
+    remoteBusy = true;
+    try {
+      const response = await fetch("/api/health", {credentials: "same-origin", cache: "no-store"});
+      const body = response.ok ? await response.json() : null;
+      remote = body && body.verdict && REMOTE_TONE[body.verdict.verdict] ? body.verdict : null;
+      remoteAt = Date.now() / 1000;
+    } catch (_) { remote = null; } finally { remoteBusy = false; }
+  }
+  function remoteVerdict(now = Date.now() / 1000) {
+    if (!remote || now - remoteAt > 120) return null;
+    const d = remote.detail || {};
+    let text = (T.v[d.code] || (() => remote.reason))(d);
+    if (remote.verdict !== "working" && remote.since_min >= 1) text += ` · ${T.dur.m(remote.since_min).replace(/^/, EN ? "for " : "מזה ")}`;
+    return {tone: REMOTE_TONE[remote.verdict], text, kind: remote.verdict};
+  }
+
   function renderStatus(data, age, complete) {
     const f = factory(data);
-    const title = verdictText(f);
+    const rv = remoteVerdict();
+    const title = rv ? rv.text : verdictText(f);
+    if (rv) f.tone = rv.tone;
     $("#ov-status").dataset.tone = f.tone;
     $("#ov-status-icon").textContent = {ok: "✓", attention: "!", bad: "✕", unknown: "?"}[f.tone];
     // The one polite live region: written only when the sentence changes, never on every refresh.
     if ($("#ov-status-title").textContent !== title) $("#ov-status-title").textContent = title;
-    $("#ov-status-detail").textContent = f.verdict === "ok" || f.verdict === "needs" ? T.supOk : "";
+    $("#ov-status-detail").textContent = (rv ? rv.kind === "working" : f.verdict === "ok" || f.verdict === "needs") ? T.supOk : "";
     const freshEl = $("#ov-fresh");
     freshEl.textContent = T.updated(age(data.observed_at));
     freshEl.dataset.age = f.freshness;
@@ -164,12 +200,27 @@
     renderDone(data, complete);
   });
   // app.js re-renders only when the state changes; freshness ("stopped since", "updated") still moves with the clock.
-  setInterval(() => { if (last && !document.hidden) renderStatus(last.data, last.age, last.complete); }, 15000);
+  setInterval(() => {
+    if (document.hidden) return;
+    loadVerdict().then(() => { if (last) renderStatus(last.data, last.age, last.complete); });
+  }, 15000);
+  // Morning report: read-only GET /api/report, fetched when the block is opened.
+  async function loadReport() {
+    const box = $("#ov-report-text");
+    box.textContent = T.reportLoading;
+    try {
+      const response = await fetch("/api/report", {credentials: "same-origin", cache: "no-store"});
+      if (!response.ok) throw new Error(String(response.status));
+      box.textContent = (await response.json()).he || "";
+    } catch (_) { box.textContent = T.reportFailed; }
+  }
 
   document.addEventListener("DOMContentLoaded", () => {
     if (EN) document.querySelectorAll("[data-i18n]").forEach(el => { const text = T.static[el.dataset.i18n]; if (text) el.textContent = text; });
     $("#ov-status-title").textContent = T.loading;
     setView();
+    loadVerdict();
+    $("#ov-report")?.addEventListener("toggle", event => { if (event.target.open) loadReport(); });
     window.addEventListener("hashchange", setView);
     syncThemeButton();
     matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", syncThemeButton);
