@@ -581,7 +581,7 @@ class Store:
         """Optional plain-language fields; empty when the asker gave none. None of them is an approval."""
         extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
                  for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500),
-                                    ("skip_effect", 1000), ("details", 4000))}
+                                    ("skip_effect", 1000), ("details", 4000), ("group", 120), ("item", 300))}
         steps = data.get("steps", [])
         if not isinstance(steps, list) or len(steps) > 12:
             raise ValueError("steps must be a list of at most 12 items")
@@ -618,6 +618,50 @@ class Store:
                 if [c["id"] for c in choices] == old_ids or not old_ids:
                     question["choices"] = sorted(choices, key=lambda c: not c.get("recommended", False))
             self._put(db, "question", question)
+        return True
+
+    DISPLAY_FIELDS = ("title", "context", "why", "recommendation", "safe_default", "link", "skip_effect", "details",
+                      "group", "item", "steps", "minutes", "choices")
+
+    def rewrite_display(self, question_id, data):
+        """Rewrite only the display text of a still-open, unanswered question. Returns True when something changed.
+
+        Id, status, answer, timestamps, blocking, task, kind and the choice ids never change; answered questions and
+        questions with any recorded answer are left as they are. Running it twice changes nothing the second time.
+        """
+        if not isinstance(data, dict) or set(data) - set(self.DISPLAY_FIELDS):
+            raise ValueError("only display fields can be rewritten")
+        clean = {}
+        if "title" in data:
+            clean["title"] = _text(data["title"], "question title", maximum=500)
+        if "context" in data:
+            clean["context"] = _text(data["context"], "context", maximum=4000, empty=True)
+        explained = self._explain({k: v for k, v in data.items() if k in {"why", "recommendation", "safe_default", "link",
+                                                                       "skip_effect", "details", "group", "item", "steps"}})
+        clean.update({k: explained[k] for k in data if k in explained and k != "kind"})
+        if "minutes" in data:
+            if type(data["minutes"]) is not int or not 0 <= data["minutes"] <= 480:
+                raise ValueError("minutes must be a whole number between 0 and 480")
+            clean["minutes"] = data["minutes"]
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if question["status"] not in ACTIVE_QUESTIONS or question.get("answer") not in (None, ""):
+                return False
+            if "choices" in data:
+                if not isinstance(data["choices"], list):
+                    raise ValueError("invalid choices")
+                choices = [self._option(c, n) for n, c in enumerate(data["choices"], 1)]
+                if sum(c.get("recommended", False) for c in choices) > 1:
+                    raise ValueError("at most one recommended choice")
+                old_ids = [c["id"] for c in question.get("choices", []) if isinstance(c, dict)]
+                if sorted(c["id"] for c in choices) != sorted(old_ids):
+                    raise ValueError("choice ids must stay the same")
+                clean["choices"] = sorted(choices, key=lambda c: not c.get("recommended", False))
+            updated = {**question, **clean}
+            if updated == question:
+                return False
+            self._put(db, "question", updated)
+            self._bump(db)
         return True
 
     @staticmethod

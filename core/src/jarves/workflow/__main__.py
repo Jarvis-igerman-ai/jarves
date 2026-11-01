@@ -22,7 +22,8 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot",
+                                        "questions-rewrite"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -30,7 +31,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-sync", action="store_true", help="supervisor: no periodic public GitHub metadata reads")
     ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser")
     ap.add_argument("--repo-root", type=Path, default=Path.cwd(), help="bootstrap: current JARVES checkout")
-    ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups")
+    ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups; "
+                    "questions-rewrite: store the plain wording")
+    ap.add_argument("--dry-run", action="store_true", help="questions-rewrite: show the before/after table only (default)")
     for name in ("id", "agent", "session-id", "provider", "project", "title", "context", "checkpoint", "answer", "state",
                  "implementation", "validation", "delivery", "criterion", "evidence", "note", "task", "version", "code-revision", "artifact-ref",
                  "why", "recommendation", "safe-default", "link", "skip-effect", "details"):
@@ -119,6 +122,13 @@ def main(argv=None) -> int:
         return 0
     store = Store(home / "workflow.db")
     try:
+        if a.action == "questions-rewrite":
+            # Display text only; ids, status, answers and timestamps stay. Never answers or defers anything.
+            from .questions_text import rewrite_pending_questions, rewrite_table
+            if a.apply and a.dry_run:
+                raise ValueError("choose --dry-run or --apply")
+            print(rewrite_table(rewrite_pending_questions(store, apply=a.apply), a.apply))
+            return 0
         if a.action == "status":
             from .autopilot import agent_retention_s
             result = store.snapshot(retention_s=agent_retention_s(home))
