@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
   <script src="/today.js" defer></script>
+  <script src="/health.js" defer></script>
+  <script src="/timeline.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">דלג לתוכן</a>
@@ -22,6 +24,8 @@
         <a href="#questions" data-view="questions" class="nav-link"><span class="nav-icon" aria-hidden="true">◇</span><span>ממתין להחלטה</span><span class="nav-count" id="questions-count">0</span></a>
         <a href="#work" data-view="work" class="nav-link"><span class="nav-icon" aria-hidden="true">▤</span><span>באגים, מיזוגים ומדיניות</span><span class="nav-count" id="work-count">0</span></a>
         <a href="#trace" data-view="trace" class="nav-link"><span class="nav-icon" aria-hidden="true">⌕</span><span>פעולות והיסטוריה</span><span class="nav-shortcut">04</span></a>
+        <a href="#health" data-view="health" class="nav-link"><span class="nav-icon" aria-hidden="true">◉</span><span>בריאות</span><span class="nav-shortcut">05</span></a>
+        <a href="#timeline" data-view="timeline" class="nav-link"><span class="nav-icon" aria-hidden="true">≋</span><span>ציר זמן</span><span class="nav-shortcut">06</span></a>
       </nav>
       <div class="sidebar-note"><span class="rail-line"></span><p>כל משימה נשארת בתמונה.<br>העבודה ממשיכה גם כשאתה לא כאן.</p></div>
       <div class="sidebar-bottom"><div class="watchdog-indicator" id="watchdog-indicator"><span class="status-dot"></span><span>בודק את המשגיח…</span></div><div class="sidebar-meta">LOCAL CONTROL CENTER <span dir="ltr">v1</span></div></div>
@@ -77,6 +81,8 @@
           <button id="trace-more" type="button" class="button secondary" hidden>אירועים קודמים</button>
           <div class="panel trace-handoff" id="trace-handoff" hidden><h2>רטרו יזום — הוכן, לא הופעל</h2><p class="detail-list">הקובץ מקומי. העתיקו את הבקשה לסוכן שבו /retro מותקן. ניתוח מציע שיפורים; שינוי הוראות או skills דורש בחירה שלכם.</p><button id="trace-copy" type="button" class="button secondary">העתק בקשה</button><textarea id="trace-retro-prompt" class="retro-prompt" rows="5" readonly aria-label="בקשה מוכנה לרטרו"></textarea></div>
         </section>
+        <section id="view-health" class="view" hidden aria-label="בריאות"><div id="health-root"></div></section>
+        <section id="view-timeline" class="view" hidden aria-label="ציר זמן"><div id="timeline-root"></div></section>
         <footer class="footer"><span dir="ltr">JARVES / WORKFLOW</span><span id="source-detail">המצב מוצג מהשירות המקומי בלבד</span></footer>
       </main>
     </div>

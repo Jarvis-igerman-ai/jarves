@@ -53,6 +53,9 @@
   const L = I18N[String(document.documentElement.lang || "he").toLowerCase().startsWith("en") ? "en" : "he"];
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
   views.trace = ["פעולות והיסטוריה", "מהתוכנית עד לפעולה", "סוכן, סשן וקריאת כלי — עכשיו ובהיסטוריה שנשמרה.", "DEVELOPMENT / ACTION HISTORY"];
+  // health.js and timeline.js draw these two read-only views; app.js only switches to them.
+  views.health = ["בריאות", "מי שומר על השומר", "כל שכבה במפעל, מתי נראתה לאחרונה ומה עצר. מתעדכן לבד.", "DEVELOPMENT / FACTORY HEALTH"];
+  views.timeline = ["ציר זמן", "מה רץ ומתי זה עצר", "השכבות על ציר זמן, העצירות ותנועת המשימות. אפשר להעתיק כטקסט לדיווח באג.", "DEVELOPMENT / TIMELINE"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
 
   function seconds(value) {
