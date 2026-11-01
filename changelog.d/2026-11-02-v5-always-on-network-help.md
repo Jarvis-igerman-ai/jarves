@@ -1,0 +1,1 @@
+- Added: With phone access ON the Phone page shows a stable computer-name.local address and a private-network firewall hint with a netsh command to run by hand (guidance only, nothing is changed); V5-I.
