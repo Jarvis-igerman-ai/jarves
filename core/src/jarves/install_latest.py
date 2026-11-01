@@ -128,6 +128,37 @@ def _has_version(line: str, shown) -> bool:
     return any(v and re.search(r"(?<![\w.])" + re.escape(v) + r"(?![\w.-])", line) for v in shown)
 
 
+_STATES = ("ACTIVE", "off", "unavailable")
+
+
+def parse_features(out: str) -> dict[str, str]:
+    """`jarvis features` list output -> {feature id: ACTIVE|off|unavailable}. Other lines are ignored."""
+    rows: dict[str, str] = {}
+    for ln in out.splitlines():
+        parts = ln.split()
+        if len(parts) >= 2 and parts[1] in _STATES and re.fullmatch(r"[a-z0-9_]+", parts[0]):
+            rows[parts[0]] = parts[1]
+    return rows
+
+
+def features_diff(before: dict[str, str], after: dict[str, str]) -> tuple[bool, str]:
+    """(True, detail). Informational: it never fails the install or rolls back; a feature that was ACTIVE and no longer is
+    is named in the detail (WARNING) so the owner sees it. No baseline or no list after: not judged, said so."""
+    if not before or not after:
+        return True, "not compared (no feature list " + ("before" if not before else "after") + ")"
+    lost = sorted(k for k, v in before.items() if v == "ACTIVE" and after.get(k) != "ACTIVE")
+    gained = sorted(k for k, v in after.items() if v == "ACTIVE" and before.get(k) != "ACTIVE")
+    changed = sorted(k for k in before if k in after and before[k] != after[k] and k not in lost and k not in gained)
+    bits = [f"{len(before)} features compared"]
+    if lost:
+        bits.append("WARNING no longer active: " + ", ".join(lost))
+    if gained:
+        bits.append("newly active: " + ", ".join(gained))
+    if changed:
+        bits.append("switch state changed: " + ", ".join(changed))
+    return True, "; ".join(bits)
+
+
 def _updates(deps: Deps) -> Path:
     return Path(deps.home) / "updates"
 
@@ -230,7 +261,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         for step in ("backup now", f"download {rep.version} and verify signature, SHA256 and size",
                      "stop the Core if it runs; silent setup (/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
                      " /RESTARTJARVES=1 when the Core ran)", "wait for the setup process to exit",
-                     "version + doctor + selftest + status in the new program",
+                     "version + doctor + selftest + speedtest + status + features diff in the new program",
                      "roll back automatically if a check fails"):
             rep.add("would: " + step, True)
         rep.ok = True
@@ -258,6 +289,11 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         deps.record_was_running(was)
     except OSError:
         pass
+    try:                                                  # baseline from the CURRENT program, before anything is stopped
+        fcode, fout = deps.run_cli(["features"])
+        before = parse_features(fout) if fcode == 0 else {}
+    except Exception:                                     # noqa: BLE001
+        before = {}
     up = _updates(deps)
     for name in (REPORT_FILE, STATE_FILE, PID_FILE):      # nothing of an older run may be mistaken for this one
         try:
@@ -265,7 +301,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         except OSError:
             pass
     state = {"report": {**rep.to_dict(), "changed": True}, "shown": shown, "core_up": core_up,
-             "installer": str(prep["installer"])}
+             "installer": str(prep["installer"]), "features_before": before}
     spawned = False
     if deps.spawn_finisher is not None:                   # the waiter exists BEFORE setup can stop this process
         try:
@@ -326,10 +362,18 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         code, out = deps.run_cli(["update", "status"])
         ver_ok = code == 0 and _has_version(_first_line(out), shown)
         ok = rep.add("installed version", ver_ok, _first_line(out) if not ver_ok else rep.version) and ok
-        for name, argv in (("doctor", ["doctor"]), ("selftest", ["selftest"]), ("status", ["status", "--brief"])):
+        for name, argv in (("doctor", ["doctor"]), ("selftest", ["selftest"]),
+                            ("speedtest", ["speedtest"]), ("status", ["status", "--brief"])):
             code, out = deps.run_cli(argv)
             good = code == 0 or (name == "status" and (code == 4 or (code == 1 and not core_up)))
             ok = rep.add(name, good, "" if good else f"exit {code}: {_first_line(out)}") and ok
+    if install_ok or end == "timeout":                    # informational: lost features are named, rollback stays check-driven
+        try:
+            fcode, fout = deps.run_cli(["features"])
+            fok, fdetail = features_diff(state.get("features_before") or {}, parse_features(fout) if fcode == 0 else {})
+        except Exception as e:                            # noqa: BLE001
+            fok, fdetail = True, f"not compared ({type(e).__name__})"
+        rep.add("features diff", fok, fdetail)
     if not ok:
         try:
             if deps.core_running():

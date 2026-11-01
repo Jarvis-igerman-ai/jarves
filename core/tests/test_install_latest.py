@@ -80,10 +80,11 @@ def test_happy_path_order_and_report(tmp_path):
     f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
-    assert f.calls[:8] == ["backup", "prepare", "set_channel", "record", "stop", "launch restart=True", "wait_installer",
-                           "cli:update status"]
-    assert [c for c in f.calls if c.startswith("cli:")] == ["cli:update status", "cli:doctor", "cli:selftest",
-                                                            "cli:status --brief"]
+    assert f.calls[:9] == ["backup", "prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
+                           "wait_installer", "cli:update status"]
+    assert [c for c in f.calls if c.startswith("cli:")] == ["cli:features", "cli:update status", "cli:doctor",
+                                                            "cli:selftest", "cli:speedtest", "cli:status --brief",
+                                                            "cli:features"]
     text = rep.render()
     assert text.startswith("PASS  install-latest  2026-10-27 09:00 UTC")
     assert "4.5.0 -> 4.5.1" in text and "revert id: pre-update.zip" in text and "jarvis update --rollback --yes" in text
@@ -101,7 +102,7 @@ def test_failed_check_rolls_back(tmp_path):
 def test_failed_installer_rolls_back_without_running_checks(tmp_path):
     f = Fake(tmp=tmp_path, wait="failed")
     rep = il.run(f.deps())
-    assert not rep.ok and rep.rolled_back and not any(c.startswith("cli:") for c in f.calls)
+    assert not rep.ok and rep.rolled_back and not any((c.startswith("cli:") and c != "cli:features") for c in f.calls)
 
 
 def test_version_mismatch_is_a_failure(tmp_path):
@@ -170,7 +171,7 @@ def test_launch_failure_restarts_core_and_reports_cleanly(tmp_path):
         assert f.calls.index("stop") < f.calls.index("start_core")
         text = rep.render()
         assert text.startswith("FAIL") and "nothing was installed" in text and "restart Core" in text
-        assert not any(c.startswith("cli:") for c in f.calls) and "rollback" not in f.calls
+        assert not any((c.startswith("cli:") and c != "cli:features") for c in f.calls) and "rollback" not in f.calls
     f = Fake(tmp=tmp_path, core=False, launch_error=OSError("x"))
     il.run(f.deps())
     assert "start_core" not in f.calls                    # the Core was not running: nothing to restart
@@ -183,7 +184,7 @@ def test_checks_wait_for_the_setup_process_and_never_roll_back_while_it_runs(tmp
     g = Fake(tmp=tmp_path, core=False, installer_exits=False)
     rep = il.run(g.deps())
     assert not rep.ok and not rep.rolled_back and "rollback" not in g.calls
-    assert not any(c.startswith("cli:") for c in g.calls) and "still running" in rep.render()
+    assert not any((c.startswith("cli:") and c != "cli:features") for c in g.calls) and "still running" in rep.render()
 
 
 def test_core_not_running_does_not_wait_for_the_core_watch(tmp_path):
@@ -196,7 +197,7 @@ def test_spawned_finisher_runs_outside_the_installed_program(tmp_path):
     rep = il.begin(f.deps())
     assert rep.pending and rep.changed and rep.render().startswith("PENDING")
     assert f.calls.index("spawn") < f.calls.index("stop") < f.calls.index("launch restart=True") < f.calls.index("pid=4242")
-    assert not any(c.startswith("cli:") or c == "rollback" for c in f.calls)
+    assert not any((c.startswith("cli:") and c != "cli:features") or c == "rollback" for c in f.calls)
     state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
     d = f.deps()
     done = il.finish(d, state, installer_running=False)    # what the waiter's `--finish` does in the new program
@@ -353,7 +354,7 @@ def test_finish_with_installer_running_flag_judges_nothing(tmp_path):
     state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
     g = Fake(tmp=tmp_path)
     rep = il.finish(g.deps(), state, installer_running=True)
-    assert not rep.ok and not rep.rolled_back and "rollback" not in g.calls and not any(c.startswith("cli:") for c in g.calls)
+    assert not rep.ok and not rep.rolled_back and "rollback" not in g.calls and not any((c.startswith("cli:") and c != "cli:features") for c in g.calls)
 
 
 def test_installed_build_without_a_waiter_stops_before_anything_is_stopped(tmp_path):
@@ -379,3 +380,39 @@ def test_lock_stays_until_rollback_returns_and_waiter_deletes_it_on_fail_paths(t
     assert seen == [True] and not (tmp_path / "updates" / il.LOCK_FILE).exists()
     s = il.finisher_script(Path("u/st.json"), "py.exe", Path("u/r"), Path("u/p"), "i.exe")
     assert s.count(il.LOCK_FILE) == 2 and s.rstrip().endswith("SilentlyContinue")
+
+
+_FEATS_BEFORE = "voice  ACTIVE  low  stable  Voice\nvision  off  low  beta  Vision\nchange: jarvis features on|off|reset ID\n"
+_FEATS_AFTER = "voice  unavailable  low  stable  Voice\nvision  off  low  beta  Vision\nmail  ACTIVE  low  beta  Mail\n"
+
+
+def test_parse_features_ignores_noise():
+    assert il.parse_features(_FEATS_BEFORE) == {"voice": "ACTIVE", "vision": "off"}
+    assert il.parse_features("garbage\n") == {}
+
+
+def test_features_diff_names_lost_and_gained_but_never_fails():
+    ok, detail = il.features_diff(il.parse_features(_FEATS_BEFORE), il.parse_features(_FEATS_AFTER))
+    assert ok and "WARNING no longer active: voice" in detail and "newly active: mail" in detail
+    assert il.features_diff({}, {"a": "off"}) == (True, "not compared (no feature list before)")
+
+
+def test_report_has_speedtest_and_features_diff(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"features": (0, _FEATS_BEFORE)})
+    rep = il.run(f.deps(), channel="beta")
+    names = [c[0] for c in rep.checks]
+    assert rep.ok and "speedtest" in names and "features diff" in names
+    assert "[PASS] features diff: 2 features compared" in rep.render()
+
+
+def test_failed_speedtest_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"speedtest": (1, "speedtest FAIL")})
+    rep = il.run(f.deps())
+    assert not rep.ok and rep.rolled_back and "rollback" in f.calls
+    assert ("speedtest", False, "exit 1: speedtest FAIL") in rep.checks
+
+
+def test_features_snapshot_failure_does_not_block_install(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
+    rep = il.run(f.deps(), channel="beta")
+    assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks

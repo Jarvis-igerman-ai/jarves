@@ -1,0 +1,1 @@
+- Added: `jarvis install-latest` now also runs `speedtest` and prints a features diff (a feature that was active before the update and is not after is named; informational, never a rollback by itself). (guide install_latest)
