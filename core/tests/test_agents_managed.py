@@ -467,7 +467,8 @@ def test_autopilot_worker_default_list_matches_owner_rights_and_never_a_bypass(w
     """P1: a headless worker could not run one test (popup timed out while the owner slept). Same working rights, no bypass."""
     from jarves.orchestrator import claude
     rules = claude.autopilot_allowed_tools("C:\py\python.exe")
-    assert "Bash(python:*)" in rules and "Bash(git push jarves:*)" in rules and "Bash(gh pr:*)" in rules
+    assert "Bash(python:*)" in rules and "Bash(gh pr:*)" in rules and "Bash(git push jarves:*)" not in rules and "Bash(jarvis:*)" not in rules
+    assert "Bash(git push*)" in claude.WORKER_DENY and "Bash(jarvis hotfix*)" in claude.WORKER_DENY
     for hard_stop in ("Bash(git push:*)", "Bash(git tag:*)", "Bash(rm:*)", "Bash(gh release:*)", "Bash(powershell:*)",
                       "Bash(schtasks:*)", "Bash(taskkill:*)"):
         assert hard_stop not in rules

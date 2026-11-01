@@ -47,6 +47,8 @@ _BYPASS = ("dangerously", "bypass", "skip-permissions")
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
+    if any(h in x.lower() for x in value for h in ("git push", "git tag", "gh release", "rm:", "rm ", "hotfix", "powershell")):
+        raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
         raise ValueError("worker_allowed_tools: no duplicates and no bypass flags")
 
