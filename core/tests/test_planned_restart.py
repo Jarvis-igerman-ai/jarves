@@ -91,6 +91,52 @@ def test_marker_deleted_when_on_start_never_or_no_previous_run(tmp_path):
     assert calls == [] and not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
 
 
+def test_crash_of_hotfixed_core_before_consuming_marker_is_reported(tmp_path):
+    """Opus blocker 2: S1 is stopped by the hotfix (marker names S1); the hotfixed Core S2 dies before its startup
+    consumed the marker; the revert's Core S3 must report S2 as a crash, not as a planned restart."""
+    def r(t, code, s):
+        return json.dumps({"ts": datetime.fromtimestamp(t, timezone.utc).isoformat(timespec="milliseconds"),
+                           "level": "INFO", "component": "core", "code": code, "msg": "-", "session": s})
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 - 200, session="S1")
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "jarves.log").write_text("\n".join([
+        r(T0 - 3000, "CORE_STARTING", "S1"), r(T0 - 190, "CORE_STOPPED", "S1"), r(T0 - 150, "CORE_STARTING", "S2")]) + "\n",
+        encoding="utf-8")
+    svc, calls = _svc(tmp_path)
+    asyncio.run(svc._startup())
+    assert calls == ["crash"]
+    assert not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+
+
+def test_marker_naming_the_previous_session_still_explains_it(tmp_path):
+    _log(tmp_path, stopped=False)                                    # session "old"
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 - 30, session="old")
+    svc, calls = _svc(tmp_path)
+    asyncio.run(svc._startup())
+    assert calls == []
+
+
+def test_last_core_session_reads_the_log(tmp_path):
+    assert selfcheck.last_core_session(tmp_path, lambda: T0) is None
+    _log(tmp_path, stopped=False)
+    assert selfcheck.last_core_session(tmp_path, lambda: T0) == "old"
+
+
+def test_hotfix_stop_failure_removes_the_marker(tmp_path, monkeypatch):
+    import pytest
+    from jarves import cli, hotfix
+    _log(tmp_path, stopped=False)
+    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: {"ok": True})        # the Core never stops
+    monkeypatch.setattr(cli, "cmd_stop", lambda *a, **k: None)
+    ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0])
+    monkeypatch.setattr(hotfix.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(hotfix.time, "sleep", lambda s: None)
+    h = hotfix.default_hooks(SimpleNamespace(link=SimpleNamespace(port=1)), tmp_path, tmp_path / "pkg")
+    with pytest.raises(hotfix.HotfixError):
+        h.stop_core()
+    assert not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+
+
 def test_future_timestamp_marker_is_rejected(tmp_path):
     shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 + 500)
     assert shutdown.consume_planned_restart(tmp_path, lambda: T0) is None

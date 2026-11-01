@@ -360,8 +360,13 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
         return cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2) is not None
 
     def stop() -> None:
-        from .runtime.shutdown import mark_planned_restart
-        mark_planned_restart(home, "hotfix")        # #620: the next start must not treat this stop as a crash
+        from . import selfcheck
+        from .runtime.shutdown import PLANNED_RESTART_FILE, mark_planned_restart
+        try:
+            sess = selfcheck.last_core_session(home)
+        except Exception:
+            sess = None
+        mark_planned_restart(home, "hotfix", session=sess)      # #620: the next start must not treat this stop as a crash
         a = None
         try:
             cli.cmd_stop(a, cfg, home)
@@ -373,7 +378,7 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
         except BaseException:
             # the stop failed: the Core was not ended on purpose, so a later crash must not be explained by this marker
             try:
-                (home / "planned_restart.json").unlink()
+                (home / PLANNED_RESTART_FILE).unlink()
             except OSError:
                 pass
             raise
