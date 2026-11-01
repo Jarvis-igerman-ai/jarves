@@ -168,7 +168,8 @@ class Store:
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=timeout_s, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
-        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")   # first: every later statement waits, not fails
+        self._busy_ms = int(timeout_s * 1000)
+        self._db.execute(f"PRAGMA busy_timeout={self._busy_ms}")   # first: every later statement waits, not fails
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript("""
@@ -188,6 +189,7 @@ class Store:
                 task_id TEXT NOT NULL,parent_id TEXT NOT NULL,event TEXT NOT NULL,tool TEXT NOT NULL,
                 call_id TEXT NOT NULL,status TEXT NOT NULL,duration_ms REAL,data TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS workflow_events_kind_ts ON workflow_events(kind,ts);
+            CREATE INDEX IF NOT EXISTS workflow_events_kind_id ON workflow_events(kind,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_agent ON workflow_trace(agent_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_task ON workflow_trace(task_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_time ON workflow_trace(ts);
@@ -219,6 +221,38 @@ class Store:
                 raise
             else:
                 self._db.execute("COMMIT")
+
+    def read(self, fn, *, budget_s: float = 2.0):
+        """Run ``fn(db)`` in a deferred (read-only) transaction: no BEGIN IMMEDIATE, so it never queues behind a writer.
+        A busy database is retried with a short backoff for ``budget_s`` seconds in total, then the error is raised
+        (hooks catch it and treat the answer as unknown)."""
+        deadline = time.monotonic() + budget_s
+        delay = 0.02
+        while True:
+            with self._lock:
+                self._db.execute("PRAGMA busy_timeout=200")
+                started = False
+                try:
+                    self._db.execute("BEGIN")
+                    started = True
+                    return fn(self._db)
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc) and "busy" not in str(exc):
+                        raise
+                    if time.monotonic() >= deadline:
+                        raise
+                finally:
+                    if started:
+                        try:
+                            self._db.execute("ROLLBACK")
+                        except sqlite3.Error:
+                            pass
+                    try:
+                        self._db.execute(f"PRAGMA busy_timeout={self._busy_ms}")
+                    except sqlite3.Error:
+                        pass
+            time.sleep(delay)
+            delay = min(delay * 2, 0.25)
 
     def close(self):
         with self._lock:
