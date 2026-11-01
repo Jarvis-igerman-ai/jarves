@@ -31,7 +31,9 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+_CLAIM_FAILED: set = set()
+
 def load_policy(home: Path) -> dict:
     from . import autopilot
     policy, error = autopilot.load(home)
@@ -254,7 +256,9 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
             if not claimed:           # lost the race or no longer ready: record it and try the next candidate
-                store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
+                if (agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
+                    _CLAIM_FAILED.add((agent_id, task["id"]))
+                    store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
                 skipped.add(task["id"])
                 actions.append({"task_id": task["id"], "action": "claim_failed"})
@@ -281,7 +285,6 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 state["paused_until"] = now + PAUSE_S
                 state["pause_reason"] = code
                 _save(store, state)
-                store.record_event("autopilot_idle", f"start refused ({code}); not counted against max_starts_per_hour")
                 store.record_event("autopilot_paused", f"Autopilot start refused ({code}); paused for {PAUSE_S // 60} min")
                 actions.append({"task_id": task["id"], "action": "refused", "code": code})
                 break
@@ -328,9 +331,6 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
         for name in watch.steward_step(store, policy, source.get("open_prs", []),
                                        lambda pr: list(pr.get("files") or []), notify=_notify):
             out.append({"action": "review_task", "task_id": name})
-        from .release_health import watch_release_health
-        for kind in watch_release_health(store, source, notify=_notify):
-            out.append({"action": "release_health", "detail": kind})
         for name in watch.manual_test_step(store):
             out.append({"action": "manual_test_item", "task_id": name})
         for name in watch.gate_questions_step(store):

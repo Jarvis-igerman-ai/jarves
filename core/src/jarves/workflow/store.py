@@ -556,7 +556,7 @@ class Store:
         """Return a taskless, session-less agent (e.g. offline after a failed start) to idle so it can claim again."""
         with self._tx() as db:
             agent = self._get(db, "agent", _id(agent_id))
-            if agent.get("task_id") or agent.get("session_id"):
+            if not agent.get("autopilot") or agent.get("task_id") or agent.get("session_id"):
                 return False
             agent["status"] = "idle"
             agent["heartbeat_at"] = self.clock()
