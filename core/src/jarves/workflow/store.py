@@ -202,7 +202,34 @@ class Store:
     def _event(self, db, kind, summary):
         db.execute("INSERT INTO workflow_events(ts,kind,summary) VALUES (?,?,?)", (self.clock(), kind, summary[:1000]))
         self._bump(db)
-        db.execute("DELETE FROM workflow_events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events)")
+        # Beats are high-volume telemetry with their own retention so they never push real events out.
+        db.execute("DELETE FROM workflow_events WHERE kind!='layer_beat' AND id < "
+                   "(SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events WHERE kind!='layer_beat')")
+        if kind == "layer_beat":
+            db.execute("DELETE FROM workflow_events WHERE kind='layer_beat' AND id < "
+                       "(SELECT COALESCE(MAX(id),0)-8000 FROM workflow_events WHERE kind='layer_beat')")
+
+    def _flow(self, db, task, from_state, agent):
+        """Pipeline telemetry for the timeline (hidden from the recent-events list)."""
+        self._event(db, "task_flow", json.dumps({"task_id": task["id"], "title": task["title"][:120], "lane": task["lane"],
+                                                 "from": from_state, "to": task["state"], "agent": agent}, ensure_ascii=False))
+
+    # Observability (see observability.py and docs/workflow/OBSERVABILITY.md)
+    def beat(self, layer, state="ok", note=""):
+        from . import observability
+        return observability.beat(self, layer, state, note)
+
+    def layers(self, now=None):
+        from . import observability
+        return observability.layers(self, now)
+
+    def timeline(self, since=None, until=None, now=None):
+        from . import observability
+        return observability.timeline(self, since, until, now)
+
+    def detect_incidents(self, now=None):
+        from . import observability
+        return observability.detect_incidents(self, now)
 
     @staticmethod
     def _release(db, task, *, locks=True):
@@ -276,7 +303,8 @@ class Store:
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
                 "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
-                "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
+                "events": [dict(r) for r in db.execute(
+                    "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
 
@@ -525,6 +553,7 @@ class Store:
                 self._put(db, "task", task)
                 self._put(db, "agent", agent)
                 self._event(db, "task_claimed", f"{agent['label']}: {task['title']}")
+                self._flow(db, task, "queued", agent_id)
                 return task
         return None
 
@@ -861,6 +890,7 @@ class Store:
                 task["validation"] = "not_run"
                 for row in task["acceptance"]:
                     row["passed"] = False
+            previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
@@ -868,6 +898,7 @@ class Store:
                 task["blocker"] = ""
             self._put(db, "task", task)
             self._event(db, "task_transition", f"{task['title']}: {state}")
+            self._flow(db, task, previous_state, task.get("agent_id"))
         return task
 
     def record_check(self, task_id, criterion_id, evidence, passed=True):

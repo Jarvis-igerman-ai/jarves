@@ -16,6 +16,7 @@ import threading
 import time
 from pathlib import Path
 
+from . import observability as obs
 from .store import Store
 
 MAX_LOOP_FAILURES = 20
@@ -134,6 +135,11 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
         child, restarts, next_sync, sync_thread = None, [], 0.0, None
         failures = 0
+        cause = "stop requested"
+        try:
+            obs.on_start(store, home)
+        except Exception as exc:  # noqa: BLE001  logging must never stop the supervisor
+            obs.log_line(home, f"on_start bookkeeping failed: {type(exc).__name__}")
 
         def sync_background():
             # Slow external metadata must never suspend local worker monitoring.
@@ -152,8 +158,11 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                         if len(restarts) >= 3:
                             store.set_supervisor({"heartbeat_at": now, "status": "degraded", "restart_limit": True})
                             store.record_event("supervisor", "Web service restart limit reached; repair the cause, then restart the supervisor")
+                            obs.log_line(home, "web restart limit reached (3 in 10 min); supervisor degraded")
                             stop.wait(interval)
                             continue
+                        if child is not None:
+                            obs.log_line(home, f"web child exited rc={child.poll()}; restarting ({len(restarts)} start(s) in 10 min)")
                         # Close stdout: the token-bearing link is printed only by the owner's open command.
                         entry = Path(__file__).resolve().parents[3] / "tools" / "workflow_console.py"
                         # A checkout-only parent sys.path is not inherited by a new Python process.
@@ -166,6 +175,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                     store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid, "pid": os.getpid(),
                                           "restart_count": len(restarts)})
                     store.tick()
+                    obs.supervisor_tick(store, home, profile_home)
                     try:
                         from .autopilot import step
                         step(store, home)  # import-only; it never starts a worker
@@ -175,6 +185,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                     from .autopilot_loop import step_safe
                     step_safe(store, profile_home)  # no-op unless <home>/autopilot.json enables it
                     if update_enabled and _self_update(store, home, profile_home, port):
+                        cause = "self-update: successor supervisor started"
                         stop.set()  # successor was started; this supervisor leaves cleanly (ledger/policy/sessions kept)
                         continue
                     if sync_github and now >= next_sync and (sync_thread is None or not sync_thread.is_alive()):
@@ -187,16 +198,19 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                     raise
                 except Exception as exc:  # noqa: BLE001  one bad tick (e.g. a locked DB) must not end the supervisor
                     failures += 1
+                    obs.log_line(home, f"loop error {failures}/{MAX_LOOP_FAILURES}: {type(exc).__name__}: {str(exc)[:200]}")
                     try:
                         store.record_event("supervisor_error", f"Supervisor loop error {failures}/{MAX_LOOP_FAILURES}: {type(exc).__name__}: {str(exc)[:160]}")
                     except Exception:  # noqa: BLE001
                         pass
                     if failures >= MAX_LOOP_FAILURES:
+                        cause = f"crash after {failures} loop errors: {type(exc).__name__}"
                         raise
                     stop.wait(min(30.0, 3.0 * failures))
         except KeyboardInterrupt:
-            pass
+            cause = "KeyboardInterrupt"
         finally:
+            obs.on_stop(home, cause, store)
             try:
                 store.set_supervisor({"heartbeat_at": clock(), "status": "stopped"})
             except sqlite3.Error:
