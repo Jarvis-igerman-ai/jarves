@@ -70,6 +70,7 @@ For the owner-facing sequence, diagrams and simplicity decisions read
 `jarvis agents start PROVIDER PROJECT "task" --model MODEL`; no additional
 launcher is installed. Those agent interfaces need the running Core and their
 existing account/project/permission prerequisites.
+The merge steward decides per cycle between single merges and one integration PR with `core/tools/integration_branch.py` (`plan`, `build`, `close-superseded`); see OPERATING_MODEL "Merge steward".
 
 ## Action history and a manual retrospective
 

@@ -220,7 +220,8 @@ def steward_step(store: Store, policy: dict, prs, files_for, *, notify=None) -> 
             data = {"id": f"steward-pr-{number}-{sha}", "title": f"Steward PR #{number}",
                     "lane": "release", "version": "ops", "priority": 2, "required_validation": "automated",
                     "scope": {"model": model, "pr": number, "kind": "steward"},
-                    "acceptance": [{"id": "C1", "label": f"PR #{number} checked per the operating model steward rules"}]}
+                    "acceptance": [{"id": "C1", "label": f"PR #{number} checked per the operating model steward rules; "
+                                                          "use core/tools/integration_branch.py plan/build when 3 or more green PRs are independent"}]}
         if _create_once(store, data):
             made.append(data["id"])
     return made
