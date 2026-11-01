@@ -33,13 +33,39 @@ def _mine(home: Path, explicit: str | None, version: str) -> tuple[Path, so.Shee
     return root, so.load(root, version)
 
 
+AUTO_PREFIX = "accepted by automation"          # release_flow.AUTOMATION_NOTE: rows CI proved, not the owner's steps
+
+
+def is_auto(row: so.Row) -> bool:
+    """A row the reduced sheet recorded as accepted by automation (with its evidence). The step-by-step view shows these
+    as one summary and never asks the owner to judge them; it cannot edit them."""
+    return row.result == "accepted-blocked" and row.note.strip().lower().startswith(AUTO_PREFIX)
+
+
+def owner_steps(sheet: so.Sheet) -> list[so.Row]:
+    """The rows the owner judges himself, in sheet order (the step-by-step view walks exactly these)."""
+    return [r for r in sheet.rows if not is_auto(r)]
+
+
+def next_step(sheet: so.Sheet) -> tuple[int, int, so.Row | None]:
+    """(1-based position, total, row) of the first owner step still open (pending, fail or blocked); (0, total, None)
+    when every owner step is done. Resume = this row, so the page and the CLI agree on where the owner stopped."""
+    steps = owner_steps(sheet)
+    for i, r in enumerate(steps, 1):
+        if r.problem():
+            return i, len(steps), r
+    return 0, len(steps), None
+
+
 def summary(sheet: so.Sheet) -> dict:
     counts: dict[str, int] = {r: 0 for r in so.RESULTS}
     for r in sheet.rows:
         counts[r.result] += 1
-    return {"version": sheet.version, "rows": [vars(r) for r in sheet.rows], "counts": counts,
+    _, _, nxt = next_step(sheet)
+    return {"version": sheet.version, "rows": [{**vars(r), "auto": is_auto(r)} for r in sheet.rows], "counts": counts,
             "open": sheet.open_rows(), "signed": sheet.signed, "beta": sheet.beta, "commit": sheet.commit,
-            "date": sheet.date, "owner": sheet.owner, "problems": sheet.problems()}
+            "date": sheet.date, "owner": sheet.owner, "problems": sheet.problems(),
+            "steps": [r.id for r in owner_steps(sheet)], "next": nxt.id if nxt else None}
 
 
 def _finish(sheet: so.Sheet, home: Path, beta: str | None, commit: str | None, owner: str | None = None) -> None:
@@ -92,6 +118,10 @@ def cmd_release(a, cfg, home) -> int:
     print(f"Sign-off sheet for {version}: {root / so.SHEET_DIR / ('MANUAL_TEST_' + version + '.md')}")
     for r in sheet.rows:
         print(f"  [{r.result:^16}] {r.id}  {r.todo}" + (f"  -- {r.note}" if r.note else ""))
+    pos, total, nxt = next_step(sheet)
+    if nxt is not None:                          # the same resume point as the dashboard's step-by-step view
+        print(clilang.fmt(f"הצעד הבא ({pos} מתוך {total}): {nxt.id}: {nxt.todo} -> {nxt.expected}",
+                          f"Next step ({pos} of {total}): {nxt.id}: {nxt.todo} -> {nxt.expected}"))
     if s["problems"]:
         print("Still open:")
         for p in s["problems"]:
@@ -180,9 +210,37 @@ def _register_feature() -> None:
     features.register("release_signoff", "אישור גרסה (בדיקה ידנית)", "Release sign-off (manual test)", True, risk="low",
                       about="the owner's checklist for a stable release: test the latest beta by hand, record the "
                             "results, sign off; a stable tag is refused without it", **kw)
+    # #60: the same sheet one check per screen. Beta and OFF until the owner has used it on his PC and phone.
+    kw2 = {"targets": {"windows": {"status": "implemented_unverified",
+                                   "evidence": "core/tests/test_signoff_steps.py (resume point, automation summary, "
+                                               "page flag); owner use on PC and phone not done yet"},
+                       "linux_arm64_pi": {"status": "planned", "blocker": "release tooling runs on the owner's PC",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}}} \
+        if kw else {}
+    features.register("signoff_steps", "אישור גרסה צעד אחר צעד", "Release sign-off step by step", False, risk="low",
+                      needs=["release_signoff"], stage="beta",
+                      about="the Release sign-off page shows one check per screen (Works, Does not work, Cannot test "
+                            "now), resumes where you stopped and sums up the checks CI already proved; it records only "
+                            "what you press, and signing still needs every row done", **kw2)
 
 
 _register_feature()
+
+
+def _steps_on(ctx) -> bool:
+    try:
+        from .features import _ctx_features
+        return bool(_ctx_features(ctx).enabled("signoff_steps"))
+    except Exception:                                 # noqa: BLE001  - no feature store: the plain table view
+        return False
+
+
+def _installed_beta(home) -> str:
+    try:
+        from . import updates
+        return updates.beta_label(home) or ""
+    except Exception:                                 # noqa: BLE001
+        return ""
 
 
 def _ver(body_or_q) -> str:
@@ -198,7 +256,8 @@ def api_signoff(ctx, m, body, q=None):
         root, sheet = _mine(ctx.home, None, version)
     except so.SheetError as e:
         return 404, {"error": str(e)}
-    return 200, {**summary(sheet), "file": str(so.sheet_path(root, version))}
+    return 200, {**summary(sheet), "file": str(so.sheet_path(root, version)), "steps_view": _steps_on(ctx),
+                 "installed": _installed_beta(ctx.home)}
 
 
 def api_signoff_set(ctx, m, body):

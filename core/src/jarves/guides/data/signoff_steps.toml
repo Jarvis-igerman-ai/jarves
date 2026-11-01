@@ -1,0 +1,54 @@
+order = 63
+category = "system"
+pages = ["signoff"]
+features = ["signoff_steps"]
+suggest = false
+aliases = ["אישור גרסה צעד אחר צעד", "אשף אישור גרסה", "signoff wizard", "sign-off steps", "release wizard"]
+links = ["release_signoff", "beta_features"]
+title_he = "אישור גרסה צעד אחר צעד (בטא)"
+title_en = "Release sign-off step by step (beta)"
+what_he = "אותו גיליון אישור גרסה, אבל בדיקה אחת בכל מסך: מה לעשות, מה אמור לקרות, ושלושה כפתורים גדולים: עובד, לא עובד, אי אפשר לבדוק עכשיו. הבדיקות שהמערכת כבר הוכיחה מוצגות כסיכום אחד. ממשיך מהבדיקה הפתוחה הראשונה. נרשם רק מה שאתם לוחצים, אף פעם לא בשבילכם. כבוי כברירת מחדל."
+what_en = "The same release sign-off sheet, one check per screen: what to do, what should happen, and three big buttons: Works, Does not work, Cannot test now. The checks the system already proved show as one summary. It resumes at the first open check. Only what you press is recorded, never on your behalf. Off by default."
+say = [["איפה עצרתי באישור הגרסה?", "Where did I stop in the release sign-off?"]]
+expect_he = "בעמוד אישור גרסה מופיע \"צעד 2 מתוך 5\" עם פס התקדמות. \"עובד\" רושם pass ועובר לבדיקה הבאה. \"לא עובד\" מבקש משפט אחד ורושם fail. \"אי אפשר לבדוק עכשיו\" רושם blocked. כפתור החתימה נעול עד שכל השורות סגורות."
+expect_en = "The Release sign-off page shows \"Step 2 of 5\" with a progress bar. \"Works\" records pass and moves to the next check. \"Does not work\" asks one sentence and records fail. \"Cannot test now\" records blocked. The sign-off button stays locked until every row is done."
+test_he = "הריצו  jarvis features on signoff_steps , צרו גיליון בדיקה  jarvis release sheet --version X.Y.Z  ופתחו את עמוד אישור גרסה עם הגרסה. ודאו שמופיע \"צעד 1 מתוך 5\". אל תלחצו \"עובד\" על בדיקה שלא עשיתם."
+test_en = "Run  jarvis features on signoff_steps , create a sheet  jarvis release sheet --version X.Y.Z  and open the Release sign-off page with that version. Check it shows \"Step 1 of 5\". Do not press \"Works\" for a check you did not do."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "התוצאות וההערות שלכם נשמרות רק בגיליון בפרויקט (docs/reviews). שום דבר לא נשלח החוצה."
+privacy_en = "Your results and notes are saved only in the sheet in the project (docs/reviews). Nothing is sent out."
+
+[parity.features]
+signoff_steps = "release"
+
+[[steps]]
+he = "הפעלה: jarvis features on signoff_steps (צריך גם את יכולות הבטא). כיבוי: jarvis features off signoff_steps, ואז העמוד חוזר לטבלה."
+en = "Turn it on: jarvis features on signoff_steps (beta features must be on too). Turn it off: jarvis features off signoff_steps, and the page goes back to the table."
+
+[[steps]]
+he = "צרו את הגיליון הקצר: jarvis release sheet --version X.Y.Z, והתקינו את הבטא האחרונה."
+en = "Create the short sheet: jarvis release sheet --version X.Y.Z, and install the latest beta."
+action = "command:jarvis release sheet"
+
+[[steps]]
+he = "פתחו את עמוד אישור גרסה, הקלידו את הגרסה ועברו על הבדיקות אחת אחת. אפשר לעצור ולחזור: העמוד ממשיך מהבדיקה הפתוחה הראשונה."
+en = "Open the Release sign-off page, type the version and go through the checks one by one. You can stop and come back: the page resumes at the first open check."
+action = "open:#/signoff"
+
+[[steps]]
+he = "במסך הסיכום לחצו \"לחתום על הגרסה\". בטרמינל: jarvis release signoff --version X.Y.Z מציג את אותו \"הצעד הבא\", ו---finish חותם."
+en = "On the summary screen press \"Sign off this release\". In a terminal: jarvis release signoff --version X.Y.Z shows the same \"Next step\", and --finish signs."
+action = "command:jarvis release signoff"
+
+[[problems]]
+he = "העמוד עדיין מציג טבלה"
+en = "The page still shows a table"
+fix_he = "התצוגה כבויה. הריצו jarvis features on signoff_steps ורעננו. הקישור \"תצוגת טבלה\" פותח תמיד את הטבלה."
+fix_en = "The view is off. Run jarvis features on signoff_steps and refresh. The \"Table view\" link always opens the table."
+
+[[problems]]
+he = "כפתור החתימה נעול"
+en = "The sign-off button is locked"
+fix_he = "נשארה בדיקה שלא עובדת או שלא נבדקה. הסיכום מציג קישור לכל אחת. בדיקה שבאמת אי אפשר לבצע מאשרים רק עם סיבה שאתם כותבים."
+fix_en = "A check still does not work or was not tested. The summary links to each one. A check that truly cannot be done is accepted only with a reason you type."
