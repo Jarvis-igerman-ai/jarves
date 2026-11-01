@@ -467,8 +467,15 @@ class Store:
                 raise ValueError("only autopilot-owned agents can be linked")
             if session_id and agent.get("session_id") and agent["session_id"] != session_id:
                 raise ValueError("agent already has a session")
-            if session_id and any(o["id"] != agent["id"] and o.get("session_id") == session_id for o in self._all(db, "agent")):
-                raise ValueError("session already attached to another workflow worker")
+            if session_id:
+                for o in self._all(db, "agent"):
+                    if o["id"] == agent["id"] or o.get("session_id") != session_id:
+                        continue
+                    if str(o["id"]).startswith("external-") and not o.get("task_id"):
+                        o["session_id"] = ""   # adopt: the hook-observed stub yields the session to its autopilot owner
+                        self._put(db, "agent", o)
+                        continue
+                    raise ValueError("session already attached to another workflow worker")
             if not session_id and agent.get("task_id"):
                 raise ValueError("cannot unlink a session while it owns a task")
             had_session = bool(agent.get("session_id"))
@@ -481,6 +488,18 @@ class Store:
             self._put(db, "agent", agent)
             self._bump(db)
         return agent
+
+    def reset_idle_agent(self, agent_id):
+        """Return a taskless, session-less agent (e.g. offline after a failed start) to idle so it can claim again."""
+        with self._tx() as db:
+            agent = self._get(db, "agent", _id(agent_id))
+            if agent.get("task_id") or agent.get("session_id"):
+                return False
+            agent["status"] = "idle"
+            agent["heartbeat_at"] = self.clock()
+            self._put(db, "agent", agent)
+            self._bump(db)
+        return True
 
     def claim(self, agent_id, task_id=None):
         agent_id = _id(agent_id)
