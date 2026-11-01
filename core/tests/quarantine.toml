@@ -16,12 +16,6 @@ since = "2026-10-26"
 reason = "failed once, same commit passed (real browser layout)"
 
 [[test]]
-id = "test_perf_probes.py::test_slow_cli_probe_never_blocks_features_list_and_its_result_lands"
-issue = 550
-since = "2026-10-26"
-reason = "failed once, same commit passed (timing probe)"
-
-[[test]]
 id = "test_say_engine.py::test_default_output_is_one_line_without_espeak_on_windows"
 issue = 551
 since = "2026-10-26"
