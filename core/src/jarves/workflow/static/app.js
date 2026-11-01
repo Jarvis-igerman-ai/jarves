@@ -201,7 +201,6 @@
     updateTraceControls();
     if (!ok && !data) {
       $("#metrics").innerHTML = "";
-      $("#now-strip").innerHTML = "";
       $("#agents-offline-wrap").innerHTML = "";
       $("#agents").innerHTML = empty("סביבת העבודה עדיין לא מחוברת", "המסך לא ממציא סוכנים או התקדמות. אחרי חיבור לשירות המקומי יופיע כאן המצב המדווח.");
       $("#active-tasks").innerHTML = empty("אין מידע זמין", "ממתינים לחיבור מאומת לשירות.", true);
@@ -369,15 +368,6 @@
     const section = $("#alerts-section");
     section.hidden = list.length === 0;
     section.innerHTML = list.map(alert => `<div class="alert"><span class="alert-symbol" aria-hidden="true">△</span><p>${esc(alert.summary)}</p>${alert.task_id ? `<button type="button" class="text-link" data-task="${esc(alert.task_id)}">למשימה ←</button>` : ""}</div>`).join("");
-  }
-
-  function renderNow() {
-    const running = data.tasks.filter(task => task.state === "running").sort(taskOrder);
-    const queued = data.tasks.filter(task => task.state === "queued").length;
-    $("#now-strip").innerHTML = `<h2 class="now-title">עכשיו בעבודה</h2>` + (running.length ? `<ul class="now-list">${running.map(task => {
-      const agent = data.agents.find(item => item.id === task.agent_id);
-      return `<li><button type="button" class="now-item" data-task="${esc(task.id)}"><span class="status-dot good" aria-hidden="true"></span><span class="now-task">${esc(task.title)}</span><span class="now-meta">${esc(agent?.label || task.agent_id || "לא דווח עובד")} · ${esc(age(agent?.heartbeat_at))}</span></button></li>`;
-    }).join("")}</ul>` : `<p class="now-empty">שום דבר לא רץ כרגע: ${queued === 1 ? "משימה אחת בתור" : `${queued} בתור`}</p>`);
   }
 
   function renderActive() {
@@ -612,7 +602,9 @@
     const focused = document.activeElement;
     const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
     const focusValue = focusKey && focused.getAttribute(focusKey);
-    renderNow(); renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    // #732: today.js draws the "Today" rows (incl. the former Now strip) from the same state; read-only.
+    document.dispatchEvent(new CustomEvent("workflow:render", {detail: {data, complete, age}}));
     const selected = $("#trace-agent").value;
     const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
     if ($("#trace-agent").innerHTML !== options) { $("#trace-agent").innerHTML = options; $("#trace-agent").value = selected; }
