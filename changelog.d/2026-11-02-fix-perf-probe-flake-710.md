@@ -1,0 +1,1 @@
+Deflake test_slow_cli_probe_never_blocks_features_list (#710): the cold features list is no longer held to the 150 ms wall-clock gate (it overshoots by one in-line probe under runner load); the stale path keeps the median budget check.
