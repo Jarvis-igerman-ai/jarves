@@ -184,8 +184,18 @@ def main(argv=None) -> int:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             return 0
-        store = Store(args.home / "workflow.db", timeout_s=1.5)
-        result = observe(store, payload, args.repo_root, os.environ.get("JARVES_WORKFLOW_AGENT") or None)
+        # Stop must not be lost to the supervisor tick holding the DB: retry once. Both tries fit inside the 3 s hook
+        # timeout that bootstrap installs (1.2 + 0.3 + 1.2 s). Every other hook stays at 1.5 s.
+        is_stop = payload.get("hook_event_name") == "Stop"
+        store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
+        agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
+        try:
+            result = observe(store, payload, args.repo_root, agent_env)
+        except sqlite3.OperationalError:
+            if not is_stop:
+                raise
+            time.sleep(0.3)
+            result = observe(store, payload, args.repo_root, agent_env)
         if result:
             print(json.dumps(result, ensure_ascii=False))
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
