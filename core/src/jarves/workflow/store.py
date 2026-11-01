@@ -187,6 +187,7 @@ class Store:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,agent_id TEXT NOT NULL,
                 task_id TEXT NOT NULL,parent_id TEXT NOT NULL,event TEXT NOT NULL,tool TEXT NOT NULL,
                 call_id TEXT NOT NULL,status TEXT NOT NULL,duration_ms REAL,data TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS workflow_events_kind_ts ON workflow_events(kind,ts);
             CREATE INDEX IF NOT EXISTS workflow_trace_agent ON workflow_trace(agent_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_task ON workflow_trace(task_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_time ON workflow_trace(ts);
@@ -345,8 +346,14 @@ class Store:
 
     @staticmethod
     def _unanswered(db, task_id):
-        return [q for q in Store._all(db, "question") if q["task_id"] == task_id
-                and q["blocks"] and q["status"] in ACTIVE_QUESTIONS]
+        # Filter by task in SQLite (C speed) instead of parsing every question record once per task.
+        try:
+            rows = db.execute("SELECT data FROM workflow_records WHERE kind='question' AND json_extract(data,'$.task_id')=? "
+                              "ORDER BY rowid", (task_id,))
+            questions = [json.loads(r[0]) for r in rows]
+        except sqlite3.OperationalError:   # SQLite built without JSON1
+            questions = Store._all(db, "question")
+        return [q for q in questions if q["task_id"] == task_id and q["blocks"] and q["status"] in ACTIVE_QUESTIONS]
 
     @staticmethod
     def _ready(db, task):

@@ -189,8 +189,8 @@ def main(argv=None) -> int:
         if a.action == "status":
             from .autopilot import agent_retention_s
             result = store.snapshot(retention_s=agent_retention_s(home))
-            from .observability import verdict
-            result["verdict"] = verdict(store)
+            from .observability import snapshot
+            result["verdict"] = snapshot(store)["verdict"]    # cached up to 30 s; refreshed here when older
         elif a.action == "report" and not a.agent:
             from .report import build
             rep = build(store, a.hours)

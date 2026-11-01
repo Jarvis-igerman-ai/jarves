@@ -75,6 +75,34 @@ class VerdictTests(Base):
         self.assertEqual(kind, "stopped")
         self.assertEqual(v["reason"], "usage stop: USAGE_LIMIT")
 
+    def test_budget_reached_is_the_worker_limit_not_usage(self):
+        self.alive()
+        self.task()
+        loop._save(self.store, {"paused_until": T0 + 600, "pause_reason": "BUDGET_REACHED"})
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["code"]), ("idle_with_work", "worker_limit"))
+        self.assertEqual(v["reason"], "worker limit reached: 0 of 3 running")
+        self.assertNotIn("usage", v["reason"])
+        self.store.register_agent({"id": "w1", "label": "W1", "lane": "bugs"})
+        self.store.heartbeat("w1")
+        self.store.claim("w1")
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["code"]), ("working", "worker_limit"))
+        self.assertEqual(v["reason"], "worker limit reached: 1 of 3 running")
+
+    def test_stale_no_core_is_ignored_after_a_worker_started(self):
+        self.alive()
+        self.task()
+        loop._save(self.store, {"paused_until": T0 + 600, "pause_reason": "NO_CORE"})
+        obs._save(self.store, obs.DECISION_KEY, {"reason": "NO_CORE", "since": T0 - 60, "logged_at": T0})
+        self.assertEqual(self.kind()[1]["detail"]["code"], "no_core")
+        self.advance(30)
+        self.store.register_agent({"id": "w1", "label": "W1", "lane": "bugs"})
+        self.store.link_session("w1", "s1", provider="claude", autopilot=True)
+        self.store.heartbeat("w1")
+        self.store.claim("w1")
+        self.assertEqual(self.kind()[0], "working")
+
     def test_usage_file_stops_the_factory(self):
         self.alive()
         self.task()

@@ -1,0 +1,1 @@
+- Fixed: the workflow dashboard and status no longer time out: verdict/health run in about 0.1 s (no per-task question scans, one shared computation, a 30 s cached snapshot refreshed by the supervisor), and a BUDGET_REACHED pause now shows as the autopilot worker limit instead of a usage stop.
