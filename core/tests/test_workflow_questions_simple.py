@@ -231,6 +231,7 @@ class DiscussHTTP(unittest.TestCase):
         self.assertEqual(argv[6:10], [r"C:\Users\owner\AppData\Roaming\npm\claude.cmd", "--permission-mode", "plan", "--add-dir"])
         self.assertTrue(all(discuss.SAFE_ARG.fullmatch(a) for a in argv[3:]))
         self.assertEqual(env["JARVES_WORKFLOW_AGENT"], "1")
+        self.assertEqual(env["JARVES_WORKFLOW_HELPER"], "1")
         path = Path(result["prompt_file"])
         self.assertEqual(path, Path(self.temp.name) / "discuss" / "gate-V5-PWA.md")
         text = path.read_text(encoding="utf-8")
@@ -244,6 +245,15 @@ class DiscussHTTP(unittest.TestCase):
         self.assertIn(str(path), result["command"])
         q = next(q for q in self.server.store.snapshot()["questions"] if q["id"] == "gate-V5-PWA")
         self.assertEqual((q["status"], q["answer"]), ("pending", None))   # helper never answers
+
+    def test_failed_launch_does_not_use_the_rate_limit_slot(self):
+        def boom(argv, *, cwd, env):
+            raise OSError("no window")
+        original = self.server.discuss.launcher
+        self.server.discuss.launcher = boom
+        self.request("/api/questions/gate-V5-PWA/discuss", {})
+        self.assertIsNone(self.server.discuss.last)
+        self.server.discuss.launcher = original
 
     def test_rate_limit_one_launch_per_ten_seconds(self):
         self.assertEqual(self.request("/api/questions/gate-V5-PWA/discuss", {})[0], 200)
@@ -291,7 +301,7 @@ class DiscussHTTP(unittest.TestCase):
 
     def test_child_env_drops_workflow_variables_and_the_token(self):
         env = discuss.child_env({"PATH": "x", "JARVES_WORKFLOW_TOKEN": "t", "OTHER": "has abc123 inside"}, token="abc123")
-        self.assertEqual(env, {"PATH": "x", "JARVES_WORKFLOW_AGENT": "1"})
+        self.assertEqual(env, {"PATH": "x", "JARVES_WORKFLOW_AGENT": "1", "JARVES_WORKFLOW_HELPER": "1"})
 
 
 class ConsoleStatic(unittest.TestCase):

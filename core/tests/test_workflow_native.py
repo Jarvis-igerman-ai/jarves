@@ -41,6 +41,24 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertFalse(agent["auto_dispatch"])
         self.assertNotIn("private message", json.dumps(self.store.snapshot()))
 
+    def test_helper_window_never_claims_followups_or_gets_context(self):
+        import os
+        from unittest import mock
+        self.event("SessionStart")                      # real manager claims
+        manager = self.store.snapshot()["agents"][0]["id"]
+        with mock.patch.dict(os.environ, {"JARVES_WORKFLOW_HELPER": "1"}):
+            for ev in ("SessionStart", "Stop"):
+                out = observe(self.store, {"hook_event_name": ev, "session_id": "helper-session",
+                                           "cwd": str(self.root)}, self.root)
+                self.assertEqual(out, {})
+        self.assertEqual([a["id"] for a in self.store.snapshot()["agents"]], [manager])
+        import sqlite3
+        db = sqlite3.connect(str(self.home / "workflow.db"))
+        row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+        db.close()
+        self.assertEqual(row[0], manager)
+        self.assertIn("additionalContext", json.dumps(self.event("SessionStart")))   # normal session unchanged
+
     def test_merge_steward_shows_as_release_lane(self):
         self.event("SubagentStart", agent_id="merger-child", agent_type="workflow-merger")
         self.assertEqual(self.store.snapshot()["agents"][0]["lane"], "release")

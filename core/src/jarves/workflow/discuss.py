@@ -1,14 +1,15 @@
 """'Help from Claude' for one owner question: a prompt file plus a visible Claude Code window (Windows).
 
-The helper session explains and helps the owner decide. It never answers, approves, defers or reopens the question:
-the owner answers in the dashboard. Safety:
+The helper session explains and helps the owner decide. It is told not to answer, approve, defer or reopen the
+question: the owner answers in the dashboard. Safety:
 - the process argv is fixed; no shell string is built from question text or request data. The question id is
   validated by the route pattern and only names the prompt file; every argv element must match ``SAFE_ARG``
   (no quotes, %, &, |, ^, <, >, !, parentheses), otherwise nothing is launched and only the command is returned;
 - the question text goes to a private file, never to the command line;
 - the child gets no workflow access token: JARVES_WORKFLOW_* variables are dropped and JARVES_WORKFLOW_AGENT=1 is
   set, so the workflow CLI refuses owner-only actions (answer, reopen, ask-more) from that session;
-- Claude starts in plan mode (read-only until the owner approves a change in its window);
+  JARVES_WORKFLOW_HELPER=1 makes the workflow hooks ignore the window (no follow-up claim, no continue, no context);
+- Claude starts in plan mode (limits the helper only until the owner approves a plan in its window);
 - at most one launch per ``RATE_S`` seconds; not on Windows or no ``claude`` on PATH: nothing is launched and the same
   command is returned for the owner to paste.
 """
@@ -64,6 +65,7 @@ def child_env(env: dict | None = None, token: str = "") -> dict:
     out = {k: v for k, v in (os.environ if env is None else env).items()
            if not k.upper().startswith("JARVES_WORKFLOW") and not (token and token in str(v))}
     out["JARVES_WORKFLOW_AGENT"] = "1"
+    out["JARVES_WORKFLOW_HELPER"] = "1"
     return out
 
 
@@ -162,8 +164,8 @@ class Helper:
             now = self.clock()
             if self.last is not None and now - self.last < RATE_S:
                 raise RateLimited("wait 10 seconds before opening another Claude help window")
-            self.last = now
-        self.launcher(argv, cwd=str(repo), env=child_env(token=self.token))
+            self.launcher(argv, cwd=str(repo), env=child_env(token=self.token))
+            self.last = now          # a failed launch does not use up the slot
         result["launched"] = True
         return result
 

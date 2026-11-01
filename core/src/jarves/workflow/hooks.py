@@ -57,6 +57,8 @@ def _managed(store: Store, agent_id: str | None) -> bool:
 
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
     event = payload.get("hook_event_name", "")
+    if os.environ.get("JARVES_WORKFLOW_HELPER"):
+        return {}      # owner "Help from Claude" window: never the manager, no claim/follow-ups/continue/context
     if event not in EVENTS or not in_project(str(payload.get("cwd", "")), root):
         return {}
     session = payload.get("session_id")
