@@ -73,3 +73,9 @@ to one English and one Hebrew trigger each, parameter descriptions and numeric b
 call: each tool costs roughly 120 characters of JSON frame plus its name before any text. Measured on the test Core:
 47.4k (tools 38.0k + rules 9.5k). Ceilings in `test_p_perf.py` and `test_tool_descriptions.py` are now 48.4k (measured +2%);
 the 40.5k / -30% target moves to 4.0.2: lazy tool exposure by group (expose a group's tools only when it is relevant).
+
+## #71 lazy tool exposure: -30% reached (4.0.2)
+Client-delegation backend call (`voice/lazy_tools.py`, 5 groups + `tools_more`): tools + rules 37.2k chars measured on the
+test Core (full list 48.3k, V4 baseline 59.4k, -37%). `test_p_perf` (41.6k) and `test_tool_descriptions` (40.5k) now assert
+the lazy size; the full list keeps its 48.4k ceiling because server delegation still sends every tool. Not measured: real
+GPT-Live scenarios with hidden groups (UNVERIFIED, billed path).
