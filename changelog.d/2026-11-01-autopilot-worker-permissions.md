@@ -1,0 +1,1 @@
+- Fixed: Autopilot workers no longer stall on permission prompts while the owner is away: they auto-accept edits in their own worktree and use the same working command rights as the owner's settings (tags, releases, force push and settings edits stay blocked); the list can be replaced with the worker_allowed_tools policy key (#748).

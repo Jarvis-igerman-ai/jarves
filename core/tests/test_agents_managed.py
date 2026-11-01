@@ -463,19 +463,55 @@ def test_autopilot_notify_op_reaches_the_owner_channel(world):
     o.notify = old
 
 
-def test_autopilot_worker_launch_carries_narrow_allow_rules_never_a_bypass(world):
-    """P1: a headless autopilot worker could not run one test (popup timed out while the owner slept -> deny)."""
+def test_autopilot_worker_default_list_matches_owner_rights_and_never_a_bypass(world):
+    """P1: a headless worker could not run one test (popup timed out while the owner slept). Same working rights, no bypass."""
     from jarves.orchestrator import claude
     rules = claude.autopilot_allowed_tools("C:\py\python.exe")
-    assert "Bash(C:/py/python.exe:*)" in rules and "Bash(node:*)" in rules
-    assert not any(w in r for r in rules for w in ("push", "merge", "release", "tag", "gh", "git"))
-    m = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None, allowed_tools=rules)
+    assert "Bash(python:*)" in rules and "Bash(git push jarves:*)" in rules and "Bash(gh pr:*)" in rules
+    for hard_stop in ("Bash(git push:*)", "Bash(git tag:*)", "Bash(rm:*)", "Bash(gh release:*)", "Bash(powershell:*)",
+                      "Bash(schtasks:*)", "Bash(taskkill:*)"):
+        assert hard_stop not in rules
+    assert claude.WORKER_PERMISSION_MODE == "acceptEdits"
+    assert not any("dangerously" in x.lower() or "bypass" in x.lower() for x in rules)
+    m = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None, allowed_tools=rules,
+                             permission_mode="acceptEdits")
+    assert m.argv[m.argv.index("--permission-mode") + 1] == "acceptEdits"
+    assert not any("dangerously" in a or "bypass" in a.lower() for a in m.argv)
+    bad = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None, permission_mode="bypassPermissions")
+    assert bad.argv[bad.argv.index("--permission-mode") + 1] == "default"
     i = m.argv.index("--allowedTools")
     assert m.argv[i + 1:i + 1 + len(rules)] == rules
     assert "--allowedTools" not in claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None).argv
-    o = world["o"]
-    r = o.start_session("claude", "alpha", "x", by="autopilot")
+
+
+def test_autopilot_worker_start_uses_isolated_worktree_mode_and_policy_override(world):
+    from jarves.workflow import autopilot
+    o, owner, home = world["o"], world["owner"], world["home"]
+    assert _grant(o, owner, max_concurrent=3)["ok"]
+    owner.policy = "approve"
+    r = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)
     argv = o.managed[r["session"]["id"]].argv
-    assert r["ok"] and "--allowedTools" in argv and "--permission-mode" in argv
+    assert r["ok"] and "--allowedTools" in argv and "Bash(git push:*)" not in argv
     r2 = o.start_session("claude", "alpha", "x", by="owner")
-    assert "--allowedTools" not in o.managed[r2["session"]["id"]].argv
+    assert r2.get("ok"), r2
+    a2 = o.managed[r2["session"]["id"]].argv
+    assert "--allowedTools" not in a2 and a2[a2.index("--permission-mode") + 1] == "default"
+    policy, _ = autopilot.load(home)
+    policy["worker_allowed_tools"] = ["Bash(ls:*)"]
+    autopilot.save(home, policy)
+    r3 = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON)
+    a3 = o.managed[r3["session"]["id"]].argv
+    assert a3[a3.index("--allowedTools") + 1] == "Bash(ls:*)"
+
+
+def test_policy_worker_allowed_tools_is_validated(tmp_path):
+    from jarves.workflow import autopilot
+    base, _ = autopilot.load(tmp_path)
+    assert "worker_allowed_tools" not in base
+    autopilot.validate({**base, "worker_allowed_tools": ["Bash(ls:*)", "Read"]})
+    for bad in ([], "Bash(ls:*)", ["ls"], ["Bash(" + "x" * 80 + ")"], ["Bash(ls:*)", "Bash(ls:*)"], [1],
+                ["Bash(claude --dangerously-skip-permissions:*)"], ["Bash(a)"] * 41):
+        with pytest.raises(ValueError):
+            autopilot.validate({**base, "worker_allowed_tools": bad})
+    autopilot.set_key(tmp_path, "worker_allowed_tools", '["Bash(ls:*)"]')
+    assert autopilot.load(tmp_path)[0]["worker_allowed_tools"] == ["Bash(ls:*)"]

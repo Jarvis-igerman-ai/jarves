@@ -1149,6 +1149,16 @@ class Orchestrator:
             pass
         return str(wt)
 
+    def _worker_tools(self) -> list[str]:
+        """Allow rules for an autopilot worker: the owner's `worker_allowed_tools` policy key, else the narrow default."""
+        try:
+            from ..workflow import autopilot
+            pol, err = autopilot.load(self.home)
+            override = None if err else pol.get("worker_allowed_tools")
+        except Exception:                                  # never block a start on a policy read
+            override = None
+        return claude.autopilot_allowed_tools(sys.executable, override)
+
     def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "",
                       env: dict | None = None) -> dict:
         pdir = str(claude.write_plugin(self.home))
@@ -1160,7 +1170,9 @@ class Orchestrator:
             self._managed_claude_event(holder, kind, d, started)
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
                                  env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"),
-                                 allowed_tools=claude.autopilot_allowed_tools(sys.executable) if by == "autopilot" else None)
+                                 allowed_tools=self._worker_tools() if by == "autopilot" else None,
+                                 permission_mode=claude.WORKER_PERMISSION_MODE
+                                 if by == "autopilot" and cwd != proj.path else "default")
         try:
             m.start()
         except OSError as e:

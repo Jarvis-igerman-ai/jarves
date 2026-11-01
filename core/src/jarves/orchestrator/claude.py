@@ -247,16 +247,31 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 
 
 # ---------------------------------------------------------------------- sessions JARVES starts
-def autopilot_allowed_tools(python: str = "") -> list[str]:
-    """Narrow allow rules for an autopilot worker. A headless `claude -p` worker cannot answer a permission prompt: the
-    owner's popup times out while he sleeps and every command outside his settings allow list is denied, so the worker
-    could not run one test. The owner's own list matches only a bare `python`, never the interpreter path a worker
-    actually uses, nor node or sed. These are command PREFIXES only (no bypass flag, no mode change); git push, merges
-    and releases stay on the owner's rules and the popup."""
-    py = [python, python.replace("\\", "/")] if python else []
-    pys = sorted({p for p in py if p})
-    rules = [f"Bash({p}:*)" for p in pys]
-    rules += [f"Bash({c}:*)" for c in ("python", "py", "pytest", "node", "npm", "npx", "jarvis", "ruff", "sed", "cd", "ls")]
+# OWNER-APPROVED SCOPE for headless autopilot workers (see docs in PR #748). A worker runs `claude -p` in its OWN isolated
+# worktree; nobody is there to answer a permission prompt, so anything outside this list is denied (the safe outcome).
+# Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
+# releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
+# The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
+WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
+    "Bash(python:*)", "Bash(py:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(node:*)", "Bash(npm:*)", "Bash(npx:*)",
+    "Bash(jarvis:*)", "Bash(sed:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)",
+    "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)",
+    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
+    "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
+    "Bash(git worktree:*)", "Bash(git push jarves:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+)
+WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
+
+
+def autopilot_allowed_tools(python: str = "", override: list[str] | None = None) -> list[str]:
+    """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
+    Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
+    if override:
+        return list(override)
+    rules = list(WORKER_ALLOWED_TOOLS)
+    if python:
+        for p in sorted({python, python.replace("\\", "/")}):
+            rules.append(f"Bash({p} -m pytest:*)")
     return rules
 
 
@@ -266,9 +281,11 @@ class ManagedClaude:
 
     def __init__(self, cmd: list[str], cwd: str, *, plugin_dir: str | None, on_event: Callable[[str, dict], None],
                  resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0,
-                 restricted: bool = False, allowed_tools: list[str] | None = None) -> None:
+                 restricted: bool = False, allowed_tools: list[str] | None = None,
+                 permission_mode: str = "default") -> None:
         argv = [*cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "default"]
+                "--permission-mode",
+                permission_mode if permission_mode in ("default", WORKER_PERMISSION_MODE) else "default"]
         self.restricted = restricted
         if restricted:        # a self-diagnosis hand-off (#336 C): the owner's broad allow rules do not apply, merging and pushing are denied
             argv += ["--setting-sources", "project", "--disallowedTools", *RESTRICTED_DENY]
