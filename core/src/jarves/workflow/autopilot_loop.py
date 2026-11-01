@@ -259,8 +259,8 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None, us
                 store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
             if not claimed:           # lost the race or no longer ready: record it and try the next candidate
-                if (agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
-                    _CLAIM_FAILED.add((agent_id, task["id"]))
+                if (str(store.path), agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
+                    _CLAIM_FAILED.add((str(store.path), agent_id, task["id"]))
                     store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
                 skipped.add(task["id"])
