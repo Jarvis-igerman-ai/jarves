@@ -678,3 +678,20 @@ def test_browser_retry_files_fail_closed(tmp_path):
     assert ci_flake.retry_files_any(xml) == []                       # one unmappable failure: the whole suite is re-run
     xml.write_text("<not xml", encoding="utf-8")
     assert ci_flake.retry_files_any(xml) == [] and ci_flake.retry_files_any(tmp_path / "missing.xml") == []
+
+
+def test_docs_read_by_a_core_test_are_not_docs_only(tmp_path):
+    """V451-MERGE-PROOF: the docs-free tree proof is sound only if no test reads the changed doc. A doc named in a
+    test the quick stage does not run needs the Linux shards (merge gate); prepush-covered and unreferenced docs stay free."""
+    tests = tmp_path / "tests"
+    tools = tmp_path / "tools"
+    tests.mkdir()
+    tools.mkdir()
+    (tools / "prepush.py").write_text('tests=("tests/test_covered.py",)', encoding="utf-8")
+    (tests / "test_covered.py").write_text('read("docs/ONLY_QUICK.md")', encoding="utf-8")
+    (tests / "test_other.py").write_text('read(ROOT / "docs" / "READ_BY_CORE.md")', encoding="utf-8")
+    got = ci_plan.test_read_docs(["docs/ONLY_QUICK.md", "docs/READ_BY_CORE.md", "docs/FREE.md", "README.md"], tests)
+    assert got == {"docs/READ_BY_CORE.md"}
+    assert ci_plan.test_read_docs(["docs/x.md"], tmp_path / "missing" / "tests") == {"docs/x.md"}   # fails closed
+    f = ci_plan.classify(["docs/NOW.md"])                          # real repo: a test reads NOW.md
+    assert f["code"] and not f["full"] and not f["installer"]      # Linux shards only
