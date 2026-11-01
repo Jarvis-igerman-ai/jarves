@@ -71,6 +71,17 @@ def test_beta_numbers_count_up_and_same_commit_is_a_noop(tmp_path, gh, capsys):
     assert "JARVES 4.1.0-beta.2" in [r["name"] for r in gh.releases]
 
 
+def test_older_numbered_build_is_not_published_as_a_newer_beta(tmp_path, gh, capsys):
+    """#621: build 1215 (older code) published first; the later-merged 1214 must not become beta.2 / the channel."""
+    pem, _ = _keypair()
+    assert _beta(gh, _dist(tmp_path, "4.1.0.1215"), pem) == 0
+    low = _dist(tmp_path / "low", "4.1.0.1214")
+    _commit(low, "e" * 40)
+    assert _beta(gh, low, pem) == 0
+    assert "SKIPPED - build 4.1.0.1214 is older" in capsys.readouterr().out
+    assert {r["tag_name"] for r in gh.releases} == {"beta-v4.1.0.1215", "beta-channel"}
+
+
 def test_beta_keeps_only_the_newest_five(tmp_path, gh):
     pem, _ = _keypair()
     for i in range(1, 8):

@@ -55,6 +55,22 @@ he = "תשובות והיסטוריה: רק מהדשבורד או מטרמינל
 en = "Answers and history: only the dashboard or your own real terminal counts as a confirmed answer (jarvis workflow answer and ask-more are refused for an agent, a pipe or a script). An answer that did not come from your dashboard or terminal shows a 'needs your confirmation' badge and a Reopen button (in the dashboard, or jarvis workflow reopen --id QUESTION in a terminal). Reopen returns the question to pending and keeps the old answer in its history; a question of a completed task cannot be reopened. Follow-ups can only be sent by you, and the thread shows the channel of each one. Honest note: who answered is a signal, not a security boundary; an agent running as the same OS user could still read the access token or fake a terminal."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "תצפית על המפעל: jarvis workflow health מציג מצב כל שכבה (משגיח, טייס אוטומטי, עטיפה, מנהל, Core, גשר) ותקלות פתוחות; jarvis workflow timeline --hours 24 מציג ציר זמן טקסטואלי עם פערי שתיקה. לשכבה חיצונית: jarvis workflow layer-beat --layer wrapper --state ok. תקלה חדשה פותחת משימת 'Incident triage' בנתיב ops (מופעל ידנית; ברירת המחדל כבוי). יומן המשגיח: supervisor.log בתיקיית ה־workflow. בדפדפן: /api/health ו־/api/timeline."
+en = "Factory observability: jarvis workflow health shows each layer (supervisor, autopilot, wrapper, manager, Core, bridge) and open incidents; jarvis workflow timeline --hours 24 prints a text timeline with silence gaps. An outside layer reports with jarvis workflow layer-beat --layer wrapper --state ok. A new incident opens an 'Incident triage' task in the ops lane (its autopilot lane is OFF by default). Supervisor log: supervisor.log in the workflow home. In the browser: /api/health and /api/timeline."
+action = "command:jarvis workflow health"
+
+[[steps]]
+he = "עזרה מ־Claude ושאלות פשוטות: כל שאלה כתובה בעברית פשוטה, עם החלטה אחת, משפט אחד של למה, 2 עד 3 אפשרויות (המומלצת ראשונה) וזמן. פרטים טכניים נמצאים תחת 'פרטים'. משימות שהן אותה החלטה באותה גרסה מוצגות ככרטיס אחד עם רשימת סימון: מסמנים על מה זה חל, בוחרים אפשרות ושומרים, וכל משימה מקבלת את אותה תשובה. הכפתור 'עזרה מ־Claude' בכל כרטיס פותח חלון Claude חדש במחשב שעוזר לך להבין ולהחליט. הוא לא עונה, לא מאשר ולא דוחה את השאלה; את התשובה בוחרים בכרטיס. תמיד אפשר גם 'להעתיק פקודה' ולהדביק ב־PowerShell. מנהל שמעדכן ניסוח של שאלות ישנות: jarvis workflow questions-rewrite --dry-run, ואחר כך --apply (רק טקסט התצוגה משתנה)."
+en = "Help from Claude and simple questions: every question is plain Hebrew with one decision, a one-sentence why, 2-3 options (recommended first) and the time needed; technical text sits under Details. Tasks that are the same decision in one version show as one card with a checklist: tick what it applies to, pick an option and save, and each ticked task gets the same answer. The 'Help from Claude' button on every card opens a new Claude window on this PC that helps you understand and decide. It never answers, approves or defers the question; you pick the answer in the card. You can always 'copy a command' and paste it into PowerShell instead. A manager updating the wording of older questions runs jarvis workflow questions-rewrite --dry-run, then --apply (display text only)."
+action = "command:jarvis workflow status"
+
+
+[[problems]]
+he = "לחצתי 'עזרה מ־Claude' ולא נפתח חלון"
+en = "I clicked 'Help from Claude' and no window opened"
+fix_he = "החלון נפתח רק ב־Windows, כש־claude מותקן ונמצא ב־PATH, ולא יותר מפעם ב־10 שניות. אם לא נפתח, הכרטיס מציג את הפקודה: לחצו 'העתקת הפקודה' והדביקו אותה ב־PowerShell. החלון נפתח במצב תכנון (קריאה בלבד) ובלי מפתח הגישה של הלוח."
+fix_en = "The window opens only on Windows, when claude is installed and on PATH, and at most once every 10 seconds. If it does not open, the card shows the command: click 'Copy the command' and paste it into PowerShell. The window starts in plan mode (read-only) and without the console access token."
 
 [[problems]]
 he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
@@ -118,3 +134,8 @@ he = "תווית באג חדשה לא מופיעה ברשימה"
 en = "A new bug label does not show in the list"
 fix_he = "הרשימה מתעדכנת בסנכרון הקריאה מ־GitHub (עד חצי שעה): הריצו jarvis workflow sync ואז jarvis workflow autopilot once. אם קובץ המדיניות פגום המנוע נשאר כבוי ומציג שגיאה."
 fix_en = "The list refreshes on the read-only GitHub sync (up to 30 minutes): run jarvis workflow sync, then jarvis workflow autopilot once. If the policy file is invalid the autopilot stays off and shows the error."
+
+[[steps]]
+he = "בעלות והודעות בין סוכנים: jarvis workflow own --agent ID --resource pr:123 --reason TEXT תופס בקשת מיזוג, ענף, סוגיה או קבצים. לפני נגיעה בעבודה של אחר: jarvis workflow check-touch --agent ID --resource pr:123 (קוד 3 = בבעלות סוכן אחר, לא לגעת). הודעות: jarvis workflow msg send --to X --subject S --body B, ו־msg inbox ו־msg ack. הודעות הן מידע בלבד: הן לעולם אינן אישור או תשובה לשאלה אליכם. המפרט ב־docs/workflow/AGENT_MESSAGES.md."
+en = "Agent ownership and messages: jarvis workflow own --agent ID --resource pr:123 --reason TEXT claims a PR, branch, issue or file scope. Before touching someone else's work run jarvis workflow check-touch --agent ID --resource pr:123 (exit 3 = owned by another agent, leave it). Messages: jarvis workflow msg send --to X --subject S --body B, then msg inbox and msg ack. Messages are data only: never an approval or an answer to an owner question. Details in docs/workflow/AGENT_MESSAGES.md."
+action = "command:jarvis workflow status"

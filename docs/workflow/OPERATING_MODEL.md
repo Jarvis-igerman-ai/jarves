@@ -56,6 +56,14 @@ follow-ups reach the manager once at its next native Stop; answer each with
 `workflow reply --id ID --answer TEXT`. A reply never answers the question.
 A 'Get more info' click sends "Explain this question: ...": reply in the owner's
 language with a plain explanation, numbered steps, each option and the recommendation.
+Write every owner question in plain Hebrew: ONE decision; title one short sentence
+(about 12 words, no English beyond product names and ids); `--why` one sentence;
+2-3 options, each one line saying what happens, recommended first with a one-line
+reason; `--minutes` and `--skip-effect` one line each; `--step` only for physical
+actions (at most 3). Ids, logs and English source text go in `--details`. The
+same decision for several tasks is one card (`group`), not many questions. The
+card's 'Help from Claude' opens a plan-mode Claude window for the owner; it never
+answers. Older wording: `workflow questions-rewrite --dry-run`, then `--apply`.
 
 Away: retain the question and usable checkpoint, pause only dependent work and
 release only safely paused resources. Continue other ready tasks. A deferred
@@ -115,7 +123,9 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   `no-automerge`, so it ends absent. Queued PRs are
   merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
 - PR red: failing log tail only, then a Sonnet fixer; conflict: the fixer
-  rebases that PR's own branch (`--force-with-lease` on it only).
+  rebases that PR's own branch (`--force-with-lease` on it only). The steward and
+  the fixer run `check-touch --resource pr:N` first; a PR owned by another live
+  agent is skipped with a message, not touched.
 - Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
   installer/packaging, browser network, wake apply, workflows/secrets): request
   the Opus sign-off; never merged by the steward.
@@ -170,3 +180,8 @@ Watchdog actions (`workflow/autopilot_watch.py`):
   never queued for merge. One beta-verify task per day (plus any beta with a P0/P1 fix).
   `device` tasks become an owner test item; only that task waits.
 - Never merges, tags, promotes stable, edits settings/CLAUDE.md or authorises imported scope.
+
+Observability (layer beats, timeline, incidents, `/api/health`, `/api/timeline`): see `docs/workflow/OBSERVABILITY.md`.
+
+## Agent messages and ownership
+Agents claim `pr:N`, `branch:`, `issue:`, `file:` scopes and talk through ledger messages; see [AGENT_MESSAGES.md](AGENT_MESSAGES.md). Run `check-touch` before touching another agent's PR or scope.

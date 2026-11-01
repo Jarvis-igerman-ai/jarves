@@ -16,6 +16,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import messages
 STATES = {"queued", "running", "waiting_owner", "blocked", "review", "verified", "done"}
 LANES = {"bugs", "features", "release", "ops", "any"}
 IMPLEMENTATIONS = {"planned", "in_progress", "merged"}
@@ -124,8 +125,8 @@ class Store:
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=timeout_s, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")   # first: every later statement waits, not fails
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS workflow_records (
@@ -135,6 +136,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS workflow_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,kind TEXT NOT NULL,summary TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS workflow_resources (name TEXT PRIMARY KEY,task_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_claims (name TEXT PRIMARY KEY,agent_id TEXT NOT NULL,reason TEXT NOT NULL,
+                claimed_at REAL NOT NULL,expires_at REAL NOT NULL,task_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_msg_reads (msg_id INTEGER NOT NULL,agent_id TEXT NOT NULL,ts REAL NOT NULL,
+                PRIMARY KEY (msg_id,agent_id));
             CREATE TABLE IF NOT EXISTS workflow_trace (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,agent_id TEXT NOT NULL,
                 task_id TEXT NOT NULL,parent_id TEXT NOT NULL,event TEXT NOT NULL,tool TEXT NOT NULL,
@@ -143,16 +148,21 @@ class Store:
             CREATE INDEX IF NOT EXISTS workflow_trace_task ON workflow_trace(task_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_time ON workflow_trace(ts);
         """)
-        with self._tx() as db:
-            for key, value in {
-                "revision": 0,
-                "owner": {"mode": "away", "active_until": 0},
-                "supervisor": {"heartbeat_at": 0, "status": "offline"},
-                "source": {"mode": "empty", "sha": "", "synced_at": 0, "unmapped": []},
-                "alerts": [],
-                "trace": {"mode": "metadata", "since": self.clock()},
-            }.items():
-                db.execute("INSERT OR IGNORE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value)))
+        defaults = {
+            "revision": 0,
+            "owner": {"mode": "away", "active_until": 0},
+            "supervisor": {"heartbeat_at": 0, "status": "offline"},
+            "source": {"mode": "empty", "sha": "", "synced_at": 0, "unmapped": []},
+            "alerts": [],
+            "trace": {"mode": "metadata", "since": self.clock()},
+        }
+        # Opening a store is a plain read in the normal case: a hook must not queue for the write lock just to
+        # find the seed rows already there. Only a fresh database takes the (short) IMMEDIATE write transaction.
+        have = {r[0] for r in self._db.execute("SELECT key FROM workflow_meta")}
+        if not set(defaults) <= have:
+            with self._tx() as db:
+                for key, value in defaults.items():
+                    db.execute("INSERT OR IGNORE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value)))
 
     @contextmanager
     def _tx(self):
@@ -202,7 +212,56 @@ class Store:
     def _event(self, db, kind, summary):
         db.execute("INSERT INTO workflow_events(ts,kind,summary) VALUES (?,?,?)", (self.clock(), kind, summary[:1000]))
         self._bump(db)
-        db.execute("DELETE FROM workflow_events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events)")
+        # Beats are high-volume telemetry with their own retention so they never push real events out.
+        db.execute("DELETE FROM workflow_events WHERE kind!='layer_beat' AND id < "
+                   "(SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events WHERE kind!='layer_beat')")
+        if kind == "layer_beat":
+            db.execute("DELETE FROM workflow_events WHERE kind='layer_beat' AND id < "
+                       "(SELECT COALESCE(MAX(id),0)-8000 FROM workflow_events WHERE kind='layer_beat')")
+
+    def _flow(self, db, task, from_state, agent):
+        """Pipeline telemetry for the timeline (hidden from the recent-events list)."""
+        self._event(db, "task_flow", json.dumps({"task_id": task["id"], "title": task["title"][:120], "lane": task["lane"],
+                                                 "from": from_state, "to": task["state"], "agent": agent}, ensure_ascii=False))
+
+    # Ownership claims and agent messages (see messages.py and docs/workflow/AGENT_MESSAGES.md)
+    def own(self, agent_id, resource, reason):
+        return messages.claim(self, agent_id, resource, reason)
+
+    def disown(self, agent_id, resource, force=False):
+        return messages.release(self, agent_id, resource, force)
+
+    def owners(self, resource=None):
+        return messages.owners(self, resource)
+
+    def check_touch(self, agent_id, resource, notify=False):
+        return messages.check_touch(self, agent_id, resource, notify)
+
+    def send_message(self, sender, to, subject, body, resource=""):
+        return messages.send(self, sender, to, subject, body, resource)
+
+    def inbox(self, agent_id, unread=False):
+        return messages.inbox(self, agent_id, unread)
+
+    def ack_message(self, msg_id, agent_id):
+        return messages.ack(self, msg_id, agent_id)
+
+    # Observability (see observability.py and docs/workflow/OBSERVABILITY.md)
+    def beat(self, layer, state="ok", note=""):
+        from . import observability
+        return observability.beat(self, layer, state, note)
+
+    def layers(self, now=None):
+        from . import observability
+        return observability.layers(self, now)
+
+    def timeline(self, since=None, until=None, now=None):
+        from . import observability
+        return observability.timeline(self, since, until, now)
+
+    def detect_incidents(self, now=None):
+        from . import observability
+        return observability.detect_incidents(self, now)
 
     @staticmethod
     def _release(db, task, *, locks=True):
@@ -214,6 +273,7 @@ class Store:
                 Store._put(db, "agent", agent)
         if locks:
             db.execute("DELETE FROM workflow_resources WHERE task_id=?", (task["id"],))
+            db.execute("DELETE FROM workflow_claims WHERE task_id=?", (task["id"],))
         task["agent_id"] = None
 
     def _quarantine(self, db, task, reason, source=""):
@@ -276,7 +336,8 @@ class Store:
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
                 "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
-                "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
+                "events": [dict(r) for r in db.execute(
+                    "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow','agent_message') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
 
@@ -371,6 +432,7 @@ class Store:
         note = _text(note, "note", maximum=1000, empty=True)
         with self._tx() as db:
             agent = self._get(db, "agent", _id(agent_id))
+            messages.renew(db, agent["id"], self.clock())
             if agent.get("task_id"):
                 # Task ownership changes only through the ledger's checkpoint/evidence paths.
                 agent["note"] = note
@@ -444,6 +506,7 @@ class Store:
         with self._tx() as db:
             agent = self._get(db, "agent", _id(agent_id))
             agent.update(heartbeat_at=max(agent["heartbeat_at"], observed_at), note=note)
+            messages.renew(db, agent["id"], self.clock())
             if progress:
                 agent["progress_at"] = max(agent["progress_at"], observed_at)
             # A recovered process must explicitly checkpoint/recover its quarantined task.
@@ -525,6 +588,7 @@ class Store:
                 self._put(db, "task", task)
                 self._put(db, "agent", agent)
                 self._event(db, "task_claimed", f"{agent['label']}: {task['title']}")
+                self._flow(db, task, "queued", agent_id)
                 return task
         return None
 
@@ -581,7 +645,7 @@ class Store:
         """Optional plain-language fields; empty when the asker gave none. None of them is an approval."""
         extra = {key: _text(data.get(key, ""), key, maximum=limit, empty=True)
                  for key, limit in (("why", 1000), ("recommendation", 500), ("safe_default", 500), ("link", 500),
-                                    ("skip_effect", 1000), ("details", 4000))}
+                                    ("skip_effect", 1000), ("details", 4000), ("group", 120), ("item", 300))}
         steps = data.get("steps", [])
         if not isinstance(steps, list) or len(steps) > 12:
             raise ValueError("steps must be a list of at most 12 items")
@@ -618,6 +682,50 @@ class Store:
                 if [c["id"] for c in choices] == old_ids or not old_ids:
                     question["choices"] = sorted(choices, key=lambda c: not c.get("recommended", False))
             self._put(db, "question", question)
+        return True
+
+    DISPLAY_FIELDS = ("title", "context", "why", "recommendation", "safe_default", "link", "skip_effect", "details",
+                      "group", "item", "steps", "minutes", "choices")
+
+    def rewrite_display(self, question_id, data):
+        """Rewrite only the display text of a still-open, unanswered question. Returns True when something changed.
+
+        Id, status, answer, timestamps, blocking, task, kind and the choice ids never change; answered questions and
+        questions with any recorded answer are left as they are. Running it twice changes nothing the second time.
+        """
+        if not isinstance(data, dict) or set(data) - set(self.DISPLAY_FIELDS):
+            raise ValueError("only display fields can be rewritten")
+        clean = {}
+        if "title" in data:
+            clean["title"] = _text(data["title"], "question title", maximum=500)
+        if "context" in data:
+            clean["context"] = _text(data["context"], "context", maximum=4000, empty=True)
+        explained = self._explain({k: v for k, v in data.items() if k in {"why", "recommendation", "safe_default", "link",
+                                                                       "skip_effect", "details", "group", "item", "steps"}})
+        clean.update({k: explained[k] for k in data if k in explained and k != "kind"})
+        if "minutes" in data:
+            if type(data["minutes"]) is not int or not 0 <= data["minutes"] <= 480:
+                raise ValueError("minutes must be a whole number between 0 and 480")
+            clean["minutes"] = data["minutes"]
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if question["status"] not in ACTIVE_QUESTIONS or question.get("answer") not in (None, ""):
+                return False
+            if "choices" in data:
+                if not isinstance(data["choices"], list):
+                    raise ValueError("invalid choices")
+                choices = [self._option(c, n) for n, c in enumerate(data["choices"], 1)]
+                if sum(c.get("recommended", False) for c in choices) > 1:
+                    raise ValueError("at most one recommended choice")
+                old_ids = [c["id"] for c in question.get("choices", []) if isinstance(c, dict)]
+                if sorted(c["id"] for c in choices) != sorted(old_ids):
+                    raise ValueError("choice ids must stay the same")
+                clean["choices"] = sorted(choices, key=lambda c: not c.get("recommended", False))
+            updated = {**question, **clean}
+            if updated == question:
+                return False
+            self._put(db, "question", updated)
+            self._bump(db)
         return True
 
     @staticmethod
@@ -861,6 +969,7 @@ class Store:
                 task["validation"] = "not_run"
                 for row in task["acceptance"]:
                     row["passed"] = False
+            previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
@@ -868,6 +977,7 @@ class Store:
                 task["blocker"] = ""
             self._put(db, "task", task)
             self._event(db, "task_transition", f"{task['title']}: {state}")
+            self._flow(db, task, previous_state, task.get("agent_id"))
         return task
 
     def record_check(self, task_id, criterion_id, evidence, passed=True):
@@ -906,6 +1016,8 @@ class Store:
                 if (native and not agent.get("task_id") and agent["status"] == "offline"
                         and now - agent["heartbeat_at"] > ARCHIVE_OFFLINE_S):
                     db.execute("DELETE FROM workflow_records WHERE kind='agent' AND id=?", (agent["id"],))
+                    db.execute("DELETE FROM workflow_resources WHERE name IN (SELECT name FROM workflow_claims WHERE agent_id=?)", (agent["id"],))
+                    db.execute("DELETE FROM workflow_claims WHERE agent_id=?", (agent["id"],))
                     changed = True
                     continue
                 stale = now - agent["heartbeat_at"] > stale_after and not in_flight

@@ -22,7 +22,8 @@ DEFAULTS = {
     "lanes": {"bugs": {"workers": 1, "model": "claude-sonnet-5-5"},
               "features": {"workers": 1, "model": "claude-sonnet-5-5"},
               "steward": {"on": True, "model": "claude-haiku-5-5"},
-              "review": {"model": "claude-opus-5-5"}},
+              "review": {"model": "claude-opus-5-5"},
+              "ops": {"workers": 0, "model": "claude-sonnet-5-5"}},  # incident triage; OFF (0 workers) by default
     "max_concurrent": 3, "max_starts_per_hour": 6,
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
     "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
@@ -73,7 +74,7 @@ def validate(policy: dict) -> dict:
     _int(policy["max_starts_per_hour"], "max_starts_per_hour", 0, 60)
     lanes = policy["lanes"]
     if not isinstance(lanes, dict) or set(lanes) != set(DEFAULTS["lanes"]):
-        raise ValueError("lanes must be bugs, features, steward, review")
+        raise ValueError("lanes must be bugs, features, steward, review, ops")
     for name, lane in lanes.items():
         if not isinstance(lane, dict) or set(lane) != set(DEFAULTS["lanes"][name]):
             raise ValueError(f"lane {name} has invalid keys")
@@ -108,6 +109,8 @@ def load(home: Path) -> tuple[dict, str]:
         if isinstance(policy, dict) and isinstance(policy.get("watchdog"), dict):
             # Policy files written before #730 lack the retention key; the default keeps them valid.
             policy["watchdog"].setdefault("agent_retention_s", DEFAULTS["watchdog"]["agent_retention_s"])
+        if isinstance(policy, dict) and isinstance(policy.get("lanes"), dict):
+            policy["lanes"].setdefault("ops", copy.deepcopy(DEFAULTS["lanes"]["ops"]))  # older files predate the ops lane
         return validate(policy), ""
     except (OSError, ValueError) as exc:
         return {**copy.deepcopy(DEFAULTS), "enabled": False}, f"policy file invalid, autopilot stays off: {exc}"

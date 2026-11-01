@@ -299,6 +299,88 @@ console.log(JSON.stringify(cases.map(t => { const r = blockedReason(t); return [
                                                       ["ci", False, "CI check test_x fails on main"], ["you", True, ""],
                                                       ["team", True, ""], ["unknown", False, "something else"], ["hardware", False, ""]])
 
+    def test_health_and_timeline_views_static_contract(self):
+        # Health ("watch the watcher") and Timeline: separate CSP-safe read-only scripts, both locales, escaped text.
+        import re
+        import shutil
+        import subprocess
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        html = (static / "index.html").read_text(encoding="utf-8")
+        app = (static / "app.js").read_text(encoding="utf-8")
+        css = (static / "style.css").read_text(encoding="utf-8")
+        for name in ("health.js", "timeline.js"):
+            status, headers, _ = self.request("/" + name)
+            self.assertEqual(status, 200, name)
+            self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
+            self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+            self.assertLess(html.index('src="/app.js"'), html.index(f'src="/{name}"'))
+        self.assertNotIn("<script>", html)
+        for view, label in (("health", "בריאות"), ("timeline", "ציר זמן")):
+            self.assertIn(f'<a href="#{view}" data-view="{view}" class="nav-link">', html)
+            self.assertIn(f'<section id="view-{view}" class="view" hidden aria-label="{label}"><div id="{view}-root"></div></section>', html)
+            self.assertIn(f'views.{view} = ["{label}"', app)
+        health = (static / "health.js").read_text(encoding="utf-8")
+        timeline = (static / "timeline.js").read_text(encoding="utf-8")
+        for script in (health, timeline):
+            # Strict CSP and read-only: no inline styles/handlers, no writes, no storage, no third-party code.
+            for banned in ("style=", "onclick", "method:", "POST", "localStorage", "http://", "https://", "eval(", "X-Workflow-Request"):
+                self.assertNotIn(banned, script)
+            self.assertIn('timeZone: TZ', script)
+            self.assertIn('const TZ = "Asia/Jerusalem";', script)
+            self.assertIn('new URLSearchParams(location.search).get("demo") === "1"', script)
+            self.assertRegex(script, r"response\.status [!=]== 404")  # no backend yet: "no data", not an error
+            block = script[script.index("const I18N = {"):script.index("const lang =")]
+            he, en = block[block.index("he: {"):block.index("en: {")], block[block.index("en: {"):]
+            keys = lambda part: set(re.findall(r"(?<![^\s{,])([A-Za-z]+): ", part)) - {"he", "en"}
+            self.assertEqual(keys(he), keys(en))
+            for text in re.findall(r'"([^"]*)"|`([^`]*)`', he):
+                words = " ".join(text)
+                self.assertIsNone(re.search(r"\b[A-Za-z]+ [A-Za-z]+ [A-Za-z]+\b", words), words)
+            for layer in ("מפקח", "טייס אוטומטי", "עוטף claude-j", "מנהל", "ליבה", "גשר סוכנים",
+                          "Supervisor", "Autopilot", "claude-j wrapper", "Manager", "Core", "Agent bridge"):
+                self.assertIn(f'"{layer}"', script)
+        self.assertIn("/api/health", health)
+        self.assertIn("/api/timeline?hours=${hours}", timeline)
+        self.assertIn('stopped: (at, dur) => `המפעל עצר מ־${at} — ${dur}.`, ready: n => `עבודה ממתינה: ${n}`', health)
+        # Every server-provided string goes through esc(); free text keeps its own direction.
+        self.assertIn('<span class="hl-note" dir="auto">${esc(l.note)}</span>', health)
+        self.assertIn('<span class="hl-incident-summary" dir="auto">${esc(i.summary || i.key)}</span>', health)
+        self.assertIn('data-task="${esc(i.task_id)}"', health)
+        self.assertIn('<span class="tl-move-title" dir="auto">${esc(p.title || p.task_id)}</span>', timeline)
+        self.assertIn('aria-label="${esc(text)}"', timeline)
+        self.assertIn('fill="url(#tl-hatch)"', timeline)
+        self.assertNotIn('data-filter=', timeline)  # app.js owns [data-filter] (roadmap)
+        for marker in ('data-tl-range="${h}" aria-pressed=', 'data-tl-lane="${esc(value)}" aria-pressed=', 'role="tooltip"', 'id="tl-copy"'):
+            self.assertIn(marker, timeline)
+        self.assertIn("@media(prefers-reduced-motion:reduce){.hl-banner-dot,.hl-dead .hl-dot{animation:none}}", css)
+        node = shutil.which("node")
+        if node:
+            for name in ("health.js", "timeline.js"):
+                self.assertEqual(subprocess.run([node, "--check", str(static / name)], capture_output=True).returncode, 0, name)
+            # Copy-as-text: the CLI layout (English, Israel time, newest pipeline first).
+            start = timeline.index("  const stamp = epoch")
+            script = "\n".join(timeline[timeline.index(f"  const {n}"):timeline.index("\n", timeline.index(f"  const {n}"))]
+                               for n in ("TZ", "LAYERS", "num", "list")) \
+                + timeline[start:timeline.index("\n  }\n", timeline.index("function timelineText", start)) + 4] + """
+const now = Date.UTC(2026, 10, 1, 18, 43) / 1000, stop = now - 13 * 3600;
+const data = {segments: [{layer: "autopilot", state: "dead", start: stop, end: now}, {layer: "supervisor", state: "ok", start: now - 30 * 3600, end: now}],
+  marks: [{ts: stop, kind: "dead", layer: "autopilot", summary: "heartbeat lost"}],
+  gaps: [{layer: "autopilot", start: stop, end: now, seconds: 13 * 3600, ready_work: 41}],
+  pipeline: [{ts: now - 600, task_id: "T-2", title: "B", lane: "bugs", from_state: "review", to_state: "merged", agent: "w"},
+             {ts: now - 1200, task_id: "T-1", title: "A", lane: "ops", from_state: null, to_state: "queued", agent: ""}]};
+console.log(timelineText(data, 24, now));
+"""
+            out = subprocess.run([node, "-e", script], capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(out.stdout.strip().splitlines(), [
+                "JARVES timeline: last 24h, Asia/Jerusalem, generated 2026-11-01 20:43", "", "STOPS",
+                "  2026-11-01 07:43 -> 2026-11-01 20:43  autopilot   stopped 13.0h  ready_work=41", "", "LAYERS",
+                "  2026-10-31 20:43 -> 2026-11-01 20:43  supervisor  ok",
+                "  2026-11-01 07:43 -> 2026-11-01 20:43  autopilot   dead", "", "MARKS",
+                "  2026-11-01 07:43  autopilot   dead: heartbeat lost", "", "PIPELINE (newest first)",
+                "  2026-11-01 20:33  T-2  review -> merged  [bugs]  w  B",
+                "  2026-11-01 20:23  T-1  - -> queued  [ops]  -  A"])
+
 
 if __name__ == "__main__":
     unittest.main()
