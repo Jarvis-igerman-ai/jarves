@@ -555,3 +555,233 @@ def verdict(store, now: float | None = None) -> dict:
     if questions:
         return out("owner_wait", "owner_wait", oldest_q, questions=len(questions))
     return out("stopped", "nothing_queued", last or None)
+
+
+# ---- blocked view ---------------------------------------------------------------------------------------------
+# ONE answer to "what is blocked, why, since when, who must act, what unblocks it" for the dashboard "Blocked" tab,
+# GET /api/blocked and `workflow_console.py blocked`. Read-only: nothing here changes a task, releases a lock or runs
+# a command; the commands are TEXT for the manager to copy.
+BLOCKED_CAUSES = ("owner", "worker_gone", "dependency", "resource", "pr", "other")
+BLOCKED_TEXT = {   # English for the API JSON; the dashboard has its own locale part, the Hebrew is also in hebrew_parts
+    "owner": ("Waiting for you", "An open question of yours holds this task; your answer releases it."),
+    "worker_gone": ("Worker gone", "The worker stopped reporting mid-task; its locks stay held until the manager releases them."),
+    "dependency": ("Dependency", "Waits for another task to be verified first."),
+    "resource": ("Resource busy", "An exclusive resource is held by another task."),
+    "pr": ("Blocked PR", "A pull request that cannot merge now: conflicts, red checks, a pending review or a stale owner."),
+    "other": ("Other blocker", "Another reason; the raw blocker text is shown as is."),
+}
+BLOCKED_HE = {     # terminal text (the CLI prints Hebrew, like the morning report)
+    "owner": ("ממתין לך", "שאלה פתוחה שלך עוצרת את המשימה. התשובה משחררת אותה."),
+    "worker_gone": ("עובד נעלם", "העובד הפסיק לדווח באמצע. הנעילות שלו נשארות עד שהמנהל משחרר."),
+    "dependency": ("תלות", "מחכה שמשימה אחרת תאומת קודם."),
+    "resource": ("משאב תפוס", "משאב בלעדי תפוס בידי משימה אחרת."),
+    "pr": ("PR חסום", "בקשת מיזוג שלא יכולה להתמזג עכשיו: התנגשות, בדיקה אדומה, סקירה ממתינה או בעלים שנעלם."),
+    "other": ("אחר", "סיבה אחרת. טקסט החסימה מוצג כמו שהוא."),
+}
+NEXT_TEXT = {
+    "answer": "Answer the question in the Decisions tab",
+    "recover": "The manager checks the checkpoint, then recovers the task",
+    "release_claim": "The manager releases the stale claim",
+    "wait_dep": "Nothing to do now: it starts when the dependency is verified",
+    "wait_resource": "Nothing to do now: it starts when the resource is free",
+    "pr_conflict": "The manager updates the branch from main and resolves the conflicts",
+    "pr_red": "The manager reads the failed check and pushes a fix",
+    "pr_review": "Waits for the independent Opus review (Tier R)",
+    "pr_owned": "The manager releases the stale claim on this PR",
+    "inspect": "The manager reads the blocker and decides",
+}
+NEXT_HE = {
+    "answer": "לענות על השאלה בלשונית ההחלטות", "recover": "המנהל בודק את נקודת השמירה ומשחרר את המשימה",
+    "release_claim": "המנהל משחרר את הבעלות הישנה", "wait_dep": "אין מה לעשות עכשיו: תתחיל כשהתלות תאומת",
+    "wait_resource": "אין מה לעשות עכשיו: תתחיל כשהמשאב יתפנה", "pr_conflict": "המנהל מעדכן את הענף מ־main ופותר התנגשויות",
+    "pr_red": "המנהל קורא את הבדיקה שנכשלה ודוחף תיקון", "pr_review": "מחכה לסקירה עצמאית של Opus",
+    "pr_owned": "המנהל משחרר את הבעלות הישנה על ה־PR", "inspect": "המנהל קורא את סיבת החסימה ומחליט",
+}
+GONE_BLOCKERS = {"worker_offline", "worker_stalled"}
+DONE_STATES = {"verified", "done"}
+
+
+def _epoch(value) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) or None
+    if isinstance(value, str) and value:
+        from datetime import datetime
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _gone(agent: dict | None) -> bool:
+    return not agent or agent.get("status") in {"offline", "blocked"}
+
+
+def classify_blocked(tasks, agents, questions, locks, claims, open_prs, now: float) -> list[dict]:
+    """THE one classification: every blocked thing as a row with its cause, who must act and the safe next step.
+
+    tasks/agents/questions: ledger records; locks: {resource name: holding task id}; claims: claim views
+    (resource, agent, stale, task_id, claimed_at); open_prs: GitHub snapshot rows, possibly empty or malformed
+    (PR rows fail soft). Pure function, no I/O. Order of tests per task: worker gone, owner, dependency, resource, other.
+    """
+    by_id = {t.get("id"): t for t in tasks}
+    agent_by = {a.get("id"): a for a in agents}
+    asks: dict = {}
+    for q in questions:
+        if (q.get("status") or "pending") in {"pending", "deferred"} and q.get("blocks", True) and q.get("task_id"):
+            asks.setdefault(q["task_id"], []).append(q)
+    held: dict = {}
+    for name, tid in locks.items():
+        held.setdefault(tid, []).append(name)
+    rows: list[dict] = []
+    covered: set = set()
+
+    def add(cause, kind, ident, title, since, who, next_code, **extra):
+        row = {"cause": cause, "kind": kind, "id": str(ident), "title": str(title or ident)[:240], "since": since or None,
+               "who": who, "next_code": next_code, "next": NEXT_TEXT[next_code], "commands": [], "blocker": "",
+               "question_id": "", "agent_id": "", "locks": [], "waiting_on": [], "reasons": [], "url": ""}
+        row.update(extra)
+        rows.append(row)
+
+    for t in tasks:
+        state, tid = t.get("state"), t.get("id")
+        if state not in {"queued", "waiting_owner", "blocked"} or (state == "queued" and not t.get("execution_allowed", True)):
+            continue
+        blocker = str(t.get("blocker") or "")[:600]
+        since = t.get("updated_at")
+        if state == "blocked" and (t.get("quarantined") or blocker in GONE_BLOCKERS or "session stopped" in blocker.lower()):
+            aid = t.get("agent_id") or ""
+            covered.add(aid)
+            add("worker_gone", "task", tid, t.get("title"), since, "manager", "recover", blocker=blocker, agent_id=aid,
+                locks=sorted(held.get(tid, [])), commands=[f"workflow_console.py recover --task {tid}"])
+            continue
+        mine = sorted(asks.get(tid, []), key=lambda q: q.get("created_at") or 0)
+        if state == "waiting_owner" or mine:
+            add("owner", "task", tid, t.get("title"), (mine[0].get("created_at") if mine else None) or since, "owner", "answer",
+                question_id=mine[0]["id"] if mine else "", blocker=blocker)
+            continue
+        deps = [d for d in t.get("depends_on") or [] if (by_id.get(d) or {}).get("state") not in DONE_STATES]
+        if deps:
+            add("dependency", "task", tid, t.get("title"), since, f"task:{deps[0]}", "wait_dep", waiting_on=deps, blocker=blocker)
+            continue
+        busy = [r for r in t.get("resources") or [] if r in locks and locks[r] != tid]
+        if busy:
+            add("resource", "task", tid, t.get("title"), since, f"task:{locks[busy[0]]}", "wait_resource", waiting_on=busy,
+                blocker=blocker)
+            continue
+        if state == "blocked":
+            add("other", "task", tid, t.get("title"), since, "manager", "inspect", blocker=blocker)
+
+    # Gone agents that still hold non-PR claims, when no quarantined task above already covers them.
+    left: dict = {}
+    for c in claims:
+        aid = c.get("agent") or ""
+        if aid not in covered and not str(c.get("resource", "")).startswith("pr:") and (c.get("stale") or _gone(agent_by.get(aid))):
+            left.setdefault(aid, []).append(c)
+    for aid, mine in sorted(left.items()):
+        agent = agent_by.get(aid) or {}
+        names = sorted(str(c.get("resource")) for c in mine)
+        add("worker_gone", "agent", aid, agent.get("label") or aid,
+            agent.get("heartbeat_at") or min(c.get("claimed_at") or now for c in mine), "manager", "release_claim",
+            agent_id=aid, locks=names, commands=[f"workflow_console.py release --resource {n} --force" for n in names])
+
+    claim_by = {str(c.get("resource")): c for c in claims}
+    for pr in open_prs if isinstance(open_prs, list) else []:
+        try:
+            if not isinstance(pr, dict) or pr.get("draft") or pr.get("state", "open") != "open":
+                continue
+            n = int(pr["number"])
+            labels = {str(x).lower() for x in pr.get("labels") or []}
+            merge = str(pr.get("mergeable_state") or pr.get("merge_state") or pr.get("mergeStateStatus") or "").lower()
+            ci = str(pr.get("ci_state") or pr.get("checks_state") or "").lower()
+            reasons = []
+            if merge in {"dirty", "conflicting"} or pr.get("mergeable") is False:
+                reasons.append("pr_conflict")
+            if ci in {"failure", "failed", "error", "red"}:
+                reasons.append("pr_red")
+            if "no-automerge" in labels:
+                reasons.append("pr_review")
+            claim = claim_by.get(f"pr:{n}") or {}
+            if claim and (claim.get("stale") or _gone(agent_by.get(claim.get("agent")))):
+                reasons.append("pr_owned")
+            if not reasons:
+                continue
+            who = {"pr_conflict": "manager", "pr_red": "manager", "pr_review": "review"}.get(reasons[0]) or f"agent:{claim.get('agent')}"
+            url = str(pr.get("url") or "")
+            add("pr", "pr", n, pr.get("title"), _epoch(pr.get("updated_at")), who, reasons[0], reasons=reasons,
+                agent_id=str(claim.get("agent") or ""), url=url if url.startswith("https://github.com/") else "",
+                commands=[f"workflow_console.py release --resource pr:{n} --force"] if "pr_owned" in reasons else [])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return rows
+
+
+def blocked_view(store, now: float | None = None) -> dict:
+    """Grouped blocked rows for the dashboard tab, GET /api/blocked and the CLI (read-only, one short transaction)."""
+    now = store.clock() if now is None else now
+    from .messages import _claim_view
+    with store._tx() as db:
+        tasks, agents, questions = store._all(db, "task"), store._all(db, "agent"), store._all(db, "question")
+        locks = {r[0]: r[1] for r in db.execute("SELECT name, task_id FROM workflow_resources")}
+        claims = [_claim_view(r, now) for r in db.execute("SELECT * FROM workflow_claims")]
+        row = db.execute("SELECT value FROM workflow_meta WHERE key='source'").fetchone()
+    try:
+        source = json.loads(row[0]) if row else {}
+        source = source if isinstance(source, dict) else {}
+    except (TypeError, ValueError):
+        source = {}
+    prs = source.get("open_prs")
+    pr_state = "ok" if isinstance(prs, list) and source.get("mode") == "github" and not source.get("error") else "unavailable"
+    rows = classify_blocked(tasks, agents, questions, locks, claims, prs if pr_state == "ok" else [], now)
+    groups = []
+    for cause in BLOCKED_CAUSES:
+        mine = sorted((r for r in rows if r["cause"] == cause), key=lambda r: (r["since"] or now, r["id"]))
+        label, meaning = BLOCKED_TEXT[cause]
+        groups.append({"cause": cause, "label": label, "meaning": meaning, "count": len(mine), "rows": mine})
+    return {"now": now, "total": len(rows), "counts": {g["cause"]: g["count"] for g in groups}, "groups": groups,
+            "tasks_in_blocked_state": sum(1 for t in tasks if t.get("state") == "blocked"),
+            "prs": {"state": pr_state, "synced_at": source.get("synced_at") or None}}
+
+
+def _ago(seconds: float) -> str:
+    s = max(0, seconds)
+    return f"{max(1, int(s // 60))} דק׳" if s < 3600 else f"{int(s // 3600)} שע׳" if s < 172800 else f"{int(s // 86400)} ימים"
+
+
+_PART_HE = {   # same wording as the dashboard summary sentence (blocked.js)
+    "owner": lambda n: "אחד מחכה לך" if n == 1 else f"{n} מחכים לך",
+    "worker_gone": lambda n: "עובד אחד נעלם" if n == 1 else f"{n} עובדים שנעלמו",
+    "dependency": lambda n: "תלות אחת" if n == 1 else f"{n} תלויות",
+    "resource": lambda n: "משאב תפוס אחד" if n == 1 else f"{n} משאבים תפוסים",
+    "pr": lambda n: "PR חסום אחד" if n == 1 else f"{n} PR חסומים",
+    "other": lambda n: "אחד מסיבה אחרת" if n == 1 else f"{n} מסיבה אחרת",
+}
+
+
+def blocked_text(view: dict) -> str:
+    """The same grouped answer as the dashboard tab, as Hebrew text for the terminal."""
+    if not view["total"]:
+        return "אין חסומים. הכול זורם."
+    parts = [_PART_HE[g["cause"]](g["count"]) for g in view["groups"] if g["count"]]
+    lines = [("חסום אחד" if view["total"] == 1 else f"{view['total']} חסומים") + ": " + ", ".join(parts)]
+    for g in view["groups"]:
+        if not g["count"]:
+            continue
+        title, meaning = BLOCKED_HE[g["cause"]]
+        lines += ["", f"== {title} ({g['count']}) — {meaning}"]
+        for r in g["rows"]:
+            ref = f"PR #{r['id']}" if r["kind"] == "pr" else r["id"]
+            age = f" · מזה {_ago(view['now'] - r['since'])}" if r["since"] else ""
+            lines.append(f"- {ref}: {r['title']}{age}")
+            actor = r["who"]
+            who = {"owner": "אתה", "manager": "המנהל", "review": "סוקר Opus"}.get(actor) or (
+                "מחכה ל־" + actor[5:] if actor.startswith("task:") else "העובד " + actor[6:] if actor.startswith("agent:") else actor)
+            lines.append(f"  מי פועל: {who} · הצעד הבא: {NEXT_HE[r['next_code']]}")
+            if r["blocker"] and g["cause"] in {"other", "worker_gone"}:
+                lines.append(f"  סיבה: {r['blocker'][:200]}")
+            if r["locks"]:
+                lines.append(f"  נעילות שנשארו: {', '.join(r['locks'])}")
+            lines += [f"  $ {c}" for c in r["commands"]]
+    if view["prs"]["state"] != "ok":
+        lines += ["", "בקשות מיזוג: אין תמונת GitHub עדכנית (workflow_console.py sync)."]
+    return "\n".join(lines)

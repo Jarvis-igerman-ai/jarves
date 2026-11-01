@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "blocked", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -58,7 +58,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--before", type=int, default=0, help="trace: next page cursor")
     ap.add_argument("--layer", default="", help="layer-beat: supervisor|autopilot|wrapper|manager|core|bridge")
     ap.add_argument("--hours", type=float, default=24, help="timeline: how many hours back")
-    ap.add_argument("--json", action="store_true", help="timeline: print JSON instead of text")
+    ap.add_argument("--json", action="store_true", help="timeline/blocked: print JSON instead of text")
     ap.add_argument("--unread", action="store_true", help="msg inbox: only unread messages")
     ap.add_argument("--force", action="store_true", help="release: take over a STALE claim of a non-running owner")
     ap.add_argument("--notify", action="store_true", help="check-touch: also message the owner when it is blocked")
@@ -213,6 +213,13 @@ def main(argv=None) -> int:
         elif a.action == "health":
             from .observability import health
             result = health(store)
+        elif a.action == "blocked":
+            # Read-only: what is blocked, why, since when, who acts, the next step (same data as GET /api/blocked).
+            from .observability import blocked_text, blocked_view
+            result = blocked_view(store)
+            if not a.json:
+                print(blocked_text(result))
+                return 0
         elif a.action == "timeline":
             from . import observability as obs
             tl = obs.timeline(store, since=store.clock() - a.hours * 3600)

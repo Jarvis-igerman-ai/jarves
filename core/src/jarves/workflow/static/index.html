@@ -14,6 +14,7 @@
   <script src="/today.js" defer></script>
   <script src="/health.js" defer></script>
   <script src="/timeline.js" defer></script>
+  <script src="/blocked.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">דלג לתוכן</a>
@@ -24,6 +25,7 @@
         <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon" aria-hidden="true">◫</span><span>תמונת מצב</span></a>
         <a href="#roadmap" data-view="roadmap" class="nav-link"><span class="nav-icon" aria-hidden="true">☷</span><span>התוכנית</span></a>
         <a href="#questions" data-view="questions" class="nav-link"><span class="nav-icon" aria-hidden="true">◇</span><span>החלטות</span><span class="nav-count" id="questions-count">0</span></a>
+        <a href="#blocked" data-view="blocked" class="nav-link"><span class="nav-icon" aria-hidden="true">⊘</span><span>חסומים</span><span class="nav-count" id="blocked-count" hidden>0</span></a>
         <a href="#work" data-view="work" class="nav-link"><span class="nav-icon" aria-hidden="true">▤</span><span>באגים ומיזוגים</span><span class="nav-count" id="work-count">0</span></a>
         <a href="#trace" data-view="trace" class="nav-link"><span class="nav-icon" aria-hidden="true">⌕</span><span>היסטוריה</span></a>
         <a href="#health" data-view="health" class="nav-link"><span class="nav-icon" aria-hidden="true">◉</span><span>בריאות</span></a>
@@ -94,6 +96,7 @@
         </section>
         <section id="view-health" class="view" hidden aria-label="בריאות"><div id="health-root"></div></section>
         <section id="view-timeline" class="view" hidden aria-label="ציר זמן"><div id="timeline-root"></div></section>
+        <section id="view-blocked" class="view" hidden aria-label="חסומים"><div id="blocked-root"></div></section>
         <section class="owner-strip" aria-label="הזמינות שלך"><div class="owner-copy"><span class="owner-avatar" aria-hidden="true">א</span><div><b id="owner-title">איך אפשר להתקדם איתך?</b><span id="owner-description">בחר אם אתה זמין לשאלות עכשיו.</span></div></div><div class="segmented" aria-label="הזמינות שלך"><button type="button" id="owner-present" aria-pressed="false">אני כאן <span class="tiny-dot" aria-hidden="true"></span></button><button type="button" id="owner-away" aria-pressed="false">להמשיך בלעדיי <span aria-hidden="true">☾</span></button></div></section>
         <footer class="footer"><span dir="ltr">JARVES / WORKFLOW</span><span id="source-detail">המצב מוצג מהשירות המקומי בלבד</span></footer>
       </main>

@@ -158,6 +158,7 @@ class Handler(BaseHTTPRequestHandler):
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                  "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),
                  "/timeline.js": ("timeline.js", "text/javascript"), "/overview.js": ("overview.js", "text/javascript"),
+                 "/blocked.js": ("blocked.js", "text/javascript"),
                  "/style.css": ("style.css", "text/css")}
         if path in files:
             name, mime = files[path]
@@ -207,6 +208,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "hours must be between 0 and 336"})
                 return
             self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
+        elif path == "/api/blocked":
+            from .observability import blocked_view
+            self._json(200, blocked_view(self.server.store))   # read-only: ledger + last GitHub snapshot
         elif path == "/api/report":
             from .report import build
             try:
