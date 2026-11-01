@@ -139,14 +139,18 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
          notify=bridge_notify, find=bridge_find, force: bool = False) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
+    from .observability import record_decision
     if not policy.get("enabled"):
+        record_decision(store, policy, [])
         return []
     if not _LOCK.acquire(blocking=False):
         return []
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                return _step(store, Path(profile_home), policy, start, stop, notify, force, find)
+                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find)
+                record_decision(store, policy, done)   # why nothing started (deduplicated)
+                return done
         except OSError:
             return []          # another process is stepping
     finally:
@@ -257,6 +261,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                     store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
                 skipped.add(task["id"])
+                actions.append({"task_id": task["id"], "action": "claim_failed"})
                 continue
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
