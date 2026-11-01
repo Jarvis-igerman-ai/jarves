@@ -1,0 +1,1 @@
+- Workflow: the owner can answer a question by typing `ANSWER q-ID text` in his interactive Claude window (#797); agents, subagents and headless sessions can never answer, defer or reopen.
