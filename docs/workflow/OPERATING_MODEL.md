@@ -120,6 +120,16 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   installer/packaging, browser network, wake apply, workflows/secrets): request
   the Opus sign-off; never merged by the steward.
 - Queue entry merged: check main CI and free the next batch.
+- Per cycle the steward decides individual vs integration with
+  `core/tools/integration_branch.py plan --auto` (JSON: tiers, file-overlap and
+  `git merge-tree` forecast, recommendation). `individual` when fewer than 3
+  eligible PRs, any overlap, or a lone Tier R; `integration` for 3 or more
+  independent green PRs: `build ... --open-pr` makes ONE branch
+  `integration-green-<MMDD>` (`--no-ff` merges, conflicting PRs skipped with the
+  reason, changelog fragments checked, prepush run) and one PR with
+  `Supersedes: #a #b`. Any Tier R inside: label `no-automerge` and ONE Opus review
+  of the combined diff; the steward never merges it. After it merges,
+  `close-superseded` comments, closes and deletes only fully merged branches.
 No close/reopen, merge-main push, force on main, check bypass or blind rerun;
 a test that fails then passes is quarantined with a `showstopper` issue.
 
