@@ -245,5 +245,72 @@ class ObservabilityHTTPTests(unittest.TestCase):
         self.assertEqual(self.get("/api/timeline?hours=99999")[0], 400)
 
 
+class SnapshotCacheTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.now = [T0]
+        self.store = Store(Path(self.temp.name) / "workflow.db", clock=lambda: self.now[0])
+        for layer in ("supervisor", "autopilot", "core", "bridge"):
+            self.store.beat(layer, "ok")
+
+    def tearDown(self):
+        self.store.close()
+        self.temp.cleanup()
+
+    def test_fresh_cache_is_used_and_stale_cache_is_refreshed(self):
+        first = obs.snapshot(self.store)
+        self.assertEqual(first["computed_at"], T0)
+        self.assertEqual(obs._meta(self.store, obs.SNAPSHOT_KEY, None)["computed_at"], T0)
+        self.store.create_task({"id": "t1", "title": "Task", "lane": "bugs"})
+        self.now[0] += 20
+        self.assertEqual(obs.health(self.store)["verdict"], first["verdict"])      # cached: still "nothing queued"
+        self.assertEqual(obs.health(self.store)["verdict"]["detail"]["ready"], 0)
+        self.now[0] += 15                                                            # 35 s old: recomputed and stored
+        self.store.beat("supervisor", "ok")
+        fresh = obs.health(self.store)
+        self.assertEqual(fresh["verdict"]["detail"]["ready"], 1)
+        self.assertEqual(obs._meta(self.store, obs.SNAPSHOT_KEY, None)["computed_at"], T0 + 35)
+
+    def test_one_computation_per_request(self):
+        calls = []
+        real = obs.layers
+        obs.layers = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+        try:
+            obs.health(self.store, T0)
+            self.assertEqual(len(calls), 1)
+            calls.clear()
+            obs.health(self.store)
+            obs.health(self.store)
+            self.assertEqual(len(calls), 1)                                          # second request came from the cache
+        finally:
+            obs.layers = real
+
+    def test_supervisor_tick_refreshes_at_most_every_ten_seconds(self):
+        home = Path(self.temp.name)
+        obs.supervisor_tick(self.store, home, home, probe=lambda h: (True, True, ""))
+        self.assertEqual(obs._meta(self.store, obs.SNAPSHOT_KEY, None)["computed_at"], T0)
+        self.now[0] += 5
+        obs.supervisor_tick(self.store, home, home, probe=lambda h: (True, True, ""))
+        self.assertEqual(obs._meta(self.store, obs.SNAPSHOT_KEY, None)["computed_at"], T0)
+        self.now[0] += 6
+        obs.supervisor_tick(self.store, home, home, probe=lambda h: (True, True, ""))
+        self.assertEqual(obs._meta(self.store, obs.SNAPSHOT_KEY, None)["computed_at"], T0 + 11)
+
+    def test_verdict_is_fast_on_a_large_ledger(self):
+        import time
+        with self.store._tx() as db:
+            db.executemany("INSERT INTO workflow_events(ts,kind,summary) VALUES (?,?,?)",
+                           [(T0 - i, "task_transition" if i % 2 else "layer_beat", json.dumps({"layer": "core", "state": "ok", "ready": 0}))
+                            for i in range(20000)])
+        for i in range(150):
+            self.store.create_task({"id": f"t{i}", "title": f"Task {i}", "lane": "bugs"})
+        started = time.perf_counter()
+        v = obs.verdict(self.store)
+        h = obs.health(self.store, T0)
+        self.assertLess(time.perf_counter() - started, 3.0)    # generous: ~0.1 s locally
+        self.assertEqual(v["detail"]["ready"], 150)
+        self.assertEqual(h["verdict"]["detail"]["ready"], 150)
+
+
 if __name__ == "__main__":
     unittest.main()

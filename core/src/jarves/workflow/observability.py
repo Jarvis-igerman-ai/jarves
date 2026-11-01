@@ -19,6 +19,7 @@ BEAT, FLOW = "layer_beat", "task_flow"
 BEATS_KEY, DECISION_KEY, INCIDENT_KEY = "layer_beats", "autopilot_decision", "incident_state"
 EVENT_EVERY_S = 60                 # a beat becomes a ledger event on state change or at most once a minute
 DECISION_EVERY_S = 1800            # same "nothing started" reason is logged again after 30 min
+SNAPSHOT_KEY, SNAPSHOT_FRESH_S, SNAPSHOT_TICK_S = "obs_snapshot", 30, 10   # cached health/verdict; the supervisor refreshes it
 INCIDENT_COOLDOWN_S = 4 * 3600
 WRAPPER_DEAD_S = 300
 IDLE_WORK_S = 1200
@@ -266,10 +267,13 @@ def _last_activity(store, db) -> float:
     return max(agents, row[0] or 0)
 
 
-def detect_incidents(store, now: float | None = None) -> list[dict]:
+def detect_incidents(store, now: float | None = None, *, rows: dict | None = None, ready: int | None = None,
+                     last: float | None = None) -> list[dict]:
+    """``rows`` (layer -> layer row), ``ready`` and ``last`` may be passed by a caller that already computed them."""
     now = store.clock() if now is None else now
     found: list[dict] = []
-    rows = {r["layer"]: r for r in layers(store, now)}
+    if rows is None:
+        rows = {r["layer"]: r for r in layers(store, now)}
 
     def add(key, kind, since, summary):
         found.append({"key": key, "kind": kind, "since": since, "summary": summary, "task_id": None})
@@ -283,14 +287,15 @@ def detect_incidents(store, now: float | None = None) -> list[dict]:
     from . import autopilot
     policy, _ = autopilot.load(store.path.parent)
     with store._tx() as db:
-        last = _last_activity(store, db)
+        if last is None:
+            last = _last_activity(store, db)
         errors = {k: db.execute("SELECT COUNT(*) FROM workflow_events WHERE kind=? AND ts>=?", (k, now - ERROR_BURST[1])).fetchone()[0]
                   for k in ERROR_KINDS}
-        queued = [t for t in store._all(db, "task") if t["state"] == "queued" and t.get("execution_allowed", True)
-                  and not _is_incident_task(t) and store._ready(db, t)]
-    if policy.get("enabled") and not policy.get("kill") and queued and now - last > IDLE_WORK_S:
+        if ready is None:
+            ready = ready_count(store, db)
+    if policy.get("enabled") and not policy.get("kill") and ready and now - last > IDLE_WORK_S:
         add("factory_idle_with_ready_work", "factory_idle_with_ready_work", last,
-            f"{len(queued)} authorised task(s) ready, no worker or manager activity for {_dur(now - last)}")
+            f"{ready} authorised task(s) ready, no worker or manager activity for {_dur(now - last)}")
     decision = _meta(store, DECISION_KEY, {})
     if decision.get("reason") in {"PAUSED", "NO_CORE"} and now - decision.get("since", now) > PAUSED_LONG_S:
         add("autopilot_paused_long", "autopilot_paused_long", decision["since"],
@@ -338,19 +343,58 @@ def process_incidents(store, now: float | None = None) -> list[dict]:
     return opened
 
 
-def health(store, now: float | None = None) -> dict:
-    now = store.clock() if now is None else now
-    state = _meta(store, INCIDENT_KEY, {})
-    incidents = [{**i, "task_id": state.get(i["key"], {}).get("task_id")} for i in detect_incidents(store, now)]
+def _usage_shown(store) -> dict:
     from . import autopilot, usage as use
     try:
         policy, _ = autopilot.load(store.path.parent)
         info = use.current(store, policy)
         slow, stop = use.thresholds(policy)
-        shown = {**info, "level": use.level(store, policy, info), "slow_pct": slow, "stop_pct": stop}
+        return {**info, "level": use.level(store, policy, info), "slow_pct": slow, "stop_pct": stop}
     except Exception:  # noqa: BLE001
-        shown = {"pct": None, "source": "unknown", "estimate": False, "text": "unknown", "level": "ok", "notice": "usage check failed"}
-    return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now)}
+        return {"pct": None, "source": "unknown", "estimate": False, "text": "unknown", "level": "ok", "notice": "usage check failed"}
+
+
+def compute_snapshot(store, now: float | None = None) -> dict:
+    """Layers, incidents, verdict and usage computed ONCE (layers, ready tasks and last activity are shared)."""
+    now = store.clock() if now is None else now
+    layer_rows = layers(store, now)
+    rows = {r["layer"]: r for r in layer_rows}
+    with store._tx() as db:
+        ready, last = ready_count(store, db), _last_activity(store, db)
+    state = _meta(store, INCIDENT_KEY, {})
+    try:
+        found = detect_incidents(store, now, rows=rows, ready=ready, last=last)
+    except Exception:  # noqa: BLE001
+        found = []
+    incidents = [{**i, "task_id": state.get(i["key"], {}).get("task_id")} for i in found]
+    return {"layers": layer_rows, "incidents": incidents, "usage": _usage_shown(store), "computed_at": now,
+            "verdict": verdict(store, now, _pre={"rows": rows, "ready": ready, "last": last, "incidents": [i["key"] for i in found]})}
+
+
+def snapshot(store, max_age: float = SNAPSHOT_FRESH_S) -> dict:
+    """The cached ``obs_snapshot`` (ledger meta) when younger than ``max_age`` seconds, else computed now and stored."""
+    try:
+        cached = _meta(store, SNAPSHOT_KEY, None)
+        if isinstance(cached, dict) and 0 <= store.clock() - float(cached.get("computed_at", 0)) < max_age:
+            return cached
+    except (ValueError, TypeError):
+        pass
+    snap = compute_snapshot(store)
+    try:
+        _save(store, SNAPSHOT_KEY, snap)
+    except Exception:  # noqa: BLE001  - a busy ledger must not break a read
+        pass
+    return snap
+
+
+def health(store, now: float | None = None) -> dict:
+    """Without ``now`` the cached snapshot is used (at most SNAPSHOT_FRESH_S old); an explicit ``now`` computes inline."""
+    if now is None:
+        snap = snapshot(store)
+        return {"layers": snap["layers"], "incidents": snap["incidents"], "usage": snap["usage"],
+                "now": snap["computed_at"], "verdict": snap["verdict"]}
+    snap = compute_snapshot(store, now)
+    return {"layers": snap["layers"], "incidents": snap["incidents"], "usage": snap["usage"], "now": now, "verdict": snap["verdict"]}
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------
@@ -394,7 +438,9 @@ def supervisor_tick(store, home: Path, profile_home: Path, *, probe=core_probe) 
         if wrapper["last_beat_at"] and wrapper["state"] != "stopped" and wrapper["age_s"] > WRAPPER_DEAD_S:
             from .autopilot_watch import raise_alert
             raise_alert(store, "watcher_dead:wrapper", f"Wrapper beat is stale ({_dur(wrapper['age_s'])})")
-        return process_incidents(store)
+        opened = process_incidents(store)
+        snapshot(store, SNAPSHOT_TICK_S)
+        return opened
     except Exception as exc:  # noqa: BLE001
         log_line(home, f"observability tick failed: {type(exc).__name__}: {str(exc)[:200]}")
         return []
@@ -491,7 +537,7 @@ VERDICT_TEXT = {
     "working": "{active} worker(s) active", "supervisor_dead": "supervisor dead", "supervisor_late": "supervisor heartbeat late",
     "no_data": "no heartbeat data yet", "no_core": "NO_CORE: the Core is not reachable", "usage_stop": "usage stop: {why}",
     "idle_ready": "idle with {ready} ready task(s)", "owner_wait": "waiting for owner questions only ({questions})",
-    "nothing_queued": "nothing is queued",
+    "nothing_queued": "nothing is queued", "worker_limit": "worker limit reached: {running} of {limit} running",
 }
 
 
@@ -504,17 +550,26 @@ def read_usage(store, now: float) -> dict | None:
         return None
 
 
-def verdict(store, now: float | None = None) -> dict:
+def _worker_limit(store) -> int | None:
+    try:
+        from . import autopilot
+        policy, _ = autopilot.load(store.path.parent)
+        return int(policy["max_concurrent"])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def verdict(store, now: float | None = None, *, _pre: dict | None = None) -> dict:
     """The ONE answer to 'is the factory working'. Derived from layers, incidents, running tasks and queued work."""
     now = store.clock() if now is None else now
-    rows = {r["layer"]: r for r in layers(store, now)}
+    rows = _pre["rows"] if _pre else {r["layer"]: r for r in layers(store, now)}
     sup = rows["supervisor"]
     with store._tx() as db:
         agents = store._all(db, "agent")
         tasks = store._all(db, "task")
         questions = [q for q in store._all(db, "question") if (q.get("status") or "pending") in {"pending", "deferred", "open"}]
-        ready = ready_count(store, db)
-        last = _last_activity(store, db)
+        ready = _pre["ready"] if _pre else ready_count(store, db)
+        last = _pre["last"] if _pre else _last_activity(store, db)
     running = {t["id"] for t in tasks if t["state"] == "running"}
     active = sum(1 for a in agents if a.get("task_id") in running and a.get("status") != "offline"
                  and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S)
@@ -522,10 +577,22 @@ def verdict(store, now: float | None = None) -> dict:
     from . import autopilot_loop as loop
     pause = loop._load(store)
     pause_code = str(pause.get("pause_reason", "")) if now < pause.get("paused_until", 0) else ""
-    try:
-        incidents = [i["key"] for i in detect_incidents(store, now)]
-    except Exception:  # noqa: BLE001
-        incidents = []
+    pause_since = pause.get("paused_until", 0) - loop.PAUSE_S
+    # A worker that is running with a live session and was active after the NO_CORE was recorded proves the Core
+    # answered since then: the NO_CORE is stale.
+    newest = max([max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) for a in agents
+                  if a.get("task_id") in running and a.get("status") != "offline" and a.get("session_id")] or [0])
+    if pause_code == "NO_CORE" and newest > pause_since:
+        pause_code = ""
+    if decision.get("reason") == "NO_CORE" and newest > (decision.get("since") or 0):
+        decision = {**decision, "reason": ""}
+    if _pre:
+        incidents = _pre["incidents"]
+    else:
+        try:
+            incidents = [i["key"] for i in detect_incidents(store, now, rows=rows, ready=ready, last=last)]
+        except Exception:  # noqa: BLE001
+            incidents = []
     detail = {"active": active, "ready": ready, "questions": len(questions), "incidents": incidents,
               "layers": {k: v["status"] for k, v in rows.items()}, "autopilot_reason": decision.get("reason", "")}
     oldest_q = min(q.get("created_at") or now for q in questions) if questions else None
@@ -543,7 +610,11 @@ def verdict(store, now: float | None = None) -> dict:
         return out("unknown", "supervisor_late", sup["last_beat_at"])
     if decision.get("reason") == "NO_CORE" or pause_code == "NO_CORE":
         return out("stopped", "no_core", decision.get("since") or None)
-    if pause_code and re.search(r"usage|limit|budget", pause_code, re.I):
+    if pause_code == "BUDGET_REACHED":      # the autopilot grant's worker limit (concurrency), not Claude usage
+        limit = _worker_limit(store)
+        return out("working" if active else "idle_with_work", "worker_limit", None if active else (decision.get("since") or last or None),
+                   running=len(running), limit=limit if limit is not None else "?", active=active)
+    if pause_code and re.search(r"usage", pause_code, re.I):
         return out("stopped", "usage_stop", decision.get("since") or None, why=pause_code)
     used = read_usage(store, now)
     if used and not active and max(used.get("weekly_pct", 0), used.get("five_hour_pct", 0)) >= 99:
