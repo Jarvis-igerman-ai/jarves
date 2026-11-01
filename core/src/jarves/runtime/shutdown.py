@@ -119,3 +119,48 @@ def same_boot(a: int | float | None, b: int | float | None, tolerance_s: float =
     if a is None or b is None:
         return None
     return abs(float(a) - float(b)) <= tolerance_s
+
+
+PLANNED_RESTART_FILE = "planned_restart.json"
+PLANNED_RESTART_TTL_S = 600.0
+
+
+def mark_planned_restart(home, reason: str, clock: Callable[[], float] = time.time, session: str | None = None) -> None:
+    """A planned stop-and-restart (hotfix, V4.5.1 #620) writes this just before it stops the Core. The next start reads
+    it so a stop it ended on purpose is not mistaken for a crash. `session` is the stopped Core's log session id: the
+    marker only explains the run that session recorded, so a crash of a LATER run (the hotfixed Core dying before it
+    consumed the marker) is not hidden. Best-effort, never raises."""
+    import json
+    try:
+        from pathlib import Path
+        (Path(home) / PLANNED_RESTART_FILE).write_text(
+            json.dumps({"ts": clock(), "reason": str(reason)[:40], "session": str(session or "")[:80]}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def consume_planned_restart_record(home, clock: Callable[[], float] = time.time) -> dict | None:
+    """{"reason", "session"} when a fresh planned-restart marker exists (it is deleted: one marker explains one
+    restart), else None. An old or unreadable marker is deleted and ignored. `session` is "" when not recorded."""
+    import json
+    from pathlib import Path
+    f = Path(home) / PLANNED_RESTART_FILE
+    if not f.exists():
+        return None
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+        fresh = 0 <= clock() - float(d["ts"]) <= PLANNED_RESTART_TTL_S
+        rec = {"reason": str(d.get("reason") or "planned"), "session": str(d.get("session") or "")}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        fresh, rec = False, None
+    try:
+        f.unlink()
+    except OSError:
+        pass
+    return rec if fresh else None
+
+
+def consume_planned_restart(home, clock: Callable[[], float] = time.time) -> str | None:
+    """The reason of a fresh planned-restart marker (consumed), else None."""
+    rec = consume_planned_restart_record(home, clock)
+    return rec["reason"] if rec else None

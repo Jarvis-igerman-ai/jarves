@@ -209,6 +209,12 @@ def previous_process(home: Path, current_session: str, lookback_s: float = 30 * 
     return procs[-1] if procs else None
 
 
+def last_core_session(home: Path, clock: Callable[[], float] = time.time) -> str | None:
+    """Log session id of the most recent Core process that wrote CORE_STARTING (None if unknown)."""
+    procs = [p for p in processes(read_logs(home, clock() - 30 * 86400)) if p["started"]]
+    return procs[-1]["session"] if procs else None
+
+
 def system_info(home: Path) -> dict:
     """Free disk of the state folder's drive, physical memory, size of the state folder (no network, no psutil)."""
     out: dict = {"disk_free_gb": None, "memory": None, "state_mb": None}
@@ -1525,14 +1531,26 @@ class SelfCheckService:
             self._spawn(self.auto("errors"))
 
     async def _startup(self) -> None:
+        from .runtime.shutdown import boot_time, consume_planned_restart_record, same_boot
+        # Read-and-delete the planned-restart marker ONCE, on every start, before any early return: one marker
+        # explains one restart and must never outlive it (a later real crash would otherwise be hidden).
+        rec = consume_planned_restart_record(self.core.home, self.clock)
         mode = str(self.db.setting("self_check.on_start") or "crash")
         if mode == "never":
             return
         prev = await asyncio.to_thread(previous_process, self.core.home, logs._SESSION, 30 * 86400, self.clock)
         if prev is None:
             return
+        # the marker explains only the run it was written for: when it names a session and that is not the previous
+        # run, a later run (the hotfixed Core) died before it consumed the marker, so that is a real crash
+        planned = rec["reason"] if rec and (not rec["session"] or rec["session"] == prev.get("session")) else None
         if not prev["stopped"]:
-            from .runtime.shutdown import boot_time, same_boot
+            if planned:                  # V4.5.1 #620: a hotfix ended the last run on purpose, not a crash
+                logs.info("selfcheck", "SELFCHECK_SKIPPED", "planned restart; not a crash",
+                          previous=prev.get("session"), reason=planned)
+                if mode == "always":
+                    await self.auto("restart")
+                return
             if same_boot(prev.get("boot"), boot_time()) is False:
                 logs.info("selfcheck", "SELFCHECK_SKIPPED", "the computer restarted since the last run; not a crash",
                           previous=prev.get("session"))
