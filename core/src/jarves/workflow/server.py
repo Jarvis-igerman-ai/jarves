@@ -67,7 +67,7 @@ class Server(ThreadingHTTPServer):
         self.session_lock = threading.Lock()
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
-        self.unlock_attempts: list[float] = []
+        self.unlock_wrong: dict[str, int] = {}    # session -> wrong code tries (5 cancel the code)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -281,7 +281,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/unlock":
                 self._unlock(data)
                 return
-            if re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss)", path) and not self._unlock_left():
+            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
+                    or path == "/api/followups") and not self._unlock_left():
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
                 self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",
                                  "locked": True})
@@ -337,17 +338,18 @@ class Handler(BaseHTTPRequestHandler):
     def _unlock(self, data):
         now = time.time()
         session = self._session()
-        with self.server.session_lock:
-            self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
-            if len(self.server.unlock_attempts) >= 5:
-                self._json(429, {"error": "wait a minute before trying again"})
-                return
-            self.server.unlock_attempts.append(now)
         code = data.get("code")
-        if not isinstance(code, str) or not unlock.consume(self.server.home, code):
-            self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
-            return
-        with self.server.session_lock:
+        with self.server.session_lock:  # one request at a time: two correct requests cannot both consume the code
+            ok = isinstance(code, str) and unlock.consume(self.server.home, code)
+            if not ok:
+                wrong = self.server.unlock_wrong.get(session, 0) + 1
+                if wrong >= 5:  # this session guessed 5 times: cancel the shown code, the owner issues a new one
+                    (Path(self.server.home) / unlock.FILE).unlink(missing_ok=True)
+                    wrong = 0
+                self.server.unlock_wrong[session] = wrong
+                self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
+                return
+            self.server.unlock_wrong.pop(session, None)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
         self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})

@@ -64,6 +64,18 @@ class UnlockTests(unittest.TestCase):
             self.assertTrue(data["locked"], action)
         self.assertEqual(self.store.snapshot()["questions"][0]["status"], "pending")
 
+    def test_ask_more_and_followups_are_locked_until_unlock_then_work(self):
+        self.login()
+        for path in (f"/api/questions/{self.q}/ask-more", "/api/followups"):
+            code, _, data = self.request(path, {"text": "More please"})
+            self.assertEqual(code, 403, path)
+            self.assertTrue(data["locked"], path)
+        self.assertEqual(self.store.snapshot().get("followups", []), [])
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+        for path in (f"/api/questions/{self.q}/ask-more", "/api/followups"):
+            self.assertEqual(self.request(path, {"text": "More please"})[0], 200, path)
+        self.assertEqual(len(self.store.snapshot()["followups"]), 2)
+
     def test_correct_code_unlocks_only_that_session_once_and_default_is_8_hours(self):
         sid = self.login()
         shown = unlock.issue(self.home)
@@ -100,12 +112,33 @@ class UnlockTests(unittest.TestCase):
         code = unlock.issue(self.home, now=1.0)          # issued long ago
         self.assertFalse(unlock.consume(self.home, code))
         self.assertFalse((self.home / unlock.FILE).exists())
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
+        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
         unlock.issue(self.home)
-        statuses = [self.request("/api/unlock", {"code": "x"})[0] for _ in range(6)]
-        self.assertEqual(statuses[-1], 429)
         text = (self.home / unlock.FILE).read_text(encoding="ascii")
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
+
+    def test_wrong_tries_are_per_session_and_two_correct_requests_unlock_once(self):
+        self.login()
+        first = self.cookie
+        for _ in range(4):
+            self.request("/api/unlock", {"code": "zzzz"})
+        self.cookie = ""
+        self.login()                                                   # another session is not locked out
+        shown = unlock.issue(self.home)
+        results = []
+        def go():
+            results.append(self.request("/api/unlock", {"code": shown})[0])
+        threads = [threading.Thread(target=go) for _ in range(2)]
+        [t.start() for t in threads]
+        [t.join(10) for t in threads]
+        self.assertEqual(sorted(results), [200, 403])
+        self.assertEqual(len(self.server.unlocked), 1)
+        self.assertNotEqual(first, self.cookie)
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
