@@ -22,3 +22,5 @@
 
 /* #741: full-page notice when the private session ended (no inline styles: strict CSP). */
 .session-ended{box-sizing:border-box;width:100%;max-width:100vw;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;margin:0}.session-ended *{box-sizing:border-box;min-width:0}.session-ended-card{width:min(100%,560px);padding:28px 20px;border:1px solid #3a5a48;border-radius:14px;background:#10201b;text-align:center}.session-ended-card h1{margin:8px 0 12px;font-size:24px}.session-ended-card p{color:#b9cdc4;line-height:1.7;overflow-wrap:anywhere}.session-ended-cmd{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;margin:18px 0}.session-ended-cmd code{max-width:100%;direction:ltr;unicode-bidi:plaintext;overflow-wrap:anywhere;padding:10px 14px;border-radius:8px;background:#0b1416;border:1px solid #2b4538;font-size:16px}.session-ended-note{min-height:1.5em;font-size:13px}.workspace[hidden]{display:none}
+
+.metric-bar.split{height:auto;display:grid;gap:1px}.metric-bar.split progress{height:2px}
