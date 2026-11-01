@@ -1,1 +1,1 @@
-- Workflow: the owner can answer a question by typing `ANSWER q-ID text` in his interactive Claude window (#797); agents, subagents and headless sessions can never answer, defer or reopen.
+- Workflow: the owner can record an answer by typing `ANSWER q-ID text` in his interactive Claude window (#797). It is stored as unconfirmed (channel claude-window) until he confirms it in the dashboard; subagent and headless payloads are ignored.

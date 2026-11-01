@@ -60,11 +60,12 @@ ANSWER_RE = re.compile(r"\A\s*(?:ANSWER|ענה)\s+(q-[0-9a-f]{6,32})\s*[:\-]?\s*
 
 
 def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool) -> dict | None:
-    """#797: the owner's own typed prompt `ANSWER q-ID text` in his interactive Claude window answers that question.
+    """#797: the owner's typed prompt `ANSWER q-ID text` in his interactive Claude window records an answer.
 
-    Only a top-level interactive prompt counts: no subagent, no autopilot/agent environment, and Claude's
-    interactive entrypoint (headless `-p` and SDK sessions can be driven by agents). The prompt is consumed
-    (never reaches the model). Anything else is ignored: an agent can never answer, defer or reopen.
+    The hook cannot prove who typed (a subagent's shell can pipe a forged payload into this module), so the
+    answer is stored on channel `claude-window`, which is NOT owner-confirmed: needs_owner_confirmation stays
+    True until the owner confirms or reopens it in the dashboard. Payloads from subagents, agent environments
+    and non-interactive entrypoints are ignored. A matching prompt is always blocked from the model, also on error.
     """
     prompt = payload.get("prompt")
     if (payload.get("hook_event_name") != "UserPromptSubmit" or not isinstance(prompt, str) or len(prompt) > 5000
@@ -76,11 +77,13 @@ def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool
         return None
     try:
         question = store.answer(match.group(1), match.group(2).strip(), answered_by="owner (typed in Claude window)",
-                                channel="terminal")
-    except ValueError as exc:
-        return {"decision": "block", "reason": f"JARVES: answer not stored ({exc}). The question stays open."}
+                                channel="claude-window")
+    except (ValueError, sqlite3.Error, OSError) as exc:
+        # Never let the answer text reach the model, even when the ledger is locked.
+        return {"decision": "block", "reason": f"JARVES: answer not stored ({type(exc).__name__}: {exc}). "
+                "The question stays open; answer it in the dashboard."}
     return {"decision": "block", "reason": f"JARVES: your answer to \"{question['title']}\" was stored. "
-            "It was not sent to the model; the waiting task resumes."}
+            "It was not sent to the model; confirm it in the dashboard (it is marked unconfirmed)."}
 
 
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
@@ -204,6 +207,7 @@ def main(argv=None) -> int:
     ap.add_argument("--repo-root", type=Path, required=True)
     args = ap.parse_args(argv)
     store = None
+    payload = None
     try:
         raw = sys.stdin.buffer.read(1048577)
         if len(raw) > 1048576:
@@ -235,6 +239,11 @@ def main(argv=None) -> int:
         # (sqlite3.Error) used to escape as a traceback and drop the event silently.
         _log_error(args.home, exc)
         print("JARVES workflow observer unavailable; Claude permissions unchanged", file=sys.stderr)
+        prompt = payload.get("prompt") if isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit" else None
+        if isinstance(prompt, str) and ANSWER_RE.match(prompt):
+            # An answer-shaped prompt must never reach the model, even if the ledger is locked (#797).
+            print(json.dumps({"decision": "block", "reason": "JARVES: ledger unavailable, answer not stored. "
+                              "The question stays open; answer it in the dashboard."}))
     finally:
         if store:
             store.close()

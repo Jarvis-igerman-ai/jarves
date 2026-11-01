@@ -69,7 +69,7 @@ def agent_roster(agents: list, tasks: list, now: float, retention_s: int = AGENT
     return visible, {"live": len(visible) - offline, "offline": offline, "archived": archived,
                      "total": len(agents), "retention_s": retention_s}
 
-ANSWER_CHANNELS = ("dashboard", "terminal", "agent", "unknown")
+ANSWER_CHANNELS = ("dashboard", "terminal", "claude-window", "agent", "unknown")  # claude-window: typed, unconfirmed (#797)
 CONFIRMED_CHANNELS = ("dashboard", "terminal")
 
 
