@@ -42,7 +42,8 @@ def _strings(value, name, limit=20):
         raise ValueError(f"{name} must be a short list of short strings")
 
 
-OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "weekly_token_budget")       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
+OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "weekly_token_budget",
+                 "focus_enabled", "focus_pr_high", "focus_green_high", "focus_showstopper_high")       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
@@ -90,6 +91,8 @@ def validate(policy: dict) -> dict:
             _int(policy[key], key, 1, 100)
     if policy.get("usage_slow_pct", 80) > policy.get("usage_stop_pct", 95):
         raise ValueError("usage_slow_pct must not be above usage_stop_pct")
+    from .focus import validate_policy as _validate_focus
+    _validate_focus(policy)
     if "weekly_token_budget" in policy:
         _int(policy["weekly_token_budget"], "weekly_token_budget", 1, 10**12)
     if "worker_allowed_tools" in policy:

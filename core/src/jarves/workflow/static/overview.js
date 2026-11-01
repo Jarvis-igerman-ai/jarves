@@ -112,7 +112,7 @@
   // The one trusted verdict comes from GET /api/health (observability.verdict). Without it (old service, fetch
   // failed, or older than 2 min) the local logic above is used unchanged.
   const REMOTE_TONE = {working: "ok", idle_with_work: "attention", owner_wait: "attention", stopped: "bad", unknown: "unknown"};
-  let remote = null, remoteAt = 0, remoteBusy = false;
+  let remote = null, remoteAt = 0, remoteBusy = false, remoteFocus = null;
   async function loadVerdict() {
     if (remoteBusy || typeof fetch !== "function") return;
     remoteBusy = true;
@@ -120,8 +120,9 @@
       const response = await fetch("/api/health", {credentials: "same-origin", cache: "no-store"});
       const body = response.ok ? await response.json() : null;
       remote = body && body.verdict && REMOTE_TONE[body.verdict.verdict] ? body.verdict : null;
+      remoteFocus = body && body.focus && typeof body.focus.he === "string" ? body.focus : null;
       remoteAt = Date.now() / 1000;
-    } catch (_) { remote = null; } finally { remoteBusy = false; }
+    } catch (_) { remote = null; remoteFocus = null; } finally { remoteBusy = false; }
   }
   function remoteVerdict(now = Date.now() / 1000) {
     if (!remote || now - remoteAt > 120) return null;
@@ -141,6 +142,11 @@
     // The one polite live region: written only when the sentence changes, never on every refresh.
     if ($("#ov-status-title").textContent !== title) $("#ov-status-title").textContent = title;
     $("#ov-status-detail").textContent = (rv ? rv.kind === "working" : f.verdict === "ok" || f.verdict === "needs") ? T.supOk : "";
+    // One short focus line from the same /api/health answer (workflow/focus.py): e.g. "מיקוד: מיזוג — 9 PR פתוחים".
+    const focusEl = $("#ov-focus");
+    const focusText = remoteFocus && Date.now() / 1000 - remoteAt <= 120 ? (EN ? remoteFocus.en : remoteFocus.he) : "";
+    focusEl.hidden = !focusText;
+    if (focusEl.textContent !== focusText) focusEl.textContent = focusText;
     const freshEl = $("#ov-fresh");
     freshEl.textContent = T.updated(age(data.observed_at));
     freshEl.dataset.age = f.freshness;

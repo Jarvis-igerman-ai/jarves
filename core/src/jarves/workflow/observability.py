@@ -343,6 +343,7 @@ def health(store, now: float | None = None) -> dict:
     state = _meta(store, INCIDENT_KEY, {})
     incidents = [{**i, "task_id": state.get(i["key"], {}).get("task_id")} for i in detect_incidents(store, now)]
     from . import autopilot, usage as use
+    policy: dict = {}
     try:
         policy, _ = autopilot.load(store.path.parent)
         info = use.current(store, policy)
@@ -350,7 +351,13 @@ def health(store, now: float | None = None) -> dict:
         shown = {**info, "level": use.level(store, policy, info), "slow_pct": slow, "stop_pct": stop}
     except Exception:  # noqa: BLE001
         shown = {"pct": None, "source": "unknown", "estimate": False, "text": "unknown", "level": "ok", "notice": "usage check failed"}
-    return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now)}
+    try:
+        from . import focus
+        focus_view = focus.current(store, policy, shown.get("level", "ok"))
+    except Exception:  # noqa: BLE001
+        focus_view = None
+    return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now),
+            "focus": focus_view}
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------

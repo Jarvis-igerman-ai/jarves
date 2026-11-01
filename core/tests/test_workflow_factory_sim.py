@@ -561,5 +561,36 @@ class SimTests(unittest.TestCase):
         self.assertTrue(all(sched["idle"][0] <= n - t0 < sched["idle"][1] for n in w["nudges"]), "never nudged outside idle")
 
 
+    def test_sim_pr_flood_merge_focus_then_back_to_balanced(self):
+        """Focus: a PR flood turns the focus to merge after 2 looks (features drop to 1), and calm brings it back."""
+        from jarves.workflow import focus
+        home, now, store = make_home(max_concurrent=4)
+        policy, _ = autopilot.load(home)
+        policy["lanes"]["features"]["workers"] = 2
+        autopilot.save(home, policy)
+        for i in range(4):
+            bug(store, f"b{i}")
+            bug(store, f"f{i}", lane="features")
+        flood = [{"number": n, "isDraft": False, "mergeable": "MERGEABLE", "labels": [],
+                  "statusCheckRollup": [{"conclusion": "SUCCESS"}]} for n in range(9)]
+        state = {"prs": flood}
+        gh = lambda kind: state["prs"] if kind == "prs" else []   # noqa: E731
+        core = FakeCore()
+        seen = []
+        for _ in range(8):                                           # five-minute cache: look every 6 minutes
+            autopilot_step(store, home, core, force=True, gh_focus=gh)
+            seen.append(focus.evaluate(store, policy, gh, commit=False, fetch=False)["focus"])
+            now[0] += 360
+        self.assertEqual(seen[0], "balanced")
+        self.assertIn("merge", seen)
+        self.assertEqual(len(kinds(store, "focus_changed")), 1)
+        state["prs"] = []
+        for _ in range(4):
+            autopilot_step(store, home, core, force=True, gh_focus=gh)
+            now[0] += 360
+        self.assertEqual(focus.evaluate(store, policy, gh, commit=False, fetch=False)["focus"], "balanced")
+        self.assertEqual(len(kinds(store, "focus_changed")), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

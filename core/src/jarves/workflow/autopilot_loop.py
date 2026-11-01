@@ -134,7 +134,7 @@ def _pick(snapshot: dict, policy: dict, lane: str, skip=()) -> dict | None:
 
 
 def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=bridge_start, stop=bridge_stop,
-         notify=bridge_notify, find=bridge_find, force: bool = False, usage=None) -> list[dict]:
+         notify=bridge_notify, find=bridge_find, force: bool = False, usage=None, gh_focus=None) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
     from .observability import record_decision
@@ -146,7 +146,7 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find, usage)
+                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find, usage, gh_focus)
                 record_decision(store, policy, done, usage)   # why nothing started (deduplicated)
                 return done
         except OSError:
@@ -184,7 +184,7 @@ def _unconfirmed(store, profile_home, agent_id, task_id, find, actions) -> None:
     actions.append({"task_id": task_id, "action": "start_unconfirmed"})
 
 
-def _step(store, profile_home, policy, start, stop, notify, force, find=None, usage=None) -> list[dict]:
+def _step(store, profile_home, policy, start, stop, notify, force, find=None, usage=None, gh_focus=None) -> list[dict]:
     actions: list[dict] = []
     state = _load(store)
     now = store.clock()
@@ -231,13 +231,15 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None, us
     starts = [t for t in state.get("starts", []) if now - t < 3600]
     running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
     throttle = _throttle(store, policy, usage, notify, profile_home)
+    plan = _focus_plan(store, policy, throttle, gh_focus)
     for lane, conf in policy.get("lanes", {}).items():
         if not isinstance(conf, dict) or "workers" not in conf:
             continue
         if now < state.get("paused_until", 0) or throttle == "stop":
             break
         skipped: set[str] = set()
-        while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
+        wanted = int(plan.get(lane, conf["workers"])) if plan else int(conf["workers"])   # focus plan (bugs/features) or static policy
+        while (sum(1 for a in running if a["lane"] == lane) < wanted
                and len(running) < int(policy.get("max_concurrent", 1))
                and (throttle != "slow" or not running)        # 80%+: one task at a time (#776)
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
@@ -296,6 +298,18 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None, us
             running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
     _LAST_SIG[key] = (store.snapshot()["revision"],) + sig[1:]
     return actions
+
+
+def _focus_plan(store, policy, throttle, gh) -> dict | None:
+    """Worker counts from the focus module, or None (static policy) when focus is off or fails. Never raises."""
+    from . import focus
+    try:
+        if not focus.setting(policy, "focus_enabled"):
+            return None
+        return focus.evaluate(store, policy, gh, usage_level=throttle)["lanes"]
+    except Exception:  # noqa: BLE001
+        log.exception("focus failed; static lane policy used")
+        return None
 
 
 def _throttle(store, policy, usage, notify, profile_home) -> str:

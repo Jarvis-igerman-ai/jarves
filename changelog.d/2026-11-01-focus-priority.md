@@ -1,0 +1,1 @@
+- Added: dynamic factory focus (`workflow_console.py focus`): many open PRs shift the manager and autopilot to merging, many showstopper issues to fixing, a red main to the main fix; hysteresis, bounded by `max_concurrent` and the usage throttle, shown in `status`, `/api/health` and the Overview.

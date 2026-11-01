@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "focus", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -191,6 +191,9 @@ def main(argv=None) -> int:
             result = store.snapshot(retention_s=agent_retention_s(home))
             from .observability import verdict
             result["verdict"] = verdict(store)
+            from . import focus as _focus
+            from .autopilot import load as _lp
+            result["focus"] = _focus.current(store, _lp(home)[0])
         elif a.action == "report" and not a.agent:
             from .report import build
             rep = build(store, a.hours)
@@ -210,6 +213,15 @@ def main(argv=None) -> int:
                 result = history(store, before=a.before, **filters)
         elif a.action == "layer-beat":
             result = store.beat(a.layer, a.state or "ok", a.note)
+        elif a.action == "focus":
+            from . import focus as _focus
+            from .autopilot import load as _load_policy
+            policy = _load_policy(home)[0]
+            res = _focus.evaluate(store, policy, commit=False)
+            if not a.json:
+                print(_focus.format_text(res))
+                return 0
+            result = _focus.summary(res)
         elif a.action == "health":
             from .observability import health
             result = health(store)

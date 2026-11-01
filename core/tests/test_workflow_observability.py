@@ -235,7 +235,7 @@ class ObservabilityHTTPTests(unittest.TestCase):
         self.login()
         status, health = self.get("/api/health")
         self.assertEqual(status, 200)
-        self.assertEqual(set(health), {"layers", "incidents", "now", "verdict"})
+        self.assertEqual(set(health), {"layers", "incidents", "now", "verdict", "usage", "focus"})
         self.assertEqual([r["layer"] for r in health["layers"]], list(obs.LAYERS))
         self.assertEqual(set(health["layers"][0]), {"layer", "status", "state", "last_beat_at", "age_s", "note"})
         status, tl = self.get("/api/timeline?hours=24")
