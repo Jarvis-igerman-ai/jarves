@@ -49,6 +49,25 @@ RULES = {
 PR_INSTALLER = r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_)"
 
 
+def test_read_docs(files: list[str], tests_dir: Path | None = None) -> set[str]:
+    """Changed docs/ files that a Core test reads from disk, so a docs-only change can still fail that test.
+
+    The docs-free content tree (ci_reuse.py) is only a sound proof when no test depends on a doc. Tests the quick
+    `validate` stage already runs (tools/prepush.py CHECKS) are covered there and ignored here. A doc counts when its
+    file name appears in any other test source. Fails closed: an unreadable tests dir counts every docs/ file."""
+    docs = [f for f in files if f.startswith("docs/")]
+    if not docs:
+        return set()
+    tests_dir = tests_dir or TESTS
+    try:
+        covered = set(re.findall(r"tests/(test_\w+\.py)", (tests_dir.parent / "tools" / "prepush.py").read_text(encoding="utf-8")))
+        text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in sorted(tests_dir.glob("test_*.py"))
+                        if p.name not in covered)
+    except OSError:
+        return set(docs)
+    return {f for f in docs if re.search(r"(?<![\w.-])" + re.escape(f.rsplit("/", 1)[-1]), text)}
+
+
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
              reuse_tests_only: bool = False) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
@@ -75,10 +94,11 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     if any(SELF.match(f) for f in files):
         return {k: True for k in FLAGS}
     rest = [f for f in files if not DOCS.match(f)]
+    read = test_read_docs([f for f in files if DOCS.match(f)])   # docs a Core test reads: Linux shards must run
     out = {k: any(re.match(p, f) for f in files) for k, p in RULES.items()}
     if event == "pull_request":
         out["installer"] = any(re.match(PR_INSTALLER, f) for f in files)
-    out["code"] = bool(rest)
+    out["code"] = bool(rest) or bool(read)
     out["full"] = any(not GUIDES.match(f) for f in rest)      # guides-only: just the Linux shard
     if not out["full"]:
         out = {**out, **{k: False for k in RULES}}

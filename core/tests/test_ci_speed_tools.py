@@ -717,3 +717,19 @@ def test_timing_job_resolves_the_upstream_run_and_tolerates_missing_junit():
     wf = (WF / "jarves-checks.yml").read_text(encoding="utf-8")
     assert "ci_reuse.py junit-source" in wf and "steps.src.outputs.run_id" in wf
     assert "no measured junit" in wf
+
+def test_docs_read_by_a_core_test_are_not_docs_only(tmp_path):
+    """V451-MERGE-PROOF: the docs-free tree proof is sound only if no test reads the changed doc. A doc named in a
+    test the quick stage does not run needs the Linux shards (merge gate); prepush-covered and unreferenced docs stay free."""
+    tests = tmp_path / "tests"
+    tools = tmp_path / "tools"
+    tests.mkdir()
+    tools.mkdir()
+    (tools / "prepush.py").write_text('tests=("tests/test_covered.py",)', encoding="utf-8")
+    (tests / "test_covered.py").write_text('read("docs/ONLY_QUICK.md")', encoding="utf-8")
+    (tests / "test_other.py").write_text('read(ROOT / "docs" / "READ_BY_CORE.md")', encoding="utf-8")
+    got = ci_plan.test_read_docs(["docs/ONLY_QUICK.md", "docs/READ_BY_CORE.md", "docs/FREE.md", "README.md"], tests)
+    assert got == {"docs/READ_BY_CORE.md"}
+    assert ci_plan.test_read_docs(["docs/x.md"], tmp_path / "missing" / "tests") == {"docs/x.md"}   # fails closed
+    f = ci_plan.classify(["docs/NOW.md"])                          # real repo: a test reads NOW.md
+    assert f["code"] and not f["full"] and not f["installer"]      # Linux shards only

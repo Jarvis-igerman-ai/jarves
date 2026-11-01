@@ -281,7 +281,7 @@ def test_both_required_checks_report_in_the_merge_queue():
     assert "github.event_name == 'merge_group'" in checks["jobs"]["installer"]["env"]["CHANNEL"]
     sys.path.insert(0, str(ROOT / "core" / "tools"))
     import ci_plan
-    assert not any(ci_plan.classify(["docs/x.md"], "merge_group").values())       # docs-only group: no heavy job
+    assert not any(ci_plan.classify(["docs/zz_unreferenced_note.md"], "merge_group").values())       # docs-only group: no heavy job
     assert all(ci_plan.classify([".github/workflows/jarves-checks.yml"], "merge_group").values())   # CI change: everything
     assert ci_plan.classify(["core/src/jarves/cli.py"], "merge_group")["full"]          # code: the full matrix
     auto = load("autolabel.yml")

@@ -1,0 +1,1 @@
+- CI: a docs-only change to a doc that a Core test reads now runs the Linux Core shards, so reusing the docs-free tree proof never hides a test that depends on that doc (V451-MERGE-PROOF).
