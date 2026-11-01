@@ -464,3 +464,43 @@ async def test_565_title_why_and_args_are_escaped_in_every_popup_and_a_long_esca
     await env.runner.tick()
     d = env.store.get(p2["id"])
     assert d["state"] == "blocked" and env.ran == [] and "too long" in d["steps"][0]["error"]
+
+
+async def test_385_timed_out_consequential_step_is_unknown_and_retry_popup_warns(env):
+    env.hang_on = "act"
+    p = env.store.propose("t", steps(("fake_act", {"text": "x"})), timeout_s=5)
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["steps"][0]["status"] == "unknown" and "may already have happened" in d["steps"][0]["error"]
+    from jarves import mobile_plans
+    assert "retry" not in mobile_plans._can(d)                    # PC-only
+    env.hang_on = None
+    env.store.retry(p["id"])
+    await env.runner.tick()
+    assert "may already have happened" in env.metas[-1]["why"]
+
+
+async def test_385_read_step_timeout_stays_failed(env):
+    env.hang_on = "read"
+    p = env.store.propose("t", steps(("fake_read", {"text": "x"})), timeout_s=5)
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    assert env.store.get(p["id"])["steps"][0]["status"] == "failed"
+
+
+def test_385_compare_and_set_cancel_wins_over_a_stale_resume(env):
+    p = env.store.propose("c", steps(("fake_read", {"text": "x"})))
+    env.store.approve(p["id"])
+    env.store.pause(p["id"])
+    real = env.store.steps
+
+    def racing(pid):                                              # the PC cancels after resume checks, before its write
+        out = real(pid)
+        env.store.cancel(pid)
+        return out
+    env.store.steps = racing
+    with pytest.raises(ValueError):
+        env.store.resume(p["id"], by="phone")
+    env.store.steps = real
+    assert env.store.get(p["id"])["state"] == "cancelled"
