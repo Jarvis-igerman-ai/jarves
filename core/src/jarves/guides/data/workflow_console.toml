@@ -74,6 +74,12 @@ en = "Tasks exist but no worker is running"
 fix_he = "בדקו את ההתראה: משימה יכולה לחכות לכם, לתלות, למשאב תפוס או למיפוי מאושר. חברו סוכן אמיתי, דווחו heartbeat ואל תסמנו משימת מקור כמאושרת לביצוע לפני שקריטריוני הקבלה וההרשאה שלה ברורים."
 fix_en = "Read the alert: work may need an owner answer, dependency, reserved resource or scope reconciliation. Attach a real worker and report a heartbeat. Do not authorise imported scope until its acceptance and execution authority are clear."
 
+[[problems]]
+he = "המסך מציג 'הסשן הפרטי הסתיים' במקום נתונים"
+en = "The console shows 'private session ended' instead of data"
+fix_he = "הסשן הפרטי נמצא בזיכרון ופג בכל הפעלה מחדש של המשגיח. הריצו jarvis workflow open (או פתחו את הקישור ש־claude-j הדפיס) והשתמשו בכפתור ההעתקה במסך."
+fix_en = "The private session lives in memory and ends at every supervisor restart. Run jarvis workflow open (or use the link claude-j printed); the notice has a Copy button for the command."
+
 [parity.features]
 # Standalone development tooling; no assistant runtime feature switch or tool group.
 

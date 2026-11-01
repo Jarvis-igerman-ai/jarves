@@ -1,0 +1,1 @@
+- Added: The workflow dashboard opens on a Today screen (what needs you, what is running, road map), shows a clear notice when its private session ended, and counts tasks truthfully (running and in review are no longer added together) (#732, #741).
