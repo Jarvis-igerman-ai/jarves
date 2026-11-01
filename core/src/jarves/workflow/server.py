@@ -67,7 +67,8 @@ class Server(ThreadingHTTPServer):
         self.session_lock = threading.Lock()
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
-        self.unlock_wrong: dict[str, int] = {}    # session -> wrong code tries (5 cancel the code)
+        self.unlock_attempts: list[float] = []
+        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -340,16 +341,27 @@ class Handler(BaseHTTPRequestHandler):
         session = self._session()
         code = data.get("code")
         with self.server.session_lock:  # one request at a time: two correct requests cannot both consume the code
-            ok = isinstance(code, str) and unlock.consume(self.server.home, code)
-            if not ok:
-                wrong = self.server.unlock_wrong.get(session, 0) + 1
-                if wrong >= 5:  # this session guessed 5 times: cancel the shown code, the owner issues a new one
-                    (Path(self.server.home) / unlock.FILE).unlink(missing_ok=True)
-                    wrong = 0
-                self.server.unlock_wrong[session] = wrong
+            self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
+            if len(self.server.unlock_attempts) >= 5:
+                self._json(429, {"error": "wait a minute before trying again"})
+                return
+            self.server.unlock_attempts.append(now)
+            path = Path(self.server.home) / unlock.FILE
+            try:
+                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+            except (OSError, ValueError, KeyError, TypeError):
+                salt = ""
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+                # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
+                prev_salt, n = self.server.unlock_wrong
+                n = (n if prev_salt == salt else 0) + 1
+                if n >= 5:
+                    path.unlink(missing_ok=True)
+                    n = 0
+                self.server.unlock_wrong = (salt, n)
                 self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
                 return
-            self.server.unlock_wrong.pop(session, None)
+            self.server.unlock_wrong = ("", 0)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
         self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})
