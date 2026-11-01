@@ -1,0 +1,1 @@
+- Fix flaky helper pipe test (#660): the POSIX process-limit headroom now counts threads, so an approved command's own fork no longer fails with exit 2 on a busy runner.
