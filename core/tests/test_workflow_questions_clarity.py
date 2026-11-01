@@ -41,14 +41,16 @@ class GateQuestionTemplate(unittest.TestCase):
         self.assertEqual(aw.gate_questions_step(self.store), ["g"])
         q = next(q for q in self.store.snapshot()["questions"] if q["id"] == "gate-g")
         self.assertEqual(q["kind"], "owner_gate")
-        self.assertEqual(q["title"], "Your step is needed for: Live voice check")
-        self.assertIn("Task g in V5", q["why"])
+        self.assertEqual(q["title"], "צריך אותך: משימה g")       # English task name -> plain Hebrew, name in details
+        self.assertEqual(q["why"], "סוכן לא יכול לסיים את זה לבד. נדרש: מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.")
         self.assertTrue(q["link"].endswith("/issues/744"))
-        self.assertEqual(q["steps"], ["Run jarvis voice test on your PC", "Say three sentences and rate them"])
+        self.assertEqual(q["steps"], [])                          # acceptance criteria are not owner steps
         self.assertEqual(q["minutes"], 10)
-        self.assertIn("stays queued", q["skip_effect"])
-        self.assertIn("takes about 10 min", q["recommendation"])
-        self.assertEqual(q["details"], "מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.")  # Hebrew kept as is
+        self.assertIn("המשימה נשארת בתור", q["skip_effect"])
+        self.assertIn("כ־10 דקות", q["recommendation"])
+        for raw in ("Live voice check", "מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.", "Run jarvis voice test on your PC"):
+            self.assertIn(raw, q["details"])                       # raw text kept, under Details
+        self.assertEqual((q["group"], q["item"]), ("gate:V5", "משימה g"))
         self.assertEqual(q["choices"][0], {**aw.GATE_CHOICES[0], "id": "later-today"})
         self.assertTrue(q["choices"][0]["recommended"])
         self.assertTrue(all(c.get("description") for c in q["choices"]))
@@ -75,7 +77,7 @@ class GateQuestionTemplate(unittest.TestCase):
         by_id = {q["id"]: q for q in self.store.snapshot()["questions"]}
         self.assertEqual(by_id["gate-g"]["kind"], "owner_gate")
         self.assertEqual(by_id["gate-g"]["status"], "pending")
-        self.assertEqual(by_id["gate-g"]["details"], "מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.")
+        self.assertIn("מדידת קול חיה במחשב הבעלים ובמסגרת התקציב.", by_id["gate-g"]["details"])
         self.assertEqual(by_id["gate-g"]["context"], "")
         self.assertEqual(by_id["gate-h"]["title"], "raw gate")          # answered: untouched
         self.assertEqual(by_id["gate-h"]["answer"], "Tell me when ready")
