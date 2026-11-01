@@ -1,6 +1,8 @@
 """Loopback-only authenticated UI, JSON API and live revision stream (stdlib).
 
-No endpoint starts a process, approves a tool, merges code or publishes a release.
+No endpoint approves a tool, merges code or publishes a release. The one endpoint that starts a process is
+POST /api/questions/<id>/discuss: a visible Claude Code window that helps the owner think about one question
+(fixed argv, no token, rate limited; see discuss.py). It never answers the question.
 Worker mutations use the local CLI; the web surface contains owner planning only.
 """
 from __future__ import annotations
@@ -17,6 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .discuss import Helper, RateLimited
 from .store import Store
 
 STATIC = Path(__file__).with_name("static")
@@ -63,6 +66,7 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
+        self.discuss = Helper(self.home, token=self.token)
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
@@ -252,6 +256,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/followups":
                 # General follow-up; only the manager's CLI can store a reply, never the web surface.
                 result = store.ask_more(data.get("text", ""), task_id=data.get("task_id", ""), channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/discuss", path):
+                # Opens a helper window for the owner; it cannot answer, defer or reopen anything.
+                from .store import ID_RE
+                if not ID_RE.fullmatch(m[1]) or set(data) - {"launch"} or type(data.get("launch", True)) is not bool:
+                    raise ValueError("invalid help request")
+                result = self.server.discuss.open(store, m[1], launch=data.get("launch", True))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
                 result = store.defer(m[1], channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
@@ -268,6 +278,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "not found"})
                 return
             self._json(200, {"ok": True, "result": result})
+        except RateLimited as exc:
+            self._json(429, {"error": str(exc)})
         except (ValueError, TypeError, KeyError) as exc:
             self._json(400, {"error": str(exc)[:240]})
         except Exception:

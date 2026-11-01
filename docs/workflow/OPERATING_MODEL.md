@@ -56,6 +56,14 @@ follow-ups reach the manager once at its next native Stop; answer each with
 `workflow reply --id ID --answer TEXT`. A reply never answers the question.
 A 'Get more info' click sends "Explain this question: ...": reply in the owner's
 language with a plain explanation, numbered steps, each option and the recommendation.
+Write every owner question in plain Hebrew: ONE decision; title one short sentence
+(about 12 words, no English beyond product names and ids); `--why` one sentence;
+2-3 options, each one line saying what happens, recommended first with a one-line
+reason; `--minutes` and `--skip-effect` one line each; `--step` only for physical
+actions (at most 3). Ids, logs and English source text go in `--details`. The
+same decision for several tasks is one card (`group`), not many questions. The
+card's 'Help from Claude' opens a plan-mode Claude window for the owner; it never
+answers. Older wording: `workflow questions-rewrite --dry-run`, then `--apply`.
 
 Away: retain the question and usable checkpoint, pause only dependent work and
 release only safely paused resources. Continue other ready tasks. A deferred

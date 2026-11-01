@@ -28,6 +28,8 @@
   let dialogTaskId = null, dialogKey = "";
   const busyButtons = new Set();
   let questionsSignature = "";
+  const discussState = new Map(), groupState = new Map();
+  let discussTick = 0;
   let lastPresenceRefresh = 0;
   const DRAFTS_KEY = "jarves-workflow-question-drafts";
   const drafts = (() => { try { const saved = JSON.parse(localStorage.getItem(DRAFTS_KEY) || "[]"); return new Map(Array.isArray(saved) ? saved : []); } catch { return new Map(); } })();
@@ -41,14 +43,42 @@
       waiting: n => n < 1 ? "נשלח למנהל · ממתין לתשובה (פחות מדקה)" : `נשלח למנהל · ממתין לתשובה כבר ${n} דק׳`,
       idle: "המנהל כנראה במנוחה. עברו לחלון של Claude, או המתינו לאירוע הבא של עובד. ההודעה נשמרה ותימסר בסיום הצעד הבא שלו.",
       replied: "המנהל הסביר. התשובה מופיעה בשרשור למטה.", sent: "הבקשה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.",
-      why: "למה שואלים", steps: "מה אתה עושה", noSteps: "אין עדיין צעדים כתובים. לחצו על ״קבל עוד מידע״ והמנהל יכתוב אותם.",
-      minutes: "זמן", about: n => `כ־${n} דק׳`, skip: "אם תדלג", recommended: "ההמלצה", details: "פרטים מקוריים", link: "פרטים ↗"},
+      why: "למה שואלים", steps: "מה אתה עושה",
+      minutes: "זמן", about: n => `כ־${n} דק׳`, skip: "אם תדלג", recommended: "ההמלצה", details: "פרטים", link: "פרטים ↗",
+      discuss: "עזרה מ־Claude", discussTitle: "פותח חלון Claude חדש שעוזר לך להבין ולהחליט. הוא לא עונה במקומך.",
+      discussOpened: "נפתח חלון Claude חדש. את התשובה עצמה בוחרים כאן, בכרטיס.",
+      discussRefused: "לא נפתח חלון. העתיקו את הפקודה והדביקו אותה ב־PowerShell.",
+      discussWait: "חלון עזרה נפתח ממש עכשיו. נסו שוב בעוד 10 שניות.", discussFailed: "העזרה לא נפתחה. ",
+      discussFallback: "או להעתיק פקודה", discussPaste: "מדביקים ב־PowerShell. נפתח Claude שמכיר את השאלה הזו.",
+      discussCopy: "העתקת הפקודה", discussCopied: "הפקודה הועתקה.", discussCopyFailed: "ההעתקה נחסמה. סמנו את הפקודה והעתיקו ידנית.",
+      groupTitle: (v, n) => `${n} משימות שרק אתה יכול לעשות ב־${v}. מתי?`,
+      groupWhy: "סוכן לא יכול לסיים אותן לבד. צריך מכשיר אמיתי, כניסה לחשבון או החלטה שלך.",
+      groupItems: "על מה זה חל (אפשר לבטל סימון)", groupAll: "סמן הכול", groupNone: "נקה הכול",
+      groupReason: v => `כך ${v} ממשיכה להתקדם.`, groupTime: "זמן לכל המסומנות", groupCount: n => `${n} פריטים`,
+      groupSubmit: "שמור למסומנות", groupDefer: "לא עכשיו", groupPick: "בחר מה לעשות וסמן לפחות משימה אחת.",
+      groupSaved: n => n === 1 ? "נשמרה תשובה למשימה אחת." : `נשמרו תשובות ל־${n} משימות.`,
+      groupDeferred: n => `${n} משימות נשמרו להמשך.`, groupPartial: n => `נשמרו ${n}, ואז הייתה שגיאה. `,
+      note: "הערה (לא חובה)"},
     en: {moreInfo: "Get more info", moreInfoTitle: "The manager explains why you are asked, what each option does, what it recommends and what happens if you skip",
       waiting: n => n < 1 ? "Sent, waiting for the manager (under a minute)" : `Sent, waiting for the manager since ${n} min`,
       idle: "The manager is idle. Switch to the Claude window or wait for the next worker event. The message is saved and is delivered at its next step.",
       replied: "The manager explained. The reply is in the thread below.", sent: "Saved; the manager gets it when its current step ends. Nothing was approved.",
-      why: "Why", steps: "What you do", noSteps: "No written steps yet. Click Get more info and the manager writes them.",
-      minutes: "Minutes", about: n => `About ${n} min`, skip: "If you skip it", recommended: "Recommended", details: "Details", link: "Details ↗"},
+      why: "Why", steps: "What you do",
+      minutes: "Minutes", about: n => `About ${n} min`, skip: "If you skip it", recommended: "Recommended", details: "Details", link: "Details ↗",
+      discuss: "Help from Claude", discussTitle: "Opens a new Claude window that helps you understand and decide. It never answers for you.",
+      discussOpened: "A new Claude window opened. You still pick the answer here, in the card.",
+      discussRefused: "No window opened. Copy the command and paste it into PowerShell.",
+      discussWait: "A help window just opened. Try again in 10 seconds.", discussFailed: "Help did not open. ",
+      discussFallback: "Or copy a command", discussPaste: "Paste it into PowerShell. Claude opens knowing this question.",
+      discussCopy: "Copy the command", discussCopied: "Command copied.", discussCopyFailed: "Copy was blocked. Select the command and copy it by hand.",
+      groupTitle: (v, n) => `${n} tasks in ${v} only you can do. When?`,
+      groupWhy: "An agent cannot finish them alone. They need a real device, a sign-in or your decision.",
+      groupItems: "What it applies to (untick to leave out)", groupAll: "Select all", groupNone: "Clear all",
+      groupReason: v => `It keeps ${v} moving.`, groupTime: "Time for the ticked ones", groupCount: n => `${n} items`,
+      groupSubmit: "Save for the ticked ones", groupDefer: "Not now", groupPick: "Pick what to do and tick at least one task.",
+      groupSaved: n => n === 1 ? "Saved the answer for one task." : `Saved answers for ${n} tasks.`,
+      groupDeferred: n => `${n} tasks kept for later.`, groupPartial: n => `Saved ${n}, then this error. `,
+      note: "Note (optional)"},
   };
   const L = I18N[String(document.documentElement.lang || "he").toLowerCase().startsWith("en") ? "en" : "he"];
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
@@ -184,7 +214,7 @@
 
   function syncControls() {
     // Offline disables mutating controls; buttons with a request in flight stay disabled.
-    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], [data-reopen], [data-more-info], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button) || button.dataset.waiting === "1"; });
+    $$("#dispatch, #add-task, #owner-present, #owner-away, .question-form button[type=submit], .ask-more-form button[type=submit], [data-defer], [data-reopen], [data-more-info], [data-discuss], [data-discuss-copy], [data-defer-group], .group-form button[type=submit], #create-task-form button[type=submit]").forEach(button => { button.disabled = !connected || busyButtons.has(button) || button.dataset.waiting === "1"; });
   }
 
   function connectionState(ok, error = "") {
@@ -508,7 +538,6 @@
     const rows = [];
     if (whyBits) rows.push([L.why, whyBits]);
     if (steps.length) rows.push([L.steps, `<ol class="question-steps" dir="auto">${steps.map(step => `<li dir="auto">${esc(step)}</li>`).join("")}</ol>`]);
-    else if (question.kind === "owner_gate") rows.push([L.steps, `<span>${esc(L.noSteps)}</span>`]);
     if (question.minutes) rows.push([L.minutes, `<span class="pill amber">${esc(L.about(question.minutes))}</span>`]);
     if (question.skip_effect) rows.push([L.skip, `<span dir="auto">${esc(question.skip_effect)}</span>`]);
     if (recommended || question.recommendation) rows.push([L.recommended, `<span dir="auto">${recommended ? `<b>${esc(recommended.label)}</b>` : ""}${recommended && question.recommendation ? " · " : ""}${question.recommendation ? esc(question.recommendation) : ""}</span>`]);
@@ -517,17 +546,109 @@
     return list + details;
   }
 
+  // Silence never approves anything: name the safe default when the asker gave one, otherwise say nothing moves.
+  function defaultLine(question) {
+    return `<p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : "ממתין, שום דבר לא זז. "}שום דבר לא מאושר מתוך שתיקה.</p>`;
+  }
+
+  // "Help from Claude": the server writes a prompt file and opens a visible Claude window (Windows); the card always
+  // offers the same command to copy. The helper never answers; the owner answers here.
+  function discussButton(id) {
+    return `<button class="button secondary discuss-open" type="button" data-discuss="${esc(id)}" title="${esc(L.discussTitle)}" aria-describedby="discuss-note-${esc(id)}"><span aria-hidden="true">✦</span> ${esc(L.discuss)}</button>`;
+  }
+
+  function discussHTML(id) {
+    const state = discussState.get(id) || {};
+    return `<div class="discuss"><p class="discuss-status${state.error ? " error" : ""}" id="discuss-note-${esc(id)}">${esc(state.note || "")}</p><details class="discuss-fallback"${state.open ? " open" : ""}><summary>${esc(L.discussFallback)}</summary><p class="discuss-paste">${esc(L.discussPaste)}</p><button class="button secondary" type="button" data-discuss-copy="${esc(id)}">${esc(L.discussCopy)}</button>${state.command ? `<code class="discuss-cmd" dir="ltr" tabindex="0">${esc(state.command)}</code>` : ""}${state.copyNote ? `<p class="discuss-copy-note">${esc(state.copyNote)}</p>` : ""}</details></div>`;
+  }
+
+  function setDiscuss(id, patch) {
+    discussState.set(id, {...(discussState.get(id) || {}), ...patch});
+    discussTick += 1;
+    renderQuestions();
+    const said = patch.copyNote || patch.note;
+    if (said) toast(said, Boolean(patch.error));  // the page's one polite live region announces it
+  }
+
+  async function discuss(button, id, launch) {
+    button.disabled = true; busyButtons.add(button);
+    try {
+      const result = (await api(`/api/questions/${encodeURIComponent(id)}/discuss`, {launch})).result || {};
+      const patch = {command: result.command || "", error: false};
+      if (launch) Object.assign(patch, result.launched ? {note: L.discussOpened, open: false} : {note: L.discussRefused, open: true});
+      if (!launch) {
+        patch.open = true;
+        try { await navigator.clipboard.writeText(patch.command); patch.copyNote = L.discussCopied; }
+        catch (_) { patch.copyNote = L.discussCopyFailed; }
+      }
+      setDiscuss(id, patch);
+    } catch (error) {
+      if (!error.sessionEnded) setDiscuss(id, {note: /^wait 10 seconds/.test(error.message) ? L.discussWait : L.discussFailed + error.message, error: true, open: true});
+    } finally {
+      busyButtons.delete(button); button.disabled = !connected;
+      const again = $(`[data-discuss${launch ? "" : "-copy"}="${CSS.escape(id)}"]`);
+      if (again && again !== button) again.focus({preventScroll: true});
+    }
+  }
+
+  // Questions that are the same decision (group = gate:<version>) show as ONE card with a checklist. Each task keeps
+  // its own question: saving answers every ticked question with the same choice through the normal answer endpoint.
+  function questionUnits(pending) {
+    const counts = new Map();
+    pending.forEach(q => { if (q.group) counts.set(q.group, (counts.get(q.group) || 0) + 1); });
+    const units = [], seen = new Map();
+    pending.forEach(q => {
+      if (!q.group || counts.get(q.group) < 2) { units.push({single: q}); return; }
+      if (!seen.has(q.group)) { const unit = {group: q.group, members: []}; seen.set(q.group, unit); units.push(unit); }
+      seen.get(q.group).members.push(q);
+    });
+    return units;
+  }
+
+  function renderGroup(unit) {
+    const members = unit.members, first = members[0], gid = unit.group;
+    const state = groupState.get(gid) || {off: [], choice: "", note: ""};
+    const version = gid.replace(/^gate:/, "");
+    const ticked = members.filter(m => !state.off.includes(m.id));
+    const total = ticked.reduce((sum, m) => sum + (Number(m.minutes) || 0), 0);
+    const choices = (first.choices || []).map(c => typeof c === "string" ? {id: c, label: c} : c);
+    const recommended = choices.find(c => c.recommended);
+    const items = members.map(m => {
+      const link = safeURL(m.link);
+      const detail = [m.why ? `<p dir="auto">${esc(m.why)}</p>` : "", m.details ? `<p dir="auto">${esc(m.details)}</p>` : "", link ? `<a class="evidence-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(L.link)}</a>` : ""].join("");
+      return `<li class="group-item"><label class="group-check"><input type="checkbox" name="item" value="${esc(m.id)}" ${state.off.includes(m.id) ? "" : "checked"}><span class="group-item-name" dir="auto">${esc(m.item || m.title)}</span>${m.minutes ? `<span class="pill amber">${esc(L.about(m.minutes))}</span>` : ""}</label><details class="question-details group-item-details"><summary>${esc(L.details)}</summary>${detail}<bdi class="mono" dir="ltr">${esc(m.id)}</bdi></details></li>`;
+    }).join("");
+    const options = choices.map((choice, index) => { const value = choice.label || choice.id; return `<label class="choice${choice.recommended ? " recommended" : ""}"><input type="radio" name="group-${esc(gid)}" value="${esc(value)}" ${state.choice === value ? "checked" : ""}><span class="choice-text"><span class="choice-label" dir="auto">${esc(value)}${choice.recommended ? ` <span class="pill recommended-badge">מומלץ</span>` : ""}</span>${choice.description ? `<span class="choice-description" dir="auto">${esc(choice.description)}</span>` : ""}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`; }).join("");
+    const rows = [[L.why, `<span dir="auto">${esc(L.groupWhy)}</span> <span class="pill">${esc(version)}</span>`],
+      [L.groupTime, `<span class="pill amber" data-group-total>${esc(L.about(total))}</span>`]];
+    if (first.skip_effect) rows.push([L.skip, `<span dir="auto">${esc(first.skip_effect)}</span>`]);
+    if (recommended) rows.push([L.recommended, `<span dir="auto"><b>${esc(recommended.label)}</b> · ${esc(L.groupReason(version))}</span>`]);
+    const title = L.groupTitle(version, members.length);
+    const noteId = `group-note-${gid.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+    return `<article class="question-card question-group" data-group-card="${esc(gid)}"><div class="question-meta">${statusPill("pending")}<span>${esc(age(first.created_at))}</span><span>${esc(L.groupCount(members.length))}</span><bdi class="mono" dir="ltr">${esc(gid)}</bdi></div><h3 dir="auto">${esc(title)}</h3><dl class="question-explain">${rows.map(([label, value]) => `<div class="explain-row"><dt>${esc(label)}</dt><dd>${value}</dd></div>`).join("")}</dl><form class="group-form" data-group="${esc(gid)}"><fieldset class="group-items"><legend>${esc(L.groupItems)}</legend><div class="group-tools"><button class="text-link" type="button" data-group-all="1">${esc(L.groupAll)}</button><button class="text-link" type="button" data-group-all="0">${esc(L.groupNone)}</button></div><ul class="group-list">${items}</ul></fieldset><fieldset class="question-choices"><legend class="sr-only">תשובות אפשריות ל־${esc(title)}</legend>${options}</fieldset><label class="ask-more-label" for="${esc(noteId)}">${esc(L.note)}</label><textarea class="question-answer group-note" id="${esc(noteId)}" dir="auto" rows="1" maxlength="2000">${esc(state.note || "")}</textarea>${defaultLine(first)}<div class="question-actions"><button class="button primary" type="submit">${esc(L.groupSubmit)} <span aria-hidden="true">←</span></button>${discussButton(first.id)}<button class="button secondary" type="button" data-defer-group="${esc(gid)}">${esc(L.groupDefer)}</button></div><p class="form-error" role="alert" hidden></p></form>${discussHTML(first.id)}</article>`;
+  }
+
+  function stashGroups() {
+    $$(".group-form").forEach(form => {
+      groupState.set(form.dataset.group, {off: $$("input[name=item]", form).filter(i => !i.checked).map(i => i.value),
+        choice: $("input[type=radio]:checked", form)?.value || "", note: $(".group-note", form).value});
+    });
+  }
+
   function renderQuestions() {
     const followups = Array.isArray(data.followups) ? data.followups : [];
     const infoTick = followups.some(item => item.text === INFO_TEXT && !item.reply) ? Math.floor(Date.now() / 60000) : 0;
-    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups, infoTick]);
+    const signature = JSON.stringify([data.questions.map(question => [question, data.tasks.find(task => task.id === question.task_id)?.title]), followups, infoTick, discussTick]);
     if (signature === questionsSignature) return;
     questionsSignature = signature;
     const focused = document.activeElement;
     const activeDraft = focused?.matches(".question-answer, .ask-more-text") ? {id: focused.id, start: focused.selectionStart, end: focused.selectionEnd} : null;
     stashDrafts();
+    stashGroups();
     const pending = data.questions.filter(question => !["answered", "resolved", "cancelled"].includes(question.status || "pending"));
-    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`} · אפשר לענות ברצף. טיוטות נשמרות גם אחרי רענון.` : "כל ההחלטות שנענו נשמרות בהמשך.";
+    const units = questionUnits(pending);
+    const decisions = units.length === pending.length ? "" : ` · ${units.length} החלטות`;
+    $("#question-progress").textContent = pending.length ? `${pending.length === 1 ? "שאלה אחת ממתינה" : `${pending.length} שאלות ממתינות`}${decisions} · אפשר לענות ברצף. טיוטות נשמרות גם אחרי רענון.` : "כל ההחלטות שנענו נשמרות בהמשך.";
     const history = data.questions.filter(question => ["answered", "resolved"].includes(question.status)).reverse()
     const shownHistory = history.filter((question, index) => index < 5 || question.needs_owner_confirmation);
     const renderQuestion = question => {
@@ -543,10 +664,10 @@
       const info = answered ? null : infoState(followups, id);
       const thread = followupThread(followups.filter(item => item.question_id === id));
       const options = choices.map((choice, index) => { const value = choice.label || choice.id; return `<label class="choice${choice.recommended ? " recommended" : ""}"><input type="${kind}" name="answer-${esc(id)}" value="${esc(value)}" ${picks.includes(value) ? "checked" : ""}><span class="choice-text"><span class="choice-label" dir="auto">${esc(value)}${choice.recommended ? ` <span class="pill recommended-badge">מומלץ</span>` : ""}</span>${choice.description ? `<span class="choice-description" dir="auto">${esc(choice.description)}</span>` : ""}</span><span class="choice-index" aria-hidden="true">${index + 1}</span></label>`; }).join("");
-      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span><span class="mono">${esc(id)}</span></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${explain}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea><p class="question-default">${question.safe_default ? `אם לא תענה: <span dir="auto">${esc(question.safe_default)}</span>. ` : ""}שום דבר לא מאושר מתוך שתיקה.</p><div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary more-info" type="button" data-more-info="${esc(id)}" data-waiting="${info?.waiting ? "1" : "0"}" title="${esc(L.moreInfoTitle)}" ${info?.waiting ? "disabled" : ""}><span aria-hidden="true">?</span> ${esc(L.moreInfo)}</button><button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div>${infoStatusHTML(info)}<p class="form-error" role="alert" hidden></p></form>${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
+      return `<article class="question-card${answered ? " answered" : ""}" id="question-${esc(id)}"><div class="question-meta">${statusPill(question.status || "pending")}<span>${esc(age(question.created_at))}</span>${!answered && question.minutes ? `<span>${esc(L.about(question.minutes))}</span>` : ""}<bdi class="mono" dir="ltr">${esc(id)}</bdi></div><h3 dir="auto">${esc(question.title)}</h3>${question.context ? `<p class="question-context" dir="auto">${esc(question.context)}</p>` : ""}${explain}${task ? `<button type="button" class="question-task text-link" data-task="${esc(task.id)}">למשימה: ${esc(task.title)} · <span class="mono">${esc(task.id)}</span> ←</button>` : ""}${answered ? `<p class="question-answer-history">${esc(question.answer || "התשובה נשמרה")}</p><p class="question-provenance">נענה על ידי: ${esc(question.answered_by || "unknown")} · ערוץ: ${esc(question.channel || "unknown")}${question.needs_owner_confirmation ? ` <span class="pill amber needs-confirmation">דרוש אישור שלך: התשובה לא ניתנה מהדשבורד או מהטרמינל שלך</span> <button class="button secondary" type="button" data-reopen="${esc(id)}">פתח מחדש</button>` : ""}</p>${thread}` : `<form class="question-form" data-question="${esc(id)}"><fieldset class="question-choices" ${choices.length ? "" : "hidden"}><legend class="sr-only">${question.multi ? "אפשר לבחור כמה תשובות" : "תשובות אפשריות"} ל־${esc(question.title)}</legend>${options}</fieldset><label class="sr-only" for="answer-${esc(id)}">תשובה אחרת או הערה ל־${esc(question.title)}</label><textarea class="question-answer" id="answer-${esc(id)}" dir="auto" rows="2" maxlength="4000" placeholder="${choices.length ? "אחר, או הערה לבחירה…" : "כתוב את התשובה שלך…"}">${esc(draft.text || "")}</textarea>${defaultLine(question)}<div class="question-actions"><button class="button primary" type="submit">שמור תשובה <span aria-hidden="true">←</span></button><button class="button secondary more-info" type="button" data-more-info="${esc(id)}" data-waiting="${info?.waiting ? "1" : "0"}" title="${esc(L.moreInfoTitle)}" ${info?.waiting ? "disabled" : ""}><span aria-hidden="true">?</span> ${esc(L.moreInfo)}</button>${discussButton(id)}<button class="button secondary" type="button" data-defer="${esc(id)}">לא עכשיו</button><span class="question-helper">Ctrl + Enter לשמירה</span></div>${infoStatusHTML(info)}<p class="form-error" role="alert" hidden></p></form>${discussHTML(id)}${thread}${askMoreForm(id, "שאל עוד את המנהל", "למשל: למה זה נחוץ? מה האפשרויות? תבדוק קודם את…")}`}</article>`;
     };
     const general = `<section class="question-card general-ask" aria-label="שאלה כללית למנהל"><h3>שאלה כללית למנהל</h3>${followupThread(followups.filter(item => !item.question_id))}${askMoreForm(GENERAL, "מה תרצה לשאול או לבקש?", "למשל: מה מצב הגרסה? תבדוק את…")}</section>`;
-    $("#questions").innerHTML = (pending.length ? pending.map(renderQuestion).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
+    $("#questions").innerHTML = (pending.length ? units.map(unit => unit.single ? renderQuestion(unit.single) : renderGroup(unit)).join("") : empty("אין כרגע שאלות שממתינות לך", "כשסוכן ייתקל בהחלטה שדורשת אותך, היא תישמר כאן עם המשימה וההקשר. שאר העבודה יכולה להמשיך.")) + general + (shownHistory.length ? `<h3 class="questions-history-title">תשובות אחרונות</h3>${shownHistory.map(renderQuestion).join("")}` : "") + `<p class="planning-note">כאן עונים על שאלות תכנון. אישורי הרשאות, תשלומים, שליחה או שחרור יציב נשארים במנגנוני האישור הקיימים.</p>`;
     if (activeDraft) {
       const restored = document.getElementById(activeDraft.id);
       if (restored) { restored.focus({preventScroll: true}); restored.setSelectionRange(activeDraft.start, activeDraft.end); }
@@ -804,6 +925,18 @@
     }
     const reopenButton = event.target.closest("[data-reopen]");
     if (reopenButton) { mutate(reopenButton, `/api/questions/${encodeURIComponent(reopenButton.dataset.reopen)}/reopen`, {}, "השאלה נפתחה מחדש וממתינה לתשובה שלך."); return; }
+    const discussOpen = event.target.closest("[data-discuss]");
+    if (discussOpen) { discuss(discussOpen, discussOpen.dataset.discuss, true); return; }
+    const discussCopy = event.target.closest("[data-discuss-copy]");
+    if (discussCopy) { discuss(discussCopy, discussCopy.dataset.discussCopy, false); return; }
+    const groupAll = event.target.closest("[data-group-all]");
+    if (groupAll) {
+      const form = groupAll.closest(".group-form");
+      $$("input[name=item]", form).forEach(input => { input.checked = groupAll.dataset.groupAll === "1"; });
+      groupChanged(form); return;
+    }
+    const deferGroup = event.target.closest("[data-defer-group]");
+    if (deferGroup) { saveGroup(deferGroup.closest(".group-form"), deferGroup, true); return; }
     const deferButton = event.target.closest("[data-defer]");
     if (deferButton) mutate(deferButton, `/api/questions/${encodeURIComponent(deferButton.dataset.defer)}/defer`, {}, "השאלה נשמרה להמשך. המשימה לא נעלמה מהתוכנית.");
   });
@@ -865,8 +998,48 @@
     } catch (err) { error.textContent = err.message; error.hidden = false; }
     finally { busyButtons.delete(button); button.disabled = !connected; }
   });
+  function groupChanged(form) {
+    stashGroups();
+    const ids = $$("input[name=item]:checked", form).map(input => input.value);
+    const total = data.questions.filter(q => ids.includes(q.id)).reduce((sum, q) => sum + (Number(q.minutes) || 0), 0);
+    const pill = $("[data-group-total]", form.closest(".question-group"));
+    if (pill) pill.textContent = L.about(total);
+  }
+
+  async function saveGroup(form, button, deferOnly) {
+    const ids = $$("input[name=item]:checked", form).map(input => input.value);
+    const picked = $("input[type=radio]:checked", form)?.value || "";
+    const note = $(".group-note", form).value.trim();
+    const error = $(".form-error", form);
+    if (!ids.length || (!deferOnly && !picked)) { error.textContent = L.groupPick; error.hidden = false; return; }
+    if (!connected) { error.textContent = "אין חיבור לשירות; התשובה לא נשלחה."; error.hidden = false; return; }
+    button.disabled = true; busyButtons.add(button); error.hidden = true;
+    let done = 0;
+    try {
+      // Same answer for every ticked task, one normal answer (or defer) request each; unticked ones stay open.
+      for (const id of ids) {
+        await api(`/api/questions/${encodeURIComponent(id)}/${deferOnly ? "defer" : "answer"}`, deferOnly ? {} : {answer: note ? `${picked} — ${note}` : picked});
+        done += 1;
+      }
+      groupState.delete(form.dataset.group);
+      await refresh();
+      toast(deferOnly ? L.groupDeferred(done) : L.groupSaved(done));
+    } catch (err) {
+      error.textContent = (done ? L.groupPartial(done) : "") + err.message; error.hidden = false;
+      if (done) await refresh();
+    } finally { busyButtons.delete(button); button.disabled = !connected; }
+  }
+
+  $("#questions").addEventListener("submit", event => {
+    const form = event.target.closest(".group-form");
+    if (!form) return;
+    event.preventDefault();
+    saveGroup(form, $("button[type=submit]", form), false);
+  });
   $("#questions").addEventListener("input", stashDrafts);
   $("#questions").addEventListener("change", stashDrafts);
+  $("#questions").addEventListener("input", event => { const form = event.target.closest(".group-form"); if (form) groupChanged(form); });
+  $("#questions").addEventListener("change", event => { const form = event.target.closest(".group-form"); if (form) groupChanged(form); });
   $("#questions").addEventListener("submit", async event => {
     const form = event.target.closest(".ask-more-form");
     if (!form) return;
