@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from jarves import cli
+from jarves import cli, logs
 from jarves.config import VoiceConfig
 from jarves.voice import audio, realtime, tts
 
@@ -49,6 +49,10 @@ def say_env(monkeypatch, tmp_path):
         monkeypatch.setattr(eng, "check", lambda self: (True, "voice X"))
         monkeypatch.setattr(eng, "synth", synth)
     monkeypatch.setattr(audio.SoundDeviceAudio, "play", no_play)
+    # `jarvis say` calls logs.setup(), which installs process-wide crash hooks and root-logger handlers. A thread of
+    # an earlier test on the same worker that dies late would then be reported as an extra "unhandled exception"
+    # line in this test's output (#711/#422). Nothing here needs real logging setup, so keep it out of the process.
+    monkeypatch.setattr(logs, "setup", lambda *a, **k: None)
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     (tmp_path / "config.toml").write_text('[ai]\nconnection = "api_key"\n', encoding="utf-8")
