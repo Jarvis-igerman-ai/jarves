@@ -1,0 +1,1 @@
+- Added: Blocked tab in the workflow console (one page: what is blocked, why, since when, who must act and the safe next step, grouped by cause), GET /api/blocked and workflow_console.py blocked [--json].

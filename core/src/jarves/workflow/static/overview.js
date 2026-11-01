@@ -14,7 +14,7 @@
 
   const EN = String(root.lang || "he").toLowerCase().startsWith("en");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-  const VIEWS = new Set(["overview", "roadmap", "questions", "work", "trace", "health", "timeline"]);
+  const VIEWS = new Set(["overview", "roadmap", "questions", "work", "trace", "health", "timeline", "blocked"]);
   // Page language: <html lang>, Hebrew by default. Each number keeps its own label; nothing is added together.
   const T = EN ? {
     allWorking: n => `Everything is working: ${n === 1 ? "1 worker is active" : `${n} workers are active`}`,
