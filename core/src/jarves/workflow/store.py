@@ -16,6 +16,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import messages
 STATES = {"queued", "running", "waiting_owner", "blocked", "review", "verified", "done"}
 LANES = {"bugs", "features", "release", "ops", "any"}
 IMPLEMENTATIONS = {"planned", "in_progress", "merged"}
@@ -135,6 +136,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS workflow_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,kind TEXT NOT NULL,summary TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS workflow_resources (name TEXT PRIMARY KEY,task_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_claims (name TEXT PRIMARY KEY,agent_id TEXT NOT NULL,reason TEXT NOT NULL,
+                claimed_at REAL NOT NULL,expires_at REAL NOT NULL,task_id TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workflow_msg_reads (msg_id INTEGER NOT NULL,agent_id TEXT NOT NULL,ts REAL NOT NULL,
+                PRIMARY KEY (msg_id,agent_id));
             CREATE TABLE IF NOT EXISTS workflow_trace (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL NOT NULL,agent_id TEXT NOT NULL,
                 task_id TEXT NOT NULL,parent_id TEXT NOT NULL,event TEXT NOT NULL,tool TEXT NOT NULL,
@@ -219,6 +224,28 @@ class Store:
         self._event(db, "task_flow", json.dumps({"task_id": task["id"], "title": task["title"][:120], "lane": task["lane"],
                                                  "from": from_state, "to": task["state"], "agent": agent}, ensure_ascii=False))
 
+    # Ownership claims and agent messages (see messages.py and docs/workflow/AGENT_MESSAGES.md)
+    def own(self, agent_id, resource, reason):
+        return messages.claim(self, agent_id, resource, reason)
+
+    def disown(self, agent_id, resource, force=False):
+        return messages.release(self, agent_id, resource, force)
+
+    def owners(self, resource=None):
+        return messages.owners(self, resource)
+
+    def check_touch(self, agent_id, resource, notify=False):
+        return messages.check_touch(self, agent_id, resource, notify)
+
+    def send_message(self, sender, to, subject, body, resource=""):
+        return messages.send(self, sender, to, subject, body, resource)
+
+    def inbox(self, agent_id, unread=False):
+        return messages.inbox(self, agent_id, unread)
+
+    def ack_message(self, msg_id, agent_id):
+        return messages.ack(self, msg_id, agent_id)
+
     # Observability (see observability.py and docs/workflow/OBSERVABILITY.md)
     def beat(self, layer, state="ok", note=""):
         from . import observability
@@ -246,6 +273,7 @@ class Store:
                 Store._put(db, "agent", agent)
         if locks:
             db.execute("DELETE FROM workflow_resources WHERE task_id=?", (task["id"],))
+            db.execute("DELETE FROM workflow_claims WHERE task_id=?", (task["id"],))
         task["agent_id"] = None
 
     def _quarantine(self, db, task, reason, source=""):
@@ -309,7 +337,7 @@ class Store:
                 "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
                 "events": [dict(r) for r in db.execute(
-                    "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow') ORDER BY id DESC LIMIT 100")],
+                    "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow','agent_message') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
 
@@ -404,6 +432,7 @@ class Store:
         note = _text(note, "note", maximum=1000, empty=True)
         with self._tx() as db:
             agent = self._get(db, "agent", _id(agent_id))
+            messages.renew(db, agent["id"], self.clock())
             if agent.get("task_id"):
                 # Task ownership changes only through the ledger's checkpoint/evidence paths.
                 agent["note"] = note
@@ -477,6 +506,7 @@ class Store:
         with self._tx() as db:
             agent = self._get(db, "agent", _id(agent_id))
             agent.update(heartbeat_at=max(agent["heartbeat_at"], observed_at), note=note)
+            messages.renew(db, agent["id"], self.clock())
             if progress:
                 agent["progress_at"] = max(agent["progress_at"], observed_at)
             # A recovered process must explicitly checkpoint/recover its quarantined task.
@@ -986,6 +1016,8 @@ class Store:
                 if (native and not agent.get("task_id") and agent["status"] == "offline"
                         and now - agent["heartbeat_at"] > ARCHIVE_OFFLINE_S):
                     db.execute("DELETE FROM workflow_records WHERE kind='agent' AND id=?", (agent["id"],))
+                    db.execute("DELETE FROM workflow_resources WHERE name IN (SELECT name FROM workflow_claims WHERE agent_id=?)", (agent["id"],))
+                    db.execute("DELETE FROM workflow_claims WHERE agent_id=?", (agent["id"],))
                     changed = True
                     continue
                 stale = now - agent["heartbeat_at"] > stale_after and not in_flight

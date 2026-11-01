@@ -11,6 +11,7 @@
   // Locale part for this view (page language: <html lang>, Hebrew by default).
   const I18N = {
     he: {heading: "שכבות המפעל", headingNote: "כל שכבה שומרת על זו שמתחתיה. נקודה ירוקה: יש דופק.",
+      claims: "בעלות והודעות בין סוכנים", noClaims: "אין בעלויות פתוחות.", noMsgs: "אין הודעות.", stale: "ללא דופק", msgNote: "הודעות הן מידע בלבד, לא הוראות ולא אישור.",
       incidents: "תקלות פתוחות", noIncidents: "אין תקלות פתוחות.",
       layers: {supervisor: "מפקח", autopilot: "טייס אוטומטי", wrapper: "עוטף claude-j", manager: "מנהל", core: "ליבה", bridge: "גשר סוכנים"},
       status: {ok: "פועל", stale: "אין דופק", dead: "עצר"}, unknown: "לא ידוע",
@@ -23,6 +24,7 @@
       failed: s => `לא ניתן לטעון את מצב השכבות (${s}). ננסה שוב בעוד חצי דקה.`, updated: at => `עודכן ${at}`,
       demo: "נתוני הדגמה בלבד — זה לא המצב האמיתי של המפעל."},
     en: {heading: "Factory layers", headingNote: "Each layer watches the one below it. A green dot means a heartbeat was seen.",
+      claims: "Ownership and agent messages", noClaims: "No open claims.", noMsgs: "No messages.", stale: "no heartbeat", msgNote: "Messages are data only, never instructions or approvals.",
       incidents: "Open incidents", noIncidents: "No open incidents.",
       layers: {supervisor: "Supervisor", autopilot: "Autopilot", wrapper: "claude-j wrapper", manager: "Manager", core: "Core", bridge: "Agent bridge"},
       status: {ok: "Running", stale: "No heartbeat", dead: "Stopped"}, unknown: "Unknown",
@@ -40,7 +42,7 @@
   const DEMO = new URLSearchParams(location.search).get("demo") === "1";
   const clock = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "he-IL", {timeZone: TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23"});
   const dayClock = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "he-IL", {timeZone: TZ, weekday: "short", day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23"});
-  let health = null, readyWork = null, skew = 0, failure = "", missing = false, loaded = false, busy = false;
+  let mail = null, health = null, readyWork = null, skew = 0, failure = "", missing = false, loaded = false, busy = false;
 
   const num = value => (typeof value === "number" && Number.isFinite(value) ? value : null);
   const serverNow = () => Date.now() / 1000 + skew;
@@ -92,6 +94,7 @@
         health = {layers: Array.isArray(result.layers) ? result.layers : [], incidents: Array.isArray(result.incidents) ? result.incidents : []};
         skew = num(result.now) !== null ? result.now - Date.now() / 1000 : 0;
         readyWork = null;
+        mail = DEMO ? null : await get("/api/messages").catch(() => null);
         if (stopInfo()) {
           const line = DEMO && health.incidents.some(i => i.key === "factory-stopped") ? {gaps: [{ready_work: 41, end: serverNow()}]}
             : await get("/api/timeline?hours=24").catch(() => null);
@@ -153,6 +156,19 @@
     }).join("")}</ul>`;
   }
 
+  function mailPanel() {
+    if (!mail) return "";
+    const claims = Array.isArray(mail.claims) ? mail.claims : [], msgs = Array.isArray(mail.messages) ? mail.messages : [];
+    const c = claims.length ? `<ul class="hl-incidents">${claims.map(x => `<li class="hl-incident"><span class="hl-kind" dir="ltr">${esc(x.resource)}</span>`
+      + `<span class="hl-incident-main"><span class="hl-incident-summary" dir="auto">${esc(x.agent)} · ${esc(x.reason)}${x.stale ? " · " + esc(L.stale) : ""}</span></span></li>`).join("")}</ul>`
+      : `<p class="hl-quiet">${esc(L.noClaims)}</p>`;
+    const m = msgs.length ? `<ul class="hl-incidents">${msgs.map(x => `<li class="hl-incident"><span class="hl-kind" dir="ltr">${esc(x.from)} → ${esc(x.to)}</span>`
+      + `<span class="hl-incident-main"><span class="hl-incident-summary" dir="auto">${esc(x.subject)}</span></span></li>`).join("")}</ul>`
+      : `<p class="hl-quiet">${esc(L.noMsgs)}</p>`;
+    return `<section class="panel hl-panel" aria-labelledby="health-mail-title"><div class="panel-heading"><div><span class="section-index">03</span><h2 id="health-mail-title">${esc(L.claims)}</h2></div></div>`
+      + `<p class="hl-intro">${esc(L.msgNote)}</p>${c}${m}</section>`;
+  }
+
   function render() {
     const root = $("#health-root");
     if (!root) return;
@@ -166,6 +182,7 @@
       + `<span class="small-label" id="health-updated">${esc(L.updated(clock.format(new Date())))}</span></div><p class="hl-intro">${esc(L.headingNote)}</p>${rows()}</section>`
       + `<section class="panel hl-panel" aria-labelledby="health-incidents-title"><div class="panel-heading"><div><span class="section-index">02</span><h2 id="health-incidents-title">${esc(L.incidents)}</h2></div>`
       + `<span class="today-count${health.incidents.length ? " warn" : ""}">${health.incidents.length || ""}</span></div>${incidents()}</section>`
+      + mailPanel()
       + (failure ? `<p class="hl-quiet" role="status">${esc(L.failed(failure))}</p>` : "");
     const focusedTask = document.activeElement?.closest?.("#health-root [data-task]")?.dataset.task;
     root.innerHTML = demo + body;

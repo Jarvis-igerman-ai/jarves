@@ -123,7 +123,9 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   `no-automerge`, so it ends absent. Queued PRs are
   merge-queue entries, not autoMergeRequest: count `mergeQueue` entries.
 - PR red: failing log tail only, then a Sonnet fixer; conflict: the fixer
-  rebases that PR's own branch (`--force-with-lease` on it only).
+  rebases that PR's own branch (`--force-with-lease` on it only). The steward and
+  the fixer run `check-touch --resource pr:N` first; a PR owned by another live
+  agent is skipped with a message, not touched.
 - Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
   installer/packaging, browser network, wake apply, workflows/secrets): request
   the Opus sign-off; never merged by the steward.
@@ -180,3 +182,6 @@ Watchdog actions (`workflow/autopilot_watch.py`):
 - Never merges, tags, promotes stable, edits settings/CLAUDE.md or authorises imported scope.
 
 Observability (layer beats, timeline, incidents, `/api/health`, `/api/timeline`): see `docs/workflow/OBSERVABILITY.md`.
+
+## Agent messages and ownership
+Agents claim `pr:N`, `branch:`, `issue:`, `file:` scopes and talk through ledger messages; see [AGENT_MESSAGES.md](AGENT_MESSAGES.md). Run `check-touch` before touching another agent's PR or scope.
