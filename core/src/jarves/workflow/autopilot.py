@@ -42,7 +42,7 @@ def _strings(value, name, limit=20):
         raise ValueError(f"{name} must be a short list of short strings")
 
 
-OPTIONAL_KEYS = ("worker_allowed_tools",)       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
+OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "weekly_token_budget")       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
@@ -85,6 +85,13 @@ def validate(policy: dict) -> dict:
             _int(lane["workers"], f"lane {name} workers", 0, 5)
         if "on" in lane and type(lane["on"]) is not bool:
             raise ValueError(f"lane {name}: on must be true or false")
+    for key in ("usage_slow_pct", "usage_stop_pct"):
+        if key in policy:
+            _int(policy[key], key, 1, 100)
+    if policy.get("usage_slow_pct", 80) > policy.get("usage_stop_pct", 95):
+        raise ValueError("usage_slow_pct must not be above usage_stop_pct")
+    if "weekly_token_budget" in policy:
+        _int(policy["weekly_token_budget"], "weekly_token_budget", 1, 10**12)
     if "worker_allowed_tools" in policy:
         _worker_tools(policy["worker_allowed_tools"])
     watchdog = policy["watchdog"]
@@ -274,4 +281,9 @@ def command(store, home: Path, op: str, args: list[str]) -> dict:
         return {"policy": policy}
     if op == "once":
         return step(store, home)
-    raise ValueError("usage: autopilot status|set|stop|start|once")
+    if op == "usage-resume":
+        from . import usage
+        usage.set_override(store, True)
+        store.record_event("autopilot_policy", "Owner cleared the usage stop: one task at a time until usage is below the slow line")
+        return {"usage_override": True}
+    raise ValueError("usage: autopilot status|set|stop|start|once|usage-resume")

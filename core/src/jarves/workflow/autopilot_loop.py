@@ -134,7 +134,7 @@ def _pick(snapshot: dict, policy: dict, lane: str, skip=()) -> dict | None:
 
 
 def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=bridge_start, stop=bridge_stop,
-         notify=bridge_notify, find=bridge_find, force: bool = False) -> list[dict]:
+         notify=bridge_notify, find=bridge_find, force: bool = False, usage=None) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
     from .observability import record_decision
@@ -146,8 +146,8 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find)
-                record_decision(store, policy, done)   # why nothing started (deduplicated)
+                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find, usage)
+                record_decision(store, policy, done, usage)   # why nothing started (deduplicated)
                 return done
         except OSError:
             return []          # another process is stepping
@@ -184,7 +184,7 @@ def _unconfirmed(store, profile_home, agent_id, task_id, find, actions) -> None:
     actions.append({"task_id": task_id, "action": "start_unconfirmed"})
 
 
-def _step(store, profile_home, policy, start, stop, notify, force, find=None) -> list[dict]:
+def _step(store, profile_home, policy, start, stop, notify, force, find=None, usage=None) -> list[dict]:
     actions: list[dict] = []
     state = _load(store)
     now = store.clock()
@@ -230,14 +230,16 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
     now = store.clock()
     starts = [t for t in state.get("starts", []) if now - t < 3600]
     running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
+    throttle = _throttle(store, policy, usage, notify, profile_home)
     for lane, conf in policy.get("lanes", {}).items():
         if not isinstance(conf, dict) or "workers" not in conf:
             continue
-        if now < state.get("paused_until", 0):
+        if now < state.get("paused_until", 0) or throttle == "stop":
             break
         skipped: set[str] = set()
         while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
                and len(running) < int(policy.get("max_concurrent", 1))
+               and (throttle != "slow" or not running)        # 80%+: one task at a time (#776)
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
             task = _pick(snap, policy, lane, skipped)
             if not task:
@@ -294,6 +296,26 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
             running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
     _LAST_SIG[key] = (store.snapshot()["revision"],) + sig[1:]
     return actions
+
+
+def _throttle(store, policy, usage, notify, profile_home) -> str:
+    """ok | slow | stop from the weekly usage (#776). Unknown usage never blocks; a failure here never stops the loop."""
+    from . import usage as use
+    from .autopilot_watch import ALERTS_KEY, _load, _save, raise_alert
+    try:
+        info = (usage or use.current)(store, policy)
+        lvl = use.level(store, policy, info)
+        if lvl == "stop":
+            raise_alert(store, "usage_stop", f"Weekly usage {info['text']} is at the stop line: no new tasks until it drops or the owner "
+                        "clears it (workflow_console.py autopilot usage-resume)", notify=lambda k, t: notify(profile_home, k, t))
+        else:
+            alerts = _load(store, ALERTS_KEY, [])
+            if any(a["kind"] == "usage_stop" for a in alerts):
+                _save(store, ALERTS_KEY, [a for a in alerts if a["kind"] != "usage_stop"])   # re-arm the alert
+        return lvl
+    except Exception:  # noqa: BLE001
+        log.exception("usage throttle failed; treated as unknown")
+        return "ok"
 
 
 def _watch(store, profile_home, policy, stop, notify) -> list[dict]:

@@ -214,12 +214,12 @@ def timeline_text(tl: dict, rows: list[dict] | None = None, limit: int = 60) -> 
 
 
 # ---- autopilot "nothing started" decisions ----------------------------------------------------------------------
-def record_decision(store, policy: dict, actions: list[dict]) -> str:
+def record_decision(store, policy: dict, actions: list[dict], usage=None) -> str:
     """Log why a tick started nothing; only on reason change or every 30 min. Returns the reason ('' when work started)."""
     if any(a.get("action") == "started" for a in actions):
         reason = ""
     else:
-        reason = _idle_reason(store, policy, actions)
+        reason = _idle_reason(store, policy, actions, usage)
     if not reason:
         _save(store, DECISION_KEY, {"reason": "", "since": store.clock(), "logged_at": store.clock()})
         return ""
@@ -233,7 +233,7 @@ def record_decision(store, policy: dict, actions: list[dict]) -> str:
     return reason
 
 
-def _idle_reason(store, policy: dict, actions: list[dict]) -> str:
+def _idle_reason(store, policy: dict, actions: list[dict], usage=None) -> str:
     from . import autopilot_loop as loop
     if not policy.get("enabled") or policy.get("kill"):
         return "POLICY_OFF"
@@ -244,6 +244,13 @@ def _idle_reason(store, policy: dict, actions: list[dict]) -> str:
         return "CLAIM_FAILED"
     snap = store.snapshot()
     running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
+    from . import usage as use
+    info = (usage or use.current)(store, policy)
+    lvl = use.level(store, policy, info)
+    if lvl != "ok" and (lvl == "stop" or running) and any(
+            loop._pick(snap, policy, lane) for lane, conf in policy.get("lanes", {}).items()
+            if isinstance(conf, dict) and int(conf.get("workers", 0)) > 0):
+        return ("USAGE_STOP" if lvl == "stop" else "USAGE_SLOW") + f" ({info['text']})"
     starts = [t for t in state.get("starts", []) if store.clock() - t < 3600]
     open_lanes = [lane for lane, conf in policy.get("lanes", {}).items()
                   if isinstance(conf, dict) and int(conf.get("workers", 0)) > 0]
@@ -335,7 +342,15 @@ def health(store, now: float | None = None) -> dict:
     now = store.clock() if now is None else now
     state = _meta(store, INCIDENT_KEY, {})
     incidents = [{**i, "task_id": state.get(i["key"], {}).get("task_id")} for i in detect_incidents(store, now)]
-    return {"layers": layers(store, now), "incidents": incidents, "now": now, "verdict": verdict(store, now)}
+    from . import autopilot, usage as use
+    try:
+        policy, _ = autopilot.load(store.path.parent)
+        info = use.current(store, policy)
+        slow, stop = use.thresholds(policy)
+        shown = {**info, "level": use.level(store, policy, info), "slow_pct": slow, "stop_pct": stop}
+    except Exception:  # noqa: BLE001
+        shown = {"pct": None, "source": "unknown", "estimate": False, "text": "unknown", "level": "ok", "notice": "usage check failed"}
+    return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now)}
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------
