@@ -1,0 +1,1 @@
+- Test: live budget-exhausted session test waits event-driven instead of a 2 s wall deadline (#788).
