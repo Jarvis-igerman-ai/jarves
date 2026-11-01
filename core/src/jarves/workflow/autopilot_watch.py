@@ -44,11 +44,11 @@ def _watch_policy(policy: dict) -> dict:
     return {**DEFAULTS, **(policy.get("watchdog") or {})}
 
 
-def raise_alert(store: Store, kind: str, summary: str, *, task_id=None, agent_id=None, notify=None, notify_text=""):
+def raise_alert(store: Store, kind: str, summary: str, *, task_id=None, agent_id=None, notify=None, notify_text="", dedupe=True):
     """Record an autopilot alert once per (kind, task, agent) key; push to the owner once (deduplicated)."""
     key = f"{kind}|{task_id or ''}|{agent_id or ''}"
     alerts = _load(store, ALERTS_KEY, [])
-    if any(a["key"] == key for a in alerts):
+    if dedupe and any(a["key"] == key for a in alerts):
         return False
     alerts.append({"key": key, "kind": kind, "summary": summary, "task_id": task_id, "agent_id": agent_id,
                    "at": store.clock()})
