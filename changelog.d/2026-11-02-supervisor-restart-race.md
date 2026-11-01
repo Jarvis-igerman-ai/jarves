@@ -1,0 +1,1 @@
+- workflow: supervisor waits up to 45 s for the old instance's lock on restart instead of exiting; the login task repeats every 5 min to restart a dead supervisor (#754)
