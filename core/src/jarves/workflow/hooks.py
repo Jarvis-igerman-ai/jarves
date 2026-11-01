@@ -51,7 +51,9 @@ def _managed(store: Store, agent_id: str | None) -> bool:
     if not agent_id:
         return False
     try:
-        return any(a["id"] == agent_id and a.get("autopilot") for a in store.snapshot()["agents"])
+        row = store.read(lambda db: db.execute(
+            "SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (agent_id,)).fetchone())
+        return bool(row) and bool(json.loads(row[0]).get("autopilot"))
     except (OSError, ValueError):
         return False
 
@@ -86,7 +88,8 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
         store.register_agent({"id": ident, "label": "Claude · " + kind,
                             "lane": lane, "provider": "claude-native",
                             "session_id": "native:" + hashlib.sha256(f"{session}:{subagent}".encode()).hexdigest(),
-                            "project": root.name, "parent_id": parent, "auto_dispatch": False})
+                            "project": root.name, "parent_id": parent, "auto_dispatch": False},
+                            skip_if_same=True)
     status = "offline" if event == "SessionEnd" else "idle" if event in {"SubagentStop", "Stop"} else "running"
     note = f"Native Claude event: {event}; completion evidence is tracked separately"
     if event == "Notification":
@@ -102,13 +105,15 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
         note = f"Claude {'started' if event == 'PreToolUse' else 'completed'} tool {tool[:80]}; no task verification inferred"
     flight = "start" if event == "PreToolUse" else "end" if event in {
         "PostToolUse", "PostToolUseFailure", "Stop", "SubagentStop", "SessionEnd"} else None
-    native = store.observe_agent(ident, status, note, tool=flight, call_id=payload.get("tool_use_id"))
     from .trace import record
-    record(store, native, event, tool=tool if isinstance(tool, str) else "",
-           call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
-           details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
-    if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
-        store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+    # Everything this event writes is ONE short transaction (one lock wait, one commit); nothing slow runs inside it.
+    with store.batch():
+        native = store.observe_agent(ident, status, note, tool=flight, call_id=payload.get("tool_use_id"))
+        record(store, native, event, tool=tool if isinstance(tool, str) else "",
+               call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
+               details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
+        if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
+            store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
     if subagent == "manager" and not managed:
         # Only one top-level session is the manager: headless/other sessions never receive owner follow-ups.
         store.claim_followup_manager(ident, takeover=event == "SessionStart")
@@ -179,6 +184,98 @@ def _log_error(home: Path, exc: BaseException) -> None:
         pass
 
 
+SPOOL_NAME = "hook_spool.jsonl"
+SPOOL_MAX_BYTES = 2 * 1024 * 1024
+_BUSY = ("locked", "busy")
+
+
+def _is_busy(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and any(w in str(exc).lower() for w in _BUSY)
+
+
+def spool_event(home: Path, payload: dict, root: Path) -> bool:
+    """Busy database: keep the lifecycle event in an append-only file the supervisor tick replays. Never raises."""
+    try:
+        path = Path(home) / SPOOL_NAME
+        if path.exists() and path.stat().st_size > SPOOL_MAX_BYTES:
+            return False                      # bounded: a dead supervisor must not fill the disk
+        line = json.dumps({"at": time.time(), "root": str(root), "agent": os.environ.get("JARVES_WORKFLOW_AGENT") or None,
+                           "payload": payload}, ensure_ascii=False) + "\n"
+        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))      # one write call: concurrent hooks do not interleave lines
+        finally:
+            os.close(fd)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def drain_spool(store: Store, limit: int = 200) -> int:
+    """Replay spooled hook events (supervisor tick). Returns how many were applied; leftovers stay for next time."""
+    path = store.path.parent / SPOOL_NAME
+    work = path.with_name(SPOOL_NAME + ".draining")
+    try:
+        if not work.exists():
+            if not path.exists():
+                return 0
+            os.replace(path, work)            # atomic: hooks that append now start a fresh spool file
+        lines = work.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    done, rest = 0, []
+    for n, line in enumerate(lines):
+        if n >= limit:
+            rest.extend(lines[n:])
+            break
+        try:
+            item = json.loads(line)
+            payload, root = item["payload"], Path(item["root"])
+        except (ValueError, KeyError, TypeError):
+            continue                           # corrupt line: drop it
+        try:
+            observe(store, payload, root, item.get("agent"))
+            done += 1
+        except sqlite3.Error:
+            rest.extend(lines[n:])             # DB busy again: keep this and the rest
+            break
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    try:
+        if rest:
+            work.write_text("\n".join(rest) + "\n", encoding="utf-8")
+        else:
+            work.unlink()
+    except OSError:
+        pass
+    return done
+
+
+def run_hook(home: Path, root: Path, payload: dict, *, agent_env: str | None = None, budget_s: float = 1.3):
+    """One hook event with a bounded retry/backoff; a database that stays busy spools the event instead of raising.
+
+    Returns (result, status) where status is "ok" or "spooled" (or "lost" if even the spool failed)."""
+    deadline = time.monotonic() + budget_s
+    delay = 0.03
+    store = None
+    try:
+        while True:
+            try:
+                if store is None:
+                    store = Store(Path(home) / "workflow.db", timeout_s=0.25, durable=False)
+                return observe(store, payload, root, agent_env), "ok"
+            except sqlite3.OperationalError as exc:
+                if not _is_busy(exc):
+                    raise
+                if time.monotonic() + delay >= deadline:
+                    return {}, "spooled" if spool_event(home, payload, root) else "lost"
+                time.sleep(delay)
+                delay = min(delay * 2, 0.25)
+    finally:
+        if store is not None:
+            store.close()
+
+
 def main(argv=None) -> int:
     import argparse
     from .__main__ import utf8_streams
@@ -199,18 +296,13 @@ def main(argv=None) -> int:
         payload = json.loads(raw)
         if not isinstance(payload, dict):
             return 0
-        # Stop must not be lost to the supervisor tick holding the DB: retry once. Both tries fit inside the 3 s hook
-        # timeout that bootstrap installs (1.2 + 0.3 + 1.2 s). Every other hook stays at 1.5 s.
+        # A busy database is retried with backoff inside the hook budget, then the event is spooled to
+        # hook_spool.jsonl (replayed by the supervisor tick): never an error, never a lost lifecycle event.
+        # Stop gets the longer budget; bootstrap installs a 3 s hook timeout for it (python start ~0.4 s).
         is_stop = payload.get("hook_event_name") == "Stop"
-        store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
-        agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
-        try:
-            result = observe(store, payload, args.repo_root, agent_env)
-        except sqlite3.OperationalError:
-            if not is_stop:
-                raise
-            time.sleep(0.3)
-            result = observe(store, payload, args.repo_root, agent_env)
+        result, _status = run_hook(args.home, args.repo_root, payload,
+                                   agent_env=os.environ.get("JARVES_WORKFLOW_AGENT") or None,
+                                   budget_s=1.8 if is_stop else 1.2)
         if result:
             print(json.dumps(result, ensure_ascii=False))
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
