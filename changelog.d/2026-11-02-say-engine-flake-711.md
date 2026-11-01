@@ -1,0 +1,1 @@
+- Fixed: flaky test test_say_engine default-output (#711): the test no longer installs the global crash hooks via logs.setup, so a late-dying thread of an earlier test cannot add an extra line to its output.
