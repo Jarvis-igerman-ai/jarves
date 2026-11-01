@@ -107,6 +107,23 @@ class VerdictTests(Base):
         self.alive()
         self.assertNotEqual(self.kind()[0], "working")
 
+    def test_native_workers_count_without_autopilot(self):
+        """#796: native workers (running, with or without a claimed task) make the verdict working, per lane."""
+        self.alive()
+        self.task()
+        self.store.register_agent({"id": "w1", "label": "W1", "lane": "bugs", "provider": "claude-native"})
+        self.store.register_agent({"id": "w2", "label": "W2", "lane": "bugs", "provider": "claude-native"})
+        self.store.observe_agent("w2", "running")            # working, no task claimed yet
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"], v["detail"]["running_by_lane"]), ("working", 1, {"unclaimed": 1}))
+        self.store.observe_agent("w1", "running")
+        self.store.claim("w1")
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"]), ("working", 2))
+        self.assertEqual(sum(v["detail"]["running_by_lane"].values()), 2)
+        self.store.observe_agent("w2", "idle")               # an idle unclaimed agent is not a running worker
+        self.assertEqual(self.kind()[1]["detail"]["active"], 1)
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()
