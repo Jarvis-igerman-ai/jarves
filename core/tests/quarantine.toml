@@ -50,3 +50,9 @@ id = "test_web_chat.py::test_silent_turns_never_speak_ring_or_light_the_face"
 issue = 722
 since = "2026-10-31"
 reason = "failed once on an unrelated PR: silent turn was spoken (2 == 1); cache-race hardening in chat_engine, remove entry once proven"
+
+[[test]]
+id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
+issue = 770
+since = "2026-11-01"
+reason = "state text races the fake mic beep: listening vs hearing you (real browser)"
