@@ -1532,7 +1532,14 @@ class SelfCheckService:
         if prev is None:
             return
         if not prev["stopped"]:
-            from .runtime.shutdown import boot_time, same_boot
+            from .runtime.shutdown import boot_time, consume_planned_restart, same_boot
+            planned = consume_planned_restart(self.core.home, self.clock)
+            if planned:                      # V4.5.1 #620: a hotfix ended the last run on purpose, not a crash
+                logs.info("selfcheck", "SELFCHECK_SKIPPED", "planned restart; not a crash",
+                          previous=prev.get("session"), reason=planned)
+                if mode == "always":
+                    await self.auto("restart")
+                return
             if same_boot(prev.get("boot"), boot_time()) is False:
                 logs.info("selfcheck", "SELFCHECK_SKIPPED", "the computer restarted since the last run; not a crash",
                           previous=prev.get("session"))

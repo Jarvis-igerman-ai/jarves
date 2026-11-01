@@ -360,6 +360,8 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
         return cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status", timeout=2) is not None
 
     def stop() -> None:
+        from .runtime.shutdown import mark_planned_restart
+        mark_planned_restart(home, "hotfix")        # #620: the next start must not treat this stop as a crash
         a = None
         cli.cmd_stop(a, cfg, home)
         deadline = time.monotonic() + 30

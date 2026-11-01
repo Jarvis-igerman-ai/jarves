@@ -119,3 +119,40 @@ def same_boot(a: int | float | None, b: int | float | None, tolerance_s: float =
     if a is None or b is None:
         return None
     return abs(float(a) - float(b)) <= tolerance_s
+
+
+PLANNED_RESTART_FILE = "planned_restart.json"
+PLANNED_RESTART_TTL_S = 600.0
+
+
+def mark_planned_restart(home, reason: str, clock: Callable[[], float] = time.time) -> None:
+    """A planned stop-and-restart (hotfix, V4.5.1 #620) writes this just before it stops the Core. The next start reads
+    it so a stop it ended on purpose is not mistaken for a crash. Best-effort, never raises."""
+    import json
+    try:
+        from pathlib import Path
+        (Path(home) / PLANNED_RESTART_FILE).write_text(
+            json.dumps({"ts": clock(), "reason": str(reason)[:40]}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def consume_planned_restart(home, clock: Callable[[], float] = time.time) -> str | None:
+    """The reason when a fresh planned-restart marker exists (it is deleted: one marker explains one restart), else None.
+    An old or unreadable marker is deleted and ignored."""
+    import json
+    from pathlib import Path
+    f = Path(home) / PLANNED_RESTART_FILE
+    if not f.exists():
+        return None
+    try:
+        d = json.loads(f.read_text(encoding="utf-8"))
+        fresh = 0 <= clock() - float(d["ts"]) <= PLANNED_RESTART_TTL_S
+        reason = str(d.get("reason") or "planned")
+    except (OSError, ValueError, KeyError, TypeError):
+        fresh, reason = False, ""
+    try:
+        f.unlink()
+    except OSError:
+        pass
+    return reason if fresh else None
