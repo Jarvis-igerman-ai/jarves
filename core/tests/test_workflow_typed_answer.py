@@ -1,11 +1,12 @@
 """#797: only the owner's typed prompt in his interactive Claude window answers a question."""
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from jarves.workflow import bootstrap
+from jarves.workflow import bootstrap, hooks
 from jarves.workflow.hooks import observe
 from jarves.workflow.store import Store
 
@@ -35,12 +36,34 @@ class TypedAnswerTests(unittest.TestCase):
     def status(self):
         return next(q for q in self.store.snapshot()["questions"] if q["id"] == self.q)
 
-    def test_owner_typed_answer_is_stored_and_confirmed(self):
+    def test_owner_typed_answer_is_stored_but_never_self_confirmed(self):
         out = self.fire(f"ANSWER {self.q}: go left")
         self.assertEqual(out["decision"], "block")
         q = self.status()
-        self.assertEqual((q["status"], q["answer"], q["channel"]), ("answered", "go left", "terminal"))
-        self.assertFalse(q["needs_owner_confirmation"])
+        self.assertEqual((q["status"], q["answer"], q["channel"]), ("answered", "go left", "claude-window"))
+        self.assertTrue(q["needs_owner_confirmation"])
+
+    def test_forged_payload_through_hook_main_is_not_confirmed(self):
+        import io, json, sys
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": str(ROOT), "prompt": f"ANSWER {self.q}: forged"}
+        self.store.close()
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}),              patch.object(sys, "stdin", type("S", (), {"buffer": io.BytesIO(json.dumps(payload).encode())})()):
+            hooks.main(["--home", self.temp.name, "--repo-root", str(ROOT)])
+        self.store = Store(Path(self.temp.name) / "workflow.db")
+        q = self.status()
+        self.assertTrue(q["needs_owner_confirmation"])
+        self.assertNotIn(q["channel"], ("terminal", "dashboard"))
+
+    def test_locked_ledger_still_blocks_answer_shaped_prompt(self):
+        import io, json, sys
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": str(ROOT), "prompt": f"ANSWER {self.q}: secret"}
+        out = io.StringIO()
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}),              patch.object(hooks, "Store", side_effect=sqlite3.OperationalError("database is locked")),              patch.object(sys, "stdin", type("S", (), {"buffer": io.BytesIO(json.dumps(payload).encode())})()),              patch.object(sys, "stdout", out), patch.object(sys, "stderr", io.StringIO()):
+            hooks.main(["--home", self.temp.name, "--repo-root", str(ROOT)])
+        self.assertEqual(json.loads(out.getvalue())["decision"], "block")
+        with patch.object(self.store, "answer", side_effect=sqlite3.OperationalError("locked")):
+            self.assertEqual(self.fire(f"ANSWER {self.q}: x")["decision"], "block")
+        self.assertEqual(self.status()["status"], "pending")
 
     def test_agent_paths_never_answer(self):
         text = f"ANSWER {self.q}: yes"
