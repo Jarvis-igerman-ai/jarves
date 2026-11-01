@@ -52,6 +52,12 @@ since = "2026-10-31"
 reason = "failed once on an unrelated PR: silent turn was spoken (2 == 1); cache-race hardening in chat_engine, remove entry once proven"
 
 [[test]]
+id = "test_voice_faults.py::test_delegated_tool_call_budget_exhausted_ends_session"
+issue = 788
+since = "2026-11-01"
+reason = "TimeoutError/CancelledError at live.py:656 on windows shard 1/4 (PR 753 run 41341778696), unrelated to the PR; tracked in #778"
+
+[[test]]
 id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
 issue = 770
 since = "2026-11-01"
