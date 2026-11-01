@@ -131,6 +131,30 @@
     toastTimer = setTimeout(() => { element.hidden = true; }, error ? 9000 : 4500);
   }
 
+  // #741: a 401/403 means the private session is gone. Stop everything, drop stale data and show ONE notice, never zeros.
+  const OPEN_COMMAND = "jarvis workflow open";
+  let ended = false;
+  function sessionEnded() {
+    if (ended) return;
+    ended = true;
+    data = null;
+    try { stream?.close(); } catch (_) { /* already closed */ }
+    $(".workspace")?.setAttribute("hidden", "");
+    $("#toast")?.setAttribute("hidden", "");
+    const page = document.createElement("div");
+    page.id = "session-ended";
+    page.className = "session-ended";
+    page.setAttribute("role", "alert");
+    page.innerHTML = `<div class="session-ended-card"><span class="empty-icon" aria-hidden="true">◌</span><h1>הסשן הפרטי הסתיים</h1><p>החיבור הפרטי למרכז העבודה פג, למשל אחרי הפעלה מחדש של המשגיח. כדי להמשיך, הריצו את הפקודה הבאה בטרמינל או פתחו את הקישור ש־claude-j הדפיס.</p><div class="session-ended-cmd"><code dir="auto">${esc(OPEN_COMMAND)}</code><button type="button" class="button primary" id="session-ended-copy">העתקת הפקודה</button></div><p class="session-ended-note" id="session-ended-note" aria-live="polite"></p></div>`;
+    document.body.appendChild(page);
+    $("#session-ended-copy").addEventListener("click", async () => {
+      const note = $("#session-ended-note");
+      try { await navigator.clipboard.writeText(OPEN_COMMAND); note.textContent = "הפקודה הועתקה."; }
+      catch (_) { note.textContent = "ההעתקה נחסמה. סמנו את הפקודה והעתיקו ידנית."; }
+    });
+    $("#session-ended-copy").focus();
+  }
+
   async function api(path, body) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -146,7 +170,12 @@
       try { result = await response.json(); } catch { result = {}; }
       if (!response.ok || result.ok === false) {
         const detail = typeof result.error === "string" ? result.error : result.error?.message;
-        if (response.status === 401 || response.status === 403) throw new Error(detail || "נדרש לפתוח את הקישור המאומת שהשירות המקומי הציג.");
+        if (response.status === 401 || response.status === 403) {
+          sessionEnded();
+          const ended = new Error(detail || "נדרש לפתוח את הקישור המאומת שהשירות המקומי הציג.");
+          ended.sessionEnded = true;
+          throw ended;
+        }
         throw new Error(detail || result.message || `הבקשה לא הושלמה (${response.status}).`);
       }
       return result;
@@ -172,7 +201,6 @@
     updateTraceControls();
     if (!ok && !data) {
       $("#metrics").innerHTML = "";
-      $("#now-strip").innerHTML = "";
       $("#agents-offline-wrap").innerHTML = "";
       $("#agents").innerHTML = empty("סביבת העבודה עדיין לא מחוברת", "המסך לא ממציא סוכנים או התקדמות. אחרי חיבור לשירות המקומי יופיע כאן המצב המדווח.");
       $("#active-tasks").innerHTML = empty("אין מידע זמין", "ממתינים לחיבור מאומת לשירות.", true);
@@ -183,6 +211,7 @@
   }
 
   async function refresh() {
+    if (ended) return;
     if (requestInFlight) { refreshAgain = true; return requestInFlight; }
     requestInFlight = (async () => {
       try {
@@ -194,7 +223,7 @@
         connectionState(true);
         renderLiveStatus();
         if (changed) render();
-      } catch (error) { connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error.message); }
+      } catch (error) { if (!error.sessionEnded) connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error.message); }
       finally {
         requestInFlight = null;
         if (refreshAgain) { refreshAgain = false; queueMicrotask(refresh); }
@@ -247,23 +276,34 @@
     return Boolean(agent.status === "running" && (!beat || Date.now() / 1000 - beat > 120));
   }
 
+  // #732 S1 count truth: workers = live running+claimed agents; running and in-review tasks are never added together;
+  // required progress is merged / verified / shipped, not one flat "done".
   function renderMetrics() {
     const tasks = data.tasks;
     const required = tasks.filter(isRequired);
-    const done = required.filter(complete).length;
-    const running = data.agents.filter(agent => agent.status === "running" && !agentStale(agent)).length;
+    const merged = required.filter(task => task.implementation === "merged" || ["verified", "done"].includes(task.state)).length;
+    const verified = required.filter(task => ["verified", "done"].includes(task.state)).length;
+    const shipped = required.filter(complete).length;
+    // same source as the "now" strip: agents holding a running/claimed task, plus live running/claimed agents with no task
+    const holders = new Set(tasks.filter(task => ["running", "claimed"].includes(task.state) && task.agent_id).map(task => task.agent_id));
+    const workers = holders.size + data.agents.filter(agent => ["running", "claimed"].includes(agent.status) && !agentStale(agent) && !holders.has(agent.id) && !agent.task_id).length;
     const waiting = tasks.filter(task => task.state === "waiting_owner").length;
-    const active = tasks.filter(task => ["running", "review"].includes(task.state)).length;
+    const running = tasks.filter(task => task.state === "running").length;
+    const inReview = tasks.filter(task => task.state === "review").length;
     const ready = tasks.filter(task => task.ready === true).length;
+    const problems = (data.alerts || []).length;
     const pending = data.questions.filter(question => ["pending", "deferred", "open"].includes(question.status || "pending")).length;
     $("#questions-count").textContent = pending;
+    const total = required.length;
+    const split = [["מוזגו", merged], ["אומתו", verified], ["נשלחו", shipped]];
     const cards = [
-      {label: "סוכנים בעבודה", symbol: "◈", value: running, detail: `${(data.agent_counts || {}).live ?? data.agents.length} פעילים`, foot: data.agents.length ? "לפי דיווחי הסוכנים" : "טרם נרשמו סוכנים", cls: ""},
-      {label: "משימות פעילות", symbol: "↗", value: active, detail: `${ready} זמינות להקצאה`, foot: "בפיתוח ובבדיקה", cls: ""},
+      {label: "סוכנים בעבודה", symbol: "◈", value: workers, detail: `${(data.agent_counts || {}).live ?? data.agents.length} סשנים חיים`, foot: problems ? (problems === 1 ? "בעיה אחת פתוחה" : `${problems} בעיות פתוחות`) : "הכול תקין", cls: problems ? "amber" : ""},
+      {label: "משימות בריצה", symbol: "↗", value: running, detail: `${inReview} בבדיקה`, foot: `${ready} זמינות להקצאה`, cls: ""},
       {label: "ממתין להחלטה שלך", symbol: "◇", value: pending, detail: waiting === 1 ? "משימה אחת" : `${waiting} משימות`, foot: "נשאר בתמונה, לא מדולג", cls: "amber"},
-      {label: "דרישות חובה שהושלמו", symbol: "✓", value: done, detail: `מתוך ${required.length}`, foot: tasks.length ? `${tasks.length} פריטים בהיקף הכולל; אופציונליים מחוץ למכנה` : "ממתין למיפוי התוכנית", cls: "done", progress: required.length ? done / required.length * 100 : 0}
+      {label: "דרישות חובה: נשלחו", symbol: "✓", value: shipped, detail: `מתוך ${total}`, foot: total ? split.map(([name, n]) => `${name} ${n}`).join(" · ") : "ממתין למיפוי התוכנית", cls: "done", split: total ? split.map(([name, n]) => [name, n / total * 100]) : null}
     ];
-    $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small>${esc(card.detail)}</small></div><p class="metric-foot">${esc(card.foot)}</p>${card.progress !== undefined ? `<div class="metric-bar" aria-hidden="true"><progress max="100" value="${card.progress}"></progress></div>` : ""}</a>`).join("");
+    const bar = card => card.split ? `<div class="metric-bar split" aria-hidden="true">${card.split.map(([name, pct]) => `<progress max="100" value="${pct}" title="${esc(name)}"></progress>`).join("")}</div>` : "";
+    $("#metrics").innerHTML = cards.map((card, index) => `<a href="#${["overview", "roadmap", "questions", "roadmap"][index]}" data-overview-metric="${index}" class="metric ${card.cls}"><div class="metric-label"><span>${esc(card.label)}</span><span class="metric-symbol" aria-hidden="true">${card.symbol}</span></div><div class="metric-value">${card.value}<small dir="auto">${esc(card.detail)}</small></div><p class="metric-foot" dir="auto">${esc(card.foot)}</p>${bar(card)}</a>`).join("");
   }
 
   // #730: live workers first; offline ones behind a remembered toggle; archived ones only counted.
@@ -328,15 +368,6 @@
     const section = $("#alerts-section");
     section.hidden = list.length === 0;
     section.innerHTML = list.map(alert => `<div class="alert"><span class="alert-symbol" aria-hidden="true">△</span><p>${esc(alert.summary)}</p>${alert.task_id ? `<button type="button" class="text-link" data-task="${esc(alert.task_id)}">למשימה ←</button>` : ""}</div>`).join("");
-  }
-
-  function renderNow() {
-    const running = data.tasks.filter(task => task.state === "running").sort(taskOrder);
-    const queued = data.tasks.filter(task => task.state === "queued").length;
-    $("#now-strip").innerHTML = `<h2 class="now-title">עכשיו בעבודה</h2>` + (running.length ? `<ul class="now-list">${running.map(task => {
-      const agent = data.agents.find(item => item.id === task.agent_id);
-      return `<li><button type="button" class="now-item" data-task="${esc(task.id)}"><span class="status-dot good" aria-hidden="true"></span><span class="now-task">${esc(task.title)}</span><span class="now-meta">${esc(agent?.label || task.agent_id || "לא דווח עובד")} · ${esc(age(agent?.heartbeat_at))}</span></button></li>`;
-    }).join("")}</ul>` : `<p class="now-empty">שום דבר לא רץ כרגע: ${queued === 1 ? "משימה אחת בתור" : `${queued} בתור`}</p>`);
   }
 
   function renderActive() {
@@ -571,7 +602,9 @@
     const focused = document.activeElement;
     const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
     const focusValue = focusKey && focused.getAttribute(focusKey);
-    renderNow(); renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    // #732: today.js draws the "Today" rows (incl. the former Now strip) from the same state; read-only.
+    document.dispatchEvent(new CustomEvent("workflow:render", {detail: {data, complete, age}}));
     const selected = $("#trace-agent").value;
     const options = '<option value="">כל הסוכנים</option>' + data.agents.map(a => `<option value="${esc(a.id)}">${a.parent_id ? "↳ " : ""}${esc(a.label || a.id)}${a.requested_model ? " · " + esc(a.requested_model) : ""}</option>`).join("");
     if ($("#trace-agent").innerHTML !== options) { $("#trace-agent").innerHTML = options; $("#trace-agent").value = selected; }
@@ -891,6 +924,7 @@
   document.addEventListener("keydown", renewPresence, {passive: true});
 
   function connectStream() {
+    if (ended) return;
     if (!("EventSource" in window)) return;
     stream = new EventSource("/api/events", {withCredentials: true});
     stream.addEventListener("change", () => refresh());
@@ -907,14 +941,15 @@
     if (token) {
       history.replaceState(null, "", `${location.pathname}${location.search}#overview`);
       try { await api("/api/session", {token}); }
-      catch (error) { connectionState(false, error.message); switchView(); return; }
+      catch (error) { if (error.sessionEnded) return; connectionState(false, error.message); switchView(); return; }
     }
     switchView();
     await refresh();
+    if (ended) return;
     connectStream();
-    setInterval(() => { if (!document.hidden) refresh(); }, 12000);
-    setInterval(() => { if (data && !document.hidden) renderQuestions(); }, 20000);
-    setInterval(() => { renderLiveStatus(); if (lastGoodAt && Date.now() - lastGoodAt > 45000) connectionState(false, "הנתונים לא עודכנו בזמן האחרון."); }, 10000);
+    setInterval(() => { if (!document.hidden && !ended) refresh(); }, 12000);
+    setInterval(() => { if (data && !document.hidden && !ended) renderQuestions(); }, 20000);
+    setInterval(() => { if (ended) return; renderLiveStatus(); if (lastGoodAt && Date.now() - lastGoodAt > 45000) connectionState(false, "הנתונים לא עודכנו בזמן האחרון."); }, 10000);
   }
   start();
 })();

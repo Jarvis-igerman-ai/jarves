@@ -172,8 +172,9 @@ ENV_GATED = ("show_yourself", "hide_yourself", "ui_show", "tasks_from_messages")
 # V3/V4 baseline 59.4k; package P 52.1k; this change: tools JSON ~29.9k + rules ~9.4k. A hard ceiling: it only shrinks.
 # 4.0.1: the 28 owner-approved V5 tools (goals, plans, preferences, proactive, development, issues, self-management) add
 # ~8k chars that trimming cannot remove (a tool costs ~120 chars of JSON frame before any text). Measured 47.4k; the
-# ceiling is that +2%. The -30% target (40.5k) is DEFERRED to 4.0.2 (lazy tool exposure by group, see SWV4_PERF.md).
+# ceiling is that +2%. The -30% target (40.5k) is met by lazy exposure (#71) on the client-delegation call: LAZY_CEILING.
 BACKEND_CEILING = 48_400
+LAZY_CEILING = 40_500           # #71: the -30% target (59.4k * 0.7 = 41.6k; 40.5k kept) on the lazy client-delegation list
 ORIGINAL_BASELINE = 59_400
 
 
@@ -252,7 +253,10 @@ async def test_backend_prompt_ceiling_and_per_tool_cap(hermetic_features, core, 
     tools = live_tools(core.registry)
     total = len(json.dumps(tools, ensure_ascii=False)) + len(core.agent.instructions())
     assert total <= BACKEND_CEILING, f"backend tools+rules are {total} chars (ceiling {BACKEND_CEILING})"
-    assert total <= ORIGINAL_BASELINE * 0.82                       # -18% against the pre-package-P baseline (the -30% target is deferred, see above)
+    assert total <= ORIGINAL_BASELINE * 0.82                       # -18% against the pre-package-P baseline (full list)
+    from jarves.voice.lazy_tools import lazy_tools                 # #71: client delegation lists tools lazily by group
+    lazy = len(json.dumps(lazy_tools(core.registry), ensure_ascii=False)) + len(core.agent.instructions())
+    assert lazy <= LAZY_CEILING, f"lazy backend tools+rules are {lazy} chars (ceiling {LAZY_CEILING})"
     long = {n: len(d) for n, d in descs.items() if len(d) > 330}
     assert not long, f"descriptions over 330 chars (move the detail to the guides): {long}"
     assert sum(len(d) for n, d in descs.items() if not core.registry._tools[n][1].lazy) <= 11_300   # lazy tools (Tool.lazy) are not always-on           # was 11.0k; 9.3k before the V5 tools (every tool now also carries an EN and an HE trigger)

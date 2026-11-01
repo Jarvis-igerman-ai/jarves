@@ -56,3 +56,9 @@ id = "test_voice_faults.py::test_delegated_tool_call_budget_exhausted_ends_sessi
 issue = 788
 since = "2026-11-01"
 reason = "TimeoutError/CancelledError at live.py:656 on windows shard 1/4 (PR 753 run 41341778696), unrelated to the PR; tracked in #778"
+
+[[test]]
+id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
+issue = 770
+since = "2026-11-01"
+reason = "state text races the fake mic beep: listening vs hearing you (real browser)"
