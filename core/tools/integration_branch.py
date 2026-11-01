@@ -25,6 +25,8 @@ BASE = f"{REMOTE}/main"
 FRAGMENT = re.compile(r"^- [A-Z][A-Za-z]*: \S.*$")
 FOOTER = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
 MIN_INTEGRATION = 3
+FILES_LIMIT = 100  # gh pr view truncates `files` here; at or above it we cannot see everything -> Tier R
+PROTECTED = re.compile(r"^(main|master|release.*|v\d.*|HEAD)$")
 GOOD_MERGE_STATES = ("CLEAN", "BLOCKED", "HAS_HOOKS")
 
 
@@ -57,11 +59,14 @@ def tier_of(files, labels) -> str:
 
 def pr_info(number, cwd=None):
     d = gh_json(["pr", "view", str(number), "--json",
-                 "number,title,headRefName,isDraft,labels,files,statusCheckRollup,mergeStateStatus,state"], cwd)
+                 "number,title,headRefName,isDraft,isCrossRepository,labels,files,statusCheckRollup,mergeStateStatus,state"], cwd)
     files = [f["path"] for f in d.get("files") or []]
     labels = [x["name"] for x in d.get("labels") or []]
+    truncated = len(files) >= FILES_LIMIT
     return {"number": d["number"], "title": d["title"], "head": d["headRefName"], "draft": bool(d.get("isDraft")),
-            "state": d.get("state"), "labels": labels, "files": files, "tier": tier_of(files, labels),
+            "cross_repo": bool(d.get("isCrossRepository")), "files_truncated": truncated,
+            "state": d.get("state"), "labels": labels, "files": files,
+            "tier": "R" if truncated else tier_of(files, labels),
             "merge_state": d.get("mergeStateStatus"), "checks": d.get("statusCheckRollup") or []}
 
 
@@ -76,7 +81,12 @@ def checks_passed(checks) -> bool:
 
 def eligible(info) -> bool:
     return (info["state"] == "OPEN" and not info["draft"] and checks_passed(info["checks"])
-            and info["merge_state"] in GOOD_MERGE_STATES)
+            and info["merge_state"] in GOOD_MERGE_STATES and not info.get("cross_repo"))
+
+
+def ineligible_reason(info) -> str:
+    return (f"state={info['state']} draft={info['draft']} merge={info['merge_state']} "
+            f"checks_ok={checks_passed(info['checks'])} cross_repo={info.get('cross_repo', False)}")
 
 
 def overlap_pairs(infos):
@@ -112,13 +122,13 @@ def cmd_plan(a):
     infos, rejected = [], []
     for n in numbers:
         info = pr_info(n, cwd)
-        (infos if (a.prs and not a.auto) or eligible(info) else rejected).append(info)
+        (infos if eligible(info) else rejected).append(info)
     overlaps = overlap_pairs(infos)
     conflicts = [[x["number"], y["number"]] for x, y in combinations(infos, 2) if merge_tree_conflicts(x, y, cwd)]
     rec, why = recommend(infos, overlaps, conflicts)
     print(json.dumps({
         "prs": [{k: i[k] for k in ("number", "title", "head", "tier", "files")} for i in infos],
-        "not_eligible": [{"number": i["number"], "reason": f"state={i['state']} draft={i['draft']} merge={i['merge_state']}"} for i in rejected],
+        "not_eligible": [{"number": i["number"], "reason": ineligible_reason(i)} for i in rejected],
         "conflict_forecast": {"file_overlap": overlaps, "merge_tree_conflicts": conflicts},
         "recommendation": rec, "reason": why, "needs_no_automerge": any(i["tier"] == "R" for i in infos)}, indent=2))
     return 0
@@ -161,17 +171,26 @@ def pr_body(included, skipped):
 
 def cmd_build(a):
     cwd = a.repo
+    if _run(["git", "status", "--porcelain"], cwd).stdout.strip():
+        print(json.dumps({"error": "working tree is not clean; use a clean isolated worktree"}), file=sys.stderr)
+        return 5
     _run(["git", "fetch", REMOTE, "main"], cwd)
-    infos = [pr_info(n, cwd) for n in a.prs]
+    allinfos = [pr_info(n, cwd) for n in a.prs]
+    infos = [i for i in allinfos if eligible(i)]
+    pre_skipped = [(i["number"], "not eligible: " + ineligible_reason(i)) for i in allinfos if not eligible(i)]
     for i in infos:
         _run(["git", "fetch", REMOTE, i["head"]], cwd)
     name = branch_name(cwd)
     _run(["git", "checkout", "-b", name, BASE], cwd)
-    included, skipped = [], []
+    included, skipped = [], list(pre_skipped)
     for i in infos:
         p = _run(["git", "merge", "--no-ff", "--no-edit", f"{REMOTE}/{i['head']}"], cwd, check=False)
         if p.returncode != 0:
             _run(["git", "merge", "--abort"], cwd, check=False)
+            if _run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd, check=False).returncode == 0:
+                print(json.dumps({"branch": name, "error": f"merge --abort did not clear MERGE_HEAD after #{i['number']}; stopping"}),
+                      file=sys.stderr)
+                return 6
             skipped.append((i["number"], "merge conflict: " + (p.stdout.strip().splitlines() or ["?"])[-1][:200]))
         else:
             included.append(i)
@@ -202,25 +221,43 @@ def cmd_build(a):
     return 0
 
 
+def supersedes_of(body):
+    """PR numbers in the integration PR's 'Supersedes:' line, or None when it has none."""
+    for line in (body or "").splitlines():
+        if line.strip().startswith("Supersedes:"):
+            return {int(x) for x in re.findall(r"#(\d+)", line)}
+    return None
+
+
 def cmd_close(a):
     cwd = a.repo
-    state = gh_json(["pr", "view", str(a.integration_pr), "--json", "state"], cwd).get("state")
-    if state != "MERGED":
-        print(f"refusing: integration PR #{a.integration_pr} is {state}, not MERGED", file=sys.stderr)
+    integ = gh_json(["pr", "view", str(a.integration_pr), "--json", "state,body"], cwd)
+    if integ.get("state") != "MERGED":
+        print(f"refusing: integration PR #{a.integration_pr} is {integ.get('state')}, not MERGED", file=sys.stderr)
         return 2
+    listed = supersedes_of(integ.get("body"))
     _run(["git", "fetch", REMOTE, "main"], cwd)
     for n in a.prs:
-        info = gh_json(["pr", "view", str(n), "--json", "headRefName,state"], cwd)
+        info = gh_json(["pr", "view", str(n), "--json", "headRefName,state,isCrossRepository"], cwd)
+        head = info["headRefName"]
+        if info.get("isCrossRepository"):
+            print(f"#{n}: skipped (cross-repository PR, head {head} is not in {REMOTE})")
+            continue
+        if listed is not None and n not in listed:
+            print(f"#{n}: skipped (not in the Supersedes line of #{a.integration_pr})")
+            continue
+        _run(["git", "fetch", REMOTE, head], cwd, check=False)
+        if _run(["git", "merge-base", "--is-ancestor", f"{REMOTE}/{head}", BASE], cwd, check=False).returncode != 0:
+            print(f"#{n}: skipped, left open (head {head} is not an ancestor of main: skipped by build or new commits)")
+            continue
         if info.get("state") == "OPEN":
             _run(["gh", "pr", "comment", str(n), "--body", f"Merged via #{a.integration_pr}"], cwd)
             _run(["gh", "pr", "close", str(n)], cwd)
-        head = info["headRefName"]
-        _run(["git", "fetch", REMOTE, head], cwd, check=False)
-        if _run(["git", "merge-base", "--is-ancestor", f"{REMOTE}/{head}", BASE], cwd, check=False).returncode == 0:
-            _run(["git", "push", REMOTE, "--delete", head], cwd, check=False)
-            print(f"#{n}: closed, branch {head} deleted")
-        else:
-            print(f"#{n}: closed, branch {head} kept (tip is not an ancestor of main)")
+        if PROTECTED.match(head):
+            print(f"#{n}: closed, branch {head} kept (protected name)")
+            continue
+        _run(["git", "push", REMOTE, "--delete", head], cwd, check=False)
+        print(f"#{n}: closed, branch {head} deleted")
     return 0
 
 
