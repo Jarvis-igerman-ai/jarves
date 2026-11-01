@@ -31,7 +31,7 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 _CLAIM_FAILED: set = set()
 
 def load_policy(home: Path) -> dict:
@@ -324,6 +324,9 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
         for name in watch.steward_step(store, policy, source.get("open_prs", []),
                                        lambda pr: list(pr.get("files") or []), notify=_notify):
             out.append({"action": "review_task", "task_id": name})
+        from .release_health import watch_release_health
+        for kind in watch_release_health(store, source, notify=_notify):
+            out.append({"action": "release_health", "detail": kind})
         for name in watch.manual_test_step(store):
             out.append({"action": "manual_test_item", "task_id": name})
         for name in watch.gate_questions_step(store):

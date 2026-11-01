@@ -1,0 +1,1 @@
+- Fixed: GitHub write audit: a second chain-length copy outside the github folder, so deleting both audit files raises the tamper alarm (#497).
