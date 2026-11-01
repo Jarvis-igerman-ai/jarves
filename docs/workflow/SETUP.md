@@ -36,6 +36,7 @@ In another terminal:
 
 ```powershell
 python core/tools/workflow_console.py open
+python core/tools/workflow_console.py unlock   # 4-digit code to answer in the dashboard (#750)
 ```
 
 The private URL contains a local access key; do not share it. The service binds

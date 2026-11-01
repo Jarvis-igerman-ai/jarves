@@ -20,6 +20,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .discuss import Helper, RateLimited
+from . import unlock
+from .autopilot import owner_unlock_s
 from .store import Store
 
 STATIC = Path(__file__).with_name("static")
@@ -64,6 +66,8 @@ class Server(ThreadingHTTPServer):
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
         self.attempts: list[float] = []
+        self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
+        self.unlock_attempts: list[float] = []
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -96,16 +100,25 @@ class Handler(BaseHTTPRequestHandler):
         return (not origin or origin == self.server.origin) and self.headers.get("Sec-Fetch-Site", "same-origin") in (
             "same-origin", "none")
 
-    def _authenticated(self) -> bool:
+    def _session(self) -> str:
+        """The live session id from the cookie, or empty."""
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
         except Exception:
-            return False
+            return ""
         value = cookie.get(self.server.cookie)
-        now = time.time()
         with self.server.session_lock:
-            return bool(value and self.server.sessions.get(value.value, 0) > now)
+            return value.value if value and self.server.sessions.get(value.value, 0) > time.time() else ""
+
+    def _authenticated(self) -> bool:
+        return bool(self._session())
+
+    def _unlock_left(self) -> int:
+        """Seconds of owner-answer unlock left for this session (0 = read-only)."""
+        session = self._session()
+        with self.server.session_lock:
+            return max(0, int(self.server.unlocked.get(session, 0) - time.time())) if session else 0
 
     def _headers(self, status: int, kind: str, length: int | None, extra: dict | None = None):
         self.send_response(status)
@@ -168,6 +181,7 @@ class Handler(BaseHTTPRequestHandler):
             state["agents"] = agent_roster(state["agents"], state["tasks"], state["observed_at"],
                                            state["agent_counts"]["retention_s"])[0]
             from .autopilot_watch import autopilot_alerts
+            state["unlock"] = {"remaining_s": self._unlock_left(), "ttl_s": owner_unlock_s(self.server.home)}
             state["alerts"] = list(state.get("alerts") or []) + [
                 {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
                 for a in autopilot_alerts(self.server.store)]
@@ -264,6 +278,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"error": "private session required"})
                 return
             store = self.server.store
+            if path == "/api/unlock":
+                self._unlock(data)
+                return
+            if re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss)", path) and not self._unlock_left():
+                # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
+                self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",
+                                 "locked": True})
+                return
             if path == "/api/owner":
                 result = store.set_owner(data.get("mode", ""))
             elif path == "/api/tasks":
@@ -311,6 +333,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": str(exc)[:240]})
         except Exception:
             self._json(500, {"error": "workflow operation failed; no approval or execution was performed"})
+
+    def _unlock(self, data):
+        now = time.time()
+        session = self._session()
+        with self.server.session_lock:
+            self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
+            if len(self.server.unlock_attempts) >= 5:
+                self._json(429, {"error": "wait a minute before trying again"})
+                return
+            self.server.unlock_attempts.append(now)
+        code = data.get("code")
+        if not isinstance(code, str) or not unlock.consume(self.server.home, code):
+            self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
+            return
+        with self.server.session_lock:
+            self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
+            self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
+        self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})
 
     def _login(self, data):
         now = time.time()

@@ -296,3 +296,4 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 
 .ov-report{white-space:pre-wrap;margin:0;padding:var(--s3) var(--s4);font:inherit;font-size:var(--fs-2);line-height:1.6;color:var(--text)}
 .questions-later{margin:8px 0 15px}.questions-later>summary{cursor:pointer;color:#cfb27a;font-size:12px;padding:8px 0}
+.unlock-bar{margin:0 0 12px}.unlock-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.unlock-form input{width:6ch;text-align:center}.unlock-help{color:var(--muted,inherit);font-size:.9em}
