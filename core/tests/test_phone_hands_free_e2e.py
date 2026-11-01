@@ -73,7 +73,9 @@ def test_hidden_page_and_a_refused_wake_lock(browser, phone):
     page.evaluate("() => { navigator.wakeLock = { request: () => Promise.reject(new Error('denied')) }; }")
     page.tap("#hfBtn")
     until(page, "document.querySelector('#hfRoot').textContent.includes('did not allow keeping the screen on')")
-    assert "listening" in page.inner_text(".hf-state").lower()
+    # The fake microphone is loud, so the live state flips between listening and hearing you (#770): either one means
+    # "the session is up"; asserting the visible word "listening" raced that flip.
+    assert page.evaluate("() => document.querySelector('.hf-state').dataset.state") in ("listening", "hearing")
     page.evaluate("() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); }")
     until(page, "document.querySelector('#hfRoot').textContent.includes('left the screen')")
     _gone(page)
