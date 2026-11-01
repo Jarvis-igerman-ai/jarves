@@ -107,6 +107,26 @@ class VerdictTests(Base):
         self.alive()
         self.assertNotEqual(self.kind()[0], "working")
 
+    def test_native_workers_count_as_working_even_with_autopilot_kill(self):
+        """#796: 2 native subagents (no task id) + many queued tasks + kill switch on must read 'working', never idle."""
+        self.alive()
+        for i in range(169):
+            self.task(f"q{i}")
+        for ident, lane in (("n1", "bugs"), ("n2", "release")):
+            self.store.register_agent({"id": ident, "label": ident, "lane": lane, "provider": "claude-native"})
+            self.store.observe_agent(ident, "running")
+        self.store.register_agent({"id": "n3", "label": "n3", "lane": "bugs", "provider": "claude-native"})
+        self.store.observe_agent("n3", "idle")     # an idle native session is not a worker
+        # the autopilot kill switch lives in <home>/autopilot.json and is deliberately not an input to the verdict
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"], v["detail"]["running_by_lane"]), ("working", 2, {"bugs": 1, "release": 1}))
+        self.assertEqual(v["reason"], "2 worker(s) active")
+        self.assertEqual(obs.running_segment(v["detail"]), "▶ 2 running (bugs 1, release 1)")
+        self.advance(1000)                         # silent past the window: not working, segment idle
+        self.alive()
+        kind, v = self.kind()
+        self.assertEqual((kind, obs.running_segment(v["detail"])), ("idle_with_work", "▶ idle"))
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()

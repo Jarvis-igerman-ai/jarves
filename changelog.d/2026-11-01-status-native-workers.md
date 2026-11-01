@@ -1,0 +1,1 @@
+- Workflow status line and factory verdict now count native subagent workers (running_by_lane); no KILL prefix (#796).

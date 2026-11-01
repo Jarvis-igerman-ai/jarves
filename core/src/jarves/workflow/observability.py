@@ -504,6 +504,27 @@ def read_usage(store, now: float) -> dict | None:
         return None
 
 
+def running_workers(agents: list[dict], tasks: list[dict], now: float) -> dict[str, int]:
+    """Live workers by lane (#796): the single source for the verdict and the status line. Counts non-offline agents
+    that are 'running' or own a running task and have a fresh heartbeat/progress (native subagents often hold no task id)."""
+    running = {t["id"] for t in tasks if t["state"] == "running"}
+    out: dict[str, int] = {}
+    for a in agents:
+        if a.get("status") == "offline" or max(a.get("heartbeat_at") or 0, a.get("progress_at") or 0) <= now - ACTIVE_FRESH_S:
+            continue
+        if a.get("status") == "running" or a.get("task_id") in running:
+            lane = a.get("lane") or "?"
+            out[lane] = out.get(lane, 0) + 1
+    return out
+
+
+def running_segment(detail: dict) -> str:
+    """The status-line worker segment from verdict()['detail'] (same numbers as the verdict, #796)."""
+    lanes = detail.get("running_by_lane") or {}
+    n = sum(lanes.values())
+    return f"▶ {n} running ({', '.join(f'{k} {v}' for k, v in sorted(lanes.items()))})" if n else "▶ idle"
+
+
 def verdict(store, now: float | None = None) -> dict:
     """The ONE answer to 'is the factory working'. Derived from layers, incidents, running tasks and queued work."""
     now = store.clock() if now is None else now
@@ -515,9 +536,8 @@ def verdict(store, now: float | None = None) -> dict:
         questions = [q for q in store._all(db, "question") if (q.get("status") or "pending") in {"pending", "deferred", "open"}]
         ready = ready_count(store, db)
         last = _last_activity(store, db)
-    running = {t["id"] for t in tasks if t["state"] == "running"}
-    active = sum(1 for a in agents if a.get("task_id") in running and a.get("status") != "offline"
-                 and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S)
+    by_lane = running_workers(agents, tasks, now)
+    active = sum(by_lane.values())
     decision = _meta(store, DECISION_KEY, {})
     from . import autopilot_loop as loop
     pause = loop._load(store)
@@ -527,7 +547,8 @@ def verdict(store, now: float | None = None) -> dict:
     except Exception:  # noqa: BLE001
         incidents = []
     detail = {"active": active, "ready": ready, "questions": len(questions), "incidents": incidents,
-              "layers": {k: v["status"] for k, v in rows.items()}, "autopilot_reason": decision.get("reason", "")}
+              "layers": {k: v["status"] for k, v in rows.items()}, "autopilot_reason": decision.get("reason", ""),
+              "running_by_lane": by_lane}
     oldest_q = min(q.get("created_at") or now for q in questions) if questions else None
 
     def out(kind, code, since, **fmt):
