@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import subprocess
@@ -55,6 +56,33 @@ def _managed(store: Store, agent_id: str | None) -> bool:
         return False
 
 
+ANSWER_RE = re.compile(r"\A\s*(?:ANSWER|ענה)\s+(q-[0-9a-f]{6,32})\s*[:\-]?\s*(\S.*)\Z", re.S | re.I)
+
+
+def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool) -> dict | None:
+    """#797: the owner's own typed prompt `ANSWER q-ID text` in his interactive Claude window answers that question.
+
+    Only a top-level interactive prompt counts: no subagent, no autopilot/agent environment, and Claude's
+    interactive entrypoint (headless `-p` and SDK sessions can be driven by agents). The prompt is consumed
+    (never reaches the model). Anything else is ignored: an agent can never answer, defer or reopen.
+    """
+    prompt = payload.get("prompt")
+    if (payload.get("hook_event_name") != "UserPromptSubmit" or not isinstance(prompt, str) or len(prompt) > 5000
+            or subagent != "manager" or managed or payload.get("agent_id") or os.environ.get("JARVES_WORKFLOW_AGENT")
+            or os.environ.get("CLAUDE_CODE_ENTRYPOINT") != "cli"):
+        return None
+    match = ANSWER_RE.match(prompt)
+    if not match:
+        return None
+    try:
+        question = store.answer(match.group(1), match.group(2).strip(), answered_by="owner (typed in Claude window)",
+                                channel="terminal")
+    except ValueError as exc:
+        return {"decision": "block", "reason": f"JARVES: answer not stored ({exc}). The question stays open."}
+    return {"decision": "block", "reason": f"JARVES: your answer to \"{question['title']}\" was stored. "
+            "It was not sent to the model; the waiting task resumes."}
+
+
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
     event = payload.get("hook_event_name", "")
     if event not in EVENTS or not in_project(str(payload.get("cwd", "")), root):
@@ -78,6 +106,9 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
     if managed:
         # Autopilot-started worker: attribute to its ledger agent; no second native identity.
         ident = workflow_agent
+    typed = typed_owner_answer(store, payload, subagent, managed)
+    if typed:
+        return typed
     # Native session identities are deliberately separate from attachable bridge sessions.
     if not managed:
         store.register_agent({"id": ident, "label": "Claude · " + kind,

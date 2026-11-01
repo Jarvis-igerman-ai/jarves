@@ -137,7 +137,7 @@ class WorkflowHookSettingsTests(unittest.TestCase):
         self.assertEqual(once, twice)
         for event, entries in twice["hooks"].items():
             hook = entries[0]["hooks"][0]
-            self.assertEqual(hook.get("async", False), event not in {"SessionStart", "SubagentStart", "Stop"}, event)
+            self.assertEqual(hook.get("async", False), event not in {"SessionStart", "SubagentStart", "Stop", "UserPromptSubmit"}, event)
             self.assertEqual(len(entries), 1)
 
 
