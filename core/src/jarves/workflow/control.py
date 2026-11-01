@@ -176,6 +176,11 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                         store.record_event("supervisor", "Workflow web process started; existing worker sessions left untouched")
                     store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid, "pid": os.getpid(),
                                           "restart_count": len(restarts)})
+                    try:
+                        from .hooks import drain_spool
+                        drain_spool(store)    # lifecycle events that hooks parked while the database was busy
+                    except Exception:  # noqa: BLE001
+                        pass
                     store.tick()
                     obs.supervisor_tick(store, home, profile_home)
                     try:

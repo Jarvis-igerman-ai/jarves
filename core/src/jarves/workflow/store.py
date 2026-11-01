@@ -159,7 +159,7 @@ def _choice(value, allowed, name: str):
 
 
 class Store:
-    def __init__(self, path: Path | str, clock=time.time, *, timeout_s=15.0):
+    def __init__(self, path: Path | str, clock=time.time, *, timeout_s=15.0, durable=True):
         if not isinstance(timeout_s, (int, float)) or not 0 <= timeout_s <= 15:
             raise ValueError("invalid workflow database timeout")
         self.path = Path(path)
@@ -171,7 +171,10 @@ class Store:
         self._busy_ms = int(timeout_s * 1000)
         self._db.execute(f"PRAGMA busy_timeout={self._busy_ms}")   # first: every later statement waits, not fails
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("PRAGMA synchronous=FULL")
+        # Hooks pass durable=False: WAL + NORMAL cannot corrupt and skips the per-commit fsync that held the write
+        # lock for tens of ms on Windows. The supervisor and CLI keep FULL.
+        self._db.execute("PRAGMA synchronous=" + ("FULL" if durable else "NORMAL"))
+        self._depth = 0
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS workflow_records (
                 kind TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL,
@@ -213,14 +216,24 @@ class Store:
     @contextmanager
     def _tx(self):
         with self._lock:
+            if self._depth:       # nested use joins the outer transaction: one lock acquisition, one commit
+                yield self._db
+                return
             self._db.execute("BEGIN IMMEDIATE")
+            self._depth = 1
             try:
                 yield self._db
             except BaseException:
+                self._depth = 0
                 self._db.execute("ROLLBACK")
                 raise
             else:
+                self._depth = 0
                 self._db.execute("COMMIT")
+
+    def batch(self):
+        """One write transaction for several store calls (single lock, single commit)."""
+        return self._tx()
 
     def read(self, fn, *, budget_s: float = 2.0):
         """Run ``fn(db)`` in a deferred (read-only) transaction: no BEGIN IMMEDIATE, so it never queues behind a writer.
@@ -230,6 +243,8 @@ class Store:
         delay = 0.02
         while True:
             with self._lock:
+                if self._depth:
+                    return fn(self._db)
                 self._db.execute("PRAGMA busy_timeout=200")
                 started = False
                 try:
@@ -402,7 +417,8 @@ class Store:
         return True
 
     def snapshot(self, retention_s: int = AGENT_RETENTION_S):
-        with self._tx() as db:
+        """Pure read (deferred transaction): dashboards and hooks must never queue for the write lock."""
+        def build(db):
             now = self.clock()
             owner = self._meta(db, "owner")
             owner["effective_mode"] = "present" if owner["mode"] == "present" and owner["active_until"] > now else "away"
@@ -426,6 +442,7 @@ class Store:
                     "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow','agent_message') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
+        return self.read(build, budget_s=5.0)
 
     def create_task(self, data):
         if not isinstance(data, dict):
@@ -477,10 +494,21 @@ class Store:
             self._event(db, "task_created", title)
         return task
 
-    def register_agent(self, data):
+    def register_agent(self, data, *, skip_if_same=False):
         if not isinstance(data, dict):
             raise ValueError("agent must be an object")
         ident = _id(data.get("id"))
+        if skip_if_same:
+            # Hook path: the native event that follows writes the heartbeat, so an unchanged registration is no write.
+            try:
+                row = self.read(lambda db: db.execute(
+                    "SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (ident,)).fetchone(), budget_s=0.3)
+            except sqlite3.OperationalError:
+                row = None
+            if row:
+                have = json.loads(row[0])
+                if all(have.get(k) == v for k, v in data.items()):
+                    return have
         now = self.clock()
         with self._tx() as db:
             old = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (ident,)).fetchone()
@@ -569,6 +597,9 @@ class Store:
         This is a bounded 'do not stop with authorised work' signal, never a
         permission grant or an attempt to resurrect a dead Claude process.
         """
+        # Look first without the write lock: most Stops find no ready work.
+        if not self.read(lambda db: any(self._ready(db, t) for t in self._all(db, "task"))):
+            return []
         with self._tx() as db:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
@@ -861,6 +892,20 @@ class Store:
         any other event only fills an empty slot. Delivered, unanswered items move to the new manager.
         """
         agent_id = _id(agent_id)
+        # Nearly every hook asks this and nearly always the answer is already settled: answer it without the write lock.
+        def peek(db):
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            current = json.loads(row[0]) if row else ""
+            if current == agent_id:
+                return True
+            if current and not takeover:
+                other = db.execute("SELECT data FROM workflow_records WHERE kind='agent' AND id=?", (current,)).fetchone()
+                if other and json.loads(other[0]).get("status") == "running":
+                    return False
+            return None
+        settled = self.read(peek)
+        if settled is not None:
+            return settled
         with self._tx() as db:
             row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
             current = json.loads(row[0]) if row else ""
@@ -885,6 +930,15 @@ class Store:
         3 deliveries in total; after that only a session start shows them.
         """
         agent_id = _id(agent_id)
+
+        def peek(db):
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+            if not row or json.loads(row[0]) != agent_id:
+                return False
+            return any(f["status"] == "pending" or (redeliver and f["status"] == "delivered")
+                       for f in self._all(db, "followup"))
+        if not self.read(peek):
+            return []
         with self._tx() as db:
             row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
             if not row or json.loads(row[0]) != agent_id:
@@ -907,9 +961,8 @@ class Store:
 
     def open_followups(self, agent_id=None):
         """Delivered but unanswered follow-ups (e.g. after a manager restart), for the receiving manager only."""
-        with self._tx() as db:
-            return [f for f in self._all(db, "followup") if f["status"] == "delivered"
-                    and (agent_id is None or f.get("delivered_to") == agent_id)]
+        return self.read(lambda db: [f for f in self._all(db, "followup") if f["status"] == "delivered"
+                                     and (agent_id is None or f.get("delivered_to") == agent_id)])
 
     def reply_followup(self, followup_id, reply):
         """The manager's reply. The linked question stays open until the owner answers it."""
@@ -1090,6 +1143,7 @@ class Store:
             now = self.clock()
             alerts = []
             changed = False
+            all_tasks = self._all(db, "task")     # once, not once per idle agent
             # Only the actual external supervisor writes its heartbeat. A web
             # refresh/dispatch check must not impersonate a running watchdog.
             for agent in self._all(db, "agent"):
@@ -1133,7 +1187,7 @@ class Store:
                     self._put(db, "agent", agent)
                     continue
                 if agent["status"] == "idle":
-                    eligible = [t for t in self._all(db, "task") if agent["lane"] in {"any", t["lane"]} and self._ready(db, t)]
+                    eligible = [t for t in all_tasks if agent["lane"] in {"any", t["lane"]} and self._ready(db, t)]
                     if eligible:
                         alerts.append({"kind": "idle_with_work", "summary": f"{agent['label']}: {len(eligible)} eligible tasks",
                                        "agent_id": agent["id"], "task_id": None})

@@ -160,12 +160,14 @@ def provider_event(profile_home, session, event, summary, payload=None):
     try:
         sid = session["id"]
         ident = "external-" + hashlib.sha256(sid.encode()).hexdigest()[:20]
-        with ledger._tx() as db:
+        def find(db):                      # a read: the full agent scan must not hold the write lock
             actors = ledger._all(db, "agent")
-            attached = next((a for a in actors if a.get("session_id") == sid), None)
-            if not attached and session["provider"] == "claude":
+            found = next((a for a in actors if a.get("session_id") == sid), None)
+            if not found and session["provider"] == "claude":
                 native_id = "claude-" + hashlib.sha256((sid.removeprefix("claude:") + ":manager").encode()).hexdigest()[:20]
-                attached = next((a for a in actors if a["id"] == native_id), None)
+                found = next((a for a in actors if a["id"] == native_id), None)
+            return found
+        attached = ledger.read(find, budget_s=0.05)
         ident = attached["id"] if attached else ident
         ledger.register_agent({"id": ident, "label": attached["label"] if attached else session["provider"] + " · " + (session.get("project") or "session"),
                                "session_id": attached.get("session_id", sid) if attached else sid,

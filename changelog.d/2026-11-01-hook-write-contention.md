@@ -1,0 +1,1 @@
+- Fixed: workflow hooks no longer fail on a busy ledger - one short write per hook event, unchanged registrations and read-only checks skip the write lock, busy events retry then spool to hook_spool.jsonl for the supervisor to replay, and snapshots are plain reads (#786).
