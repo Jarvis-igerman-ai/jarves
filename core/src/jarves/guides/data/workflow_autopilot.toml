@@ -40,6 +40,11 @@ he = "ההרשאה תמיד דורשת קוד מוקלד, לא אישור פשו
 en = "The grant always needs a typed code, never a plain yes. With the Core running the code is shown in the approval popup. With no Core and a terminal, the code is typed in the terminal itself. With no Core and no terminal the grant is refused (no click-to-approve downgrade); ask again from a terminal or while the Core runs. The kill switch also ends the grant at once."
 action = "command:jarvis workflow autopilot grant-status"
 
+[[steps]]
+he = "מיקוד דינמי: המנהל והטייס האוטומטי קובעים סדר עדיפויות לפי העומס. הרבה בקשות מיזוג פתוחות (6 ויותר, או 3 ירוקות שממתינות) מזיזות את המיקוד למיזוג. שתי תקלות חוסמות ויותר מזיזות אותו לתיקון. main אדום גובר על הכול. הפקודה jarvis workflow focus מציגה את המיקוד, הסיבות ותוכנית הנתיבים (--json לפלט מכונה). המיקוד משתנה רק אחרי שני מבטים רצופים, אינו עובר את max_concurrent ולעולם לא משאיר את המיזוג בלי עובד. כיבוי: jarvis workflow autopilot set focus_enabled false. הספים: focus_pr_high, focus_green_high, focus_showstopper_high."
+en = "Dynamic focus: the manager and the autopilot set priorities from the load. Many open PRs (6 or more, or 3 green ones waiting) move the focus to merge. Two or more showstopper/P0 issues move it to fix. A red main beats everything. jarvis workflow focus shows the focus, the reasons and the lane plan (--json for machines). The focus changes only after two looks in a row, never exceeds max_concurrent and never leaves merging without a worker. Turn off: jarvis workflow autopilot set focus_enabled false. Thresholds: focus_pr_high, focus_green_high, focus_showstopper_high."
+action = "command:jarvis workflow focus"
+
 [[problems]]
 he = "משימה נחסמה אחרי שני קיפאונות"
 en = "A task was blocked after two stalls"
