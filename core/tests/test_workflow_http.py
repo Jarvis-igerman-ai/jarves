@@ -45,6 +45,7 @@ class WorkflowHTTPTests(unittest.TestCase):
         status, headers, data = self.request("/api/session", {"token": self.server.token})
         self.assertEqual(status, 200)
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.server.unlocked[self.cookie.split("=", 1)[1]] = 4e9  # owner-answer unlock (#750): see test_workflow_unlock.py
 
     def test_private_state_requires_private_session(self):
         self.assertEqual(self.request("/api/state")[0], 401)

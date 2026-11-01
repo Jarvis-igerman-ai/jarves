@@ -1,0 +1,1 @@
+- Fixed: The workflow dashboard's private link is view-only; answering questions needs a 4-digit code from your own terminal (jarvis workflow unlock), open for 8 hours (#750).

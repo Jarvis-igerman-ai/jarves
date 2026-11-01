@@ -21,7 +21,7 @@ def default_profile() -> Path:
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
-    ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
+    ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
@@ -153,6 +153,16 @@ def main(argv=None) -> int:
         capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
+    if a.action == "unlock":
+        # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
+        from . import unlock
+        try:
+            owner_only_guard("unlock")
+        except PermissionError as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            return 3
+        print(f"Unlock code (type it in the dashboard, Questions tab; the code is valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}")
+        return 0
     if a.action == "open":
         # Kept out of event logs and process arguments. Never use this link as a public share URL.
         link = f"http://127.0.0.1:{a.port}/#token={access_token(home)}"
@@ -160,6 +170,12 @@ def main(argv=None) -> int:
         if not a.no_open:
             import webbrowser
             webbrowser.open(link)
+        try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
+            owner_only_guard("open")
+            from . import unlock
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+        except PermissionError:
+            pass
         return 0
     store = Store(home / "workflow.db")
     try:

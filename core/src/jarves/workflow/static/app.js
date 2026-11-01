@@ -43,6 +43,9 @@
       waiting: n => n < 1 ? "נשלח למנהל · ממתין לתשובה (פחות מדקה)" : `נשלח למנהל · ממתין לתשובה כבר ${n} דק׳`,
       idle: "המנהל כנראה במנוחה. עברו לחלון של Claude, או המתינו לאירוע הבא של עובד. ההודעה נשמרה ותימסר בסיום הצעד הבא שלו.",
       replied: "המנהל הסביר. התשובה מופיעה בשרשור למטה.", sent: "הבקשה נשמרה ותימסר למנהל בסיום הצעד הנוכחי שלו. שום דבר לא אושר.",
+      unlockLocked: "התשובות נעולות. הקישור הפרטי נותן צפייה בלבד.", unlockOpen: n => `מענה פתוח עוד ${n}`,
+      unlockHelp: "בטרמינל שלך הריצו: workflow_console.py unlock — והקלידו כאן את הקוד בן 4 הספרות.", unlockButton: "פתח מענה",
+      unlockLabel: "קוד מהטרמינל", unlockWrong: "הקוד שגוי או שפג תוקפו.", unlockDone: "המענה נפתח.",
       why: "למה שואלים", steps: "מה אתה עושה",
       minutes: "זמן", about: n => `כ־${n} דק׳`, skip: "אם תדלג", recommended: "ההמלצה", details: "פרטים", link: "פרטים ↗",
       discuss: "עזרה מ־Claude", discussTitle: "פותח חלון Claude חדש שעוזר לך להבין ולהחליט. הוא לא עונה במקומך.",
@@ -63,6 +66,9 @@
       waiting: n => n < 1 ? "Sent, waiting for the manager (under a minute)" : `Sent, waiting for the manager since ${n} min`,
       idle: "The manager is idle. Switch to the Claude window or wait for the next worker event. The message is saved and is delivered at its next step.",
       replied: "The manager explained. The reply is in the thread below.", sent: "Saved; the manager gets it when its current step ends. Nothing was approved.",
+      unlockLocked: "Answers are locked. The private link is view-only.", unlockOpen: n => `Answering open for ${n}`,
+      unlockHelp: "In your own terminal use workflow_console.py unlock, then type the 4-digit code here.", unlockButton: "Unlock answers",
+      unlockLabel: "Code from the terminal", unlockWrong: "Wrong or expired code.", unlockDone: "Answering is open.",
       why: "Why", steps: "What you do",
       minutes: "Minutes", about: n => `About ${n} min`, skip: "If you skip it", recommended: "Recommended", details: "Details", link: "Details ↗",
       discuss: "Help from Claude", discussTitle: "Opens a new Claude window that helps you understand and decide. It never answers for you.",
@@ -188,6 +194,33 @@
     $("#session-ended-copy").focus();
   }
 
+  let unlockUntil = 0;
+  function renderUnlock() {
+    const bar = $("#unlock-bar");
+    if (!bar) return;
+    const left = Math.max(0, Math.round((unlockUntil - Date.now()) / 60000));
+    const open = unlockUntil > Date.now();
+    const typed = bar.querySelector("input")?.value || "";
+    const key = open ? "open" + left : "locked";
+    if (bar.dataset.key === key && !typed) return;
+    if (bar.dataset.key === "locked" && key === "locked" && typed) return; // keep what the owner is typing
+    bar.dataset.key = key;
+    bar.innerHTML = open ? `<span class="pill">${esc(L.unlockOpen(left >= 90 ? Math.round(left / 60) + (L === I18N.en ? " h" : " ש׳") : left + (L === I18N.en ? " min" : " דק׳")))}</span>`
+      : `<form class="unlock-form"><span class="pill amber">${esc(L.unlockLocked)}</span><span class="unlock-help">${esc(L.unlockHelp)}</span><label class="sr-only" for="unlock-code">${esc(L.unlockLabel)}</label><input id="unlock-code" dir="ltr" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000" size="5"><button class="button secondary" type="submit">${esc(L.unlockButton)}</button><span class="form-error" role="alert"></span></form>`;
+  }
+  document.addEventListener("submit", async event => {
+    const form = event.target.closest?.(".unlock-form");
+    if (!form) return;
+    event.preventDefault();
+    const code = form.querySelector("input").value.trim();
+    try {
+      const result = await api("/api/unlock", {code});
+      unlockUntil = Date.now() + (result.result?.remaining_s || 0) * 1000;
+      renderUnlock(); toast(L.unlockDone);
+    } catch (error) { if (!error.sessionEnded) { const e = form.querySelector(".form-error"); if (e) e.textContent = L.unlockWrong; } }
+  });
+  setInterval(renderUnlock, 30000);
+
   async function api(path, body) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -203,6 +236,7 @@
       try { result = await response.json(); } catch { result = {}; }
       if (!response.ok || result.ok === false) {
         const detail = typeof result.error === "string" ? result.error : result.error?.message;
+        if (result.locked) { unlockUntil = 0; renderUnlock(); throw new Error(detail || L.unlockLocked); } // locked, not logged out (#750)
         if (response.status === 401 || response.status === 403) {
           sessionEnded();
           const ended = new Error(detail || "נדרש לפתוח את הקישור המאומת שהשירות המקומי הציג.");
@@ -252,6 +286,8 @@
         if (!Array.isArray(next.tasks) || !Array.isArray(next.agents) || !Array.isArray(next.questions)) throw new Error("התקבל עדכון בפורמט לא מוכר.");
         const changed = !data || next.revision !== data.revision || !connected;
         data = next;
+        unlockUntil = Date.now() + (next.unlock?.remaining_s || 0) * 1000;
+        renderUnlock();
         lastGoodAt = Date.now();
         connectionState(true);
         renderLiveStatus();

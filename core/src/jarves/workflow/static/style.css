@@ -293,3 +293,5 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 .ov-fresh[data-age="attention"]{color:var(--warn)}.ov-fresh[data-age="attention"]:before{content:"!";font-weight:700;color:var(--warn)}
 .ov-fresh[data-age="bad"]{color:var(--bad)}.ov-fresh[data-age="bad"]:before{content:"✕";color:var(--bad)}
 .status-dot.today-pulse{background:var(--busy)}
+
+.unlock-bar{margin:0 0 12px}.unlock-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.unlock-form input{width:6ch;text-align:center}.unlock-help{color:var(--muted,inherit);font-size:.9em}

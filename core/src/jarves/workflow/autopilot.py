@@ -27,7 +27,8 @@ DEFAULTS = {
     "max_concurrent": 3, "max_starts_per_hour": 6,
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
     "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
-                 "agent_retention_s": 86400},  # console hides agents offline longer than this (#730)
+                 "agent_retention_s": 86400,  # console hides agents offline longer than this (#730)
+                 "owner_unlock_s": 28800},  # dashboard answer-unlock lifetime: 8 h (#750)
 }
 
 
@@ -109,11 +110,17 @@ def load(home: Path) -> tuple[dict, str]:
         if isinstance(policy, dict) and isinstance(policy.get("watchdog"), dict):
             # Policy files written before #730 lack the retention key; the default keeps them valid.
             policy["watchdog"].setdefault("agent_retention_s", DEFAULTS["watchdog"]["agent_retention_s"])
+            policy["watchdog"].setdefault("owner_unlock_s", DEFAULTS["watchdog"]["owner_unlock_s"])
         if isinstance(policy, dict) and isinstance(policy.get("lanes"), dict):
             policy["lanes"].setdefault("ops", copy.deepcopy(DEFAULTS["lanes"]["ops"]))  # older files predate the ops lane
         return validate(policy), ""
     except (OSError, ValueError) as exc:
         return {**copy.deepcopy(DEFAULTS), "enabled": False}, f"policy file invalid, autopilot stays off: {exc}"
+
+
+def owner_unlock_s(home: Path) -> int:
+    """How long a dashboard session stays unlocked for owner answers after the terminal code (#750)."""
+    return load(home)[0]["watchdog"]["owner_unlock_s"]
 
 
 def agent_retention_s(home: Path) -> int:

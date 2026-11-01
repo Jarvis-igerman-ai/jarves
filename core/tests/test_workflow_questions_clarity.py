@@ -159,6 +159,7 @@ class GetMoreInfoHTTP(unittest.TestCase):
         self.thread.start()
         status, headers, _ = self.request("/api/session", {"token": self.server.token}, cookie="")
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.server.unlocked[self.cookie.split("=", 1)[1]] = 4e9  # owner-answer unlock (#750): see test_workflow_unlock.py
 
     def tearDown(self):
         self.server.shutdown()

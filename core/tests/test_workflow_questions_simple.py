@@ -194,6 +194,7 @@ class DiscussHTTP(unittest.TestCase):
         self.thread.start()
         status, headers, _ = self.request("/api/session", {"token": self.server.token}, cookie="")
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.server.unlocked[self.cookie.split("=", 1)[1]] = 4e9  # owner-answer unlock (#750): see test_workflow_unlock.py
         store = self.server.store
         plan_task(store, "V5-PWA")
         plan_task(store, "V5-PAIRING")
