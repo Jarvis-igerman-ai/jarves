@@ -1,0 +1,1 @@
+- Fixed: the dashboard canary journey no longer fails on a loaded Windows runner when the host runs out of socket buffers (ERR_NO_BUFFER_SPACE): it retries up to three times with a growing pause, and only for that error. Fixes #707

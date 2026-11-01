@@ -35,6 +35,8 @@ from typing import Callable
 
 PASS, FAIL, BLOCKED = "PASS", "FAIL", "BLOCKED"
 DASHBOARD_BUDGET_MS = 8000.0         # M budget for one page load (CI-loose); the owner's PC is checked by the monitor
+DASHBOARD_ATTEMPTS = 3               # whole-journey tries when the only errors are host socket exhaustion (#707)
+DASHBOARD_RETRY_PAUSE_S = 5.0        # pause x attempt number between those tries
 DASHBOARD_RUNS = 3                   # measured loads per page after the warm-up pass; the median is judged
 DASHBOARD_PAGES = ("home", "conversations", "health", "settings")
 
@@ -219,15 +221,17 @@ TRANSIENT_NET = re.compile(r"net::ERR_(NO_BUFFER_SPACE|INSUFFICIENT_RESOURCES|NE
 
 
 async def j_dashboard(env: Env) -> str:
-    """One retry, only when EVERY error is a host socket-exhaustion error (Windows ERR_NO_BUFFER_SPACE on a loaded
-    runner, flake #278): a real page or script error never matches, so it is never retried away."""
-    for attempt in (1, 2):
+    """Retry (DASHBOARD_ATTEMPTS tries, growing pause so the host's socket buffers drain) only when EVERY error is a host
+    socket-exhaustion error (Windows ERR_NO_BUFFER_SPACE on a loaded runner, flakes #278, #707: one retry was not enough):
+    a real page or script error never matches, so it is never retried away."""
+    for attempt in range(1, DASHBOARD_ATTEMPTS + 1):
         try:
             return await _dashboard_attempt(env)
         except AssertionError as e:
             parts = str(e).split("; ")
-            if attempt == 2 or not all(TRANSIENT_NET.search(x) for x in parts):
+            if attempt == DASHBOARD_ATTEMPTS or not all(TRANSIENT_NET.search(x) for x in parts):
                 raise
+            await asyncio.sleep(DASHBOARD_RETRY_PAUSE_S * attempt)
     raise AssertionError("unreachable")
 
 
