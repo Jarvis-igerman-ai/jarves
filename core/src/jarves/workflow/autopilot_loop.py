@@ -32,6 +32,8 @@ _LAST_SIG: dict[str, tuple] = {}
 
 
 # ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+_CLAIM_FAILED: set = set()
+
 def load_policy(home: Path) -> dict:
     from . import autopilot
     policy, error = autopilot.load(home)
@@ -117,8 +119,8 @@ def _slug(text: str) -> str:
     return "".join(c if c.isalnum() or c in "_.-" else "-" for c in text)[:60]
 
 
-def _pick(snapshot: dict, policy: dict, lane: str) -> dict | None:
-    tasks = [t for t in snapshot["tasks"] if t["lane"] == lane]
+def _pick(snapshot: dict, policy: dict, lane: str, skip=()) -> dict | None:
+    tasks = [t for t in snapshot["tasks"] if t["lane"] == lane and t["id"] not in skip]
     ready = [t for t in tasks if t.get("ready") and t.get("execution_allowed", True)]
     if lane == "features":
         # Imported/planned scope runs only for versions the owner authorised in the policy.
@@ -231,10 +233,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
             continue
         if now < state.get("paused_until", 0):
             break
+        skipped: set[str] = set()
         while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
                and len(running) < int(policy.get("max_concurrent", 1))
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
-            task = _pick(snap, policy, lane)
+            task = _pick(snap, policy, lane, skipped)
             if not task:
                 break
             agent_id = AGENT_PREFIX + _slug(f"{lane}-{task['id']}")
@@ -245,10 +248,16 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                                   "provider": "claude", "project": policy.get("project", ""),
                                   "requested_model": conf.get("model", ""), "auto_dispatch": False})
             store.link_session(agent_id, "", autopilot=True)
+            if old and old.get("status") != "idle":
+                store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
-            if not claimed:           # lost the race or no longer ready: no start
+            if not claimed:           # lost the race or no longer ready: record it and try the next candidate
+                if (agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
+                    _CLAIM_FAILED.add((agent_id, task["id"]))
+                    store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
-                break
+                skipped.add(task["id"])
+                continue
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
                        task=assignment(ctx, agent_id, store.path.parent), approved=False,
