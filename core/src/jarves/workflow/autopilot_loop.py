@@ -31,8 +31,9 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 _CLAIM_FAILED: set = set()
+
 
 def load_policy(home: Path) -> dict:
     from . import autopilot
@@ -136,17 +137,21 @@ def _pick(snapshot: dict, policy: dict, lane: str, skip=()) -> dict | None:
 
 
 def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=bridge_start, stop=bridge_stop,
-         notify=bridge_notify, find=bridge_find, force: bool = False) -> list[dict]:
+         notify=bridge_notify, find=bridge_find, force: bool = False, usage=None) -> list[dict]:
     """One idempotent pass. Returns the actions taken (empty when nothing changed)."""
     policy = policy if policy is not None else load_policy(store.path.parent)
+    from .observability import record_decision
     if not policy.get("enabled"):
+        record_decision(store, policy, [])
         return []
     if not _LOCK.acquire(blocking=False):
         return []
     try:
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
-                return _step(store, Path(profile_home), policy, start, stop, notify, force, find)
+                done = _step(store, Path(profile_home), policy, start, stop, notify, force, find, usage)
+                record_decision(store, policy, done, usage)   # why nothing started (deduplicated)
+                return done
         except OSError:
             return []          # another process is stepping
     finally:
@@ -182,7 +187,7 @@ def _unconfirmed(store, profile_home, agent_id, task_id, find, actions) -> None:
     actions.append({"task_id": task_id, "action": "start_unconfirmed"})
 
 
-def _step(store, profile_home, policy, start, stop, notify, force, find=None) -> list[dict]:
+def _step(store, profile_home, policy, start, stop, notify, force, find=None, usage=None) -> list[dict]:
     actions: list[dict] = []
     state = _load(store)
     now = store.clock()
@@ -228,14 +233,16 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
     now = store.clock()
     starts = [t for t in state.get("starts", []) if now - t < 3600]
     running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
+    throttle = _throttle(store, policy, usage, notify, profile_home)
     for lane, conf in policy.get("lanes", {}).items():
         if not isinstance(conf, dict) or "workers" not in conf:
             continue
-        if now < state.get("paused_until", 0):
+        if now < state.get("paused_until", 0) or throttle == "stop":
             break
         skipped: set[str] = set()
         while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
                and len(running) < int(policy.get("max_concurrent", 1))
+               and (throttle != "slow" or not running)        # 80%+: one task at a time (#776)
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
             task = _pick(snap, policy, lane, skipped)
             if not task:
@@ -252,11 +259,12 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
             if not claimed:           # lost the race or no longer ready: record it and try the next candidate
-                if (agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
-                    _CLAIM_FAILED.add((agent_id, task["id"]))
+                if (str(store.path), agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
+                    _CLAIM_FAILED.add((str(store.path), agent_id, task["id"]))
                     store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
                 skipped.add(task["id"])
+                actions.append({"task_id": task["id"], "action": "claim_failed"})
                 continue
             ctx = task_context(store, claimed)
             req = dict(provider="claude", project=policy.get("project", ""), model=conf.get("model", ""),
@@ -266,9 +274,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            starts.append(now)
-            state["starts"] = starts
-            _save(store, state)
+            if result is None or result.get("ok"):
+                # Only a start the bridge accepted (or an unknown outcome) uses the hourly budget (#763).
+                starts.append(now)
+                state["starts"] = starts
+                _save(store, state)
             if result is None:
                 _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):
@@ -278,6 +288,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 state["paused_until"] = now + PAUSE_S
                 state["pause_reason"] = code
                 _save(store, state)
+                store.record_event("autopilot_idle", f"start refused ({code}); not counted against max_starts_per_hour")
                 store.record_event("autopilot_paused", f"Autopilot start refused ({code}); paused for {PAUSE_S // 60} min")
                 actions.append({"task_id": task["id"], "action": "refused", "code": code})
                 break
@@ -290,6 +301,26 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
             running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
     _LAST_SIG[key] = (store.snapshot()["revision"],) + sig[1:]
     return actions
+
+
+def _throttle(store, policy, usage, notify, profile_home) -> str:
+    """ok | slow | stop from the weekly usage (#776). Unknown usage never blocks; a failure here never stops the loop."""
+    from . import usage as use
+    from .autopilot_watch import ALERTS_KEY, _load, _save, raise_alert
+    try:
+        info = (usage or use.current)(store, policy)
+        lvl = use.level(store, policy, info)
+        if lvl == "stop":
+            raise_alert(store, "usage_stop", f"Weekly usage {info['text']} is at the stop line: no new tasks until it drops or the owner "
+                        "clears it (workflow_console.py autopilot usage-resume)", notify=lambda k, t: notify(profile_home, k, t))
+        else:
+            alerts = _load(store, ALERTS_KEY, [])
+            if any(a["kind"] == "usage_stop" for a in alerts):
+                _save(store, ALERTS_KEY, [a for a in alerts if a["kind"] != "usage_stop"])   # re-arm the alert
+        return lvl
+    except Exception:  # noqa: BLE001
+        log.exception("usage throttle failed; treated as unknown")
+        return "ok"
 
 
 def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
@@ -324,6 +355,9 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
         for name in watch.steward_step(store, policy, source.get("open_prs", []),
                                        lambda pr: list(pr.get("files") or []), notify=_notify):
             out.append({"action": "review_task", "task_id": name})
+        from .release_health import watch_release_health
+        for kind in watch_release_health(store, source, notify=_notify):
+            out.append({"action": "release_health", "detail": kind})
         for name in watch.manual_test_step(store):
             out.append({"action": "manual_test_item", "task_id": name})
         for name in watch.gate_questions_step(store):

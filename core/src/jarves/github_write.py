@@ -105,6 +105,19 @@ def _lines(path: Path) -> list[str]:
     return [x for x in path.read_text(encoding="utf-8").split("\n") if x.strip()] if path.exists() else []
 
 
+def _anchor_path(path: Path) -> Path:
+    """Second copy of the chain length, OUTSIDE the github/ folder, so deleting that folder's files is noticed."""
+    return path.parent.parent / "audit_anchor" / "github_write.json"
+
+
+def _read_anchor(path: Path) -> int:
+    try:
+        n = json.loads(_anchor_path(path).read_text(encoding="utf-8")).get("n", 0)
+        return n if isinstance(n, int) and n > 0 else 0
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
 def _scan(path: Path) -> tuple[list[dict], str, list[str]]:
     head_p = path.with_suffix(".head")
     try:
@@ -135,6 +148,8 @@ def _scan(path: Path) -> tuple[list[dict], str, list[str]]:
     except (OSError, ValueError):
         return [], "the audit head file is not valid", []
     n = len(hashes)
+    if _read_anchor(path) > n:        # both audit files deleted or cut back consistently: the second copy remembers more rows
+        return [], "the audit file and its head were deleted or shortened (anchor copy)", []
     # the head may LAG by exactly one row (a crash, or on Windows a reader holding the head open, between the fsynced
     # append and the head replace): appending a row is never hidden by this, a removed row still is detected
     lag_ok = (head is None and n == 1) or (isinstance(head, dict) and n >= 2 and head.get("n") == n - 1
@@ -173,6 +188,12 @@ def _append_chained(path: Path, rec: dict) -> None:
     tmp = path.with_suffix(".head.tmp")
     tmp.write_text(json.dumps({"n": n + 1, "h": h}), encoding="utf-8")
     os.replace(tmp, path.with_suffix(".head"))
+    try:
+        ap = _anchor_path(path)
+        ap.parent.mkdir(parents=True, exist_ok=True)
+        ap.write_text(json.dumps({"n": n + 1, "h": h}), encoding="utf-8")
+    except OSError:
+        logs.warn("github", "GITHUB_AUDIT_ANCHOR", "anchor copy not written")
 
 
 def reset_audit(home: Path) -> str:
@@ -185,6 +206,7 @@ def reset_audit(home: Path) -> str:
             kept = f"write_audit.tampered-{uuid.uuid4().hex[:8]}.jsonl"
             os.replace(path, path.with_name(kept))
         path.with_suffix(".head").unlink(missing_ok=True)
+        _anchor_path(path).unlink(missing_ok=True)
     return kept
 
 

@@ -18,6 +18,7 @@ import logging
 import re
 from pathlib import Path
 
+from . import questions_text as qt
 from .store import Store
 
 OWNED_PREFIX = "ap-"  # agents pre-registered by the autopilot: ap-<lane>-<task>
@@ -43,11 +44,11 @@ def _watch_policy(policy: dict) -> dict:
     return {**DEFAULTS, **(policy.get("watchdog") or {})}
 
 
-def raise_alert(store: Store, kind: str, summary: str, *, task_id=None, agent_id=None, notify=None, notify_text=""):
+def raise_alert(store: Store, kind: str, summary: str, *, task_id=None, agent_id=None, notify=None, notify_text="", dedupe=True):
     """Record an autopilot alert once per (kind, task, agent) key; push to the owner once (deduplicated)."""
     key = f"{kind}|{task_id or ''}|{agent_id or ''}"
     alerts = _load(store, ALERTS_KEY, [])
-    if any(a["key"] == key for a in alerts):
+    if dedupe and any(a["key"] == key for a in alerts):
         return False
     alerts.append({"key": key, "kind": kind, "summary": summary, "task_id": task_id, "agent_id": agent_id,
                    "at": store.clock()})
@@ -220,7 +221,8 @@ def steward_step(store: Store, policy: dict, prs, files_for, *, notify=None) -> 
             data = {"id": f"steward-pr-{number}-{sha}", "title": f"Steward PR #{number}",
                     "lane": "release", "version": "ops", "priority": 2, "required_validation": "automated",
                     "scope": {"model": model, "pr": number, "kind": "steward"},
-                    "acceptance": [{"id": "C1", "label": f"PR #{number} checked per the operating model steward rules"}]}
+                    "acceptance": [{"id": "C1", "label": f"PR #{number} checked per the operating model steward rules; "
+                                                          "use core/tools/integration_branch.py plan/build when 3 or more green PRs are independent"}]}
         if _create_once(store, data):
             made.append(data["id"])
     return made
@@ -269,24 +271,13 @@ def manual_test_step(store: Store) -> list[str]:
             continue
         if any(q["id"] == f"manual-{task['id']}" for q in snap["questions"]):
             continue
-        sheet = ", ".join(task.get("source_paths") or []) or "see task acceptance"
-        store.ask({"id": f"manual-{task['id']}", "task_id": task["id"], "blocks": True,
-                   "title": f"Manual test needed: {task['title']}",
-                   "context": f"Test sheet: {sheet}. Record the result with check --criterion --evidence "
-                              "(an answer text is not evidence).",
+        store.ask({"id": f"manual-{task['id']}", "task_id": task["id"], "blocks": True, **qt.manual_test_text(task),
                    "checkpoint": "autopilot: ready for the owner's manual test"})
         asked.append(task["id"])
     return asked
 
 
-GATE_CHOICES = [
-    {"id": "later-today", "label": "Schedule it for later today", "recommended": True,
-     "description": "The manager puts it on today's list with the steps; nothing runs until you do it."},
-    {"id": "tell-me", "label": "Tell me when ready",
-     "description": "It stays queued; the manager tells you when the rest of the version is ready for it."},
-    {"id": "skip-version", "label": "Skip for this version",
-     "description": "It moves out of this version; the version can ship without it."},
-]
+GATE_CHOICES = qt.GATE_CHOICES  # Hebrew, one short line each; ids unchanged (later-today, tell-me, skip-version)
 GATE_CAP = 15
 
 
@@ -303,30 +294,17 @@ def _gate_id(task_id: str) -> str:
 
 
 def gate_question(task: dict) -> dict:
-    """Plain-language owner-gate question: one-sentence title, why, steps, minutes, skip effect, recommendation.
-
-    The raw owner_gate text (often Hebrew) is kept as is in ``details``; the console shows it collapsed.
+    """Plain Hebrew owner-gate question (see questions_text): short title, one-line why, 3 short options,
+    time and skip effect. Ids, the raw owner_gate text and the acceptance criteria are under ``details``;
+    ``group`` = gate:<version> lets the console show one checklist card per version.
     """
     link = task.get("source_url") or (
         f"https://github.com/igalgerman/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
     scope = task.get("scope")
     minutes = scope.get("owner_minutes") if isinstance(scope, dict) else None
     minutes = minutes if type(minutes) is int and 0 < minutes <= 480 else 15
-    version = task.get("version") or "this version"
-    steps = [str(row.get("label", "")).strip()[:500] for row in task.get("acceptance") or []
-             if isinstance(row, dict) and str(row.get("label", "")).strip()][:8]
-    return {
-        "id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False, "kind": "owner_gate",
-        "title": f"Your step is needed for: {str(task['title'])[:400]}",
-        "why": f"Task {task['id']} in {version} cannot be finished by an agent; it needs you (a real device, "
-               "a sign-in, a purchase or your decision).",
-        "link": link[:500], "steps": steps, "minutes": minutes,
-        "skip_effect": f"Nothing breaks and nothing is approved: the task stays queued and {version} "
-                       "may ship without it.",
-        "recommendation": f"it keeps {version} moving and takes about {minutes} min.",
-        "safe_default": "nothing is done or approved without you",
-        "details": str(task["owner_gate"])[:4000], "context": "", "choices": GATE_CHOICES,
-    }
+    return {"id": _gate_id(task["id"]), "task_id": task["id"], "blocks": False, "kind": "owner_gate",
+            "link": link[:500], "minutes": minutes, **qt.gate_text(task, minutes)}
 
 
 def gate_questions_step(store: Store) -> list[str]:

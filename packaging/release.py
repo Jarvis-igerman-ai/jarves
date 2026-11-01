@@ -513,6 +513,14 @@ def next_beta_number(releases: list[dict], base: str) -> int:
     return max(ns, default=0) + 1
 
 
+def newest_published_beta_tag(releases: list[dict]) -> str | None:
+    """Tag (beta-v<build>) of the highest-numbered published beta release, or None."""
+    tags = [r["tag_name"] for r in releases if beta_number(r) and not r.get("draft")
+            and str(r.get("tag_name") or "").startswith(BETA_PREFIX)]
+    tags = [t for t in tags if version_key(TAG_PREFIX + t[len(BETA_PREFIX):])]
+    return max(tags, key=lambda t: version_key(TAG_PREFIX + t[len(BETA_PREFIX):]), default=None)
+
+
 def beta_for_commit(releases: list[dict], commit: str) -> dict | None:
     """A beta release already built from this commit (re-run of the same green main is a no-op)."""
     for r in releases:
@@ -613,6 +621,13 @@ def beta_publish(dist: Path, env: dict | None = None, gh: GitHub | None = None, 
     releases = gh.releases()
     if beta_for_commit(releases, str(info.get("commit"))):
         print(f"Beta publish: commit {str(info.get('commit'))[:12]} already has a beta; nothing to do")
+        return 0
+    newer = newest_published_beta_tag(releases)
+    if newer and version_key(TAG_PREFIX + info["version"]) < version_key(TAG_PREFIX + newer[len(BETA_PREFIX):]):
+        # #621: merge order is not build order (run numbers come from the PR run). Publishing this lower-numbered
+        # build would put newer code under an older number, or move the channel to an older build; skip it.
+        print(f"::warning::Beta publish: SKIPPED - build {info['version']} is older than the published {newer}; "
+              "the next green main supplies a higher build")
         return 0
     base = beta_base(info["version"])
     n = next_beta_number(releases, base)

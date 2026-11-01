@@ -1,6 +1,8 @@
 """Loopback-only authenticated UI, JSON API and live revision stream (stdlib).
 
-No endpoint starts a process, approves a tool, merges code or publishes a release.
+No endpoint approves a tool, merges code or publishes a release. The one endpoint that starts a process is
+POST /api/questions/<id>/discuss: a visible Claude Code window that helps the owner think about one question
+(fixed argv, no token, rate limited; see discuss.py). It never answers the question.
 Worker mutations use the local CLI; the web surface contains owner planning only.
 """
 from __future__ import annotations
@@ -17,6 +19,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from .discuss import Helper, RateLimited
+from . import unlock
+from .autopilot import owner_unlock_s
 from .store import Store
 
 STATIC = Path(__file__).with_name("static")
@@ -61,8 +66,12 @@ class Server(ThreadingHTTPServer):
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
         self.attempts: list[float] = []
+        self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
+        self.unlock_attempts: list[float] = []
+        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
+        self.discuss = Helper(self.home, token=self.token)
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
@@ -92,16 +101,25 @@ class Handler(BaseHTTPRequestHandler):
         return (not origin or origin == self.server.origin) and self.headers.get("Sec-Fetch-Site", "same-origin") in (
             "same-origin", "none")
 
-    def _authenticated(self) -> bool:
+    def _session(self) -> str:
+        """The live session id from the cookie, or empty."""
         cookie = SimpleCookie()
         try:
             cookie.load(self.headers.get("Cookie", ""))
         except Exception:
-            return False
+            return ""
         value = cookie.get(self.server.cookie)
-        now = time.time()
         with self.server.session_lock:
-            return bool(value and self.server.sessions.get(value.value, 0) > now)
+            return value.value if value and self.server.sessions.get(value.value, 0) > time.time() else ""
+
+    def _authenticated(self) -> bool:
+        return bool(self._session())
+
+    def _unlock_left(self) -> int:
+        """Seconds of owner-answer unlock left for this session (0 = read-only)."""
+        session = self._session()
+        with self.server.session_lock:
+            return max(0, int(self.server.unlocked.get(session, 0) - time.time())) if session else 0
 
     def _headers(self, status: int, kind: str, length: int | None, extra: dict | None = None):
         self.send_response(status)
@@ -139,7 +157,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "service": "jarves-workflow"})
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
-                 "/today.js": ("today.js", "text/javascript"),
+                 "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),
+                 "/timeline.js": ("timeline.js", "text/javascript"), "/overview.js": ("overview.js", "text/javascript"),
                  "/style.css": ("style.css", "text/css")}
         if path in files:
             name, mime = files[path]
@@ -163,6 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             state["agents"] = agent_roster(state["agents"], state["tasks"], state["observed_at"],
                                            state["agent_counts"]["retention_s"])[0]
             from .autopilot_watch import autopilot_alerts
+            state["unlock"] = {"remaining_s": self._unlock_left(), "ttl_s": owner_unlock_s(self.server.home)}
             state["alerts"] = list(state.get("alerts") or []) + [
                 {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
                 for a in autopilot_alerts(self.server.store)]
@@ -175,6 +195,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, history(self.server.store, limit=100, **filters))
             except (ValueError, TypeError):
                 self._json(400, {"error": "invalid trace filters"})
+        elif path in {"/api/health", "/api/timeline"}:
+            from . import observability as obs
+            if path == "/api/health":
+                self._json(200, obs.health(self.server.store))
+                return
+            try:
+                hours = float(parse_qs(urlsplit(self.path).query).get("hours", ["24"])[0])
+                if not 0 < hours <= 24 * 14:
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": "hours must be between 0 and 336"})
+                return
+            self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
+        elif path == "/api/report":
+            from .report import build
+            try:
+                hours = float(parse_qs(urlsplit(self.path).query).get("hours", ["24"])[0])
+                if not 0 < hours <= 24 * 14:
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": "hours must be between 0 and 336"})
+                return
+            self._json(200, build(self.server.store, hours))   # read-only: ledger + gh metadata
+        elif path == "/api/messages":
+            from .messages import overview
+            self._json(200, overview(self.server.store))   # read-only: open claims + last 20 agent messages
         elif path == "/api/events":
             self._stream()
         else:
@@ -233,6 +279,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"error": "private session required"})
                 return
             store = self.server.store
+            if path == "/api/unlock":
+                self._unlock(data)
+                return
+            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
+                    or path == "/api/followups") and not self._unlock_left():
+                # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
+                self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",
+                                 "locked": True})
+                return
             if path == "/api/owner":
                 result = store.set_owner(data.get("mode", ""))
             elif path == "/api/tasks":
@@ -252,6 +307,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/followups":
                 # General follow-up; only the manager's CLI can store a reply, never the web surface.
                 result = store.ask_more(data.get("text", ""), task_id=data.get("task_id", ""), channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/discuss", path):
+                # Opens a helper window for the owner; it cannot answer, defer or reopen anything.
+                from .store import ID_RE
+                if not ID_RE.fullmatch(m[1]) or set(data) - {"launch"} or type(data.get("launch", True)) is not bool:
+                    raise ValueError("invalid help request")
+                result = self.server.discuss.open(store, m[1], launch=data.get("launch", True))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
                 result = store.defer(m[1], channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
@@ -268,10 +329,42 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(404, {"error": "not found"})
                 return
             self._json(200, {"ok": True, "result": result})
+        except RateLimited as exc:
+            self._json(429, {"error": str(exc)})
         except (ValueError, TypeError, KeyError) as exc:
             self._json(400, {"error": str(exc)[:240]})
         except Exception:
             self._json(500, {"error": "workflow operation failed; no approval or execution was performed"})
+
+    def _unlock(self, data):
+        now = time.time()
+        session = self._session()
+        code = data.get("code")
+        with self.server.session_lock:  # one request at a time: two correct requests cannot both consume the code
+            self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
+            if len(self.server.unlock_attempts) >= 5:
+                self._json(429, {"error": "wait a minute before trying again"})
+                return
+            self.server.unlock_attempts.append(now)
+            path = Path(self.server.home) / unlock.FILE
+            try:
+                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+            except (OSError, ValueError, KeyError, TypeError):
+                salt = ""
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+                # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
+                prev_salt, n = self.server.unlock_wrong
+                n = (n if prev_salt == salt else 0) + 1
+                if n >= 5:
+                    path.unlink(missing_ok=True)
+                    n = 0
+                self.server.unlock_wrong = (salt, n)
+                self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
+                return
+            self.server.unlock_wrong = ("", 0)
+            self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
+            self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
+        self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})
 
     def _login(self, data):
         now = time.time()

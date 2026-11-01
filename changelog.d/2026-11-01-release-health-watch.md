@@ -1,0 +1,1 @@
+- Added: workflow autopilot: read-only release-health watch raises deduplicated alerts for a red main, a stuck PR, a dropped merge queue and a missing beta (V451-WATCHDOG). It never merges, reruns or approves.

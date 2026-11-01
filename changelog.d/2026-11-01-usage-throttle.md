@@ -1,0 +1,1 @@
+- Added: autopilot usage throttle from the weekly Claude usage (80% one task at a time, 95% stop with an alert and owner notice, `autopilot usage-resume`), shown as `usage` in `workflow_console.py health`.
