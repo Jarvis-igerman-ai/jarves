@@ -1,0 +1,56 @@
+order = 61
+category = "start"
+pages = ["home", "releasenotes"]
+features = ["whats_new_card"]
+suggest = false
+aliases = ["מה השתנה", "מה השתנה מאז הגרסה שלי", "כרטיס מה חדש", "what changed", "what changed since my version", "whats new card", "update card"]
+links = ["self_awareness", "updates"]
+title_he = "כרטיס מה השתנה מאז הגרסה שלך"
+title_en = "What changed since your version"
+what_he = "אחרי עדכון מופיע בדף הבית כרטיס קצר אחד עם השינויים שבין הגרסה הקודמת שלכם לגרסה החדשה בלבד, מתוך הערות הגרסה. סוגרים אותו בלחיצה, והוא חוזר רק אחרי העדכון הבא."
+what_en = "After an update the Home page shows one short card with only the changes between your previous version and the new one, taken from the release notes. Close it with one click; it comes back only after the next update."
+say = [["מה השתנה מאז הגרסה הקודמת?", "What changed since my last version?"]]
+expect_he = "הכרטיס מראה עד שמונה שינויים חשובים, ואם יש עוד, קישור לעמוד הערות הגרסה. אחרי התקנה חדשה, או בפעם הראשונה אחרי שמדליקים את המתג, אין כרטיס עד העדכון הבא. גרסאות בטא של אותה גרסה לא מציגות כרטיס חדש."
+expect_en = "The card shows up to eight important changes and, when there are more, a link to the Release notes page. After a fresh install, or the first time after you switch it on, there is no card until the next update. Beta builds of the same version do not show a new card."
+test = "feature"
+test_he = "הבדיקה רק מוודאת שהרכיב מותקן. את אותם שינויים רואים בטרמינל: jarvis whatsnew --since 4.5.0."
+test_en = "The check only sees that the component is installed. The same changes show in a terminal: jarvis whatsnew --since 4.5.0."
+cost_he = "חינם ומקומי. אין שום בקשה בתשלום ואין גישה לאינטרנט."
+cost_en = "Free and local. No paid request and no internet access."
+privacy_he = "נשמרים רק שלושה מספרי גרסה (האחרונה שנראתה, ממנה מראים, ומה נסגר), במחשב הזה. ההגדרות, מודל מילת ההפעלה והנתונים לא משתנים."
+privacy_en = "Only three version numbers are stored (last seen, shown from, and closed), on this computer. Settings, the wake-word model and your data are not changed."
+
+[parity.features]
+whats_new_card = "whatsnew"
+
+[[steps]]
+he = "הדליקו את המתג \"כרטיס מה השתנה מאז הגרסה שלך\" (כבוי כברירת מחדל). זו תכונת בטא: קודם הדליקו תכונות בטא."
+en = "Switch on \"What changed since your version card\" (off by default). It is a beta feature: turn on beta features first."
+action = "feature_on:whats_new_card"
+check = "active:whats_new_card"
+
+[[steps]]
+he = "אחרי העדכון הבא פתחו את דף הבית: הכרטיס מופיע למעלה. לחיצה על סגירה מסתירה אותו עד העדכון הבא."
+en = "After the next update open the Home page: the card is at the top. Close hides it until the next update."
+action = "open:#/home"
+
+[[steps]]
+he = "בטרמינל: jarvis whatsnew --since 4.5.0 מראה את אותם שינויים, ו-jarvis whatsnew --dismiss סוגר את הכרטיס."
+en = "In a terminal: jarvis whatsnew --since 4.5.0 shows the same changes, and jarvis whatsnew --dismiss closes the card."
+action = "command:jarvis whatsnew --since 4.5.0"
+
+[[steps]]
+he = "לכיבוי: jarvis features off whats_new_card. הערות הגרסה עצמן נשארות בעמוד הערות הגרסה."
+en = "To turn off: jarvis features off whats_new_card. The release notes stay on the Release notes page."
+
+[[problems]]
+he = "לא מופיע כרטיס אחרי עדכון"
+en = "No card appears after an update"
+fix_he = "או שהמתג כבוי (jarvis features on whats_new_card), או שהמתג הודלק רק אחרי העדכון, או שזו בטא של אותה גרסה. jarvis whatsnew --since <הגרסה הקודמת> מראה את השינויים בכל מקרה."
+fix_en = "Either the switch is off (jarvis features on whats_new_card), it was switched on only after the update, or this is a beta of the same version. jarvis whatsnew --since <previous version> shows the changes anyway."
+
+[[problems]]
+he = "הכרטיס חוזר אחרי שסגרתי אותו"
+en = "The card comes back after I closed it"
+fix_he = "הוא חוזר רק אחרי עדכון לגרסה חדשה יותר. אם הוא חוזר בלי עדכון, הריצו jarvis whatsnew --dismiss ודווחו על באג."
+fix_en = "It returns only after an update to a newer version. If it returns without an update, run jarvis whatsnew --dismiss and report a bug."
