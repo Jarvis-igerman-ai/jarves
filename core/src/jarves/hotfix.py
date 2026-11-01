@@ -363,12 +363,20 @@ def default_hooks(cfg, home: Path, installed_pkg: Path) -> Hooks:
         from .runtime.shutdown import mark_planned_restart
         mark_planned_restart(home, "hotfix")        # #620: the next start must not treat this stop as a crash
         a = None
-        cli.cmd_stop(a, cfg, home)
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and running():
-            time.sleep(0.5)
-        if running():
-            raise HotfixError("HOTFIX_STOP", "the Core did not stop within 30 s")
+        try:
+            cli.cmd_stop(a, cfg, home)
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline and running():
+                time.sleep(0.5)
+            if running():
+                raise HotfixError("HOTFIX_STOP", "the Core did not stop within 30 s")
+        except BaseException:
+            # the stop failed: the Core was not ended on purpose, so a later crash must not be explained by this marker
+            try:
+                (home / "planned_restart.json").unlink()
+            except OSError:
+                pass
+            raise
 
     def start() -> None:
         cli._background_spawn(home, False)             # pythonw, no window, no console, no sound

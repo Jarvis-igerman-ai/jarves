@@ -59,3 +59,39 @@ def test_planned_hotfix_stop_is_not_a_crash(tmp_path):
     asyncio.run(svc._startup())
     assert calls == []
     assert not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+
+
+def _svc_mode(home, mode):
+    svc, calls = _svc(home)
+    svc.db = SimpleNamespace(setting=lambda k: {"self_check.on_start": mode}.get(k))
+    return svc, calls
+
+
+def test_marker_after_clean_stop_does_not_hide_a_later_crash(tmp_path):
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 - 30)
+    _log(tmp_path, stopped=True)
+    svc, calls = _svc(tmp_path)
+    asyncio.run(svc._startup())                                     # clean previous run: marker consumed anyway
+    assert calls == []
+    assert not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+    _log(tmp_path, stopped=False)                                   # a real crash within the 10 minutes
+    svc, calls = _svc(tmp_path)
+    asyncio.run(svc._startup())
+    assert calls == ["crash"]
+
+
+def test_marker_deleted_when_on_start_never_or_no_previous_run(tmp_path):
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 - 30)
+    svc, calls = _svc_mode(tmp_path, "never")
+    asyncio.run(svc._startup())
+    assert calls == [] and not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 - 30)
+    svc, calls = _svc(tmp_path)                                     # no log at all: no previous run
+    asyncio.run(svc._startup())
+    assert calls == [] and not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()
+
+
+def test_future_timestamp_marker_is_rejected(tmp_path):
+    shutdown.mark_planned_restart(tmp_path, "hotfix", lambda: T0 + 500)
+    assert shutdown.consume_planned_restart(tmp_path, lambda: T0) is None
+    assert not (tmp_path / shutdown.PLANNED_RESTART_FILE).exists()

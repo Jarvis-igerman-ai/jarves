@@ -1525,6 +1525,10 @@ class SelfCheckService:
             self._spawn(self.auto("errors"))
 
     async def _startup(self) -> None:
+        from .runtime.shutdown import boot_time, consume_planned_restart, same_boot
+        # Read-and-delete the planned-restart marker ONCE, on every start, before any early return: one marker
+        # explains one restart and must never outlive it (a later real crash would otherwise be hidden).
+        planned = consume_planned_restart(self.core.home, self.clock)
         mode = str(self.db.setting("self_check.on_start") or "crash")
         if mode == "never":
             return
@@ -1532,9 +1536,7 @@ class SelfCheckService:
         if prev is None:
             return
         if not prev["stopped"]:
-            from .runtime.shutdown import boot_time, consume_planned_restart, same_boot
-            planned = consume_planned_restart(self.core.home, self.clock)
-            if planned:                      # V4.5.1 #620: a hotfix ended the last run on purpose, not a crash
+            if planned:                    # V4.5.1 #620: a hotfix ended the last run on purpose, not a crash
                 logs.info("selfcheck", "SELFCHECK_SKIPPED", "planned restart; not a crash",
                           previous=prev.get("session"), reason=planned)
                 if mode == "always":
