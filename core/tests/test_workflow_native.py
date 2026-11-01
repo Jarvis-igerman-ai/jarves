@@ -56,7 +56,7 @@ class WorkflowNativeTests(unittest.TestCase):
         db = sqlite3.connect(str(self.home / "workflow.db"))
         row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
         db.close()
-        self.assertEqual(row[0], manager)
+        self.assertEqual(json.loads(row[0]), manager)
         self.assertIn("additionalContext", json.dumps(self.event("SessionStart")))   # normal session unchanged
 
     def test_merge_steward_shows_as_release_lane(self):
