@@ -161,6 +161,23 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(sorted(a["id"] for a in state["agents"]), ["live", "old-1", "old-2", "recent"])
         self.assertEqual(state["agent_counts"]["archived"], 2)
 
+    def test_console_session_ended_notice_static_contract(self):
+        # #741: any 401/403 stops polling, drops stale data and shows one Hebrew notice with a copy button, never zeros.
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        app = (static / "app.js").read_text(encoding="utf-8")
+        css = (static / "style.css").read_text(encoding="utf-8")
+        api = app[app.index("async function api("):app.index("function syncControls")]
+        self.assertIn("response.status === 401 || response.status === 403", api)
+        self.assertIn("sessionEnded();", api)
+        body = app[app.index("function sessionEnded()"):app.index("async function api(")]
+        for needle in ("data = null", "stream?.close()", 'id="session-ended-copy"', "navigator.clipboard.writeText(OPEN_COMMAND)", 'dir="auto"', "הסשן הפרטי הסתיים"):
+            self.assertIn(needle, body)
+        self.assertIn('const OPEN_COMMAND = "jarvis workflow open"', app)
+        self.assertIn("if (ended) return;", app[app.index("async function refresh()"):app.index("function renderLiveStatus")])
+        self.assertIn("!document.hidden && !ended", app)
+        self.assertIn(".session-ended", css)
+        self.assertNotIn("style=", body)  # strict CSP: no inline styles
+
     def test_console_agent_list_ui_static_contract(self):
         # #730: the toggle is keyboard reachable, remembered with guarded storage and not an aria-live region.
         static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
@@ -193,6 +210,94 @@ console.log(JSON.stringify(tasks.slice(0, 9).map(t => t.id).concat([tasks[9].ver
             out = subprocess.run([node, "-e", script], capture_output=True, text=True)
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertEqual(json.loads(out.stdout), ["r0", "r1", "r2", "r3", "r4", "w", "b", "v", "q012", "V4.5.1", "d"])
+
+    def test_metrics_count_truth_contract(self):
+        # #732 S1: running+claimed live workers, running and review separate, merged/verified/shipped split, no bare alerts number.
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        app = (Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC) / "app.js").read_text(encoding="utf-8")
+
+        def cut(start, end):
+            i = app.index(start)
+            return app[i:app.index(end, i)]
+        nl = chr(10)
+        code = (cut("  const esc =", nl) + nl + cut("  const validationRank", nl) + nl + cut("  function complete(task)", "  // What is working now")
+                + cut("  function agentStale", "  function renderMetrics") + cut("  function renderMetrics", "  // #730: live workers"))
+        script = """
+const $ = sel => ({set textContent(v) { out.q = v; }, set innerHTML(v) { out.html = v; }}); const out = {};
+const seconds = v => v || 0;
+let data;
+""" + code + """
+const now = Date.now() / 1000;
+const ok = {task_id: null, heartbeat_at: now};
+data = {
+  agents: [{id: "a1", status: "running", heartbeat_at: now}, {id: "a2", status: "claimed", heartbeat_at: now}, {id: "a3", status: "running", heartbeat_at: now - 9999}, {id: "h1", status: "idle"}, {id: "a4", status: "offline"}],
+  agent_counts: {live: 3},
+  tasks: [{state: "running", agent_id: "h1"}, {state: "running", agent_id: "h1"}, {state: "review"}, {state: "review"}, {state: "review"}, {state: "verified", implementation: "merged"}, {state: "queued", implementation: "merged"}, {state: "queued"}],
+  questions: [{status: "pending"}, {status: "answered"}, {status: "deferred"}],
+  alerts: [],
+};
+renderMetrics();
+const calm = out.html;
+data.alerts = [{summary: "x"}, {summary: "y"}];
+renderMetrics();
+console.log(JSON.stringify({q: out.q, calm, noisy: out.html}));
+"""
+        res = subprocess.run([node, "-e", script], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(res.returncode, 0, res.stderr)
+        got = json.loads(res.stdout)
+        self.assertEqual(got["q"], 2)
+        html = got["calm"]
+        self.assertIn('<div class="metric-value">3<small dir="auto">3 ', html)        # distinct task holders (h1) + live running/claimed agents without a task; stale excluded
+        self.assertIn('<div class="metric-value">2<small dir="auto">3 ', html)        # 2 running tasks, 3 in review: not added together
+        self.assertIn("מוזגו 2 · אומתו 1 · נשלחו 0", html)
+        self.assertEqual(html.count("<progress"), 3)
+        self.assertIn("הכול תקין", html)
+        self.assertIn("2 בעיות פתוחות", got["noisy"])
+        self.assertNotIn("alerts", html.lower())
+    def test_today_first_screen_static_contract(self):
+        # #732: Today is its own CSP-safe script, served by the static route, read-only, accessible.
+        import re
+        import shutil
+        import subprocess
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        html = (static / "index.html").read_text(encoding="utf-8")
+        today = (static / "today.js").read_text(encoding="utf-8")
+        app = (static / "app.js").read_text(encoding="utf-8")
+        status, headers, body = self.request("/today.js")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/javascript"))
+        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+        self.assertLess(html.index('src="/app.js"'), html.index('src="/today.js"'))
+        self.assertEqual(html.count("<h1"), 1)
+        self.assertNotIn('id="now-strip"', html)  # the Now strip is merged into "Running now"
+        self.assertIn('<div id="today-needs" aria-live="polite">', html)
+        self.assertEqual(len(re.findall(r'<section class="today-block[^"]*" aria-labelledby="today-[a-z]+-title">', html)), 4)
+        self.assertIn('dispatchEvent(new CustomEvent("workflow:render"', app)
+        # Strict CSP: no inline styles or handlers; read-only: no requests, no answer path.
+        for banned in ("style=", "onclick", "fetch(", "/api/", "XMLHttpRequest", "localStorage"):
+            self.assertNotIn(banned, today)
+        self.assertIn('dir="auto">${esc(q.title)}', today)
+        self.assertIn("שום דבר לא מחכה לך", today)
+        node = shutil.which("node")
+        if node:
+            self.assertEqual(subprocess.run([node, "--check", str(static / "today.js")], capture_output=True).returncode, 0)
+            start = today.index("  function blockedReason")
+            script = today[today.index("  const unblockers"):today.index("\n", today.index("  const unblockers"))] \
+                + today[start:today.index("\n  }\n", start) + 4] + """
+const cases = [{blocker: "needs the phone and the car for a device check"}, {blocker: "CI check test_x fails on main"},
+  {blocker: "autopilot: stalled twice, owner decision needed"}, {blocker: "worker_offline"}, {blocker: "something else"},
+  {blocker: "", required_validation: "device"}];
+console.log(JSON.stringify(cases.map(t => { const r = blockedReason(t); return [r.who, Boolean(r.reason), r.raw]; })));
+"""
+            out = subprocess.run([node, "-e", script], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(json.loads(out.stdout), [["hardware", False, "needs the phone and the car for a device check"],
+                                                      ["ci", False, "CI check test_x fails on main"], ["you", True, ""],
+                                                      ["team", True, ""], ["unknown", False, "something else"], ["hardware", False, ""]])
 
 
 if __name__ == "__main__":

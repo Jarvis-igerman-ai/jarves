@@ -139,6 +139,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "service": "jarves-workflow"})
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
+                 "/today.js": ("today.js", "text/javascript"),
                  "/style.css": ("style.css", "text/css")}
         if path in files:
             name, mime = files[path]
@@ -174,6 +175,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, history(self.server.store, limit=100, **filters))
             except (ValueError, TypeError):
                 self._json(400, {"error": "invalid trace filters"})
+        elif path in {"/api/health", "/api/timeline"}:
+            from . import observability as obs
+            if path == "/api/health":
+                self._json(200, obs.health(self.server.store))
+                return
+            try:
+                hours = float(parse_qs(urlsplit(self.path).query).get("hours", ["24"])[0])
+                if not 0 < hours <= 24 * 14:
+                    raise ValueError
+            except ValueError:
+                self._json(400, {"error": "hours must be between 0 and 336"})
+                return
+            self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
         elif path == "/api/events":
             self._stream()
         else:

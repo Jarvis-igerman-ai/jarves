@@ -202,7 +202,34 @@ class Store:
     def _event(self, db, kind, summary):
         db.execute("INSERT INTO workflow_events(ts,kind,summary) VALUES (?,?,?)", (self.clock(), kind, summary[:1000]))
         self._bump(db)
-        db.execute("DELETE FROM workflow_events WHERE id < (SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events)")
+        # Beats are high-volume telemetry with their own retention so they never push real events out.
+        db.execute("DELETE FROM workflow_events WHERE kind!='layer_beat' AND id < "
+                   "(SELECT COALESCE(MAX(id),0)-2000 FROM workflow_events WHERE kind!='layer_beat')")
+        if kind == "layer_beat":
+            db.execute("DELETE FROM workflow_events WHERE kind='layer_beat' AND id < "
+                       "(SELECT COALESCE(MAX(id),0)-8000 FROM workflow_events WHERE kind='layer_beat')")
+
+    def _flow(self, db, task, from_state, agent):
+        """Pipeline telemetry for the timeline (hidden from the recent-events list)."""
+        self._event(db, "task_flow", json.dumps({"task_id": task["id"], "title": task["title"][:120], "lane": task["lane"],
+                                                 "from": from_state, "to": task["state"], "agent": agent}, ensure_ascii=False))
+
+    # Observability (see observability.py and docs/workflow/OBSERVABILITY.md)
+    def beat(self, layer, state="ok", note=""):
+        from . import observability
+        return observability.beat(self, layer, state, note)
+
+    def layers(self, now=None):
+        from . import observability
+        return observability.layers(self, now)
+
+    def timeline(self, since=None, until=None, now=None):
+        from . import observability
+        return observability.timeline(self, since, until, now)
+
+    def detect_incidents(self, now=None):
+        from . import observability
+        return observability.detect_incidents(self, now)
 
     @staticmethod
     def _release(db, task, *, locks=True):
@@ -276,7 +303,8 @@ class Store:
                 "agent_counts": agent_roster(agents, tasks, now, retention_s)[1],
                 "questions": [question_view(q) for q in self._all(db, "question")], "followups": self._all(db, "followup")[-200:],
                 "alerts": self._meta(db, "alerts"),
-                "events": [dict(r) for r in db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT 100")],
+                "events": [dict(r) for r in db.execute(
+                    "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
             }
 
@@ -467,8 +495,15 @@ class Store:
                 raise ValueError("only autopilot-owned agents can be linked")
             if session_id and agent.get("session_id") and agent["session_id"] != session_id:
                 raise ValueError("agent already has a session")
-            if session_id and any(o["id"] != agent["id"] and o.get("session_id") == session_id for o in self._all(db, "agent")):
-                raise ValueError("session already attached to another workflow worker")
+            if session_id:
+                for o in self._all(db, "agent"):
+                    if o["id"] == agent["id"] or o.get("session_id") != session_id:
+                        continue
+                    if str(o["id"]).startswith("external-") and not o.get("task_id"):
+                        o["session_id"] = ""   # adopt: the hook-observed stub yields the session to its autopilot owner
+                        self._put(db, "agent", o)
+                        continue
+                    raise ValueError("session already attached to another workflow worker")
             if not session_id and agent.get("task_id"):
                 raise ValueError("cannot unlink a session while it owns a task")
             had_session = bool(agent.get("session_id"))
@@ -481,6 +516,18 @@ class Store:
             self._put(db, "agent", agent)
             self._bump(db)
         return agent
+
+    def reset_idle_agent(self, agent_id):
+        """Return a taskless, session-less agent (e.g. offline after a failed start) to idle so it can claim again."""
+        with self._tx() as db:
+            agent = self._get(db, "agent", _id(agent_id))
+            if agent.get("task_id") or agent.get("session_id"):
+                return False
+            agent["status"] = "idle"
+            agent["heartbeat_at"] = self.clock()
+            self._put(db, "agent", agent)
+            self._bump(db)
+        return True
 
     def claim(self, agent_id, task_id=None):
         agent_id = _id(agent_id)
@@ -506,6 +553,7 @@ class Store:
                 self._put(db, "task", task)
                 self._put(db, "agent", agent)
                 self._event(db, "task_claimed", f"{agent['label']}: {task['title']}")
+                self._flow(db, task, "queued", agent_id)
                 return task
         return None
 
@@ -842,6 +890,7 @@ class Store:
                 task["validation"] = "not_run"
                 for row in task["acceptance"]:
                     row["passed"] = False
+            previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
@@ -849,6 +898,7 @@ class Store:
                 task["blocker"] = ""
             self._put(db, "task", task)
             self._event(db, "task_transition", f"{task['title']}: {state}")
+            self._flow(db, task, previous_state, task.get("agent_id"))
         return task
 
     def record_check(self, task_id, criterion_id, evidence, passed=True):

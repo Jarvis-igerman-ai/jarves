@@ -55,6 +55,10 @@ he = "תשובות והיסטוריה: רק מהדשבורד או מטרמינל
 en = "Answers and history: only the dashboard or your own real terminal counts as a confirmed answer (jarvis workflow answer and ask-more are refused for an agent, a pipe or a script). An answer that did not come from your dashboard or terminal shows a 'needs your confirmation' badge and a Reopen button (in the dashboard, or jarvis workflow reopen --id QUESTION in a terminal). Reopen returns the question to pending and keeps the old answer in its history; a question of a completed task cannot be reopened. Follow-ups can only be sent by you, and the thread shows the channel of each one. Honest note: who answered is a signal, not a security boundary; an agent running as the same OS user could still read the access token or fake a terminal."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "תצפית על המפעל: jarvis workflow health מציג מצב כל שכבה (משגיח, טייס אוטומטי, עטיפה, מנהל, Core, גשר) ותקלות פתוחות; jarvis workflow timeline --hours 24 מציג ציר זמן טקסטואלי עם פערי שתיקה. לשכבה חיצונית: jarvis workflow layer-beat --layer wrapper --state ok. תקלה חדשה פותחת משימת 'Incident triage' בנתיב ops (מופעל ידנית; ברירת המחדל כבוי). יומן המשגיח: supervisor.log בתיקיית ה־workflow. בדפדפן: /api/health ו־/api/timeline."
+en = "Factory observability: jarvis workflow health shows each layer (supervisor, autopilot, wrapper, manager, Core, bridge) and open incidents; jarvis workflow timeline --hours 24 prints a text timeline with silence gaps. An outside layer reports with jarvis workflow layer-beat --layer wrapper --state ok. A new incident opens an 'Incident triage' task in the ops lane (its autopilot lane is OFF by default). Supervisor log: supervisor.log in the workflow home. In the browser: /api/health and /api/timeline."
+action = "command:jarvis workflow health"
 
 [[problems]]
 he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
@@ -73,6 +77,12 @@ he = "יש משימות אבל אף סוכן לא עובד"
 en = "Tasks exist but no worker is running"
 fix_he = "בדקו את ההתראה: משימה יכולה לחכות לכם, לתלות, למשאב תפוס או למיפוי מאושר. חברו סוכן אמיתי, דווחו heartbeat ואל תסמנו משימת מקור כמאושרת לביצוע לפני שקריטריוני הקבלה וההרשאה שלה ברורים."
 fix_en = "Read the alert: work may need an owner answer, dependency, reserved resource or scope reconciliation. Attach a real worker and report a heartbeat. Do not authorise imported scope until its acceptance and execution authority are clear."
+
+[[problems]]
+he = "המסך מציג 'הסשן הפרטי הסתיים' במקום נתונים"
+en = "The console shows 'private session ended' instead of data"
+fix_he = "הסשן הפרטי נמצא בזיכרון ופג בכל הפעלה מחדש של המשגיח. הריצו jarvis workflow open (או פתחו את הקישור ש־claude-j הדפיס) והשתמשו בכפתור ההעתקה במסך."
+fix_en = "The private session lives in memory and ends at every supervisor restart. Run jarvis workflow open (or use the link claude-j printed); the notice has a Copy button for the command."
 
 [parity.features]
 # Standalone development tooling; no assistant runtime feature switch or tool group.

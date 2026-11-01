@@ -170,3 +170,5 @@ Watchdog actions (`workflow/autopilot_watch.py`):
   never queued for merge. One beta-verify task per day (plus any beta with a P0/P1 fix).
   `device` tasks become an owner test item; only that task waits.
 - Never merges, tags, promotes stable, edits settings/CLAUDE.md or authorises imported scope.
+
+Observability (layer beats, timeline, incidents, `/api/health`, `/api/timeline`): see `docs/workflow/OBSERVABILITY.md`.

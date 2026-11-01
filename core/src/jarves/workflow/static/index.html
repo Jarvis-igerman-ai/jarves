@@ -8,6 +8,7 @@
   <title>JARVES — מרכז העבודה</title>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
+  <script src="/today.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">דלג לתוכן</a>
@@ -36,7 +37,12 @@
         <section class="owner-strip" aria-label="הזמינות שלך"><div class="owner-copy"><span class="owner-avatar" aria-hidden="true">א</span><div><b id="owner-title">איך אפשר להתקדם איתך?</b><span id="owner-description">בחר אם אתה זמין לשאלות עכשיו.</span></div></div><div class="segmented" aria-label="הזמינות שלך"><button type="button" id="owner-present" aria-pressed="false">אני כאן <span class="tiny-dot" aria-hidden="true"></span></button><button type="button" id="owner-away" aria-pressed="false">להמשיך בלעדיי <span aria-hidden="true">☾</span></button></div></section>
 
         <section id="view-overview" class="view" aria-label="תמונת מצב">
-          <section class="now-strip" id="now-strip" aria-label="עכשיו בעבודה"></section>
+          <div class="today" id="today" hidden>
+            <section class="today-block today-needs" aria-labelledby="today-needs-title"><div class="today-head"><h2 id="today-needs-title">צריך אותך</h2><span class="today-count" id="today-needs-count"></span><a class="text-link" href="#questions">לכל השאלות <span aria-hidden="true">←</span></a></div><div id="today-needs" aria-live="polite"></div></section>
+            <section class="today-block" aria-labelledby="today-running-title"><div class="today-head"><h2 id="today-running-title">רץ עכשיו</h2><span class="today-count" id="today-running-count"></span></div><div id="today-running"></div></section>
+            <section class="today-block" aria-labelledby="today-blocked-title"><div class="today-head"><h2 id="today-blocked-title">חסום</h2><span class="today-count warn" id="today-blocked-count"></span></div><div id="today-blocked"></div></section>
+            <section class="today-block today-roadmap" aria-labelledby="today-roadmap-title"><div class="today-head"><h2 id="today-roadmap-title">התקדמות לפי גרסה</h2><span class="today-legend" aria-hidden="true"><i class="seg shipped"></i>שוחרר<i class="seg verified"></i>נבדק<i class="seg merged"></i>מוזג</span></div><div id="today-roadmap"></div></section>
+          </div>
           <div class="metrics" id="metrics"><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div><div class="metric skeleton"></div></div>
           <section id="alerts-section" class="alerts-section" hidden aria-label="דורש תשומת לב"></section>
           <section class="section-block"><div class="section-heading"><div><span class="section-index">01</span><h2>הצוות עכשיו</h2><span class="small-label" id="agent-summary">ממתין לנתונים</span></div><span class="live-label" id="agents-live-label"><span class="status-dot"></span>מצב מדווח</span></div><div class="agent-grid" id="agents"><div class="empty-state"><span class="empty-icon" aria-hidden="true">◌</span><h3>טוען את סביבת העבודה</h3><p>הנתונים יופיעו כאן אחרי חיבור לשירות המקומי.</p></div></div><div class="agents-offline" id="agents-offline-wrap"></div></section>
