@@ -1,0 +1,4 @@
+{
+ "the Release sign-off page shows one check per screen (Works, Does not work, Cannot test now), resumes where you stopped and sums up the checks CI already proved; it records only what you press, and signing still needs every row done": "עמוד אישור הגרסה מציג בדיקה אחת בכל מסך (עובד, לא עובד, אי אפשר לבדוק עכשיו), ממשיך מהמקום שבו עצרתם ומסכם את הבדיקות שהמערכת כבר אישרה; נרשם רק מה שאתם לוחצים, והחתימה עדיין דורשת שכל השורות יסתיימו",
+ "core/tests/test_signoff_steps.py (resume point, automation summary, page flag); owner use on PC and phone not done yet": "core/tests/test_signoff_steps.py (נקודת המשך, סיכום הבדיקות האוטומטיות, מתג העמוד); עוד לא נוסה על ידי הבעלים במחשב ובטלפון"
+}

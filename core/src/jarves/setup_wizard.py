@@ -271,6 +271,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "beta_channel",
         "auto_update",
         "release_signoff",
+        "signoff_steps",
         "setup_tour",
         "backup",
         "self_awareness",
@@ -1407,6 +1408,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "beta_channel": [_mod("jarves.updates")],
     "auto_update": [_mod("jarves.auto_update")],
     "release_signoff": [_mod("jarves.release_signoff")],
+    "signoff_steps": [_mod("jarves.release_cmd"), _data("jarves", "dashboard_static/signoff_steps.js")],
     "setup_tour": [_mod("jarves.wizard")],
     "update_check": [_mod("jarves.updates"), _mod("jarves.migrations"), _data("jarves", "dashboard_static/updates.js"),
                      _mod("cryptography.hazmat.primitives.asymmetric.ed25519")],   # the signed-manifest check needs it
