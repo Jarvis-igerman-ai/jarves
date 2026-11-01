@@ -161,6 +161,23 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(sorted(a["id"] for a in state["agents"]), ["live", "old-1", "old-2", "recent"])
         self.assertEqual(state["agent_counts"]["archived"], 2)
 
+    def test_console_session_ended_notice_static_contract(self):
+        # #741: any 401/403 stops polling, drops stale data and shows one Hebrew notice with a copy button, never zeros.
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        app = (static / "app.js").read_text(encoding="utf-8")
+        css = (static / "style.css").read_text(encoding="utf-8")
+        api = app[app.index("async function api("):app.index("function syncControls")]
+        self.assertIn("response.status === 401 || response.status === 403", api)
+        self.assertIn("sessionEnded();", api)
+        body = app[app.index("function sessionEnded()"):app.index("async function api(")]
+        for needle in ("data = null", "stream?.close()", 'id="session-ended-copy"', "navigator.clipboard.writeText(OPEN_COMMAND)", 'dir="auto"', "הסשן הפרטי הסתיים"):
+            self.assertIn(needle, body)
+        self.assertIn('const OPEN_COMMAND = "jarvis workflow open"', app)
+        self.assertIn("if (ended) return;", app[app.index("async function refresh()"):app.index("function renderLiveStatus")])
+        self.assertIn("!document.hidden && !ended", app)
+        self.assertIn(".session-ended", css)
+        self.assertNotIn("style=", body)  # strict CSP: no inline styles
+
     def test_console_agent_list_ui_static_contract(self):
         # #730: the toggle is keyboard reachable, remembered with guarded storage and not an aria-live region.
         static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
