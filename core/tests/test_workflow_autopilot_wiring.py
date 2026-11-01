@@ -91,21 +91,30 @@ class Wiring(unittest.TestCase):
     def test_pre_start_refusals_do_not_count_but_post_start_ones_do(self):
         # SESSION_CLOSED / AUTH_REQUIRED are returned after a worker process exists: they still use the budget.
         for code in ("NOT_ALLOWED_PROJECT", "BUDGET_REACHED", "MODEL_NOT_ALLOWED", "SECOND_WRITER", "NOT_APPROVED",
-                     "CONFIG_NOT_VERIFIED", "CORE_NOT_RUNNING", "PROVIDER_MISSING", "error"):
+                     "CONFIG_NOT_VERIFIED", "CORE_NOT_RUNNING", "PROVIDER_MISSING"):
             self.assertIn(code, ap.PRE_START_REFUSALS)
-        for code, counted in (("SESSION_CLOSED", 1), ("AUTH_REQUIRED", 1), ("NO_CORE", 0), ("PROVIDER_MISSING", 0)):
+        self.assertNotIn("error", ap.PRE_START_REFUSALS)
+        rows = (("SESSION_CLOSED", "", 1), ("AUTH_REQUIRED", "", 1), ("NO_CORE", "", 0), ("PROVIDER_MISSING", "", 0),
+                ("error", "start failed (RuntimeError)", 1), ("error", "worktree failed: boom", 0),
+                ("error", "Invalid autopilot environment.", 0), ("error", "Invalid model identifier.", 0))
+        for code, text, counted in rows:
             ap._LAST_SIG.clear()
             if not any(t["id"] == "a" for t in self.store.snapshot()["tasks"]):
                 self.task("a")
             state = ap._load(self.store)
             state.update(starts=[], paused_until=0)
             ap._save(self.store, state)
-            self.step(start=lambda h, c=code, **r: {"ok": False, "code": c})
-            self.assertEqual(len(ap._load(self.store).get("starts", [])), counted, code)
+            self.step(start=lambda h, c=code, t=text, **r: {"ok": False, "code": c, "text": t})
+            self.assertEqual(len(ap._load(self.store).get("starts", [])), counted, (code, text))
 
     def test_ok_and_unconfirmed_starts_still_count(self):
         self.task("a")
         self.step()
+        self.assertEqual(len(ap._load(self.store).get("starts", [])), 1)
+
+    def test_unconfirmed_start_none_result_counts(self):
+        self.task("b")
+        self.step(start=lambda h, **r: None, find=lambda h, agent: "")
         self.assertEqual(len(ap._load(self.store).get("starts", [])), 1)
 
     def test_unconfirmed_start_without_a_session_is_quarantined_not_retried(self):

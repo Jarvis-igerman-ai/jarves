@@ -28,7 +28,9 @@ START_TIMEOUT_S = 240
 # start budget (#763). Anything else (SESSION_CLOSED, AUTH_REQUIRED api_key, ...) may have started a paid worker.
 PRE_START_REFUSALS = frozenset({"NO_CORE", "CORE_NOT_RUNNING", "NOT_ALLOWED_PROJECT", "BUDGET_REACHED",
                                 "MODEL_NOT_ALLOWED", "SECOND_WRITER", "NOT_APPROVED", "CONFIG_NOT_VERIFIED",
-                                "PROVIDER_MISSING", "error"})
+                                "PROVIDER_MISSING"})
+# The generic code "error" is a pre-start refusal only for these texts; any other error may follow a started worker.
+PRE_START_ERROR_TEXTS = ("worktree failed:", "Invalid autopilot environment.", "Invalid model identifier.")
 log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
@@ -269,7 +271,9 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            if result is None or str(result.get("code", "")) not in PRE_START_REFUSALS:
+            if (result is None or result.get("ok") or (str(result.get("code", "")) not in PRE_START_REFUSALS
+                                                    and not (result.get("code") == "error"
+                                                             and str(result.get("text", "")).startswith(PRE_START_ERROR_TEXTS)))):
                 starts.append(now)
                 state["starts"] = starts
                 _save(store, state)
