@@ -29,10 +29,12 @@ if ($Install) {
     # Use pythonw.exe beside python.exe so logon starts no console window.
     $pythonw = Join-Path (Split-Path $python) "pythonw.exe"
     if (Test-Path $pythonw) { $python = $pythonw }
+    # Restart layer (#754): a 5-minute repeat re-launches a dead supervisor; IgnoreNew keeps a healthy one untouched.
+    $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
     $action = New-ScheduledTaskAction -Execute $python -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "External JARVES workflow observer; no approval/merge/release authority" -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($trigger, $repeat) -Settings $settings -Description "External JARVES workflow observer; no approval/merge/release authority" -Force | Out-Null
     Start-ScheduledTask -TaskName $taskName
     Write-Output "Installed per-user external observer. Run python core/tools/workflow_console.py open to open the private view."
 } else {

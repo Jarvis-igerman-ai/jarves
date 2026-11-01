@@ -19,24 +19,40 @@ from pathlib import Path
 from .store import Store
 
 MAX_LOOP_FAILURES = 20
+SUPERVISOR_LOCK_WAIT_S = 45.0  # covers a stop-then-start restart overlapping the old instance (#754)
 
 
 @contextlib.contextmanager
-def exclusive(path: Path):
-    """A kernel-backed lock: released on a crash, never inferred from a stale PID."""
+def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.monotonic):
+    """A kernel-backed lock: released on a crash, never inferred from a stale PID.
+
+    wait_s > 0 retries a held lock for that long (a restart that overlaps the old
+    instance's shutdown must wait for it, not exit and leave nothing running, #754).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
+        # fstat, not read(): on Windows reading the byte another process has locked raises.
+        if os.fstat(stream.fileno()).st_size == 0:
             stream.write(b"0")
             stream.flush()
         stream.seek(0)
         if os.name == "nt":
             import msvcrt
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        deadline = clock() + max(0.0, wait_s)
+        while True:
+            try:
+                if os.name == "nt":
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if clock() >= deadline:
+                    raise
+                sleep(0.25)
         try:
             yield
         finally:
@@ -129,7 +145,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     stop = stop or threading.Event()
     if not 1 <= port <= 65535:
         raise ValueError("supervisor needs a fixed port between 1 and 65535")
-    with exclusive(home / "supervisor.lock"):
+    with exclusive(home / "supervisor.lock", wait_s=SUPERVISOR_LOCK_WAIT_S):
         store = Store(home / "workflow.db")
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
         child, restarts, next_sync, sync_thread = None, [], 0.0, None
