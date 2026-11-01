@@ -129,7 +129,8 @@ class SourceTests(Base):
 
     def test_health_shows_usage_field(self):
         got = observability.health(self.store)["usage"]
-        self.assertIn("source", got)   # pct depends on the PC (real statusline snapshot may exist)
+        # The default snapshot file is the real %LOCALAPPDATA% usage.json, so the source depends on the PC.
+        self.assertIn(got["source"], {"statusline", "estimate", "unknown"})
         self.assertIn("text", got)
         self.assertIn("level", got)
 
