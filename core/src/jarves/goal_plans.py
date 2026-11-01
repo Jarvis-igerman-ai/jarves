@@ -159,13 +159,24 @@ class PlanStore:
         cols = {"state": state, "updated": self.clock(), **extra}
         self.db.x(f"UPDATE goal_plans SET {', '.join(k + '=?' for k in cols)} WHERE id=?", (*cols.values(), int(pid)))
 
-    def _cas(self, pid: int, expected: tuple, state: str, **extra) -> None:
-        """Atomic compare-and-set (#385): one UPDATE ... WHERE state IN (...); a racing cancel/pause wins, never flipped back."""
+    def _cas(self, pid: int, expected: tuple, state: str, step_sql: tuple = (), **extra) -> None:
+        """Atomic compare-and-set (#385): the state change and the step updates are ONE locked transaction, so the runner
+        never sees a 'ready' plan whose steps are not pending yet, and a racing cancel/pause wins (rolled back, never flipped)."""
         cols = {"state": state, "updated": self.clock(), **extra}
-        cur = self.db.x(f"UPDATE goal_plans SET {', '.join(k + '=?' for k in cols)} WHERE id=? AND state IN "
-                        f"({','.join('?' * len(expected))})", (*cols.values(), int(pid), *expected))
-        if cur.rowcount != 1:
-            raise ValueError("the plan changed in the meantime: look at it again")
+        with self.db._lock:
+            c = self.db._db
+            try:
+                cur = c.execute(f"UPDATE goal_plans SET {', '.join(k + '=?' for k in cols)} WHERE id=? AND state IN "
+                                f"({','.join('?' * len(expected))})", (*cols.values(), int(pid), *expected))
+                if cur.rowcount != 1:
+                    c.rollback()
+                    raise ValueError("the plan changed in the meantime: look at it again")
+                for sql, args in step_sql:
+                    c.execute(sql, args)
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
 
     def approve(self, pid: int, *, by: str = "user") -> dict:
         """The owner approved the whole plan, once. The caller has already shown the steps and got the approval."""
@@ -191,8 +202,9 @@ class PlanStore:
         for s in self.steps(pid):
             if s["status"] == "unknown":
                 raise ValueError(f"step {s['idx'] + 1} may already have run before the stop: retry or skip it first")
-        self._cas(pid, ("paused", "blocked"), "ready", note="", **({} if by == "phone" else {"tainted": 0}))
-        self.db.x("UPDATE goal_plan_steps SET status='pending', error='' WHERE plan_id=? AND status='blocked'", (int(pid),))   # the owner's resume on the PC is a new turn: the guard is lifted; a phone never lifts it (#340)
+        self._cas(pid, ("paused", "blocked"), "ready",
+                  (("UPDATE goal_plan_steps SET status='pending', error='' WHERE plan_id=? AND status='blocked'", (int(pid),)),),
+                  note="", **({} if by == "phone" else {"tainted": 0}))   # the owner's resume on the PC is a new turn: the guard is lifted; a phone never lifts it (#340)
         logs.info("goals", "PLAN_RESUMED", "plan resumed", id=pid, by=by)
         return self.get(pid)
 
@@ -216,13 +228,15 @@ class PlanStore:
             if s["status"] in ("failed", "blocked", "unknown") and step_idx in (None, s["idx"]):
                 if s["attempts"] >= MAX_ATTEMPTS:
                     raise ValueError(f"step {s['idx'] + 1} was tried {MAX_ATTEMPTS} times already: skip it or cancel")
+                if s["status"] == "unknown" and by == "phone":
+                    raise ValueError(f"step {s['idx'] + 1} may already have run: repeating it is done on the computer")
                 todo.append(s["id"])
         n = len(todo)
         if not n:
             raise ValueError("no failed or blocked step to retry")
-        self._cas(pid, ("failed", "blocked", "paused"), "ready", note="", finished=None, **({} if by == "phone" else {"tainted": 0}))
-        for sid in todo:
-            self.db.x("UPDATE goal_plan_steps SET status='pending', error='' WHERE id=?", (sid,))   # a phone never lifts the guard (#340)
+        self._cas(pid, ("failed", "blocked", "paused"), "ready",
+                  tuple(("UPDATE goal_plan_steps SET status='pending', error='' WHERE id=? AND status IN ('failed','blocked','unknown')", (sid,))
+                        for sid in todo), note="", finished=None, **({} if by == "phone" else {"tainted": 0}))   # a phone never lifts the guard (#340)
         logs.info("goals", "PLAN_RETRIED", "plan step retried", id=pid, count=n, by=by)
         return self.get(pid)
 

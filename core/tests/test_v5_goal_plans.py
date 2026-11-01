@@ -504,3 +504,69 @@ def test_385_compare_and_set_cancel_wins_over_a_stale_resume(env):
         env.store.resume(p["id"], by="phone")
     env.store.steps = real
     assert env.store.get(p["id"])["state"] == "cancelled"
+
+
+def _stale(env, name):
+    """Make PlanStore._plan return a copy taken now, so the operation passes its state check on an old view."""
+    real = env.store._plan
+    old = dict(real(name))
+    env.store._plan = lambda pid: dict(old)
+    return real
+
+
+def test_385_stale_view_cannot_flip_a_cancelled_plan_on_approve_or_pause(env):
+    a = env.store.propose("a", steps(("fake_read", {"text": "x"})))
+    real = _stale(env, a["id"])
+    env.store._plan = real
+    old = dict(real(a["id"]))
+    env.store._plan = lambda pid: dict(old)
+    env.db.x("UPDATE goal_plans SET state='cancelled' WHERE id=?", (a["id"],))
+    with pytest.raises(ValueError):
+        env.store.approve(a["id"])
+    env.store._plan = real
+    assert env.store.get(a["id"])["state"] == "cancelled"
+    b = env.store.propose("b", steps(("fake_read", {"text": "x"})))
+    env.store.approve(b["id"])
+    old = dict(real(b["id"]))
+    env.store._plan = lambda pid: dict(old)
+    env.db.x("UPDATE goal_plans SET state='cancelled' WHERE id=?", (b["id"],))
+    with pytest.raises(ValueError):
+        env.store.pause(b["id"])
+    env.store._plan = real
+    assert env.store.get(b["id"])["state"] == "cancelled"
+
+
+async def test_385_retry_race_with_cancel_rolls_back_and_never_runs_a_skipped_step(env):
+    p = env.store.propose("r", steps(("fake_bad", {}), ("fake_read", {"text": "z"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    assert env.store.get(p["id"])["state"] == "failed"
+    real = env.store.steps
+
+    def racing(pid):
+        out = real(pid)
+        env.store.cancel(pid)
+        return out
+    env.store.steps = racing
+    with pytest.raises(ValueError):
+        env.store.retry(p["id"])
+    env.store.steps = real
+    d = env.store.get(p["id"])
+    assert d["state"] == "cancelled" and all(s["status"] != "pending" for s in d["steps"])
+
+
+async def test_385_phone_retry_of_an_unknown_step_is_refused_and_plan_never_done_with_unrun_step(env):
+    env.hang_on = "act"
+    p = env.store.propose("u", steps(("fake_act", {"text": "x"})), timeout_s=5)
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    assert env.store.get(p["id"])["steps"][0]["status"] == "unknown"
+    with pytest.raises(ValueError):
+        env.store.retry(p["id"], by="phone")
+    assert env.store.get(p["id"])["state"] == "failed"
+    env.hang_on = None
+    env.store.retry(p["id"])                                     # the PC may; state and step flip together
+    d = env.store.get(p["id"])
+    assert d["state"] == "ready" and d["steps"][0]["status"] == "pending"
+    await env.runner.tick()
+    assert env.store.get(p["id"])["steps"][0]["status"] == "done" and ("act", "x") in env.ran
