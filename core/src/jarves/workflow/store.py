@@ -124,8 +124,8 @@ class Store:
         self._lock = threading.RLock()
         self._db = sqlite3.connect(str(path), timeout=timeout_s, isolation_level=None, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")   # first: every later statement waits, not fails
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(f"PRAGMA busy_timeout={int(timeout_s * 1000)}")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript("""
             CREATE TABLE IF NOT EXISTS workflow_records (
@@ -143,16 +143,21 @@ class Store:
             CREATE INDEX IF NOT EXISTS workflow_trace_task ON workflow_trace(task_id,id);
             CREATE INDEX IF NOT EXISTS workflow_trace_time ON workflow_trace(ts);
         """)
-        with self._tx() as db:
-            for key, value in {
-                "revision": 0,
-                "owner": {"mode": "away", "active_until": 0},
-                "supervisor": {"heartbeat_at": 0, "status": "offline"},
-                "source": {"mode": "empty", "sha": "", "synced_at": 0, "unmapped": []},
-                "alerts": [],
-                "trace": {"mode": "metadata", "since": self.clock()},
-            }.items():
-                db.execute("INSERT OR IGNORE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value)))
+        defaults = {
+            "revision": 0,
+            "owner": {"mode": "away", "active_until": 0},
+            "supervisor": {"heartbeat_at": 0, "status": "offline"},
+            "source": {"mode": "empty", "sha": "", "synced_at": 0, "unmapped": []},
+            "alerts": [],
+            "trace": {"mode": "metadata", "since": self.clock()},
+        }
+        # Opening a store is a plain read in the normal case: a hook must not queue for the write lock just to
+        # find the seed rows already there. Only a fresh database takes the (short) IMMEDIATE write transaction.
+        have = {r[0] for r in self._db.execute("SELECT key FROM workflow_meta")}
+        if not set(defaults) <= have:
+            with self._tx() as db:
+                for key, value in defaults.items():
+                    db.execute("INSERT OR IGNORE INTO workflow_meta VALUES (?,?)", (key, json.dumps(value)))
 
     @contextmanager
     def _tx(self):

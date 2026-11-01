@@ -267,9 +267,11 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            starts.append(now)
-            state["starts"] = starts
-            _save(store, state)
+            if result is None or result.get("ok"):
+                # Only a start the bridge accepted (or an unknown outcome) uses the hourly budget (#763).
+                starts.append(now)
+                state["starts"] = starts
+                _save(store, state)
             if result is None:
                 _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):
@@ -279,6 +281,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 state["paused_until"] = now + PAUSE_S
                 state["pause_reason"] = code
                 _save(store, state)
+                store.record_event("autopilot_idle", f"start refused ({code}); not counted against max_starts_per_hour")
                 store.record_event("autopilot_paused", f"Autopilot start refused ({code}); paused for {PAUSE_S // 60} min")
                 actions.append({"task_id": task["id"], "action": "refused", "code": code})
                 break
