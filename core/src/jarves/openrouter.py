@@ -147,7 +147,7 @@ class OpenRouterClient:
         d = self.policy.decide(self.registry, preferred=m.id, agent=agent, project=project, tokens_in=tin, tokens_out=tout)
         if d.model is None:
             raise PolicyBlocked(d.exception)
-        return d.model
+        return d
 
     def chat(self, messages: list[dict], model: str = FREE_ROUTER, *, agent: str = "default", project: str = "",
              content_class: str = "private", max_tokens: int = 1024) -> Result:
@@ -157,8 +157,17 @@ class OpenRouterClient:
             raise OpenRouterError("OPENROUTER_BAD_REQUEST", "messages must be a list of {role, content}")
         if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 1 <= max_tokens <= 8192:
             raise OpenRouterError("OPENROUTER_BAD_REQUEST", "max_tokens must be 1..8192")
-        tin = sum(len(x["content"]) for x in messages) // 3 + 1          # rough upper estimate, only for the policy caps
-        m = self._check(model, agent, project, content_class, tin, max_tokens)
+        # worst case for the policy caps: one token per UTF-8 byte (never fewer) plus per-message framing
+        tin = sum(len(x["content"].encode("utf-8")) + 8 for x in messages) + 8
+        d = self._check(model, agent, project, content_class, tin, max_tokens)
+        m, reserved = d.model, d.est_cost_usd         # decide() reserved the worst case; record() settles it
+        held = [reserved]                              # record() zeroes it; anything left is released
+        try:
+            return self._chat_reserved(m, messages, agent, max_tokens, held)
+        finally:
+            self.policy.release(agent, held[0])
+
+    def _chat_reserved(self, m, messages, agent, max_tokens, held) -> Result:
         key = self._key or os.environ.get(KEY_ENV, "").strip()
         if not key:
             raise OpenRouterError("OPENROUTER_NOT_CONNECTED", f"OpenRouter is not connected; run {START_COMMAND}")
@@ -186,7 +195,8 @@ class OpenRouterClient:
         if math.isfinite(est) and est > res.cost_usd:
             res = dataclasses.replace(res, cost_usd=est)
         if res.cost_usd:
-            self.policy.record(agent, res.cost_usd)
+            self.policy.record(agent, res.cost_usd, held[0])
+            held[0] = 0.0
         if self.policy.mode == "free-only" and (res.cost_usd > 0 or not is_free_id(res.resolved_model)):
             raise OpenRouterError("OPENROUTER_UNEXPECTED_CHARGE",
                                   f"free-only run resolved to {res.resolved_model[:60]} with cost ${res.cost_usd:.6f}; recorded")

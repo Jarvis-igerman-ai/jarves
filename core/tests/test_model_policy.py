@@ -1,7 +1,7 @@
 """V7 M1 (#415): SpendPolicy never switches to a paid model silently. Fakes only: no network, no keys."""
 import pytest
 
-from jarves.model_policy import ModelInfo, ModelRegistry, SpendPolicy, load_registry
+from jarves.model_policy import ModelConfigError, ModelInfo, ModelRegistry, SpendPolicy, load_registry
 
 LOCAL = ModelInfo("loc", "local", local=True, paid=False, quality=3)
 FREE = ModelInfo("fre", "openrouter", paid=False, quality=5)
@@ -182,3 +182,58 @@ def test_concurrent_record_is_exact():
     [t.join() for t in ts]
     assert p.spent_today == 8 * 2000 * 0.25 and p.spent_by_agent["a"] == p.spent_today
     assert math.isfinite(p.spent_today)
+
+
+# ---- #840: free_overrides never unlocks local; caps are reserved in decide() ----
+def test_free_override_never_unlocks_local(tmp_path):
+    f = tmp_path / "models.toml"
+    f.write_text('[[model]]\nid="remote-x"\nprovider="openrouter"\nlocal=true\npaid=false\n', encoding="utf-8")
+    with pytest.raises(ModelConfigError):
+        load_registry(f, free_overrides=["remote-x"])
+    f.write_text('[[model]]\nid="remote-x"\nprovider="openrouter"\npaid=false\n', encoding="utf-8")
+    reg = load_registry(f, free_overrides=["remote-x"])          # free is still allowed
+    p = SpendPolicy(mode="local-only", allowed_providers=ALLOW)
+    assert p.decide(reg, preferred="remote-x").model is None
+
+
+M90 = ModelInfo("m90", "openai", input_per_1m=0.01, output_per_1m=900_000.0, quality=5)   # 1 output token = $0.90
+
+
+def test_decide_reserves_cost_second_decide_refused():
+    reg = ModelRegistry([M90])
+    p = SpendPolicy(mode="cheap", daily_cap_usd=1.0, task_cap_usd=1.0, allowed_providers=ALLOW)
+    d1 = p.decide(reg, preferred="m90", tokens_out=1)
+    d2 = p.decide(reg, preferred="m90", tokens_out=1)
+    assert d1.model is not None and d2.model is None and "cap" in d2.exception.reason
+    p.release("default", d1.est_cost_usd)                                       # failed call: reservation returned
+    assert p.reserved_today == 0.0
+    assert p.decide(reg, preferred="m90", tokens_out=1).model is not None
+
+
+def test_concurrent_decides_respect_cap_and_settle():
+    import threading
+    reg = ModelRegistry([M90])
+    p = SpendPolicy(mode="cheap", daily_cap_usd=1.0, task_cap_usd=1.0, allowed_providers=ALLOW)
+    out, gate = [], threading.Barrier(8)
+
+    def go():
+        gate.wait()
+        out.append(p.decide(reg, preferred="m90", tokens_out=1))
+    ts = [threading.Thread(target=go) for _ in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    ok = [d for d in out if d.model is not None]
+    assert len(ok) == 1
+    p.record("default", 0.5, ok[0].est_cost_usd)                               # settle: reserve -> real spend
+    assert p.reserved_today == 0.0 and abs(p.spent_today - 0.5) < 1e-9
+    assert p.decide(reg, preferred="m90", tokens_out=1).model is None          # 0.5 + 0.9 > 1.0
+
+
+def test_agent_cap_counts_reservations():
+    reg = ModelRegistry([M90])
+    p = SpendPolicy(mode="cheap", daily_cap_usd=10.0, task_cap_usd=1.0, agent_cap_usd={"a": 1.0}, allowed_providers=ALLOW)
+    assert p.decide(reg, preferred="m90", agent="a", tokens_out=1).model is not None
+    d = p.decide(reg, preferred="m90", agent="a", tokens_out=1)
+    assert d.model is None and "agent" in d.exception.reason

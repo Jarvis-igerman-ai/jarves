@@ -131,7 +131,7 @@ def load_registry(path: Path | None, free_overrides=()) -> ModelRegistry:
             same = b is not None and b.provider == m.provider
             if not m.paid and not (m.id in approved or (same and not b.paid)):
                 raise ModelConfigError(f"{m.id}: models.toml cannot mark a model free without owner approval")
-            if m.local and not (m.id in approved or (same and b.local)):
+            if m.local and not (same and b.local):      # free_overrides unlock free only, never local (#840)
                 raise ModelConfigError(f"{m.id}: models.toml cannot mark a model local without owner approval")
             models.append(m)
     except (TypeError, tomllib.TOMLDecodeError) as e:
@@ -173,6 +173,8 @@ class SpendPolicy:
             self._allow(v)
         self.spent_today = 0.0
         self.spent_by_agent: dict = {}
+        self.reserved_today = 0.0                  # worst-case cost of decisions not yet settled (#840)
+        self.reserved_by_agent: dict = {}
 
     @property
     def mode(self) -> str:
@@ -190,9 +192,23 @@ class SpendPolicy:
             raise ModelConfigError("an allow-list must be a list or set of provider names, not a string")
         return v
 
-    def record(self, agent: str, usd: float) -> None:
-        usd = _num(usd, "usd")
+    def _unreserve(self, agent: str, reserved: float) -> None:       # caller holds the lock
+        if reserved and math.isfinite(reserved) and reserved > 0:
+            self.reserved_today = max(0.0, self.reserved_today - reserved)
+            self.reserved_by_agent[agent] = max(0.0, self.reserved_by_agent.get(agent, 0.0) - reserved)
+
+    def release(self, agent: str, reserved: float) -> None:
+        """Give back the reservation of a decision whose call failed, was skipped or cost nothing."""
+        reserved = _num(reserved, "reserved")
         with self._lock:
+            self._unreserve(agent, reserved)
+
+    def record(self, agent: str, usd: float, reserved: float = 0.0) -> None:
+        """Settle: add the real spend and release the `reserved` amount (Decision.est_cost_usd) taken by decide()."""
+        usd = _num(usd, "usd")
+        reserved = _num(reserved, "reserved")
+        with self._lock:
+            self._unreserve(agent, reserved)
             self.spent_today += usd
             self.spent_by_agent[agent] = self.spent_by_agent.get(agent, 0.0) + usd
 
@@ -230,9 +246,9 @@ class SpendPolicy:
                 return "paid models are off (cap is 0 USD)"
             if est > self.task_cap_usd:
                 return f"task estimate ${est:.4f} is over the per-task cap ${self.task_cap_usd:.4f}"
-            if self.spent_today + est > self.daily_cap_usd:
+            if self.spent_today + self.reserved_today + est > self.daily_cap_usd:
                 return "daily cap would be exceeded"
-            if self.spent_by_agent.get(agent, 0.0) + est > cap:
+            if self.spent_by_agent.get(agent, 0.0) + self.reserved_by_agent.get(agent, 0.0) + est > cap:
                 return f"agent {agent} daily cap would be exceeded"
         return ""
 
@@ -255,6 +271,7 @@ class SpendPolicy:
             why = "" if up(m) else f"{m.id} is unavailable"
             why = why or self._blocked(m, agent, project, est)
             if not why:
+                self._reserve(m, agent, est)
                 return Decision(m, est_cost_usd=est)
             # unavailable or blocked: an alternative is only offered as a request, never used silently
             alt = self._pick(registry, up, agent, project, tin, tout, exclude=m.id)
@@ -262,7 +279,14 @@ class SpendPolicy:
         m = self._pick(registry, up, agent, project, tin, tout)
         if m is None:
             return Decision(None, PolicyException(f"no model fits mode {self._mode} and the caps", ""))
-        return Decision(m, est_cost_usd=m.cost_usd(tin, tout))
+        est = m.cost_usd(tin, tout)
+        self._reserve(m, agent, est)
+        return Decision(m, est_cost_usd=est)
+
+    def _reserve(self, m: ModelInfo, agent: str, est: float) -> None:    # caller holds the lock
+        if m.paid and math.isfinite(est) and est > 0:
+            self.reserved_today += est
+            self.reserved_by_agent[agent] = self.reserved_by_agent.get(agent, 0.0) + est
 
     def _pick(self, registry, up, agent, project, tin, tout, exclude=""):
         ok = [m for m in registry.all() if m.id != exclude and up(m)
