@@ -270,6 +270,16 @@ def trim(a: np.ndarray, floor: float = 0.01) -> np.ndarray:
 MAX_PHRASE_S = 1.5           # a positive clip longer than this can never fill a ~2 s window (see windows())
 
 
+def _sustained(idx: np.ndarray, min_run: int = 3) -> np.ndarray:
+    """Frame indices that sit in a run of >= min_run consecutive frames (60 ms): a key click or a one-frame burst is
+    not speech and must not stretch the span (#542: a stretched span raised the threshold and cut the quiet tail)."""
+    if len(idx) == 0:
+        return idx
+    runs = np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
+    keep = [r for r in runs if len(r) >= min_run]
+    return np.concatenate(keep) if keep else idx
+
+
 def trim_speech(a: np.ndarray, sr: int = SR, pad_s: float = 0.1) -> np.ndarray:
     """Trim a REAL recording to the spoken phrase. `trim` alone keeps everything above 1 % of the peak, which on a
     room recording with a noise floor keeps the whole fixed-length clip (all of a 19-clip set stayed 2.6 s): such a
@@ -286,7 +296,7 @@ def trim_speech(a: np.ndarray, sr: int = SR, pad_s: float = 0.1) -> np.ndarray:
     thr = max(noise_lvl * 3.0, top * 0.1)
     out = a
     for _ in range(8):
-        idx = np.flatnonzero(e > thr)
+        idx = _sustained(np.flatnonzero(e > thr))
         if not len(idx):
             break
         pad = int(pad_s * sr)
@@ -636,7 +646,8 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     report = {"phrase": phrase, "texts": texts, "model": str(out), "threshold": threshold, "held_out_voice": held,
               "voices": [f"{v.engine}:{v.id}" for v in voices], "own_recordings": len(own),
               "own_skipped_too_long": len(too_long), "seed": seed, "curve": curve, "target_false_per_hour": 0.5,
-              "owner": {"recordings": len(own), "peak_scores": [round(float(x), 3) for x in own_peaks],
+              "owner": {"recordings": len(own), "usable_recordings": len(own) - len(too_long),
+                        "skipped_too_long": len(too_long), "peak_scores": [round(float(x), 3) for x in own_peaks],
                         "held_out_indices": held_idx,
                         "recall_at_threshold": wake_prod.recall_at(own_peaks, threshold),
                         "held_out_recall_at_threshold": wake_prod.recall_at([own_peaks[i] for i in held_idx],

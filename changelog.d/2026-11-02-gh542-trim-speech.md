@@ -1,0 +1,1 @@
+- wake train: trim_speech ignores one-frame clicks so a quiet phrase tail is kept; report/CLI show usable vs skipped recordings and warn below the minimum (#542)
