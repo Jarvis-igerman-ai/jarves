@@ -1,0 +1,1 @@
+- Fixed: the microphone mode menu is re-positioned whenever its content changes, so it can no longer overflow the screen edge on narrow phones (flaky test, #709, #788).
