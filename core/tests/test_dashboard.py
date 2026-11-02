@@ -3,6 +3,7 @@ e-mail addresses served, every page's API, issue status writes, workspace stub a
 import http.client
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,9 @@ def dash(home, monkeypatch):
     monkeypatch.setattr(diagnose, "expire", lambda store, days=diagnose.EXPIRE_DAYS, now=None: _expire(store, days, 1792454400.0))
     st = Store(home / "store.db", tier="priority", backend_model="gpt-6-luna")
     diagnose.run(st, Config(), st.ingest_log(FIXTURE))
+    with st._lock:      # the fixture log is dated 19 Oct: keep its issues "just seen" so the 14-day auto-expiry never depends on today's date
+        st._db.execute("UPDATE issues SET last_seen = ?", (time.time(),))
+        st._db.commit()
     st.close()
     (home / "health.json").write_text(json.dumps({"ts": 0, "core": "stopped", "components": {
         "ai": {"status": "ok", "detail": "ChatGPT plan (someone@example.com), web search on", "action": ""},
