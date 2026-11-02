@@ -25,13 +25,15 @@ BASE = f"{REMOTE}/main"
 FRAGMENT = re.compile(r"^- [A-Z][A-Za-z]*: \S.*$")
 FOOTER = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
 MIN_INTEGRATION = 3
+# Windows: never flash a console window (issue #889); same contract as jarves.workflow.winproc.hidden_popen_kwargs.
+_HIDDEN = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if sys.platform == "win32" else {}
 FILES_LIMIT = 100  # gh pr view truncates `files` here; at or above it we cannot see everything -> Tier R
 PROTECTED = re.compile(r"^(main|master|release.*|v\d.*|HEAD)$")
 GOOD_MERGE_STATES = ("CLEAN", "BLOCKED", "HAS_HOOKS")
 
 
 def _run(cmd, cwd=None, check=True):
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", **_HIDDEN)
     if check and p.returncode != 0:
         raise RuntimeError(f"{' '.join(cmd[:3])} failed: {(p.stderr or p.stdout).strip()[:400]}")
     return p
@@ -224,7 +226,7 @@ def cmd_build(a):
         print(json.dumps({"branch": name, "error": "nothing could be merged", "skipped": skipped}), file=sys.stderr)
         return 3
     if not a.no_prepush:
-        if subprocess.run([sys.executable, "core/tools/prepush.py"], cwd=cwd).returncode != 0:
+        if subprocess.run([sys.executable, "core/tools/prepush.py"], cwd=cwd, **_HIDDEN).returncode != 0:
             print(json.dumps({"branch": name, "error": "prepush failed"}), file=sys.stderr)
             return 4
     body = pr_body(included, skipped)

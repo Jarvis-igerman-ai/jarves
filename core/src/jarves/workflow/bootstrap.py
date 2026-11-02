@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .hooks import EVENTS, console_command
+from .winproc import hidden_popen_kwargs
 
 START, END = "<!-- JARVES-WORKFLOW-START -->", "<!-- JARVES-WORKFLOW-END -->"
 OBSOLETE = ("5 nightly", "five nightly", "no idle agents", "Keep 5-8", "one AskUserQuestion batch", "agentN_STATE.md")
@@ -138,7 +139,7 @@ def install(root: Path, home: Path, *, apply=False, python=sys.executable) -> di
     claude = shutil.which("claude")
     if not claude:
         raise ValueError("Claude Code CLI not found; no local instructions/settings changed")
-    checked = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=10, check=True)
+    checked = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=10, check=True, **hidden_popen_kwargs())
     version = re.search(r"(\d+)\.(\d+)\.(\d+)", checked.stdout)
     if not version or tuple(map(int, version.groups())) < (2, 1, 271):
         raise ValueError("observer hook compatibility requires Claude Code 2.1.271+; no settings changed")
@@ -156,7 +157,7 @@ def install(root: Path, home: Path, *, apply=False, python=sys.executable) -> di
         temporary.replace(path)
     # Ignore machine-local connection paths and hook settings without modifying tracked .gitignore.
     gitdir = subprocess.run(["git", "-C", str(root), "rev-parse", "--git-path", "info/exclude"],
-                            capture_output=True, text=True, check=True, timeout=3).stdout.strip()
+                            capture_output=True, text=True, check=True, timeout=3, **hidden_popen_kwargs()).stdout.strip()
     exclude = Path(gitdir) if Path(gitdir).is_absolute() else root / gitdir
     exclude.parent.mkdir(parents=True, exist_ok=True)
     text = exclude.read_text(encoding="utf-8") if exclude.exists() else ""

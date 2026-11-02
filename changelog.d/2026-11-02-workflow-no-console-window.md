@@ -1,0 +1,1 @@
+- Workflow hooks, supervisor, autopilot, prepush and integration helpers no longer flash console windows on Windows (shared hidden_popen_kwargs helper, scan test) (#889).

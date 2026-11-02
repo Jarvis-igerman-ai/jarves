@@ -15,6 +15,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import observability as obs
+from .winproc import hidden_popen_kwargs
 
 TZ = ZoneInfo("Asia/Jerusalem")
 REPO = "Jarvis-igerman-ai/jarves"
@@ -29,7 +30,7 @@ def gh_merged(since: float, *, run=subprocess.run) -> tuple[bool, list[dict]]:
     cmd = ["gh", "pr", "list", "--repo", REPO, "--state", "merged", "--search", f"merged:>={day}",
            "--json", "number,title,mergedAt", "--limit", "100"]
     try:
-        proc = run(cmd, capture_output=True, text=True, timeout=15, encoding="utf-8")
+        proc = run(cmd, capture_output=True, text=True, timeout=15, encoding="utf-8", **hidden_popen_kwargs())
         if proc.returncode != 0:
             return False, []
         rows = json.loads(proc.stdout or "[]")
