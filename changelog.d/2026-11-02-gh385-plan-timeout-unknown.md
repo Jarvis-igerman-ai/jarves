@@ -1,0 +1,1 @@
+- Fixed: a goal-plan step that changes something and times out is now kept as "unknown" (computer only, the approval says it may already have happened) instead of "failed"; plan state changes are atomic so a phone resume cannot undo a computer cancel. Fixes: #385
