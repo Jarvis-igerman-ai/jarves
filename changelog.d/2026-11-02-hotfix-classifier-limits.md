@@ -1,1 +1,1 @@
-- hotfix classifier fails closed on dynamic imports, dotted submodules, constraints files and dependency files in folder sources; docs/scripts/tools changes are listed (#464)
+- Fixed: hotfix classifier fails closed on dynamic imports, dotted submodules, constraints files and dependency files in folder sources; docs/scripts/tools changes are listed (#464)
