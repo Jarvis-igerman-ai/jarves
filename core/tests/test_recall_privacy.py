@@ -308,7 +308,7 @@ async def test_injection_text_recalled_from_a_past_conversation_causes_no_action
 async def test_private_hit_never_reaches_the_model(home):
     st = Store(home / "store.db")
     st.indexer = recall.Indexer()
-    conv(st, "g", ago(3), ("user", "תזכור שהקוד של השער החשמלי בבניין הוא 4512"))
+    conv(st, "g", ago(3), ("user", "תזכור שהקוד של השער החשמלי בבניין הוא 7777"))
     st.commit()
     st.close()
     reg = SkillRegistry()
@@ -317,7 +317,7 @@ async def test_private_hit_never_reaches_the_model(home):
                        ("conversation_search", {"query": "השער בבניין"})):
         r = await reg.call(tool, args)
         assert r.ok and r.data["results"][0]["private"], tool
-        assert "4512" not in r.to_model() and r.data["results"][0]["untrusted_snippet"] is None, tool
+        assert "7777" not in r.to_model() and r.data["results"][0]["untrusted_snippet"] is None, tool
 
 
 async def test_show_tool_is_an_action_that_opens_the_recall_page(home):
