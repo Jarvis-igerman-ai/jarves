@@ -1,1 +1,1 @@
-- Fixed: Browser pilot: the DNS lookup pool refuses (fails closed) when more than 32 lookups are pending (#623, refs #574).
+- Fixed: Browser pilot: a DNS lookup that timed out but still runs in the pool stays in the pending-lookup count until it finishes or is cancelled (#623, refs #574).

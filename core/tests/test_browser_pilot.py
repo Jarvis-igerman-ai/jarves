@@ -347,14 +347,20 @@ def test_623_pending_dns_lookups_are_bounded(monkeypatch):
     assert bp._PENDING == bp.MAX_PENDING_LOOKUPS
 
 
-def test_623_pending_lookups_are_bounded_and_fail_closed(monkeypatch):
+def test_623_timed_out_running_lookup_stays_counted_until_it_finishes(monkeypatch):
     import threading
     gate = threading.Event()
     monkeypatch.setattr(bp.socket, "getaddrinfo", lambda *a, **k: gate.wait(5))
-    monkeypatch.setattr(bp, "RESOLVE_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(bp, "MAX_PENDING_LOOKUPS", 2)
+    monkeypatch.setattr(bp, "RESOLVE_TIMEOUT_S", 0.05)
     monkeypatch.setattr(bp, "_PENDING", 0)
-    for i in range(6):                                   # every one fails closed; hung lookups never exceed the bound
-        assert bp.vet_url(f"https://h{i}.example.com/") == ""
-    assert bp._PENDING <= 2
-    gate.set()
+    try:
+        with pytest.raises(Exception):
+            bp.system_resolver("hung.example.com")           # the caller times out; the lookup thread is still running
+        assert bp._PENDING == 1                              # it still holds a pool slot, so it still counts
+    finally:
+        gate.set()
+    for _ in range(100):
+        if bp._PENDING == 0:
+            break
+        threading.Event().wait(0.05)
+    assert bp._PENDING == 0                                  # released when the lookup really finished
