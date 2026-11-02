@@ -1,0 +1,1 @@
+- Fixed: the autopilot usage snapshot reader treats hostile or malformed usage.json (NaN/Infinity, future timestamp, bool, oversized file) as unknown (#776, follow-up to #877).
