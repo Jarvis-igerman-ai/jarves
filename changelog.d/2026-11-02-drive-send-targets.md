@@ -1,0 +1,1 @@
+- Fixed: Drive mode: the WhatsApp bridge send tool now declares the real number (Telegram and Instagram never match a saved contact, see the drive security fix) so the known-contact check is not by name alone, and the Gate runs off the event loop so a stuck queue lock cannot freeze voice (#379).

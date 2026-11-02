@@ -1162,7 +1162,9 @@ class WhatsAppBridgeSkill(Skill):
                  compose, ComposeArgs, permission="action"),
             Tool("whatsapp_send", 'Send a whatsapp_compose draft. The system shows recipient, number and full text and asks the owner; do not ask yourself.', send, SendArgs,
                  permission="destructive", timeout_s=30, impact=send_impact, precheck=send_precheck,
-                 recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"), approval_meta=send_meta),
+                 recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"),
+                 target=lambda a: (self._drafts.get(a.draft_id) or {}).get("number") or "",    # LID contact: "" = never known
+                 approval_meta=send_meta),
         ]
 
 
