@@ -498,6 +498,15 @@ def test_update_restarts_only_what_was_running_before():
     assert "nothing was running before the update: nothing is started after it" in smoke
 
 
+def test_elevated_interactive_setup_does_not_restart_the_core_with_admin_rights():
+    """#436: Run as administrator + wizard leaves JARVES stopped; elevated silent installs (CI) still restart."""
+    iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8")
+    assert "Result := IsAdmin() and not WizardSilent();" in iss
+    want = iss.split("function RestartWanted", 1)[1].split("end;", 1)[0]
+    assert "not ElevatedInteractive() and (" in want
+    assert iss.index("function ElevatedInteractive") < iss.index("function RestartWanted")
+
+
 def test_setup_restores_the_pre_install_state_without_a_flag_and_flags_mangled_switches():
     """#343: what ran before setup is restarted in any mode (no /RESTARTJARVES needed); the flag stays an override."""
     iss = (PKG / "windows" / "jarves.iss").read_text(encoding="utf-8")
