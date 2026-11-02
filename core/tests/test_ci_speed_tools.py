@@ -545,7 +545,7 @@ def test_reused_main_push_feeds_the_proof_runs_timings_into_mains_cache():
     assert [s["if"] for s in downloads] == ["needs.changes.outputs.reused != 'true' && needs.changes.outputs.reuse_tests_only != 'true'",
                                          "needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'"]
     proof = downloads[1]["with"]
-    assert proof["run-id"] == "${{ needs.changes.outputs.proof_run }}" and proof["github-token"] == "${{ github.token }}"
+    assert proof["run-id"] == "${{ steps.src.outputs.run_id }}" and proof["github-token"] == "${{ github.token }}"
     assert proof["pattern"] == downloads[0]["with"]["pattern"] == "junit-${{ matrix.platform }}-*"
     assert "durations" not in jobs["ci-ok"]["needs"]
 
@@ -678,3 +678,42 @@ def test_browser_retry_files_fail_closed(tmp_path):
     assert ci_flake.retry_files_any(xml) == []                       # one unmappable failure: the whole suite is re-run
     xml.write_text("<not xml", encoding="utf-8")
     assert ci_flake.retry_files_any(xml) == [] and ci_flake.retry_files_any(tmp_path / "missing.xml") == []
+
+
+def _src_api(pr_runs, mg_run, head="h" * 40):
+    def api(path):
+        if path.startswith("repos/o/r/actions/runs/"):
+            return mg_run
+        if path == "repos/o/r/pulls/5":
+            return {"head": {"sha": head}}
+        if "/workflows/jarves-checks.yml/runs" in path:
+            assert f"head_sha={head}" in path
+            return {"workflow_runs": pr_runs}
+        raise AssertionError(path)
+    return api
+
+
+def test_junit_source_follows_a_reusing_merge_group_to_the_pr_run():
+    # PR (run 41178778083) -> merge group (41179664087, reused it, no junit) -> main: timings come from the PR run
+    mg = _run(41179664087, event="merge_group", head_branch="gh-readonly-queue/main/pr-5-abc")
+    pr_run = _run(41178778083, head_sha="h" * 40, pull_requests=[{"number": 5}], run_number=3)
+    stale = _run(1, head_sha="h" * 40, pull_requests=[{"number": 5}], conclusion="failure", run_number=9)
+    foreign = _run(2, head_sha="h" * 40, pull_requests=[{"number": 6}], run_number=8)
+    hit = ci_reuse.junit_source_run("o/r", 41179664087, _src_api([stale, foreign, pr_run], mg))
+    assert hit == {"run_id": 41178778083, "via": "merge-group", "pr": 5}
+
+
+def test_junit_source_never_guesses():
+    mg = _run(10, event="merge_group", head_branch="gh-readonly-queue/main/pr-5-abc")
+    assert ci_reuse.junit_source_run("o/r", 10, _src_api([], mg))["via"] == "direct"      # no green PR run found
+    assert ci_reuse.junit_source_run("o/r", 11, lambda p: _run(11))["via"] == "direct"   # a PR run is its own source
+
+    def boom(path):
+        raise RuntimeError("gh down")
+    assert ci_reuse.junit_source_run("o/r", 12, boom) == {"run_id": 12, "via": "direct", "pr": None}
+
+
+def test_timing_job_resolves_the_upstream_run_and_tolerates_missing_junit():
+    wf = (WF / "jarves-checks.yml").read_text(encoding="utf-8")
+    assert "ci_reuse.py junit-source" in wf and "steps.src.outputs.run_id" in wf
+    assert "no measured junit" in wf

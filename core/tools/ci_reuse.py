@@ -22,6 +22,7 @@ import sys
 from typing import Callable
 
 WORKFLOW_NAME = "jarves-checks"
+WORKFLOW_FILE = "jarves-checks.yml"
 PREFIX = "jarves-installer-"
 PROOF_PREFIX = "jarves-no-installer-proof-"  # test-only PRs, no binary; main must still build installer
 
@@ -123,6 +124,32 @@ def merge_group_decision(repo: str, tree: str, head_ref: str, api: Callable[[str
     return {"mode": "tests", "pr": pr, "run_id": hit["run_id"]} if hit else none
 
 
+def junit_source_run(repo: str, run_id: int | str, api: Callable[[str], dict] = gh_json) -> dict:
+    """The run whose junit artifacts hold the real test timings for a proof run: {"run_id", "via", "pr"}.
+
+    A merge-queue group that reused its PR's green proof produced no junit of its own, so main (which resolves the
+    newest artifact, i.e. the group's) must follow the group to the PR run it reused: the PR's `pull_request` run at the
+    PR's current head. Anything unresolved returns the original run_id (via="direct"), never a guess."""
+    direct = {"run_id": run_id, "via": "direct", "pr": None}
+    try:
+        run = api(f"repos/{repo}/actions/runs/{run_id}")
+        if run.get("event") != "merge_group":
+            return direct
+        pr = pr_of_group(run.get("head_branch") or "")
+        head = api(f"repos/{repo}/pulls/{pr}").get("head", {}).get("sha") if pr else None
+        if not head:
+            return direct
+        runs = api(f"repos/{repo}/actions/workflows/{WORKFLOW_FILE}/runs?event=pull_request&head_sha={head}&per_page=30")
+        for r in sorted(runs.get("workflow_runs", []), key=lambda r: r.get("run_number", 0), reverse=True):
+            if (r.get("head_sha") == head and r.get("event") == "pull_request" and r.get("status") == "completed"
+                    and r.get("conclusion") == "success" and (r.get("head_repository") or {}).get("full_name") == repo
+                    and pr in [p.get("number") for p in r.get("pull_requests") or []]):
+                return {"run_id": r["id"], "via": "merge-group", "pr": pr}
+    except Exception:
+        pass
+    return direct
+
+
 # Documentation does not change what is tested or built, so it is not part of the content address: a docs-only merge
 # has the same "tree" as the previous code state and reuses its proof (same patterns as core/tools/ci_plan.py DOCS).
 DOCS = re.compile(r"^(docs/|[^/]+\.md$|LICENSE$|\.gitignore$)")
@@ -164,7 +191,14 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--repo", required=True)
     g.add_argument("--tree", required=True)
     g.add_argument("--head-ref", required=True)
+    j = sub.add_parser("junit-source", help="run holding the real junit timings for a proof run (follows a merge group to its PR)")
+    j.add_argument("--repo", required=True)
+    j.add_argument("--run-id", required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "junit-source":
+        d = junit_source_run(a.repo, a.run_id)
+        print(f"run_id={d['run_id']}\nvia={d['via']}\npr={d['pr'] or ''}")
+        return 0
     if a.cmd == "tree":
         print(git_tree(a.rev))
         return 0
