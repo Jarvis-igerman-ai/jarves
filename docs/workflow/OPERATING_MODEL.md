@@ -146,24 +146,39 @@ a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## Tier R flow and merge backlog
 
+Owner decision: the owner approved this flow in chat on 2 Nov 2026. It narrows, but
+does not remove, the rule that Tier R is not merged by the steward: only PRs outside the
+excluded set below may follow it.
+
 `core/tools/tier_r_flow.py plan` prints, per open PR, the next action
 `review|fix|queue|wait|owner` with reasons (read-only; it never merges).
 1. Green on the CURRENT head SHA and no verdict for that SHA: one Opus review
-   task per PR + SHA (never per push; an existing evidence comment for the SHA
-   means no new review). The reviewer must be Opus and not an author of the diff.
-2. The reviewer comments `SIGN-OFF head SHA reviewer ID model opus-5-5` or
-   `CHANGES REQUESTED head SHA ...`, bound to the SHA.
+   task per PR + SHA (never per push). The reviewer must be Opus and declare a
+   task/agent id different from the PR's declared `Author-Agent:` id(s).
+2. Verdict format (machine-readable, first line): `SIGN-OFF <40-char head sha>` or
+   `CHANGES REQUESTED <40-char head sha>`, then marker lines `Review-Head: <same sha>`,
+   `Review-Task: <ledger task id>`, `Reviewer-Agent: <agent id>`, `Reviewer-Model: opus-5-5`.
+   Only comments whose GitHub association is OWNER, MEMBER or COLLABORATOR count;
+   quoted or buried text, short SHAs and incomplete markers do not. The LATEST verdict
+   for the current head wins, so a later CHANGES REQUESTED cancels an earlier SIGN-OFF.
+   Honest limit: every agent posts through one GitHub account, so account != author
+   proves nothing about independence. The check is only that the declared reviewer id
+   differs from the declared author id; the steward must confirm that `Review-Task`
+   exists in the workflow ledger with that agent id and model before queueing. A missing
+   `Author-Agent:` or marker means owner.
 3. CHANGES REQUESTED: a Sonnet fixer pushes to the PR's own branch only
    (`check-touch pr:N` first, `--force-with-lease` only on that branch); the new
-   head is reviewed again. At most 2 review rounds, then record a ledger blocker,
-   alert and leave it to the owner.
+   head is reviewed again. At most 2 review rounds (two heads with CHANGES REQUESTED);
+   after that every verdict, even a SIGN-OFF, means a ledger blocker, alert and owner.
 4. SIGN-OFF on the current head, required checks green, main not red: the steward
    removes `no-automerge`, runs `gh pr merge N --auto` and confirms the PR is in
    the merge queue. A push after sign-off invalidates it (back to step 1).
-5. Never automatic (owner, today's rules): release/sign-off/tag/stable promotion,
-   anything weakening Gate/approvals, secrets handling, `.github/workflows`,
-   permission/settings/CLAUDE.md/AGENTS.md files, truncated file lists, and any
-   PR where the steward is unsure.
+5. Never automatic (owner): any path containing release, approval or signoff
+   (release_cmd, release_flow, release_run, release_signoff, release_gate, approval_keys,
+   approval_popup ...), the Gate (drive_mode.py, skills/__init__.py), secrets,
+   `.github/workflows`, permission/settings/CLAUDE.md/AGENTS.md files, this flow's own
+   files, release/tag/stable wording in the title, empty or truncated file lists, and
+   anything unknown or unsure (fail closed).
 
 Merge backlog mode: `tier_r_flow.py focus` sets `backlog` when 8 or more
 non-draft PRs are open, or 3 or more green PRs are not yet queued. Then the

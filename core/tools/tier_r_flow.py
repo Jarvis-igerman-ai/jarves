@@ -7,7 +7,8 @@ Standard library + gh via subprocess (plan/focus only read). It decides, it neve
     python core/tools/tier_r_flow.py focus [--max-workers K] -> JSON: backlog flag, line, ordered work
 
 Rules (docs/workflow/OPERATING_MODEL.md, "Merge steward"): one Opus review per PR + head SHA; a verdict
-binds to that SHA and a new push invalidates it; max 2 review rounds, then owner; excluded paths always owner.
+binds to that SHA and a new push invalidates it; max 2 review rounds, then owner; excluded paths always owner;
+only OWNER/MEMBER/COLLABORATOR comments count; the latest verdict on the head wins.
 """
 from __future__ import annotations
 
@@ -23,16 +24,22 @@ from pathlib import Path
 MAX_ROUNDS = 2
 BACKLOG_OPEN = 8        # open non-draft PRs
 BACKLOG_GREEN = 3       # green PRs not yet queued
-VERDICT = re.compile(r"\b(SIGN-OFF|CHANGES REQUESTED)\b[^\n]*?\bhead[:= ]+([0-9a-f]{7,40})\b", re.I)
-REVIEWER = re.compile(r"\breviewer[:= ]+(\S+)", re.I)
-MODEL = re.compile(r"\bmodel[:= ]+(\S+)", re.I)
+# Machine-readable verdict: FIRST line "SIGN-OFF <40-hex head sha>" or "CHANGES REQUESTED <40-hex head sha>", plus
+# marker lines "Review-Head: <same sha>", "Review-Task: <id>", "Reviewer-Agent: <id>", "Reviewer-Model: <model>".
+# Quoted text and anything below line 1 never counts as the verdict.
+VERDICT = re.compile(r"^(SIGN-OFF|CHANGES REQUESTED)[ \t]+([0-9a-f]{40})\b", re.I)
+MARK = {k: re.compile(r"^" + k + r":[ \t]*(\S+)[ \t]*$", re.I | re.M)
+        for k in ("Review-Head", "Review-Task", "Reviewer-Agent", "Reviewer-Model")}
+AUTHOR_AGENT = re.compile(r"^Author-Agent:[ \t]*(\S+)[ \t]*$", re.I | re.M)
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")     # GitHub author association; the repo is public
 # Always owner: release/sign-off/tag/stable, Gate/approval, secrets, workflows, permission/settings/instruction files.
+# Deliberately broad (anything with "release", "approval" or "signoff" in the path): unknown means owner.
 EXCLUDED = (
     ".github/*", "CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md", "CLAUDE.local.md", ".claude/*",
-    "core/src/jarves/approvals*", "core/src/jarves/*/approvals*", "core/src/jarves/secrets*",
-    "core/src/jarves/permissions*", "core/src/jarves/release_signoff.py", "core/src/jarves/signing*",
-    "core/tools/release*", "core/tools/promote*", "core/tools/manual_test_sheet.py",
-    "core/src/jarves/dashboard_auth*", "*settings.json", "*settings.local.json",
+    "*release*", "*approval*", "*signoff*", "*sign_off*", "*secrets*", "*permissions*", "*signing*",
+    "*promote*", "core/tools/manual_test_sheet.py", "*dashboard_auth*", "*settings.json", "*settings.local.json",
+    "core/src/jarves/drive_mode.py", "core/src/jarves/skills/__init__.py", "core/tools/risk_class.py",
+    "docs/workflow/OPERATING_MODEL.md", "core/tools/tier_r_flow.py",
 )
 EXCLUDED_TITLE = re.compile(r"\b(release|sign-?off|tag|stable|promot\w*)\b", re.I)
 
@@ -43,6 +50,8 @@ def _match(path, patterns):
 
 def excluded_reason(pr):
     """Why this PR may never be auto-merged, or ''."""
+    if not pr.get("files"):
+        return "no file list (unknown): owner"
     hit = [f for f in pr.get("files") or [] if _match(f, EXCLUDED)]
     if hit:
         return "excluded path: " + ", ".join(hit[:3])
@@ -54,21 +63,29 @@ def excluded_reason(pr):
 
 
 def parse_evidence(comments):
-    """Verdicts from PR comments: [{verdict, sha, reviewer, model}] in order."""
+    """Trusted verdicts from PR comments, in order: [{verdict, sha, task, reviewer, model, complete}].
+    A comment is a dict {body, login, association}; plain strings and untrusted associations are ignored.
+    NOTE: every agent posts as one GitHub account, so authorship proves nothing about independence; the
+    Reviewer-Agent / Review-Task markers are declarations the manager checks against the ledger."""
     out = []
-    for body in comments or []:
-        m = VERDICT.search(body or "")
+    for c in comments or []:
+        if not isinstance(c, dict) or str(c.get("association") or "").upper() not in TRUSTED:
+            continue
+        body = (c.get("body") or "").replace("\r\n", "\n").lstrip("\ufeff")
+        m = VERDICT.match(body)
         if not m:
             continue
-        r, md = REVIEWER.search(body), MODEL.search(body)
-        out.append({"verdict": m.group(1).upper().replace(" ", "_"), "sha": m.group(2).lower(),
-                    "reviewer": r.group(1).lower() if r else "", "model": md.group(1).lower() if md else ""})
+        sha = m.group(2).lower()
+        mk = {k: (r.search(body).group(1) if r.search(body) else "") for k, r in MARK.items()}
+        out.append({"verdict": m.group(1).upper().replace(" ", "_"), "sha": sha, "task": mk["Review-Task"],
+                    "reviewer": mk["Reviewer-Agent"].lower(), "model": mk["Reviewer-Model"].lower(),
+                    "complete": mk["Review-Head"].lower() == sha and bool(mk["Review-Task"] and mk["Reviewer-Agent"])})
     return out
 
 
 def _at(ev, sha):
     sha = (sha or "").lower()
-    return [e for e in ev if sha and (sha.startswith(e["sha"]) or e["sha"].startswith(sha))]
+    return [e for e in ev if sha and e["sha"] == sha]
 
 
 def decide(pr, main_red=False):
@@ -98,26 +115,28 @@ def decide(pr, main_red=False):
         return out("fix", "required check red on current head")
     here = _at(ev, sha)
     changes = {e["sha"] for e in ev if e["verdict"] == "CHANGES_REQUESTED"}
-    authors = {a.lower() for a in pr.get("authors") or []}
-    good = [e for e in here if e["verdict"] == "SIGN-OFF"]
-    if good:
-        e = good[-1]
+    if len(changes) >= MAX_ROUNDS:      # round limit: a 3rd review round never happens, whatever it says
+        return out("owner", f"{MAX_ROUNDS} review rounds used: record blocker in ledger and alert")
+    authors = {a.lower() for a in pr.get("authors") or []} | {a.lower() for a in pr.get("author_agents") or []}
+    if here and here[-1]["verdict"] == "CHANGES_REQUESTED":     # the LATEST verdict on this head wins
+        return out("fix", "CHANGES REQUESTED on current head: Sonnet fixer pushes to the PR branch")
+    if here and here[-1]["verdict"] == "SIGN-OFF":
+        e = here[-1]
         if "opus" not in e["model"]:
             return out("owner", "sign-off is not from an Opus review", "model=" + (e["model"] or "unknown"))
-        if not e["reviewer"] or e["reviewer"] in authors:
-            return out("owner", "reviewer missing or is an author of the diff")
+        if not e["complete"]:
+            return out("owner", "sign-off lacks Review-Head / Review-Task / Reviewer-Agent markers")
+        if not pr.get("author_agents"):
+            return out("owner", "PR declares no Author-Agent: independence cannot be checked")
+        if e["reviewer"] in authors:
+            return out("owner", "reviewer is an author of the diff")
         if main_red:
             return out("wait", "main is red: only the fix PR is queued")
         if pr.get("merge_state") not in ("CLEAN", "BLOCKED", "HAS_HOOKS"):
             return out("wait", "merge state " + str(pr.get("merge_state")))
-        return out("queue", "Opus SIGN-OFF bound to current head " + sha[:8],
-                   "steward removes no-automerge, runs gh pr merge N --auto, confirms merge-queue entry")
-    if any(e["verdict"] == "CHANGES_REQUESTED" for e in here):
-        if len(changes) >= MAX_ROUNDS:
-            return out("owner", f"{MAX_ROUNDS} review rounds used: record blocker in ledger and alert")
-        return out("fix", "CHANGES REQUESTED on current head: Sonnet fixer pushes to the PR branch")
-    if len(changes) >= MAX_ROUNDS:
-        return out("owner", f"{MAX_ROUNDS} review rounds used: record blocker in ledger and alert")
+        return out("queue", "Opus SIGN-OFF bound to current head " + sha[:8] + " by task " + e["task"],
+                   "steward checks Review-Task/Reviewer-Agent in the ledger, removes no-automerge, runs gh pr merge N --auto, "
+                   "confirms merge-queue entry")
     return out("review", "green on head " + sha[:8] + " with no verdict for it: one Opus review task for this SHA")
 
 
@@ -167,7 +186,7 @@ def load_prs(numbers=None):
     prs = []
     for n in nums:
         info = ib.pr_info(n)
-        d = json.loads(_run(["gh", "pr", "view", str(n), "--json", "headRefOid,author,commits,comments,autoMergeRequest,isInMergeQueue"]))
+        d = json.loads(_run(["gh", "pr", "view", str(n), "--json", "headRefOid,author,body,commits,comments,autoMergeRequest,isInMergeQueue"]))
         authors = {d["author"]["login"]} | {a.get("login", "") for c in d.get("commits") or [] for a in c.get("authors") or []}
         checks = info["checks"]
         pend = any((c.get("status") or "").upper() in ("QUEUED", "IN_PROGRESS", "PENDING")
@@ -177,7 +196,9 @@ def load_prs(numbers=None):
                     "head_sha": d["headRefOid"], "authors": sorted(a for a in authors if a),
                     "checks_green": ib.checks_passed(checks), "checks_pending": pend, "merge_state": info["merge_state"],
                     "queued": bool(d.get("isInMergeQueue")) or bool(d.get("autoMergeRequest")),
-                    "comments": [c["body"] for c in d.get("comments") or []]})
+                    "author_agents": sorted({m.lower() for m in AUTHOR_AGENT.findall(d.get("body") or "")}),
+                    "comments": [{"body": c.get("body") or "", "login": (c.get("author") or {}).get("login", ""),
+                                  "association": c.get("authorAssociation") or ""} for c in d.get("comments") or []]})
     return prs
 
 
