@@ -88,6 +88,11 @@ fix_he = "הטלפון חייב להיות באותה רשת Wi-Fi והמחשב 
 fix_en = "The phone must be on the same Wi-Fi and the computer on with JARVES running. If Windows asks about the firewall, allow private networks only."
 
 [[problems]]
+he = "כתובת המחשב השתנתה והטלפון לא מתחבר, או שחומת האש חוסמת"
+en = "The computer's address changed and the phone cannot connect, or the firewall blocks it"
+fix_he = "הכתובת הקבועה (שם-המחשב.local) ופקודת חומת האש (netsh) מופיעות כרגע רק במידע הטלפון (תשובת GET /api/mobile), עדיין לא בעמוד הטלפון, ואין שינוי ב-jarvis phone status. שמרו את כתובת ה-.local במקום כתובת ה-IP שיכולה להשתנות; אם הטלפון לא פותח אותה, השתמשו ב-IP. אם Windows חוסם, הרשו רשתות פרטיות בלבד והריצו את הפקודה בעצמכם בחלון מנהל (JARVES לא מריץ אותה). הן מוצגות רק כשהיכולת דולקת."
+fix_en = "The stable computer-name.local address and a netsh firewall command are, for now, only in the phone info (the GET /api/mobile reply); the Phone page does not show them yet and jarvis phone status is unchanged. Bookmark the .local name instead of the IP, which can change; if the phone cannot open it, use the IP. If Windows blocks it, allow Private networks only and run the command yourself in an admin window (JARVES never runs it). They appear only while the feature is ON."
+[[problems]]
 he = "כפתור הדיבור לא פעיל"
 en = "The talk button is disabled"
 fix_he = "דיבור דורש חיבור מאובטח. במחשב הריצו jarvis dashboard --mobile --tls-selfsigned ואשרו את אזהרת התעודה בטלפון פעם אחת."
