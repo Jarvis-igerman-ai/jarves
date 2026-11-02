@@ -1,0 +1,1 @@
+- Fixed: the mic/stop dashboard browser test now waits for every dashboard script to finish loading and closes its browser contexts before the server stops, removing the "PAGES is not defined" and connection-aborted flake. (#488)

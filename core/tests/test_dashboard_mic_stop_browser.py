@@ -63,8 +63,26 @@ class FakeCore:
         return route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
 
 
+OPEN: list = []
+
+
+@pytest.fixture(autouse=True)
+def _close_contexts(dash):  # noqa: F811
+    """Close every browser context before the dashboard server stops (also when a test fails early), so no in-flight
+    page request hits a dead server (WinError 10053 / closed-sqlite noise, #488)."""
+    OPEN.clear()
+    yield
+    for c in OPEN:
+        try:
+            c.close()
+        except Exception:  # noqa: BLE001  (already closed)
+            pass
+    OPEN.clear()
+
+
 def open_page(browser, dash, fake, *, width=1440, lang="en"):  # noqa: F811
     ctx = browser.new_context(viewport={"width": width, "height": 800})
+    OPEN.append(ctx)
     p = ctx.new_page()
     errs: list[str] = []
     p.on("pageerror", lambda e: errs.append(str(e)))
@@ -73,6 +91,10 @@ def open_page(browser, dash, fake, *, width=1440, lang="en"):  # noqa: F811
     p.goto(dash.url + "#/home")
     p.wait_for_selector("#micPill", timeout=30000)
     p.wait_for_function("() => !!document.querySelector('.schip-stop, .schip-start')", timeout=30000)
+    # every deferred dashboard script must have loaded and run (PAGES comes from pages.js) before the test acts or
+    # closes the context; closing mid-load aborted requests and left "PAGES is not defined" page errors (#488)
+    p.wait_for_load_state("load", timeout=30000)
+    p.wait_for_function("() => typeof PAGES !== 'undefined' && !!PAGES.home", timeout=30000)
     return ctx, p, errs
 
 
