@@ -69,7 +69,9 @@ hebrew.TaskAutostart=הפעל את JARVES כשאני נכנס ל-Windows
 english.RunSetup=Set up JARVES now
 hebrew.RunSetup=הגדר את JARVES עכשיו
 english.ShowNotes=Show what is new in this version
+english.SelfCheck=Run the first self-check now (prints the result; then run "jarvis connect" for accounts)
 hebrew.ShowNotes=הצג מה חדש בגרסה הזו
+hebrew.SelfCheck=הרץ עכשיו בדיקה עצמית ראשונה (מדפיס תוצאה; אחר כך "jarvis connect" לחשבונות)
 english.GetPear=Get Pear Desktop for music (optional, separate app)
 hebrew.GetPear=הורד את Pear Desktop למוזיקה (אופציונלי, תוכנה נפרדת)
 english.AskPurge=Also delete your JARVES data (memory, settings, saved keys, logs) in:%n%1%n%nChoose No to keep it for a later reinstall.
@@ -136,6 +138,8 @@ Filename: "{app}\python\pythonw.exe"; Parameters: "{code:DashboardRunArgs}"; Wor
 ; Silent installs: JARVES-Setup.exe /VERYSILENT /SETUPANSWERS=C:\path\answers.json applies a setup answers file (no
 ; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" setup --answers ""{param:SETUPANSWERS|}"""""; WorkingDir: "{app}"; Check: WizardSilent; Flags: runhidden waituntilterminated
+; #58: first-run self-check, result printed in a console (never in silent installs; accounts/keys stay out of the installer).
+Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" selftest"""; WorkingDir: "{app}"; Description: "{cm:SelfCheck}"; Flags: postinstall nowait skipifsilent
 ; Release notes: opens an HTML page (local file, written by `jarvis release-notes --open`); on by default, never in silent installs.
 Filename: "{app}\python\pythonw.exe"; Parameters: "-m jarves release-notes --open"; WorkingDir: "{app}"; Description: "{cm:ShowNotes}"; Flags: postinstall nowait skipifsilent
 Filename: "https://github.com/pear-devs/pear-desktop/releases"; Description: "{cm:GetPear}"; Flags: postinstall shellexec nowait skipifsilent unchecked
