@@ -616,9 +616,11 @@ class Store:
             self._bump(db)
         return agent
 
-    def manager_continue(self, agent_id):
-        """At most two native Stop continuations/hour, only for truly ready work.
+    def manager_continue(self, agent_id, worker_limit=3):
+        """Native Stop continuations, only for truly runnable ready work (one shared _ready filter, #855/#858).
 
+        Only continuations that carry runnable work are counted. While fewer than worker_limit workers are
+        busy the safety cap is 12/hour, otherwise 2/hour. The hook still never loops under stop_hook_active.
         This is a bounded 'do not stop with authorised work' signal, never a
         permission grant or an attempt to resurrect a dead Claude process.
         """
@@ -629,10 +631,12 @@ class Store:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
                 return []
+            busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
+            cap = 12 if busy < worker_limit else 2
             key = "native_continue:" + _id(agent_id)
             row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
             times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
-            if len(times) >= 2:
+            if len(times) >= cap:
                 return []
             times.append(self.clock())
             self._set_meta(db, key, times)
