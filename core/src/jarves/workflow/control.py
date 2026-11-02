@@ -53,7 +53,7 @@ def task_context(store: Store, task: dict) -> dict:
                                          "decided_at": q.get("answered_at"), "channel": q.get("channel"),
                                          "needs_owner_confirmation": q.get("needs_owner_confirmation", False)}
                                        for q in store.snapshot()["questions"]
-                                       if q["task_id"] == task["id"] and q["status"] == "answered"]}
+                                       if q["task_id"] == task["id"] and q["status"] == "answered" and not q.get("held")]}
 
 
 def assignment(task: dict, agent_id: str, workflow_home: Path) -> str:

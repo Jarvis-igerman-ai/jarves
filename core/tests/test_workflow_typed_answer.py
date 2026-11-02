@@ -86,6 +86,74 @@ class TypedAnswerTests(unittest.TestCase):
         q = self.status()
         self.assertEqual((q["status"], q["answer"]), ("answered", "a"))
 
+    def task(self):
+        return next(t for t in self.store.snapshot()["tasks"] if t["id"] == "t1")
+
+    def forge(self):
+        import io, json, sys
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": str(ROOT), "prompt": f"ANSWER {self.q}: yes go"}
+        self.store.close()
+        with patch.dict(os.environ, {"CLAUDE_CODE_ENTRYPOINT": "cli"}), \
+             patch.object(sys, "stdin", type("S", (), {"buffer": io.BytesIO(json.dumps(payload).encode())})()), \
+             patch.object(sys, "stdout", io.StringIO()):
+            hooks.main(["--home", self.temp.name, "--repo-root", str(ROOT)])
+        self.store = Store(Path(self.temp.name) / "workflow.db")
+
+    def test_unconfirmed_answer_keeps_task_blocked_and_unassigned(self):
+        from jarves.workflow.control import task_context
+        self.store.register_agent({"id": "w1", "label": "w1", "lane": "bugs", "provider": "claude-native",
+                                   "session_id": "native:w1", "project": "x"})
+        self.assertEqual(self.task()["state"], "waiting_owner")
+        self.forge()
+        q = self.status()
+        self.assertEqual((q["status"], q["answered_by"]), ("answered", "unverified (Claude window)"))
+        self.assertEqual(self.task()["state"], "waiting_owner")
+        self.assertEqual(task_context(self.store, self.task())["owner_decisions"], [])
+        self.assertIsNone(self.store.claim("w1"))
+        with self.assertRaises(ValueError):
+            self.store.transition("t1", {"state": "queued"})
+
+    def test_confirm_from_agent_or_pipe_fails(self):
+        from test_workflow_owner_answer_guard import run_cli
+        self.forge()
+        self.store.close()
+        home = Path(self.temp.name)
+        for tty, env in ((True, {"JARVES_WORKFLOW_AGENT": "a1"}), (False, None)):
+            code, _, err = run_cli(home, "confirm", "--id", self.q, tty=tty, env=env)
+            self.assertEqual(code, 1)
+            self.assertIn("refused", err)
+        self.store = Store(home / "workflow.db")
+        self.assertEqual(self.task()["state"], "waiting_owner")
+        self.assertTrue(self.status()["needs_owner_confirmation"])
+        with self.assertRaises(PermissionError):
+            self.store.confirm(self.q, channel="claude-window")
+
+    def test_confirm_by_owner_terminal_unblocks(self):
+        from jarves.workflow.control import task_context
+        from test_workflow_owner_answer_guard import run_cli
+        self.forge()
+        self.store.close()
+        home = Path(self.temp.name)
+        code, _, _ = run_cli(home, "confirm", "--id", self.q, tty=True)
+        self.assertEqual(code, 0)
+        self.store = Store(home / "workflow.db")
+        self.assertEqual(self.task()["state"], "queued")
+        self.assertFalse(self.status()["needs_owner_confirmation"])
+        self.assertEqual(task_context(self.store, self.task())["owner_decisions"][0]["answer"], "yes go")
+        with self.assertRaises(ValueError):
+            self.store.confirm(self.q, channel="dashboard")
+
+    def test_confirm_by_dashboard_channel_and_reopen_clears_hold(self):
+        self.fire(f"ANSWER {self.q}: a")
+        self.store.confirm(self.q, by="owner (dashboard session)", channel="dashboard")
+        self.assertEqual(self.task()["state"], "queued")
+        self.store.reopen(self.q, channel="dashboard")
+        self.assertEqual(self.task()["state"], "waiting_owner")
+        self.fire(f"ANSWER {self.q}: b")
+        self.store.reopen(self.q, channel="dashboard")
+        self.store.answer(self.q, "c", answered_by="owner (dashboard session)", channel="dashboard")
+        self.assertEqual(self.task()["state"], "queued")
+
     def test_hook_is_synchronous_so_it_can_block(self):
         self.assertNotIn("UserPromptSubmit", bootstrap.ASYNC_EVENTS)
 
