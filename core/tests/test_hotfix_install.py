@@ -358,7 +358,7 @@ def test_git_skips_packaging_lists_it_and_applies_python(po):
     try:
         r = hf.apply(inst, s, home, FakeHooks().hooks(), dry_run=True)
         assert r["status"] == "dry-run" and r["files"] == ["a.py"]
-        assert r["pending_installer"] == ["packaging/smoke_windows.ps1", "packaging/windows/jarves.iss"]
+        assert r["pending_installer"] == ["docs/NOW.md", "packaging/smoke_windows.ps1", "packaging/windows/jarves.iss"]
         assert (inst / "a.py").read_text() == "A=1\n" and not (home / "hotfix").exists()
         f = FakeHooks()
         m = hf.apply(inst, s, home, f.hooks())
@@ -428,6 +428,7 @@ def test_git_refuses_a_new_third_party_import_but_allows_installed_and_stdlib(po
                 "core/src/jarves/b.py": "def f():\n    import zzz_not_installed_mod\n"})
     try:
         (inst.parent / "okmod").mkdir()
+        (inst.parent / "okmod" / "sub.py").write_text("", encoding="utf-8")
         with pytest.raises(hf.Refused) as e:
             hf.apply(inst, s, home, FakeHooks().hooks())
         assert e.value.code == "HOTFIX_NEW_DEPENDENCY" and "zzz_not_installed_mod" in e.value.message
