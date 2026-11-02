@@ -1,0 +1,1 @@
+- Fixed: jarvis phone status no longer says it is listening on the home network while phone access is off (V5-CORE-WIRING).
