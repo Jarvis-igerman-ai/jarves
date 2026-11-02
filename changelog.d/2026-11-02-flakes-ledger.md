@@ -1,0 +1,1 @@
+- Docs: flakes ledger of 2 Nov 2026 lists every quarantined test with its issue, fix PR and whether the entry can be lifted (#778).
