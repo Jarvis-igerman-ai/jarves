@@ -516,8 +516,17 @@ def verdict(store, now: float | None = None) -> dict:
         ready = ready_count(store, db)
         last = _last_activity(store, db)
     running = {t["id"] for t in tasks if t["state"] == "running"}
-    active = sum(1 for a in agents if a.get("task_id") in running and a.get("status") != "offline"
-                 and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S)
+    lane_of = {t["id"]: t.get("lane") or "?" for t in tasks}
+    # A native worker counts when fresh and it holds a running task or reports status "running" (native workers may work
+    # before or without claiming a task); a factory with autopilot off must not read as idle (#796).
+    live = [a for a in agents if a.get("status") != "offline"
+            and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S
+            and (a.get("task_id") in running or a.get("status") == "running")]
+    active = len(live)
+    running_by_lane: dict[str, int] = {}
+    for a in live:
+        lane = {"features": "feat"}.get(lane_of.get(a.get("task_id"), "unclaimed"), lane_of.get(a.get("task_id"), "unclaimed"))
+        running_by_lane[lane] = running_by_lane.get(lane, 0) + 1
     decision = _meta(store, DECISION_KEY, {})
     from . import autopilot_loop as loop
     pause = loop._load(store)
@@ -526,7 +535,7 @@ def verdict(store, now: float | None = None) -> dict:
         incidents = [i["key"] for i in detect_incidents(store, now)]
     except Exception:  # noqa: BLE001
         incidents = []
-    detail = {"active": active, "ready": ready, "questions": len(questions), "incidents": incidents,
+    detail = {"active": active, "running_by_lane": running_by_lane, "ready": ready, "questions": len(questions), "incidents": incidents,
               "layers": {k: v["status"] for k, v in rows.items()}, "autopilot_reason": decision.get("reason", "")}
     oldest_q = min(q.get("created_at") or now for q in questions) if questions else None
 
