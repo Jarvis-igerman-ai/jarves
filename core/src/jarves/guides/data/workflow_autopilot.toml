@@ -31,6 +31,11 @@ en = "Alerts show in the console and in status: lane_idle, worker_restarted, tas
 action = "command:jarvis workflow autopilot status"
 
 [[steps]]
+he = "האטה לפי שימוש שבועי: מ-80% (usage_slow_pct) מתחילה משימה אחת בכל פעם ורק כשדבר אינו רץ; מ-95% (usage_stop_pct) לא מתחילות משימות חדשות, העובדים הרצים מסיימים ותקבלו התראה. המשך: jarvis workflow autopilot resume, או באיפוס השבועי. האחוז נקרא מהקובץ usage.json והוא הערכה; בלי קובץ טרי הכול רץ כרגיל."
+en = "Weekly usage throttle: from 80% (usage_slow_pct) one task starts at a time and only when nothing runs; from 95% (usage_stop_pct) no new tasks start, running workers finish and you get an alert. Continue with jarvis workflow autopilot resume, or at the weekly reset. The percentage is read from usage.json and is an estimate; with no fresh file everything runs as usual."
+action = "command:jarvis workflow autopilot resume"
+
+[[steps]]
 he = "הרשאת התחלה: jarvis workflow autopilot grant. ההרשאה מוגבלת בזמן (עד 365 יום, ברירת המחדל 365), לפרויקט, למודלים ולמספר עובדים מוגדרים. בדקו עם jarvis workflow autopilot grant-status וסיימו מיד עם jarvis workflow autopilot revoke."
 en = "Start grant: jarvis workflow autopilot grant. It is time-limited (up to 365 days, default 365) and tied to one project, the listed models and a worker count. Check it with jarvis workflow autopilot grant-status and end it at once with jarvis workflow autopilot revoke."
 action = "command:jarvis workflow autopilot grant-status"

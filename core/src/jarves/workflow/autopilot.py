@@ -24,6 +24,7 @@ DEFAULTS = {
               "steward": {"on": True, "model": "claude-haiku-5-5"},
               "review": {"model": "claude-opus-5-5"}},
     "max_concurrent": 3, "max_starts_per_hour": 6,
+    "usage_slow_pct": 80, "usage_stop_pct": 95,   # weekly Claude usage throttle (#776), see autopilot_usage.py
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
     "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
                  "agent_retention_s": 86400},  # console hides agents offline longer than this (#730)
@@ -40,7 +41,8 @@ def _strings(value, name, limit=20):
         raise ValueError(f"{name} must be a short list of short strings")
 
 
-OPTIONAL_KEYS = ("worker_allowed_tools",)       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
+USAGE_KEYS = ("usage_slow_pct", "usage_stop_pct")      # absent in older policy files: defaults apply
+OPTIONAL_KEYS = ("worker_allowed_tools",)      # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
@@ -57,7 +59,7 @@ def _worker_tools(value) -> None:
 
 def validate(policy: dict) -> dict:
     """Return the policy if valid, else raise ValueError. Unknown keys are refused."""
-    if not isinstance(policy, dict) or not set(DEFAULTS) <= set(policy) <= set(DEFAULTS) | set(OPTIONAL_KEYS):
+    if not isinstance(policy, dict) or not set(DEFAULTS) - set(USAGE_KEYS) <= set(policy) <= set(DEFAULTS) | set(OPTIONAL_KEYS):
         raise ValueError("policy keys must be exactly: " + ", ".join(DEFAULTS))
     for key in ("enabled", "kill"):
         if type(policy[key]) is not bool:
@@ -71,6 +73,11 @@ def validate(policy: dict) -> dict:
     _strings(policy["bug_labels"], "bug_labels")
     _int(policy["max_concurrent"], "max_concurrent", 0, 8)
     _int(policy["max_starts_per_hour"], "max_starts_per_hour", 0, 60)
+    slow, stop = policy.get("usage_slow_pct", 80), policy.get("usage_stop_pct", 95)
+    _int(slow, "usage_slow_pct", 1, 100)
+    _int(stop, "usage_stop_pct", 1, 100)
+    if slow >= stop:
+        raise ValueError("usage_slow_pct must be lower than usage_stop_pct")
     lanes = policy["lanes"]
     if not isinstance(lanes, dict) or set(lanes) != set(DEFAULTS["lanes"]):
         raise ValueError("lanes must be bugs, features, steward, review")
@@ -105,6 +112,9 @@ def load(home: Path) -> tuple[dict, str]:
         return copy.deepcopy(DEFAULTS), ""
     try:
         policy = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(policy, dict):
+            for key in USAGE_KEYS:
+                policy.setdefault(key, DEFAULTS[key])
         if isinstance(policy, dict) and isinstance(policy.get("watchdog"), dict):
             # Policy files written before #730 lack the retention key; the default keeps them valid.
             policy["watchdog"].setdefault("agent_retention_s", DEFAULTS["watchdog"]["agent_retention_s"])
@@ -244,7 +254,13 @@ def view(snapshot: dict, home: Path) -> dict:
                      "labels": pr.get("labels", []), "priority": 9, "task_id": ", ".join(linked), "task_state": "",
                      "ci": "unknown"})
     work.sort(key=lambda w: (w["kind"] != "issue", w["priority"], w["number"]))
-    return {"policy": policy, "error": error, "work": work, "synced_at": source.get("synced_at", 0),
+    import time
+    from . import autopilot_usage
+    try:
+        resumed = bool(json.loads((Path(home) / "autopilot_state.json").read_text(encoding="utf-8")).get("usage_resume"))
+    except (OSError, ValueError, AttributeError):
+        resumed = False
+    return {"policy": policy, "error": error, "usage": autopilot_usage.view(policy, home, time.time(), resumed), "work": work, "synced_at": source.get("synced_at", 0),
             "sync_error": source.get("error", "")}
 
 
@@ -264,4 +280,11 @@ def command(store, home: Path, op: str, args: list[str]) -> dict:
         return {"policy": policy}
     if op == "once":
         return step(store, home)
-    raise ValueError("usage: autopilot status|set|stop|start|once")
+    if op == "resume":
+        from .autopilot_loop import _load, _save
+        state = _load(store)
+        state["usage_resume"] = True
+        _save(store, state)
+        store.record_event("autopilot_policy", "Owner resumed autopilot above the usage stop line (one task at a time)")
+        return {"resumed": True}
+    raise ValueError("usage: autopilot status|set|stop|start|once|resume")

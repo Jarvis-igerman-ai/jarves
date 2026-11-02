@@ -1,0 +1,1 @@
+- Added: autopilot usage-aware throttle: from `usage_slow_pct` (80) of weekly Claude usage it starts one task at a time, from `usage_stop_pct` (95) it starts none and alerts the owner; `jarvis workflow autopilot resume` or the weekly reset continues. Usage is read from `usage.json` (estimate); the real collector is UNVERIFIED (#776).

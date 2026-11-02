@@ -36,7 +36,7 @@ _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
 _CLAIM_FAILED: set = set()
 
 def load_policy(home: Path) -> dict:
@@ -233,6 +233,27 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
     now = store.clock()
     starts = [t for t in state.get("starts", []) if now - t < 3600]
     running = [a for a in snap["agents"] if a.get("autopilot") and a.get("task_id")]
+    from . import autopilot_usage as usage_mod
+    usage = usage_mod.read_usage(store.path.parent, now)
+    if state.get("usage_resume") and (usage is None or usage["pct"] < usage_mod.thresholds(policy)[1]):
+        state.pop("usage_resume", None)          # the week reset (or the source is gone): the override ends
+        _save(store, state)
+    umode = usage_mod.mode(policy, usage, bool(state.get("usage_resume")))
+    if umode == "stop":
+        if not state.get("usage_notified"):
+            pct = round(usage["pct"], 1)
+            text = (f"Autopilot stopped starting new tasks: weekly Claude usage is {pct}% "
+                    f"({'estimate' if usage['estimated'] else 'measured'}). Running workers finish. "
+                    "Resume with: jarvis workflow autopilot resume, or wait for the weekly reset.")
+            state["usage_notified"] = True
+            _save(store, state)
+            store.record_event("autopilot_usage_stop", text)
+            notify(profile_home, "usage_stop", text)
+            actions.append({"action": "usage_stop", "pct": pct})
+        _LAST_SIG[key] = sig
+        return actions
+    if state.pop("usage_notified", None):
+        _save(store, state)
     for lane, conf in policy.get("lanes", {}).items():
         if not isinstance(conf, dict) or "workers" not in conf:
             continue
@@ -240,6 +261,7 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
             break
         skipped: set[str] = set()
         while (sum(1 for a in running if a["lane"] == lane) < int(conf["workers"])
+               and not (umode == "slow" and running)      # from slow_pct: one at a time, only when nothing else runs
                and len(running) < int(policy.get("max_concurrent", 1))
                and len(starts) < int(policy.get("max_starts_per_hour", 1))):
             task = _pick(snap, policy, lane, skipped)
