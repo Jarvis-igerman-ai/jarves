@@ -360,10 +360,12 @@ class Operations:
             await self.cheer.check()
         except Exception:
             logs.error("goals", "GOAL_DONE_LINE_FAILED", "goal finished line failed", exc=True)
-        try:
-            await self.plan_cheer.check()
-        except Exception:
-            logs.error("goals", "PLAN_DONE_LINE_FAILED", "plan finished line failed", exc=True)
+        plan_cheer = getattr(self, "plan_cheer", None)       # absent on a partial Operations (tick tests)
+        if plan_cheer is not None:
+            try:
+                await plan_cheer.check()
+            except Exception:
+                logs.error("goals", "PLAN_DONE_LINE_FAILED", "plan finished line failed", exc=True)
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
