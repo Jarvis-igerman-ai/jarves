@@ -603,3 +603,22 @@ async def test_failure_message_returned_to_the_caller_is_redacted(tmp_path, monk
     monkeypatch.setattr(gen, "run_sandboxed", boom)
     r = await mgr.run("shopping", "shopping_list", {})
     assert not r.ok and "sk-ant-api03-abcdefghijklmnopqrstuvwxyz" not in r.message
+
+
+def test_legitimate_secret_handling_code_is_accepted(tmp_path):
+    _, mgr = setup(tmp_path)
+    for py in ("import os\napi_key = os.environ.get('OPENAI_API_KEY')\n",
+               "def f(token: str):\n    return token\n",
+               "token = ctx.storage_get('token')\npassword = get_password()\n"):
+        assert mgr.propose(_md(name="notes_helper"), py)["id"] == "notes_helper"
+    assert mgr.propose(_md(name="notes_helper", body="The password: never store it, use the environment."))["id"] == "notes_helper"
+
+
+def test_literal_secret_shapes_are_refused(tmp_path):
+    _, mgr = setup(tmp_path)
+    for py in ("KEY = 'AKIA" + "ABCDEFGHIJKLMNOP'", "api_key = 'abc12345xyz'", "GITHUB_TOKEN=abcdef1234567890abcd",
+               '{"client_secret": "Zx9Yw8Vu7"}', "DB_PASSWORD = 'hunter22hunter'", "k = 'sk_live_" + "abcdefgh12345'",
+               "k = 'AIza" + "A" * 35 + "'", "-----BEGIN RSA PRIVATE KEY-----\nabc"):
+        rep = mgr.propose(_md(name="notes_helper"), py)
+        assert not rep["ok"] and rep["id"] is None, py
+        assert not (mgr.drafts / "notes_helper").exists()

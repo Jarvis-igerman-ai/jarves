@@ -365,6 +365,29 @@ _STATE_LOCKS: dict[str, threading.RLock] = {}
 _STATE_LOCKS_GUARD = threading.Lock()
 
 
+_SECRET_SHAPES = [re.compile(x) for x in (
+    r"\bAKIA[0-9A-Z]{16}\b", r"\bsk_(?:live|test)_[A-Za-z0-9]{8,}", r"\bAIza[0-9A-Za-z_\-]{30,}",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----")]
+_NAMED_SECRET = re.compile(
+    r"(?i)\b[\w-]*(?:api[_-]?key|token|secret|password|passwd|pwd)[\w-]*[\"']?\s*[:=]\s*"
+    r"(?:[\"'](?P<q>[^\"'\s]{8,})[\"']|(?P<u>[A-Za-z0-9_\-/+=]{16,})(?![\w.(\[]))")
+
+
+def _has_literal_secret(text: str) -> bool:
+    """A draft holds a real credential: a known token shape, or a secret-named field set to a literal value.
+    Identifiers, annotations, env/storage lookups, calls and prose ("the password: never store it") do not count."""
+    if logs.has_secret(text) or any(p.search(text) for p in _SECRET_SHAPES):
+        return True
+    for m in _NAMED_SECRET.finditer(text):
+        v = m.group("q") or m.group("u")
+        if m.group("u") and not any(c.isdigit() for c in v):
+            continue
+        if v.isupper() or v.startswith("<") or "***" in v:       # an env var NAME or a placeholder
+            continue
+        return True
+    return False
+
+
 class GeneratedSkills:
     """Drafts, installs, grants and the runner for one data dir (Core and dashboard processes share the files)."""
 
@@ -528,7 +551,7 @@ class GeneratedSkills:
             return {"ok": False, "errors": ["draft too large"], "warnings": [], "id": None}
         md = _lf(md)                      # #314 item 4: the draft is read back with LF endings, so hash what is stored
         py = _lf(py) if py is not None else None
-        if logs.redact(md) != md or (py is not None and logs.redact(py) != py):
+        if _has_literal_secret(md) or (py is not None and _has_literal_secret(py)):
             # #862 (CodeQL 46/47): a draft holding secret-like text is refused; nothing is written to disk
             return {"ok": False, "errors": ["secret-like text found in the draft; keep secrets in the environment and resubmit"],
                     "warnings": [], "id": None}
