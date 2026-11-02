@@ -32,6 +32,38 @@ def test_stale_and_missing(tmp_path):
     assert factory_sim_alerts(tmp_path, now=100.0 + 3600) == []
 
 
+def test_unreadable_result_file_alerts(tmp_path):
+    (tmp_path / "factory_sim_last.json").write_text("{not json", encoding="utf-8")
+    assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
+
+
+def test_file_issue_skips_when_duplicate_check_fails(monkeypatch):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 1, "", "boom")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "tail")
+    assert len(calls) == 1 and "list" in calls[0]
+
+
+def test_file_issue_body_has_no_raw_output(monkeypatch):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    tail = "noise C:\\Users\\bob\\secret.py sk-abcdefghijkl123\nFAILED core/tests/t.py::x - boom\n=== 1 failed in 2s ==="
+    factory_sim.file_issue(["x"], tail)
+    body = calls[1][calls[1].index("--body") + 1]
+    assert "noise" not in body and "sk-abc" not in body and "C:\\Users" not in body
+    assert "FAILED core/tests/t.py::x" in body
+
+
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out

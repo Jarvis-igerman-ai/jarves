@@ -45,17 +45,31 @@ def record(home: str, results: list, failed: int, tail: str) -> None:
         file_issue(failing, tail)
 
 
+def _summary(tail: str, limit: int = 600) -> str:
+    """Short, redacted summary for a public issue: no raw pytest output, no paths, no key-like strings."""
+    import re
+    lines = [ln.strip() for ln in (tail or "").splitlines()
+             if re.match(r"^(FAILED|ERROR) |^=+ .*(passed|failed|error)", ln.strip())]
+    text = "\n".join(lines[-5:]) or "(see local run for details)"
+    text = re.sub(r"[A-Za-z]:[\\/][^\s:]*", "<path>", text)
+    text = re.sub(r"\b(sk-|ghp_|gho_|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
+    return text[:limit]
+
+
 def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves") -> None:
     title = "Factory nightly simulation failed: " + ", ".join(failing)[:120]
     try:
         found = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open", "--search",
                                 "Factory nightly simulation failed in:title", "--json", "number"],
-                               capture_output=True, text=True, timeout=60).stdout
-        if found.strip() not in ("", "[]"):
+                               capture_output=True, text=True, timeout=60)
+        if found.returncode != 0:
+            print("duplicate check failed (gh issue list); not filing an issue")
+            return
+        if found.stdout.strip() not in ("", "[]"):
             print("an open nightly-failure issue already exists; not filing another")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
-                + ", ".join(failing) + "\n\nTail:\n```\n" + tail + "\n```\nRe-run: python core/tools/factory_sim.py -v")
+                + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
         subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
                         "--label", "showstopper", "--label", "P1"], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as exc:

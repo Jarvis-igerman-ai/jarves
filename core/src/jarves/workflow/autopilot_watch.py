@@ -351,11 +351,15 @@ def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
     import time
     from pathlib import Path
     path = Path(home) / "factory_sim_last.json"
+    if not path.exists():
+        return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         at = float(data.get("at") or 0)
     except (OSError, ValueError, TypeError, AttributeError):
-        return []
+        # fail closed: a result file that exists but cannot be read must not look healthy
+        return [{"kind": "factory_sim_unreadable", "summary": "Nightly factory simulation result file is unreadable",
+                 "task_id": None, "agent_id": None}]
     if not data.get("ok", False):
         failed = ", ".join(str(x) for x in (data.get("failed") or ["unknown"]))[:200]
         return [{"kind": "factory_sim_failed", "summary": f"Nightly factory simulation failed: {failed}", "task_id": None, "agent_id": None}]
