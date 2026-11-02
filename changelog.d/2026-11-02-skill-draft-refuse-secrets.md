@@ -1,0 +1,1 @@
+- Security: a Skill draft containing secret-like text (API keys, tokens) is now refused and never written to disk, instead of being saved with the text masked (#862, CodeQL alerts 46 and 47).
