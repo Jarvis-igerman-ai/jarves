@@ -19,6 +19,10 @@ def default_profile() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "jarves"
 
 
+REQUIRED_FLAGS = {"next": ("agent",), "report": ("agent",), "agent": ("agent",), "transition": ("task",),
+                  "recover": ("task",), "authorize": ("task",), "check": ("task",), "reply": ("id",)}
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
@@ -187,6 +191,11 @@ def main(argv=None) -> int:
         result = census(home, a.port)
         print(json.dumps(result, ensure_ascii=False) if a.json else ("PASS " if result["ok"] else "FAIL ") + result["detail"])
         return 0 if result["ok"] else 1
+    for flag in REQUIRED_FLAGS.get(a.action, ()):
+        if not getattr(a, flag.replace("-", "_")):
+            hint = " (your workflow agent ID is in the SubagentStart/SessionStart context)" if flag == "agent" else ""
+            print(json.dumps({"error": f"{a.action} needs --{flag} VALUE{hint}"}, ensure_ascii=False), file=sys.stderr)
+            return 1
     store = Store(home / "workflow.db")
     try:
         if a.action == "questions-rewrite":

@@ -206,6 +206,8 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             f"Your workflow agent ID is {ident}; workflow data directory is {store.path.parent}. "
             "Use workflow CLI to claim/checkpoint work, record evidence and queue owner planning questions; "
             f"run it exactly as: {console_command(root, store.path.parent)} <command> "
+            f"and pass --agent {ident} to next/report (next --agent {ident} --task TASK_ID); transition needs --task TASK_ID. "
+            "Never register an ad-hoc agent id. "
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases." +
