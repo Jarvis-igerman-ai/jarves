@@ -129,3 +129,12 @@ def test_plain_http_update_base_is_named_not_silently_replaced(tmp_path, monkeyp
     s = UpdateChecker(tmp_path, http=lambda url, h: hits.append(url) or (404, None), current="3.0.0.5",
                       public_keys=[], base_url="http://example.test/releases").check(force=True)
     assert not s["available"] and "must be an https://" in s["error"] and hits == []
+
+
+def test_user_agents_and_autopilot_links_name_the_org_repo():
+    """V5-REPO-MOVE (#456): no code constant points at the moved igalgerman/jarves address."""
+    src = ROOT / "core" / "src" / "jarves"
+    for rel in ("journey.py", "phone_location.py", "workflow/autopilot_watch.py"):
+        text = (src / rel).read_text(encoding="utf-8")
+        assert "igalgerman/jarves" not in text, rel
+        assert "Jarvis-igerman-ai/jarves" in text, rel

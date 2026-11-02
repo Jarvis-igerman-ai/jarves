@@ -299,7 +299,7 @@ def gate_question(task: dict) -> dict:
     ``group`` = gate:<version> lets the console show one checklist card per version.
     """
     link = task.get("source_url") or (
-        f"https://github.com/igalgerman/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
+        f"https://github.com/Jarvis-igerman-ai/jarves/issues/{task['issue_numbers'][0]}" if task.get("issue_numbers") else "")
     scope = task.get("scope")
     minutes = scope.get("owner_minutes") if isinstance(scope, dict) else None
     minutes = minutes if type(minutes) is int and 0 < minutes <= 480 else 15
