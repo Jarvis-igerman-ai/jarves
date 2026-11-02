@@ -225,7 +225,8 @@ def main(argv=None) -> int:
             return 0
         # Stop must not be lost to the supervisor tick holding the DB: retry once. Both tries fit inside the 3 s hook
         # timeout that bootstrap installs (1.2 + 0.3 + 1.2 s). Every other hook stays at 1.5 s.
-        is_stop = payload.get("hook_event_name") == "Stop"
+        # SubagentStart/SessionStart register the worker; losing them leaves "unknown agent" (#786), so they retry too.
+        is_stop = payload.get("hook_event_name") in {"Stop", "SubagentStart", "SessionStart"}
         store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
         agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
         try:
