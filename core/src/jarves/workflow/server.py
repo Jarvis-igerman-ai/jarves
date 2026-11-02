@@ -375,8 +375,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.server.unlock_wrong = ("", 0)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
-            self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
-        self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})
+            ttl = owner_unlock_s(self.server.home)
+            self.server.unlocked[session] = now + ttl
+            # The session must live as long as the unlock window the UI promises (same single session, no extra one).
+            self.server.sessions[session] = max(self.server.sessions.get(session, 0), now + ttl)
+        self._json(200, {"ok": True, "result": {"remaining_s": ttl}},
+                   {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max(ttl, 43200)}"})
 
     def _login(self, data):
         now = time.time()

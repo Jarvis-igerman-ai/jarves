@@ -107,6 +107,25 @@ class UnlockTests(unittest.TestCase):
         code = unlock.issue(self.home)
         self.assertEqual(self.request("/api/unlock", {"code": code})[2]["result"]["remaining_s"], 600)
 
+    def test_session_lives_as_long_as_the_unlock_window(self):
+        sid = self.login()
+        code, headers, data = self.request("/api/unlock", {"code": unlock.issue(self.home)})
+        self.assertEqual(code, 200)
+        self.assertGreaterEqual(self.server.sessions[sid], self.server.unlocked[sid])
+        self.assertGreater(self.server.sessions[sid] - __import__("time").time(), 7 * 86400 - 60)
+        self.assertIn("Max-Age=604800", headers["Set-Cookie"])
+        self.assertEqual(len(self.server.sessions), 1)
+
+    def test_cli_unlock_prints_hours_when_under_a_day(self):
+        policy = autopilot.load(self.home)[0]
+        policy["watchdog"]["owner_unlock_s"] = 6 * 3600
+        autopilot.save(self.home, policy)
+        out = io.StringIO()
+        with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
+        self.assertIn("unlocked for 6 hours", out.getvalue())
+        self.assertNotIn("0 days", out.getvalue())
+
     def test_unlock_limit_is_one_week(self):
         policy = autopilot.load(self.home)[0]
         policy["watchdog"]["owner_unlock_s"] = 7 * 86400
