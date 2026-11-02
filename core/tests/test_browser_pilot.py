@@ -345,3 +345,16 @@ def test_623_pending_dns_lookups_are_bounded(monkeypatch):
     with pytest.raises(OSError):
         bp.system_resolver("example.com")
     assert bp._PENDING == bp.MAX_PENDING_LOOKUPS
+
+
+def test_623_pending_lookups_are_bounded_and_fail_closed(monkeypatch):
+    import threading
+    gate = threading.Event()
+    monkeypatch.setattr(bp.socket, "getaddrinfo", lambda *a, **k: gate.wait(5))
+    monkeypatch.setattr(bp, "RESOLVE_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(bp, "MAX_PENDING_LOOKUPS", 2)
+    monkeypatch.setattr(bp, "_PENDING", 0)
+    for i in range(6):                                   # every one fails closed; hung lookups never exceed the bound
+        assert bp.vet_url(f"https://h{i}.example.com/") == ""
+    assert bp._PENDING <= 2
+    gate.set()
