@@ -1,1 +1,1 @@
-- Installer (#58): the finish page offers the first-run self-check (`jarvis selftest`) and points to `jarvis connect`; silent installs unchanged.
+- Added: installer (#58): the finish page offers the first-run self-check (`jarvis selftest`) and points to `jarvis connect`; silent installs unchanged.
