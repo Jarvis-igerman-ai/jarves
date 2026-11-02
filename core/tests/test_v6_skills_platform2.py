@@ -15,12 +15,12 @@ from jarves.skills import manifest2 as m2
 from jarves.skills import platform2 as p2
 
 KEY = b"0123456789abcdef-owner-key"
-SECRET_BODY = "ZZ_BODY_MARKER_never_in_logs"
-SECRET_CODE = "ZZ_CODE_MARKER_never_in_logs"
+MARKER_BODY = "ZZ_BODY_MARKER_never_in_logs"
+MARKER_CODE = "ZZ_CODE_MARKER_never_in_logs"
 
-V1_MD = f"---\nname: shopping\ntitle: Shopping\ndescription: Keeps a list\ncapabilities: [storage]\n---\n{SECRET_BODY}\n"
+V1_MD = f"---\nname: shopping\ntitle: Shopping\ndescription: Keeps a list\ncapabilities: [storage]\n---\n{MARKER_BODY}\n"
 V1_PY = f'''
-"""{SECRET_CODE}"""
+"""{MARKER_CODE}"""
 TOOLS = [
     {{"name": "shopping_add", "description": "Add one item", "permission": "action", "args": {{"item": "string"}}}},
     {{"name": "shopping_list", "description": "Read the list", "permission": "read", "args": {{}}}},
@@ -39,7 +39,7 @@ def shopping_list(args, ctx):
 '''
 
 
-def v2_md(version="1.0.0", perms="[read, action, storage]", body=SECRET_BODY, extra=""):
+def v2_md(version="1.0.0", perms="[read, action, storage]", body=MARKER_BODY, extra=""):
     return (f"---\nname: shopping\ntitle: Shopping\ndescription: Keeps a list\nmanifest: 2\nversion: {version}\n"
             f"permissions: {perms}\nsurfaces: [voice, cli]\n{extra}---\n{body}\n")
 
@@ -139,7 +139,7 @@ def test_tampered_manifest_is_never_installed(tmp_path, case):
     if case != "no_key":
         put_key(tmp_path)
     if case == "body_changed":
-        md = signed(v2_md(), V1_PY).replace(SECRET_BODY, SECRET_BODY + " and also something else")
+        md = signed(v2_md(), V1_PY).replace(MARKER_BODY, MARKER_BODY + " and also something else")
     rep = mgr.propose(md, V1_PY, by="voice")
     assert not rep["ok"] and rep["manifest2"]["trust"] == "tampered"
     assert any("signature does not match" in e for e in rep["errors"])
@@ -189,7 +189,7 @@ def test_update_refuses_a_tampered_new_version(tmp_path):
     _, mgr = setup(tmp_path)
     put_key(tmp_path)
     install(mgr, v2_md("1.0.0"))
-    md = signed(v2_md("1.1.0"), V1_PY).replace(SECRET_BODY, "changed after signing")
+    md = signed(v2_md("1.1.0"), V1_PY).replace(MARKER_BODY, "changed after signing")
     mgr.propose(md, V1_PY)
     plan = p2.plan_update(mgr, "shopping")
     assert plan["refused"] and plan["trust"] == "tampered"
@@ -328,7 +328,7 @@ async def test_logs_hold_no_skill_source_text(tmp_path, captured):
     await mgr.run("shopping", "shopping_list", {})
     blob = "\n".join(captured)
     assert "SKILL_V2_REFUSED" in blob and "SKILL_UPDATE_PLANNED" in blob
-    assert SECRET_BODY not in blob and SECRET_CODE not in blob and "def shopping_add" not in blob
+    assert MARKER_BODY not in blob and MARKER_CODE not in blob and "def shopping_add" not in blob
 
 
 # ---------------------------------------------------------------------- CLI
@@ -352,7 +352,7 @@ def test_cli_update_and_rollback(monkeypatch, tmp_path, capsys):
     rep = mgr.propose(v2_md("1.1.0"), V1_PY)
     assert _cli(monkeypatch, tmp_path, True, "update", "shopping") == 0
     out = capsys.readouterr().out
-    assert "added permissions: storage" in out and rep["sha256"] in out and SECRET_CODE not in out
+    assert "added permissions: storage" in out and rep["sha256"] in out and MARKER_CODE not in out
     assert mgr.view("shopping")["version"] == 1
     assert _cli(monkeypatch, tmp_path, True, "update", "shopping", "--approve", "0" * 64) == 1
     assert _cli(monkeypatch, tmp_path, True, "update", "shopping", "--approve", rep["sha256"]) == 0

@@ -15,7 +15,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "session_2026-10-19.jsonl"
 
 
 @pytest.fixture
-def dash(home):
+def dash(home, monkeypatch):
+    # clock-free: the Oct 19 fixture must not age into the auto-expiry (1792454400 = 2026-10-20 UTC)
+    _expire = diagnose.expire
+    monkeypatch.setattr(diagnose, "expire", lambda store, days=diagnose.EXPIRE_DAYS, now=None: _expire(store, days, 1792454400.0))
     st = Store(home / "store.db", tier="priority", backend_model="gpt-6-luna")
     diagnose.run(st, Config(), st.ingest_log(FIXTURE))
     st.close()
