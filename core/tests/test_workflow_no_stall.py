@@ -47,6 +47,7 @@ class AutopilotReuse(unittest.TestCase):
 
     def test_failed_claim_is_recorded_and_does_not_break(self):
         home, now, store = _store_with_task()
+        ap._CLAIM_FAILED.clear()                      # module-level dedupe set: isolate from other tests
         with mock.patch.object(Store, "claim", return_value=None):
             ap.step(store, home, start=lambda h, **r: {"ok": True}, stop=lambda h, s: {"ok": True},
                     notify=lambda *a: None, find=lambda h, a: "", force=True)

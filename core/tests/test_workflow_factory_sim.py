@@ -181,14 +181,12 @@ class SimTests(unittest.TestCase):
             now[0] += 30
         return None if started is None else (started - back) / 60
 
-    def test_sim_known_bug_763_refused_starts_eat_the_hourly_budget(self):
-        """KNOWN BUG #763 (not in #755): a refused start (NO_CORE) is appended to the hourly start list, so after a
-        long Core outage with max_starts_per_hour <= 3 the lane waits ~30 min although the Core is back. Written as
-        a strict xfail would be (the repo's no-skip rule forbids xfail): when #763 is fixed this test fails on
-        purpose; then flip it to assertLess(minutes, 25) and drop the 'known bug' name."""
+    def test_sim_refused_starts_do_not_eat_the_hourly_budget(self):
+        """Regression for #763: refused starts (NO_CORE) must not count against max_starts_per_hour, so the lane
+        starts at once when the Core is back after a long outage, even with a small budget."""
         minutes = self._outage_recovery_minutes(max_starts=2)
         self.assertIsNotNone(minutes)
-        self.assertGreaterEqual(minutes, 25, "bug #763 seems fixed: turn this into a normal regression test")
+        self.assertLess(minutes, 25)
 
     def test_sim_default_budget_recovers_after_outage(self):
         minutes = self._outage_recovery_minutes(max_starts=6)
