@@ -172,6 +172,18 @@ requires an already running allow-listed session and explicit
 - A merged task reopened to queued stays `implementation=merged` and is never listed as ready.
   Reopen it with `transition --task ID --state queued --implementation in_progress`, or route
   it to a QA task.
+- Fewer workers than the policy allows: run `workflow_console.py --home HOME worker-watch` every few
+  minutes from the wrapper (claude-j). It prints and always exits 0 with
+  `{"running":1,"allowed":4,"shortfall":3,"over":0,"ready_ids":["t1"],"action":"short|over|recovered|none|error"}`.
+  running = native non-manager workers (bugs/features lanes) with status running and a heartbeat under 30 min;
+  allowed = autopilot policy bugs.workers + features.workers (max 8); shortfall counts only when runnable
+  ready work exists (same filter as ready). With a shortfall (or over-limit) it sends ONE note
+  `WORKERS_SHORT: running N of M` / `WORKERS_OVER` to the manager, at most once per 5 minutes, plus a ledger
+  event; dedupe state lives in workflow_meta. A recovery writes a `WORKERS_OK` event. The note is shown at the
+  manager's next Stop (once, never while stop_hook_active). `status` also reports `workers` (numbers only).
+- Manager restart or nudge: ask `handover-state` first. It prints `{"ready":bool,"age_s":N,"reason":"..."}`;
+  ready is true when the manager ran `handover --note "state and next steps"` after its last activity, or has
+  been silent for the 10 minute grace period, or no manager is registered. Hold a restart/nudge while ready is false.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
 

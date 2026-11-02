@@ -858,6 +858,35 @@ class Store:
             self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
         return item
 
+    def get_meta(self, key, default=None):
+        with self._lock:
+            row = self._db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def set_meta(self, key, value):
+        with self._tx() as db:
+            self._set_meta(db, key, value)
+
+    def followup_manager_id(self):
+        return self.get_meta("followup_manager", "") or ""
+
+    def post_manager_note(self, subject, body):
+        """Bounded unread notes for the manager; shown once at its next Stop (until the agent-message channel lands)."""
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = (json.loads(row[0]) if row else [])[-19:]
+            notes.append({"at": self.clock(), "subject": _text(subject, "subject", maximum=200),
+                          "body": _text(body, "body", maximum=1000)})
+            self._set_meta(db, "manager_notes", notes)
+
+    def take_manager_notes(self):
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = json.loads(row[0]) if row else []
+            if notes:
+                self._set_meta(db, "manager_notes", [])
+            return notes
+
     def claim_followup_manager(self, agent_id, takeover=False):
         """Designate the one session that receives owner follow-ups; returns True if agent_id is it.
 

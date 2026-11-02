@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "focus", "questions-rewrite",
-                                        "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded"])
+                                        "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "worker-watch", "handover", "handover-state"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -213,6 +213,10 @@ def main(argv=None) -> int:
             from . import focus as _focus
             from .autopilot import load as _lp
             result["focus"] = _focus.current(store, _lp(home)[0])
+            from . import watch
+            from .autopilot import load as load_policy
+            numbers = watch.watch(store, load_policy(home)[0], dry=True)  # numbers only: no message, no state
+            result["workers"] = {k: numbers.get(k) for k in ("running", "allowed", "shortfall", "over", "ready_ids")}
         elif a.action == "report" and not a.agent:
             from .report import build
             rep = build(store, a.hours)
@@ -322,6 +326,18 @@ def main(argv=None) -> int:
             if a.action == "authorize":
                 changes.update(execution_allowed=True)
             result = store.transition(a.task, changes)
+        elif a.action == "worker-watch":
+            from . import watch
+            from .autopilot import load
+            result = watch.watch(store, load(home)[0])
+            print(json.dumps(result, ensure_ascii=False))
+            return 0  # always 0: the wrapper must not treat a monitor problem as a failure
+        elif a.action == "handover":
+            from . import watch
+            result = watch.write_handover(store, a.note or a.checkpoint)
+        elif a.action == "handover-state":
+            from . import watch
+            result = watch.handover_state(store)
         elif a.action == "close-superseded":
             # rest = numbers of the currently OPEN PRs (e.g. from gh pr list); other review/steward tasks are closed.
             result = {"closed": store.close_superseded(a.rest)}
