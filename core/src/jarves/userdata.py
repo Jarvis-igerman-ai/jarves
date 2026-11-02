@@ -145,7 +145,8 @@ DEFAULTS: dict[str, Any] = {
     "diag.handoff_project": "",                 # #336 slice C: the allow-listed Orchestrator project a failure is handed to
     "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "connect.state": {},                        # per-integration state: id -> connected | skipped (jarvis connect)
-    "home_setup.state": {},                     # home setup cards (#457): id -> {later_until, failed, done}
+    "home_setup.state": {},
+    "whats_new.state": {},                      # what-changed card (#167): {last, from, dismissed} versions                     # home setup cards (#457): id -> {later_until, failed, done}
     "goals.cheer_cursor": 0.0,                  # finished goals up to this time were announced or expired (goals.py)
     "proactive.mode": "on_request",             # on_request | in_conversation (proactive.py)
     "files.quota_mb": 200,

@@ -1,0 +1,14 @@
+{
+ "dict": {
+  "All release notes →": "כל הערות הגרסה ←",
+  "Got it, close": "הבנתי, לסגור",
+  "What changed since your version": "מה השתנה מאז הגרסה שלך",
+  "What changed since your version card": "כרטיס מה השתנה מאז הגרסה שלך"
+ },
+ "rules": [
+  [
+   "^and (\\d+) more changes$",
+   "ועוד $1 שינויים"
+  ]
+ ]
+}
