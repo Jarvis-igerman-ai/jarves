@@ -11,7 +11,8 @@ Focus words (highest first):
   merge     open PRs >= focus_pr_high (or green-waiting >= focus_green_high): steward + review first, features drop to 1
   balanced  the static lane workers from autopilot.json
 
-A change of focus needs the condition to hold for 2 evaluations in a row (no flapping) and records ONE ledger
+Beta: OFF by default (``focus_enabled`` false, the owner opts in). A lane configured with 0 workers stays 0 in every
+focus (the owner paused it). A change of focus needs the condition to hold for 2 evaluations in a row (no flapping) and records ONE ledger
 event ``focus_changed``. The steward is never 0. Worker counts never exceed ``max_concurrent`` and the usage
 throttle (stop = 0, slow = 1) always wins. GitHub is read through ``gh`` (read-only, fail soft) and cached 5 minutes.
 """
@@ -21,7 +22,7 @@ import json
 import os
 import subprocess
 
-FOCUS_DEFAULTS = {"focus_enabled": True, "focus_pr_high": 6, "focus_green_high": 3, "focus_showstopper_high": 2}
+FOCUS_DEFAULTS = {"focus_enabled": False, "focus_pr_high": 6, "focus_green_high": 3, "focus_showstopper_high": 2}
 FOCUS_KEYS = tuple(FOCUS_DEFAULTS)
 CACHE_KEY, STATE_KEY = "focus_gh_cache", "focus_state"
 CACHE_TTL_S = 300
@@ -195,10 +196,10 @@ def _plan(focus: str, inputs: dict, policy: dict) -> dict:
     steward = 1                                              # never 0
     bugs, features, review = b0, f0, min(tier_r, 1)
     if focus == "main-fix":
-        bugs, features, review = min(max(b0, 1), cap), 0, 0
+        bugs, features, review = (min(max(b0, 1), cap) if b0 > 0 else 0), 0, 0
     elif focus == "fix":
         want = max(b0, min(5, inputs["queued"]["bugs"]))
-        bugs = b0 if "bugs" in blocked else max(b0, min(want, cap - steward))   # borrow, steward keeps 1
+        bugs = b0 if "bugs" in blocked or b0 == 0 else max(b0, min(want, cap - steward))   # borrow, steward keeps 1
         features = min(f0, max(0, cap - steward - bugs))
         review = min(tier_r, 1)
     elif focus == "merge":

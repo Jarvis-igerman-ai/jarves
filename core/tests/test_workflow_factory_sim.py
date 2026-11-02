@@ -620,6 +620,7 @@ class SimTests(unittest.TestCase):
         home, now, store = make_home(max_concurrent=4)
         policy, _ = autopilot.load(home)
         policy["lanes"]["features"]["workers"] = 2
+        policy["focus_enabled"] = True
         autopilot.save(home, policy)
         for i in range(4):
             bug(store, f"b{i}")

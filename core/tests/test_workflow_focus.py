@@ -10,7 +10,7 @@ from jarves.workflow import autopilot_loop as ap
 from jarves.workflow.store import Store
 
 POLICY = {"enabled": True, "kill": False, "project": "jarves", "versions": ["V4.5.1"], "authorized_versions": ["V4.5.1"],
-          "max_concurrent": 4, "max_starts_per_hour": 50,
+          "max_concurrent": 4, "max_starts_per_hour": 50, "focus_enabled": True,
           "lanes": {"bugs": {"workers": 1, "model": "claude-sonnet-5-5"}, "features": {"workers": 2, "model": "claude-sonnet-5-5"}}}
 
 
@@ -88,6 +88,17 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(r["lanes"]["bugs"], 3)                       # cap 4 - steward 1
         self.assertEqual(r["lanes"]["features"], 0)
         self.assertEqual(r["lanes"]["steward"], 1)
+
+    def test_lane_set_to_zero_workers_stays_zero_in_every_focus(self):
+        policy = {**POLICY, "max_concurrent": 3,
+                  "lanes": {"bugs": {"workers": 0, "model": "m"}, "features": {"workers": 1, "model": "m"}}}
+        for case in (inputs(main_red=True, bugs=4), inputs(pressure=3, bugs=4), inputs(total=9, bugs=4), inputs(bugs=4)):
+            self.assertEqual(focus.compute_focus(case, policy)["lanes"]["bugs"], 0, case)
+
+    def test_focus_is_off_by_default(self):
+        self.assertFalse(focus.setting({}, "focus_enabled"))
+        self.assertFalse(focus.FOCUS_DEFAULTS["focus_enabled"])
+        self.assertIsNone(ap._focus_plan(None, {k: v for k, v in POLICY.items() if k != "focus_enabled"}, "ok", None))
 
     def test_borrowing_is_bounded_by_max_concurrent(self):
         for cap in range(0, 9):
