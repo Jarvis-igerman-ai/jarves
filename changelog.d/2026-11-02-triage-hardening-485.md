@@ -1,1 +1,1 @@
-Skipped-task store: 128-bit salt, owner-only file; ui_blocks.clean strips zero-width and direction marks (#485).
+- Fixed: Skipped-task store uses a 128-bit salt and an owner-only file; ui_blocks.clean strips zero-width and direction marks (#485).
