@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Callable
 
 FILE = "progress.json"
-STALE_S = 30 * 60                       # a "running" file older than this is reported as stalled, not as running
+FINISHED_TTL_S = 10 * 60                # #453: the dashboard hides a Done/Failed card this long after it finished
+STALE_S = 30 * 60                      # a "running" file older than this is reported as stalled, not as running
 # stage -> (step, percent, English, Hebrew); the percent is the position in the chain, not a byte count
 STAGES = {
     "downloading": (1, 10, "Downloading the installer", "מוריד את המתקין"),
@@ -145,7 +146,12 @@ def watch(home, say: Callable[[str], None], *, current: Callable[[], str | None]
 
 def api_progress(ctx, m, body):
     from . import updates
-    return 200, read(ctx.home, updates.build_info()["version"])
+    s = read(ctx.home, updates.build_info()["version"])
+    if s.get("active") and s.get("state") in ("done", "failed"):   # #453: a finished card goes away after a while
+        age = time.time() - float(s.get("ts") or 0) - (STALE_S if s.get("code") == "STALLED" else 0)
+        if age > FINISHED_TTL_S:
+            return 200, {"active": False, "state": "idle", "steps": STEPS}
+    return 200, s
 
 
 def dashboard_routes(register_route) -> None:

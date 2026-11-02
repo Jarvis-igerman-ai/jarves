@@ -89,6 +89,19 @@ def test_a_running_file_that_stopped_moving_is_reported_stalled(home):
     assert s["state"] == "failed" and s["code"] == "STALLED"
 
 
+def test_finished_card_is_hidden_by_the_api_after_ten_minutes(home, monkeypatch):
+    class Ctx:
+        pass
+    ctx = Ctx()
+    ctx.home = home
+    up.write(home, "downloading", state="failed", fresh=True, code="X")
+    ts = up.read(home)["ts"]
+    monkeypatch.setattr(up.time, "time", lambda: ts + 60)
+    assert up.api_progress(ctx, None, None)[1]["active"] is True
+    monkeypatch.setattr(up.time, "time", lambda: ts + up.FINISHED_TTL_S + 5)
+    assert up.api_progress(ctx, None, None)[1]["active"] is False
+
+
 def test_idle_without_a_file_and_garbage_file(home):
     assert up.read(home)["active"] is False
     up.path(home).parent.mkdir(parents=True, exist_ok=True)
