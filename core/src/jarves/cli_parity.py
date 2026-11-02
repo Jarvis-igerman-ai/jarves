@@ -409,7 +409,12 @@ def cmd_prefs(a, cfg, home) -> int:
             from .cli import _cli_features
             from .preferences import FEATURE, prompt_block
             if a.state in ("on", "off"):
-                switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+                from .features import BetaLocked
+                try:
+                    switch(_cli_features(cfg, home), FEATURE, a.state == "on", by="cli")
+                except BetaLocked as e:      # one friendly message, no traceback (#469)
+                    print(f"{FEATURE}: {e} (jarvis features beta on)", file=sys.stderr)
+                    return 1
             on = _cli_features(cfg, home).enabled(FEATURE)
             print(clilang.fmt("שימוש בהעדפות בשיחות: " + ("פעיל" if on else "כבוי"),
                               "preferences in conversations: " + ("on" if on else "off")))
