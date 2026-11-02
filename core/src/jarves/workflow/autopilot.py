@@ -99,7 +99,7 @@ def validate(policy: dict) -> dict:
         raise ValueError("watchdog has invalid keys")
     for key, value in watchdog.items():
         _int(value, f"watchdog {key}", 0 if key == "max_restarts_per_task" else 1,
-             30 * 86400 if key == "agent_retention_s" else 86400)
+             30 * 86400 if key == "agent_retention_s" else 7 * 86400 if key == "owner_unlock_s" else 86400)
     return policy
 
 

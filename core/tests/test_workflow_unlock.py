@@ -107,6 +107,14 @@ class UnlockTests(unittest.TestCase):
         code = unlock.issue(self.home)
         self.assertEqual(self.request("/api/unlock", {"code": code})[2]["result"]["remaining_s"], 600)
 
+    def test_unlock_limit_is_one_week(self):
+        policy = autopilot.load(self.home)[0]
+        policy["watchdog"]["owner_unlock_s"] = 7 * 86400
+        autopilot.validate(policy)
+        policy["watchdog"]["owner_unlock_s"] = 7 * 86400 + 1
+        with self.assertRaises(ValueError):
+            autopilot.validate(policy)
+
     def test_code_expiry_attempt_limit_and_no_token_leak(self):
         self.login()
         code = unlock.issue(self.home, now=1.0)          # issued long ago
