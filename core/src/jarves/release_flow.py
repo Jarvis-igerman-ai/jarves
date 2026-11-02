@@ -19,7 +19,6 @@ from pathlib import Path
 from . import release_signoff as so
 
 REPO = "Jarvis-igerman-ai/jarves"
-_LATER = re.compile(r"(?i)^(enhancement|v[5-9]|4\.5\.1)$")
 ACCEPTED_LABEL = "known-issue-4.5"   # OWNER-ONLY label: the owner accepts an open P0-P2 as a known issue for the 4.5 stable
 AUTOMATION_NOTE = "accepted by automation: {ev}"
 
@@ -69,7 +68,7 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
 
     Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs) labelled P0-P2.
     Label `known-issue-4.5` (owner-only, exact) makes an issue accepted: printed, not a blocker, even when labelled bug.
-    Planned work (enhancement, v5-v9, 4.5.1) is skipped ONLY when the issue is not also labelled bug."""
+    Owner decision: every open P0-P2 blocks, whatever its bug/version/enhancement labels; only the accepted label exempts."""
     blockers: list[tuple[int | None, str, str]] = []
     accepted: list[tuple[int | None, str, str]] = []
     for i in issues:
@@ -82,7 +81,7 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
         row = (i.get("number"), sev, str(i.get("title", ""))[:70])
         if any(l.lower() == ACCEPTED_LABEL for l in labels):
             accepted.append(row)
-        elif any(l.lower() == "bug" for l in labels) or not any(_LATER.match(l) for l in labels):
+        else:
             blockers.append(row)
     return blockers, accepted
 
