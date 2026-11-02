@@ -40,6 +40,20 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertEqual(agent["lane"], "bugs")
         self.assertFalse(agent["auto_dispatch"])
         self.assertNotIn("private message", json.dumps(self.store.snapshot()))
+        self.assertIn(f"--agent {agent['id']}", context)  # gh-853: worker is told which flag carries its id
+
+    def test_cli_names_missing_flag_instead_of_invalid_id(self):
+        import contextlib
+        import io
+        from jarves.workflow.__main__ import main
+        for argv, flag in ((["next"], "--agent"), (["transition", "--state", "review"], "--task"),
+                           (["report"], "--agent")):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = main(argv + ["--home", str(self.home)])
+            self.assertEqual(code, 1)
+            self.assertIn(flag, err.getvalue())
+            self.assertNotIn("invalid id", err.getvalue())
 
     def test_merge_steward_shows_as_release_lane(self):
         self.event("SubagentStart", agent_id="merger-child", agent_type="workflow-merger")
