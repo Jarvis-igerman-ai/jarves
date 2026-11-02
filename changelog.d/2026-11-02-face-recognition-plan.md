@@ -1,0 +1,1 @@
+- Docs: added the face recognition plan (local owner enrollment, embeddings only, delete-all, optional friends via Google Photos Picker); plan only, nothing implemented or enabled (#358).

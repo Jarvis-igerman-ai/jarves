@@ -135,6 +135,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [plans/WHATSAPP_REAL_ACCESS](plans/WHATSAPP_REAL_ACCESS.md) | WhatsApp options and bridge design | V4 | background, built | [SWV4_F_WHATSAPP](archive/reviews/SWV4_F_WHATSAPP.md) |
 | [plans/GOOGLE_CALENDAR_GMAIL_SKILLS](plans/GOOGLE_CALENDAR_GMAIL_SKILLS.md) | Google skills plan | V2-V3 | historical (built) | [GOOGLE_SETUP](GOOGLE_SETUP.md) |
 | [plans/CAMERA_PLAN](plans/CAMERA_PLAN.md) | Camera plan phases | V2-V3 | historical plan | [CAMERA_SETUP](CAMERA_SETUP.md) |
+| [plans/FACE_RECOGNITION_PLAN](plans/FACE_RECOGNITION_PLAN.md) | Face recognition plan: local owner enrollment, consent, threat model, options, staged rollout, owner gates (#358) | V7 | **plan only**, not started, UNVERIFIED | [CAMERA_SETUP](CAMERA_SETUP.md) |
 | [plans/INSTAGRAM_CHANNEL](plans/INSTAGRAM_CHANNEL.md) | Instagram channel design | V3 | historical (live verification open) | features table |
 | [plans/CODE_SIGNING_FREE](archive/plans/CODE_SIGNING_FREE.md) | Free code-signing options | V3-V4 | open; owner chose unsigned for now (OD-08) | PRIORITIES |
 | [plans/VIRTUAL_COMPUTER_JUSTIFICATION](archive/plans/VIRTUAL_COMPUTER_JUSTIFICATION.md) | Whether a virtual computer is needed | V4 | open question | V4 package |
