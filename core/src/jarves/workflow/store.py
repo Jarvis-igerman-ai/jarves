@@ -1185,6 +1185,16 @@ class Store:
             self._event(db, kind, summary)
         return {"kind": kind, "summary": summary}
 
+    def events(self, kind=None, limit=100):
+        """Events oldest-first, optionally one kind; the newest `limit` are kept (not only the last 100 of all kinds)."""
+        limit = max(1, min(int(limit), 2000))
+        with self._tx() as db:
+            if kind:
+                rows = db.execute("SELECT * FROM workflow_events WHERE kind=? ORDER BY id DESC LIMIT ?", (kind, limit))
+            else:
+                rows = db.execute("SELECT * FROM workflow_events ORDER BY id DESC LIMIT ?", (limit,))
+            return [dict(r) for r in reversed(rows.fetchall())]
+
     def seed_plan(self, plan):
         """Import scope only; reruns never replace actual progress or evidence."""
         if not isinstance(plan, dict):

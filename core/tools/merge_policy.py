@@ -11,13 +11,21 @@ from __future__ import annotations
 import json
 
 BASE_THRESHOLD = 3
-MIN_THRESHOLD, MAX_THRESHOLD = 2, 6
+# OPERATING_MODEL: individual when fewer than 3 eligible PRs, so the floor stays at 3.
+MIN_THRESHOLD, MAX_THRESHOLD = 3, 6
 WINDOW = 10            # most recent cycles per mode
 MIN_SAMPLES = 2        # cycles of a mode needed before history can move the threshold
 SKIP_RATE_LIMIT = 0.30
 SERIAL_WAIT_LIMIT = 40  # minutes
 RARE_CONFLICT = 0.10
 EVENT_KIND = "merge_cycle"
+
+
+def _int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _avg(values):
@@ -28,15 +36,15 @@ def _avg(values):
 def stats(history: list) -> dict:
     out = {}
     for mode in ("integration", "individual"):
-        rows = [c for c in history if c.get("mode") == mode][-WINDOW:]
-        elig = sum(max(int(c.get("eligible", 0)), 0) for c in rows)
-        bad = sum(int(c.get("skipped", 0)) + int(c.get("conflicts", 0)) for c in rows)
+        rows = [c for c in history if isinstance(c, dict) and c.get("mode") == mode][-WINDOW:]  # history is oldest first
+        elig = sum(max(_int(c.get("eligible")), 0) for c in rows)
+        bad = sum(_int(c.get("skipped")) + _int(c.get("conflicts")) for c in rows)
         out[mode] = {
             "cycles": len(rows),
             "conflict_rate": (bad / elig) if elig else 0.0,
             "avg_minutes_to_merge": _avg([c.get("minutes_to_merge") for c in rows]),
             "avg_ci_minutes": _avg([c.get("ci_minutes") for c in rows]),
-            "reverts": sum(int(c.get("reverts", 0)) for c in rows),
+            "reverts": sum(_int(c.get("reverts")) for c in rows),
         }
     return out
 
@@ -86,15 +94,23 @@ def record_cycle(store, cycle: dict) -> dict:
 
 
 def history_from_events(events: list) -> list:
+    """Cycle dicts, oldest first. Accepts events in any order (sorted by id/ts); skips non-dict rows."""
+    ordered = sorted((e for e in events if isinstance(e, dict) and e.get("kind") == EVENT_KIND),
+                     key=lambda e: (_int(e.get("id")), e.get("ts") or 0))
     rows = []
-    for e in events:
-        if e.get("kind") != EVENT_KIND:
-            continue
+    for e in ordered:
         try:
-            rows.append(json.loads(e.get("summary", "")))
-        except ValueError:
+            row = json.loads(e.get("summary", ""))
+        except (ValueError, TypeError):
             continue
+        if isinstance(row, dict):
+            rows.append(row)
     return rows
+
+
+def history_from_store(store) -> list:
+    """Read merge_cycle rows with a kind-filtered query, so other events cannot push them out."""
+    return history_from_events(store.events(kind=EVENT_KIND, limit=WINDOW * 4))
 
 
 def simulate(scenario: list, history: list | None = None) -> list:
@@ -110,5 +126,8 @@ def simulate(scenario: list, history: list | None = None) -> list:
 if __name__ == "__main__":  # merge_policy.py N [history.json] -> decision JSON
     import sys
     n = int(sys.argv[1])
-    hist = json.load(open(sys.argv[2])) if len(sys.argv) > 2 else []
+    hist = []
+    if len(sys.argv) > 2:
+        with open(sys.argv[2], encoding="utf-8") as fh:
+            hist = json.load(fh)
     print(json.dumps(decide(n, hist), indent=2))

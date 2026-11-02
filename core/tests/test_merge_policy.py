@@ -39,10 +39,10 @@ def test_revert_raises_threshold():
     assert mp.decide(3, [cyc("integration", reverts=1)] * 2)["threshold"] == 4
 
 
-def test_long_serial_wait_lowers_threshold():
+def test_long_serial_wait_never_drops_below_three():
     hist = [cyc("individual", 2, minutes=55)] * 2
     d = mp.decide(2, hist)
-    assert d["threshold"] == 2 and d["mode"] == "integration"
+    assert d["threshold"] == 3 and d["mode"] == "individual"  # OPERATING_MODEL: fewer than 3 -> individual
 
 
 def test_long_serial_wait_with_conflicts_does_not_lower():
@@ -73,6 +73,51 @@ def test_ledger_round_trip(tmp_path):
 def test_record_rejects_bad_mode():
     with pytest.raises(ValueError):
         mp.record_cycle(None, {"mode": "x"})
+
+
+def test_history_read_from_real_ledger_is_oldest_first_and_survives_noise(tmp_path):
+    from jarves.workflow.store import Store
+    store = Store(tmp_path / "w.db")
+    try:
+        for i in range(11):  # old good cycles, then 4 recent bad ones: window must keep the NEWEST
+            mp.record_cycle(store, cyc("integration", 3, skipped=0))
+        for _ in range(4):
+            mp.record_cycle(store, cyc("integration", 3, skipped=3))
+        for i in range(150):  # more than the 100-event snapshot limit
+            store.record_event("noise", f"n{i}")
+        hist = mp.history_from_store(store)
+        assert len(hist) == 15 and hist[-1]["skipped"] == 3
+        assert mp.decide(3, hist)["threshold"] == 4
+        assert mp.decide(3, hist)["mode"] == "individual"
+    finally:
+        store.close()
+
+
+def test_history_from_events_order_and_robustness():
+    events = [{"id": 2, "kind": "merge_cycle", "summary": '{"mode":"integration","eligible":2}'},
+              {"id": 1, "kind": "merge_cycle", "summary": '{"mode":"individual","eligible":1}'},
+              {"id": 3, "kind": "merge_cycle", "summary": "7"},
+              {"id": 4, "kind": "merge_cycle", "summary": "[1]"},
+              {"id": 5, "kind": "other", "summary": "{}"}, "junk"]
+    assert [r["eligible"] for r in mp.history_from_events(events)] == [1, 2]
+    bad = [{"mode": "integration", "eligible": None, "skipped": None, "reverts": "x"}, 5, "s"]
+    assert mp.decide(3, bad)["mode"] == "integration"
+
+
+def test_plan_auto_uses_ledger_threshold(tmp_path):
+    import integration_branch as ib
+    from jarves.workflow.store import Store
+    store = Store(tmp_path / "workflow.db")
+    try:
+        for _ in range(2):
+            mp.record_cycle(store, cyc("integration", 3, skipped=3))
+    finally:
+        store.close()
+    assert ib.ledger_threshold(tmp_path) == 4
+    assert ib.ledger_threshold(tmp_path / "missing") == 3
+    infos = [{"tier": "N"}] * 3
+    assert ib.recommend(infos, [], [], 4)[0] == "individual"
+    assert ib.recommend(infos, [], [])[0] == "integration"
 
 
 def test_simulation_adapts_to_bad_integration_runs():
