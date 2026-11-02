@@ -28,7 +28,14 @@ def store(tmp_path):
 @pytest.fixture
 def mon(store, tmp_path):
     clock = {"t": T0 + 10}
-    m = Monitor(store, home=tmp_path, cfg=Config(), clock=lambda: clock["t"], version=("4.0.0", "abc"))
+    cpu = {"t": 0.0}
+
+    def fake_cpu():                                  # deterministic CPU clock: 50 us per reading, no real timer (#866)
+        cpu["t"] += 50e-6
+        return cpu["t"]
+
+    m = Monitor(store, home=tmp_path, cfg=Config(), clock=lambda: clock["t"], version=("4.0.0", "abc"),
+                cpu_clock=fake_cpu)
     m.clock_box = clock
     yield m
     if m._sink is not None:
@@ -91,10 +98,10 @@ def test_sampler_and_overhead_budget(mon, store, tmp_path):
     assert d["ram_mb"] > 1 and d["threads"] >= 1 and d["disk_state_mb"] >= 0.1 and "cpu_pct" in d
     assert d["loop_lag_ms"] == pytest.approx(2.0)
     # event-driven cost: 2000 records in one minute (far more than real use), measured
-    t = time.thread_time()
+    t = mon.cpu_clock()
     for i in range(2000):
         mon.on_record("TOOL_RESULT" if i % 3 else "WAKE_WORD", "INFO", "x", {"ok": True, "ms": 5}, mon.clock_box["t"])
-    per_record = (time.thread_time() - t) / 2000
+    per_record = (mon.cpu_clock() - t) / 2000
     sample_cost = mon.own_cpu_s / max(mon.samples, 1)
     # budget: <= 0.1% CPU at ~100 records/min + one sample per minute
     assert (per_record * 100 + sample_cost) / 60 <= 0.001, (per_record, sample_cost)
