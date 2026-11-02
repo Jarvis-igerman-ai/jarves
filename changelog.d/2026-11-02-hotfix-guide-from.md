@@ -1,0 +1,1 @@
+- Changed (docs): the hotfix guide now says `jarvis hotfix apply --from` takes a branch or ref in the repository; a plain folder without `.git` is always refused.

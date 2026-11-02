@@ -22,13 +22,13 @@ privacy_en = "Everything is local. The backup holds no keys. Nothing is sent out
 hotfix = "hotfix"
 
 [[steps]]
-he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה> --dry-run  וראו אילו קבצים ישתנו. אם כתוב REFUSED, ראו את הסיבה (צריך את המתקין המלא)."
-en = "Run  jarvis hotfix apply --from <branch or folder> --dry-run  and see which files would change. If it says REFUSED, read the reason (use the full installer)."
+he = "הריצו  jarvis hotfix apply --from <ענף או רפרנס> --dry-run  וראו אילו קבצים ישתנו. אם כתוב REFUSED, ראו את הסיבה (צריך את המתקין המלא). המקור חייב להיות ענף או רפרנס במאגר; תיקייה רגילה בלי תיקיית .git נדחית תמיד."
+en = "Run  jarvis hotfix apply --from <branch or ref> --dry-run  and see which files would change. If it says REFUSED, read the reason (use the full installer). The source must be a branch or ref in the repository; a plain folder without a .git directory is always refused."
 action = "command:jarvis hotfix apply --dry-run"
 
 [[steps]]
-he = "הריצו  jarvis hotfix apply --from <ענף או תיקייה>. נעשה גיבוי, הקבצים מועתקים, הליבה מופעלת מחדש רק אם רצה, ו-doctor רץ. כל כשל מחזיר הכול אוטומטית."
-en = "Run  jarvis hotfix apply --from <branch or folder>. It backs up, copies the files, restarts the Core only if it ran, and runs doctor. Any failure restores everything automatically."
+he = "הריצו  jarvis hotfix apply --from <ענף או רפרנס>. נעשה גיבוי, הקבצים מועתקים, הליבה מופעלת מחדש רק אם רצה, ו-doctor רץ. כל כשל מחזיר הכול אוטומטית."
+en = "Run  jarvis hotfix apply --from <branch or ref>. It backs up, copies the files, restarts the Core only if it ran, and runs doctor. Any failure restores everything automatically."
 action = "command:jarvis hotfix apply"
 
 [[steps]]
