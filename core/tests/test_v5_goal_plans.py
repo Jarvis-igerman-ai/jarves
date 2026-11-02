@@ -468,6 +468,7 @@ async def test_565_title_why_and_args_are_escaped_in_every_popup_and_a_long_esca
 
 async def test_385_timed_out_consequential_step_is_unknown_and_retry_popup_warns(env):
     env.hang_on = "act"
+    env.reg.get("fake_act").timeout_s = 0.05
     p = env.store.propose("t", steps(("fake_act", {"text": "x"})), timeout_s=5)
     env.store.approve(p["id"])
     await env.runner.tick()
@@ -483,6 +484,7 @@ async def test_385_timed_out_consequential_step_is_unknown_and_retry_popup_warns
 
 async def test_385_read_step_timeout_stays_failed(env):
     env.hang_on = "read"
+    env.reg.get("fake_read").timeout_s = 0.05
     p = env.store.propose("t", steps(("fake_read", {"text": "x"})), timeout_s=5)
     env.store.approve(p["id"])
     await env.runner.tick()
@@ -495,7 +497,8 @@ def test_385_compare_and_set_cancel_wins_over_a_stale_resume(env):
     env.store.pause(p["id"])
     real = env.store.steps
 
-    def racing(pid):                                              # the PC cancels after resume checks, before its write
+    def racing(pid):                                              # the PC cancels ONCE after resume checks, before its write
+        env.store.steps = real
         out = real(pid)
         env.store.cancel(pid)
         return out
@@ -544,6 +547,7 @@ async def test_385_retry_race_with_cancel_rolls_back_and_never_runs_a_skipped_st
     real = env.store.steps
 
     def racing(pid):
+        env.store.steps = real                                    # cancel only once; later reads are normal
         out = real(pid)
         env.store.cancel(pid)
         return out
@@ -557,6 +561,7 @@ async def test_385_retry_race_with_cancel_rolls_back_and_never_runs_a_skipped_st
 
 async def test_385_phone_retry_of_an_unknown_step_is_refused_and_plan_never_done_with_unrun_step(env):
     env.hang_on = "act"
+    env.reg.get("fake_act").timeout_s = 0.05
     p = env.store.propose("u", steps(("fake_act", {"text": "x"})), timeout_s=5)
     env.store.approve(p["id"])
     await env.runner.tick()
