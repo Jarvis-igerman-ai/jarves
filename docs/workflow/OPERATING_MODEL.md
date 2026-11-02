@@ -196,3 +196,16 @@ Observability (layer beats, timeline, incidents, `/api/health`, `/api/timeline`)
 
 ## Agent messages and ownership
 Agents claim `pr:N`, `branch:`, `issue:`, `file:` scopes and talk through ledger messages; see [AGENT_MESSAGES.md](AGENT_MESSAGES.md). Run `check-touch` before touching another agent's PR or scope.
+
+## Owner rules added 2 Nov 2026
+- **Owner-requested agents do not count against the policy worker allowance.** An agent the owner
+  explicitly asked for in chat (for example the merge-all driver, or a named fix) is tracked in the
+  ledger but is not counted in `workers running/allowed`, and does not stop the manager from starting
+  the policy lanes. Sub-agents spawned by such an agent are also not counted. The allowance applies to
+  manager-chosen lane workers only.
+- **Workflow fixes also go to the local checkout.** Every fix to the workflow system (supervisor,
+  hooks, console, ledger, steward helpers) that merges to main is also cherry-picked onto the local
+  `local-live` branch of `C:\work\jarves-main` (`git cherry-pick -x`, no switch of the checkout branch:
+  use a worktree), so the running supervisor has it before the next release. Record the cherry-pick
+  commit in the ledger.
+- **No popups.** Agents, hooks and helper subprocesses run hidden (no console windows, focus stealing).
