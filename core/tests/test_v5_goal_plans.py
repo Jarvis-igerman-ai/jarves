@@ -575,3 +575,21 @@ async def test_385_phone_retry_of_an_unknown_step_is_refused_and_plan_never_done
     assert d["state"] == "ready" and d["steps"][0]["status"] == "pending"
     await env.runner.tick()
     assert env.store.get(p["id"])["steps"][0]["status"] == "done" and ("act", "x") in env.ran
+async def test_plan_done_gives_one_quiet_line_only_at_pc_and_outside_quiet_hours(env):
+    said, state = [], {"quiet": True, "pc": True}
+
+    async def say(line):
+        said.append(line)
+        return True
+    cheer = gp.PlanCheer(env.store, quiet=lambda: state["quiet"], at_pc=lambda: state["pc"], say=say, clock=env.clock)
+    env.clock.t += 5
+    p = env.store.propose("Read it", steps(("fake_read", {"text": "x"})))
+    env.store.approve(p["id"])
+    await env.runner.run_plan(p["id"])
+    assert env.store.get(p["id"])["state"] == "done"
+    assert await cheer.check() == "" and not said          # quiet hours: silent
+    state["quiet"], state["pc"] = False, False
+    assert await cheer.check() == "" and not said          # away: silent
+    state["pc"] = True
+    assert await cheer.check() and len(said) == 1          # one line
+    assert await cheer.check() == "" and len(said) == 1    # never twice
