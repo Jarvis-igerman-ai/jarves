@@ -1,0 +1,1 @@
+- Fixed: workflow SubagentStart context now tells workers to pass --agent <their id>, and the workflow CLI names the missing flag (--agent/--task/--id) instead of answering 'invalid id' (#853).
