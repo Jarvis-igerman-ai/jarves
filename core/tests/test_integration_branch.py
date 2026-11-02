@@ -57,6 +57,7 @@ def env(tmp_path, monkeypatch):
     git(work, "push", "-q", "jarves", "main")
     gh = FakeGh()
     monkeypatch.setattr(ib, "_run", gh)
+    monkeypatch.setattr(ib, "ledger_threshold", lambda home=None: ib.MIN_INTEGRATION)  # hermetic: never read the real ledger
     return work, gh
 
 
