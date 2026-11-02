@@ -72,6 +72,7 @@ def agent_roster(agents: list, tasks: list, now: float, retention_s: int = AGENT
 
 ANSWER_CHANNELS = ("dashboard", "terminal", "claude-window", "agent", "unknown")  # claude-window: typed, unconfirmed (#797)
 CONFIRMED_CHANNELS = ("dashboard", "terminal")
+HELD_CHANNELS = ("claude-window", "agent")  # answers that keep the task blocked until the owner confirms
 
 
 def question_view(question):
@@ -80,7 +81,7 @@ def question_view(question):
     if out.get("status") == "answered":
         out["answered_by"] = out.get("answered_by") or "unknown"
         out["channel"] = out.get("channel") if out.get("channel") in ANSWER_CHANNELS else "unknown"
-        out["needs_owner_confirmation"] = out["channel"] not in CONFIRMED_CHANNELS
+        out["needs_owner_confirmation"] = out["channel"] not in CONFIRMED_CHANNELS and not out.get("confirmed_at")
     return out
 
 
@@ -346,7 +347,7 @@ class Store:
     @staticmethod
     def _unanswered(db, task_id):
         return [q for q in Store._all(db, "question") if q["task_id"] == task_id
-                and q["blocks"] and q["status"] in ACTIVE_QUESTIONS]
+                and q["blocks"] and (q["status"] in ACTIVE_QUESTIONS or q.get("held"))]
 
     @staticmethod
     def _ready(db, task):
@@ -895,14 +896,33 @@ class Store:
             question = self._get(db, "question", _id(question_id))
             if question["status"] not in ACTIVE_QUESTIONS:
                 raise ValueError("question already answered")
+            # An answer from an unconfirmed channel is held: the task stays blocked until the owner confirms.
             question.update(status="answered", answer=answer, answered_at=self.clock(),
-                            answered_by=answered_by, channel=channel)
+                            answered_by=answered_by, channel=channel, held=channel in HELD_CHANNELS)
+            question.pop("confirmed_at", None)
             self._put(db, "question", question)
             task = self._get(db, "task", question["task_id"])
             if task["state"] == "waiting_owner" and not self._unanswered(db, task["id"]):
                 task.update(state="queued", blocker="", updated_at=self.clock())
                 self._put(db, "task", task)
             self._event(db, "question_answered", f"{question['title']} [{channel}]")
+        return question_view(question)
+
+    def confirm(self, question_id, *, by="owner", channel="unknown"):
+        """Owner-only (dashboard session / real terminal): accept a held answer and release its task."""
+        if channel not in CONFIRMED_CHANNELS:
+            raise PermissionError("only the dashboard or the owner's terminal can confirm an answer")
+        with self._tx() as db:
+            question = self._get(db, "question", _id(question_id))
+            if question["status"] != "answered" or not question.get("held"):
+                raise ValueError("no unconfirmed answer to confirm")
+            question.update(held=False, confirmed_at=self.clock(), confirmed_by=by, confirmed_channel=channel)
+            self._put(db, "question", question)
+            task = self._get(db, "task", question["task_id"])
+            if task["state"] == "waiting_owner" and not self._unanswered(db, task["id"]):
+                task.update(state="queued", blocker="", updated_at=self.clock())
+                self._put(db, "task", task)
+            self._event(db, "question_confirmed", f"{question['title']} [{channel}]")
         return question_view(question)
 
     def reopen(self, question_id, *, by="owner", channel="unknown"):
@@ -917,7 +937,7 @@ class Store:
             history = list(question.get("history", []))
             history.append({k: view.get(k) for k in ("answer", "answered_at", "answered_by", "channel")}
                            | {"reopened_at": self.clock(), "reopened_by": by, "reopened_channel": channel})
-            for key in ("answered_at", "answered_by", "channel"):
+            for key in ("answered_at", "answered_by", "channel", "held", "confirmed_at"):
                 question.pop(key, None)
             question.update(status="pending", answer=None, history=history[-20:])
             self._put(db, "question", question)

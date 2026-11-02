@@ -77,14 +77,14 @@ def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool
     if not match:
         return None
     try:
-        question = store.answer(match.group(1), match.group(2).strip(), answered_by="owner (typed in Claude window)",
+        question = store.answer(match.group(1), match.group(2).strip(), answered_by="unverified (Claude window)",
                                 channel="claude-window")
     except (ValueError, sqlite3.Error, OSError) as exc:
         # Never let the answer text reach the model, even when the ledger is locked.
         return {"decision": "block", "reason": f"JARVES: answer not stored ({type(exc).__name__}: {exc}). "
                 "The question stays open; answer it in the dashboard."}
     return {"decision": "block", "reason": f"JARVES: your answer to \"{question['title']}\" was stored. "
-            "It was not sent to the model; confirm it in the dashboard (it is marked unconfirmed)."}
+            "It was not sent to the model; the task stays blocked until you confirm it in the dashboard or your own terminal."}
 
 
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:

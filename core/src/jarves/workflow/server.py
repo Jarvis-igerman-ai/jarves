@@ -327,6 +327,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.discuss.open(store, m[1], launch=data.get("launch", True))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
                 result = store.defer(m[1], channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/confirm", path):
+                result = store.confirm(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
                 result = store.reopen(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/tasks/([A-Za-z0-9_.:-]+)/transition", path):

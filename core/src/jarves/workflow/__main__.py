@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -263,10 +263,12 @@ def main(argv=None) -> int:
             result = store.ask_more(a.note, question_id=a.id, task_id=a.task, channel=channel)
         elif a.action == "reply":
             result = store.reply_followup(a.id, a.answer)
-        elif a.action in {"answer", "reopen"}:
+        elif a.action in {"answer", "confirm", "reopen"}:
             channel = owner_only_guard(a.action)
             if a.action == "answer":
                 result = store.answer(a.id, a.answer, answered_by="owner (terminal)", channel=channel)
+            elif a.action == "confirm":
+                result = store.confirm(a.id, by="owner (terminal)", channel=channel)
             else:
                 result = store.reopen(a.id, by="owner (terminal)", channel=channel)
         elif a.action == "task":
