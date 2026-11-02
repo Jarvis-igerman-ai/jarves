@@ -145,15 +145,9 @@ async def test_logs_have_correlation_ids_and_no_private_text(core, home):
     secret = "zq" + uuid.uuid4().hex
     await f.send("user.text", {"text": f"תזכור שהקוד של הכספת {secret}"})
     await f.wait("assistant.text")
-<<<<<<< HEAD
-    lines = [json.loads(l) for l in (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
-    # Text fields only: random hex cid/ts can contain "4321" by chance (#708).
-    assert not [l for l in lines if "4321" in str(l.get("msg", ""))]
-=======
     raw = (home / "logs" / "jarves.log").read_text(encoding="utf-8")
     lines = [json.loads(l) for l in raw.splitlines()]
     assert secret not in raw
->>>>>>> b0fc7345 (tests: fix flakes #481 and #488, un-quarantine #548/#550)
     reply = [l for l in lines if l["code"] == "REPLY"][-1]
     tool = [l for l in lines if l["code"] == "TOOL_RESULT"][-1]
     assert reply["cid"] == tool["cid"] != "-"
