@@ -26,3 +26,9 @@ id = "test_agents_pr_card_browser.py::test_the_card_is_absent_when_off_or_the_ap
 issue = 890
 since = "2026-11-02"
 reason = "Windows real browser: Page.goto net::ERR_NO_BUFFER_SPACE (host socket exhaustion, seen on PR 868, unrelated to its diff); retry fix PR 875 merged, prior issue 874 closed"
+
+[[test]]
+id = "test_suite_voice_fixes.py::test_room_noise_alone_cannot_keep_the_session_open"
+issue = 880
+since = "2026-11-02"
+reason = "Windows: real wall-clock bound 2.5 s exceeded once (3.19 s) on an unrelated PR, ended==idle was correct; use a fake clock"
