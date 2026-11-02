@@ -136,7 +136,10 @@ class WhatsAppSkill(Skill):
 
         return [
             Tool("whatsapp_draft", "Prepare a WhatsApp message (text + name or phone): 'WhatsApp Dana I'm late', 'תשלח לדנה בוואטסאפ'. Nothing opened or sent; then call whatsapp_open at once.",
-                 draft, DraftArgs, permission="action"),
+                 draft, DraftArgs, permission="action",
+                 # issue #830: the drive-mode known-contact check uses the REAL number, never the display name
+                 target=lambda a: ((normalize_phone(a.phone, self.country) if a.phone.strip() else self.lookup(a.name))
+                                   or "")),
             Tool("whatsapp_open", 'Open the WhatsApp chat with the draft pre-filled. The system reads the draft back and asks approval (do not ask yourself). The user presses send; you never send.', open_, OpenArgs,
                  permission="destructive", impact=open_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name")),

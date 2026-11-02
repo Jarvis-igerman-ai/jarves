@@ -80,6 +80,8 @@ T: dict[str, tuple[str, str]] = {
                               "Calls and messages only go to a known contact. Saved for when you stop."),
     "DRIVE_UNTRUSTED": ("בקשה שמקורה בטקסט לא מהימן לא מבוצעת בנהיגה. נשמר לאחר העצירה.",
                         "A request that came from untrusted text is not run while driving. Saved for when you stop."),
+    "DRIVE_PASSENGER": ("ייתכן שיש נוסע ברכב, אז היומן לא מוקרא. נשמר לאחר העצירה.",
+                        "A passenger may be present, so the calendar is not read aloud. Saved for when you stop."),
     "DRIVE_DEFER": ("זה נשמר לאחר העצירה.", "That is saved for when you stop."),
     "DRIVE_QUEUE_FULL": ("רשימת הממתינים מלאה; הפעולה לא נשמרה.", "The when-stopped list is full; the action was not saved."),
     "DRIVE_STOPPED": ("עצרת. ממתינים לך: {n}.", "You have stopped. Waiting for you: {n}."),
@@ -376,6 +378,9 @@ class Gate:
     active: Callable[[], bool]               # the drive_mode switch (only the owner flips it)
     queue: DriveQueue
     contacts: Callable[[], list] = _no_contacts
+    # the owner's saved drive_briefing.passenger setting (ask | present | alone). Fail closed: only "alone" lets a
+    # calendar read (full event titles) be spoken while driving (issue #831)
+    passenger: Callable[[], str] = lambda: "ask"
 
     @staticmethod
     def _addr(value) -> str:
@@ -441,6 +446,13 @@ class Gate:
                 return v
         return ""
 
+    def _passenger_mode(self) -> str:
+        try:
+            m = str(self.passenger() or "ask")
+        except Exception:
+            return "ask"
+        return m if m in ("ask", "present", "alone") else "ask"
+
     def check(self, tool, args, *, origin: str, route: str, tainted: bool):
         from .skills import ToolResult
         if route == PHONE_SCREEN:                         # a read-only display on the owner's phone (see the class docstring)
@@ -473,6 +485,8 @@ class Gate:
                          builtin=trusted_origin(tool))
         who = self.recipient(tool, args) if kind in VOICE_CONFIRMED else ""
         v = decide(kind, active=True, known_contact=self.known(who, self.target(tool, args)), source=source, by_voice=by_voice)
+        if v.allowed and kind == "calendar_read" and self._passenger_mode() != "alone":
+            v = Verdict("defer", "DRIVE_PASSENGER")       # never read event titles aloud unless the owner said alone
         if v.allowed:
             if v.code != "DRIVE_OK" or tool.permission != "read":
                 logs.info("drive", "DRIVE_ALLOWED", "drive mode allows this; normal approvals still apply",
@@ -496,7 +510,10 @@ class Gate:
 def attach(registry, features, home, memory=None) -> Gate:
     """Wire drive mode into a SkillRegistry (Core and text session). With the switch off it does nothing."""
     contacts = (lambda: contacts_from_memory(memory)) if memory is not None else _no_contacts
-    gate = Gate(active=lambda: features.active(FEATURE), queue=queue_for(home), contacts=contacts)
+    def passenger() -> str:
+        from .userdata import open_db
+        return str(open_db(home).setting("drive_briefing.passenger") or "ask")
+    gate = Gate(active=lambda: features.active(FEATURE), queue=queue_for(home), contacts=contacts, passenger=passenger)
     registry.drive = gate
     return gate
 
