@@ -322,6 +322,17 @@ def test_core_starts_the_phone_server_at_boot_only_when_the_switch_is_on(tmp_pat
     asyncio.run(core_app.Core.start_mobile(fake_self))
 
 
+def test_network_help_gives_stable_name_and_private_firewall_command():
+    """V5-I: guidance only; the .local name is sanitised and the firewall rule is private-profile."""
+    from jarves import mobile
+    h = mobile.network_help("192.168.1.9", 8443, "https", hostname="My-PC.lan_x")
+    assert h["stable_url"] == "https://my-pc.local:8443/m/"
+    assert h["firewall"]["profile"] == "private"
+    assert "profile=private remoteip=localsubnet" in h["firewall"]["command"] and "localport=8443" in h["firewall"]["command"]
+    none = mobile.network_help(None, 0, hostname="")
+    assert none["stable_url"] is None and none["firewall"]["command"] is None
+
+
 @pytest.mark.parametrize("exc,status", [(FileNotFoundError, 404), (PermissionError, 500), (OSError, 500)])
 def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, status):
     """The file can vanish or be unreadable between the check and the read: no traceback, no server path in the reply."""

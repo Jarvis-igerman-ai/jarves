@@ -1269,6 +1269,24 @@ def make_selfsigned(home: Path, host: str | None) -> tuple[Path, Path]:
     return cert_p, key_p
 
 
+def network_help(host: str | None, port: int, scheme: str = "http", *, hostname: str | None = None) -> dict:
+    """V5-I: guidance only (nothing is run or changed). The IP can change with DHCP, so the computer's own `<name>.local`
+    address is offered as the stable one to bookmark; the firewall rule is shown for the owner to run, private networks only."""
+    import re
+    import socket
+    raw = hostname if hostname is not None else socket.gethostname()
+    name = re.sub(r"[^a-z0-9-]", "", (raw or "").lower().split(".")[0])
+    local = f"{name}.local" if name else None
+    cmd = (f'netsh advfirewall firewall add rule name="JARVES phone" dir=in action=allow protocol=TCP '
+           f'localport={int(port)} profile=private remoteip=localsubnet') if port else None
+    return {"lan_ip": host, "port": port,
+            "stable_url": f"{scheme}://{local}:{port}/m/" if local and port else None,
+            "stable_note": "The IP address can change; the .local name stays. If the phone cannot open .local, use the IP address.",
+            "firewall": {"profile": "private",
+                         "hint": "If Windows asks about the firewall, allow Private networks only (never Public).",
+                         "command": cmd}}
+
+
 # ---------------------------------------------------------------------- owner (loopback) dashboard routes
 def dashboard_routes(register) -> None:
     def mob(ctx) -> MobileAccess:
@@ -1282,7 +1300,8 @@ def dashboard_routes(register) -> None:
                                  "name": t.get("name"), "host": a.tailnet_host(), "bind": a.bind,
                                  "url": f"{a.scheme}://{a.tailnet_host()}:{a.port}/m/" if a.tailnet_host() else None,
                                  "tls_source": a.tls_source},
-                     "reachable_from_phone": bool(a.enabled and a.host), **a.settings(), "devices": a.devices(),
+                     "reachable_from_phone": bool(a.enabled and a.host),
+                     "network": network_help(a.host, a.port, a.scheme) if a.enabled and a.host else None, **a.settings(), "devices": a.devices(),
                      "can_enable_here": getattr(ctx, "dashboard", None) is not None,
                      "how": "jarvis features on mobile_access, then jarvis dashboard --mobile --tls-selfsigned"}
 
