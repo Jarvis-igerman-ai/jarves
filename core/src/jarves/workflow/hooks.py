@@ -87,6 +87,16 @@ def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool
     return {"decision": "block", "reason": f"JARVES: your answer to \"{question['title']}\" was stored. "
             "It was not sent to the model; the task stays blocked until you confirm it in the dashboard or your own terminal."}
 
+def _stop_without_handoff(store: Store, task_id: str) -> None:
+    """A stop with recorded evidence is a handoff to review; one without it is quarantined (#854)."""
+    task = next((t for t in store.snapshot()["tasks"] if t["id"] == task_id), None)
+    if task is None or task["state"] not in {"running", "blocked"}:
+        return
+    if task["state"] == "running" and store.has_recorded_evidence(task):
+        store.transition(task_id, {"state": "review"})
+        return
+    store.quarantine(task_id, "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+
 
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
     event = payload.get("hook_event_name", "")
@@ -143,7 +153,7 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
            call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
            details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
-        store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+        _stop_without_handoff(store, native["task_id"])
     if subagent == "manager" and not managed:
         # Only one top-level session is the manager: headless/other sessions never receive owner follow-ups.
         store.claim_followup_manager(ident, takeover=event == "SessionStart")
