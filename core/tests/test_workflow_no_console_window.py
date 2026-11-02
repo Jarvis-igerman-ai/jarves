@@ -12,7 +12,7 @@ SCANNED = sorted((CORE / "src" / "jarves" / "workflow").glob("*.py")) + [
 # Deliberately visible: opens a Claude window for the owner via "cmd /c start" (discuss.py).
 EXEMPT = {("discuss.py", "_default_launch")}
 SUBPROCESS_FUNCS = {"run", "Popen", "call", "check_call", "check_output"}
-INJECTED = {"popen"}  # injectable Popen default in autopilot_update
+INJECTED = {"popen", "run"}  # injectable defaults: autopilot_update popen=, report.gh_merged run=
 
 
 def _hidden(call: ast.Call) -> bool:
@@ -29,6 +29,13 @@ def _hidden(call: ast.Call) -> bool:
 def _violations(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     found = []
+    imported_funcs = set()
+    params = {a.arg for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              for a in n.args.args + n.args.kwonlyargs}
+    params |= {"popen"}  # popen is always treated as the injected Popen
+    for n in ast.walk(tree):  # from subprocess import run / Popen as P
+        if isinstance(n, ast.ImportFrom) and n.module == "subprocess":
+            imported_funcs |= {a.asname or a.name for a in n.names if a.name in SUBPROCESS_FUNCS}
 
     def visit(node, scope):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -41,7 +48,10 @@ def _violations(path: Path) -> list[str]:
                     bad = True
                 if f.value.id == "os" and f.attr == "system":
                     bad = True
-            elif isinstance(f, ast.Name) and f.id in INJECTED:
+            elif isinstance(f, ast.Name) and (f.id in INJECTED & params or f.id in imported_funcs):
+                bad = True
+            if (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                    and f.value.id == "os" and f.attr == "startfile"):
                 bad = True
             if bad and not _hidden(node) and (path.name, scope) not in EXEMPT:
                 found.append(f"{path.name}:{node.lineno}")
@@ -62,6 +72,9 @@ class NoConsoleWindowTests(unittest.TestCase):
         try:
             sample.write_text("import subprocess\nsubprocess.run(['x'])\nsubprocess.run(['y'], creationflags=1)\n", encoding="utf-8")
             self.assertEqual(_violations(sample), ["_sample_889.py:2"])
+            sample.write_text("import os\nfrom subprocess import run as r, Popen as P\nr(['x'])\nP(['y'])\nos.startfile('z')\n"
+                              "def f(run=None):\n    run(['q'])\n", encoding="utf-8")
+            self.assertEqual(_violations(sample), [f"_sample_889.py:{n}" for n in (3, 4, 5, 7)])
         finally:
             sample.unlink(missing_ok=True)
 

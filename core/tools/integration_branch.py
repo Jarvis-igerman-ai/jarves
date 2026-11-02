@@ -226,7 +226,8 @@ def cmd_build(a):
         print(json.dumps({"branch": name, "error": "nothing could be merged", "skipped": skipped}), file=sys.stderr)
         return 3
     if not a.no_prepush:
-        if subprocess.run([sys.executable, "core/tools/prepush.py"], cwd=cwd, **_HIDDEN).returncode != 0:
+        if subprocess.run([sys.executable, "core/tools/prepush.py"], cwd=cwd, stdin=subprocess.DEVNULL,
+                          stdout=sys.stdout, stderr=sys.stderr, **_HIDDEN).returncode != 0:
             print(json.dumps({"branch": name, "error": "prepush failed"}), file=sys.stderr)
             return 4
     body = pr_body(included, skipped)

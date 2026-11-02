@@ -253,3 +253,24 @@ def test_many_files_treated_as_tier_r(env):
     make_pr(work, gh, 1, {"docs/a.md": "x"})
     gh.prs[1]["files"] = [{"path": f"docs/f{i}.md"} for i in range(100)]
     assert ib.pr_info(1, work)["tier"] == "R"
+
+
+def test_prepush_keeps_output_visible_with_hidden_flag(env, monkeypatch):
+    """#889: the no-window flag detaches stdio on Windows; prepush must be given explicit streams."""
+    work, gh = env
+    make_pr(work, gh, 1, {"core/src/jarves/x_thing.py": "x = 1\n"})
+    seen = {}
+    orig = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if "core/tools/prepush.py" not in cmd:
+            return orig(cmd, **kw)
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert run_main(work, "build", "1") == 0
+    assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
+    assert seen["stdin"] == subprocess.DEVNULL
+    if sys.platform == "win32":
+        assert seen["creationflags"]

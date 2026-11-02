@@ -176,7 +176,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                         webchild.reap(home, port, store.record_event)  # the launcher can exit while the server lives
                         child = popen([*command, "serve", "--home", str(home), "--profile-home", str(profile_home), "--port", str(port)],
                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                      **hidden_popen_kwargs(detached=True))
+                                      **hidden_popen_kwargs())
                         restarts.append(now)
                         store.record_event("supervisor", "Workflow web process started; existing worker sessions left untouched")
                     store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": webchild.listening_pid(home, port) or child.pid,
