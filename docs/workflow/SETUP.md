@@ -167,6 +167,9 @@ requires an already running allow-listed session and explicit
 - Stale review/steward tasks of merged or superseded PRs: `close-superseded <open PR numbers>`
   (e.g. from `gh pr list`) blocks queued tasks whose PR is not in that list. Tasks with
   implementation=merged are never listed as ready; route them to an installed-product QA task.
+- A merged task reopened to queued stays `implementation=merged` and is never listed as ready.
+  Reopen it with `transition --task ID --state queued --implementation in_progress`, or route
+  it to a QA task.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
 
