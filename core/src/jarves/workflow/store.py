@@ -383,6 +383,12 @@ class Store:
         self._put(db, "task", task)
         self._event(db, "task_quarantined", f"{task['title']}: {reason}; resource locks retained")
 
+    @staticmethod
+    def has_recorded_evidence(task):
+        """True when the worker already recorded passing acceptance evidence or validation."""
+        return (any(c.get("passed") and str(c.get("evidence", "")).strip() for c in task.get("acceptance", []))
+                or task.get("validation", "not_run") != "not_run")
+
     def quarantine(self, task_id, reason):
         """Quarantine an ambiguous dispatch or live writer without releasing locks."""
         reason = _text(reason, "quarantine reason", maximum=2000)

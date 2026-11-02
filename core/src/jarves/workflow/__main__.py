@@ -290,7 +290,8 @@ def main(argv=None) -> int:
             if a.checkpoint:
                 changes["checkpoint"] = a.checkpoint
             if a.action == "recover":
-                changes.update(state="queued", recovery_confirmed=True)
+                # recover --state review|blocked|queued (default queued); needs --checkpoint (#854).
+                changes.update(state=changes.get("state") or "queued", recovery_confirmed=True)
             if a.action == "authorize":
                 changes.update(execution_allowed=True)
             result = store.transition(a.task, changes)
