@@ -56,3 +56,9 @@ id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
 issue = 770
 since = "2026-11-01"
 reason = "state text races the fake mic beep: listening vs hearing you (real browser)"
+
+[[test]]
+id = "test_diag_monitor.py::test_sampler_and_overhead_budget"
+issue = 778
+since = "2026-11-02"
+reason = "Windows shard 3/4 failed on PR 849 (unrelated mic test PR): thread_time has 15.6 ms granularity so sample_cost read 0.0625 s and the 0.1 pct CPU budget assert at line 100 tripped; passes elsewhere"
