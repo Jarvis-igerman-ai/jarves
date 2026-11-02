@@ -312,16 +312,14 @@ class WebChat:
         """The owner's silent switch. A failed read (a busy or locked settings database on another thread) must never turn a
         silent chat into a speaking one: it answers with the last value seen or written (#665); only a core with no
         settings store at all counts as "not silent"."""
-        gen = self._silent_gen
         try:
-            on = (self.core.memory.get_setting("chat:silent") or "") == "on"
+            with self._silent_lock:                       # read under the write lock: never sees the row mid-write (#722)
+                on = (self.core.memory.get_setting("chat:silent") or "") == "on"
+                self._silent_last = on
+                return on
         except AttributeError:
             return False
         except Exception:
-            return self._silent_last
-        with self._silent_lock:
-            if gen == self._silent_gen:                   # a write since the read began wins over this (stale) value
-                self._silent_last = on
             return self._silent_last
 
     def set_silent(self, on: bool) -> None:

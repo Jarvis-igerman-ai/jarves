@@ -14,6 +14,7 @@ import pytest
 
 from jarves import approvals as appr
 from jarves import features as feat
+from jarves import isolation
 from jarves.config import Config
 from jarves.skills import IN_TOOL, NoArgs, Skill, SkillRegistry, Tool, ToolResult
 from jarves.skills import helper as hp
@@ -324,7 +325,8 @@ def helper_env(home):
         return await svc.ask(prompt, **meta)
     confirm.accepts_meta = True
     reg.confirm = confirm
-    hp.register_helper(reg, home)
+    # RLIMIT_NPROC is per user: a busy CI runner can eat the default headroom between the count and the pipe fork (#660)
+    hp.register_helper(reg, home, limits=isolation.Limits(max_processes=1024))
     dashboard_open(home)
     yield SimpleNamespace(f=f, svc=svc, reg=reg, home=home)
     feat.detach()
