@@ -1,1 +1,1 @@
-- Workflow: coalesced, clean-prompt-only manager wake queue with design note and simulation (#762).
+- Added: coalesced, clean-prompt-only manager wake queue for the workflow, with design note and simulation (#762).
