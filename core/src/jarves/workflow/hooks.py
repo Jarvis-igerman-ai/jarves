@@ -87,6 +87,32 @@ def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool
     return {"decision": "block", "reason": f"JARVES: your answer to \"{question['title']}\" was stored. "
             "It was not sent to the model; the task stays blocked until you confirm it in the dashboard or your own terminal."}
 
+
+DEPRECATED_REMOTE = "igalgerman/jarvis"
+
+
+def git_base_note(cwd: str) -> str:
+    """State the worker checkout's remotes and HEAD; warn when it comes from the deprecated repo (#852).
+
+    Isolated worktrees are created by Claude Code from the launching checkout, so the hook cannot choose
+    the base; it verifies and states it so the worker rebases onto jarves/main instead of an old commit.
+    """
+    def git(*args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=3).stdout.strip()
+    try:
+        remotes = git("remote", "-v")
+        head = git("rev-parse", "--short", "HEAD") or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "Worktree base could not be verified: run git remote -v and branch from jarves/main."
+    if not remotes:
+        return f"Worktree base HEAD {head}; no git remote found, verify it before branching."
+    if "jarves" not in remotes.lower().replace(DEPRECATED_REMOTE, ""):
+        return (f"WARNING worktree base HEAD {head} has no jarves remote (deprecated {DEPRECATED_REMOTE} only): "
+                "add/fetch Jarvis-igerman-ai/jarves and branch from jarves/main before any change.")
+    return (f"Worktree base HEAD {head} (stated, not guaranteed current): git fetch jarves main and "
+            "branch from jarves/main.")
+
+
 def _stop_without_handoff(store: Store, task_id: str) -> None:
     """A stop with recorded evidence is a handoff to review; one without it is quarantined (#854)."""
     task = next((t for t in store.snapshot()["tasks"] if t["id"] == task_id), None)
@@ -184,6 +210,7 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases." +
             (" " + notice_line(unread) if unread else "") +
+            (" " + git_base_note(payload.get("cwd") or str(root)) if event == "SubagentStart" else "") +
             (" " + followup_message(store.open_followups(ident), root, store.path.parent)
              if event == "SessionStart" and not managed else "")}}
     return {}
