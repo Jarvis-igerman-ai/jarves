@@ -23,6 +23,15 @@ A gap is silence longer than the layer threshold; `ready_work` = ready authorise
 Mark layers: supervisor, autopilot, manager, ledger. Both endpoints need the same session as `/api/state`.
 CLI for terminals and agents: `workflow_console.py timeline --hours 24 [--json]` and `workflow_console.py health`.
 
+## GET /api/now (Overview "now" panels, #789)
+`{"now","since","trace_mode","workers":[{"agent_id","label","lane","status","task_id","task_title","seen_at",
+"last":{"ts","event","tool","status","duration_ms","hint"}|null}],"workers_total","manager":{"agent_id","actions":[{"ts","event",
+"tool","status","duration_ms"}]}|null,"restarts":{"events":[{"ts","kind":"start|stop|status","summary"}],"gaps":[{"start","end","seconds"}],"starts","stops"}}`
+Bounded: 12 workers, 20 manager actions (a finished tool call is one line), 40 supervisor events and 20 gaps over 24 h.
+Metadata only from the action journal; `hint` is a re-scrubbed one-line `description`/`summary` (max 100 chars) and exists
+only when details capture is on. The manager is the follow-up manager session, else the freshest top-level native session.
+No transcript file is read. CLI: `workflow_console.py now`.
+
 ## Incidents
 Detected: `supervisor_dead` (silent > 5 min, or found at restart), `factory_idle_with_ready_work` (autopilot on, ready work,
 no worker or manager activity > 20 min), `autopilot_paused_long` (> 30 min), `repeated_supervisor_error` /

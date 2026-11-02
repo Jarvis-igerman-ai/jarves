@@ -401,9 +401,9 @@ console.log(timelineText(data, 24, now));
         self.assertNotIn("style=", html)
         for banned in ("style=", "onclick", "XMLHttpRequest", "EventSource", "method:"):
             self.assertNotIn(banned, js)
-        # read-only: the only calls are two GETs (the verdict and the morning report)
-        self.assertEqual(sorted(set(re.findall(r'fetch\("(/api/[a-z]+)"', js))), ["/api/health", "/api/report"])
-        self.assertEqual(js.count("fetch("), 2)
+        # read-only: the only calls are three GETs (the verdict, the morning report and the #789 "now" panels)
+        self.assertEqual(sorted(set(re.findall(r'fetch\("(/api/[a-z]+)"', js))), ["/api/health", "/api/now", "/api/report"])
+        self.assertEqual(js.count("fetch("), 3)
         for line in js.splitlines():  # the theme choice is the only stored thing; storage is always guarded
             if "localStorage." in line:
                 self.assertIn("try {", line)

@@ -36,7 +36,23 @@
       owner_wait: d => `Waiting for your answers only (${d.questions})`, nothing_queued: () => "Nothing is queued"},
     static: {needs: "Needs you", all_questions: "All questions", running: "Working now", blocked: "Stuck", done_today: "Done today",
       versions: "Progress by version", shipped: "Shipped", verified: "Verified", merged: "Merged",
-      more: "More details: team, active tasks, events and alerts", report: "Morning report"},
+      more: "More details: team, active tasks, events and alerts", report: "Morning report",
+      now_title: "What each worker is doing now", now_loading: "Loading worker activity", restarts_title: "Supervisor stops and starts",
+      restarts_more: "Full timeline", manager_title: "Manager log", manager_note: "Last 20 actions: kind and time only"},
+    // #789: Overview "now" panels (GET /api/now, read-only metadata).
+    now: {
+      noWorkers: "No worker is running right now.", noTask: "No task claimed", noTrace: "No recorded action yet",
+      failed: "This data is not available now. It refreshes by itself.", ago: a => `${a} ago`, just: "just now",
+      more: (shown, total) => `Showing ${shown} of ${total}`, traceOff: "Action recording is off, so there is no last action.",
+      act: {PreToolUse: t => `Running ${t}`, PostToolUse: t => `Finished ${t}`, PostToolUseFailure: t => `${t} failed`,
+        Stop: () => "Stopped and waiting", SubagentStop: () => "Worker finished", SubagentStart: () => "Worker started",
+        SessionStart: () => "Session started", SessionEnd: () => "Session ended", Notification: () => "Notification",
+        UserPromptSubmit: () => "New instruction received"},
+      other: e => `Event ${e}`, tool: "a tool", ms: n => n >= 1000 ? `${Math.round(n / 1000)} s` : `${n} ms`,
+      noManager: "No manager session is known yet.", noActions: "The manager has no recorded actions yet.",
+      stripLabel: (s, p, g) => `Last 24 hours: ${s} starts, ${p} stops, ${g} silent gaps`,
+      start: "Started", stop: "Stopped", status: "Status change", gap: d => `Silent for ${d}`,
+      stripEmpty: "No stop or start in the last 24 hours.", from: "24 h ago", to: "Now"},
   } : {
     allWorking: n => `הכול עובד: ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}`,
     needsYou: (q, n, shown) => `צריך אותך: ${q === 1 ? "שאלה אחת" : shown && shown < q ? `${shown} מתוך ${q} שאלות` : `${q} שאלות`}${n ? ` · ${n === 1 ? "עובד אחד פעיל" : `${n} עובדים פעילים`}` : ""}`,
@@ -56,7 +72,22 @@
       owner_wait: d => `מחכה רק לתשובות שלך (${d.questions})`, nothing_queued: () => "אין משימות בתור"},
     static: {needs: "צריך אותך", all_questions: "לכל השאלות", running: "עובד עכשיו", blocked: "תקוע", done_today: "הושלם היום",
       versions: "התקדמות לפי גרסה", shipped: "שוחרר", verified: "נבדק", merged: "מוזג",
-      more: "עוד פרטים: הצוות, משימות פעילות, אירועים והתראות"},
+      more: "עוד פרטים: הצוות, משימות פעילות, אירועים והתראות",
+      now_title: "מה כל עובד עושה עכשיו", now_loading: "טוען את פעילות העובדים", restarts_title: "עצירות והפעלות של המשגיח",
+      restarts_more: "לציר הזמן המלא", manager_title: "יומן המנהל", manager_note: "20 הפעולות האחרונות: סוג וזמן בלבד"},
+    now: {
+      noWorkers: "אין עובד פעיל כרגע.", noTask: "בלי משימה רשומה", noTrace: "עדיין לא נרשמה פעולה",
+      failed: "הנתונים האלה לא זמינים כרגע. הם יתעדכנו מעצמם.", ago: a => `לפני ${a}`, just: "עכשיו",
+      more: (shown, total) => `מוצגים ${shown} מתוך ${total}`, traceOff: "רישום הפעולות כבוי, לכן אין פעולה אחרונה.",
+      act: {PreToolUse: t => `מריץ ${t}`, PostToolUse: t => `סיים ${t}`, PostToolUseFailure: t => `${t} נכשל`,
+        Stop: () => "עצר וממתין", SubagentStop: () => "עובד סיים", SubagentStart: () => "עובד התחיל",
+        SessionStart: () => "שיחה התחילה", SessionEnd: () => "שיחה הסתיימה", Notification: () => "התראה",
+        UserPromptSubmit: () => "התקבלה הנחיה חדשה"},
+      other: e => `אירוע ${e}`, tool: "כלי", ms: n => n >= 1000 ? `${Math.round(n / 1000)} שנ׳` : `${n} מ״ש`,
+      noManager: "עדיין לא ידוע מי המנהל.", noActions: "עדיין לא נרשמו פעולות של המנהל.",
+      stripLabel: (s, p, g) => `24 השעות האחרונות: ${s} הפעלות, ${p} עצירות, ${g} פערי שקט`,
+      start: "הופעל", stop: "נעצר", status: "שינוי מצב", gap: d => `שקט במשך ${d}`,
+      stripEmpty: "לא היו עצירות או הפעלות ב־24 השעות האחרונות.", from: "לפני 24 שע׳", to: "עכשיו"},
   };
   const signatures = {};
 
@@ -175,6 +206,72 @@
     $("#ov-more-count").textContent = alerts ? `· ${T.alerts(alerts)}` : "";
   }
 
+  // ---- #789: what each worker is doing now, supervisor stop/start strip and the manager log (GET /api/now) ----
+  const N = T.now;
+  const ago = (ts, now) => {
+    const sec = Math.max(0, now - seconds(ts));
+    return sec < 60 ? N.just : N.ago(duration(sec));
+  };
+  function actionText(a) {
+    const fn = N.act[a.event];
+    return fn ? fn(a.tool || N.tool) : N.other(a.event || "?");
+  }
+  function workerItem(w, now, mode) {
+    const task = w.task_id ? `<span class="ov-worker-task" dir="auto"><b>${esc(w.task_id)}</b>${w.task_title ? ` · ${esc(w.task_title)}` : ""}</span>`
+      : `<span class="ov-worker-task muted">${esc(N.noTask)}</span>`;
+    const a = w.last;
+    const line = a ? `<span class="ov-worker-line${a.status === "failed" ? " bad" : ""}"><span dir="auto">${esc(actionText(a))}</span> · <time>${esc(ago(a.ts, now))}</time>${a.hint ? ` · <span dir="auto">${esc(a.hint)}</span>` : ""}</span>`
+      : `<span class="ov-worker-line muted">${esc(mode === "off" ? N.traceOff : N.noTrace)}</span>`;
+    return `<li class="ov-worker"><span class="ov-worker-name" dir="auto">${esc(w.label)}</span>${task}${line}</li>`;
+  }
+  function renderWorkers(view) {
+    const list = view.workers || [];
+    $("#ov-now-count").textContent = view.workers_total ? String(view.workers_total) : "";
+    let html = list.length ? list.map(w => workerItem(w, view.now, view.trace_mode)).join("") : `<li class="today-empty">${esc(N.noWorkers)}</li>`;
+    if (view.workers_total > list.length) html += `<li class="ov-note">${esc(N.more(list.length, view.workers_total))}</li>`;
+    put("#ov-workers", html);
+  }
+  function renderStrip(view) {
+    const r = view.restarts || {events: [], gaps: []}, span = Math.max(1, view.now - view.since);
+    const x = ts => { const p = Math.min(1000, Math.max(0, (ts - view.since) / span * 1000)); return EN ? p : 1000 - p; };
+    const label = N.stripLabel(r.starts || 0, r.stops || 0, (r.gaps || []).length);
+    if (!r.events.length && !r.gaps.length) { put("#ov-strip", `<p class="today-empty">${esc(N.stripEmpty)}</p>`); return; }
+    const gaps = r.gaps.map(g => { const a = x(g.start), b = x(g.end); return `<rect class="ov-strip-gap" x="${Math.min(a, b).toFixed(1)}" y="2" width="${Math.max(3, Math.abs(b - a)).toFixed(1)}" height="20"></rect>`; }).join("");
+    const marks = r.events.map(e => `<rect class="ov-strip-${e.kind}" x="${(x(e.ts) - 2).toFixed(1)}" y="0" width="4" height="24"></rect>`).join("");
+    const svg = `<svg class="ov-strip-svg" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="${esc(label)}"><rect class="ov-strip-bg" x="0" y="8" width="1000" height="8"></rect>${gaps}${marks}</svg>`;
+    const axis = `<div class="ov-strip-axis" aria-hidden="true"><span>${esc(N.from)}</span><span>${esc(N.to)}</span></div>`;
+    const rows = [...r.events.map(e => ({ts: e.ts, kind: e.kind, text: N[e.kind] || e.kind, title: e.summary})),
+      ...r.gaps.map(g => ({ts: g.start, kind: "gap", text: N.gap(duration(g.seconds)), title: ""}))]
+      .sort((a, b) => b.ts - a.ts).slice(0, 6);
+    const list = `<ol class="ov-strip-list">${rows.map(e => `<li class="ov-strip-item ${e.kind}"${e.title ? ` title="${esc(e.title)}"` : ""}><time>${esc(clock(e.ts))}</time> <span dir="auto">${esc(e.text)}</span></li>`).join("")}</ol>`;
+    put("#ov-strip", `<p class="ov-note">${esc(label)}</p>${svg}${axis}${list}`);
+  }
+  function renderManager(view) {
+    const m = view.manager;
+    if (!m) { put("#ov-manager-log", `<p class="today-empty">${esc(N.noManager)}</p>`); return; }
+    if (!m.actions.length) { put("#ov-manager-log", `<p class="today-empty">${esc(view.trace_mode === "off" ? N.traceOff : N.noActions)}</p>`); return; }
+    put("#ov-manager-log", `<ol class="ov-log">${m.actions.map(a => `<li class="ov-log-row${a.status === "failed" ? " bad" : ""}"><time>${esc(clock(a.ts))}</time><span dir="auto">${esc(actionText(a))}</span>${a.duration_ms != null ? `<span class="ov-log-ms">${esc(N.ms(a.duration_ms))}</span>` : ""}</li>`).join("")}</ol>`);
+  }
+  const NOW_BOXES = ["#ov-workers", "#ov-strip", "#ov-manager-log"];
+  let nowBusy = false;
+  async function loadNow() {
+    if (nowBusy || typeof fetch !== "function" || !$("#ov-workers")) return;
+    nowBusy = true;
+    try {
+      const response = await fetch("/api/now", {credentials: "same-origin", cache: "no-store"});
+      if (!response.ok) throw new Error(String(response.status));
+      const view = await response.json();
+      if (!view || !Array.isArray(view.workers)) throw new Error("shape");
+      renderWorkers(view); renderStrip(view); renderManager(view);
+    } catch (_) {
+      // Keep the last good panels; only an empty (first) load shows the error line.
+      NOW_BOXES.forEach(id => { if (!signatures[id]) put(id, `<p class="today-empty">${esc(N.failed)}</p>`); });
+    } finally {
+      NOW_BOXES.forEach(id => $(id)?.setAttribute("aria-busy", "false"));
+      nowBusy = false;
+    }
+  }
+
   function setView() {
     const name = location.hash.replace(/^#/, "").split("&")[0];
     document.body.dataset.view = VIEWS.has(name) ? name : "overview";
@@ -195,6 +292,8 @@
   document.addEventListener("workflow:render", event => {
     const {data, complete = () => false, age = () => ""} = event.detail || {};
     if (!data || !Array.isArray(data.tasks) || !Array.isArray(data.agents) || !Array.isArray(data.questions)) return;
+    // The first render means the private session is ready: load the "now" panels at once instead of waiting 15 s.
+    if (!last) loadNow();
     last = {data, complete, age};
     renderStatus(data, age, complete);
     renderDone(data, complete);
@@ -203,6 +302,7 @@
   setInterval(() => {
     if (document.hidden) return;
     loadVerdict().then(() => { if (last) renderStatus(last.data, last.age, last.complete); });
+    if (document.body.dataset.view === "overview") loadNow();
   }, 15000);
   // Morning report: read-only GET /api/report, fetched when the block is opened.
   async function loadReport() {
@@ -220,8 +320,9 @@
     $("#ov-status-title").textContent = T.loading;
     setView();
     loadVerdict();
+    loadNow();
     $("#ov-report")?.addEventListener("toggle", event => { if (event.target.open) loadReport(); });
-    window.addEventListener("hashchange", setView);
+    window.addEventListener("hashchange", () => { setView(); if (document.body.dataset.view === "overview") loadNow(); });
     syncThemeButton();
     matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", syncThemeButton);
     $("#theme-toggle")?.addEventListener("click", () => {

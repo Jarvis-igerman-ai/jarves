@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -211,6 +211,9 @@ def main(argv=None) -> int:
         elif a.action == "health":
             from .observability import health
             result = health(store)
+        elif a.action == "now":
+            from .observability import now_view
+            result = now_view(store)   # same read-only data as the Overview "now" panels (#789)
         elif a.action == "timeline":
             from . import observability as obs
             tl = obs.timeline(store, since=store.clock() - a.hours * 3600)
