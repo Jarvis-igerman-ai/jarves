@@ -159,12 +159,31 @@ class PlanStore:
         cols = {"state": state, "updated": self.clock(), **extra}
         self.db.x(f"UPDATE goal_plans SET {', '.join(k + '=?' for k in cols)} WHERE id=?", (*cols.values(), int(pid)))
 
+    def _cas(self, pid: int, expected: tuple, state: str, step_sql: tuple = (), **extra) -> None:
+        """Atomic compare-and-set (#385): the state change and the step updates are ONE locked transaction, so the runner
+        never sees a 'ready' plan whose steps are not pending yet, and a racing cancel/pause wins (rolled back, never flipped)."""
+        cols = {"state": state, "updated": self.clock(), **extra}
+        with self.db._lock:
+            c = self.db._db
+            try:
+                cur = c.execute(f"UPDATE goal_plans SET {', '.join(k + '=?' for k in cols)} WHERE id=? AND state IN "
+                                f"({','.join('?' * len(expected))})", (*cols.values(), int(pid), *expected))
+                if cur.rowcount != 1:
+                    c.rollback()
+                    raise ValueError("the plan changed in the meantime: look at it again")
+                for sql, args in step_sql:
+                    c.execute(sql, args)
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+
     def approve(self, pid: int, *, by: str = "user") -> dict:
         """The owner approved the whole plan, once. The caller has already shown the steps and got the approval."""
         p = self._plan(pid)
         if p["state"] != "draft":
             raise ValueError("only a draft plan can be approved")
-        self._set(pid, "ready", approved_at=self.clock(), note="")
+        self._cas(pid, ("draft",), "ready", approved_at=self.clock(), note="")
         logs.info("goals", "PLAN_APPROVED", "plan approved", id=pid, by=by)
         return self.get(pid)
 
@@ -172,7 +191,7 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] not in ("ready", "running"):
             raise ValueError("only a ready or running plan can be paused")
-        self._set(pid, "paused", note="paused by the owner")
+        self._cas(pid, ("ready", "running"), "paused", note="paused by the owner")
         logs.info("goals", "PLAN_PAUSED", "plan paused", id=pid, by=by)
         return self.get(pid)
 
@@ -183,8 +202,9 @@ class PlanStore:
         for s in self.steps(pid):
             if s["status"] == "unknown":
                 raise ValueError(f"step {s['idx'] + 1} may already have run before the stop: retry or skip it first")
-        self.db.x("UPDATE goal_plan_steps SET status='pending', error='' WHERE plan_id=? AND status='blocked'", (int(pid),))
-        self._set(pid, "ready", note="", **({} if by == "phone" else {"tainted": 0}))   # the owner's resume on the PC is a new turn: the guard is lifted; a phone never lifts it (#340)
+        self._cas(pid, ("paused", "blocked"), "ready",
+                  (("UPDATE goal_plan_steps SET status='pending', error='' WHERE plan_id=? AND status='blocked'", (int(pid),)),),
+                  note="", **({} if by == "phone" else {"tainted": 0}))   # the owner's resume on the PC is a new turn: the guard is lifted; a phone never lifts it (#340)
         logs.info("goals", "PLAN_RESUMED", "plan resumed", id=pid, by=by)
         return self.get(pid)
 
@@ -203,16 +223,20 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] not in ("failed", "blocked", "paused"):
             raise ValueError("only a failed, blocked or paused plan can be retried")
-        n = 0
+        todo = []
         for s in self.steps(pid):
             if s["status"] in ("failed", "blocked", "unknown") and step_idx in (None, s["idx"]):
                 if s["attempts"] >= MAX_ATTEMPTS:
                     raise ValueError(f"step {s['idx'] + 1} was tried {MAX_ATTEMPTS} times already: skip it or cancel")
-                self.db.x("UPDATE goal_plan_steps SET status='pending', error='' WHERE id=?", (s["id"],))
-                n += 1
+                if s["status"] == "unknown" and by == "phone":
+                    raise ValueError(f"step {s['idx'] + 1} may already have run: repeating it is done on the computer")
+                todo.append(s["id"])
+        n = len(todo)
         if not n:
             raise ValueError("no failed or blocked step to retry")
-        self._set(pid, "ready", note="", finished=None, **({} if by == "phone" else {"tainted": 0}))   # a phone never lifts the guard (#340)
+        self._cas(pid, ("failed", "blocked", "paused"), "ready",
+                  tuple(("UPDATE goal_plan_steps SET status='pending', error='' WHERE id=? AND status IN ('failed','blocked','unknown')", (sid,))
+                        for sid in todo), note="", finished=None, **({} if by == "phone" else {"tainted": 0}))   # a phone never lifts the guard (#340)
         logs.info("goals", "PLAN_RETRIED", "plan step retried", id=pid, count=n, by=by)
         return self.get(pid)
 
@@ -424,7 +448,8 @@ class PlanRunner:
                     f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
                     f"{_args_text(step['args'], STEP_SHOW_CHARS)}\nRun this step?",
                     title="goal_plan_step", risk="medium", kind="tool", pc_only=True,
-                    why=_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
+                    why=(_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
+                    + (" It was tried before and may already have happened: check first." if step["attempts"] else ""))
                 if not ok:
                     self._block(pid, step, "the owner did not approve this step")
                     return st.get(pid)
@@ -439,7 +464,8 @@ class PlanRunner:
                 res = await asyncio.wait_for(self.registry.call(step["tool"], step["args"], origin="model"),
                                              min(remaining, tool.timeout_s + STEP_GRACE_S))
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(pid, step, "the step timed out", t0)
+                self._fail(pid, step, "the step timed out" + (": it may already have happened" if consequential else ""), t0,
+                           status="unknown" if consequential else "failed")
                 return st.get(pid)
             except asyncio.CancelledError:
                 raise                                          # shutdown: the step stays 'running' for recover()
@@ -466,6 +492,9 @@ class PlanRunner:
             if res.code in ("TOOL_APPROVAL_TIMEOUT", "TOOL_APPROVAL_UNAVAILABLE"):     # V5 sec F8: nothing ran; retry after resume
                 self._block(pid, step, "no approval was given for this step (no answer in time or nowhere to ask)")
                 return st.get(pid)
+            if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
+                self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
+                return st.get(pid)
             self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
             return st.get(pid)
 
@@ -473,11 +502,11 @@ class PlanRunner:
         self.store.db.x("UPDATE goal_plan_steps SET status='blocked', error=? WHERE id=?", (_short(why, 200), step["id"]))
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
-    def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "") -> None:
+    def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
-        self.store.db.x("UPDATE goal_plan_steps SET status='failed', finished=?, error=?, evidence=? WHERE id=?",
-                        (self.clock(), _short(why, 200), _short(evidence), step["id"]))
+        self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
+                        (status, self.clock(), _short(why, 200), _short(evidence), step["id"]))
         self._stop_plan(pid, "failed", f"step {step['idx'] + 1}: {why}", finished=self.clock())
 
     def _finish(self, pid: int) -> dict:
