@@ -1,0 +1,1 @@
+- Added: `core/tools/merge_policy.py`, a small `decide()` for the merge steward that chooses integration PR or one-by-one from recorded `merge_cycle` ledger events (starts at 3 eligible PRs, raises or lowers by skip rate, time to merge, reverts); Tier R rules unchanged (#777).

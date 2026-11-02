@@ -104,10 +104,32 @@ def merge_tree_conflicts(a, b, cwd=None):
     return {0: False, 1: True}.get(p.returncode)
 
 
-def recommend(infos, overlaps, conflicts):
+def ledger_threshold(home=None):
+    """Adaptive threshold (>= MIN_INTEGRATION) from recorded merge cycles; default when no ledger/history (#777)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        import merge_policy
+        from jarves.workflow.store import Store
+        from pathlib import Path as _P
+        import os
+        base = _P(home) if home else _P(os.environ.get("LOCALAPPDATA", _P.home())) / "jarves" / "workflow"
+        db = base / "workflow.db"
+        if not db.exists():
+            return MIN_INTEGRATION
+        store = Store(db)
+        try:
+            return max(merge_policy.threshold(merge_policy.history_from_store(store))[0], MIN_INTEGRATION)
+        finally:
+            store.close()
+    except Exception:
+        return MIN_INTEGRATION
+
+
+def recommend(infos, overlaps, conflicts, min_integration=MIN_INTEGRATION):
     n = len(infos)
-    if n < MIN_INTEGRATION:
-        return "individual", f"only {n} eligible PR(s); need at least {MIN_INTEGRATION}"
+    if n < min_integration:
+        return "individual", f"only {n} eligible PR(s); need at least {min_integration}"
     if overlaps or conflicts:
         return "individual", "PRs overlap on files or conflict, so they are not independent"
     extra = " (Tier R included: no-automerge + one Opus review of the combined diff)" if any(i["tier"] == "R" for i in infos) else ""
@@ -125,7 +147,7 @@ def cmd_plan(a):
         (infos if eligible(info) else rejected).append(info)
     overlaps = overlap_pairs(infos)
     conflicts = [[x["number"], y["number"]] for x, y in combinations(infos, 2) if merge_tree_conflicts(x, y, cwd)]
-    rec, why = recommend(infos, overlaps, conflicts)
+    rec, why = recommend(infos, overlaps, conflicts, ledger_threshold() if a.auto else MIN_INTEGRATION)
     print(json.dumps({
         "prs": [{k: i[k] for k in ("number", "title", "head", "tier", "files")} for i in infos],
         "not_eligible": [{"number": i["number"], "reason": ineligible_reason(i)} for i in rejected],

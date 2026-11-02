@@ -133,7 +133,8 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
 - Per cycle the steward decides individual vs integration with
   `core/tools/integration_branch.py plan --auto` (JSON: tiers, file-overlap and
   `git merge-tree` forecast, recommendation). `individual` when fewer than 3
-  eligible PRs, any overlap, or a lone Tier R; `integration` for 3 or more
+  eligible PRs (recorded `merge_cycle` ledger history may raise this threshold up to 6 via
+  `core/tools/merge_policy.py`, never lower it), any overlap, or a lone Tier R; `integration` for 3 or more
   independent green PRs: `build ... --open-pr` makes ONE branch
   `integration-green-<MMDD>` (`--no-ff` merges, conflicting PRs skipped with the
   reason, changelog fragments checked, prepush run) and one PR with
