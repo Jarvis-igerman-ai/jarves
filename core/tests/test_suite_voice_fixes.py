@@ -228,22 +228,37 @@ async def test_a_quick_on_screen_answer_gets_no_spoken_hint(monkeypatch):
 # ------------------------------------------------------------------ idle: room noise cannot keep a session open
 async def test_room_noise_alone_cannot_keep_the_session_open(monkeypatch):
     """A false wake's session stayed open 3 min 16 s on hiss/coughs (mic energy counted as activity)."""
+    # Clock-free (#880): the module's clock and sleep are faked, so the 2.5 s bound is virtual seconds.
+    now = [1000.0]
+    real_sleep = asyncio.sleep
+
+    class _Asyncio:                                           # live_mod.asyncio whose sleep advances the fake clock
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+        @staticmethod
+        async def sleep(delay, *a, **k):
+            now[0] += delay
+            await real_sleep(0)
+
+    monkeypatch.setattr(live_mod, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(live_mod, "asyncio", _Asyncio())
     monkeypatch.setattr(live_mod, "ENERGY_EXTEND_S", 0.3)
     ended = []
     lv = make(idle_disconnect_s=0.4)
     lv._speaking_until = 0.0
     lv._request_end = lambda reason: ended.append(reason)
     lv.note_activity()
-    t0 = time.monotonic()
+    t0 = now[0]
 
     async def noise():
         while not ended:
-            lv._last_energy = time.monotonic()                # loud mic, never transcribed
-            await asyncio.sleep(0.05)
+            lv._last_energy = now[0]                          # loud mic, never transcribed
+            await real_sleep(0)
     n = asyncio.create_task(noise())
     await asyncio.wait_for(lv._idle_watchdog(), 5)
     n.cancel()
-    assert ended == ["idle"] and time.monotonic() - t0 < 2.5   # 0.3 s extension + 0.4 s idle (+1 s checks)
+    assert ended == ["idle"] and now[0] - t0 < 2.5            # 0.3 s extension + 0.4 s idle (+1 s checks), virtual
 
 
 async def test_real_activity_still_keeps_the_session_open(monkeypatch):
