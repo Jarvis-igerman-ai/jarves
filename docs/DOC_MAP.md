@@ -9,6 +9,7 @@
 - [Agent messages and ownership](workflow/AGENT_MESSAGES.md): ledger claims on PRs/branches/issues/files, check-touch, agent-to-agent messages.
 - [Validation and limits](reports/2026-10-31-workflow-history.md): action-history, model routing and deferred native acceptance.
 - [Owner journey and diagrams](workflow/USER_JOURNEY.he.md): simplicity audit, provider/model choice, action history, manual retro and future Orchestrator task #715.
+- [Quiet manager wake](workflow/WAKE_DESIGN.md): coalesced wake queue, clean-prompt delivery, no retry timer (#762).
 - [Local setup](workflow/SETUP.md): first-run instructions/hooks and external Windows observer.
 - [Version scope mapping](workflow/VERSION_MAPPING_2026-10-30.md): 94 requirements, unknown proof and mapping gaps.
 - [Industry research](workflow/INDUSTRY_RESEARCH_2026-10-30.md): verified official sources and compatibility limits.
