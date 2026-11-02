@@ -41,5 +41,27 @@ class ReadyFilterTests(unittest.TestCase):
         self.assertIn("Superseded", task["blocker"])
 
 
+class ContinueCapTests(unittest.TestCase):
+    def test_unrunnable_work_never_spends_a_continuation_and_cap_depends_on_busy_workers(self):
+        now = [1000.0]
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "workflow.db", clock=lambda: now[0])
+            try:
+                store.create_task({"id": "scope", "title": "Scope", "execution_allowed": False})
+                for _ in range(5):
+                    self.assertEqual(store.manager_continue("m"), [])
+                store.create_task({"id": "ok", "title": "Runnable"})
+                got = [bool(store.manager_continue("m")) for _ in range(14)]
+                self.assertEqual(got.count(True), 12)  # high safety cap, not 2
+                now[0] += 3601
+                self.assertEqual(store.manager_continue("m"), ["ok"])
+                # at the worker limit the strict 2/hour cap applies
+                now[0] += 3601
+                self.assertEqual([bool(store.manager_continue("m", worker_limit=0)) for _ in range(4)],
+                                 [True, True, False, False])
+            finally:
+                store.close()
+
+
 if __name__ == "__main__":
     unittest.main()

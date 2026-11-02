@@ -89,8 +89,13 @@ class WorkflowNativeTests(unittest.TestCase):
         self.store.create_task({"id": "ready", "title": "Approved task"})
         self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop", stop_hook_active=True), {})
-        self.assertEqual(self.event("Stop")["decision"], "block")
+        for _ in range(11):  # safety cap is 12/hour while workers are below the limit (#858)
+            self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop"), {})
+
+    def test_subagent_start_states_worktree_base(self):
+        result = self.event("SubagentStart", agent_id="c", agent_type="workflow-bugs")
+        self.assertIn("base", result["hookSpecificOutput"]["additionalContext"].lower())
 
     def test_owner_wait_and_unapproved_scope_do_not_keep_manager_in_a_loop(self):
         self.store.create_task({"id": "scope", "title": "Scope only", "execution_allowed": False})
