@@ -1,0 +1,59 @@
+order = 32
+category = "system"
+features = []
+suggest = false
+aliases = ["מדיניות מודלים", "תקרת הוצאה", "תקרת עלות", "מודל בתשלום", "model policy", "spend cap", "spend policy", "paid model", "model registry", "free-only"]
+links = ["provider_openrouter", "model_lab"]
+title_he = "מדיניות מודלים והוצאה"
+title_en = "Model policy and spending"
+what_he = "בקרה פנימית שמחליטה איזה מודל מותר להפעיל: חמישה מצבים (מאוזן, איכות מרבית, זול, חינם בלבד, מקומי בלבד), תקרות לפי יום, משימה וסוכן, ורשימת ספקים מותרים לכל פרויקט. ברירת המחדל היא חינם בלבד ו-0 דולר. מודל בתשלום לא נבחר בשקט: במקום זה מוצגת בקשת חריגה שרק אתם מאשרים. אין לה מתג והיא פעילה תמיד (בטא); היא משמשת את ספק OpenRouter ואת מעבדת המודלים."
+what_en = "An internal control that decides which model may run: five modes (balanced, best-quality, cheap, free-only, local-only), caps per day, task and agent, and a per-project list of allowed providers. The default is free-only and 0 USD. A paid model is never picked silently: you get an exception request that only you can approve. It has no switch and is always on (beta); the OpenRouter provider and the model lab use it."
+say = [["אילו מודלים זמינים?", "Which models are available?"], ["באיזה מצב מדיניות המודלים?", "Which model policy mode is on?"]]
+expect_he = "במצב ברירת המחדל רק מודלים חינמיים או מקומיים מותרים. כשמודל לא זמין או חסום, לא עוברים אוטומטית למודל בתשלום: מוצגת סיבה והצעה חלופית, והיא פועלת רק אחרי אישור שלכם. פרויקט בלי רשימת ספקים מותרים מקבל מודלים חינמיים או מקומיים בלבד. מודל בתשלום בלי מחיר ידוע נחסם. מודל מרוחק אף פעם לא מסומן כפרטי או מקומי."
+expect_en = "In the default mode only free or local models are allowed. When a model is unavailable or blocked there is no automatic switch to a paid one: you see the reason and a proposed alternative, and it works only after you approve it. A project without an allowed-provider list gets free or local models only. A paid model with no known price is blocked. A remote model is never labelled private or local."
+test_he = "הריצו  jarvis models status  (מצב ותקרה) ו-jarvis models list  (המודלים ואם הם חינמיים). הבדיקה לא פונה לרשת ולא עולה כסף."
+test_en = "Run  jarvis models status  (mode and cap) and jarvis models list  (the models and whether each is free). The check uses no network and costs nothing."
+cost_he = "חינם. המדיניות עצמה לא מבצעת קריאות ולא מוציאה כסף; היא רק חוסמת. הוצאה בתשלום אפשרית רק אחרי שתקבעו תקרה גדולה מ-0 במפורש."
+cost_en = "Free. The policy itself makes no calls and spends nothing; it only blocks. Paid spending is possible only after you explicitly set a cap above 0."
+privacy_he = "אין שליחת נתונים. המדיניות רק מסמנת כל מודל כמקומי או מרוחק, ומודל מרוחק מסומן תמיד כלא פרטי."
+privacy_en = "Nothing is sent. The policy only labels each model local or remote, and a remote model is always labelled not private."
+
+[[steps]]
+he = "ראו מה המצב כרגע: jarvis models status. מוצגים המצב (ברירת מחדל: חינם בלבד) והאם תשלום מותר (ברירת מחדל: לא)."
+en = "See the current state: jarvis models status. It shows the mode (default: free-only) and whether paid use is allowed (default: no)."
+
+[[steps]]
+he = "ראו את רשימת המודלים: jarvis models list. לכל מודל מצוין אם הוא חינמי, בתשלום, מקומי או מרוחק. אפשר להוסיף --json."
+en = "See the model list: jarvis models list. Each model shows whether it is free, paid, local or remote. Add --json for machine output."
+
+[[steps]]
+he = "לבדיקת המדיניות בפעולה בלי רשת: jarvis modellab run --models free-remote --fake. מודל שהמדיניות חוסמת מדולג עם הסיבה. תקרה בתשלום להרצה: --cap-usd (ברירת מחדל 0, מקסימום 2 דולר)."
+en = "To see the policy at work with no network: jarvis modellab run --models free-remote --fake. A model the policy blocks is skipped with the reason. A paid cap for one run: --cap-usd (default 0, at most 2 USD)."
+
+[[steps]]
+he = "מודלים נוספים ומחירים נקראים מהקובץ models.toml בתיקיית הנתונים (שורות [[model]]). הקובץ לא יכול לסמן מודל כחינמי או מקומי בלי אישור שלכם; שורה לא תקינה נדחית. תקרות יומיות ולפי סוכן, ורשימת ספקים לפרויקט, עדיין אינן ניתנות להגדרה משורת הפקודה."
+en = "Extra models and prices are read from models.toml in the data folder ([[model]] rows). The file cannot mark a model free or local without your approval; an invalid row is rejected. Daily and per-agent caps and a per-project provider list cannot be set from the command line yet."
+
+[[problems]]
+he = "מודל נחסם ונאמר שהתקרה היא 0 או שאין רשימת ספקים לפרויקט"
+en = "A model is blocked with a cap of 0 or no allowed-provider list"
+fix_he = "זו ההתנהגות הרצויה: חינם בלבד כברירת מחדל. השתמשו במודל חינמי או מקומי (jarvis models list), או אשרו חריגה בעצמכם."
+fix_en = "That is the intended behaviour: free-only by default. Use a free or local model (jarvis models list), or approve an exception yourself."
+
+[[problems]]
+he = "הוא אומר שלמודל אין מחיר ידוע"
+en = "He says a model has no known price"
+fix_he = "מודל בתשלום בלי מחיר נחסם בכוונה. הוסיפו לו מחיר בקובץ models.toml, או בחרו מודל אחר."
+fix_en = "A paid model with no price is blocked on purpose. Add its price in models.toml, or pick another model."
+
+[[problems]]
+he = "models.toml נדחה כולו"
+en = "models.toml is rejected as a whole"
+fix_he = "שורה אחת אינה תקינה (מספר שלילי, מחיר שאינו מספר, או מודל שסומן חינמי או מקומי בלי אישור). תקנו את השורה או מחקו את הקובץ כדי לחזור לטבלה המובנית."
+fix_en = "One row is invalid (a negative number, a price that is not a number, or a model marked free or local without approval). Fix the row, or delete the file to return to the built-in table."
+
+[platform]
+windows = "implemented_unverified"
+windows_note_en = "core/tests/test_model_policy.py (pure logic, no network); not yet wired to every model call (OpenRouter and the model lab only)"
+pi = "implemented_unverified"
+pi_note_en = "pure Python; not run on a Pi yet"
