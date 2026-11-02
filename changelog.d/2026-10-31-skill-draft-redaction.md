@@ -1,1 +1,0 @@
-- Security: Skill drafts no longer store secret-like text (API keys, tokens) in clear text; it is hidden before the draft is saved (CodeQL code-scanning alerts 46 and 47, not GitHub issues).

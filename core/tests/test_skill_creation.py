@@ -262,14 +262,15 @@ def test_prompt_injection_wording_is_flagged(tmp_path):
     assert rep["ok"] and any("injection" in w for w in rep["warnings"])
 
 
-def test_secret_in_draft_is_not_stored_in_clear_text(tmp_path):
+def test_secret_in_draft_is_refused_and_never_written(tmp_path):
     key = "sk-" + "A1b2C3d4E5f6G7h8"
     _, mgr = setup(tmp_path)
-    rep = mgr.propose(_md(name="notes_helper", body=f"Use key {key} here."))
-    d = mgr.drafts / "notes_helper"
-    assert key not in (d / "SKILL.md").read_text(encoding="utf-8")
-    assert key not in json.dumps(rep) and any("secret" in w for w in rep["warnings"])
-    assert key not in mgr.draft("notes_helper")["skill_md"]
+    for md, py in ((_md(name="notes_helper", body=f"Use key {key} here."), None),
+                   (_md(name="notes_helper"), f"KEY = '{key}'\n")):
+        rep = mgr.propose(md, py)
+        assert not rep["ok"] and rep["id"] is None and key not in json.dumps(rep)
+        assert not (mgr.drafts / "notes_helper").exists()
+        assert all(key not in f.read_text(encoding="utf-8", errors="ignore") for f in mgr.drafts.rglob("*") if f.is_file())
 
 
 async def _run(code, tool="evil_run", broker=None, **kw):
@@ -602,3 +603,22 @@ async def test_failure_message_returned_to_the_caller_is_redacted(tmp_path, monk
     monkeypatch.setattr(gen, "run_sandboxed", boom)
     r = await mgr.run("shopping", "shopping_list", {})
     assert not r.ok and "sk-ant-api03-abcdefghijklmnopqrstuvwxyz" not in r.message
+
+
+def test_legitimate_secret_handling_code_is_accepted(tmp_path):
+    _, mgr = setup(tmp_path)
+    for py in ("import os\napi_key = os.environ.get('OPENAI_API_KEY')\n",
+               "def f(token: str):\n    return token\n",
+               "token = ctx.storage_get('token')\npassword = get_password()\n"):
+        assert mgr.propose(_md(name="notes_helper"), py)["id"] == "notes_helper"
+    assert mgr.propose(_md(name="notes_helper", body="The password: never store it, use the environment."))["id"] == "notes_helper"
+
+
+def test_literal_secret_shapes_are_refused(tmp_path):
+    _, mgr = setup(tmp_path)
+    for py in ("KEY = 'AKIA" + "ABCDEFGHIJKLMNOP'", "api_key = 'abc12345xyz'", "GITHUB_TOKEN=abcdef1234567890abcd",
+               '{"client_secret": "Zx9Yw8Vu7"}', "DB_PASSWORD = 'hunter22hunter'", "k = 'sk_live_" + "abcdefgh12345'",
+               "k = 'AIza" + "A" * 35 + "'", "-----BEGIN RSA PRIVATE KEY-----\nabc"):
+        rep = mgr.propose(_md(name="notes_helper"), py)
+        assert not rep["ok"] and rep["id"] is None, py
+        assert not (mgr.drafts / "notes_helper").exists()
