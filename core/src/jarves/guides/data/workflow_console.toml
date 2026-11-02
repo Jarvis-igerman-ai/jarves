@@ -26,6 +26,11 @@ en = "Open the dashboard in one step with jarvis workflow open: the login opens 
 action = "command:jarvis workflow open"
 
 [[steps]]
+he = "הלוח תקוע או מציג נתונים ישנים? הריצו jarvis workflow web-check. הבדיקה קוראת בלבד: היא סופרת אילו תהליכים מחזיקים את הפורט של הלוח ומשווה לשרת הרשום. PASS פירושו שרת לוח אחד בלבד. FAIL מציג את מספרי התהליכים העודפים (שרת ישן שעדיין עונה ללשונית פתוחה); עצרו אותם לפי המספר, הפעילו מחדש את המשגיח וטענו את הלשונית מחדש."
+en = "Dashboard stuck or showing old data? Run jarvis workflow web-check. It only reads: it lists the processes holding the dashboard port and compares them with the recorded server. PASS means exactly one dashboard server. FAIL names the extra process ids (an older server still answering an open tab); stop them by id, restart the supervisor and reload the tab."
+action = "command:jarvis workflow web-check"
+
+[[steps]]
 he = "סנכרון קריאה בלבד מ־GitHub: jarvis workflow sync. שיוך סוכן קיים: jarvis workflow agent --agent bugs --lane bugs --session-id ID --auto-dispatch. הקצאה חיה עדיין עוברת דרך ה־Orchestrator הקיים."
 en = "Read-only GitHub sync: jarvis workflow sync. Attach an existing session with jarvis workflow agent --agent bugs --lane bugs --session-id ID --auto-dispatch. Live assignment still uses the existing Orchestrator."
 action = "command:jarvis workflow status"
