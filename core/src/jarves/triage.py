@@ -62,7 +62,7 @@ class SkippedStore:
         except (OSError, ValueError):
             d = {}
         d = d if isinstance(d, dict) else {}
-        d.setdefault("salt", secrets.token_hex(8))
+        d.setdefault("salt", secrets.token_hex(16))
         items = d.get("items") if isinstance(d.get("items"), dict) else {}
         cut = self.clock() - EXPIRY_DAYS * 86400
         d["items"] = {k: v for k, v in items.items() if isinstance(v, (int, float)) and v > cut}
@@ -71,11 +71,8 @@ class SkippedStore:
     def _save(self, d: dict) -> None:
         if self.path is None:
             return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(d, f)
-        os.replace(tmp, self.path)
+        from .channels_common import write_private_json      # owner-only (0600), atomic replace
+        write_private_json(self.path, d)
 
     @staticmethod
     def fp(salt: str, title: str, ref: str = "") -> str:

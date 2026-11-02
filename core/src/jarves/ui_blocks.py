@@ -33,7 +33,7 @@ _ID = re.compile(r"i\d{1,2}")
 # offered to the model only when the owner's words ask for a list (keeps the always-on prompt small, like lazy_tools)
 LAZY = r"check-?list|tick|to-?do list|list of|table|choose|options|רשימ|סמן|סימון|תיבות|טבלה|לבחור"
 # control characters and bidi overrides (U+202A-202E, U+2066-2069); zero-width joiners stay for Hebrew
-_BAD = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\\u202a-\\u202e\\u2066-\\u2069]")
+_BAD = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\\u202a-\\u202e\\u2066-\\u2069\\u200b-\\u200f\\u2060\\u061c\\ufeff]")
 
 
 def clean(s: str) -> str:

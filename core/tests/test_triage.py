@@ -319,3 +319,14 @@ async def test_unknown_source_is_refused_not_shown(tmp_path):
     reg.register(triage.TriageSkill(tmp_path, titles_fn=lambda: None))
     res = await reg.call("tasks_from_messages", {"candidates": [{"title": "x", "source": "<script>"}]})
     assert not res.ok
+
+
+def test_skipped_store_salt_is_128_bit_and_file_is_private(tmp_path):   # #485
+    import json as _json
+    import os as _os
+    st = triage.SkippedStore(tmp_path)
+    st.add([("a task", "")])
+    d = _json.loads((tmp_path / triage.FILE).read_text(encoding="utf-8"))
+    assert len(d["salt"]) == 32
+    if _os.name != "nt":
+        assert (tmp_path / triage.FILE).stat().st_mode & 0o077 == 0

@@ -147,3 +147,7 @@ def test_context_taint_outlives_the_untrusted_turn_then_decays():
         assert reg.context_tainted()
     reg.new_turn()
     assert not reg.context_tainted()
+
+
+def test_clean_strips_zero_width_and_direction_marks():   # #485
+    assert ub.clean("pa\u200By\u200E\u200F\u2060\u061C\uFEFFroll ") == "payroll"
