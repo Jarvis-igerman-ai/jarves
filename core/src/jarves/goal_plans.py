@@ -491,6 +491,40 @@ class PlanRunner:
         return st.get(pid)
 
 
+class PlanCheer:
+    """ONE short calm line when a plan has finished (state done), polled from the Core tick. Same fixed lines and
+    gate as GoalCheer: only while `at_pc()` and not `quiet()`; an older finish is silently dropped. Never touches
+    the plan."""
+    CURSOR = "goal_plans.cheer_cursor"
+
+    def __init__(self, store: PlanStore, *, quiet, at_pc, say, clock=time.time) -> None:
+        self.store, self.quiet, self.at_pc, self.say, self.clock = store, quiet, at_pc, say, clock
+        if not float(store.db.setting(self.CURSOR) or 0):
+            store.db.set_setting(self.CURSOR, clock(), actor="system")
+
+    async def check(self) -> str:
+        from .goals import CHEER, CHEER_MAX_AGE_S
+        db, now = self.store.db, self.clock()
+        cursor = float(db.setting(self.CURSOR) or 0)
+        rows = db.rows("SELECT id, title, finished FROM goal_plans WHERE state='done' AND finished > ? "
+                       "ORDER BY finished", (cursor,))
+        fresh = [r for r in rows if now - r["finished"] <= CHEER_MAX_AGE_S]
+        if not fresh:
+            if rows:
+                db.set_setting(self.CURSOR, rows[-1]["finished"], actor="system")
+            return ""
+        if self.quiet() or not self.at_pc():
+            return ""
+        from .calm import uses_hebrew
+        last = fresh[-1]
+        line = CHEER["he" if uses_hebrew(last["title"]) else "en"]
+        if not await self.say(line):
+            return ""
+        db.set_setting(self.CURSOR, last["finished"], actor="system")
+        logs.info("goals", "PLAN_DONE_LINE", "plan finished line spoken", n=len(fresh))
+        return line
+
+
 # ---------------------------------------------------------------------- voice / agent tools (tiny on purpose)
 class ProposeArgs(BaseModel):
     title: str = Field(..., min_length=1, max_length=MAX_TITLE)

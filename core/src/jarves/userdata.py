@@ -146,6 +146,7 @@ DEFAULTS: dict[str, Any] = {
     "connect.skipped": [],                      # items the owner chose "never ask again" for (jarvis connect)
     "connect.state": {},                        # per-integration state: id -> connected | skipped (jarvis connect)
     "home_setup.state": {},                     # home setup cards (#457): id -> {later_until, failed, done}
+    "goal_plans.cheer_cursor": 0.0,             # finished plans up to this time were announced or expired (goal_plans.py)
     "goals.cheer_cursor": 0.0,                  # finished goals up to this time were announced or expired (goals.py)
     "proactive.mode": "on_request",             # on_request | in_conversation (proactive.py)
     "files.quota_mb": 200,

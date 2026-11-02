@@ -464,3 +464,23 @@ async def test_565_title_why_and_args_are_escaped_in_every_popup_and_a_long_esca
     await env.runner.tick()
     d = env.store.get(p2["id"])
     assert d["state"] == "blocked" and env.ran == [] and "too long" in d["steps"][0]["error"]
+
+
+async def test_plan_done_gives_one_quiet_line_only_at_pc_and_outside_quiet_hours(env):
+    said, state = [], {"quiet": True, "pc": True}
+
+    async def say(line):
+        said.append(line)
+        return True
+    cheer = gp.PlanCheer(env.store, quiet=lambda: state["quiet"], at_pc=lambda: state["pc"], say=say, clock=env.clock)
+    env.clock.t += 5
+    p = env.store.propose("Read it", steps(("fake_read", {"text": "x"})))
+    env.store.approve(p["id"])
+    await env.runner.run_plan(p["id"])
+    assert env.store.get(p["id"])["state"] == "done"
+    assert await cheer.check() == "" and not said          # quiet hours: silent
+    state["quiet"], state["pc"] = False, False
+    assert await cheer.check() == "" and not said          # away: silent
+    state["pc"] = True
+    assert await cheer.check() and len(said) == 1          # one line
+    assert await cheer.check() == "" and len(said) == 1    # never twice
