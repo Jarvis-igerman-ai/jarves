@@ -114,7 +114,13 @@ def _git_base_note(cwd: str) -> str:
         left = deadline - time.monotonic()
         if left <= 0:
             raise subprocess.TimeoutExpired("git", GIT_NOTE_BUDGET_S)
+<<<<<<< HEAD
         return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left, **hidden_popen_kwargs()).stdout.strip()
+=======
+        # (start + budget) - now can exceed the budget by an ulp (seen on Windows); keep it in (0, budget].
+        timeout = min(max(left, 0.05), GIT_NOTE_BUDGET_S)
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout).stdout.strip()
+>>>>>>> 182677b8 (fix(workflow): clamp git note timeouts to (0, budget] and test with a fake clock)
     try:
         remotes = git("remote", "-v")
         head = git("rev-parse", "--short", "HEAD") or "unknown"

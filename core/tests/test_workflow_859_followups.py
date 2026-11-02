@@ -35,7 +35,10 @@ class GitNoteTests(unittest.TestCase):
         def fake_run(cmd, **kw):
             calls.append(kw["timeout"])
             return mock.Mock(stdout="jarves\thttps://x/jarves.git\n" if "remote" in cmd else "abc1234\n")
-        with mock.patch.object(hooks.subprocess, "run", fake_run):
+        # Fake clock: 252557.90562814512 + 0.6 - 252557.90562814512 > 0.6 in floating point, which failed
+        # on Windows with the real clock. The timeouts must still stay inside (0, budget].
+        with mock.patch.object(hooks.subprocess, "run", fake_run), \
+                mock.patch.object(hooks.time, "monotonic", side_effect=[252557.90562814512, 252557.90562814512, 252557.9056281452]):
             first = hooks.git_base_note("C:/nowhere")
             second = hooks.git_base_note("C:/nowhere")  # database retry path
         self.assertEqual(first, second)
