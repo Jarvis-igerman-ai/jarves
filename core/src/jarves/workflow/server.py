@@ -217,7 +217,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json(200, obs.timeline(self.server.store, since=time.time() - hours * 3600))
         elif path == "/api/report":
-            from .report import build
+            from .report import build, gh_cached
             try:
                 hours = float(parse_qs(urlsplit(self.path).query).get("hours", ["24"])[0])
                 if not 0 < hours <= 24 * 14:
@@ -225,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._json(400, {"error": "hours must be between 0 and 336"})
                 return
-            self._json(200, build(self.server.store, hours))   # read-only: ledger + gh metadata
+            # read-only: ledger + gh metadata; gh runs in the background, never on the request path (#789)
+            self._json(200, build(self.server.store, hours, gh=gh_cached))
         elif path == "/api/messages":
             from .messages import overview
             self._json(200, overview(self.server.store))   # read-only: open claims + last 20 agent messages
@@ -399,6 +400,8 @@ def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None
     from . import webchild
     server = Server(home, port, profile_home=profile_home)
     webchild.record(home, server.server_port)  # the pid that actually listens, for the supervisor (#789)
+    from .report import gh_cached
+    gh_cached(time.time() - 24 * 3600)  # warm the report's GitHub list in the background (#789)
     if ready:
         ready(server)
     try:

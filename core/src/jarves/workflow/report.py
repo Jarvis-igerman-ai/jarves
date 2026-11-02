@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -40,6 +41,44 @@ def gh_merged(since: float, *, run=subprocess.run) -> tuple[bool, list[dict]]:
         return True, sorted(out, key=lambda r: r["merged_at"])
     except Exception:  # noqa: BLE001  a missing gh, no network or bad JSON must never break the report
         return False, []
+
+
+GH_TTL_S = 300
+_GH_LOCK = threading.Lock()
+
+
+def gh_cached(since: float, *, now: float | None = None, fetch=None, wait: bool = False) -> tuple[bool, list[dict]]:
+    """Request-path wrapper (#789): never runs ``gh`` inside the HTTP request. Returns the last result for the
+    day of ``since`` (filtered to ``since``) and refreshes it in a background thread when older than 5 minutes.
+    Before the first result arrives it returns (False, []), which the report shows as "GitHub not read"."""
+    fetch = fetch or gh_merged
+    now = time.time() if now is None else now
+    day_start = datetime.fromtimestamp(since, TZ).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    with _GH_LOCK:
+        entry = _GH_CACHE.get(day_start)
+        stale = not entry or now - entry["at"] >= GH_TTL_S
+        start = stale and not (entry or {}).get("busy")
+        if start:
+            _GH_CACHE[day_start] = entry = dict(entry or {"at": 0.0, "ok": False, "rows": []}, busy=True)
+
+    def refresh():
+        try:
+            ok, rows = fetch(day_start)
+        except Exception:  # noqa: BLE001  gh_merged already swallows errors; an injected fetch must not kill the thread
+            ok, rows = False, []
+        with _GH_LOCK:
+            _GH_CACHE[day_start] = {"at": now, "ok": ok, "rows": rows, "busy": False}  # age from the request
+            for key in [k for k in _GH_CACHE if k < day_start - 86400]:
+                _GH_CACHE.pop(key, None)  # keep at most yesterday and today
+
+    if start:
+        if wait:
+            refresh()
+        else:
+            threading.Thread(target=refresh, name="report-gh", daemon=True).start()
+    with _GH_LOCK:
+        entry = _GH_CACHE[day_start]
+        return entry["ok"], [r for r in entry["rows"] if r["merged_at"] >= since]
 
 
 def local(ts: float | None) -> str:
