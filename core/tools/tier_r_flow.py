@@ -27,17 +27,19 @@ BACKLOG_GREEN = 3       # green PRs not yet queued
 # Machine-readable verdict: FIRST line "SIGN-OFF <40-hex head sha>" or "CHANGES REQUESTED <40-hex head sha>", plus
 # marker lines "Review-Head: <same sha>", "Review-Task: <id>", "Reviewer-Agent: <id>", "Reviewer-Model: <model>".
 # Quoted text and anything below line 1 never counts as the verdict.
-VERDICT = re.compile(r"^(SIGN-OFF|CHANGES REQUESTED)[ \t]+([0-9a-f]{40})\b", re.I)
+VERDICT = re.compile(r"^(?:VERDICT:[ \t]*)?(SIGN-OFF|CHANGES REQUESTED)[ \t]+([0-9a-f]{40})\b", re.I)
 MARK = {k: re.compile(r"^" + k + r":[ \t]*(\S+)[ \t]*$", re.I | re.M)
         for k in ("Review-Head", "Review-Task", "Reviewer-Agent", "Reviewer-Model")}
-AUTHOR_AGENT = re.compile(r"^Author-Agent:[ \t]*(\S+)[ \t]*$", re.I | re.M)
+AUTHOR_AGENT = re.compile(r"^Author-Agent:[ \t]*(\S+)", re.I | re.M)     # first token only; extra text ignored
+ROLE_NAMES = {"workflow-bugs", "workflow-current", "workflow-qa", "workflow-merger", "claude", "codex", "agent",
+              "manager", "unknown", "none", "n/a", "tbd", "-"}                # a role is not an identity: unknown
 TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")     # GitHub author association; the repo is public
 # Always owner: release/sign-off/tag/stable, Gate/approval, secrets, workflows, permission/settings/instruction files.
 # Deliberately broad (anything with "release", "approval" or "signoff" in the path): unknown means owner.
 EXCLUDED = (
     ".github/*", "CLAUDE.md", "*/CLAUDE.md", "AGENTS.md", "*/AGENTS.md", "CLAUDE.local.md", ".claude/*",
-    "*release*", "*approval*", "*signoff*", "*sign_off*", "*secrets*", "*permissions*", "*signing*",
-    "*promote*", "core/tools/manual_test_sheet.py", "*dashboard_auth*", "*settings.json", "*settings.local.json",
+    "*releas*", "*approv*", "*signoff*", "*sign_off*", "*secrets*", "*permissions*", "*signing*",
+    "*promote*", "*gate*", "*github-approve*", "core/tools/manual_test_sheet.py", "*dashboard_auth*", "*settings.json", "*settings.local.json",
     "core/src/jarves/drive_mode.py", "core/src/jarves/skills/__init__.py", "core/tools/risk_class.py",
     "docs/workflow/OPERATING_MODEL.md", "core/tools/tier_r_flow.py",
 )
@@ -45,7 +47,18 @@ EXCLUDED_TITLE = re.compile(r"\b(release|sign-?off|tag|stable|promot\w*)\b", re.
 
 
 def _match(path, patterns):
-    return any(fnmatch.fnmatchcase(path, p) for p in patterns)
+    path = path.replace("\\", "/").lower()
+    return any(fnmatch.fnmatchcase(path, p.lower()) for p in patterns)
+
+
+def author_agents(names):
+    """Distinct lowercase author ids; role names and empties are unknown and dropped."""
+    out = set()
+    for n in names or []:
+        tok = (str(n).split() or [""])[0].strip(",;:.").lower()
+        if tok and tok not in ROLE_NAMES:
+            out.add(tok)
+    return sorted(out)
 
 
 def excluded_reason(pr):
@@ -117,7 +130,7 @@ def decide(pr, main_red=False):
     changes = {e["sha"] for e in ev if e["verdict"] == "CHANGES_REQUESTED"}
     if len(changes) >= MAX_ROUNDS:      # round limit: a 3rd review round never happens, whatever it says
         return out("owner", f"{MAX_ROUNDS} review rounds used: record blocker in ledger and alert")
-    authors = {a.lower() for a in pr.get("authors") or []} | {a.lower() for a in pr.get("author_agents") or []}
+    authors = {a.lower() for a in pr.get("authors") or []} | set(author_agents(pr.get("author_agents")))
     if here and here[-1]["verdict"] == "CHANGES_REQUESTED":     # the LATEST verdict on this head wins
         return out("fix", "CHANGES REQUESTED on current head: Sonnet fixer pushes to the PR branch")
     if here and here[-1]["verdict"] == "SIGN-OFF":
@@ -126,7 +139,7 @@ def decide(pr, main_red=False):
             return out("owner", "sign-off is not from an Opus review", "model=" + (e["model"] or "unknown"))
         if not e["complete"]:
             return out("owner", "sign-off lacks Review-Head / Review-Task / Reviewer-Agent markers")
-        if not pr.get("author_agents"):
+        if not author_agents(pr.get("author_agents")):
             return out("owner", "PR declares no Author-Agent: independence cannot be checked")
         if e["reviewer"] in authors:
             return out("owner", "reviewer is an author of the diff")
@@ -196,7 +209,7 @@ def load_prs(numbers=None):
                     "head_sha": d["headRefOid"], "authors": sorted(a for a in authors if a),
                     "checks_green": ib.checks_passed(checks), "checks_pending": pend, "merge_state": info["merge_state"],
                     "queued": bool(d.get("isInMergeQueue")) or bool(d.get("autoMergeRequest")),
-                    "author_agents": sorted({m.lower() for m in AUTHOR_AGENT.findall(d.get("body") or "")}),
+                    "author_agents": author_agents(AUTHOR_AGENT.findall(d.get("body") or "")),
                     "comments": [{"body": c.get("body") or "", "login": (c.get("author") or {}).get("login", ""),
                                   "association": c.get("authorAssociation") or ""} for c in d.get("comments") or []]})
     return prs

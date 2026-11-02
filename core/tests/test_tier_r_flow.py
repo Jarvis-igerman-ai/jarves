@@ -144,3 +144,28 @@ def test_focus_respects_worker_limit_and_order():
     assert f["priority"][0].startswith("P0/P1")
     quiet = t.focus([pr()], 2)
     assert quiet["merge_pipeline_work"] == [] and not quiet["pause_new_feature_work"]
+
+
+def test_excluded_case_insensitive_and_variants():
+    for f in ("app/src/ApprovalsUi.kt", "docs/RELEASING.md", "tools/GitHub-Approve.py", "core/src/jarves/SignOff.py",
+              "core/src/jarves/Gate.py", "CORE/TOOLS/Release_Gate.py", "core\\src\\Approvals.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f
+
+
+def test_author_agent_first_token_and_roles_unknown():
+    assert t.AUTHOR_AGENT.findall("Author-Agent: workflow-bugs-sonnet (Tier R flow author)") == ["workflow-bugs-sonnet"]
+    assert t.author_agents(["workflow-bugs-sonnet", "Agent-X (note)"]) == ["agent-x", "workflow-bugs-sonnet"]
+    assert t.author_agents(["workflow-bugs", "Claude", "unknown", ""]) == []
+    assert act(author_agents=["workflow-bugs"], comments=[so()]) == "owner"
+    assert act(author_agents=["workflow-bugs-sonnet"], comments=[so()]) == "queue"
+    assert act(author_agents=["agent-rev (extra)"], comments=[so()]) == "owner"
+
+
+def test_verdict_forms():
+    tail = f"\nReview-Head: {SHA}\nReview-Task: T-9\nReviewer-Agent: agent-rev\nReviewer-Model: opus-5-5"
+    for first in (f"SIGN-OFF {SHA}", f"VERDICT: SIGN-OFF {SHA}"):
+        assert act(comments=[c(first + tail)]) == "queue", first
+    for first in (f"CHANGES REQUESTED {SHA}", f"VERDICT: CHANGES REQUESTED {SHA}"):
+        assert act(comments=[c(first + tail)]) == "fix", first
+    assert act(comments=[c(f"VERDICT: SIGN-OFF {SHA[:12]}" + tail)]) == "review"
+    assert act(comments=[c("note\nVERDICT: SIGN-OFF " + SHA + tail)]) == "review"
