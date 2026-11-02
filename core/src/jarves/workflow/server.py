@@ -203,6 +203,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, history(self.server.store, limit=100, **filters))
             except (ValueError, TypeError):
                 self._json(400, {"error": "invalid trace filters"})
+        elif path == "/api/now":
+            from .observability import now_view
+            self._json(200, now_view(self.server.store))   # read-only, bounded metadata for the Overview (#789)
         elif path in {"/api/health", "/api/timeline"}:
             from . import observability as obs
             if path == "/api/health":

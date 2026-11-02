@@ -483,6 +483,101 @@ def on_stop(home: Path, cause: str, store=None) -> None:
             pass
 
 
+# ---- Overview "now" (#789 item 5) ---------------------------------------------------------------------------------
+NOW_WORKERS, NOW_MANAGER_ACTIONS, NOW_RESTARTS, NOW_HINT = 12, 20, 40, 100
+_HINT_KEYS = ("description", "summary")
+
+
+def _hint(raw: str) -> str:
+    """One short, re-scrubbed line from a recorded trace row. Only present when details capture is on; never a transcript."""
+    from .trace import scrub
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    source = data.get("tool_input") if isinstance(data.get("tool_input"), dict) else data
+    for key in _HINT_KEYS:
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            line = " ".join(scrub(value).split())
+            return line[:NOW_HINT] + ("…" if len(line) > NOW_HINT else "")
+    return ""
+
+
+def _action(row) -> dict:
+    return {"ts": row["ts"], "event": row["event"], "tool": row["tool"], "status": row["status"],
+            "duration_ms": None if row["duration_ms"] is None else round(row["duration_ms"])}
+
+
+def manager_id(store, db, agents: list[dict]) -> str:
+    """The follow-up manager session, else the freshest top-level native Claude session."""
+    row = db.execute("SELECT value FROM workflow_meta WHERE key='followup_manager'").fetchone()
+    known = {a["id"] for a in agents}
+    current = json.loads(row[0]) if row else ""
+    if current in known:
+        return current
+    top = [a for a in agents if a.get("provider") == "claude-native" and not a.get("parent_id") and a.get("lane") == "ops"]
+    top.sort(key=lambda a: max(a.get("heartbeat_at", 0), a.get("progress_at", 0)), reverse=True)
+    return top[0]["id"] if top else ""
+
+
+def now_view(store, now: float | None = None) -> dict:
+    """Read-only, bounded Overview data: what each running worker does now, supervisor stop/start strip, manager log.
+
+    Metadata only (event, tool, status, time). A worker hint exists only when details capture is on, and it is
+    re-scrubbed and cut to one short line. Nothing here reads a transcript file, starts a process or writes.
+    """
+    now = store.clock() if now is None else now
+    since = now - 86400
+    with store._tx() as db:
+        agents = store._all(db, "agent")
+        tasks = {t["id"]: t for t in store._all(db, "task")}
+        mode = store._meta(db, "trace").get("mode", "metadata")
+        manager = manager_id(store, db, agents)
+        running = {i for i, t in tasks.items() if t["state"] == "running"}
+        live = [a for a in agents if a["id"] != manager and a.get("status") != "offline"
+                and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S
+                and (a.get("task_id") in running or a.get("status") == "running")]
+        live.sort(key=lambda a: max(a.get("heartbeat_at", 0), a.get("progress_at", 0)), reverse=True)
+        workers = []
+        for agent in live[:NOW_WORKERS]:
+            row = db.execute("SELECT ts,event,tool,status,duration_ms,data FROM workflow_trace WHERE agent_id=? "
+                             "ORDER BY id DESC LIMIT 1", (agent["id"],)).fetchone()
+            task = tasks.get(agent.get("task_id") or "", {})
+            workers.append({"agent_id": agent["id"], "label": str(agent.get("label") or agent["id"])[:80],
+                            "lane": agent.get("lane", ""), "status": agent.get("status", ""),
+                            "task_id": agent.get("task_id") or "", "task_title": str(task.get("title", ""))[:160],
+                            "seen_at": max(agent.get("heartbeat_at", 0), agent.get("progress_at", 0)) or None,
+                            "last": {**_action(row), "hint": _hint(row["data"])} if row else None})
+        actions = []
+        if manager:
+            rows = db.execute("SELECT ts,event,tool,call_id,status,duration_ms FROM workflow_trace WHERE agent_id=? "
+                              "ORDER BY id DESC LIMIT ?", (manager, NOW_MANAGER_ACTIONS * 3)).fetchall()
+            finished = {r["call_id"] for r in rows if r["call_id"] and r["event"] != "PreToolUse"}
+            # One line per action: a started tool call is shown only until its end is recorded.
+            actions = [_action(r) for r in rows if not (r["event"] == "PreToolUse" and r["call_id"] in finished)][:NOW_MANAGER_ACTIONS]
+        marks = db.execute("SELECT ts,kind,summary FROM workflow_events WHERE ts>=? AND kind IN ('supervisor','supervisor_status') "
+                           "ORDER BY id DESC LIMIT ?", (since, NOW_RESTARTS)).fetchall()
+        beats = [dict(r) for r in db.execute(
+            "SELECT ts,kind,summary FROM workflow_events WHERE ts>=? AND (kind='supervisor_status' OR "
+            "(kind=? AND summary LIKE '%\"layer\": \"supervisor\"%')) ORDER BY id", (since, BEAT))]
+    from .trace import scrub
+    events = []
+    for m in reversed(marks):
+        text = str(m["summary"])
+        kind = ("start" if text.startswith("Supervisor start") else "stop" if text.startswith("Supervisor stop")
+                else "status")
+        events.append({"ts": m["ts"], "kind": kind, "summary": scrub(text)[:160]})
+    _, gaps = _segments_and_gaps("supervisor", _beat_rows(beats)["supervisor"], now, now, 0)
+    return {"now": now, "since": since, "trace_mode": mode, "workers": workers, "workers_total": len(live),
+            "manager": {"agent_id": manager, "actions": actions} if manager else None,
+            "restarts": {"events": events, "gaps": [{k: g[k] for k in ("start", "end", "seconds")} for g in gaps[-20:]],
+                         "starts": sum(1 for e in events if e["kind"] == "start"),
+                         "stops": sum(1 for e in events if e["kind"] == "stop")}}
+
+
 # ---- one trusted verdict (#758) -----------------------------------------------------------------------------------
 VERDICTS = ("working", "idle_with_work", "stopped", "owner_wait", "unknown")
 ACTIVE_FRESH_S = 900
