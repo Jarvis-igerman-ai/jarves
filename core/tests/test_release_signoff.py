@@ -177,10 +177,11 @@ def _issue(n, *labels, **kw):
     return {"number": n, "title": f"t{n}", "state": "open", "labels": [{"name": x} for x in labels], **kw}
 
 
-def test_gate_blocks_on_open_p0_p2_github_issues_but_not_planned_work(tmp_path):
-    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"),
-                                   _issue(4, "P1", "bug", pull_request={}), _issue(7, "P1", "4.5.1")]) == []
-    # #499: a real defect that also carries a planned-work label is NOT skipped
+def test_gate_blocks_on_every_open_p0_p2_github_issue_whatever_its_other_labels(tmp_path):
+    # not blockers: P3, pull requests. Everything P0-P2 blocks, even when labelled v7/enhancement/4.5.1 (owner decision)
+    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(4, "P1", "bug", pull_request={})]) == []
+    planned = _gate(tmp_path, issues=[_issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"), _issue(7, "P1", "4.5.1")])
+    assert [p for p in planned if "open P" in p] == ["open P1 issue #2: t2", "open P2 issue #3: t3", "open P1 issue #7: t7"]
     both = _gate(tmp_path, issues=[_issue(8, "P1", "bug", "v7"), _issue(9, "P2", "bug", "4.5.1"), _issue(10, "P0", "bug", "enhancement")])
     assert [p for p in both if "open P" in p] == ["open P1 issue #8: t8", "open P2 issue #9: t9", "open P0 issue #10: t10"]
     probs = _gate(tmp_path, issues=[_issue(5, "P0", "bug"), _issue(6, "P2", "ci")])
