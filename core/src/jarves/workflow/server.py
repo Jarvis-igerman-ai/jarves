@@ -294,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/unlock":
                 self._unlock(data)
                 return
-            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
+            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|confirm|defer|reopen|discuss|ask-more)", path)
                     or path == "/api/followups") and not self._unlock_left():
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
                 self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",

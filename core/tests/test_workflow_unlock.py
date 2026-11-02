@@ -64,6 +64,17 @@ class UnlockTests(unittest.TestCase):
             self.assertTrue(data["locked"], action)
         self.assertEqual(self.store.snapshot()["questions"][0]["status"], "pending")
 
+    def test_locked_session_cannot_confirm_a_forged_held_answer(self):
+        self.store.answer(self.q, "forged")
+        self.login()
+        code, _, data = self.request(f"/api/questions/{self.q}/confirm", {})
+        self.assertEqual(code, 403)
+        self.assertTrue(data["locked"])
+        q = self.store.snapshot()["questions"][0]
+        self.assertTrue(q["held"])
+        task = [t for t in self.store.snapshot()["tasks"] if t["id"] == "t"][0]
+        self.assertEqual(task["state"], "waiting_owner")
+
     def test_ask_more_and_followups_are_locked_until_unlock_then_work(self):
         self.login()
         for path in (f"/api/questions/{self.q}/ask-more", "/api/followups"):
