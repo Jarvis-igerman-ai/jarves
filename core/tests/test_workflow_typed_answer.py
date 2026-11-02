@@ -29,7 +29,7 @@ class TypedAnswerTests(unittest.TestCase):
         merged = {"CLAUDE_CODE_ENTRYPOINT": "cli", **(env or {})}
         with patch.dict(os.environ, {k: v for k, v in merged.items() if v is not None}):
             if merged["CLAUDE_CODE_ENTRYPOINT"] is None:
-                os.environ.pop("CLAUDE_CODE_ENTRYPOINT")
+                os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
             os.environ.pop("JARVES_WORKFLOW_AGENT", None) if "JARVES_WORKFLOW_AGENT" not in merged else None
             return observe(self.store, payload, ROOT)
 
