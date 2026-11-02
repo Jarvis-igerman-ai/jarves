@@ -1,0 +1,1 @@
+- Fixed: The workflow verdict report now reads pull requests from Jarvis-igerman-ai/jarves instead of the deprecated igalgerman/jarves (#456).
