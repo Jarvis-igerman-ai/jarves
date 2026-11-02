@@ -67,8 +67,24 @@ def git_base_note(cwd: str) -> str:
     Isolated worktrees are created by Claude Code from the launching checkout, so the hook cannot choose
     the base; it verifies and states it so the worker rebases onto jarves/main instead of an old commit.
     """
+    if cwd in _GIT_NOTE_CACHE:  # a database retry must not run the git calls again
+        return _GIT_NOTE_CACHE[cwd]
+    _GIT_NOTE_CACHE[cwd] = note = _git_base_note(cwd)
+    return note
+
+
+_GIT_NOTE_CACHE: dict = {}
+GIT_NOTE_BUDGET_S = 1.0  # total for both git calls; the native hook limit is 3 s
+
+
+def _git_base_note(cwd: str) -> str:
+    deadline = time.monotonic() + GIT_NOTE_BUDGET_S
+
     def git(*args):
-        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=3).stdout.strip()
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired("git", GIT_NOTE_BUDGET_S)
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left).stdout.strip()
     try:
         remotes = git("remote", "-v")
         head = git("rev-parse", "--short", "HEAD") or "unknown"
