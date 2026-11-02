@@ -3,6 +3,7 @@ e-mail addresses served, every page's API, issue status writes, workspace stub a
 import http.client
 import json
 import shutil
+import time
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "session_2026-10-19.jsonl"
 def dash(home):
     st = Store(home / "store.db", tier="priority", backend_model="gpt-6-luna")
     diagnose.run(st, Config(), st.ingest_log(FIXTURE))
+    with st._lock:      # the fixture log is dated 19 Oct: keep its issues "just seen" so the 14-day auto-expiry never depends on today's date
+        st._db.execute("UPDATE issues SET last_seen = ?", (time.time(),))
+        st._db.commit()
     st.close()
     (home / "health.json").write_text(json.dumps({"ts": 0, "core": "stopped", "components": {
         "ai": {"status": "ok", "detail": "ChatGPT plan (someone@example.com), web search on", "action": ""},
