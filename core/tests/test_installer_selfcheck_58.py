@@ -10,6 +10,7 @@ def test_selfcheck_run_entry_is_interactive_only():
     row = rows[0]
     assert "postinstall" in row and "skipifsilent" in row
     assert "{cm:SelfCheck}" in row
+    assert "Check: not IsAdmin;" in row  # never elevated: selftest would write root-owned data
 
 
 def test_selfcheck_text_in_both_languages():

@@ -139,7 +139,7 @@ Filename: "{app}\python\pythonw.exe"; Parameters: "{code:DashboardRunArgs}"; Wor
 ; secrets in it; see docs/INSTALL_TEST.md). Without /SETUPANSWERS= the command does nothing (exit 0).
 Filename: "{cmd}"; Parameters: "/c """"{app}\jarvis.cmd"" setup --answers ""{param:SETUPANSWERS|}"""""; WorkingDir: "{app}"; Check: WizardSilent; Flags: runhidden waituntilterminated
 ; #58: first-run self-check, result printed in a console (never in silent installs; accounts/keys stay out of the installer).
-Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" selftest"""; WorkingDir: "{app}"; Description: "{cm:SelfCheck}"; Flags: postinstall nowait skipifsilent
+Filename: "{cmd}"; Parameters: "/k """"{app}\jarvis.cmd"" selftest"""; WorkingDir: "{app}"; Description: "{cm:SelfCheck}"; Check: not IsAdmin; Flags: postinstall nowait skipifsilent
 ; Release notes: opens an HTML page (local file, written by `jarvis release-notes --open`); on by default, never in silent installs.
 Filename: "{app}\python\pythonw.exe"; Parameters: "-m jarves release-notes --open"; WorkingDir: "{app}"; Description: "{cm:ShowNotes}"; Flags: postinstall nowait skipifsilent
 Filename: "https://github.com/pear-devs/pear-desktop/releases"; Description: "{cm:GetPear}"; Flags: postinstall shellexec nowait skipifsilent unchecked
