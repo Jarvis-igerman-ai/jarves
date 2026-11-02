@@ -895,8 +895,8 @@ class Store:
 
     def open_followups(self, agent_id=None):
         """Delivered but unanswered follow-ups (e.g. after a manager restart), for the receiving manager only."""
-        with self._tx() as db:
-            return [f for f in self._all(db, "followup") if f["status"] == "delivered"
+        with self._lock:  # plain WAL read: no write lock, so it cannot collide with the supervisor (#786)
+            return [f for f in self._all(self._db, "followup") if f["status"] == "delivered"
                     and (agent_id is None or f.get("delivered_to") == agent_id)]
 
     def reply_followup(self, followup_id, reply):
