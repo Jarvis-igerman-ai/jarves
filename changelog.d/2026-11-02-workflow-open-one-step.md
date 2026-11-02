@@ -1,0 +1,1 @@
+- Fixed: jarvis workflow open opens the dashboard login in one step and prints no secret link (only --no-open prints it); when the dashboard server is not running it says how to start it instead of opening a spinning page (#789).

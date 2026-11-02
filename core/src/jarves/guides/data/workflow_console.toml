@@ -21,8 +21,8 @@ en = "From the checkout: python core/tools/workflow_console.py supervise, or jar
 action = "command:jarvis workflow supervise"
 
 [[steps]]
-he = "פתחו את הקישור הפרטי עם jarvis workflow open. סמנו 'אני כאן' למענה מרוכז לשאלות, או 'להמשיך בלעדיי' לשמירת השאלות. שתיקה אינה אישור."
-en = "Open the private link with jarvis workflow open. Select Present for interactive planning questions or Away to retain them. Silence is never approval."
+he = "פתחו את הלוח בצעד אחד עם jarvis workflow open: הכניסה נפתחת בדפדפן ברירת המחדל, ושום קישור סודי לא מודפס (את הקישור מקבלים רק עם --no-open). אם שירות התצוגה לא רץ, מוצגת הוראה להפעיל אותו במקום דף שמסתובב. סמנו 'אני כאן' למענה מרוכז לשאלות, או 'להמשיך בלעדיי' לשמירת השאלות. שתיקה אינה אישור."
+en = "Open the dashboard in one step with jarvis workflow open: the login opens in your default browser and no secret link is printed (only --no-open prints the link). If the web service is not running, it says how to start it instead of opening a spinning page. Select Present for interactive planning questions or Away to retain them. Silence is never approval."
 action = "command:jarvis workflow open"
 
 [[steps]]
