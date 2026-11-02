@@ -34,12 +34,6 @@ since = "2026-10-26"
 reason = "failed once, same commit passed"
 
 [[test]]
-id = "test_runtime.py::test_hide_terminates_a_window_that_does_not_close"
-issue = 556
-since = "2026-10-26"
-reason = "2 s wall-clock bound fails on a loaded Windows runner (2.53 s)"
-
-[[test]]
 id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeout_kills"
 issue = 660
 since = "2026-10-27"
