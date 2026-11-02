@@ -217,7 +217,8 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
         return {"decision": "block", "reason": notice_line(unread)}
     if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
         ready = store.manager_continue(ident)
-        notes = store.take_manager_notes()  # worker-watch mail, shown once; never while stop_hook_active
+        # worker-watch mail, shown once; with no ready work it only blocks within manager_continue's hourly cap
+        notes = store.take_manager_notes() if ready else store.take_manager_notes_capped(ident)
         mail = "".join(f"[{n['subject']}] {n['body']} " for n in notes)
         if notes and not ready:
             return {"decision": "block", "reason": mail + "Act on the workflow monitor note above, then continue."}

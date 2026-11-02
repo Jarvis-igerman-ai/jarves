@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jarves.workflow import watch
 from jarves.workflow.hooks import observe
-from jarves.workflow.store import Store
+from jarves.workflow.store import NATIVE_GRACE_S, Store
 
 POLICY = {"lanes": {"bugs": {"workers": 2}, "features": {"workers": 2}}}
 
@@ -99,10 +99,26 @@ class WorkerWatchTests(unittest.TestCase):
         self.now[0] += 100
         self.event("PostToolUse", tool_name="Bash")
         self.assertFalse(watch.handover_state(self.store)["ready"])
-        self.now[0] += 700
+        self.now[0] += 700  # a long wait (permission prompt / long tool call) is not silence yet
+        self.assertFalse(watch.handover_state(self.store)["ready"])
+        self.now[0] += NATIVE_GRACE_S
         state = watch.handover_state(self.store)
         self.assertTrue(state["ready"])
         self.assertIn("grace", state["reason"])
+
+    def test_notes_without_ready_work_respect_the_hourly_cap(self):
+        self.event("SessionStart")
+        blocked = 0
+        for i in range(14):
+            self.store.post_manager_note("WORKERS_SHORT", f"n{i}")
+            out = self.event("Stop")
+            blocked += out.get("decision") == "block"
+            self.now[0] += 10
+        self.assertEqual(blocked, 12)  # the shared cap (no busy workers); notes 13 and 14 are held back
+        self.assertEqual(self.store.take_manager_notes()[-1]["body"], "n13")  # held back, not lost
+        self.now[0] += 3600
+        self.store.post_manager_note("WORKERS_SHORT", "later")
+        self.assertEqual(self.event("Stop").get("decision"), "block")
 
 
 if __name__ == "__main__":

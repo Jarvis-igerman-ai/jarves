@@ -14,7 +14,7 @@ from .store import NATIVE_GRACE_S, Store
 WORKER_LANES = {"bugs", "features", "any"}
 MIN_INTERVAL_S = 300
 MAX_ALLOWED = 8
-HANDOVER_GRACE_S = 600
+HANDOVER_GRACE_S = NATIVE_GRACE_S  # a permission prompt or long tool call emits no hooks; same grace as the store
 SELF_ACTIVITY_S = 30  # the handover command's own tool hooks land just after it
 
 

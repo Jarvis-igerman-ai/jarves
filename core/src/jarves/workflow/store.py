@@ -569,6 +569,19 @@ class Store:
         except Exception:  # noqa: BLE001  incl. RecursionError from a deeply nested policy file: never break Stop
             return default
 
+    def _continue_slot(self, db, agent_id, worker_limit):
+        """Take one slot of the shared per-hour Stop-continuation cap; False when the cap is spent."""
+        busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
+        cap = 12 if busy < worker_limit else 2
+        key = "native_continue:" + _id(agent_id)
+        row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
+        times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
+        if len(times) >= cap:
+            return False
+        times.append(self.clock())
+        self._set_meta(db, key, times)
+        return True
+
     def manager_continue(self, agent_id, worker_limit=None):
         """Native Stop continuations, only for truly runnable ready work (one shared _ready filter, #855/#858).
 
@@ -583,15 +596,8 @@ class Store:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
                 return []
-            busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
-            cap = 12 if busy < worker_limit else 2
-            key = "native_continue:" + _id(agent_id)
-            row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
-            times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
-            if len(times) >= cap:
+            if not self._continue_slot(db, agent_id, worker_limit):
                 return []
-            times.append(self.clock())
-            self._set_meta(db, key, times)
             self._event(db, "manager_continue", "Native manager has authorised ready work; one bounded continuation requested")
             return ready[:5]
 
@@ -887,6 +893,20 @@ class Store:
             notes.append({"at": self.clock(), "subject": _text(subject, "subject", maximum=200),
                           "body": _text(body, "body", maximum=1000)})
             self._set_meta(db, "manager_notes", notes)
+
+    def take_manager_notes_capped(self, agent_id, worker_limit=None):
+        """Notes that may block a Stop with no ready work: counted in manager_continue's per-hour cap.
+
+        When the cap is spent the notes stay queued (not lost) for a later Stop."""
+        if worker_limit is None:
+            worker_limit = self._worker_limit()
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = json.loads(row[0]) if row else []
+            if not notes or not self._continue_slot(db, agent_id, worker_limit):
+                return []
+            self._set_meta(db, "manager_notes", [])
+            return notes
 
     def take_manager_notes(self):
         with self._tx() as db:
