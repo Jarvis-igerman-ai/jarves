@@ -50,6 +50,11 @@ he = "אם ברצונכם שג'ארביס יפתח Issues אוטומטיים, ל
 en = "To allow autonomous GitHub performance issues, click Enable GitHub auto reporting, confirm once, and ensure the local GitHub token/gh CLI is configured. You can turn it off here; without a token findings remain local."
 action = "open:#/speed"
 
+[[steps]]
+he = "זמני תגובה קולית לפי שלב: jarvis performance --voice-stages מראה חציון, p95, צוואר הבקבוק ורמת ביטחון מתוך היומן המקומי. שלבים שהמערכת לא מודדת מסומנים כלא זמינים, ואישור על מכשיר אמיתי נשאר לבדיקה שלכם."
+en = "Voice reply time by stage: jarvis performance --voice-stages shows median, p95, the bottleneck and a confidence level from the local log. Stages the system does not time are marked unavailable, and real-device acceptance stays your own test."
+action = "command:jarvis performance --voice-stages"
+
 [[problems]]
 he = "הבדיקה המתוזמנת לא רצה"
 en = "The scheduled test did not run"

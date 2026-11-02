@@ -111,7 +111,11 @@ def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cf
     calls = slow_cli_feature
     f = feat.Features(cfg, home, components=lambda: {}, skills=lambda: set())
     ms, rows = _timed_list(f)                                  # cold: nothing checked yet
-    assert ms < BUDGET_MS, ms
+    # structural, not the 150 ms gate (#710): the cold list runs cheap probes in line until its 30 ms budget is spent
+    # and overshoots by one probe, so its absolute time follows runner load (one stall > 150 ms failed this line).
+    # What matters is that the 2 s fake claude was NOT run in line: the row says "checking" (below) and the list
+    # returned long before 2 s. The 150 ms budget is asserted on the stale path, as a median of 4.
+    assert ms < 1500, ms
     r = rows[FID]
     assert (r["available"], r["check"], r["health"], r["reason"]) == (False, "checking", "checking",
                                                                     feat.CHECKING_REASON)

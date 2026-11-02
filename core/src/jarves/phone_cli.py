@@ -251,8 +251,12 @@ def cmd_phone(a, cfg, home) -> int:
                       f"phone access: {'on' if v['enabled'] else 'off'}; paired phones: {v['paired_phones']}"))
     print(clilang.fmt("אישורים מהטלפון: " + ("פועל" if v["phone_approvals"] else "כבוי"),
                       "phone approvals: " + ("on" if v["phone_approvals"] else "off")))
-    print(clilang.fmt("האזנה: " + ("כתובת Tailscale בלבד" if v["bind_tailnet_only"] else "רשת הבית (וכן Tailscale אם קיים)"),
-                      "listening: " + ("tailnet address only" if v["bind_tailnet_only"] else "home network (and Tailscale if present)")))
+    if not v["enabled"]:       # switch OFF: no phone listener exists, so never describe one (V5-CORE-WIRING C1/C2)
+        print(clilang.fmt("האזנה: אין. גישה מהטלפון כבויה ולא נפתח שום נתיב לטלפון",
+                          "listening: nothing (phone access is off, no phone path is open)"))
+    else:
+        print(clilang.fmt("האזנה: " + ("כתובת Tailscale בלבד" if v["bind_tailnet_only"] else "רשת הבית (וכן Tailscale אם קיים)"),
+                          "listening: " + ("tailnet address only" if v["bind_tailnet_only"] else "home network (and Tailscale if present)")))
     word = {"ready": ("מוכן", "ready"), "not-installed": ("לא מותקן", "not installed"),
             "not-connected": ("לא מחובר", "not connected")}[t["state"]]
     print(clilang.fmt(f"Tailscale: {word[0]}" + (f" ({t['ip']}, {t['name'] or 'ללא שם'})" if t["ip"] else ""),

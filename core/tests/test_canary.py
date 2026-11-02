@@ -45,6 +45,39 @@ async def test_dashboard_journey_is_real_browser_or_blocked(home):
             assert page in r["detail"]
 
 
+async def test_dashboard_retries_only_host_socket_exhaustion(home, monkeypatch):
+    """#707: ERR_NO_BUFFER_SPACE hit twice in a row on a loaded Windows runner. Deterministic, no browser."""
+    transient = "AssertionError: console Failed to load resource: net::ERR_NO_BUFFER_SPACE"
+    monkeypatch.setattr(canary, "DASHBOARD_RETRY_PAUSE_S", 0)
+
+    def script(outcomes):
+        it = iter(outcomes)
+
+        async def attempt(env):
+            o = next(it)
+            if isinstance(o, str) and o.startswith("ok"):
+                return o
+            raise AssertionError(o)
+        return attempt
+
+    env = canary.Env(profile="ci", home=home)
+    monkeypatch.setattr(canary, "_dashboard_attempt", script([transient, transient, "ok home 1 ms"]))
+    assert await canary.j_dashboard(env) == "ok home 1 ms"
+    monkeypatch.setattr(canary, "_dashboard_attempt", script([transient] * canary.DASHBOARD_ATTEMPTS))
+    with pytest.raises(AssertionError, match="ERR_NO_BUFFER_SPACE"):
+        await canary.j_dashboard(env)                                   # still fails after the last try
+    calls = []
+    real = script(["pageerror boom", "ok"])
+
+    async def counting(e):
+        calls.append(1)
+        return await real(e)
+    monkeypatch.setattr(canary, "_dashboard_attempt", counting)
+    with pytest.raises(AssertionError, match="pageerror boom"):
+        await canary.j_dashboard(env)
+    assert len(calls) == 1                                                # a real page error is never retried
+
+
 async def test_installer_check_fails_on_a_missing_addon_and_hash_mismatch(home, monkeypatch, tmp_path):
     monkeypatch.setattr("jarves.setup_wizard.check_addons",
                         lambda: {"ok": False, "rows": [{"id": "camera", "ok": False}], "load_failed": []})

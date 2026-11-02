@@ -90,6 +90,7 @@ ADDON_MODULES = (
     "jarves.selfcheck",
     "jarves.connect",
     "jarves.home_setup",
+    "jarves.whats_new_card",
     "jarves.skills.helper",
     "jarves.context_trace",
     "jarves.recall",
@@ -142,6 +143,7 @@ SAFE_OFF = frozenset({
     "whatsapp_archive",
     "whatsapp_bridge",
     "whatsapp_send",
+    "whats_new_card",
 })
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
@@ -228,6 +230,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "dev_manager",
         "dev_status",
         "home_setup_cards",
+        "whats_new_card",
     )),
     ("channels", "ערוצים ובית חכם", "Channels & smart home", (
         "telegram",
@@ -1421,6 +1424,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "browser_recording": [_mod("jarves.browser_recording"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "browser_takeover": [_mod("jarves.browser_liveview"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
     "browser_liveview": [_mod("jarves.browser_liveview"), _mod("jarves.browser_pilot"), _data("jarves.guides", "data/browser_pilot.toml")],
+    "whats_new_card": [_mod("jarves.whats_new_card"), _mod("jarves.release_notes"), _data("jarves.guides", "data/whats_new_card.toml")],
     "home_setup_cards": [_mod("jarves.home_setup"), _mod("jarves.connect"), _data("jarves.guides", "data/home_setup_cards.toml")],
     "browser_pilot": [_mod("jarves.browser_pilot"), _mod("jarves.browser"), _data("jarves.guides", "data/browser_pilot.toml")],
     "telegram": [_mod("jarves.telegram_channel"), _mod("httpx"), _data("jarves.guides", "data/telegram.toml")],

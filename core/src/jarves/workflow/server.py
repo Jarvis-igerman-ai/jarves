@@ -10,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -51,7 +52,14 @@ def access_token(home: Path) -> str:
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Exclusive bind (#789): on Windows SO_REUSEADDR lets a second server share the port, so a stale
+    # server kept answering with old code. POSIX SO_REUSEADDR only skips TIME_WAIT and stays exclusive.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def __init__(self, home: Path, port: int = 8188, *, store: Store | None = None, profile_home: Path | None = None):
         self.home = Path(home)
@@ -295,10 +303,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None = None) -> None:
+    from . import webchild
     server = Server(home, port, profile_home=profile_home)
+    webchild.record(home, server.server_port)  # the pid that actually listens, for the supervisor (#789)
     if ready:
         ready(server)
     try:
         server.serve_forever(poll_interval=0.2)
     finally:
+        webchild.clear(home)
         server.server_close()

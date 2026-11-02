@@ -14,12 +14,18 @@ import sys
 
 
 def _user_procs() -> int:
+    """Tasks (processes AND threads) of this user. RLIMIT_NPROC counts every Linux thread, so counting only
+    processes left less headroom than intended and the approved command's own fork (the grep of 'a | grep b')
+    could fail with EAGAIN, exit 2 (#660)."""
     uid, n = os.getuid(), 0
     for d in os.listdir("/proc"):
         if d.isdigit():
             try:
                 if os.stat("/proc/" + d).st_uid == uid:
-                    n += 1
+                    try:
+                        n += max(1, len(os.listdir(f"/proc/{d}/task")))
+                    except OSError:
+                        n += 1
             except OSError:
                 pass
     return n

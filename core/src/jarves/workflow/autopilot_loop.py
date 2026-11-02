@@ -24,14 +24,21 @@ AGENT_PREFIX = "ap-"
 START_GRACE_S = 300          # a claim with no linked session after this long is an unconfirmed start
 PAUSE_S = 600
 START_TIMEOUT_S = 240
-CLEAN_REFUSALS = {"NOT_ALLOWED_PROJECT", "BUDGET_REACHED", "PROVIDER_MISSING", "AUTH_REQUIRED", "NO_CORE",
-                  "MODEL_NOT_ALLOWED", "SECOND_WRITER", "error"}
+# Refusals returned BEFORE any worker process exists: they launched nothing, so they do not use the hourly
+# start budget (#763). Anything else (SESSION_CLOSED, AUTH_REQUIRED api_key, ...) may have started a paid worker.
+PRE_START_REFUSALS = frozenset({"NO_CORE", "CORE_NOT_RUNNING", "NOT_ALLOWED_PROJECT", "BUDGET_REACHED",
+                                "MODEL_NOT_ALLOWED", "SECOND_WRITER", "NOT_APPROVED", "CONFIG_NOT_VERIFIED",
+                                "PROVIDER_MISSING"})
+# The generic code "error" is a pre-start refusal only for these texts; any other error may follow a started worker.
+PRE_START_ERROR_TEXTS = ("worktree failed:", "Invalid autopilot environment.", "Invalid model identifier.")
 log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 _LAST_SIG: dict[str, tuple] = {}
 
 
-# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+# ---- policy: T1's reader (re-read every step; a bad file fails closed) ----------------------------
+_CLAIM_FAILED: set = set()
+
 def load_policy(home: Path) -> dict:
     from . import autopilot
     policy, error = autopilot.load(home)
@@ -250,7 +257,9 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 store.reset_idle_agent(agent_id)   # leftover offline agent from a failed try must not block the lane forever
             claimed = store.claim(agent_id, task_id=task["id"])
             if not claimed:           # lost the race or no longer ready: record it and try the next candidate
-                store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
+                if (agent_id, task["id"]) not in _CLAIM_FAILED:      # once per task: an unclaimable task must not flood the ledger
+                    _CLAIM_FAILED.add((agent_id, task["id"]))
+                    store.record_event("autopilot_error", f"Autopilot could not claim {task['id']} for {agent_id}; trying the next candidate")
                 snap = store.snapshot()
                 skipped.add(task["id"])
                 continue
@@ -262,9 +271,12 @@ def _step(store, profile_home, policy, start, stop, notify, force, find=None) ->
                 result = start(profile_home, **req)
             except Exception:  # noqa: BLE001
                 result = None
-            starts.append(now)
-            state["starts"] = starts
-            _save(store, state)
+            if (result is None or result.get("ok") or (str(result.get("code", "")) not in PRE_START_REFUSALS
+                                                    and not (result.get("code") == "error"
+                                                             and str(result.get("text", "")).startswith(PRE_START_ERROR_TEXTS)))):
+                starts.append(now)
+                state["starts"] = starts
+                _save(store, state)
             if result is None:
                 _unconfirmed(store, profile_home, agent_id, task["id"], find, actions)
             elif not result.get("ok"):

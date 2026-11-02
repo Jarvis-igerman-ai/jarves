@@ -22,7 +22,10 @@ async def test_backend_prompt_does_not_grow(hermetic_features, core):
     total = len(tools) + len(core.agent.instructions())
     assert total <= BACKEND_CHARS_BUDGET, f"backend prompt+tools is {total} chars (budget {BACKEND_CHARS_BUDGET:.0f})"
     assert '"title": "' not in tools                      # slimmed schemas carry no pydantic titles
-    assert total <= 48_400                             # 4.0.1: -18% vs the V4 baseline; the -30% target (41.6k) is deferred to 4.0.2 (lazy tool exposure), docs/reviews/SWV4_PERF.md
+    assert total <= 48_400                             # full list (server delegation keeps it): -18% vs the V4 baseline
+    from jarves.voice.lazy_tools import lazy_tools     # #71: the client-delegation call lists tools lazily by group
+    lazy = len(json.dumps(lazy_tools(core.registry), ensure_ascii=False)) + len(core.agent.instructions())
+    assert lazy <= 41_600                              # -30% vs the V4 baseline (59.4k); measured 37.2k, docs/reviews/SWV4_PERF.md
 
 
 class _Args(BaseModel):

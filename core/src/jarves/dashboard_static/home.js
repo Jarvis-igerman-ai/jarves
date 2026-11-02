@@ -109,16 +109,43 @@ PAGES.home = async function () {
     el("div", { class: "actions" }, el("a", { class: "button-link", href: "#/guide/daily_limits" }, tx("איך משנים ←", "How to change it →"))))));
   const setup = typeof window.guidesSetupCard === "function" ? await window.guidesSetupCard() : null;   // WP-L checklist
   const setupCards = await homeSetupCards();   // #457: one guided card per open setup item (beta, OFF by default)
+  const whatsNew = await homeWhatsNewCard();   // #167: what changed since your version (beta, OFF by default)
   const strip = typeof window.privacyStripCard === "function" ? window.privacyStripCard() : null;     // strip.js
   render(el("div", { class: "big-status hero" }, el("span", { class: "lamp " + lampOf(d.status) }),
     el("div", {}, el("h1", { class: "title" }, tx(d.status_he, d.status_en)),
       el("div", { class: "muted" }, d.live ? tx("מדבר עכשיו", "talking now") : tx(d.next.he, d.next.en))),
     el("span", { class: "spacer" }), d.next.link ? el("a", { class: "button-link", href: d.next.link }, tx("קדימה ←", "Go →")) : null),
-    limitCards, setupCards, setup, tiles, lc ? last : null,
+    limitCards, whatsNew, setupCards, setup, tiles, lc ? last : null,
     el("details", { class: "home-more card" }, el("summary", {}, tx("עוד פרטים: חיבורים, יכולות ופרטיות", "More details: connections, features and privacy")),
       strip, el("div", { class: "grid-home" }, conns, feats), privacyCard(d.privacy)));
   timer = setInterval(() => route(true), 15000);
 };
+
+// ---------------------------------------------------------------- What changed since your version (#167, beta)
+// The note texts are the English CHANGELOG (data-noi18n, like the Release notes page); labels are translated.
+async function homeWhatsNewCard() {
+  let d;
+  try { d = await api("/api/home/whats-new"); } catch (e) { return null; }
+  if (!d.enabled || !d.card || !d.card.items.length) return null;
+  const c = d.card;
+  const kindHe = { Added: "נוסף", Changed: "שונה", Fixed: "תוקן", Docs: "תיעוד", Version: "גרסה", Security: "אבטחה", Removed: "הוסר", Note: "הערה" };
+  const multi = c.versions.length > 1;
+  const msg = el("div", { class: "small", dir: "auto", role: "status" });
+  return el("div", { class: "card", id: "home-whats-new", "data-whats-new": c.to },
+    el("h2", {}, tx("מה השתנה מאז הגרסה שלך", "What changed since your version")),
+    el("div", { class: "muted small", dir: "ltr" }, c.from + " → " + c.to),
+    el("ul", {}, ...c.items.map((it) => el("li", {},
+      pill(it.kind === "Fixed" ? "ok" : "info", tx(kindHe[it.kind] || it.kind, it.kind) + (it.scope ? " (" + it.scope + ")" : "")), " ",
+      multi ? el("span", { class: "muted small", dir: "ltr" }, it.version + " ") : null,
+      el("span", { "data-noi18n": "", dir: "auto" }, it.text)))),
+    c.more ? el("div", { class: "muted small" }, tx(`ועוד ${c.more} שינויים`, `and ${c.more} more changes`)) : null,
+    el("div", { class: "actions" },
+      el("a", { class: "button-link", href: "#/releasenotes?version=" + encodeURIComponent(c.to) }, tx("כל הערות הגרסה ←", "All release notes →")),
+      el("button", { type: "button", "data-whats-new-dismiss": "", onclick: async () => {
+        try { await post("/api/home/whats-new", { action: "dismiss" }); route(true); }
+        catch (e) { msg.textContent = e.message; } } }, tx("הבנתי, לסגור", "Got it, close"))),
+    msg);
+}
 
 // ---------------------------------------------------------------- Home setup cards (#457, beta)
 async function homeSetupCards() {

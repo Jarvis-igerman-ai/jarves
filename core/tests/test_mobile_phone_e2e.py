@@ -235,6 +235,23 @@ def until(page, js, timeout=15000):
     raise AssertionError("page condition not reached: " + js)
 
 
+def tap_until(page, selector, text, attempts=3, each=8000):
+    """Tap a plans-view button and wait for its status note. The view repaints (replaceChildren) on every refresh, so a
+    tap that lands on a node replaced a moment before is lost on a slow runner (flake #367); tap again while the button
+    is still there and the note is absent. Each op is idempotent from the button's point of view (it vanishes on success)."""
+    js = f"document.querySelector('#plansRoot').textContent.includes({text!r})"
+    for i in range(attempts):
+        if i and (page.evaluate("() => !!(" + js + ")") or not page.locator(selector).count()):
+            break
+        page.tap(selector)
+        try:
+            until(page, js, each)
+            return
+        except AssertionError:
+            if i == attempts - 1:
+                raise
+
+
 def token(page) -> str:
     return page.evaluate("localStorage.getItem('jarves_m_token')")
 
@@ -756,17 +773,14 @@ def test_goal_plan_view_pause_and_cancel_from_the_phone_and_nothing_that_starts_
     assert "list_notes" in steps and "send_message" in steps and "tell Dana" in steps and "changes something" not in steps
     assert "SECRET" not in page.inner_text("body")                      # arguments and results never reach the phone
     assert page.locator("#plansRoot button:has-text('Approve'), #plansRoot button:has-text('Skip'), #plansRoot button:has-text('Delete')").count() == 0
-    page.tap("#plansRoot button:has-text('Pause')")
-    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
+    tap_until(page, "#plansRoot button:has-text('Pause')", "Plan paused")
     assert st.get(pid)["state"] == "paused"                             # the PC sees the same state
     assert p.owner("GET", "/api/goal-plans")[1]["plans"][0]["state"] == "paused"
     page.wait_for_selector("#plansRoot button:has-text('Resume')")      # #340: resume is on the phone now
     assert page.locator("#plansRoot button:has-text('Pause')").count() == 0
-    page.tap("#plansRoot button:has-text('Resume')")
-    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan resumed')")
+    tap_until(page, "#plansRoot button:has-text('Resume')", "Plan resumed")
     assert st.get(pid)["state"] == "ready"
-    page.tap("#plansRoot button:has-text('Pause')")
-    until(page, "document.querySelector('#plansRoot').textContent.includes('Plan paused')")
+    tap_until(page, "#plansRoot button:has-text('Pause')", "Plan paused")
     page.tap("#plansRoot button:has-text('Cancel plan')")               # cancelling asks first
     assert st.get(pid)["state"] == "paused"
     page.tap("#plansRoot button:has-text('Yes, cancel')")

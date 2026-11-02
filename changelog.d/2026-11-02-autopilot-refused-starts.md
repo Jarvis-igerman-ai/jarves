@@ -1,0 +1,1 @@
+- Fixed: Autopilot: a refused start (for example NO_CORE) no longer consumes max_starts_per_hour (#763).

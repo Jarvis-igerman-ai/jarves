@@ -40,9 +40,24 @@ def _strings(value, name, limit=20):
         raise ValueError(f"{name} must be a short list of short strings")
 
 
+OPTIONAL_KEYS = ("worker_allowed_tools",)       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
+_TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
+_HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
+_BYPASS = ("dangerously", "bypass", "skip-permissions")
+
+
+def _worker_tools(value) -> None:
+    if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
+        raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
+    if any(_HARD_STOP.search(x) for x in value):
+        raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
+    if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
+        raise ValueError("worker_allowed_tools: no duplicates and no bypass flags")
+
+
 def validate(policy: dict) -> dict:
     """Return the policy if valid, else raise ValueError. Unknown keys are refused."""
-    if not isinstance(policy, dict) or set(policy) != set(DEFAULTS):
+    if not isinstance(policy, dict) or not set(DEFAULTS) <= set(policy) <= set(DEFAULTS) | set(OPTIONAL_KEYS):
         raise ValueError("policy keys must be exactly: " + ", ".join(DEFAULTS))
     for key in ("enabled", "kill"):
         if type(policy[key]) is not bool:
@@ -68,6 +83,8 @@ def validate(policy: dict) -> dict:
             _int(lane["workers"], f"lane {name} workers", 0, 5)
         if "on" in lane and type(lane["on"]) is not bool:
             raise ValueError(f"lane {name}: on must be true or false")
+    if "worker_allowed_tools" in policy:
+        _worker_tools(policy["worker_allowed_tools"])
     watchdog = policy["watchdog"]
     if not isinstance(watchdog, dict) or set(watchdog) != set(DEFAULTS["watchdog"]):
         raise ValueError("watchdog has invalid keys")
@@ -125,7 +142,7 @@ def set_key(home: Path, key: str, raw: str) -> dict:
         if not isinstance(node, dict) or part not in node:
             raise ValueError(f"unknown policy key: {key}")
         node = node[part]
-    if not isinstance(node, dict) or parts[-1] not in node:
+    if not isinstance(node, dict) or (parts[-1] not in node and key not in OPTIONAL_KEYS):
         raise ValueError(f"unknown policy key: {key}")
     node[parts[-1]] = value
     return save(home, policy)

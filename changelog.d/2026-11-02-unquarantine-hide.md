@@ -1,0 +1,1 @@
+- Changed: tests: de-flaked test_hide_terminates_a_window_that_does_not_close (no wall-clock bound) and removed its quarantine entry (#556).
