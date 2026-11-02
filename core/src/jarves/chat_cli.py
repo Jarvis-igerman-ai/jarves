@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from . import approval_popup as popup
-from . import clilang, logs
+from . import chat_render, clilang, logs
 
 HISTORY_FILE = "chat_history.txt"
 HISTORY_KEEP = 1000
@@ -194,7 +194,16 @@ class ChatSession:
         return "silent" if self.silent else ("voice" if self.voice else "text")
 
     def prompt(self, cont: bool = False) -> str:
-        return "....> " if cont else f"you [{self.mode()}]> "
+        """Claude Code style: a bare "> " in text mode; [silent] / [voice] in front when that matters (#331)."""
+        if cont:
+            return "  ... "
+        return "> " if self.mode() == "text" else f"[{self.mode()}] > "
+
+    def status_line(self) -> str:
+        return chat_render.status_line(self.mode(), self.voice and not self.silent, self.state.get("text_model") or "")
+
+    def show_status_line(self) -> None:
+        self.say(self.paint("2", self.status_line()))
 
     # -------------------------------------------------------------- link plumbing
     async def _pump(self) -> None:
@@ -228,6 +237,7 @@ class ChatSession:
         tool lines and Ctrl+C. Returns that final message."""
         self.in_wait = True
         streamed = False
+        md = chat_render.MarkdownStream(self.color)
         cancelled_at: float | None = None
         ask: asyncio.Task | None = None
         ask_req: dict = {}
@@ -268,17 +278,19 @@ class ChatSession:
                     if not streamed:
                         self.say(self.paint("1;36", "jarvis> "), end="")
                         streamed = True
-                    self.say(p.get("text", ""), end="")
+                    self.say(md.feed(str(p.get("text", ""))), end="")
                 elif t == "chat.tool" and p.get("id") == tid:
+                    if streamed:
+                        self.out.write(md.flush())
                     self._tool_line(p, streamed)
                 elif t == "chat.display" and p.get("id") == tid:
                     if streamed:
-                        self.say()
+                        self.say(md.flush())
                         streamed = False
                     self.say(str(p.get("text", "")))                    # read-only owner display (#363)
                 elif t == "chat.ui_block" and p.get("id") == tid:
                     if streamed:
-                        self.say()
+                        self.say(md.flush())
                         streamed = False
                     from .ui_blocks import numbered                      # #444: plain numbered list, no widgets in the terminal
                     self.say(numbered(p["block"]) if isinstance(p.get("block"), dict) else "")
@@ -286,7 +298,7 @@ class ChatSession:
                         self.pending_block = p["block"]                 # S2: "1,3" or "all" now chooses from it
                 elif t == "chat.approval_request":
                     if streamed:
-                        self.say()
+                        self.say(md.flush())
                         streamed = False
                     ask_req = p
                     tries = 0
@@ -318,7 +330,7 @@ class ChatSession:
                     ask_req = {}
                 elif t in finish and (not tid or p.get("id", tid) == tid or t != "chat.done"):
                     if streamed:
-                        self.say()
+                        self.say(md.flush())
                     return t, p
                 elif t == "chat.error" and t not in finish:
                     self.say(f"! {p.get('message', p.get('code', ''))}")
@@ -335,8 +347,14 @@ class ChatSession:
         if not ok and p.get("code") == "TOOL_UNTRUSTED_TURN":      # a safety rule, not an error (#363)
             self.say(self.paint("2", f"  > {name}  skipped (safety rule)"))
             return
-        extra = f" [{logs.redact(str(p.get('code', '')))}]" if (self.verbose or not ok) else ""
-        self.say(self.paint("2" if ok else "31", f"  > {name}  {'ok' if ok else 'FAILED'}{extra}"))
+        code = logs.redact(str(p.get("code", "")))
+        extra = f" [{code}]" if (self.verbose or not ok) else ""
+        why = "" if ok else chat_render.reason(code)
+        if self.color:                                 # #331: compact Claude Code style marks on a terminal
+            mark = "✓" if ok else "✗"
+            self.say(self.paint("2" if ok else "31", f"  {mark} {name}" + (f"  {why}" if why else "") + extra))
+            return
+        self.say(f"  > {name}  {'ok' if ok else 'FAILED'}" + (f" ({why})" if why else "") + extra)
 
     # -------------------------------------------------------------- approvals
     def _show_request(self, p: dict) -> None:
@@ -502,6 +520,7 @@ class ChatSession:
         if want == "off":
             self.voice = False
             self.say(T("הקול כבוי: טקסט בלבד.", "Voice off: text only."))
+            self.show_status_line()
             return
         await self.refresh_state()
         if self.silent:
@@ -511,6 +530,7 @@ class ChatSession:
         else:
             self.voice = True
             self.say(T("הקול דולק: התשובות גם יוקראו.", "Voice on: answers are also spoken."))
+            self.show_status_line()
 
     async def resume(self, args: list[str]) -> None:
         await self.t.send("chat.command", {"name": "sessions"})
@@ -567,6 +587,8 @@ class ChatSession:
                                                   "no speech, chimes or face light in this session."))
             else:
                 self.say(T("טקסט בלבד. /voice on מקריא גם בקול.", "Text only. /voice on also speaks the answers."))
+            self.show_status_line()
+            self.say()
             while True:
                 msg = await self.read_message()
                 if msg is None:
@@ -621,11 +643,10 @@ class ChatSession:
                 self.voice = False
             self.quiet = now
         if not p.get("streamed") and p.get("text"):
-            self.say(self.paint("1;36", "jarvis> ") + p["text"])
+            self.say(self.paint("1;36", "jarvis> ") + chat_render.render(str(p["text"]), self.color))
         if not p.get("ok"):
             self.say(self.paint("31", f"[{p.get('code')}]"))
-        if self.color:
-            self.say(self.paint("2", "-" * 40))
+        self.say()                                     # #331: clean spacing instead of a dashed separator
 
 
 # ---------------------------------------------------------------------- entry point

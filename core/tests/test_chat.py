@@ -170,7 +170,7 @@ async def test_streamed_hebrew_round_trip_with_tool_line_and_no_speech(core, spy
     assert text.index("get_time") < text.index("שלום")
     assert spy == {"speak": [], "face": [], "chime": []}          # text mode: nothing speaks, nothing lights up
     assert core.tts.spoken == []
-    assert "you [text]> " in sc.prompts[0][0]
+    assert sc.prompts[0][0] == "> "
 
 
 async def test_reply_without_streaming_is_shown_once_and_stored_like_a_typed_message(core, spy):
@@ -373,7 +373,7 @@ async def test_silent_flag_never_speaks_and_refuses_voice(core, spy):
     session, sc, out = await start_chat(core, "/voice on", "hello", "/mode", EOF_, silent=True)
     await finish(asyncio.create_task(session.run()))
     text = out.getvalue()
-    assert "[silent]" in text and "you [silent]> " in sc.prompts[0][0]
+    assert "[silent]" in text and "[silent] > " in sc.prompts[0][0]
     assert "cannot be turned on" in text and "jarvis> quiet answer" in text
     assert "session: silent" in text
     assert spy == {"speak": [], "face": [], "chime": []} and core.tts.spoken == []
@@ -410,7 +410,7 @@ async def test_voice_on_speaks_the_same_session_when_it_is_not_silent(core, spy)
     await finish(asyncio.create_task(session.run()))
     assert "Voice on" in out.getvalue() and "Voice off" in out.getvalue()
     assert spy["speak"] == ["spoken answer"]                          # only the turn while voice was on
-    assert "you [voice]> " in "".join(p for p, _ in sc.prompts)
+    assert "[voice] > " in "".join(p for p, _ in sc.prompts)
 
 
 async def test_a_session_turns_silent_when_quiet_hours_begin(core, spy, monkeypatch):
@@ -423,7 +423,7 @@ async def test_a_session_turns_silent_when_quiet_hours_begin(core, spy, monkeypa
     await finish(asyncio.create_task(session.run()))
     assert "quiet hours began" in out.getvalue()
     assert spy["speak"] == ["answer"]                                 # the first turn only; "after" is silent
-    assert "you [silent]> " in sc.prompts[-1][0]
+    assert "[silent] > " in sc.prompts[-1][0]
 
 
 # ---------------------------------------------------------------------------------------------- commands
@@ -480,7 +480,7 @@ async def test_verbose_shows_codes_and_failed_tools_are_marked(core, spy):
     session, sc, out = await start_chat(core, "go", EOF_, verbose=True)
     await finish(asyncio.create_task(session.run()))
     text = out.getvalue()
-    assert "no_such_tool  FAILED [TOOL_UNKNOWN]" in text and "get_time  ok [ok]" in text
+    assert "no_such_tool  FAILED (unknown tool) [TOOL_UNKNOWN]" in text and "get_time  ok [ok]" in text
 
 
 async def test_core_disconnect_ends_the_chat_with_an_error(core, spy):
