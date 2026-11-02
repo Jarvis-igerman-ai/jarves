@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -136,7 +137,8 @@ def _self_update(store, home: Path, profile_home: Path, port: int) -> bool:
 
 def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: float = 10, sync_github: bool = True,
                update_enabled: bool = False,
-               stop: threading.Event | None = None, popen=subprocess.Popen, clock=time.time) -> None:
+               stop: threading.Event | None = None, popen=subprocess.Popen, clock=time.time,
+               lock_sleep=time.sleep, lock_clock=time.monotonic) -> None:
     """Own the web child; workers are never killed or blindly re-run.
 
     An OS login task/service should supervise THIS process. No process can
@@ -148,7 +150,14 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     stop = stop or threading.Event()
     if not 1 <= port <= 65535:
         raise ValueError("supervisor needs a fixed port between 1 and 65535")
-    with exclusive(home / "supervisor.lock", wait_s=SUPERVISOR_LOCK_WAIT_S):
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(exclusive(home / "supervisor.lock", wait_s=SUPERVISOR_LOCK_WAIT_S,
+                                          sleep=lock_sleep, clock=lock_clock))
+        except OSError:
+            # A healthy supervisor outside the scheduled task still holds the lock: a duplicate exits cleanly (#754).
+            logging.getLogger(__name__).warning("another supervisor holds the lock; this duplicate exits")
+            return
         store = Store(home / "workflow.db")
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
         from . import webchild

@@ -29,7 +29,7 @@ if ($Install) {
     # Use pythonw.exe beside python.exe so logon starts no console window.
     $pythonw = Join-Path (Split-Path $python) "pythonw.exe"
     if (Test-Path $pythonw) { $python = $pythonw }
-    # Restart layer (#754): a 5-minute repeat re-launches a dead supervisor; IgnoreNew keeps a healthy one untouched.
+    # Restart layer (#754): a 5-minute repeat re-launches a dead supervisor; IgnoreNew covers the task instance; a supervisor started outside the task makes the duplicate exit 0 after the lock wait (see control.supervisor).
     $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
     $action = New-ScheduledTaskAction -Execute $python -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
