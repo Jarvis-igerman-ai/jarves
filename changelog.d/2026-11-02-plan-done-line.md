@@ -1,0 +1,1 @@
+- Added: A finished goal plan gives one short calm line, only while you are at the PC and outside quiet hours (V5-GOALS, the plans feature stays as before).

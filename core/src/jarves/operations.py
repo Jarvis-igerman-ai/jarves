@@ -214,6 +214,8 @@ class Operations:
         self.plan_runner = plans_mod.PlanRunner(self.plans, core.registry, budget=getattr(core, "budget", None),
                                                 features=core.features)
         self._plan_task: asyncio.Task | None = None
+        self.plan_cheer = plans_mod.PlanCheer(self.plans, quiet=lambda: calm.quiet_hours_now(self.db, time.time()),
+                                              at_pc=lambda: calm.owner_at_pc(core), say=self._say_goal_line)
         self.prefs = prefs_mod.Preferences(self.db)
         self.proactive = proactive_mod.Proactive(self.db, self.goals)
         self.cont = continuity_mod.Continuity(home, quiet=lambda ts: calm.quiet_hours_now(self.db, ts))
@@ -358,6 +360,12 @@ class Operations:
             await self.cheer.check()
         except Exception:
             logs.error("goals", "GOAL_DONE_LINE_FAILED", "goal finished line failed", exc=True)
+        plan_cheer = getattr(self, "plan_cheer", None)       # absent on a partial Operations (tick tests)
+        if plan_cheer is not None:
+            try:
+                await plan_cheer.check()
+            except Exception:
+                logs.error("goals", "PLAN_DONE_LINE_FAILED", "plan finished line failed", exc=True)
         await self.alerts.flush()
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
