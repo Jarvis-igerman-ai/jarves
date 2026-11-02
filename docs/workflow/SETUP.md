@@ -164,6 +164,9 @@ requires an already running allow-listed session and explicit
 - No work: inspect owner wait, dependencies, resources, scope and worker alerts.
 - GitHub unavailable: cached metadata remains visible with its age/error.
 - Present expired: select it again; polling does not count as owner activity.
+- Stale review/steward tasks of merged or superseded PRs: `close-superseded <open PR numbers>`
+  (e.g. from `gh pr list`) blocks queued tasks whose PR is not in that list. Tasks with
+  implementation=merged are never listed as ready; route them to an installed-product QA task.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
 
