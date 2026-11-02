@@ -1301,8 +1301,9 @@ def selfsigned_needs_reissue(home: Path) -> bool:
 
 
 def ensure_selfsigned(home: Path, host: str | None) -> None:
-    """Create the self-signed certificate, or reissue ours when it lacks the .local name."""
-    if not tls_paths(home)[0].is_file() or selfsigned_needs_reissue(home):
+    """Create the self-signed certificate (with the .local name) only when none exists. An existing certificate is never
+    replaced here: the Android app pins its SHA-256, so a silent reissue would break every paired phone."""
+    if not tls_paths(home)[0].is_file():
         make_selfsigned(home, host)
 
 

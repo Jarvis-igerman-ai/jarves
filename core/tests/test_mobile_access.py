@@ -658,7 +658,7 @@ def test_stable_local_url_is_accepted_only_while_phone_access_is_on(home, fake, 
         off.stop()
 
 
-def test_selfsigned_certificate_carries_local_name_and_is_reissued(home, monkeypatch):
+def test_selfsigned_certificate_carries_local_name_and_is_never_replaced(home, monkeypatch):
     from cryptography import x509
     from jarves import mobile
     monkeypatch.setattr("socket.gethostname", lambda: "Old-PC")
@@ -674,4 +674,4 @@ def test_selfsigned_certificate_carries_local_name_and_is_reissued(home, monkeyp
     assert cert_p.read_bytes() == first                                         # unchanged name: no reissue
     monkeypatch.setattr("socket.gethostname", lambda: "New-PC")
     mobile.ensure_selfsigned(home, HOST)
-    assert "new-pc.local" in dns() and cert_p.read_bytes() != first
+    assert cert_p.read_bytes() == first and "new-pc.local" not in dns()         # existing cert kept (phones pin it)
