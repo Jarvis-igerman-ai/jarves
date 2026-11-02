@@ -73,10 +73,12 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()["source"]["open_bugs"], 4)
         autopilot.command(self.store, self.home, "once", [])
         tasks = self.tasks()
-        self.assertEqual(sorted(k for k in tasks if k.startswith("gh-")), ["gh-1", "gh-2", "gh-4", "gh-7", "gh-8"])
+        self.assertEqual(sorted(k for k in tasks if k.startswith("gh-")), ["gh-1", "gh-2", "gh-4", "gh-8"])
+        # A v5-labelled issue no requirement maps is placed by sync as requirement ISSUE-7 (no duplicate gh task).
+        self.assertIn("ISSUE-7", tasks)
         self.assertEqual((tasks["gh-1"]["lane"], tasks["gh-1"]["priority"], tasks["gh-1"]["version"]), ("bugs", 1, "V4.5.1"))
         self.assertEqual(tasks["gh-2"]["priority"], 0)
-        self.assertEqual((tasks["gh-7"]["lane"], tasks["gh-7"]["version"]), ("features", "V5"))
+        self.assertEqual((tasks["ISSUE-7"]["lane"], tasks["ISSUE-7"]["version"]), ("features", "V5"))
         self.assertEqual(tasks["gh-8"]["lane"], "bugs")
         # Imported rows are not runnable until the policy is enabled and their version authorised.
         self.assertFalse(any(tasks[k]["execution_allowed"] for k in tasks))
@@ -84,11 +86,11 @@ class AutopilotTests(unittest.TestCase):
         autopilot.command(self.store, self.home, "once", [])
         tasks = self.tasks()
         self.assertTrue(tasks["gh-1"]["execution_allowed"])
-        self.assertFalse(tasks["gh-7"]["execution_allowed"])
+        self.assertFalse(tasks["ISSUE-7"]["execution_allowed"])
         self.assertFalse(tasks["gh-8"]["execution_allowed"])
         autopilot.command(self.store, self.home, "set", ["authorized_versions", '["V4.5.1","V5"]'])
         autopilot.command(self.store, self.home, "once", [])
-        self.assertTrue(self.tasks()["gh-7"]["execution_allowed"])
+        self.assertTrue(self.tasks()["ISSUE-7"]["execution_allowed"])
         self.assertTrue(self.tasks()["gh-8"]["execution_allowed"])
         # Re-running creates nothing new.
         self.assertEqual(autopilot.step(self.store, self.home)["created"], [])
