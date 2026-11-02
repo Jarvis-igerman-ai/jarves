@@ -311,3 +311,37 @@ def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_share
                                  "https://127.0.0.1:22" + chr(92) + "@example.com/", "https://example.com/a" + chr(92) + "b"])
 def test_574_a_backslash_url_is_refused_browsers_read_it_as_a_slash(url):
     assert bp.page_scope(url) == "" and bp.vet_url(url, lambda h: ["93.184.216.34"]) == ""
+
+
+def test_623_concurrent_handlers_pin_once_and_never_overwrite(tmp_path):
+    import threading
+    calls, gate = [], threading.Barrier(2)
+
+    def rebinding(host):
+        calls.append(host)
+        return ["93.184.216.34"] if len(calls) == 1 else ["10.0.0.5"]
+    s, d, _ = mk(tmp_path, resolver=rebinding)
+    out = []
+
+    def go():
+        gate.wait()
+        out.append(s.request_allowed("https://rebind.example.net/x"))
+    ts = [threading.Thread(target=go) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(calls) == 1 and out == [True, True]
+    assert s.pins["rebind.example.net"] == ["93.184.216.34"]
+    assert d.pinned[-1] == {"rebind.example.net": ["93.184.216.34"]}
+
+
+def test_623_stopped_session_allows_nothing(tmp_path):
+    s, _, _ = mk(tmp_path)
+    s.stop()
+    assert s.request_allowed("https://example.com/x") is False
+
+
+def test_623_pending_dns_lookups_are_bounded(monkeypatch):
+    monkeypatch.setattr(bp, "_PENDING", bp.MAX_PENDING_LOOKUPS)
+    with pytest.raises(OSError):
+        bp.system_resolver("example.com")
+    assert bp._PENDING == bp.MAX_PENDING_LOOKUPS

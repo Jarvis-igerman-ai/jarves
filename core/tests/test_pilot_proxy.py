@@ -325,5 +325,6 @@ def test_the_pin_filter_hands_the_driver_only_public_answers():
 
     s = PilotSession.__new__(PilotSession)
     s.driver, s.pins = D(), {"a.test": ["64:ff9b::a00:1"], "b.test": ["fec0::1"], "c.test": ["ff0e::1"], "d.test": ["2606:4700::1"]}
+    s._pin_lock = __import__("threading").RLock()
     s._apply_pins()
     assert got == {"d.test": ["2606:4700::1"]}
