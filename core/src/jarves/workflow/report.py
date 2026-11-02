@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from . import observability as obs
 
 TZ = ZoneInfo("Asia/Jerusalem")
-REPO = "igalgerman/jarves"
+REPO = "Jarvis-igerman-ai/jarves"
 DAILY_HOUR = 8
 GAP_LAYERS = ("supervisor", "autopilot", "core")
 _GH_CACHE: dict = {}
