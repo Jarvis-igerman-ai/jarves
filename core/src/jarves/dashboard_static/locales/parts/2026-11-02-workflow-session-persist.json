@@ -1,0 +1,12 @@
+{
+ "dict": {
+  "Last good data arrived under a minute ago.": "הנתונים הטובים האחרונים התקבלו לפני פחות מדקה.",
+  "The local service is not reachable right now, maybe it is restarting. Retrying automatically.": "השירות המקומי לא זמין כרגע, אולי הוא מופעל מחדש. מנסים שוב אוטומטית."
+ },
+ "rules": [
+  [
+   "^Last good data arrived (\\d+) min ago\\.$",
+   "הנתונים הטובים האחרונים התקבלו לפני $1 דק׳."
+  ]
+ ]
+}

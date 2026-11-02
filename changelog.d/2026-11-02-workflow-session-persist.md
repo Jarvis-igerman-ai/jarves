@@ -1,0 +1,1 @@
+- Fixed: the workflow dashboard no longer logs you out when the supervisor restarts its web server; the login is kept as a keyed digest in the private workflow folder (never the session id or access token), and a request that hangs now gives up after 8 seconds with a banner saying how old the shown data is (#789).

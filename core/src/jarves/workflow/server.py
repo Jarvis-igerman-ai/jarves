@@ -55,6 +55,42 @@ def access_token(home: Path) -> str:
         return token
 
 
+SESSION_TTL_S = 12 * 3600
+MAX_SESSIONS = 32
+
+
+def session_key(token: str, session: str) -> str:
+    """Keyed digest of a session id (#789). Only this digest is written to disk; rotating the
+    access token invalidates every stored session because the key changes."""
+    return hmac.new(token.encode("ascii"), session.encode("ascii", "replace"), "sha256").hexdigest()
+
+
+def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
+    """Unexpired stored session digests; a missing or damaged file means no stored sessions."""
+    now = time.time() if now is None else now
+    try:
+        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        rows = raw.get("sessions") if isinstance(raw, dict) else None
+        if not isinstance(rows, dict):
+            return {}
+        return {k: float(v) for k, v in rows.items()
+                if isinstance(k, str) and re.fullmatch(r"[0-9a-f]{64}", k) and isinstance(v, (int, float))
+                and now < float(v) <= now + SESSION_TTL_S}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_sessions(home: Path, digests: dict[str, float]) -> None:
+    """Atomic owner-only write of session digests (never the session id or the access token)."""
+    private_directory(Path(home))
+    path = Path(home) / "sessions.json"
+    tmp = path.with_name(f"sessions.{os.getpid()}.{threading.get_ident()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"version": 1, "sessions": digests}, f)
+    os.replace(tmp, path)
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     # Exclusive bind (#789): on Windows SO_REUSEADDR lets a second server share the port, so a stale
@@ -73,6 +109,9 @@ class Server(ThreadingHTTPServer):
         self.store = store or Store(self.home / "workflow.db")
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
+        # Sessions from before a restart (#789): digest -> end. A matching cookie moves back into
+        # `sessions`; the in-memory raw ids are never written anywhere.
+        self.restored: dict[str, float] = load_sessions(self.home)
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
@@ -87,6 +126,26 @@ class Server(ThreadingHTTPServer):
     @property
     def url(self) -> str:
         return f"{self.origin}/#token={self.token}"
+
+    def session_end(self, session: str, now: float) -> float:
+        """End time of a live session, restoring it from a stored digest. Caller holds session_lock."""
+        end = self.sessions.get(session, 0)
+        if not end and session and self.restored:
+            end = self.restored.pop(session_key(self.token, session), 0)
+            if end > now:
+                self.sessions[session] = end
+        return end if end > now else 0
+
+    def persist_sessions(self, now: float) -> None:
+        """Drop expired sessions and store digests of the rest. Caller holds session_lock."""
+        self.sessions = {s: end for s, end in self.sessions.items() if end > now}
+        self.restored = {k: end for k, end in self.restored.items() if end > now}
+        digests = dict(self.restored)
+        digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
+        try:
+            save_sessions(self.home, digests)
+        except OSError:
+            pass  # persistence is a convenience; the live session still works in memory
 
     def server_close(self) -> None:
         self.stopping.set()
@@ -118,7 +177,7 @@ class Handler(BaseHTTPRequestHandler):
             return ""
         value = cookie.get(self.server.cookie)
         with self.server.session_lock:
-            return value.value if value and self.server.sessions.get(value.value, 0) > time.time() else ""
+            return value.value if value and self.server.session_end(value.value, time.time()) else ""
 
     def _authenticated(self) -> bool:
         return bool(self._session())
@@ -391,12 +450,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"error": "invalid private link"})
                 return
             self.server.sessions = {s: end for s, end in self.server.sessions.items() if end > now}
-            if len(self.server.sessions) >= 32:
+            # Stored sessions not seen since the restart give way first (oldest first), so a full
+            # store never needs a manual reset; live sessions in this process still count.
+            keep = max(0, MAX_SESSIONS - 1 - len(self.server.sessions))
+            alive = sorted(((end, k) for k, end in self.server.restored.items() if end > now), reverse=True)[:keep]
+            self.server.restored = {k: end for end, k in alive}
+            if len(self.server.sessions) >= MAX_SESSIONS:
                 self._json(429, {"error": "too many active sessions; restart the local console"})
                 return
             session = secrets.token_hex(32)
-            self.server.sessions[session] = now + 12 * 3600
-        self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200"})
+            self.server.sessions[session] = now + SESSION_TTL_S
+            self.server.persist_sessions(now)
+        self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 
 
 def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None = None) -> None:
