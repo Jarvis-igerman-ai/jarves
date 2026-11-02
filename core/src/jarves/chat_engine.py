@@ -508,7 +508,7 @@ class WebChat:
     def _untrusted_turn(self) -> bool:
         reg = getattr(self.core, "registry", None)
         try:
-            return bool(reg is not None and reg._untrusted_at is not None)    # third-party text was read in this turn
+            return bool(reg is not None and reg.context_tainted())    # third-party text read in this or the last few turns (#479)
         except Exception:
             return True                                                      # unknown = the careful answer
 

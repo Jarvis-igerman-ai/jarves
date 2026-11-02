@@ -240,7 +240,7 @@ class ChatService:
             def ui_block(_s, block):         # #444: validated UI block for the owner
                 try:
                     reg = core.registry
-                    untrusted = reg._untrusted_at is not None
+                    untrusted = reg.context_tainted()       # #479: this turn or the last few
                 except Exception:
                     untrusted = True
                 svc.blocks.add(block, untrusted=untrusted)       # creating a block never runs anything

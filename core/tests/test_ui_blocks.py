@@ -133,3 +133,17 @@ def test_choices_ids_and_numbered():
     assert [o["id"] for o in b["options"]] == ["o1", "o2"]
     assert ub.numbered(b).splitlines()[:3] == ["Which?", "1) Tea", "2) Coffee"]
     assert ub.BlockStore().add(b) is None          # no next step: nothing to record or click
+
+
+def test_context_taint_outlives_the_untrusted_turn_then_decays():
+    """#479: third-party text read in an earlier turn still taints blocks the model builds in the next few turns."""
+    from jarves.skills import CONTEXT_TAINT_TURNS, SkillRegistry
+    reg = SkillRegistry()
+    reg._untrusted_at = reg.clock()
+    assert reg.context_tainted()
+    for _ in range(CONTEXT_TAINT_TURNS):
+        reg.new_turn()
+        reg._untrusted.clear()                       # the per-turn action guard is lifted by the owner turn
+        assert reg.context_tainted()
+    reg.new_turn()
+    assert not reg.context_tainted()

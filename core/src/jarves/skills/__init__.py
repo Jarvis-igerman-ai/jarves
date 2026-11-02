@@ -61,6 +61,7 @@ def expected_tool_refusal(code: str | None, origin: str | None = None) -> bool:
     return code in EXPECTED_TOOL_REFUSALS or (code == "TOOL_BAD_ARGS" and origin == "user")
 
 
+CONTEXT_TAINT_TURNS = 3   # #479: owner turns after third-party text was read in which model-built UI blocks stay tainted
 UNTRUSTED_GRACE_S = 3.0    # see SkillRegistry.new_turn
 ASK_HARD_CAP_S = 660.0     # Issue #17: no approval wait is endless (the approvals service itself stops at 600 s)
 REPEAT_REPLAY_S = 30.0     # V4-VC-3: an identical successful action repeated in a tainted turn gets its result back
@@ -308,6 +309,7 @@ class SkillRegistry:
         # monotonic time untrusted text entered the current turn, PER ROUTE (SW-V3 P0.1: one shared taint let a
         # mail read in the voice conversation refuse a scheduled job's action, and vice versa)
         self._untrusted: dict[str, float] = {}
+        self._ctx_taint: dict[str, int] = {}        # #479: route -> owner turns left in which third-party text may still be in context
         self.clock = time.monotonic
         # human approval time (registry.confirm) is not AI time: Brain timeouts add it back (bounded_ai)
         self.confirm_wait_s = 0.0
@@ -334,12 +336,23 @@ class SkillRegistry:
             self._untrusted.pop(ROUTE.get(), None)
         else:
             self._untrusted[ROUTE.get()] = value
+            self._ctx_taint[ROUTE.get()] = CONTEXT_TAINT_TURNS + 1
+
+    def context_tainted(self) -> bool:
+        """#479: third-party text was read in this turn or in one of the last CONTEXT_TAINT_TURNS turns on this route, so it
+        may still be in the model's context. Used only for UI-block provenance; the action guard keeps its per-turn rule."""
+        return self._untrusted_at is not None or self._ctx_taint.get(ROUTE.get(), 0) > 0
 
     def new_turn(self, route: str | None = None) -> None:
         """The user said something new on `route` (default: the caller's ROUTE): side effects are allowed again
         there. A taint younger than UNTRUSTED_GRACE_S is kept: a voice transcript can complete just after the tool
         of that same turn returned."""
         key = route or ROUTE.get()
+        left = self._ctx_taint.get(key, 0)
+        if left > 1:
+            self._ctx_taint[key] = left - 1
+        else:
+            self._ctx_taint.pop(key, None)
         self._read_cache = {k: v for k, v in self._read_cache.items() if k[0] != key}
         at = self._untrusted.get(key)
         if at is not None and self.clock() - at >= UNTRUSTED_GRACE_S:
