@@ -1,0 +1,1 @@
+- OpenRouter: empty/blank key rejected by jarvis models key; response cap enforced while streaming (#490)
