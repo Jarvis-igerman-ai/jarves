@@ -93,6 +93,18 @@ class UsageThrottleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             autopilot.validate({**autopilot.DEFAULTS, "usage_slow_pct": 96})
 
+    def test_hostile_usage_files_read_as_unknown(self):
+        from jarves.workflow import autopilot_usage as au
+        f = self.home / "usage.json"
+        now = time.time()
+        for body in ("[" * 100000, '{"pct": 99, "at": 1e999}', '{"pct": 99, "at": NaN}',
+                     json.dumps({"pct": 99, "at": now + 86400}), '{"pct": 99, "at": %f, "x": "%s"}' % (now, "a" * 70000)):
+            f.write_text(body)
+            self.assertIsNone(au.read_usage(self.home, now), body[:20])
+        f.write_text("[" * 100000)
+        v = autopilot.command(self.store, self.home, "status", [])["usage"]
+        self.assertEqual((v["pct"], v["mode"]), (None, "normal"))
+
     def test_status_shows_usage(self):
         self.usage(83)
         v = autopilot.command(self.store, self.home, "status", [])["usage"]

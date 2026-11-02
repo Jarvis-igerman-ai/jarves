@@ -9,10 +9,12 @@ no collector ships here; a missing, stale (over 6 h) or malformed file means "un
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 USAGE_NAME = "usage.json"
 STALE_S = 6 * 3600
+MAX_BYTES = 64 * 1024
 SLOW_PCT, STOP_PCT = 80, 95
 
 
@@ -23,14 +25,19 @@ def thresholds(policy: dict) -> tuple[float, float]:
 def read_usage(home: Path, now: float) -> dict | None:
     """The fresh usage record, or None when unknown."""
     try:
-        data = json.loads((Path(home) / USAGE_NAME).read_text(encoding="utf-8"))
+        path = Path(home) / USAGE_NAME
+        if path.stat().st_size > MAX_BYTES:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
         pct = data["pct"]
         if type(pct) not in (int, float) or not 0 <= pct <= 1000:
             return None
-        if now - float(data.get("at", 0)) > STALE_S:
+        at = float(data.get("at", 0))
+        age = now - at
+        if not math.isfinite(at) or not 0 <= age <= STALE_S:  # NaN/Infinity/future timestamp = unknown
             return None
         return {"pct": float(pct), "source": str(data.get("source", ""))[:80], "estimated": bool(data.get("estimated", True))}
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, OverflowError):
         return None
 
 
