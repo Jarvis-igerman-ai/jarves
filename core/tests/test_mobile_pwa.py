@@ -328,7 +328,7 @@ def test_network_help_gives_stable_name_and_private_firewall_command():
     h = mobile.network_help("192.168.1.9", 8443, "https", hostname="My-PC.lan_x")
     assert h["stable_url"] == "https://my-pc.local:8443/m/"
     assert h["firewall"]["profile"] == "private"
-    assert "profile=private" in h["firewall"]["command"] and "localport=8443" in h["firewall"]["command"]
+    assert "profile=private remoteip=localsubnet" in h["firewall"]["command"] and "localport=8443" in h["firewall"]["command"]
     none = mobile.network_help(None, 0, hostname="")
     assert none["stable_url"] is None and none["firewall"]["command"] is None
 

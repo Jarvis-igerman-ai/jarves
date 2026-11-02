@@ -90,9 +90,8 @@ fix_en = "The phone must be on the same Wi-Fi and the computer on with JARVES ru
 [[problems]]
 he = "כתובת המחשב השתנתה והטלפון לא מתחבר, או שחומת האש חוסמת"
 en = "The computer's address changed and the phone cannot connect, or the firewall blocks it"
-fix_he = "עמוד הטלפון מציג כתובת קבועה בצורת שם-המחשב.local: שמרו אותה במקום כתובת ה-IP, שיכולה להשתנות. אם הטלפון לא פותח שם .local, השתמשו בכתובת ה-IP. אם Windows חוסם, הרשו רשתות פרטיות בלבד; העמוד מציג גם פקודת netsh להרצה ידנית בחלון מנהל (JARVES לא מריץ אותה). הפקודה מוצגת רק כשהיכולת דולקת, וכיבוי המתג עוצר את הגישה מיד."
-fix_en = "The Phone page shows a stable computer-name.local address: bookmark it instead of the IP, which can change. If the phone cannot open a .local name, use the IP. If Windows blocks it, allow Private networks only; the page also shows a netsh command for you to run yourself in an admin window (JARVES never runs it). It shows only while the feature is ON, and switching it off stops access at once."
-
+fix_he = "הכתובת הקבועה (שם-המחשב.local) ופקודת חומת האש (netsh) מופיעות כרגע רק במידע הטלפון (תשובת GET /api/mobile), עדיין לא בעמוד הטלפון, ואין שינוי ב-jarvis phone status. שמרו את כתובת ה-.local במקום כתובת ה-IP שיכולה להשתנות; אם הטלפון לא פותח אותה, השתמשו ב-IP. אם Windows חוסם, הרשו רשתות פרטיות בלבד והריצו את הפקודה בעצמכם בחלון מנהל (JARVES לא מריץ אותה). הן מוצגות רק כשהיכולת דולקת."
+fix_en = "The stable computer-name.local address and a netsh firewall command are, for now, only in the phone info (the GET /api/mobile reply); the Phone page does not show them yet and jarvis phone status is unchanged. Bookmark the .local name instead of the IP, which can change; if the phone cannot open it, use the IP. If Windows blocks it, allow Private networks only and run the command yourself in an admin window (JARVES never runs it). They appear only while the feature is ON."
 [[problems]]
 he = "כפתור הדיבור לא פעיל"
 en = "The talk button is disabled"
