@@ -1,0 +1,1 @@
+- Fixed: real-browser tests no longer fail on a loaded Windows runner when the host runs out of socket buffers (ERR_NO_BUFFER_SPACE): one shared helper retries Page.goto for that error only, with a growing pause. Fixes #874
