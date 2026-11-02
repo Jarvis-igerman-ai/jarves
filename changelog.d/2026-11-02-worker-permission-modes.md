@@ -1,0 +1,1 @@
+- Docs: evaluation of headless worker permission modes (dontAsk, acceptEdits, auto) and `claude agents --json`, with a gradual rollout and rollback recommendation (#768).
