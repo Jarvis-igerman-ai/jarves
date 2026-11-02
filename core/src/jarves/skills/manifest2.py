@@ -12,7 +12,9 @@ Format: the same flat SKILL.md frontmatter as v1 (`generated.parse_skill_md`) pl
     permissions: [read, action, storage, network:api.example.com]
     dependencies: [notes, lists]     # Skill ids that must already exist
     surfaces: [voice, dashboard, cli, phone]
-    signed_by: owner                 # key label; signature = HMAC-SHA256 hex over id, version and content hash
+    setup: setup_skill               # optional: top-level def in skill.py the OWNER may run once (declared only)
+    diagnostic: check_skill          # optional: top-level def in skill.py for doctor-style checks (declared only)
+    signed_by: owner                # key label; signature = HMAC-SHA256 hex over id, version and content hash
     signature: <hex>
 Trust is local and never automatic: `unsigned` (default, needs the owner review as today), `owner_signed` (valid
 signature from the key of THIS PC owner; still needs approval to install), `tampered` (signature present but wrong:
@@ -54,6 +56,8 @@ class Manifest:
     permissions: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
     surfaces: list[str] = field(default_factory=lambda: ["voice"])
+    setup: str = ""
+    diagnostic: str = ""
     signed_by: str = ""
     signature: str = ""
     sha256: str = ""
@@ -133,6 +137,15 @@ def parse_manifest(md: str, py: str | None = None) -> Manifest:
         for s in m.surfaces:
             if s not in SURFACES:
                 m.errors.append(f"unknown surface {s!r} (allowed: {', '.join(SURFACES)})")
+    for hook in ("setup", "diagnostic"):
+        # hooks are DECLARED names only: this module never imports or calls them (pure parser)
+        name = str(meta.get(hook, "")).strip()
+        if name:
+            if not re.fullmatch(r"[a-z_][a-z0-9_]{0,63}", name):
+                m.errors.append(f"{hook} must be a plain function name")
+            elif py is not None and not re.search(rf"^(?:async\s+)?def\s+{name}\s*\(", py, re.M):
+                m.errors.append(f"{hook} hook {name!r} is not defined in skill.py")
+            setattr(m, hook, name)
     m.signed_by = str(meta.get("signed_by", "")).strip()
     m.signature = str(meta.get("signature", "")).strip().lower()
     if m.signature and not re.fullmatch(r"[0-9a-f]{64}", m.signature):
