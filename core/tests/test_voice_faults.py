@@ -165,7 +165,12 @@ def make_live(rec, client, audio=None, budget=None, **kw):
 
 
 async def settle(lv, timeout=2.0):
-    await asyncio.wait_for(lv.wait_ended(), timeout)
+    """Wait for the session to finalize. timeout=None: event-driven only (no wall-clock deadline); finalization is
+    already bounded by the product (close_timeout_s, 3 s task wait), so a stalled CI loop cannot make it flaky."""
+    if timeout is None:
+        await lv.wait_ended()
+    else:
+        await asyncio.wait_for(lv.wait_ended(), timeout)
 
 
 def assert_finalized(lv, rec, reason, audio=None):
@@ -511,7 +516,7 @@ async def test_delegated_tool_call_budget_exhausted_ends_session(tmp_path):
     conn.push({"type": "response.event", "delegation_id": "d2", "event": {
         "type": "response.output_item.done",
         "item": {"type": "function_call", "name": "get_time", "call_id": "c9", "arguments": "{}"}}})
-    await settle(lv)
+    await settle(lv, None)                  # #788: no 2 s wall deadline (windows CI stalled the loop for 12 s)
     assert rec.ends == ["budget"] and len(rec.usage) == 1
     outputs = [i for k, i in conn.sent if k == "response.item.create"]
     assert outputs and outputs[0]["call_id"] == "c9"

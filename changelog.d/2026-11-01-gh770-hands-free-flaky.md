@@ -1,0 +1,1 @@
+- Fixed: flaky hands-free e2e test (hidden page and refused wake lock) no longer races the listening / hearing-you state (#770). Test-only change.
