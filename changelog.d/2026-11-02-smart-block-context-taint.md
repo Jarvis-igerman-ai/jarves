@@ -1,0 +1,1 @@
+- Fixed: smart chat blocks (#479) built within 3 owner turns after the model read third-party text (mail, WhatsApp, web) are now untrusted, so their titles are withheld from the model, not only in the same turn.
