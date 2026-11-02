@@ -334,6 +334,31 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual((counts["archived"], counts["total"]), (1, 2))
         self.assertEqual(len(snap["agents"]), 2)   # the ledger snapshot itself keeps every record
 
+    def test_concurrent_writers_never_hit_database_is_locked(self):
+        """#767: two threads, each with its own connection and the hook's 1.2 s timeout, write a short burst."""
+        import sqlite3
+        import threading
+        errors: list[BaseException] = []
+
+        def burst(name):
+            try:
+                handle = Store(self.path, timeout_s=1.2)
+                for i in range(40):
+                    handle.record_event("burst", f"{name}-{i}")
+                handle.close()
+            except sqlite3.OperationalError as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=burst, args=(n,)) for n in ("a", "b")]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        self.assertEqual(errors, [])
+        with self.store._tx() as db:
+            count = db.execute("SELECT COUNT(*) FROM workflow_events WHERE kind='burst'").fetchone()[0]
+        self.assertEqual(count, 80)
+
 
 if __name__ == "__main__":
     unittest.main()

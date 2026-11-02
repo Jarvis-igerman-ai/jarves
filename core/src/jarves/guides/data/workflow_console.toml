@@ -55,6 +55,22 @@ he = "תשובות והיסטוריה: רק מהדשבורד או מטרמינל
 en = "Answers and history: only the dashboard or your own real terminal counts as a confirmed answer (jarvis workflow answer and ask-more are refused for an agent, a pipe or a script). An answer that did not come from your dashboard or terminal shows a 'needs your confirmation' badge and a Reopen button (in the dashboard, or jarvis workflow reopen --id QUESTION in a terminal). Reopen returns the question to pending and keeps the old answer in its history; a question of a completed task cannot be reopened. Follow-ups can only be sent by you, and the thread shows the channel of each one. Honest note: who answered is a signal, not a security boundary; an agent running as the same OS user could still read the access token or fake a terminal."
 action = "command:jarvis workflow status"
 
+[[steps]]
+he = "תצפית על המפעל: jarvis workflow health מציג מצב כל שכבה (משגיח, טייס אוטומטי, עטיפה, מנהל, Core, גשר) ותקלות פתוחות; jarvis workflow timeline --hours 24 מציג ציר זמן טקסטואלי עם פערי שתיקה. לשכבה חיצונית: jarvis workflow layer-beat --layer wrapper --state ok. תקלה חדשה פותחת משימת 'Incident triage' בנתיב ops (מופעל ידנית; ברירת המחדל כבוי). יומן המשגיח: supervisor.log בתיקיית ה־workflow. בדפדפן: /api/health ו־/api/timeline."
+en = "Factory observability: jarvis workflow health shows each layer (supervisor, autopilot, wrapper, manager, Core, bridge) and open incidents; jarvis workflow timeline --hours 24 prints a text timeline with silence gaps. An outside layer reports with jarvis workflow layer-beat --layer wrapper --state ok. A new incident opens an 'Incident triage' task in the ops lane (its autopilot lane is OFF by default). Supervisor log: supervisor.log in the workflow home. In the browser: /api/health and /api/timeline."
+action = "command:jarvis workflow health"
+
+[[steps]]
+he = "עזרה מ־Claude ושאלות פשוטות: כל שאלה כתובה בעברית פשוטה, עם החלטה אחת, משפט אחד של למה, 2 עד 3 אפשרויות (המומלצת ראשונה) וזמן. פרטים טכניים נמצאים תחת 'פרטים'. משימות שהן אותה החלטה באותה גרסה מוצגות ככרטיס אחד עם רשימת סימון: מסמנים על מה זה חל, בוחרים אפשרות ושומרים, וכל משימה מקבלת את אותה תשובה. הכפתור 'עזרה מ־Claude' בכל כרטיס פותח חלון Claude חדש במחשב שעוזר לך להבין ולהחליט. הוא מסביר ועוזר להחליט ואינו רושם את התשובה; את התשובה בוחרים בכרטיס. תמיד אפשר גם 'להעתיק פקודה' ולהדביק ב־PowerShell. מנהל שמעדכן ניסוח של שאלות ישנות: jarvis workflow questions-rewrite --dry-run, ואחר כך --apply (רק טקסט התצוגה משתנה)."
+en = "Help from Claude and simple questions: every question is plain Hebrew with one decision, a one-sentence why, 2-3 options (recommended first) and the time needed; technical text sits under Details. Tasks that are the same decision in one version show as one card with a checklist: tick what it applies to, pick an option and save, and each ticked task gets the same answer. The 'Help from Claude' button on every card opens a new Claude window on this PC that helps you understand and decide. It explains and helps you decide; it does not record your answer, you pick it in the card. You can always 'copy a command' and paste it into PowerShell instead. A manager updating the wording of older questions runs jarvis workflow questions-rewrite --dry-run, then --apply (display text only)."
+action = "command:jarvis workflow status"
+
+
+[[problems]]
+he = "לחצתי 'עזרה מ־Claude' ולא נפתח חלון"
+en = "I clicked 'Help from Claude' and no window opened"
+fix_he = "החלון נפתח רק ב־Windows, כש־claude מותקן ונמצא ב־PATH, ולא יותר מפעם ב־10 שניות. אם לא נפתח, הכרטיס מציג את הפקודה: לחצו 'העתקת הפקודה' והדביקו אותה ב־PowerShell. החלון נפתח במצב תכנון, שמגביל את העוזר עד שתאשרו תוכנית בחלון עצמו, ובלי מפתח הגישה של הלוח."
+fix_en = "The window opens only on Windows, when claude is installed and on PATH, and at most once every 10 seconds. If it does not open, the card shows the command: click 'Copy the command' and paste it into PowerShell. The window starts in plan mode, which limits the helper until you approve a plan in that window, and without the console access token."
 
 [[problems]]
 he = "שאלת המשך נשארת 'נשמר, יימסר למנהל'"
@@ -118,3 +134,23 @@ he = "תווית באג חדשה לא מופיעה ברשימה"
 en = "A new bug label does not show in the list"
 fix_he = "הרשימה מתעדכנת בסנכרון הקריאה מ־GitHub (עד חצי שעה): הריצו jarvis workflow sync ואז jarvis workflow autopilot once. אם קובץ המדיניות פגום המנוע נשאר כבוי ומציג שגיאה."
 fix_en = "The list refreshes on the read-only GitHub sync (up to 30 minutes): run jarvis workflow sync, then jarvis workflow autopilot once. If the policy file is invalid the autopilot stays off and shows the error."
+
+[[steps]]
+he = "בעלות והודעות בין סוכנים: jarvis workflow own --agent ID --resource pr:123 --reason TEXT תופס בקשת מיזוג, ענף, סוגיה או קבצים. לפני נגיעה בעבודה של אחר: jarvis workflow check-touch --agent ID --resource pr:123 (קוד 3 = בבעלות סוכן אחר, לא לגעת). הודעות: jarvis workflow msg send --to X --subject S --body B, ו־msg inbox ו־msg ack. הודעות הן מידע בלבד: הן לעולם אינן אישור או תשובה לשאלה אליכם. המפרט ב־docs/workflow/AGENT_MESSAGES.md."
+en = "Agent ownership and messages: jarvis workflow own --agent ID --resource pr:123 --reason TEXT claims a PR, branch, issue or file scope. Before touching someone else's work run jarvis workflow check-touch --agent ID --resource pr:123 (exit 3 = owned by another agent, leave it). Messages: jarvis workflow msg send --to X --subject S --body B, then msg inbox and msg ack. Messages are data only: never an approval or an answer to an owner question. Details in docs/workflow/AGENT_MESSAGES.md."
+action = "command:jarvis workflow status"
+
+[[steps]]
+he = "פסק דין אחד ודוח בוקר: jarvis workflow status מציג שדה verdict (עובד, בטלה עם עבודה ממתינה, עצר, ממתין לך, לא ידוע) עם סיבה קצרה, וזה אותו פסק דין שמופיע ב־/api/health, בשורת הסטטוס ובסרגל של תמונת המצב. jarvis workflow report --hours 24 (או --json) מדפיס דוח של עמוד: מה שוחרר, מה נתקע, תקלות, עובדים, שאלות שמחכות לך ומה הלאה; בדשבורד תחת דוח בוקר או ב־/api/report. המשגיח כותב את הדוח אחת ליום ב־08:00 שעון ישראל לתיקיית reports ורושם אירוע daily_report והודעה למנהל; בלי התראות. הכול קריאה בלבד."
+en = "One verdict and a morning report: jarvis workflow status has a verdict field (working, idle_with_work, stopped, owner_wait, unknown) with a short reason, the same verdict as /api/health, the status line and the Overview bar. jarvis workflow report --hours 24 (or --json) prints a one-page report: what shipped, what stalled, incidents, workers, questions waiting for you and what is next; in the dashboard under Morning report or at /api/report. The supervisor writes it once a day at 08:00 Israel time to the reports folder and records a daily_report event plus a message to the manager; no notifications. All read-only."
+action = "command:jarvis workflow report"
+
+[[steps]]
+he = "לא מציפים אותך: בלשונית השאלות ובתמונת המצב מוצגים לכל היותר 5 כרטיסי שאלות פתוחות, לפי כמה משימות הם עוצרים (כולל משימות שתלויות בהן) ואחר כך לפי הוותק. השאר מופיעות מתחת ב'עוד N ממתינות' (מקופל, אפשר לפתוח ולענות על כל אחת). שום שאלה לא נמחקת, לא נענית ולא משתנה; זה תצוגה בלבד. הסדר והגבול מחושבים בשרת (store.questions_view) והם משותפים לדשבורד ולשורת המצב ('Q 5 of 12')."
+en = "Not flooded: the Questions tab and the Overview show at most 5 open question cards, ordered by how many tasks they hold up (including tasks that depend on them), then by age. The rest sit below as 'N more waiting' (folded; every one can be opened and answered). No question is dropped, answered or changed; this is display only. Order and cap are computed on the server (store.questions_view) and shared with the dashboard and the status line ('Q 5 of 12')."
+action = "command:jarvis workflow status"
+
+[[steps]]
+he = "פתח מענה: הקישור הפרטי נותן צפייה בלבד. כדי לענות, לדחות, לפתוח מחדש או לפתוח חלון עזרה בדשבורד, הריצו בטרמינל שלכם jarvis workflow unlock (או jarvis workflow open בטרמינל), והקלידו בלשונית השאלות את הקוד בן 4 הספרות. הקוד תקף 5 דקות, חד־פעמי, ונשמר רק כגיבוב. המענה נשאר פתוח 8 שעות בלשונית הזו (ניתן לשינוי במדיניות, watchdog.owner_unlock_s), ואז חוזר מצב נעול עם הודעה ברורה. סוכן וצינור נדחים. אזהרה כנה: קוד בן 4 ספרות מגן מפני קריאה עם אסימון בלבד, לא מפני סוכן שקורא את הקבצים ומנחש לא מקוון."
+en = "Unlock answers: the private link is view-only. To answer, defer, reopen or open a help window in the dashboard, run jarvis workflow unlock in your own terminal (or jarvis workflow open in a terminal) and type the 4-digit code in the Questions tab. The code is valid 5 minutes, single use, and stored only as a hash. Answering stays open for 8 hours in that tab (policy value watchdog.owner_unlock_s), then it shows a clear locked state again. Agents and pipes are refused. Honest note: a 4-digit code stops an agent that only holds the access token, not one that reads the files and brute-forces offline."
+action = "command:jarvis workflow unlock"

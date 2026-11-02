@@ -52,11 +52,12 @@ class OwnerQuestions(unittest.TestCase):
         gates = [q for q in snap["questions"] if q["id"].startswith("gate-")]
         self.assertEqual(len(gates), 20)
         self.assertTrue(all(q["blocks"] is False and q["status"] == "pending" for q in gates))
-        self.assertEqual(gates[0]["details"], "צריך מכשיר אמיתי")
-        self.assertTrue(gates[0]["title"].startswith("Your step is needed for: "))
-        self.assertEqual(gates[0]["choices"][0]["label"], "Schedule it for later today")
+        self.assertIn("צריך מכשיר אמיתי", gates[0]["details"])
+        self.assertTrue(gates[0]["title"].startswith("צריך אותך: "))
+        self.assertEqual(gates[0]["choices"][0]["label"], "לתזמן להיום")
         self.assertTrue(gates[0]["choices"][0]["recommended"])
-        self.assertIn("nothing is done or approved without you", gates[0]["safe_default"])
+        self.assertEqual(gates[0]["safe_default"], "שום דבר לא נעשה ולא מאושר בלעדיך")
+        self.assertEqual({q["group"] for q in gates}, {"gate:V4.5.1", "gate:V5"})  # one card per version
         self.assertTrue(all(t["state"] == "queued" for t in snap["tasks"]))
 
     def test_answered_gate_is_not_recreated(self):

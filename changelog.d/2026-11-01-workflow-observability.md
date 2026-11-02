@@ -1,0 +1,1 @@
+- Added: factory observability backend (workflow layer beats, /api/health and /api/timeline, timeline/health/layer-beat CLI, supervisor.log, autopilot idle reasons, deduplicated incident triage tasks in the ops lane).

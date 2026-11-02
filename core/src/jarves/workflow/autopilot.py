@@ -22,11 +22,13 @@ DEFAULTS = {
     "lanes": {"bugs": {"workers": 1, "model": "claude-sonnet-5-5"},
               "features": {"workers": 1, "model": "claude-sonnet-5-5"},
               "steward": {"on": True, "model": "claude-haiku-5-5"},
-              "review": {"model": "claude-opus-5-5"}},
+              "review": {"model": "claude-opus-5-5"},
+              "ops": {"workers": 0, "model": "claude-sonnet-5-5"}},  # incident triage; OFF (0 workers) by default
     "max_concurrent": 3, "max_starts_per_hour": 6,
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
     "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
-                 "agent_retention_s": 86400},  # console hides agents offline longer than this (#730)
+                 "agent_retention_s": 86400,  # console hides agents offline longer than this (#730)
+                 "owner_unlock_s": 28800},  # dashboard answer-unlock lifetime: 8 h (#750)
 }
 
 
@@ -40,7 +42,7 @@ def _strings(value, name, limit=20):
         raise ValueError(f"{name} must be a short list of short strings")
 
 
-OPTIONAL_KEYS = ("worker_allowed_tools",)       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
+OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "weekly_token_budget")       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
@@ -73,7 +75,7 @@ def validate(policy: dict) -> dict:
     _int(policy["max_starts_per_hour"], "max_starts_per_hour", 0, 60)
     lanes = policy["lanes"]
     if not isinstance(lanes, dict) or set(lanes) != set(DEFAULTS["lanes"]):
-        raise ValueError("lanes must be bugs, features, steward, review")
+        raise ValueError("lanes must be bugs, features, steward, review, ops")
     for name, lane in lanes.items():
         if not isinstance(lane, dict) or set(lane) != set(DEFAULTS["lanes"][name]):
             raise ValueError(f"lane {name} has invalid keys")
@@ -83,6 +85,13 @@ def validate(policy: dict) -> dict:
             _int(lane["workers"], f"lane {name} workers", 0, 5)
         if "on" in lane and type(lane["on"]) is not bool:
             raise ValueError(f"lane {name}: on must be true or false")
+    for key in ("usage_slow_pct", "usage_stop_pct"):
+        if key in policy:
+            _int(policy[key], key, 1, 100)
+    if policy.get("usage_slow_pct", 80) > policy.get("usage_stop_pct", 95):
+        raise ValueError("usage_slow_pct must not be above usage_stop_pct")
+    if "weekly_token_budget" in policy:
+        _int(policy["weekly_token_budget"], "weekly_token_budget", 1, 10**12)
     if "worker_allowed_tools" in policy:
         _worker_tools(policy["worker_allowed_tools"])
     watchdog = policy["watchdog"]
@@ -108,9 +117,17 @@ def load(home: Path) -> tuple[dict, str]:
         if isinstance(policy, dict) and isinstance(policy.get("watchdog"), dict):
             # Policy files written before #730 lack the retention key; the default keeps them valid.
             policy["watchdog"].setdefault("agent_retention_s", DEFAULTS["watchdog"]["agent_retention_s"])
+            policy["watchdog"].setdefault("owner_unlock_s", DEFAULTS["watchdog"]["owner_unlock_s"])
+        if isinstance(policy, dict) and isinstance(policy.get("lanes"), dict):
+            policy["lanes"].setdefault("ops", copy.deepcopy(DEFAULTS["lanes"]["ops"]))  # older files predate the ops lane
         return validate(policy), ""
     except (OSError, ValueError) as exc:
         return {**copy.deepcopy(DEFAULTS), "enabled": False}, f"policy file invalid, autopilot stays off: {exc}"
+
+
+def owner_unlock_s(home: Path) -> int:
+    """How long a dashboard session stays unlocked for owner answers after the terminal code (#750)."""
+    return load(home)[0]["watchdog"]["owner_unlock_s"]
 
 
 def agent_retention_s(home: Path) -> int:
@@ -264,4 +281,9 @@ def command(store, home: Path, op: str, args: list[str]) -> dict:
         return {"policy": policy}
     if op == "once":
         return step(store, home)
-    raise ValueError("usage: autopilot status|set|stop|start|once")
+    if op == "usage-resume":
+        from . import usage
+        usage.set_override(store, True)
+        store.record_event("autopilot_policy", "Owner cleared the usage stop: one task at a time until usage is below the slow line")
+        return {"usage_override": True}
+    raise ValueError("usage: autopilot status|set|stop|start|once|usage-resume")

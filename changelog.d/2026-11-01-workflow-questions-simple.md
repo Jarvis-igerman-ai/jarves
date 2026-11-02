@@ -1,0 +1,1 @@
+- Added: A 'Help from Claude' button on every workflow question card opens a Claude window that helps you decide (it never answers), with a copy-command fallback; questions are short plain Hebrew with one decision each, and the 45 owner-gate cards show as one checklist card per version.

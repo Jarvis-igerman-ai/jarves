@@ -21,8 +21,9 @@ def default_profile() -> Path:
 
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
-    ap.add_argument("action", choices=["serve", "supervise", "open", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot"])
+    ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "questions-rewrite",
+                                        "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -30,10 +31,12 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--no-sync", action="store_true", help="supervisor: no periodic public GitHub metadata reads")
     ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser")
     ap.add_argument("--repo-root", type=Path, default=Path.cwd(), help="bootstrap: current JARVES checkout")
-    ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups")
+    ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups; "
+                    "questions-rewrite: store the plain wording")
+    ap.add_argument("--dry-run", action="store_true", help="questions-rewrite: show the before/after table only (default)")
     for name in ("id", "agent", "session-id", "provider", "project", "title", "context", "checkpoint", "answer", "state",
                  "implementation", "validation", "delivery", "criterion", "evidence", "note", "task", "version", "code-revision", "artifact-ref",
-                 "why", "recommendation", "safe-default", "link", "skip-effect", "details"):
+                 "why", "recommendation", "safe-default", "link", "skip-effect", "details", "reason", "to", "subject", "body"):
         ap.add_argument("--" + name, default="")
     ap.add_argument("--lane", choices=["bugs", "features", "release", "ops", "any"], default="any")
     ap.add_argument("--priority", type=int, default=2)
@@ -53,6 +56,12 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--since", type=float, default=0, help="trace/retro: first UNIX timestamp")
     ap.add_argument("--until", type=float, help="trace/retro: last UNIX timestamp")
     ap.add_argument("--before", type=int, default=0, help="trace: next page cursor")
+    ap.add_argument("--layer", default="", help="layer-beat: supervisor|autopilot|wrapper|manager|core|bridge")
+    ap.add_argument("--hours", type=float, default=24, help="timeline: how many hours back")
+    ap.add_argument("--json", action="store_true", help="timeline: print JSON instead of text")
+    ap.add_argument("--unread", action="store_true", help="msg inbox: only unread messages")
+    ap.add_argument("--force", action="store_true", help="release: take over a STALE claim of a non-running owner")
+    ap.add_argument("--notify", action="store_true", help="check-touch: also message the owner when it is blocked")
     return ap
 
 
@@ -81,6 +90,39 @@ def owner_only_guard(action: str) -> str:
     return "terminal"
 
 
+def agent_messages(store, a) -> int:
+    """Ownership claims and agent messages. Exit 3 = the resource is owned by another agent (see AGENT_MESSAGES.md)."""
+    from .messages import ClaimConflict
+    agent = a.agent or os.environ.get("JARVES_WORKFLOW_AGENT", "")
+    resource = a.resource[0] if a.resource else ""
+    try:
+        if a.action == "own":
+            result = store.own(agent, resource, a.reason)
+        elif a.action == "release":
+            result = store.disown(agent, resource, force=a.force)
+        elif a.action == "owners":
+            result = store.owners(resource or None)
+        elif a.action == "check-touch":
+            result = store.check_touch(agent, resource, notify=a.notify)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["allowed"] else 3
+        else:
+            sub = (a.rest or [""])[0]
+            if sub == "send":
+                result = store.send_message(agent, a.to, a.subject, a.body, resource)
+            elif sub == "inbox":
+                result = store.inbox(agent, unread=a.unread)
+            elif sub == "ack":
+                result = store.ack_message(a.id, agent)
+            else:
+                raise ValueError("msg needs one of: send, inbox, ack")
+    except ClaimConflict as exc:
+        print(json.dumps({"error": str(exc), "owner": exc.owner}, ensure_ascii=False), file=sys.stderr)
+        return 3
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
@@ -107,7 +149,19 @@ def main(argv=None) -> int:
         return 0
     if a.action == "supervise":
         from .control import supervisor
+        from .observability import capture_stderr
+        capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
+        return 0
+    if a.action == "unlock":
+        # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
+        from . import unlock
+        try:
+            owner_only_guard("unlock")
+        except PermissionError as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            return 3
+        print(f"Unlock code (type it in the dashboard, Questions tab; the code is valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}")
         return 0
     if a.action == "open":
         # Kept out of event logs and process arguments. Never use this link as a public share URL.
@@ -116,12 +170,35 @@ def main(argv=None) -> int:
         if not a.no_open:
             import webbrowser
             webbrowser.open(link)
+        try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
+            owner_only_guard("open")
+            from . import unlock
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+        except PermissionError:
+            pass
         return 0
     store = Store(home / "workflow.db")
     try:
+        if a.action == "questions-rewrite":
+            # Display text only; ids, status, answers and timestamps stay. Never answers or defers anything.
+            from .questions_text import rewrite_pending_questions, rewrite_table
+            if a.apply and a.dry_run:
+                raise ValueError("choose --dry-run or --apply")
+            print(rewrite_table(rewrite_pending_questions(store, apply=a.apply), a.apply))
+            return 0
         if a.action == "status":
             from .autopilot import agent_retention_s
             result = store.snapshot(retention_s=agent_retention_s(home))
+            from .observability import verdict
+            result["verdict"] = verdict(store)
+        elif a.action == "report" and not a.agent:
+            from .report import build
+            rep = build(store, a.hours)
+            if a.json:
+                result = rep
+            else:
+                print(rep["he"])
+                return 0
         elif a.action in {"trace", "retro"}:
             from .trace import history, retro_bundle, settings
             filters = {"agent_id": a.agent, "task_id": a.task, "since": a.since, "until": a.until}
@@ -131,6 +208,21 @@ def main(argv=None) -> int:
                 result = settings(store, a.capture)
             else:
                 result = history(store, before=a.before, **filters)
+        elif a.action == "layer-beat":
+            result = store.beat(a.layer, a.state or "ok", a.note)
+        elif a.action == "health":
+            from .observability import health
+            result = health(store)
+        elif a.action == "timeline":
+            from . import observability as obs
+            tl = obs.timeline(store, since=store.clock() - a.hours * 3600)
+            if a.json:
+                result = tl
+            else:
+                print(obs.timeline_text(tl, obs.layers(store)))
+                return 0
+        elif a.action in {"own", "release", "owners", "msg", "check-touch"}:
+            return agent_messages(store, a)
         elif a.action == "autopilot":
             from .autopilot import command
             result = command(store, home, (a.rest or ["status"])[0], a.rest[1:])
