@@ -1,0 +1,1 @@
+- Fixed: WhatsApp reading and archive switches and the preferences prompt switch show the friendly beta-feature message instead of a raw error when beta features are off (#469)

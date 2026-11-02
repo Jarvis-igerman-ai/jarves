@@ -257,3 +257,35 @@ def test_update_channel_is_separate(home):
     assert feat.stage_of("beta_channel") == "stable"
     f.set("beta_channel", True)                   # the build channel switches without the beta-features opt-in
     assert f.enabled("beta_channel") and not f.beta_on()
+
+
+# ------------------------------------------------------------------ #469: friendly refusal, and assertions that fail on a bypass
+def test_locked_beta_switch_stays_off_and_raises_the_gate_error(home):
+    from jarves.features import switch
+    fid = beta_ids()[0]
+    f = make(home)
+    with pytest.raises(BetaLocked):
+        switch(f, fid, True, by="test")
+    assert not f.enabled(fid)                      # a bypass would leave it ON
+
+
+def test_whatsapp_toggle_maps_the_lock_to_one_friendly_error(home):
+    from jarves import whatsapp_admin as wad
+    from jarves import whatsapp_bridge as wab
+    f = make(home)
+    with pytest.raises(wab.BridgeError) as ei:
+        wad._beta_switch(f, "whatsapp_archive", True, by="test")
+    assert ei.value.code == "BETA_LOCKED" and ei.value.status == 403
+    assert ei.value.message == BETA_MSG and "בטא" in ei.value.he
+    assert not f.enabled("whatsapp_archive")
+    f.set_beta(True)
+    assert wad._beta_switch(f, "whatsapp_archive", True, by="test")["enabled"] is True
+
+
+def test_prefs_prompt_cli_is_friendly_when_locked(home, capsys):
+    from jarves import cli
+    assert feat.stage_of("prefs_in_prompt") == "beta"
+    rc = cli.main(["prefs", "prompt", "on"])
+    err = capsys.readouterr().err
+    assert rc == 1 and BETA_MSG in err and "Traceback" not in err
+    assert not make(home).enabled("prefs_in_prompt")

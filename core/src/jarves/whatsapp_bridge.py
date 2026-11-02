@@ -86,6 +86,7 @@ HE = {   # Hebrew answers for bridge codes (fixed strings)
     "WA_STORE_LOCKED": "המידע של הגשר לא נפתח במשתמש או במחשב הזה. מחברים מחדש: jarvis whatsapp unlink ואז link.",
     "WA_UNKNOWN_CONTACT": "חיפשתי בשמות הצ'אטים ולא מצאתי צ'אט כזה. אפשר להגיד חלק אחר מהשם, או שאחפש בטקסט של ההודעות.",
     "WA_AMBIGUOUS": "יש כמה אנשים בשם הזה. למי התכוונת?",
+    "BETA_LOCKED": "יכולת בטא: קודם מפעילים את יכולות הבטא.",
     "WA_BAD_REQUEST": "הבקשה לגשר לא תקינה.",
     "WA_BAD_PATTERN": "תבנית החיפוש לא תקינה. אפשר לחפש חלק מהשם, או להשתמש ב-* ? \"..\" א|ב ^ $.",
     "WA_ARCHIVE_OFF": "שמירה ארוכה מ-90 ימים דורשת את הארכיון המוצפן. מפעילים במחשב: jarvis whatsapp archive on.",
