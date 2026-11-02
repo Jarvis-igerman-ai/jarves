@@ -718,6 +718,7 @@ def test_timing_job_resolves_the_upstream_run_and_tolerates_missing_junit():
     assert "ci_reuse.py junit-source" in wf and "steps.src.outputs.run_id" in wf
     assert "no measured junit" in wf
 
+
 def test_docs_read_by_a_core_test_are_not_docs_only(tmp_path):
     """V451-MERGE-PROOF: the docs-free tree proof is sound only if no test reads the changed doc. A doc named in a
     test the quick stage does not run needs the Linux shards (merge gate); prepush-covered and unreferenced docs stay free."""
