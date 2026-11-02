@@ -231,3 +231,22 @@ def test_feature_is_beta_off_and_cli(tmp_path, capsys):
     assert any(r["id"] == "openrouter/free" and "not private" in r["privacy"] for r in rows)
     assert orx.cmd_models(NS(action="status", json=True), None, tmp_path) == 0
     assert json.loads(capsys.readouterr().out)["remote_is_private"] is False
+
+
+def test_oversized_answer_is_refused_by_streaming_cap(fake, monkeypatch):
+    monkeypatch.setattr(orx, "MAX_BODY", 200)
+    fake.body = {"model": FREE, "choices": [{"message": {"role": "assistant", "content": "x" * 5000}}], "usage": {}}
+    with pytest.raises(orx.OpenRouterError) as e:
+        client(fake).chat(MSG, orx.FREE_ROUTER)
+    assert e.value.code == "OPENROUTER_PROVIDER_ERROR" and "too large" in str(e.value)
+
+
+def test_cli_key_rejects_empty_or_blank_key(tmp_path, monkeypatch, capsys):
+    import getpass
+    from jarves.config import secrets_file
+    for blank in ("", "   "):
+        monkeypatch.setattr(getpass, "getpass", lambda prompt="", b=blank: b)
+        assert orx.cmd_models(NS(action="key", json=False), None, tmp_path) == 1
+        assert "no valid key" in capsys.readouterr().out
+    f = secrets_file(tmp_path)
+    assert not f.exists() or orx.KEY_ENV not in f.read_text(encoding="utf-8-sig")

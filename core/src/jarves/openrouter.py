@@ -178,17 +178,22 @@ class OpenRouterClient:
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json", "X-Title": "JARVES"}
         try:
             with httpx.Client(timeout=TIMEOUT, transport=self.transport, follow_redirects=False) as c:
-                r = c.post(self.base + "/chat/completions", headers=headers, content=json.dumps(body))
+                with c.stream("POST", self.base + "/chat/completions", headers=headers, content=json.dumps(body)) as r:
+                    status, rheaders, chunks, size = r.status_code, r.headers, [], 0
+                    if status < 300 or status >= 400:
+                        for part in r.iter_bytes():        # hard cap while reading, not after the full read
+                            size += len(part)
+                            if size > MAX_BODY:
+                                raise OpenRouterError("OPENROUTER_PROVIDER_ERROR", "answer too large")
+                            chunks.append(part)
         except httpx.HTTPError as e:
             raise OpenRouterError("OPENROUTER_OFFLINE", f"cannot reach OpenRouter ({type(e).__name__})") from None
-        if 300 <= r.status_code < 400:
+        if 300 <= status < 400:
             raise OpenRouterError("OPENROUTER_REDIRECT", "OpenRouter tried to redirect; not followed")
-        if r.status_code >= 400:
-            raise _map(r.status_code, r.headers)
-        if len(r.content) > MAX_BODY:
-            raise OpenRouterError("OPENROUTER_PROVIDER_ERROR", "answer too large")
+        if status >= 400:
+            raise _map(status, rheaders)
         try:
-            res = parse_response(r.json(), m.id)
+            res = parse_response(json.loads(b"".join(chunks)), m.id)
         except ValueError:
             raise OpenRouterError("OPENROUTER_PROVIDER_ERROR", "OpenRouter sent an unreadable answer") from None
         est = m.cost_usd(res.tokens_in, res.tokens_out)       # never trust a lower reported cost for a priced model
@@ -235,7 +240,10 @@ def cmd_models(a, cfg, home) -> int:
     if a.action == "key":
         import getpass
         try:
-            save_secret(KEY_ENV, getpass.getpass("OpenRouter API key (hidden): "), home)
+            entered = getpass.getpass("OpenRouter API key (hidden): ").strip()
+            if not entered:
+                raise ValueError("empty key")
+            save_secret(KEY_ENV, entered, home)
         except (ValueError, EOFError, KeyboardInterrupt):
             print("OPENROUTER_BAD_REQUEST: no valid key entered")
             return 1
