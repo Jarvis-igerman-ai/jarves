@@ -33,6 +33,8 @@ Current dashboard review: [23 Oct findings inventory and recheck gates](archive/
 
 Findings ledger (P3 and nits, moved out of GitHub issues 27 Oct): [findings ledger](reviews/FINDINGS_LEDGER.md).
 
+Flakes ledger (quarantined tests, issues and fix PRs, 2 Nov): [flakes ledger](reviews/FLAKES_LEDGER_2026-11-02.md).
+
 Phone acceptance result (25 Oct): [phone sheet result](archive/reviews/PHONE_SHEET_RESULT_2026-10-25.md).
 Self-diagnosis plan (25 Oct): [self-diagnosis plan](archive/plans/SELF_DIAGNOSIS_PLAN_2026-10-25.md).
 
