@@ -1,1 +1,1 @@
-- docs: V5 phone+desktop scenario report lists exactly which integrations are fakes (#187).
+- Docs: V5 phone+desktop scenario report lists exactly which integrations are fakes (#187).
