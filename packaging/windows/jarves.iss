@@ -582,9 +582,17 @@ end;
 
 // #343: what ran before setup stopped it is started again in ANY mode (silent or wizard), no flag needed;
 // /RESTARTJARVES=1 stays as the explicit override (restart even when detection is unsure: unknown = ran).
+// #436: a setup the user started with "Run as administrator" (elevated and with the wizard) must not start the Core
+// again: it would inherit the admin token. It is left stopped (see the message at the end); elevated silent installs
+// (CI runners, scripted) keep restarting.
+function ElevatedInteractive(): Boolean;
+begin
+  Result := IsAdmin() and not WizardSilent();
+end;
+
 function RestartWanted(): Boolean;
 begin
-  Result := RestartRequested() or (WasRecorded and (WasCore or WasFace or WasDash));
+  Result := not ElevatedInteractive() and (RestartRequested() or (WasRecorded and (WasCore or WasFace or WasDash)));
 end;
 
 function CoreWasRunning(): Boolean;
@@ -1000,6 +1008,11 @@ var
   Args, State: String;
 begin
   if CurStep = ssDone then HealthCheckAfterUpdate();
+  if (CurStep = ssPostInstall) and ElevatedInteractive() and (WasCore or WasFace or WasDash) then begin
+    Log('restart: setup is elevated (Run as administrator) -> JARVES left stopped, not restarted with admin rights');
+    MsgBox('JARVES was running and is now stopped. Setup was started as administrator, so JARVES is not restarted ' +
+           '(it would run with administrator rights). Start it from the Start menu.', mbInformation, MB_OK);
+  end;
   if CurStep = ssPostInstall then begin
     State := ExpandConstant('{app}\install-state.json');
     if FileExists(BackupState) and not FileCopy(BackupState, State, False) then
