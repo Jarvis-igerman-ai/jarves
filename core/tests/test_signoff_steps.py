@@ -82,3 +82,17 @@ def test_page_script_loads_after_the_table_page_and_posts_only_single_rows_or_fi
     posts = re.findall(r"post\(\{([^}]*)\}", js)
     assert posts and all(p.strip().startswith(("row: r.id", "finish: true")) for p in posts), posts
     assert "forEach" not in js.split("const record")[1].split("const failBox")[0]   # one press = one row, never bulk
+
+
+def test_owner_smoke_rows_are_never_automation_even_with_the_automation_note(tmp_path, monkeypatch):
+    root = _root(tmp_path, monkeypatch)
+    sheet = so.load(root, "4.1.0")
+    sheet.set_result("S1", "accepted-blocked", rf.AUTOMATION_NOTE.format(ev="forged"))
+    assert not release_cmd.is_auto(sheet.row("S1"))
+    assert "S1" in [r.id for r in release_cmd.owner_steps(sheet)]
+    assert release_cmd.is_auto(sheet.row("C1"))
+
+
+def test_summary_card_lists_every_automated_row():
+    js = (STATIC / "signoff_steps.js").read_text(encoding="utf-8")
+    assert "auto.map(" in js and "a.id" in js and "auto[0]" not in js
