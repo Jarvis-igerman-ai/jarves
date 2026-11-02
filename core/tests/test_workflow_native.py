@@ -56,6 +56,30 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertTrue(task["quarantined"])
         self.assertEqual(task["validation"], "not_run")
 
+    def test_native_stop_after_evidence_goes_to_review_not_quarantine(self):
+        self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
+        aid = self.store.snapshot()["agents"][0]["id"]
+        self.store.create_task({"id": "fix", "title": "Fix", "lane": "bugs", "resources": ["windows-gui"],
+                                "acceptance": [{"label": "works"}]})
+        self.store.claim(aid, "fix")
+        crit = self.store.snapshot()["tasks"][0]["acceptance"][0]["id"]
+        self.store.record_check("fix", crit, "test passed")
+        self.event("SubagentStop", agent_id="child", agent_type="workflow-bugs")
+        task = self.store.snapshot()["tasks"][0]
+        self.assertEqual(task["state"], "review")
+        self.assertFalse(task.get("quarantined"))
+
+    def test_recover_can_go_straight_to_review(self):
+        self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
+        aid = self.store.snapshot()["agents"][0]["id"]
+        self.store.create_task({"id": "fix", "title": "Fix", "lane": "bugs"})
+        self.store.claim(aid, "fix")
+        self.event("SubagentStop", agent_id="child", agent_type="workflow-bugs")
+        with self.assertRaises(ValueError):
+            self.store.transition("fix", {"state": "review"})
+        self.store.transition("fix", {"state": "review", "recovery_confirmed": True, "checkpoint": "inspected"})
+        self.assertEqual(self.store.snapshot()["tasks"][0]["state"], "review")
+
     def test_permission_notification_does_not_return_permission_decision(self):
         result = self.event("Notification", notification_type="permission_prompt")
         self.assertEqual(result, {})

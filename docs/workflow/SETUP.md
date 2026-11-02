@@ -145,7 +145,12 @@ All criteria must pass at the same revision; new code clears old proof. Use
 `check --failed` for a regression. Imported scope requires explicit operator
 `authorize --task ID` after scope/dependency reconciliation; this does not grant
 runtime permissions. Recover quarantine only after inspecting the original
-process/worktree: `recover --task ID --checkpoint "writer stopped; state reconciled"`.
+process/worktree: `recover --task ID --checkpoint "writer stopped; state reconciled"`
+(back to queued) or `recover --task ID --state review --checkpoint "..."` (work and evidence
+done, awaiting review). The manager or any agent may run it after inspecting the work; it is
+the only way out of quarantine (`transition --state review` alone is refused). A native stop of
+a worker that already recorded passing evidence or validation moves the task to review instead
+of quarantining it.
 
 Codex can register with `agent --agent ID --lane ...` and use the same protocol;
 automatic Codex hooks are not claimed. Optional existing-orchestrator delivery
