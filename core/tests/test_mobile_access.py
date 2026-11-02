@@ -627,3 +627,13 @@ async def test_pc_only_approval_is_still_approvable_on_the_computer(home):
     a = await next_request(svc)
     assert svc.answer(a.id, True, channel="dashboard") == (True, "")
     assert await asyncio.wait_for(task, 30) is True
+
+
+def test_network_help_absent_when_phone_access_is_off(home, fake):
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=fake.bridge()).start()
+    try:
+        assert admin(d, "GET", "/api/mobile")[1]["network"]["firewall"]["profile"] == "private"
+        d.mobile.gate = lambda: False
+        assert admin(d, "GET", "/api/mobile")[1]["network"] is None
+    finally:
+        d.stop()

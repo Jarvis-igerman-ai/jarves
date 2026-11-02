@@ -1278,7 +1278,7 @@ def network_help(host: str | None, port: int, scheme: str = "http", *, hostname:
     name = re.sub(r"[^a-z0-9-]", "", (raw or "").lower().split(".")[0])
     local = f"{name}.local" if name else None
     cmd = (f'netsh advfirewall firewall add rule name="JARVES phone" dir=in action=allow protocol=TCP '
-           f'localport={int(port)} profile=private') if port else None
+           f'localport={int(port)} profile=private remoteip=localsubnet') if port else None
     return {"lan_ip": host, "port": port,
             "stable_url": f"{scheme}://{local}:{port}/m/" if local and port else None,
             "stable_note": "The IP address can change; the .local name stays. If the phone cannot open .local, use the IP address.",

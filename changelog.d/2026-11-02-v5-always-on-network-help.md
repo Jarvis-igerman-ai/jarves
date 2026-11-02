@@ -1,1 +1,1 @@
-- Added: With phone access ON the Phone page shows a stable computer-name.local address and a private-network firewall hint with a netsh command to run by hand (guidance only, nothing is changed); V5-I.
+- Added: With phone access ON the phone info (GET /api/mobile) includes a stable computer-name.local address and a private-network firewall hint with a netsh command to run by hand (guidance only, nothing is changed); the Phone page does not show it yet and jarvis phone status is unchanged; V5-I.
