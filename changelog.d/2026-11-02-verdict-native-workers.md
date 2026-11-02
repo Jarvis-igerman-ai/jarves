@@ -1,1 +1,1 @@
-- Workflow verdict counts native workers (running, with or without a claimed task) and reports running_by_lane; status line uses it (#796).
+- Fixed: Workflow verdict counts native workers (running, with or without a claimed task) and reports running_by_lane; the status line uses it (#796).
