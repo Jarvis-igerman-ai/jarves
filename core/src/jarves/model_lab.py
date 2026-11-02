@@ -137,12 +137,14 @@ def run_eval(registry: ModelRegistry, policy: SpendPolicy, provider, models, *, 
                 row.update(status="skipped", note=scrub(d.exception.reason))
                 continue
             if d.model.paid and (not math.isfinite(d.est_cost_usd) or spent + d.est_cost_usd > cap):
+                policy.release(AGENT, d.est_cost_usd)
                 row.update(status="skipped", note="run cap would be exceeded")
                 continue
             t0 = clock()
             try:
                 r = provider.call(mid, t.prompt, t.id, max_tokens=MAX_OUT_TOKENS)   # the cap check assumed this worst case
             except Exception as e:  # noqa: BLE001 - a provider failure is data; only the class name is kept
+                policy.release(AGENT, d.est_cost_usd)
                 row.update(status="error", latency_s=round(clock() - t0, 3), note=type(e).__name__)
                 continue
             lat = round(clock() - t0, 3)
@@ -150,8 +152,8 @@ def run_eval(registry: ModelRegistry, policy: SpendPolicy, provider, models, *, 
             cost = d.model.cost_usd(tin, tout)
             if not math.isfinite(cost):
                 cost = d.est_cost_usd
+            policy.record(AGENT, cost, d.est_cost_usd)      # settles the decide() reservation
             if cost:
-                policy.record(AGENT, cost)
                 spent += cost
             row.update(status="ok", accepted=grade(t, r.text), latency_s=lat, cost_usd=round(cost, 6),
                        tokens_in=tin, tokens_out=tout, snippet=scrub(r.text))
