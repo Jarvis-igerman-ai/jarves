@@ -662,11 +662,18 @@ _DYNAMIC_IMPORT = ("__import__", "import_module")
 
 
 def _imported_names(tree) -> tuple[set[str], int]:
-    """(full dotted module names imported by statements or by a constant-string __import__/import_module call, number of
-    dynamic calls whose module name is not a constant string)."""
+    """(full dotted module names imported by statements or by a constant-string __import__/import_module call (also via
+    `from importlib import import_module as X`, `import importlib as Y` -> Y.import_module), number of unverifiable
+    dynamic imports). Unverifiable = a call with a computed/relative name, or ANY non-call use of those functions
+    (getattr, passing, assignment). NOT detected: exec()/eval() code and importlib.util.spec_from_file_location loads."""
     import ast
     names: set[str] = set()
     opaque = 0
+    aliases = set(_DYNAMIC_IMPORT)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "builtins"):
+            aliases.update(a.asname for a in node.names if a.name in _DYNAMIC_IMPORT and a.asname)
+    called: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(a.name for a in node.names)
@@ -675,12 +682,19 @@ def _imported_names(tree) -> tuple[set[str], int]:
         elif isinstance(node, ast.Call):
             f = node.func
             fn = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
-            if fn in _DYNAMIC_IMPORT:
+            if fn in aliases:
+                called.add(id(f))
                 a0 = node.args[0] if node.args else None
                 if isinstance(a0, ast.Constant) and isinstance(a0.value, str) and a0.value and not a0.value.startswith("."):
                     names.add(a0.value)
                 else:
                     opaque += 1                              # computed or relative name: cannot be checked (fail closed)
+    for node in ast.walk(tree):
+        if id(node) in called:
+            continue
+        if ((isinstance(node, ast.Name) and node.id in aliases) or (isinstance(node, ast.Attribute) and node.attr in aliases)
+                or (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _DYNAMIC_IMPORT)):
+            opaque += 1                                      # getattr / argument / assignment use: fail closed
     return names, opaque
 
 

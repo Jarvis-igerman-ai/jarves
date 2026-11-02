@@ -66,3 +66,24 @@ def test_folder_checkout_with_dependency_files_is_refused(tmp_path):
     assert e.value.code == "HOTFIX_NEEDS_SLICE2" and "uv.lock" in e.value.message
     (co / "core" / "uv.lock").unlink()
     assert hf.classify(hf.Plan(), None, ctx)[1] == []
+
+
+@pytest.mark.parametrize("code", [
+    "from importlib import import_module as im\nim('nope_zz')\n",
+    "import importlib as il\nil.import_module('nope_zz')\n",
+    "from builtins import __import__ as z\nz('nope_zz')\n"])
+def test_aliased_dynamic_imports_are_checked(tmp_path, code):
+    sp, inst, new = _trees(tmp_path, code)
+    out = hf.scan_new_imports(new, ["a.py"], inst, [sp])
+    assert out and "nope_zz" in out[0]
+
+
+@pytest.mark.parametrize("code", [
+    "from importlib import import_module as im\nim(name)\n",
+    "import importlib\ngetattr(importlib, 'import_module')('nope_zz')\n",
+    "import importlib\nf = importlib.import_module\nf('nope_zz')\n",
+    "from importlib import import_module as im\nlist(map(im, ['nope_zz']))\n"])
+def test_indirect_dynamic_imports_fail_closed(tmp_path, code):
+    sp, inst, new = _trees(tmp_path, code)
+    out = hf.scan_new_imports(new, ["a.py"], inst, [sp])
+    assert any(x.startswith("<dynamic import") for x in out)
