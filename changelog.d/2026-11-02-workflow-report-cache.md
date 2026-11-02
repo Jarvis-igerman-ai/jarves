@@ -1,0 +1,1 @@
+- Fixed: the workflow dashboard report (/api/report) no longer waits for GitHub on each request; the merged-PR list is read in the background and kept for 5 minutes, so the report answers in milliseconds instead of seconds (#789).
