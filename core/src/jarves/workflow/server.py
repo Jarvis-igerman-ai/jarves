@@ -179,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if not self._authenticated():
-            self._json(401, {"error": "open the private link printed by jarvis workflow open"})
+            self._json(401, {"error": "sign in again: run jarvis workflow open"})
             return
         if path == "/api/state":
             from .autopilot import agent_retention_s, view

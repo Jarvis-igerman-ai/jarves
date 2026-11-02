@@ -29,7 +29,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
     ap.add_argument("--no-sync", action="store_true", help="supervisor: no periodic public GitHub metadata reads")
-    ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser")
+    ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser (open alone prints no link)")
     ap.add_argument("--repo-root", type=Path, default=Path.cwd(), help="bootstrap: current JARVES checkout")
     ap.add_argument("--apply", action="store_true", help="bootstrap: install reviewed project-local instructions/hooks, with backups; "
                     "questions-rewrite: store the plain wording")
@@ -164,19 +164,17 @@ def main(argv=None) -> int:
         print(f"Unlock code (type it in the dashboard, Questions tab; the code is valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}")
         return 0
     if a.action == "open":
-        # Kept out of event logs and process arguments. Never use this link as a public share URL.
-        link = f"http://127.0.0.1:{a.port}/#token={access_token(home)}"
-        print(link)
-        if not a.no_open:
-            import webbrowser
-            webbrowser.open(link)
+        # One step (#789): open the login in the default browser and print nothing secret.
+        # The token link is printed only with --no-open; it stays out of event logs and process arguments.
+        from .opener import open_dashboard
+        rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
             from . import unlock
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
-        return 0
+        return rc
     store = Store(home / "workflow.db")
     try:
         if a.action == "questions-rewrite":
