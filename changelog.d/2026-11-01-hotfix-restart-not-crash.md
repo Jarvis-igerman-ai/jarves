@@ -1,0 +1,1 @@
+- Fixed: a planned hotfix stop-and-restart is no longer treated as a crash at the next start, so no automatic crash self-check and no high spoken alert run after a hotfix (#620).
