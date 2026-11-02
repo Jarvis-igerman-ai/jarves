@@ -1,0 +1,1 @@
+- Added: `jarvis performance --voice-stages` shows voice reply latency by stage (median, p95, bottleneck, confidence) from the local log; unmeasured stages are marked unavailable and real-device acceptance stays UNVERIFIED (#122).

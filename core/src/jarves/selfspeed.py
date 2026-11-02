@@ -412,6 +412,8 @@ def add_cli(sub) -> None:
     sp.add_argument("--trigger", default="cli", help=argparse.SUPPRESS)
     pa = sub.add_parser("performance", help="measured performance recommendations and optional owner-controlled GitHub issues")
     pa.add_argument("--auto-github", choices=["on", "off"], help="explicit owner opt-in or disable (no network call here)")
+    pa.add_argument("--voice-stages", action="store_true",
+                    help="voice reply latency by stage (median, p95, bottleneck, confidence) from the local log")
     pa.add_argument("--json", action="store_true")
 
 
@@ -456,6 +458,15 @@ def cmd_performance(a, cfg, home: Path, *, out=print) -> int:
     from . import perf_advisor
     if a.auto_github is not None:
         perf_advisor.configure(home, a.auto_github == "on")
+    if getattr(a, "voice_stages", False):
+        from . import voice_stages
+        res = voice_stages.run(home)
+        if a.json:
+            out(json.dumps({"voice_stages": res}, ensure_ascii=False))
+        else:
+            for line in voice_stages.render(res):
+                out(line)
+        return 0
     state = perf_advisor.options(home)
     advice = perf_advisor.recommendations(History(home).rows("speedtest", 30))
     if a.json:
