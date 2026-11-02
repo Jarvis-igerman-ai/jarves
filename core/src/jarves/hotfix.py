@@ -448,7 +448,7 @@ class Slice2Ctx:
 
 def _is_dependency_file(r: str) -> bool:
     name = r.rsplit("/", 1)[-1].lower()
-    return name in DEPENDENCY_NAMES or (name.startswith("requirements") and name.endswith((".txt", ".in")))
+    return name in DEPENDENCY_NAMES or (name.startswith(("requirements", "constraints")) and name.endswith((".txt", ".in")))
 
 
 def _is_bridge_change(r: str) -> bool:
@@ -519,6 +519,16 @@ def classify(plan: Plan, repo_changes: list[str] | None, ctx: Slice2Ctx | None =
             bridge.append(r)
         elif r.lower().startswith(FULL_INSTALLER_PREFIXES):      # case-insensitive: Windows paths
             pending.append(r)
+        elif not r.lower().startswith(PACKAGE_PREFIX):           # docs/, scripts/, core/tools...: listed, never silent (#464)
+            pending.append(r)
+    if repo_changes is None and ctx is not None and ctx.src.checkout is not None:
+        # a folder checkout cannot be compared with the installed build: a dependency change would pass unseen (#464)
+        co = Path(ctx.src.checkout)
+        found = [str(q.relative_to(co)) for d in (co, co / "core") if d.is_dir() for q in d.iterdir()
+                 if q.is_file() and _is_dependency_file(q.name)]
+        if found:
+            raise Refused("HOTFIX_NEEDS_SLICE2", "a folder source has no change set, so dependency changes cannot be ruled out ("
+                          + ", ".join(sorted(found)[:4]) + "): " + SLICE2, "apply from a git ref (--from <commit on jarves main>)")
     unplaceable: list[str] = []
     for rel in plan.files:
         suffix = Path(rel).suffix.lower()
@@ -639,25 +649,75 @@ def _expand_pth(dirs: list[Path]) -> tuple[list[Path], list[Path]]:
 
 
 def _module_present(top: str, dirs: list[Path]) -> bool:
-    """True when the interpreter would find `top` in these site folders: a package folder, a module file, or a top-level
-    entry of a zip archive named by a .pth file (or an extra .pth directory). Unreadable zips count as missing."""
+    """True when the interpreter would find `top` (a name, dotted names must resolve fully) in these site folders: a
+    package folder, a module file, or a top-level entry of a zip archive named by a .pth file (or an extra .pth
+    directory). Unreadable zips count as missing; a dotted name found only inside a zip is not verified (missing)."""
     import re
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", top):
+    parts = top.split(".")
+    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in parts):
         return False
     all_dirs, zips = _expand_pth(dirs)
     for d in all_dirs:
-        if (d / top).is_dir() or (d / (top + ".py")).is_file() or any(d.glob(top + ".*")):
+        base = d.joinpath(*parts[:-1])
+        last = parts[-1]
+        if len(parts) == 1:
+            if (d / last).is_dir() or (d / (last + ".py")).is_file() or any(d.glob(last + ".*")):
+                return True
+        elif base.is_dir() and ((base / last).is_dir() or (base / (last + ".py")).is_file() or any(base.glob(last + ".*"))):
             return True
-    for zp in zips:
-        tops = _zip_tops(zp)
-        if tops is not None and top in tops:
-            return True
+    if len(parts) == 1:
+        for zp in zips:
+            tops = _zip_tops(zp)
+            if tops is not None and top in tops:
+                return True
     return False
 
 
+_DYNAMIC_IMPORT = ("__import__", "import_module")
+
+
+def _imported_names(tree) -> tuple[set[str], int]:
+    """(full dotted module names imported by statements or by a constant-string __import__/import_module call (also via
+    `from importlib import import_module as X`, `import importlib as Y` -> Y.import_module), number of unverifiable
+    dynamic imports). Unverifiable = a call with a computed/relative name, or ANY non-call use of those functions
+    (getattr, passing, assignment). NOT detected: exec()/eval() code and importlib.util.spec_from_file_location loads."""
+    import ast
+    names: set[str] = set()
+    opaque = 0
+    aliases = set(_DYNAMIC_IMPORT)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "builtins"):
+            aliases.update(a.asname for a in node.names if a.name in _DYNAMIC_IMPORT and a.asname)
+    called: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names.add(node.module)
+        elif isinstance(node, ast.Call):
+            f = node.func
+            fn = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
+            if fn in aliases:
+                called.add(id(f))
+                a0 = node.args[0] if node.args else None
+                if isinstance(a0, ast.Constant) and isinstance(a0.value, str) and a0.value and not a0.value.startswith("."):
+                    names.add(a0.value)
+                else:
+                    opaque += 1                              # computed or relative name: cannot be checked (fail closed)
+    for node in ast.walk(tree):
+        if id(node) in called:
+            continue
+        if ((isinstance(node, ast.Name) and node.id in aliases) or (isinstance(node, ast.Attribute) and node.attr in aliases)
+                or (isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _DYNAMIC_IMPORT)):
+            opaque += 1                                      # getattr / argument / assignment use: fail closed
+    return names, opaque
+
+
 def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs: list[Path] | None = None) -> list[str]:
-    """Third-party top-level modules imported by the given Python files (any import statement, anywhere in the file:
-    conservative) that are not in the installed environment. Unparseable files are reported too."""
+    """Third-party modules imported by the given Python files (any import statement anywhere in the file, the FULL
+    dotted name, and importlib.import_module/__import__ calls: conservative) that are not in the installed environment.
+    A dynamic import with a computed name that the installed copy did not already have is reported as unverifiable.
+    Unparseable files are reported too."""
     import ast
     dirs = site_dirs if site_dirs is not None else _site_dirs(installed_pkg)
     std = set(getattr(sys, "stdlib_module_names", ())) | {"__future__"}
@@ -671,27 +731,20 @@ def scan_new_imports(pkg: Path, rels: list[str], installed_pkg: Path, site_dirs:
             missing.setdefault("<unparseable>", rel)
             continue
         known: set[str] = set()                          # modules the installed copy already imports: not new
+        old_opaque = 0
         try:
-            old = ast.parse((installed_pkg / rel).read_text(encoding="utf-8"))
-            for n0 in ast.walk(old):
-                if isinstance(n0, ast.Import):
-                    known.update(a.name.split(".")[0] for a in n0.names)
-                elif isinstance(n0, ast.ImportFrom) and n0.level == 0 and n0.module:
-                    known.add(n0.module.split(".")[0])
+            known, old_opaque = _imported_names(ast.parse((installed_pkg / rel).read_text(encoding="utf-8")))
         except (SyntaxError, ValueError, OSError):
             pass
-        for node in ast.walk(tree):
-            names: list[str] = []
-            if isinstance(node, ast.Import):
-                names = [a.name for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                names = [node.module]
-            for n in names:
-                top = n.split(".")[0]
-                if top in std or top == "jarves" or top in missing or top in known:
-                    continue
-                if not _module_present(top, dirs):
-                    missing[top] = rel
+        names, opaque = _imported_names(tree)
+        if opaque > old_opaque:
+            missing.setdefault("<dynamic import with a computed name>", rel)
+        for n in sorted(names):
+            top = n.split(".")[0]
+            if top in std or top == "jarves" or n in missing or n in known:
+                continue
+            if not _module_present(n, dirs):
+                missing[n] = rel
     return [f"{m} (in {r})" for m, r in sorted(missing.items())]
 
 
