@@ -1,1 +1,1 @@
-- browser pilot: pin hand-over is atomic and the pending DNS lookups are bounded (#623).
+- Fixed: browser pilot pin hand-over is atomic and the pending DNS lookups are bounded (#623).
