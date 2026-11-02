@@ -146,14 +146,23 @@ RESOLVE_TIMEOUT_S = 3.0
 def system_resolver(host: str) -> list[str]:
     """All addresses the system resolver gives for a host (tests inject a fake). Bounded: a resolver that does not answer
     in RESOLVE_TIMEOUT_S raises (the caller fails closed); getaddrinfo itself has no timeout (#566)."""
+    global _PENDING
+    with _POOL_GUARD:                                  # #623: bounded queue; a page with many hosts fails closed
+        if _PENDING >= MAX_PENDING_LOOKUPS:
+            raise OSError("too many pending DNS lookups")
+        _PENDING += 1
     fut = _resolver_pool().submit(socket.getaddrinfo, host, None)
     try:
         return sorted({i[4][0] for i in fut.result(timeout=RESOLVE_TIMEOUT_S)})
     finally:
-        fut.cancel()                                   # a lookup still queued after the timeout never runs: no backlog in the pool
+        with _POOL_GUARD:
+            _PENDING -= 1
+        fut.cancel()                                  # a lookup still queued after the timeout never runs: no backlog in the pool
 
 
 _POOL = None
+_PENDING = 0
+MAX_PENDING_LOOKUPS = 32
 _POOL_GUARD = threading.Lock()
 RESOLVER_THREADS = 4                                   # one shared, capped pool: hung lookups cannot grow the thread count (#574)
 
@@ -256,7 +265,8 @@ class PilotSession:
                 return bool(ips) and all(public_ip(i) for i in ips)
             except ValueError:
                 return False
-        self.driver.pin_hosts({h: list(v) for h, v in self.pins.items() if good(v)})
+        with self._pin_lock:                                  # #623: snapshot and hand-over are one step; stale maps never overwrite newer
+            self.driver.pin_hosts({h: list(v) for h, v in self.pins.items() if good(v)})
 
     def _final_url(self) -> str:
         cur = self.driver.current_url
