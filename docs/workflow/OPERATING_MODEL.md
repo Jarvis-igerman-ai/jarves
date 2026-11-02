@@ -127,8 +127,8 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   the fixer run `check-touch --resource pr:N` first; a PR owned by another live
   agent is skipped with a message, not touched.
 - Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
-  installer/packaging, browser network, wake apply, workflows/secrets): request
-  the Opus sign-off; never merged by the steward.
+  installer/packaging, browser network, wake apply, workflows/secrets): automatic
+  review -> fix -> merge, see "Tier R flow" below. Excluded PRs stay with the owner.
 - Queue entry merged: check main CI and free the next batch.
 - Per cycle the steward decides individual vs integration with
   `core/tools/integration_branch.py plan --auto` (JSON: tiers, file-overlap and
@@ -143,6 +143,35 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   `close-superseded` comments, closes and deletes only fully merged branches.
 No close/reopen, merge-main push, force on main, check bypass or blind rerun;
 a test that fails then passes is quarantined with a `showstopper` issue.
+
+## Tier R flow and merge backlog
+
+`core/tools/tier_r_flow.py plan` prints, per open PR, the next action
+`review|fix|queue|wait|owner` with reasons (read-only; it never merges).
+1. Green on the CURRENT head SHA and no verdict for that SHA: one Opus review
+   task per PR + SHA (never per push; an existing evidence comment for the SHA
+   means no new review). The reviewer must be Opus and not an author of the diff.
+2. The reviewer comments `SIGN-OFF head SHA reviewer ID model opus-5-5` or
+   `CHANGES REQUESTED head SHA ...`, bound to the SHA.
+3. CHANGES REQUESTED: a Sonnet fixer pushes to the PR's own branch only
+   (`check-touch pr:N` first, `--force-with-lease` only on that branch); the new
+   head is reviewed again. At most 2 review rounds, then record a ledger blocker,
+   alert and leave it to the owner.
+4. SIGN-OFF on the current head, required checks green, main not red: the steward
+   removes `no-automerge`, runs `gh pr merge N --auto` and confirms the PR is in
+   the merge queue. A push after sign-off invalidates it (back to step 1).
+5. Never automatic (owner, today's rules): release/sign-off/tag/stable promotion,
+   anything weakening Gate/approvals, secrets handling, `.github/workflows`,
+   permission/settings/CLAUDE.md/AGENTS.md files, truncated file lists, and any
+   PR where the steward is unsure.
+
+Merge backlog mode: `tier_r_flow.py focus` sets `backlog` when 8 or more
+non-draft PRs are open, or 3 or more green PRs are not yet queued. Then the
+status/verdict line says `merge backlog: N PRs` and the manager, within the
+policy worker limit (never above it), starts in this order: P0/P1 bug fixes,
+already running reviews and fixers, steward queue, Tier R Opus reviews, fixers
+for red or conflicted PRs. No new feature or bug-implementation task starts until
+the counts drop below both thresholds.
 
 ## External observer
 
