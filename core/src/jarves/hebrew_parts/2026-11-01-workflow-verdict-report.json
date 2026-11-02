@@ -1,0 +1,12 @@
+{
+ "Morning report": "דוח בוקר",
+ "supervisor dead": "המשגיח לא פעיל",
+ "supervisor heartbeat late": "פעימת המשגיח מאחרת",
+ "no heartbeat data yet": "עדיין אין נתוני דופק",
+ "NO_CORE: the Core is not reachable": "הליבה לא זמינה (NO_CORE)",
+ "nothing is queued": "אין משימות בתור",
+ "Idle with ready tasks and no active worker": "בטלה עם משימות מוכנות ואין עובד פעיל",
+ "Waiting for your answers only": "מחכה רק לתשובות שלך",
+ "The report is not available now.": "הדוח לא זמין כרגע.",
+ "Loading the report": "טוען את הדוח"
+}

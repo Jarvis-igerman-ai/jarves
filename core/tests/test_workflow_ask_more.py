@@ -192,6 +192,9 @@ class AskMoreHTTPTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request(f"/api/questions/{q['id']}/ask-more", {"text": "why?"},
                                       {"X-Workflow-Request": ""})[0], 403)
+        self.assertEqual(self.request(f"/api/questions/{q['id']}/ask-more", {"text": "why?"})[0], 403)  # locked (#750)
+        from jarves.workflow import unlock
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.server.home)})[0], 200)
         self.assertEqual(self.request(f"/api/questions/{q['id']}/ask-more", {"text": "why?"})[0], 200)
         self.assertEqual(self.request("/api/followups", {"text": "status?"})[0], 200)
         self.assertEqual(self.request("/api/followups", {"text": ""})[0], 400)

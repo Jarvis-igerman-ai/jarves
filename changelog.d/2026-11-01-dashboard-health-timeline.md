@@ -1,0 +1,1 @@
+- Added: The workflow dashboard has two read-only tabs, Health (each factory layer with its last heartbeat, a red banner when the factory stopped, open incidents) and Timeline (swim lanes per layer with hatched stop bands, the task pipeline feed and copy as text for bug reports), in Israel time, Hebrew and English.

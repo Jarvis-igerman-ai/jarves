@@ -1,0 +1,1 @@
+- Added: merge steward helper `core/tools/integration_branch.py` (plan, build, close-superseded) so the steward can choose between merging PRs one by one and building one integration PR for several independent green PRs; Tier R inside keeps `no-automerge` and one Opus review.

@@ -1,0 +1,1 @@
+- Fixed: the autopilot no longer counts a refused start (Core offline) against max_starts_per_hour, and workflow ledger connections always wait for the database lock instead of failing (#763, #767).

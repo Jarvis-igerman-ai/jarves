@@ -848,3 +848,22 @@ def test_a_failed_settings_read_never_turns_a_silent_chat_into_a_speaking_one(ri
         assert r.chat.setting_silent() is False                       # last known is "not silent"
     finally:
         r.core.memory.get_setting = real
+
+
+def test_a_stale_settings_read_never_overwrites_a_newer_silent_write(rig):
+    """#722: a read that began before set_silent(True) but returns the old value afterwards must not un-silence the chat
+    (deterministic: the write lands in the middle of the read, no scheduler luck)."""
+    r = rig()
+    r.chat.set_silent(False)
+    real = r.core.memory.get_setting
+
+    def read_overtaken_by_write(key, *a, **k):
+        old = real(key, *a, **k)                      # the value as it was when the read started
+        r.chat.set_silent(True)                       # the owner's write lands before the read returns
+        return old
+    r.core.memory.get_setting = read_overtaken_by_write
+    try:
+        assert r.chat.setting_silent() is True        # the newer write wins over the stale "off"
+    finally:
+        r.core.memory.get_setting = real
+    assert r.chat.silent_state()["on"] is True

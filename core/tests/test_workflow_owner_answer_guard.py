@@ -133,6 +133,7 @@ class DashboardAnswerTests(unittest.TestCase):
         self.assertEqual(self.post(f"/api/questions/{q}/answer", {"answer": "ok"})[0], 401)
         _, headers, _ = self.post("/api/session", {"token": self.server.token})
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        self.server.unlocked[self.cookie.split("=", 1)[1]] = 4e9  # owner-answer unlock (#750): see test_workflow_unlock.py
         self.assertEqual(self.post(f"/api/questions/{q}/answer", {"answer": "A"})[0], 200)
         row = store.snapshot()["questions"][0]
         self.assertEqual((row["channel"], row["needs_owner_confirmation"]), ("dashboard", False))

@@ -1,0 +1,9 @@
+{
+  "wait 10 seconds before opening another Claude help window": "המתינו 10 שניות לפני פתיחת חלון עזרה נוסף של Claude",
+  "Claude help windows open only on Windows; copy the command instead": "חלון העזרה של Claude נפתח רק ב־Windows; העתיקו את הפקודה במקום",
+  "claude was not found on PATH; copy the command instead": "הפקודה claude לא נמצאה ב־PATH; העתיקו את הפקודה במקום",
+  "a path contains characters that are unsafe on a command line; copy the command instead": "נתיב מכיל תווים לא בטוחים לשורת פקודה; העתיקו את הפקודה במקום",
+  "invalid help request": "בקשת עזרה לא תקינה",
+  "only display fields can be rewritten": "אפשר לשנות רק את טקסט התצוגה",
+  "choice ids must stay the same": "מזהי האפשרויות חייבים להישאר זהים"
+}

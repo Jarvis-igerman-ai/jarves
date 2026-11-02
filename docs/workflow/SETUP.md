@@ -36,6 +36,7 @@ In another terminal:
 
 ```powershell
 python core/tools/workflow_console.py open
+python core/tools/workflow_console.py unlock   # 4-digit code to answer in the dashboard (#750)
 ```
 
 The private URL contains a local access key; do not share it. The service binds
@@ -70,6 +71,7 @@ For the owner-facing sequence, diagrams and simplicity decisions read
 `jarvis agents start PROVIDER PROJECT "task" --model MODEL`; no additional
 launcher is installed. Those agent interfaces need the running Core and their
 existing account/project/permission prerequisites.
+The merge steward decides per cycle between single merges and one integration PR with `core/tools/integration_branch.py` (`plan`, `build`, `close-superseded`); see OPERATING_MODEL "Merge steward".
 
 ## Action history and a manual retrospective
 
