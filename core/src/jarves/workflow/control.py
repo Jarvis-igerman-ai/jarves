@@ -22,21 +22,38 @@ MAX_LOOP_FAILURES = 20
 
 
 @contextlib.contextmanager
-def exclusive(path: Path):
-    """A kernel-backed lock: released on a crash, never inferred from a stale PID."""
+def exclusive(path: Path, wait_s: float = 0.0, sleep=time.sleep):
+    """A kernel-backed lock: released on a crash, never inferred from a stale PID.
+
+    wait_s > 0 retries a held lock for that long (a successor started while the old process is still
+    exiting must not give up, #754); a live second holder still fails with OSError afterwards.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
+        # Size check, not a read: on Windows the locked byte cannot be read by a second contender.
+        if os.fstat(stream.fileno()).st_size == 0:
             stream.write(b"0")
             stream.flush()
-        stream.seek(0)
+        waited = 0.0
+        while True:
+            stream.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if waited >= wait_s:
+                    raise
+                sleep(0.5)
+                waited += 0.5
         if os.name == "nt":
             import msvcrt
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             yield
         finally:
@@ -129,7 +146,7 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     stop = stop or threading.Event()
     if not 1 <= port <= 65535:
         raise ValueError("supervisor needs a fixed port between 1 and 65535")
-    with exclusive(home / "supervisor.lock"):
+    with exclusive(home / "supervisor.lock", wait_s=30.0):
         store = Store(home / "workflow.db")
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
         child, restarts, next_sync, sync_thread = None, [], 0.0, None
