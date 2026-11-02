@@ -335,7 +335,15 @@ class Store:
 
     def close_superseded(self, open_prs):
         """Block queued review/steward tasks whose PR is no longer open (merged, closed or superseded)."""
-        open_prs = {int(n) for n in open_prs}
+        numbers = set()
+        for n in open_prs:
+            if isinstance(n, bool):
+                raise ValueError("PR numbers must be positive integers")
+            value = int(n)
+            if value <= 0:
+                raise ValueError("PR numbers must be positive integers")
+            numbers.add(value)
+        open_prs = numbers
         if not open_prs:
             # An empty list usually means the PR listing failed; closing against it would block every queued review.
             raise ValueError("close-superseded needs the open PR numbers; an empty list changes nothing")
@@ -558,7 +566,7 @@ class Store:
                 return default
             policy, error = autopilot.load(self.path.parent)
             return default if error else int(policy.get("max_concurrent", default))
-        except (OSError, ValueError, TypeError, ImportError):
+        except Exception:  # noqa: BLE001  incl. RecursionError from a deeply nested policy file: never break Stop
             return default
 
     def manager_continue(self, agent_id, worker_limit=None):
@@ -658,7 +666,8 @@ class Store:
         agent_id = _id(agent_id)
         with self._tx() as db:
             agent = self._get(db, "agent", agent_id)
-            native_request = agent.get("provider") == "claude-native" and agent["status"] == "running"
+            native = agent.get("provider") == "claude-native" or str(agent.get("session_id", "")).startswith("native:")
+            native_request = native and agent["status"] == "running"
             if agent.get("task_id") or (agent["status"] != "idle" and not native_request):
                 return None
             if self.clock() - agent["heartbeat_at"] > 120:

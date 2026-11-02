@@ -104,7 +104,7 @@ def git_base_note(cwd: str) -> str:
 
 
 _GIT_NOTE_CACHE: dict = {}
-GIT_NOTE_BUDGET_S = 1.0  # total for both git calls; the native hook limit is 3 s
+GIT_NOTE_BUDGET_S = 0.6  # total for both git calls (cached across the retry); the native hook limit is 3 s
 
 
 def _git_base_note(cwd: str) -> str:
@@ -309,7 +309,7 @@ def main(argv=None) -> int:
             result = observe(store, payload, args.repo_root, agent_env)
         if result:
             print(json.dumps(result, ensure_ascii=False))
-    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+    except Exception as exc:  # noqa: BLE001  hooks fail open: never exit non-zero (incl. RecursionError)
         # Do not block Claude or emit private input. The supervisor exposes the
         # missing heartbeat if telemetry cannot reach the ledger. A locked database
         # (sqlite3.Error) used to escape as a traceback and drop the event silently.
