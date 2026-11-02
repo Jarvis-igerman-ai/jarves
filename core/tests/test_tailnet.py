@@ -335,4 +335,16 @@ def test_cli_phone_commands(home, capsys, monkeypatch):
     assert mobile.MobileAccess(home).settings()["bind_tailnet_only"] is True
     assert phone_cli.cmd_phone(ns(action="revoke-all"), cfg, home) == 0
     assert phone_cli.cmd_phone(ns(action="status"), cfg, home) == 0
-    assert "Tailscale" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Tailscale" in out and "listening: nothing" in out      # switch OFF: never claims a phone listener
+
+
+def test_cli_phone_status_names_the_listener_only_when_on(home, capsys, monkeypatch):
+    from jarves import phone_cli, tailnet
+    monkeypatch.setattr(tailnet, "local_addresses", lambda: [])
+    monkeypatch.setattr(tailnet, "detect", lambda: {"state": "not-installed", "ip": "", "name": "", "certs_possible": False})
+    monkeypatch.setattr(phone_cli, "status_view", lambda cfg, h: {
+        "enabled": True, "phone_approvals": False, "bind_tailnet_only": False, "paired_phones": 0,
+        "tailscale": {"state": "not-installed", "ip": "", "name": "", "certs_possible": False}})
+    assert phone_cli.cmd_phone(SimpleNamespace(json=False, action="status"), Config(), home) == 0
+    assert "listening: home network" in capsys.readouterr().out
