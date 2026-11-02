@@ -590,7 +590,7 @@ def test_typed_code_approvals_are_pc_only(rig):
     st, view = dev_req(r.dash, "GET", "/api/m/chat/state", token=tok)
     theirs = view["approvals"][0]
     assert theirs["typed"] and theirs["code"] == "" and theirs["id"] == mine["id"]   # the phone never receives it
-    assert mine["code"] not in json.dumps(view)
+    assert mine["code"] not in json.dumps(view).replace(mine["id"], "")   # ids are random hex and may contain digits
     st, body = dev_req(r.dash, "POST", f"/api/m/approvals/{mine['id']}", token=tok, body={"approved": True})
     assert st == 403 and body["code"] == "TYPED_PC_ONLY"
     st, body = owner_req(r.dash, "POST", f"/api/approvals/{mine['id']}", {"approved": True, "typed": "0000x"})

@@ -1393,6 +1393,13 @@ def _wake_train(a, cfg, home) -> int:
         print(line)
     ow = rep["owner"]
     if ow["recordings"]:
+        usable = ow.get("usable_recordings", ow["recordings"])
+        print(f"Your recordings: {usable} usable of {ow['recordings']}"
+              + (f" ({ow.get('skipped_too_long', 0)} skipped: longer than one short phrase)"
+                 if ow.get("skipped_too_long") else "") + ".")
+        if usable < wake_prod.MIN_USABLE_SAMPLES:
+            print(f"  WARNING: only {usable} usable (fewer than {wake_prod.MIN_USABLE_SAMPLES}): this model leans on "
+                  "synthetic voices. Record more clips (one short phrase each, quiet room).")
         print(f"Your recordings wake it {ow['recall_at_threshold']:.0%} of the time at {rep['threshold']}"
               + (f" (held out, not trained on: {ow['held_out_recall_at_threshold']:.0%})"
                  if ow["held_out_recall_at_threshold"] is not None else "") + ".")

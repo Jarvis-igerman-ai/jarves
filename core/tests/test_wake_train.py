@@ -210,3 +210,16 @@ def test_594_head_detector_skips_the_burst_and_the_zero_context_embeddings_then_
     assert wt.STARTUP_EMBEDDINGS == 100 and first_scored_chunk() == 26        # chunk 1: 91 burst, chunks 2-10: 9 zero-context skipped, chunks 11-26 fill the ring
     d.reset()
     assert first_scored_chunk() == 26                                          # the same after every reset
+
+
+def test_542_trim_speech_keeps_quiet_tail_despite_a_loud_click():
+    sr = wt.SR
+    rng = np.random.default_rng(0)
+    a = (rng.standard_normal(int(sr * 2.6)) * 0.002).astype(np.float32)
+    t = np.arange(int(sr * 0.5)) / sr
+    a[int(sr * 0.5): int(sr * 1.0)] += (0.3 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)      # loud body
+    a[int(sr * 1.0): int(sr * 1.3)] += (0.04 * np.sin(2 * np.pi * 300 * t[: int(sr * 0.3)])).astype(np.float32)  # quiet tail
+    a[int(sr * 2.4): int(sr * 2.4) + 40] += 1.0                                                      # key click
+    out = wt.trim_speech(a)
+    assert len(out) <= wt.MAX_PHRASE_S * sr
+    assert len(out) >= int(sr * 0.75)          # body + quiet tail kept, click not followed
