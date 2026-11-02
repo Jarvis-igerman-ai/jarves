@@ -336,6 +336,9 @@ class Store:
     def close_superseded(self, open_prs):
         """Block queued review/steward tasks whose PR is no longer open (merged, closed or superseded)."""
         open_prs = {int(n) for n in open_prs}
+        if not open_prs:
+            # An empty list usually means the PR listing failed; closing against it would block every queued review.
+            raise ValueError("close-superseded needs the open PR numbers; an empty list changes nothing")
         closed = []
         with self._tx() as db:
             for task in self._all(db, "task"):
@@ -547,7 +550,18 @@ class Store:
             self._bump(db)
         return agent
 
-    def manager_continue(self, agent_id, worker_limit=3):
+    def _worker_limit(self, default=3):
+        """Autopilot policy max_concurrent when the policy file is present and valid, else the default."""
+        try:
+            from . import autopilot
+            if not autopilot.policy_path(self.path.parent).exists():
+                return default
+            policy, error = autopilot.load(self.path.parent)
+            return default if error else int(policy.get("max_concurrent", default))
+        except (OSError, ValueError, TypeError, ImportError):
+            return default
+
+    def manager_continue(self, agent_id, worker_limit=None):
         """Native Stop continuations, only for truly runnable ready work (one shared _ready filter, #855/#858).
 
         Only continuations that carry runnable work are counted. While fewer than worker_limit workers are
@@ -555,6 +569,8 @@ class Store:
         This is a bounded 'do not stop with authorised work' signal, never a
         permission grant or an attempt to resurrect a dead Claude process.
         """
+        if worker_limit is None:
+            worker_limit = self._worker_limit()
         with self._tx() as db:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
