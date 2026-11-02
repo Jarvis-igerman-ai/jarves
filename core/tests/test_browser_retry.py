@@ -38,6 +38,28 @@ def test_real_errors_are_not_retried_and_exhaustion_raises():
     assert len(calls) == 3
 
 
+def test_connection_reset_is_not_retried():
+    calls = []
+
+    def reset():
+        calls.append(1)
+        raise Exception("Page.goto: net::ERR_CONNECTION_RESET at http://127.0.0.1:1/")
+    with pytest.raises(Exception, match="CONNECTION_RESET"):
+        br.retrying(reset, sleep=lambda s: None)()
+    assert len(calls) == 1
+
+
+def test_connection_aborted_is_retried():
+    seq = [Exception("net::ERR_CONNECTION_ABORTED"), "ok"]
+
+    def goto():
+        v = seq.pop(0)
+        if isinstance(v, Exception):
+            raise v
+        return v
+    assert br.retrying(goto, sleep=lambda s: None)() == "ok"
+
+
 def test_install_is_idempotent():
     if not br.install():
         pytest.skip("playwright not installed")

@@ -8,7 +8,7 @@ import functools
 import re
 import time
 
-TRANSIENT = re.compile(r"net::ERR_(NO_BUFFER_SPACE|INSUFFICIENT_RESOURCES|NETWORK_IO_SUSPENDED|CONNECTION_RESET|CONNECTION_ABORTED)")
+TRANSIENT = re.compile(r"net::ERR_(NO_BUFFER_SPACE|INSUFFICIENT_RESOURCES|NETWORK_IO_SUSPENDED|CONNECTION_ABORTED)")
 ATTEMPTS = 4
 PAUSE_S = 2.0
 
@@ -22,6 +22,7 @@ def retrying(fn, attempts: int = ATTEMPTS, pause: float | None = None, sleep=tim
             except Exception as e:
                 if n == attempts or not TRANSIENT.search(str(e)):
                     raise
+                print(f"browser_retry: attempt {n}/{attempts} transient goto error, retrying: {str(e)[:120]}", flush=True)
                 sleep((PAUSE_S if pause is None else pause) * n)
     wrapper._retrying = True
     return wrapper
