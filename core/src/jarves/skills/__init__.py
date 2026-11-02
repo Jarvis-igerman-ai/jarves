@@ -465,7 +465,9 @@ class SkillRegistry:
                       tool=tool.name, permission=str(perm), origin=str(origin))
             return ToolResult(False, f"{tool.name} is not allowed", code="TOOL_FORBIDDEN")
         if self.drive is not None:
-            refused = self._drive_check(tool, args, origin)
+            # the Gate can hold a cross-process file lock for up to 5 s (queue add): run it in a worker thread so a
+            # stuck lock never freezes the event loop / voice (#379). to_thread keeps the ROUTE contextvar.
+            refused = await asyncio.to_thread(self._drive_check, tool, args, origin)
             if refused is not None:
                 return refused
         if perm != "read" and origin == "model" and self._untrusted_at is not None:
