@@ -1,0 +1,1 @@
+- Fixed: the diagnostics monitor overhead-budget test no longer depends on the real CPU clock (15.6 ms ticks on Windows made it flaky); the monitor takes an injectable CPU clock, default unchanged (#866).

@@ -38,3 +38,9 @@ id = "test_diag_monitor.py::test_sampler_and_overhead_budget"
 issue = 778
 since = "2026-11-02"
 reason = "Windows shard 3/4 failed on PR 849 (unrelated mic test PR): thread_time has 15.6 ms granularity so sample_cost read 0.0625 s and the 0.1 pct CPU budget assert at line 100 tripped; passes elsewhere"
+
+[[test]]
+id = "test_agents_pr_card_browser.py::test_the_card_is_absent_when_off_or_the_api_is_missing"
+issue = 890
+since = "2026-11-02"
+reason = "Windows real browser: Page.goto net::ERR_NO_BUFFER_SPACE (host socket exhaustion, seen on PR 868, unrelated to its diff); retry fix PR 875 merged, prior issue 874 closed"

@@ -133,7 +133,9 @@ class MonitorSink(logging.Handler):
 
 class Monitor:
     def __init__(self, store, *, home: Path | None = None, cfg=None, clock: Callable[[], float] = time.time,
-                 version: tuple[str, str] | None = None, dead_air_s: float | None = None) -> None:
+                 version: tuple[str, str] | None = None, dead_air_s: float | None = None,
+                 cpu_clock: Callable[[], float] = time.thread_time) -> None:
+        self.cpu_clock = cpu_clock                # injectable so tests need no real CPU clock (#866)
         self.store, self.home, self.cfg, self.clock = store, Path(home) if home else None, cfg, clock
         self.metrics = MetricStore(store, clock=clock, version=version)
         self.dead_air_s = float(dead_air_s if dead_air_s is not None else
@@ -155,7 +157,7 @@ class Monitor:
         return self._live or f"cid:{logs.get_cid()}"
 
     def on_record(self, code: str, level: str, component: str, f: dict, ts: float) -> None:
-        t0 = time.thread_time()
+        t0 = self.cpu_clock()
         result_code = f.get("result_code") if code == "TOOL_RESULT" else code
         if expected_tool_refusal(result_code, f.get("origin")):
             return  # retained in the raw log, not a failure-rate/latency sample
@@ -188,7 +190,7 @@ class Monitor:
                 m.event("tool_fail", tool, 1.0, ref=conv_key(self.conversation()), ts=ts)
         elif code in BUDGET_CODES:
             m.add("budget_hits", 1, ts)
-        self.own_cpu_s += time.thread_time() - t0
+        self.own_cpu_s += self.cpu_clock() - t0
 
     def on_health(self, components: dict) -> None:
         for name, c in components.items():
@@ -202,7 +204,7 @@ class Monitor:
 
     # ---- sampler
     def sample(self, loop_lag_s: float | None = None) -> dict:
-        t0 = time.thread_time()
+        t0 = self.cpu_clock()
         now = self.clock()
         d = process_stats()
         pt = time.process_time()
@@ -227,7 +229,7 @@ class Monitor:
         for k, v in d.items():
             self.metrics.add(k, v, now)
         self.samples += 1
-        self.own_cpu_s += time.thread_time() - t0
+        self.own_cpu_s += self.cpu_clock() - t0
         self.metrics.add("monitor_cpu_s", self.own_cpu_s, now)
         self.last_sample = d
         return d
