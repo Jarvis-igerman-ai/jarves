@@ -407,7 +407,9 @@ class InstagramSkill(Skill):
             Tool("instagram_send", 'Send an instagram_draft only after read-back and a yes; the user also approves on screen. One draft per call.', send, SendArgs,
                  permission="destructive", timeout_s=25, impact=send_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"),
-                 target=lambda a: (self._drafts.get(a.draft_id) or {}).get("sender") or ""),    # the real IGSID
+                 # issue #830: an Instagram account is never a saved phone/e-mail contact, so the drive-mode
+                 # known-contact check must not match it by display name: "" = never known (deferred while driving)
+                 target=lambda a: ""),
         ]
 
 

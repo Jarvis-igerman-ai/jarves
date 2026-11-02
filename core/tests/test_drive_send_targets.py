@@ -3,9 +3,8 @@ event loop on the cross-process queue lock."""
 from __future__ import annotations
 
 import asyncio
-import importlib
-import inspect
 import time
+from types import SimpleNamespace
 
 import pytest
 from pydantic import BaseModel
@@ -49,12 +48,36 @@ async def test_name_alone_is_not_enough_real_target_decides(tmp_path, target, co
     assert (res.code if not res.ok else None) == code
 
 
-@pytest.mark.parametrize("mod,name", [("whatsapp_bridge", "whatsapp_send"), ("instagram_channel", "instagram_send"),
-                                      ("telegram_channel", "telegram_send")])
-def test_real_send_tools_declare_a_target(mod, name):
-    src = inspect.getsource(importlib.import_module("jarves." + mod))
-    seg = src.split(f'Tool("{name}"', 1)[1].split("\n        ]", 1)[0]
-    assert "target=" in seg
+def _real_target(skill, tool_name, draft):
+    skill._drafts["d1"] = draft
+    tool = next(t for t in skill.tools() if t.name == tool_name)
+    assert tool.target is not None, f"{tool_name} must declare a target"
+    return tool.target(SimpleNamespace(draft_id="d1"))
+
+
+def _gate(tmp_path, phone):
+    return dm.Gate(active=lambda: True, queue=dm.DriveQueue(tmp_path / "q.json"),
+                   contacts=lambda: [{"name": "Dana", "phone": phone}])
+
+
+def test_whatsapp_bridge_target_is_the_draft_number(tmp_path):
+    from jarves import whatsapp_bridge as wb
+    skill = wb.WhatsAppBridgeSkill(tmp_path)
+    assert _real_target(skill, "whatsapp_send", {"name": "Dana", "number": "0541234567"}) == "0541234567"
+    assert _real_target(skill, "whatsapp_send", {"name": "Dana"}) == ""     # LID contact: never known
+
+
+def test_telegram_and_instagram_numeric_ids_are_never_a_saved_phone(tmp_path):
+    """A Telegram chat id / Instagram sender id like 972541234567 must NOT count as Dana's saved number: the real
+    tools declare no usable target, so the Gate defers the send while driving."""
+    from jarves import instagram_channel as ig
+    from jarves import telegram_channel as tg
+    gate = _gate(tmp_path, "0541234567")
+    assert gate.known("Dana", "972541234567")                               # control: the same digits WOULD match
+    tgt = _real_target(tg.TelegramSkill(tmp_path), "telegram_send", {"name": "Dana", "chat_id": 972541234567})
+    igt = _real_target(ig.InstagramSkill(tmp_path), "instagram_send", {"name": "Dana", "sender": "972541234567"})
+    assert not gate.known("Dana", tgt)
+    assert not gate.known("Dana", igt)
 
 
 async def test_gate_lock_wait_does_not_block_the_event_loop(tmp_path, monkeypatch):

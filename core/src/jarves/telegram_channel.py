@@ -224,7 +224,8 @@ class TelegramSkill(Skill):
             Tool("telegram_send", 'Send a telegram_draft only after read-back and a yes; the user also approves on screen.', send, SendArgs, permission="destructive",
                  timeout_s=20, impact=send_impact,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"),
-                 target=lambda a: str((self._drafts.get(a.draft_id) or {}).get("chat_id") or "")),    # the real chat id
+                 # issue #830: a Telegram chat id is not a saved phone/e-mail contact; never matched by display name
+                 target=lambda a: ""),
         ]
 
 
