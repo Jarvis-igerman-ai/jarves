@@ -40,7 +40,7 @@
     const build = el("div", { class: "muted small" }, tx("בטא מותקנת: ", "Installed beta: ") + (d.installed || tx("לא ידוע", "unknown")));
     const autoCard = auto.length ? el("div", { class: "card" },
       el("strong", {}, tx(`בדיקות שהמערכת כבר אישרה: ${auto.length}`, `Checks the system already passed: ${auto.length}`)),
-      el("div", { class: "muted small", dir: "auto" }, auto[0].note)) : null;
+      ...auto.map((a) => el("div", { class: "muted small", dir: "auto" }, a.id + ": " + a.note))) : null;
 
     const want = params.get("step");                                     // none = resume at the first open check
     if (!steps.length || want === "end" || (!want && !d.next)) return renderEnd();

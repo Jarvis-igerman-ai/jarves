@@ -39,6 +39,9 @@ AUTO_PREFIX = "accepted by automation"          # release_flow.AUTOMATION_NOTE: 
 def is_auto(row: so.Row) -> bool:
     """A row the reduced sheet recorded as accepted by automation (with its evidence). The step-by-step view shows these
     as one summary and never asks the owner to judge them; it cannot edit them."""
+    from . import release_flow as rf                  # lazy: owner smoke rows (S1-S5) are never automation, whatever the note says
+    if row.id in rf.SMOKE_IDS:
+        return False
     return row.result == "accepted-blocked" and row.note.strip().lower().startswith(AUTO_PREFIX)
 
 
