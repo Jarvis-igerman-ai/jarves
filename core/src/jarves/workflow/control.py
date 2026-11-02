@@ -132,6 +132,8 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     with exclusive(home / "supervisor.lock"):
         store = Store(home / "workflow.db")
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
+        from . import webchild
+        webchild.reap(home, port, store.record_event)  # a server left by a crashed supervisor (#789)
         child, restarts, next_sync, sync_thread = None, [], 0.0, None
         failures = 0
 
@@ -159,11 +161,13 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                         # A checkout-only parent sys.path is not inherited by a new Python process.
                         command = ([sys.executable, str(entry)] if entry.is_file() else
                                    [sys.executable, "-m", "jarves.workflow"])
+                        webchild.reap(home, port, store.record_event)  # the launcher can exit while the server lives
                         child = popen([*command, "serve", "--home", str(home), "--profile-home", str(profile_home), "--port", str(port)],
                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         restarts.append(now)
                         store.record_event("supervisor", "Workflow web process started; existing worker sessions left untouched")
-                    store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": child.pid, "pid": os.getpid(),
+                    store.set_supervisor({"heartbeat_at": now, "status": "running", "web_pid": webchild.listening_pid(home, port) or child.pid,
+                                          "pid": os.getpid(),
                                           "restart_count": len(restarts)})
                     store.tick()
                     try:
@@ -208,4 +212,5 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                 except subprocess.TimeoutExpired:
                     child.kill()
                     child.wait(timeout=10)
+            webchild.reap(home, port)  # the real server behind a launcher handle (#789)
             store.close()
