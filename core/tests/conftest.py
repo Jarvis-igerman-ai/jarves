@@ -356,6 +356,15 @@ def _close_browser_contexts_after_each_test(request):
 
 
 @pytest.fixture(autouse=True)
+def _browser_goto_survives_socket_exhaustion(request):
+    """Every real-browser test gets Page.goto retried on host socket exhaustion (ERR_NO_BUFFER_SPACE, #874)."""
+    if "browser" in getattr(request, "fixturenames", ()):
+        import browser_retry
+        browser_retry.install()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _helper_not_elevated(monkeypatch):
     """CI runners (Windows) run as administrator, where the helper correctly refuses everything. Tests assume a normal
     user; the elevation tests set their own monkeypatch to True after this fixture."""
