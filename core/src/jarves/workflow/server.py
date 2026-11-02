@@ -297,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
             if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
                     or path == "/api/followups") and not self._unlock_left():
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
-                self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",
+                self._json(403, {"error": "answers are locked: run 'jarvis workflow unlock' in your own terminal and type the code",
                                  "locked": True})
                 return
             if path == "/api/owner":
@@ -371,7 +371,7 @@ class Handler(BaseHTTPRequestHandler):
                     path.unlink(missing_ok=True)
                     n = 0
                 self.server.unlock_wrong = (salt, n)
-                self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
+                self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = ("", 0)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
