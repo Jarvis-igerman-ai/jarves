@@ -1,1 +1,1 @@
-- Drive mode: Instagram/Telegram/WhatsApp sends no longer match a contact by display name, and calendar reads while driving are only spoken when the saved passenger setting is alone (issues #830, #831).
+- Fixed: Drive mode: Instagram/Telegram/WhatsApp sends no longer match a contact by display name, and calendar reads while driving are only spoken when the saved passenger setting is alone (issues #830, #831).
