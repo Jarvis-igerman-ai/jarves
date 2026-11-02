@@ -1,0 +1,1 @@
+- Added: workflow `worker-watch` (one-shot worker-count monitor with a deduplicated WORKERS_SHORT note to the manager), `handover` / `handover-state` (manager checkpoint signal before a restart or nudge), and worker numbers in `status`.
