@@ -1087,6 +1087,7 @@ class Dashboard:
                 raise OSError("no private home-network address found (Wi-Fi/Ethernet connected?)")
         self.access = Access(home, token, lan=lan, lan_host=lan_host)
         self.access.extra_hosts = {h for h in (tail_ip, tail.get("name")) if h} if mobile_on else set()
+        self.access.local_name = mobile.local_name() if mobile_on else None
         self.ctx.access = self.access
         self.access.mobile = bool(mobile_on)
         self.mobile = self.ctx.mobile = mobile.MobileAccess(home)
@@ -1194,9 +1195,7 @@ class Dashboard:
         host = None if only_tail else lan_ip()
         if host is None and not tail_ip:
             raise OSError("no private home-network address found: connect this computer to your Wi-Fi or cable and try again")
-        cert, key = _m.tls_paths(self.ctx.home)
-        if not cert.is_file():
-            _m.make_selfsigned(self.ctx.home, host)
+        _m.ensure_selfsigned(self.ctx.home, host)
         tls, src = _tn.choose_tls(self.ctx.home, tail)
         if not tls:
             raise OSError("no TLS certificate for the phone could be made: phone access needs TLS, nothing was opened")
@@ -1230,6 +1229,7 @@ class Dashboard:
             raise
         # everything above worked: only now does the rest of the dashboard learn about the phone listener
         self.access.extra_hosts = {h for h in (tail_ip, tail.get("name")) if h}
+        self.access.local_name = _m.local_name()
         self.access.lan_host = host or self.access.lan_host
         self.access.mobile = True
         mob.tailnet, mob.tls_source, mob.bind = tail, src, bind

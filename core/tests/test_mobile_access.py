@@ -637,3 +637,41 @@ def test_network_help_absent_when_phone_access_is_off(home, fake):
         assert admin(d, "GET", "/api/mobile")[1]["network"] is None
     finally:
         d.stop()
+
+
+def test_stable_local_url_is_accepted_only_while_phone_access_is_on(home, fake, monkeypatch):
+    monkeypatch.setattr("socket.gethostname", lambda: "My-PC.lan")
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, mobile_bridge=fake.bridge()).start()
+    try:
+        stable = admin(d, "GET", "/api/mobile")[1]["network"]["stable_url"]
+        host = stable.split("//")[1].split("/")[0]
+        assert host.startswith("my-pc.local:")
+        assert req(d, "GET", "/m/", headers={"Host": host})[0] == 200          # the advertised address works
+        assert req(d, "GET", "/m/", headers={"Host": f"evil.local:{d.port}"})[0] == 403   # exact match only
+        assert req(d, "GET", "/m/", headers={"Host": f"x.my-pc.local:{d.port}"})[0] == 403
+    finally:
+        d.stop()
+    off = dashboard.Dashboard(home, Config(), free_port()).start()             # phone access OFF: .local is refused
+    try:
+        assert req(off, "GET", "/m/", headers={"Host": f"my-pc.local:{off.port}"})[0] == 403
+    finally:
+        off.stop()
+
+
+def test_selfsigned_certificate_carries_local_name_and_is_reissued(home, monkeypatch):
+    from cryptography import x509
+    from jarves import mobile
+    monkeypatch.setattr("socket.gethostname", lambda: "Old-PC")
+    mobile.ensure_selfsigned(home, HOST)
+    cert_p, _ = mobile.tls_paths(home)
+
+    def dns():
+        c = x509.load_pem_x509_certificate(cert_p.read_bytes())
+        return c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
+    assert "old-pc.local" in dns()
+    first = cert_p.read_bytes()
+    mobile.ensure_selfsigned(home, HOST)
+    assert cert_p.read_bytes() == first                                         # unchanged name: no reissue
+    monkeypatch.setattr("socket.gethostname", lambda: "New-PC")
+    mobile.ensure_selfsigned(home, HOST)
+    assert "new-pc.local" in dns() and cert_p.read_bytes() != first
