@@ -35,7 +35,7 @@ STALE_AFTER_S = 15 * 60
 HTTP_TIMEOUT_S = 8.0
 NOMINATIM_ENV = "JARVES_GEOCODE_API_BASE"
 OSRM_ENV = "JARVES_ROUTE_API_BASE"
-USER_AGENT = "JARVES-journey/1.0 (personal assistant; contact via GitHub igalgerman/jarves)"
+USER_AGENT = "JARVES-journey/1.0 (personal assistant; contact via GitHub Jarvis-igerman-ai/jarves)"
 CURRENT_LOCATION = re.compile(r"^(here|my location|current location|where i am|me|כאן|פה|המיקום שלי|המיקום הנוכחי|איפה שאני)$", re.I)
 
 
