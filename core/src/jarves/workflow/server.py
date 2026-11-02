@@ -189,11 +189,11 @@ class Handler(BaseHTTPRequestHandler):
             # The console list leaves out archived agents (#730); agent_counts keeps the totals.
             state["agents"] = agent_roster(state["agents"], state["tasks"], state["observed_at"],
                                            state["agent_counts"]["retention_s"])[0]
-            from .autopilot_watch import autopilot_alerts
+            from .autopilot_watch import autopilot_alerts, factory_sim_alerts
             state["unlock"] = {"remaining_s": self._unlock_left(), "ttl_s": owner_unlock_s(self.server.home)}
             state["alerts"] = list(state.get("alerts") or []) + [
                 {"kind": a["kind"], "summary": a["summary"], "task_id": a.get("task_id"), "agent_id": a.get("agent_id")}
-                for a in autopilot_alerts(self.server.store)]
+                for a in autopilot_alerts(self.server.store)] + factory_sim_alerts(self.server.home)
             self._json(200, state)
         elif path == "/api/trace":
             from .trace import history

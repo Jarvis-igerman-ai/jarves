@@ -336,3 +336,34 @@ def gate_questions_step(store: Store) -> list[str]:
             continue
         asked.append(task["id"])
     return asked
+
+
+FACTORY_SIM_STALE_S = 36 * 3600
+
+
+def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
+    """Dashboard alerts from the nightly factory simulation result (#757): a failing scenario, or no run for 36 h.
+
+    Reads <home>/factory_sim_last.json written by core/tools/factory_sim.py --nightly. No file = no alert
+    (the schedule is not installed yet; absence is not a failure).
+    """
+    import json
+    import time
+    from pathlib import Path
+    path = Path(home) / "factory_sim_last.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        at = float(data.get("at") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        # fail closed: a result file that exists but cannot be read must not look healthy
+        return [{"kind": "factory_sim_unreadable", "summary": "Nightly factory simulation result file is unreadable",
+                 "task_id": None, "agent_id": None}]
+    if not data.get("ok", False):
+        failed = ", ".join(str(x) for x in (data.get("failed") or ["unknown"]))[:200]
+        return [{"kind": "factory_sim_failed", "summary": f"Nightly factory simulation failed: {failed}", "task_id": None, "agent_id": None}]
+    if (now if now is not None else time.time()) - at > FACTORY_SIM_STALE_S:
+        return [{"kind": "factory_sim_stale", "summary": "Nightly factory simulation has not run for over 36 hours",
+                 "task_id": None, "agent_id": None}]
+    return []

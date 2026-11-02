@@ -182,8 +182,8 @@ class SimTests(unittest.TestCase):
         return None if started is None else (started - back) / 60
 
     def test_sim_refused_starts_do_not_eat_the_hourly_budget(self):
-        """#763: a start refused with NO_CORE is recorded as an idle event, not in the hourly start list, so the lane
-        resumes right after the pause even with max_starts_per_hour <= 3."""
+        """Regression for #763: refused starts (NO_CORE) must not count against max_starts_per_hour, so the lane
+        starts at once when the Core is back after a long outage, even with a small budget."""
         minutes = self._outage_recovery_minutes(max_starts=2)
         self.assertIsNotNone(minutes)
         self.assertLess(minutes, 25)

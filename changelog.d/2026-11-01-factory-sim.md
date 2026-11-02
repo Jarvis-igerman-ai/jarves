@@ -1,0 +1,1 @@
+- Added: a factory chaos simulation suite (core/tools/factory_sim.py) proving the workflow factory does not stall: Core outages, leftover agents, locked database, dead supervisor and a 24-hour day, all with a fake clock.
