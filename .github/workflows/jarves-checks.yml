@@ -341,19 +341,34 @@ jobs:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
         continue-on-error: true  # a missing/expired artifact must not turn this optional job red
+      - name: Resolve the run that measured the tests (a merge group that reused its PR's proof has no junit of its own)
+        id: src
+        if: needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 core/tools/ci_reuse.py junit-source --repo "$GITHUB_REPOSITORY" --run-id "${{ needs.changes.outputs.proof_run }}" | tee src.out || true
+          rid=$(sed -n 's/^run_id=//p' src.out | head -1)
+          echo "run_id=${rid:-${{ needs.changes.outputs.proof_run }}}" >> "$GITHUB_OUTPUT"
       - name: Junit of the PR run that proved this tree (reused main push)
         uses: actions/download-artifact@v8
         if: needs.changes.outputs.reused == 'true' || needs.changes.outputs.reuse_tests_only == 'true'
         with:
           pattern: junit-${{ matrix.platform }}-*
           path: junit
-          run-id: ${{ needs.changes.outputs.proof_run }}
+          run-id: ${{ steps.src.outputs.run_id }}
           github-token: ${{ github.token }}
         continue-on-error: true  # same: digest-mismatch / expired proof-run artifact
       - name: Merge measured timings and show shard skew
         shell: bash
         run: |
           mkdir -p junit
+          if ! find junit -name '*.xml' | grep -q .; then
+            echo "::notice::no measured junit for ${{ matrix.platform }} (artifacts expired or never produced): timing cache left unchanged, nothing invented"
+            echo "### ${{ matrix.platform }} shard timing: no measured junit available, cache unchanged" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           python3 core/tools/ci_plan.py durations-merge --junit junit --into core/tests/durations-${{ matrix.platform }}.json | tee shard-timings.txt
           { echo "### ${{ matrix.platform }} shard timing"; cat shard-timings.txt; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/cache/save@v6

@@ -1,0 +1,1 @@
+- Fixed: the post-merge shard-timing refresh follows a merge-queue group to the PR run it reused, so main updates the timing cache from the real PR junit; missing or expired artifacts now give a clear notice instead of a failed optional job (#717).
