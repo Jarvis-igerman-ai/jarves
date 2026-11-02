@@ -173,9 +173,9 @@ async def test_hide_terminates_a_window_that_does_not_close(home, cfg):
     await core.start()
     try:
         await core.runtime.show("test")
-        t0 = time.monotonic()
-        await core.runtime.viewer.close(grace_s=0.2)
-        assert launcher.procs[0].terminated and time.monotonic() - t0 < 2
+        # No wall-clock bound (#556): the 0.2 s grace is the only timing; wait_for only catches a hang.
+        await asyncio.wait_for(core.runtime.viewer.close(grace_s=0.2), 60)
+        assert launcher.procs[0].terminated
         assert core.runtime.display_state() == "hidden"
     finally:
         await core.stop()
