@@ -22,7 +22,7 @@ def default_profile() -> Path:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "blocked", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "blocked", "questions-rewrite", "close-superseded",
                                         "own", "release", "owners", "msg", "check-touch"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -295,6 +295,9 @@ def main(argv=None) -> int:
             if a.action == "authorize":
                 changes.update(execution_allowed=True)
             result = store.transition(a.task, changes)
+        elif a.action == "close-superseded":
+            # rest = numbers of the currently OPEN PRs (e.g. from gh pr list); other review/steward tasks are closed.
+            result = {"closed": store.close_superseded(a.rest)}
         elif a.action == "dispatch":
             from .control import dispatch
             store.tick()

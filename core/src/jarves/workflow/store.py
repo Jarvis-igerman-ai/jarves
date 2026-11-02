@@ -383,6 +383,23 @@ class Store:
         self._put(db, "task", task)
         self._event(db, "task_quarantined", f"{task['title']}: {reason}; resource locks retained")
 
+    def close_superseded(self, open_prs):
+        """Block queued review/steward tasks whose PR is no longer open (merged, closed or superseded)."""
+        open_prs = {int(n) for n in open_prs}
+        closed = []
+        with self._tx() as db:
+            for task in self._all(db, "task"):
+                scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+                if (task["state"] == "queued" and scope.get("kind") in {"tier_r_review", "steward"}
+                        and scope.get("pr") not in open_prs):
+                    task.update(state="blocked", execution_allowed=False, updated_at=self.clock(),
+                                blocker=f"Superseded: PR #{scope.get('pr')} is no longer open")
+                    self._put(db, "task", task)
+                    closed.append(task["id"])
+            if closed:
+                self._event(db, "tasks_superseded", f"{len(closed)} review/steward tasks closed: PRs no longer open")
+        return closed
+
     @staticmethod
     def has_recorded_evidence(task):
         """True when the worker already recorded passing acceptance evidence or validation."""
@@ -414,6 +431,8 @@ class Store:
     def _ready(db, task):
         if not task.get("execution_allowed", True) or task["state"] != "queued" or Store._unanswered(db, task["id"]):
             return False
+        if task.get("implementation") == "merged":
+            return False  # already on main: needs installed-product QA, not another implementer (#855)
         for ident in task["depends_on"]:
             if Store._get(db, "task", ident)["state"] not in {"verified", "done"}:
                 return False
