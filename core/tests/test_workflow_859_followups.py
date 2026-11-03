@@ -70,3 +70,23 @@ class WorkerLimitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportFlagTests(unittest.TestCase):
+    """`report` without --agent is the owner's morning report; with --agent it is a heartbeat."""
+
+    def test_report_with_and_without_agent(self):
+        import contextlib
+        import io
+        from jarves.workflow import __main__ as wf
+        with tempfile.TemporaryDirectory() as tmp:
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = wf.main(["report", "--json", "--home", tmp])
+            self.assertEqual(rc, 0, err.getvalue())
+            json.loads(out.getvalue())
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = wf.main(["agent", "--agent", "a1", "--home", tmp])
+                rc2 = wf.main(["report", "--agent", "a1", "--note", "hi", "--home", tmp])
+            self.assertEqual((rc, rc2), (0, 0), err.getvalue())

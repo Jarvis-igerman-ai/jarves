@@ -47,7 +47,7 @@ class WorkflowNativeTests(unittest.TestCase):
         import io
         from jarves.workflow.__main__ import main
         for argv, flag in ((["next"], "--agent"), (["transition", "--state", "review"], "--task"),
-                           (["report"], "--agent")):
+                           (["agent"], "--agent")):
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 code = main(argv + ["--home", str(self.home)])

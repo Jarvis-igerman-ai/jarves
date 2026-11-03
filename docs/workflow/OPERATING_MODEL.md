@@ -160,7 +160,7 @@ web child with a bounded restart budget. It cannot kill or blindly restart
 workers or repeat ambiguous actions. Lost workers retain locks until explicit
 checkpoint/recovery. Slow GitHub reads run separately from local monitoring.
 Only the actual supervisor writes its heartbeat. Native Stop can request at most two
-continuations per hour when independent authorised work is ready; it respects
+continuations per hour once workers are at the limit (up to 12 per hour while below it) when independent authorised work is ready; it respects
 stop_hook_active and never loops on pending owner questions or imported scope.
 
 Windows Task Scheduler is the further layer that restarts the supervisor after

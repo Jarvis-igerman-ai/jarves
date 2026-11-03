@@ -19,7 +19,7 @@ def default_profile() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "jarves"
 
 
-REQUIRED_FLAGS = {"next": ("agent",), "report": ("agent",), "agent": ("agent",), "transition": ("task",),
+REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task",),
                   "recover": ("task",), "authorize": ("task",), "check": ("task",), "reply": ("id",)}
 
 
