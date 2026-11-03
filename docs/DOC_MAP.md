@@ -151,6 +151,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 |---|---|---|---|---|
 | [USER_GUIDE](USER_GUIDE.md), [USER_GUIDE.he](USER_GUIDE.he.md) | End-user guide, English and Hebrew (same sections, tested) | V4 | current | in-app guides in `core/src/jarves/guides/data/` |
 | In-app guide `whats_new_card` (`core/src/jarves/guides/data/whats_new_card.toml`) | Home card "What changed since your version" after an update (#167); same items as `jarvis whatsnew --since V`, closed with `jarvis whatsnew --dismiss`; code `core/src/jarves/whats_new_card.py` | V4.5.1 | beta, OFF by default | [USER_GUIDE](USER_GUIDE.md) |
+| [Model policy guide](../core/src/jarves/guides/data/model_policy.toml) | In-app guide (EN+HE) for the V7 M1 model registry and spend policy (modes, caps, no silent paid fallback) | V7 | beta | `core/src/jarves/model_policy.py` |
 | [INSTALL_TEST](INSTALL_TEST.md) | Windows installer owner test | V4 | current | itself |
 | [GOOGLE_SETUP](GOOGLE_SETUP.md) | Google connection | V3 | current | itself |
 | [CAMERA_SETUP](CAMERA_SETUP.md) | Camera and privacy rules | V3 | current | itself |

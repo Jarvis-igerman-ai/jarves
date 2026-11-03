@@ -1,0 +1,1 @@
+- Added: guide "Model policy and spending" (EN+HE) for the V7 M1 ModelRegistry/SpendPolicy: modes, caps, per-project allow-list, no silent paid fallback; points at `jarvis models` and `jarvis modellab` (docs only, no logic change).
