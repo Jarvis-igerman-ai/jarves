@@ -28,12 +28,6 @@ since = "2026-11-02"
 reason = "Windows: real wall-clock bound 2.5 s exceeded once (3.19 s) on an unrelated PR, ended==idle was correct; use a fake clock"
 
 [[test]]
-id = "test_workflow_store.py::test_concurrent_writers_never_hit_database_is_locked"
-issue = 908
-since = "2026-11-03"
-reason = "Windows shard 3/4 (PR 892 run 41589115828): sqlite 'database is locked' under 1.2 s timeout on a loaded runner, then WinError 32 at teardown; PR does not touch the store"
-
-[[test]]
 id = "test_voice_faults.py::test_delegated_tool_call_budget_exhausted_ends_session"
 issue = 788
 since = "2026-11-01"

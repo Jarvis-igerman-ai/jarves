@@ -339,15 +339,21 @@ class WorkflowStoreTests(unittest.TestCase):
         import sqlite3
         import threading
         errors: list[BaseException] = []
+        barrier = threading.Barrier(2)   # both writers start together; the contention is the point
 
         def burst(name):
+            handle = None
             try:
-                handle = Store(self.path, timeout_s=1.2)
+                # generous timeout: a loaded CI runner must not turn slow I/O into a false "locked"
+                handle = Store(self.path, timeout_s=10.0)
+                barrier.wait(10)
                 for i in range(40):
                     handle.record_event("burst", f"{name}-{i}")
-                handle.close()
-            except sqlite3.OperationalError as exc:
+            except BaseException as exc:
                 errors.append(exc)
+            finally:
+                if handle is not None:
+                    handle.close()   # always release the file so Windows teardown cannot hit WinError 32
 
         threads = [threading.Thread(target=burst, args=(n,)) for n in ("a", "b")]
         for t in threads:
