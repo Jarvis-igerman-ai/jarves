@@ -19,7 +19,8 @@
     recommended: "Recommended:", ifSkip: "If you do not answer:", answer: "Answer", answerLabel: t => `Answer: ${t}`,
     more: n => n === 1 ? "1 more question" : `${n} more questions`,
     nothing: "Nothing is waiting for you.", nothingMore: "The team keeps working; a new question will show up here.",
-    started: a => `started ${a}`, noBeat: a => `no progress since ${a}`, noWorker: q => `No worker is running right now · ${q === 1 ? "1 task" : `${q} tasks`} queued`,
+    runFor: d => `running ${d}`, lastBeat: a => `last activity ${a}`, noAgent: "No worker connected", noBeat: a => `no progress since ${a}`,
+    dur: {m: n => `${n} min`, h: n => `${n} h`}, noWorker: q => `No worker is running right now · ${q === 1 ? "1 task" : `${q} tasks`} queued`,
     earlier: n => `Earlier sessions: ${n}`, moreTeam: n => `${n} more in the team list. `, archived: n => `${n} archived.`,
     offline: "The worker disconnected mid-task", stalled: "The worker stalled without progress", twice: "Stalled twice; needs a decision",
     refused: "Autopilot could not start a worker", noReason: "No reason recorded", since: a => `since ${a}`,
@@ -33,7 +34,8 @@
     recommended: "מומלץ:", ifSkip: "אם לא תענה:", answer: "לענות", answerLabel: t => `לענות על: ${t}`,
     more: n => n === 1 ? "ועוד שאלה אחת" : `${n} שאלות נוספות`,
     nothing: "שום דבר לא מחכה לך.", nothingMore: "הצוות ממשיך לעבוד; שאלה חדשה תופיע כאן.",
-    started: a => `התחיל ${a}`, noBeat: a => `ללא התקדמות מאז ${a}`, noWorker: q => `שום עובד לא רץ כרגע · ${q === 1 ? "משימה אחת" : `${q} משימות`} בתור`,
+    runFor: d => `רץ ${d}`, lastBeat: a => `פעילות אחרונה ${a}`, noAgent: "אין עובד מחובר", noBeat: a => `ללא התקדמות מאז ${a}`,
+    dur: {m: n => `${n} דק׳`, h: n => `${n} שע׳`}, noWorker: q => `שום עובד לא רץ כרגע · ${q === 1 ? "משימה אחת" : `${q} משימות`} בתור`,
     earlier: n => `סשנים קודמים: ${n}`, moreTeam: n => `ועוד ${n} ברשימת הצוות. `, archived: n => `${n} בארכיון.`,
     offline: "העובד התנתק באמצע העבודה", stalled: "העובד נתקע בלי התקדמות", twice: "נתקע פעמיים; צריך החלטה",
     refused: "המנוע האוטומטי לא הצליח להתחיל עובד", noReason: "לא נרשמה סיבה", since: a => `מאז ${a}`,
@@ -92,28 +94,39 @@
       : `<p class="today-empty"><span class="status-dot good" aria-hidden="true"></span><b>${esc(T.nothing)}</b> ${esc(T.nothingMore)}</p>`);
   }
 
+  // #733: every running task is listed, with its worker, how long it has run and when the worker last reported.
+  // A running task whose worker vanished stays visible (amber, "no worker connected") instead of disappearing.
+  const runMinutes = sec => { const m = Math.max(1, Math.floor(sec / 60)); return m < 60 ? T.dur.m(m) : T.dur.h(Math.floor(m / 60)); };
+  function runningEntries(data, now = Date.now() / 1000) {
+    const beatOf = agent => !agent ? 0 : Math.max(seconds(agent.heartbeat_at), seconds(agent.tool_started_at) && now - seconds(agent.tool_started_at) < 900 ? now : 0);
+    const holders = new Map();
+    data.agents.filter(agent => agent.status !== "offline").forEach(agent => { if (agent.task_id && !holders.has(agent.task_id)) holders.set(agent.task_id, agent); });
+    const byId = new Map(data.agents.map(agent => [agent.id, agent]));
+    // Stalled or orphaned rows float to the top (they need attention); then the most recent progress.
+    return data.tasks.filter(task => task.state === "running")
+      .map(task => { const agent = holders.get(task.id) || byId.get(task.agent_id); const beat = beatOf(agent); return {task, agent, beat, fresh: Boolean(agent && agent.status !== "offline" && beat && now - beat < 120)}; })
+      .sort((a, b) => (a.fresh - b.fresh) || seconds(b.agent?.progress_at) - seconds(a.agent?.progress_at) || String(a.task.id).localeCompare(String(b.task.id)));
+  }
+
   function running(data) {
     const now = Date.now() / 1000;
-    const tasks = new Map(data.tasks.map(task => [task.id, task]));
-    const beatOf = agent => Math.max(seconds(agent.heartbeat_at), seconds(agent.tool_started_at) && now - seconds(agent.tool_started_at) < 900 ? now : 0);
-    // Stalled rows float to the top (they need attention); then the most recent progress.
-    const live = data.agents.filter(agent => agent.status !== "offline" && tasks.get(agent.task_id)?.state === "running")
-      .sort((a, b) => (now - beatOf(b) >= 120) - (now - beatOf(a) >= 120) || seconds(b.progress_at) - seconds(a.progress_at));
+    const live = runningEntries(data, now);
     const earlier = data.agents.filter(agent => agent.status === "offline")
       .sort((a, b) => seconds(b.heartbeat_at) - seconds(a.heartbeat_at));
     const archived = (data.agent_counts || {}).archived || 0;
     $("#today-running-count").textContent = live.length ? String(live.length) : "";
-    const row = agent => {
-      const task = tasks.get(agent.task_id);
-      const beat = beatOf(agent);
-      const fresh = beat && now - beat < 120;
-      const model = agent.observed_model || agent.requested_model;
+    const row = ({task, agent, beat, fresh}) => {
+      const model = agent && (agent.observed_model || agent.requested_model);
+      const lane = agent?.lane && agent.lane !== "any" ? agent.lane : task.lane;
       // "How long": the task's last state change (claim) is the best start time the state carries.
-      const started = task.updated_at ? `<span>${esc(T.started(helpers.age(task.updated_at)))}</span>` : "";
+      const ran = seconds(task.updated_at) ? `<span>${esc(T.runFor(runMinutes(now - seconds(task.updated_at))))}</span>` : "";
+      const last = !agent || agent.status === "offline" ? `<span class="today-warn"><span aria-hidden="true">⚠ </span>${esc(T.noAgent)}</span>`
+        : fresh ? `<span>${esc(T.lastBeat(helpers.age(beat)))}</span>`
+        : `<span class="today-warn"><span aria-hidden="true">⚠ </span>${esc(T.noBeat(clock(beat)))}</span>`;
       return `<li><button type="button" class="today-row" data-task="${esc(task.id)}"><span class="status-dot ${fresh ? "good today-pulse" : "warn"}" aria-hidden="true"></span>`
         + `<span class="today-row-main"><span class="today-row-title" dir="auto">${esc(task.title)}</span>`
-        + `<span class="today-row-meta"><span class="today-chip">${esc(T.lanes[agent.lane] || agent.lane || T.general)}</span><span dir="auto">${esc(agent.label || agent.id)}</span>${model ? `<span dir="ltr">${esc(model)}</span>` : ""}`
-        + `${started}${fresh ? "" : `<span class="today-warn"><span aria-hidden="true">⚠ </span>${esc(T.noBeat(clock(beat)))}</span>`}</span></span></button></li>`;
+        + `<span class="today-row-meta"><span class="today-chip">${esc(T.lanes[lane] || lane || T.general)}</span>${agent ? `<span dir="auto">${esc(agent.label || agent.id)}</span>` : ""}${model ? `<span dir="ltr">${esc(model)}</span>` : ""}`
+        + `${ran}${last}</span></span></button></li>`;
     };
     const rows = live.slice(0, VISIBLE).map(row).join("");
     const overflow = live.length > VISIBLE ? `<details class="today-earlier today-overflow"><summary>${esc(T.overflow(live.length - VISIBLE))}</summary><ul class="today-list">${live.slice(VISIBLE).map(row).join("")}</ul></details>` : "";

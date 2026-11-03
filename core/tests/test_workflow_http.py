@@ -424,7 +424,7 @@ console.log(timelineText(data, 24, now));
                        ("מוזגו היום", "Merged today"), ("עוד לא הושלם דבר היום", "Nothing was finished yet today")):
             self.assertIn(he, js)
             self.assertIn(en, js)
-        for he, en in (("שום דבר לא תקוע", "Nothing is stuck"), ("ללא התקדמות מאז ${a}", "no progress since ${a}"), ("התחיל ${a}", "started ${a}")):
+        for he, en in (("שום דבר לא תקוע", "Nothing is stuck"), ("ללא התקדמות מאז ${a}", "no progress since ${a}"), ("רץ ${d}", "running ${d}")):
             self.assertIn(he, today)
             self.assertIn(en, today)
         # Tokens: dark default, light by system and by explicit choice; reduced motion respected.

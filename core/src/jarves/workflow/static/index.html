@@ -40,14 +40,15 @@
         <section class="page-heading"><div><div class="eyebrow" id="page-eyebrow"></div><h1 id="page-title">תמונת מצב</h1><p id="page-description"></p></div><div class="heading-actions"><button type="button" id="add-task" class="button secondary"><span aria-hidden="true">＋</span> משימה חדשה</button><button type="button" id="dispatch" class="button primary"><span aria-hidden="true">↗</span> בדוק הקצאה</button></div></section>
 
         <section id="view-overview" class="view" aria-label="תמונת מצב">
+          <p class="ov-banner" id="ov-banner" hidden></p>
           <section class="ov-status" id="ov-status" aria-labelledby="ov-status-title" data-tone="unknown">
             <span class="ov-status-icon" id="ov-status-icon" aria-hidden="true">…</span>
             <div class="ov-status-main"><h2 id="ov-status-title" aria-live="polite">טוען את מצב המפעל</h2><p class="ov-status-detail"><span id="ov-status-detail"></span> <span class="ov-fresh" id="ov-fresh" data-age="ok"></span></p><p class="ov-status-detail" id="ov-focus" hidden></p></div>
             <ul class="ov-facts" id="ov-facts" aria-label="צנרת העבודה"></ul>
           </section>
           <div class="today" id="today" hidden>
-            <section class="today-block today-needs" aria-labelledby="today-needs-title"><div class="today-head"><span class="today-icon" aria-hidden="true">◆</span><h2 id="today-needs-title" data-i18n="needs">צריך אותך</h2><span class="today-count" id="today-needs-count"></span><a class="text-link" href="#questions"><span data-i18n="all_questions">לכל השאלות</span> <span aria-hidden="true" class="dir-arrow">←</span></a></div><div id="today-needs" aria-live="polite"></div></section>
             <section class="today-block today-running" aria-labelledby="today-running-title"><div class="today-head"><span class="today-icon ok" aria-hidden="true">▶</span><h2 id="today-running-title" data-i18n="running">עובד עכשיו</h2><span class="today-count" id="today-running-count"></span></div><div id="today-running"></div></section>
+            <section class="today-block today-needs" aria-labelledby="today-needs-title"><div class="today-head"><span class="today-icon" aria-hidden="true">◆</span><h2 id="today-needs-title" data-i18n="needs">צריך אותך</h2><span class="today-count" id="today-needs-count"></span><a class="text-link" href="#questions"><span data-i18n="all_questions">לכל השאלות</span> <span aria-hidden="true" class="dir-arrow">←</span></a></div><div id="today-needs" aria-live="polite"></div></section>
             <section class="today-block today-blocked" aria-labelledby="today-blocked-title"><div class="today-head"><span class="today-icon warn" aria-hidden="true">■</span><h2 id="today-blocked-title" data-i18n="blocked">תקוע</h2><span class="today-count warn" id="today-blocked-count"></span></div><div id="today-blocked"></div></section>
             <section class="today-block ov-done" aria-labelledby="ov-done-title"><div class="today-head"><span class="today-icon ok" aria-hidden="true">✓</span><h2 id="ov-done-title" data-i18n="done_today">הושלם היום</h2></div><div id="ov-done"></div></section>
           </div>
