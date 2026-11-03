@@ -1,0 +1,1 @@
+- Fixed: quarantined three flaky tests (issues 722, 660, 422) so CI stays green while they are made deterministic.
