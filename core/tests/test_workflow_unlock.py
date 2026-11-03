@@ -76,15 +76,15 @@ class UnlockTests(unittest.TestCase):
             self.assertEqual(self.request(path, {"text": "More please"})[0], 200, path)
         self.assertEqual(len(self.store.snapshot()["followups"]), 2)
 
-    def test_correct_code_unlocks_only_that_session_once_and_default_is_8_hours(self):
+    def test_correct_code_unlocks_only_that_session_once_and_default_is_1_week(self):
         sid = self.login()
         shown = unlock.issue(self.home)
         self.assertRegex(shown, r"^\d{4}$")
         self.assertEqual(self.request("/api/unlock", {"code": "0000" if shown != "0000" else "1111"})[0], 403)
         code, _, data = self.request("/api/unlock", {"code": shown})
         self.assertEqual(code, 200)
-        self.assertEqual(data["result"]["remaining_s"], 8 * 3600)
-        self.assertEqual(self.request("/api/state")[2]["unlock"]["remaining_s"] // 3600, 7)
+        self.assertEqual(data["result"]["remaining_s"], 7 * 86400)
+        self.assertEqual(self.request("/api/state")[2]["unlock"]["remaining_s"] // 3600, 167)
         self.assertEqual(self.request(f"/api/questions/{self.q}/answer", {"answer": "A"})[0], 200)
         self.assertFalse((self.home / unlock.FILE).exists())          # single use
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
@@ -99,7 +99,7 @@ class UnlockTests(unittest.TestCase):
         self.server.unlocked[sid] = __import__("time").time() - 1
         self.assertEqual(self.request(f"/api/questions/{self.q}/defer", {})[0], 403)
         self.assertEqual(self.request("/api/state")[2]["unlock"]["remaining_s"], 0)
-        self.assertEqual(autopilot.owner_unlock_s(self.home), 8 * 3600)
+        self.assertEqual(autopilot.owner_unlock_s(self.home), 7 * 86400)
         policy = autopilot.load(self.home)[0]
         policy["watchdog"]["owner_unlock_s"] = 600
         autopilot.save(self.home, policy)
