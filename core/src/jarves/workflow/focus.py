@@ -15,19 +15,23 @@ Beta: OFF by default (``focus_enabled`` false, the owner opts in). A lane config
 focus (the owner paused it). A change of focus needs the condition to hold for 2 evaluations in a row (no flapping) and records ONE ledger
 event ``focus_changed``. The steward is never 0. Worker counts never exceed ``max_concurrent`` and the usage
 throttle (stop = 0, slow = 1) always wins. GitHub is read through ``gh`` (read-only, fail soft) and cached 5 minutes.
+Hysteresis counts distinct gh reads, not loop ticks; the read runs outside autopilot.lock (background thread).
 """
 from __future__ import annotations
 
 import json
 import os
 import subprocess
+import sys
+import threading
 
 FOCUS_DEFAULTS = {"focus_enabled": False, "focus_pr_high": 6, "focus_green_high": 3, "focus_showstopper_high": 2}
 FOCUS_KEYS = tuple(FOCUS_DEFAULTS)
 CACHE_KEY, STATE_KEY = "focus_gh_cache", "focus_state"
 CACHE_TTL_S = 300
 CONFIRM = 2                      # evaluations in a row before a focus change
-GH_TIMEOUT_S = 20
+GH_TIMEOUT_S = 15
+_BG = threading.Lock()         # one background gh read at a time
 FOCUSES = ("main-fix", "fix", "merge", "balanced")
 HE_NAME = {"main-fix": "תיקון main", "fix": "תיקון", "merge": "מיזוג", "balanced": "מאוזן"}
 SENTENCE = "Run workflow_console.py focus each cycle and follow it."
@@ -48,7 +52,9 @@ def setting(policy: dict, key: str):
 
 # ---- inputs ---------------------------------------------------------------------------------------------------
 def _gh_json(args: list[str]):
-    out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S, check=True, shell=False)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0     # no console flash
+    out = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=GH_TIMEOUT_S, check=True, shell=False,
+                         creationflags=flags)
     return json.loads(out.stdout or "[]")
 
 
@@ -135,11 +141,38 @@ def _github(store, gh, fetch: bool) -> tuple[list | None, list | None, str]:
         prs, issues = (gh or default_gh)("prs"), (gh or default_gh)("issues")
         if not isinstance(prs, list) or not isinstance(issues, list):
             raise ValueError("unexpected gh output")
-        _put(store, CACHE_KEY, {"ts": now, "prs": prs, "issues": issues})
+        _put(store, CACHE_KEY, {"ts": now, "read": now, "prs": prs, "issues": issues})
         return prs, issues, "gh"
     except Exception:  # noqa: BLE001  fail soft: never raise into the loop
         _put(store, CACHE_KEY, {**cache, "ts": now})        # retry in 5 min, keep the last good lists
         return (cache.get("prs"), cache.get("issues"), "stale-cache") if cache.get("prs") is not None else (None, None, "none")
+
+
+def refresh(store, policy: dict, gh=None, *, background: bool = False) -> None:
+    """Refresh the 5-minute gh cache when focus is on and the cache is stale. Call it OUTSIDE autopilot.lock.
+    ``background`` runs the slow gh read on a daemon thread (the supervisor loop is never blocked); otherwise it
+    reads synchronously (tests, injected ``gh``). Never raises."""
+    try:
+        if not setting(policy, "focus_enabled"):
+            return
+        cache = _meta(store, CACHE_KEY, {})
+        if cache and store.clock() - cache.get("ts", 0) < CACHE_TTL_S:
+            return
+        if not background:
+            _github(store, gh, True)
+            return
+
+        def work():
+            try:
+                _github(store, gh, True)
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                _BG.release()
+        if _BG.acquire(blocking=False):
+            threading.Thread(target=work, name="focus-gh", daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def gather_inputs(store, gh=None, *, fetch: bool = True, usage_level: str = "ok") -> dict:
@@ -147,8 +180,11 @@ def gather_inputs(store, gh=None, *, fetch: bool = True, usage_level: str = "ok"
     snap = store.snapshot()
     source = snap.get("source", {})
     prs, issues, origin = _github(store, gh, fetch)
+    cache = _meta(store, CACHE_KEY, {})
+    read_ts = cache.get("read", cache.get("ts")) if origin in {"gh", "cache", "stale-cache"} else None
     if prs is None:                                           # no gh data at all: fall back to the sync snapshot
         prs, issues, origin = source.get("open_prs", []), source.get("open_issues", []), "snapshot"
+        read_ts = int(store.clock() // CACHE_TTL_S)           # no gh data: one look per 5-minute window
     from .release_health import release_health
     try:
         main_red = any(f["kind"] == "main_not_green" for f in release_health(source, store.clock()))
@@ -164,7 +200,8 @@ def gather_inputs(store, gh=None, *, fetch: bool = True, usage_level: str = "ok"
             queued[task["lane"]] += 1
     waiting = sum(1 for q in snap.get("questions", []) if q.get("status") in {"pending", "deferred", "open"})
     return {"prs": classify_prs(prs), "issues": classify_issues(issues), "main_red": main_red, "queued": queued,
-            "questions_waiting": waiting, "blocked_lanes": blocked_lanes, "usage_level": usage_level, "source": origin}
+            "questions_waiting": waiting, "blocked_lanes": blocked_lanes, "usage_level": usage_level, "source": origin,
+            "read_ts": read_ts}
 
 
 # ---- decision -------------------------------------------------------------------------------------------------
@@ -246,7 +283,12 @@ def compute_focus(inputs: dict, policy: dict, state: dict | None = None, advance
         if raw != current:
             seen = new.get("streak", 0) if new.get("candidate") == raw else 0
             pending = {"focus": raw, "seen": seen, "needed": CONFIRM}
+    elif inputs.get("read_ts") is not None and new.get("last_read") == inputs["read_ts"]:
+        focus = current                    # same data read as last time (10 s ticks, 5 min cache): not a new look
+        if raw != current:
+            pending = {"focus": raw, "seen": new.get("streak", 0) if new.get("candidate") == raw else 0, "needed": CONFIRM}
     else:
+        new["last_read"] = inputs.get("read_ts")
         if raw == current:
             new["candidate"], new["streak"] = None, 0
         else:

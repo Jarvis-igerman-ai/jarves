@@ -166,6 +166,61 @@ class StateTests(Base):
         self.assertEqual(self.tick(calm)["focus"], "balanced")
         self.assertEqual(len(self.events()), 2)
 
+    def test_ten_second_ticks_one_cached_read_does_not_flip_focus(self):
+        """Real supervisor rate: a tick every 10 s, gh cached 5 min. One read must not confirm itself."""
+        busy = FakeGh([pr(n) for n in range(8)])
+        seen = []
+        for _ in range(29):                                            # 290 s: all the same single read
+            seen.append(self.ev(busy)["focus"])
+            self.now[0] += 10
+        self.assertEqual(set(seen), {"balanced"})
+        self.assertEqual(self.events(), [])
+        self.assertEqual(busy.calls, 2, "one gh read (prs + issues)")
+        self.now[0] += 20                                              # cache expired: second distinct read confirms
+        self.assertEqual(self.ev(busy)["focus"], "merge")
+        self.assertEqual(len(self.events()), 1)
+
+    def test_failed_gh_read_does_not_count_as_a_new_look(self):
+        busy = FakeGh([pr(n) for n in range(8)])
+        self.ev(busy)
+        busy.fail = True
+        self.now[0] += 301
+        self.assertEqual(self.ev(busy)["focus"], "balanced")           # stale cache is not a second look
+
+    def test_gh_runs_without_console_window_flag(self):
+        import subprocess
+        import sys
+        from unittest import mock
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen.update(kw)
+            return mock.Mock(stdout="[]")
+        with mock.patch.object(subprocess, "run", fake_run):
+            focus._gh_json(["pr", "list"])
+        self.assertFalse(seen["shell"])
+        if sys.platform == "win32":
+            self.assertEqual(seen["creationflags"], subprocess.CREATE_NO_WINDOW)
+
+    def test_background_refresh_does_not_block_and_fills_cache(self):
+        import threading
+        gate, started = threading.Event(), threading.Event()
+        busy = FakeGh([pr(n) for n in range(8)])
+        real = busy.__call__
+
+        def slow(kind):
+            started.set()
+            gate.wait(5)
+            return real(kind)
+        focus.refresh(self.store, {**POLICY, "focus_enabled": True}, slow, background=True)   # returns at once
+        self.assertTrue(started.wait(5))
+        gate.set()
+        for _ in range(100):
+            if not focus._BG.locked():
+                break
+            threading.Event().wait(0.05)
+        self.assertEqual(focus.gather_inputs(self.store, None, fetch=False)["source"], "cache")
+
     def test_flapping_does_not_change_focus(self):
         busy, calm = FakeGh([pr(n) for n in range(8)]), FakeGh()
         for i in range(8):

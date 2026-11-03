@@ -152,6 +152,8 @@ def step(store: Store, profile_home: Path, policy: dict | None = None, *, start=
     if not _LOCK.acquire(blocking=False):
         return []
     try:
+        from . import focus as _focus
+        _focus.refresh(store, policy, gh_focus, background=gh_focus is None)    # slow gh read: before and outside the lock
         try:
             with exclusive(store.path.parent / "autopilot.lock"):
                 done = _step(store, Path(profile_home), policy, start, stop, notify, force, find, usage, gh_focus)
@@ -317,7 +319,7 @@ def _focus_plan(store, policy, throttle, gh) -> dict | None:
     try:
         if not focus.setting(policy, "focus_enabled"):
             return None
-        return focus.evaluate(store, policy, gh, usage_level=throttle)["lanes"]
+        return focus.evaluate(store, policy, gh, fetch=False, usage_level=throttle)["lanes"]
     except Exception:  # noqa: BLE001
         log.exception("focus failed; static lane policy used")
         return None
