@@ -276,7 +276,8 @@ console.log(JSON.stringify({q: out.q, calm, noisy: out.html}));
         self.assertEqual(html.count("<h1"), 1)
         self.assertNotIn('id="now-strip"', html)  # the Now strip is merged into "Running now"
         self.assertIn('<div id="today-needs" aria-live="polite">', html)
-        self.assertEqual(len(re.findall(r'<section class="today-block[^"]*" aria-labelledby="today-[a-z]+-title">', html)), 4)
+        # needs, running, stuck; done today has its own id; version progress is folded (#789)
+        self.assertEqual(len(re.findall(r'<section class="today-block[^"]*" aria-labelledby="today-[a-z]+-title">', html)), 3)
         self.assertIn('dispatchEvent(new CustomEvent("workflow:render"', app)
         # Strict CSP: no inline styles or handlers; read-only: no requests, no answer path.
         for banned in ("style=", "onclick", "fetch(", "/api/", "XMLHttpRequest", "localStorage"):

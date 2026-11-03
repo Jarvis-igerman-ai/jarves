@@ -26,6 +26,7 @@
     hint: "The tag shows who can unblock it.", moreBlocked: n => `${n} more in the plan`, noBlocked: "Nothing is stuck.",
     bar: r => `${r.version}: ${r.merged} merged, ${r.verified} verified, ${r.shipped} shipped of ${r.total} required. Open in the plan`,
     merged: "merged", verified: "verified", shipped: "shipped", of: n => `of ${n}`, who: unblockersEn,
+    overflow: n => `${n} more`, foldSum: r => `${r.version}: ${r.merged} of ${r.total} merged`,
   } : {
     lanes: {bugs: "באגים", release: "שחרור", features: "פיצ'רים", ops: "תשתית", security: "אבטחה", manager: "ניהול"},
     general: "כללי", minutes: n => `כ־${n} דק׳`, deferred: "נשמר להמשך", blocks: "חוסם:", related: "קשור ל:",
@@ -39,7 +40,10 @@
     hint: "התג מראה מי יכול לשחרר.", moreBlocked: n => `ועוד ${n} בתוכנית`, noBlocked: "שום דבר לא תקוע.",
     bar: r => `${r.version}: ${r.merged} מוזגו, ${r.verified} נבדקו, ${r.shipped} שוחררו מתוך ${r.total} חובה. פתח בתוכנית`,
     merged: "מוזגו", verified: "נבדקו", shipped: "שוחררו", of: n => `מתוך ${n}`, who: unblockers,
+    overflow: n => `עוד ${n}`, foldSum: r => `מוזגו ${r.merged} מתוך ${r.total} · ${r.version}`,
   };
+  // #789: at most this many rows are visible in a block; the rest open from one "more N" line.
+  const VISIBLE = 7;
   const signatures = {};
   let helpers = {age: () => "", complete: () => false};
 
@@ -99,7 +103,7 @@
       .sort((a, b) => seconds(b.heartbeat_at) - seconds(a.heartbeat_at));
     const archived = (data.agent_counts || {}).archived || 0;
     $("#today-running-count").textContent = live.length ? String(live.length) : "";
-    const rows = live.map(agent => {
+    const row = agent => {
       const task = tasks.get(agent.task_id);
       const beat = beatOf(agent);
       const fresh = beat && now - beat < 120;
@@ -110,13 +114,15 @@
         + `<span class="today-row-main"><span class="today-row-title" dir="auto">${esc(task.title)}</span>`
         + `<span class="today-row-meta"><span class="today-chip">${esc(T.lanes[agent.lane] || agent.lane || T.general)}</span><span dir="auto">${esc(agent.label || agent.id)}</span>${model ? `<span dir="ltr">${esc(model)}</span>` : ""}`
         + `${started}${fresh ? "" : `<span class="today-warn"><span aria-hidden="true">⚠ </span>${esc(T.noBeat(clock(beat)))}</span>`}</span></span></button></li>`;
-    }).join("");
+    };
+    const rows = live.slice(0, VISIBLE).map(row).join("");
+    const overflow = live.length > VISIBLE ? `<details class="today-earlier today-overflow"><summary>${esc(T.overflow(live.length - VISIBLE))}</summary><ul class="today-list">${live.slice(VISIBLE).map(row).join("")}</ul></details>` : "";
     const queued = data.tasks.filter(task => task.state === "queued" && task.execution_allowed !== false).length;
-    const list = rows ? `<ul class="today-list">${rows}</ul>` : `<p class="today-empty">${esc(T.noWorker(queued))}</p>`;
-    const history = earlier.length || archived ? `<details class="today-earlier"><summary>${esc(T.earlier(earlier.length + archived))}</summary><ul>${earlier.slice(0, 8).map(agent => `<li><span dir="auto">${esc(agent.label || agent.id)}</span><span>${esc(helpers.age(agent.heartbeat_at))}</span></li>`).join("")}</ul>${earlier.length > 8 || archived ? `<p>${earlier.length > 8 ? esc(T.moreTeam(earlier.length - 8)) : ""}${archived ? esc(T.archived(archived)) : ""}</p>` : ""}</details>` : "";
-    const open = $("#today-running details")?.open;
+    const list = rows ? `<ul class="today-list">${rows}</ul>${overflow}` : `<p class="today-empty">${esc(T.noWorker(queued))}</p>`;
+    const history = earlier.length || archived ? `<details class="today-earlier today-history"><summary>${esc(T.earlier(earlier.length + archived))}</summary><ul>${earlier.slice(0, 8).map(agent => `<li><span dir="auto">${esc(agent.label || agent.id)}</span><span>${esc(helpers.age(agent.heartbeat_at))}</span></li>`).join("")}</ul>${earlier.length > 8 || archived ? `<p>${earlier.length > 8 ? esc(T.moreTeam(earlier.length - 8)) : ""}${archived ? esc(T.archived(archived)) : ""}</p>` : ""}</details>` : "";
+    const opened = [".today-overflow", ".today-history"].filter(cls => $(`#today-running ${cls}`)?.open);
     put("#today-running", list + history);
-    if (open) $("#today-running details")?.setAttribute("open", "");
+    opened.forEach(cls => $(`#today-running ${cls}`)?.setAttribute("open", ""));
   }
 
   // Who can move a blocked task, from the fields a task carries. Unknown stays unknown.
@@ -138,6 +144,8 @@
     const list = data.tasks.filter(task => task.state === "blocked")
       .sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2) || seconds(a.updated_at) - seconds(b.updated_at));
     $("#today-blocked-count").textContent = list.length ? String(list.length) : "";
+    // Healthy = calm (#789): the block shows only when something is stuck; the verdict bar covers the rest.
+    $("#today-blocked").closest(".today-block").hidden = !list.length;
     const rows = list.slice(0, 6).map(task => {
       const info = blockedReason(task);
       const why = info.reason ? esc(reasonText[info.reason]()) : info.raw ? `<span dir="auto">${esc(info.raw)}</span>` : esc(T.noReason);
@@ -157,6 +165,9 @@
       const merged = required.filter(task => helpers.complete(task) || ["verified", "done"].includes(task.state) || task.implementation === "merged").length;
       return {version, total: required.length, shipped, verified, merged};
     });
+    // The folded block's one-line summary: the first version that is not fully shipped.
+    const focus = rows.find(row => row.total && row.shipped < row.total);
+    $("#fold-versions-sum").textContent = focus ? T.foldSum(focus) : "";
     put("#today-roadmap", `<ul class="today-versions">${rows.map(row => `<li><a class="today-version" href="#roadmap" data-version="${esc(row.version)}" aria-label="${esc(T.bar(row))}">`
       + `<span class="today-version-name" dir="ltr">${esc(row.version)}</span>`
       + `<span class="today-bar" aria-hidden="true" data-total="${row.total}"><span class="seg shipped" data-n="${row.shipped}"></span><span class="seg verified" data-n="${row.verified - row.shipped}"></span><span class="seg merged" data-n="${row.merged - row.verified}"></span></span>`

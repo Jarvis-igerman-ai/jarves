@@ -177,6 +177,29 @@ class NowStaticContractTests(unittest.TestCase):
             self.assertEqual(self.js.count(f"{key}: "), 2, key)
             self.assertIn(f'data-i18n="{key}"', self.html)
 
+    def test_secondary_blocks_are_folded_with_counts(self):
+        # #789 folding pass: everything but verdict, needs, running, stuck and done today is a closed <details>
+        # with a one-line summary; the open/closed choice is remembered in guarded storage only.
+        folds = re.findall(r'<details class="ov-more ov-fold"[^>]*data-fold="([a-z]+)"[^>]*>', self.html)
+        self.assertEqual(folds, ["workers", "versions", "restarts", "manager", "report", "more"])
+        self.assertNotRegex(self.html, r"<details[^>]*data-fold[^>]*\bopen\b")
+        for count in ('id="ov-now-count"', 'id="fold-versions-sum"', 'id="ov-restarts-count"', 'id="ov-manager-count"', 'id="ov-more-count"'):
+            self.assertIn(count, self.html)
+        main = self.html[self.html.index('id="today"'):self.html.index('data-fold="workers"')]
+        for always in ("today-needs", "today-running", "today-blocked", "ov-done"):
+            self.assertIn(always, main)
+        self.assertIn('const FOLD_KEY = "jarves.workflow.fold.";', self.js)
+        for line in self.js.splitlines():
+            if "localStorage." in line:
+                self.assertIn("try {", line)
+        self.assertIn('fold("more", alerts > 0);', self.js)
+        self.assertIn('<bdi class="ov-id">${esc(w.task_id)}</bdi>', self.js)
+        today = (Path(STATIC) / "today.js").read_text(encoding="utf-8")
+        self.assertIn("const VISIBLE = 7;", today)
+        self.assertIn('$("#today-blocked").closest(".today-block").hidden = !list.length;', today)
+        self.assertIn("overflow: n => `עוד ${n}`", today)
+        self.assertNotIn("localStorage", today)
+
     def test_overview_script_parses_and_renders(self):
         node = shutil.which("node")
         if not node:

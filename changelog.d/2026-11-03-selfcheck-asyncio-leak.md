@@ -1,0 +1,1 @@
+- Fixed: test_selfcheck ignores asyncio 'Task was destroyed' logs leaked from earlier tests (flaky CI on PR 909).
