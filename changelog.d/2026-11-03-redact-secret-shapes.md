@@ -1,0 +1,1 @@
+- Fixed: `logs.redact` and `logs.has_secret` now cover AWS key ids, `*_SECRET_ACCESS_KEY` / `*_TOKEN` / `*_PASSWORD` / `client_secret` style names, Stripe `sk_live_`, Google `AIza` keys and PEM private key blocks; env lookups such as `os.environ.get(...)` are no longer masked (#869).

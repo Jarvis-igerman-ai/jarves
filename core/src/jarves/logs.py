@@ -69,17 +69,25 @@ _PATTERNS = [
     (re.compile(r"AQAAANCMnd8BFdERjHoAwE/Cl\+sBAAAA[A-Za-z0-9+/=]*"), "<dpapi-blob>"),   # Windows DPAPI blob (base64)
     (re.compile(r"\bwa[ab]_[A-Za-z0-9_\-]{20,}"), "<whatsapp-bridge-token>"),           # SW-V4 F bridge user/admin token
     (re.compile(r"\bwa1\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"), "<whatsapp-approval>"),   # signed approval id
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "<aws-key-id>"),                       # AWS access key id
+    (re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}"), "<stripe-key>"),              # Stripe secret / restricted key
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}"), "<google-api-key>"),                        # Google API key
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|[\s\S]*$)"),
+     "<private-key>"),                                                                   # PEM private key block
     (re.compile(r"(?i)([?&#;](?:t|k|key|token|access_token|refresh_token|id_token|code|secret|client_secret|sig|"
                 r"signature|auth|password|pwd|session|sid|apikey|api_key|state)=)[^&#\s\"'<>]+"), r"\1***"),
-    (re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|cookie|authorization)(\"?\s*[:=]\s*\"?)"
-                r"(?!\*\*\*|<\d+ chars>|<secret>)[^\s\",}&]+"), r"\1\2***"),
+    # the name may carry a prefix (access_token, client_secret, DB_PASSWORD, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN);
+    # a lookup such as os.environ.get(...) is code, not a secret value
+    (re.compile(r"(?i)(?<![\w-])((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|token|secret(?:[_-]access[_-]key)?|"
+                r"password|passwd|cookie|authorization))(\"?\s*[:=]\s*\"?)"
+                r"(?!\*\*\*|<\d+ chars>|<secret>|(?:true|false|null|none)\b|os\.|environ|getenv|process\.env|\$|<)[^\s\",}&]+"), r"\1\2***"),
 ]
 # Windows user-profile paths: C:\Users\<name>\ (also / and JSON-escaped \\) -> C:\Users\<user>\
 _USER_PATH = re.compile(r"(?i)((?:[a-z]:)?(?:\\\\|\\|/)(?:users|documents and settings)(?:\\\\|\\|/)|(?<![\w.])/home/)"
                         r"(?!<user>|public(?:\\|/|$)|default(?:\\|/|$))[^\\/\s\"'<>:*?|]+")
 
 
-_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:14]]   # token shapes only (no bearer/key=value/URL rules)
+_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:18]]   # token shapes only (no bearer/key=value/URL rules)
 
 
 def has_secret(s: str) -> bool:
