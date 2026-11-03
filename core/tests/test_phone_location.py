@@ -80,7 +80,7 @@ def test_coordinates_are_rounded_and_never_on_disk(rig, home):
     assert call(rig.d, "POST", "/api/m/drive/location", tok, fix())[0] == 200
     assert pl._fixes[dev][:2] == (32.08, 34.781)
     for raw in disk_bytes(home):                        # not the raw point, not the rounded one: the audit holds the kind only
-        assert b"32.08" not in raw and b"34.78" not in raw
+        assert not re.search(rb"(?<![0-9.])(32\.08|34\.78)", raw)   # bounded: a timestamp like 1793659432.08 is not a coordinate
 
 
 def test_spoofed_from_a_non_phone_client_and_missing_scope(rig):
