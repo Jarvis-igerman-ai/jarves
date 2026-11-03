@@ -40,6 +40,20 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertEqual(agent["lane"], "bugs")
         self.assertFalse(agent["auto_dispatch"])
         self.assertNotIn("private message", json.dumps(self.store.snapshot()))
+        self.assertIn(f"--agent {agent['id']}", context)  # gh-853: worker is told which flag carries its id
+
+    def test_cli_names_missing_flag_instead_of_invalid_id(self):
+        import contextlib
+        import io
+        from jarves.workflow.__main__ import main
+        for argv, flag in ((["next"], "--agent"), (["transition", "--state", "review"], "--task"),
+                           (["agent"], "--agent")):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = main(argv + ["--home", str(self.home)])
+            self.assertEqual(code, 1)
+            self.assertIn(flag, err.getvalue())
+            self.assertNotIn("invalid id", err.getvalue())
 
     def test_helper_window_never_claims_followups_or_gets_context(self):
         import os
@@ -74,6 +88,30 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertTrue(task["quarantined"])
         self.assertEqual(task["validation"], "not_run")
 
+    def test_native_stop_after_evidence_goes_to_review_not_quarantine(self):
+        self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
+        aid = self.store.snapshot()["agents"][0]["id"]
+        self.store.create_task({"id": "fix", "title": "Fix", "lane": "bugs", "resources": ["windows-gui"],
+                                "acceptance": [{"label": "works"}]})
+        self.store.claim(aid, "fix")
+        crit = self.store.snapshot()["tasks"][0]["acceptance"][0]["id"]
+        self.store.record_check("fix", crit, "test passed")
+        self.event("SubagentStop", agent_id="child", agent_type="workflow-bugs")
+        task = self.store.snapshot()["tasks"][0]
+        self.assertEqual(task["state"], "review")
+        self.assertFalse(task.get("quarantined"))
+
+    def test_recover_can_go_straight_to_review(self):
+        self.event("SubagentStart", agent_id="child", agent_type="workflow-bugs")
+        aid = self.store.snapshot()["agents"][0]["id"]
+        self.store.create_task({"id": "fix", "title": "Fix", "lane": "bugs"})
+        self.store.claim(aid, "fix")
+        self.event("SubagentStop", agent_id="child", agent_type="workflow-bugs")
+        with self.assertRaises(ValueError):
+            self.store.transition("fix", {"state": "review"})
+        self.store.transition("fix", {"state": "review", "recovery_confirmed": True, "checkpoint": "inspected"})
+        self.assertEqual(self.store.snapshot()["tasks"][0]["state"], "review")
+
     def test_permission_notification_does_not_return_permission_decision(self):
         result = self.event("Notification", notification_type="permission_prompt")
         self.assertEqual(result, {})
@@ -83,8 +121,13 @@ class WorkflowNativeTests(unittest.TestCase):
         self.store.create_task({"id": "ready", "title": "Approved task"})
         self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop", stop_hook_active=True), {})
-        self.assertEqual(self.event("Stop")["decision"], "block")
+        for _ in range(11):  # safety cap is 12/hour while workers are below the limit (#858)
+            self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop"), {})
+
+    def test_subagent_start_states_worktree_base(self):
+        result = self.event("SubagentStart", agent_id="c", agent_type="workflow-bugs")
+        self.assertIn("base", result["hookSpecificOutput"]["additionalContext"].lower())
 
     def test_owner_wait_and_unapproved_scope_do_not_keep_manager_in_a_loop(self):
         self.store.create_task({"id": "scope", "title": "Scope only", "execution_allowed": False})

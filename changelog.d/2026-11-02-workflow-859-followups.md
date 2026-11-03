@@ -1,0 +1,1 @@
+- Fixed: workflow: close-superseded refuses an empty PR list, the SubagentStart base note is bounded to 1 s and cached, manager_continue reads its worker limit from the autopilot max_concurrent, SETUP documents reopening merged tasks (#859 follow-ups).

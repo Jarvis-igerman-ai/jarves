@@ -19,12 +19,16 @@ def default_profile() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "jarves"
 
 
+REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task",),
+                  "recover": ("task",), "authorize": ("task",), "check": ("task",), "reply": ("id",)}
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "focus", "questions-rewrite",
-                                        "own", "release", "owners", "msg", "check-touch", "web-check"])
-    ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
+                                        "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded"])
+    ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
@@ -187,6 +191,11 @@ def main(argv=None) -> int:
         result = census(home, a.port)
         print(json.dumps(result, ensure_ascii=False) if a.json else ("PASS " if result["ok"] else "FAIL ") + result["detail"])
         return 0 if result["ok"] else 1
+    for flag in REQUIRED_FLAGS.get(a.action, ()):
+        if not getattr(a, flag.replace("-", "_")):
+            hint = " (your workflow agent ID is in the SubagentStart/SessionStart context)" if flag == "agent" else ""
+            print(json.dumps({"error": f"{a.action} needs --{flag} VALUE{hint}"}, ensure_ascii=False), file=sys.stderr)
+            return 1
     store = Store(home / "workflow.db")
     try:
         if a.action == "questions-rewrite":
@@ -308,10 +317,14 @@ def main(argv=None) -> int:
             if a.checkpoint:
                 changes["checkpoint"] = a.checkpoint
             if a.action == "recover":
-                changes.update(state="queued", recovery_confirmed=True)
+                # recover --state review|blocked|queued (default queued); needs --checkpoint (#854).
+                changes.update(state=changes.get("state") or "queued", recovery_confirmed=True)
             if a.action == "authorize":
                 changes.update(execution_allowed=True)
             result = store.transition(a.task, changes)
+        elif a.action == "close-superseded":
+            # rest = numbers of the currently OPEN PRs (e.g. from gh pr list); other review/steward tasks are closed.
+            result = {"closed": store.close_superseded(a.rest)}
         elif a.action == "dispatch":
             from .control import dispatch
             store.tick()

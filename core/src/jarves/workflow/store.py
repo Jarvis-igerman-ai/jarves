@@ -333,6 +333,32 @@ class Store:
         self._put(db, "task", task)
         self._event(db, "task_quarantined", f"{task['title']}: {reason}; resource locks retained")
 
+    def close_superseded(self, open_prs):
+        """Block queued review/steward tasks whose PR is no longer open (merged, closed or superseded)."""
+        open_prs = {int(n) for n in open_prs}
+        if not open_prs:
+            # An empty list usually means the PR listing failed; closing against it would block every queued review.
+            raise ValueError("close-superseded needs the open PR numbers; an empty list changes nothing")
+        closed = []
+        with self._tx() as db:
+            for task in self._all(db, "task"):
+                scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+                if (task["state"] == "queued" and scope.get("kind") in {"tier_r_review", "steward"}
+                        and scope.get("pr") not in open_prs):
+                    task.update(state="blocked", execution_allowed=False, updated_at=self.clock(),
+                                blocker=f"Superseded: PR #{scope.get('pr')} is no longer open")
+                    self._put(db, "task", task)
+                    closed.append(task["id"])
+            if closed:
+                self._event(db, "tasks_superseded", f"{len(closed)} review/steward tasks closed: PRs no longer open")
+        return closed
+
+    @staticmethod
+    def has_recorded_evidence(task):
+        """True when the worker already recorded passing acceptance evidence or validation."""
+        return (any(c.get("passed") and str(c.get("evidence", "")).strip() for c in task.get("acceptance", []))
+                or task.get("validation", "not_run") != "not_run")
+
     def quarantine(self, task_id, reason):
         """Quarantine an ambiguous dispatch or live writer without releasing locks."""
         reason = _text(reason, "quarantine reason", maximum=2000)
@@ -352,6 +378,8 @@ class Store:
     def _ready(db, task):
         if not task.get("execution_allowed", True) or task["state"] != "queued" or Store._unanswered(db, task["id"]):
             return False
+        if task.get("implementation") == "merged":
+            return False  # already on main: needs installed-product QA, not another implementer (#855)
         for ident in task["depends_on"]:
             if Store._get(db, "task", ident)["state"] not in {"verified", "done"}:
                 return False
@@ -522,20 +550,37 @@ class Store:
             self._bump(db)
         return agent
 
-    def manager_continue(self, agent_id):
-        """At most two native Stop continuations/hour, only for truly ready work.
+    def _worker_limit(self, default=3):
+        """Autopilot policy max_concurrent when the policy file is present and valid, else the default."""
+        try:
+            from . import autopilot
+            if not autopilot.policy_path(self.path.parent).exists():
+                return default
+            policy, error = autopilot.load(self.path.parent)
+            return default if error else int(policy.get("max_concurrent", default))
+        except (OSError, ValueError, TypeError, ImportError):
+            return default
 
+    def manager_continue(self, agent_id, worker_limit=None):
+        """Native Stop continuations, only for truly runnable ready work (one shared _ready filter, #855/#858).
+
+        Only continuations that carry runnable work are counted. While fewer than worker_limit workers are
+        busy the safety cap is 12/hour, otherwise 2/hour. The hook still never loops under stop_hook_active.
         This is a bounded 'do not stop with authorised work' signal, never a
         permission grant or an attempt to resurrect a dead Claude process.
         """
+        if worker_limit is None:
+            worker_limit = self._worker_limit()
         with self._tx() as db:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
                 return []
+            busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
+            cap = 12 if busy < worker_limit else 2
             key = "native_continue:" + _id(agent_id)
             row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
             times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
-            if len(times) >= 2:
+            if len(times) >= cap:
                 return []
             times.append(self.clock())
             self._set_meta(db, key, times)
@@ -866,8 +911,8 @@ class Store:
 
     def open_followups(self, agent_id=None):
         """Delivered but unanswered follow-ups (e.g. after a manager restart), for the receiving manager only."""
-        with self._tx() as db:
-            return [f for f in self._all(db, "followup") if f["status"] == "delivered"
+        with self._lock:  # plain WAL read: no write lock, so it cannot collide with the supervisor (#786)
+            return [f for f in self._all(self._db, "followup") if f["status"] == "delivered"
                     and (agent_id is None or f.get("delivered_to") == agent_id)]
 
     def reply_followup(self, followup_id, reply):

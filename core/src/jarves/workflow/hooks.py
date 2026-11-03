@@ -88,6 +88,58 @@ def typed_owner_answer(store: Store, payload: dict, subagent: str, managed: bool
             "It was not sent to the model; the task stays blocked until you confirm it in the dashboard or your own terminal."}
 
 
+DEPRECATED_REMOTE = "igalgerman/jarvis"
+
+
+def git_base_note(cwd: str) -> str:
+    """State the worker checkout's remotes and HEAD; warn when it comes from the deprecated repo (#852).
+
+    Isolated worktrees are created by Claude Code from the launching checkout, so the hook cannot choose
+    the base; it verifies and states it so the worker rebases onto jarves/main instead of an old commit.
+    """
+    if cwd in _GIT_NOTE_CACHE:  # a database retry must not run the git calls again
+        return _GIT_NOTE_CACHE[cwd]
+    _GIT_NOTE_CACHE[cwd] = note = _git_base_note(cwd)
+    return note
+
+
+_GIT_NOTE_CACHE: dict = {}
+GIT_NOTE_BUDGET_S = 1.0  # total for both git calls; the native hook limit is 3 s
+
+
+def _git_base_note(cwd: str) -> str:
+    deadline = time.monotonic() + GIT_NOTE_BUDGET_S
+
+    def git(*args):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise subprocess.TimeoutExpired("git", GIT_NOTE_BUDGET_S)
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left, **hidden_popen_kwargs()).stdout.strip()
+    try:
+        remotes = git("remote", "-v")
+        head = git("rev-parse", "--short", "HEAD") or "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "Worktree base could not be verified: run git remote -v and branch from jarves/main."
+    if not remotes:
+        return f"Worktree base HEAD {head}; no git remote found, verify it before branching."
+    if "jarves" not in remotes.lower().replace(DEPRECATED_REMOTE, ""):
+        return (f"WARNING worktree base HEAD {head} has no jarves remote (deprecated {DEPRECATED_REMOTE} only): "
+                "add/fetch Jarvis-igerman-ai/jarves and branch from jarves/main before any change.")
+    return (f"Worktree base HEAD {head} (stated, not guaranteed current): git fetch jarves main and "
+            "branch from jarves/main.")
+
+
+def _stop_without_handoff(store: Store, task_id: str) -> None:
+    """A stop with recorded evidence is a handoff to review; one without it is quarantined (#854)."""
+    task = next((t for t in store.snapshot()["tasks"] if t["id"] == task_id), None)
+    if task is None or task["state"] not in {"running", "blocked"}:
+        return
+    if task["state"] == "running" and store.has_recorded_evidence(task):
+        store.transition(task_id, {"state": "review"})
+        return
+    store.quarantine(task_id, "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+
+
 def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None = None) -> dict:
     event = payload.get("hook_event_name", "")
     if os.environ.get("JARVES_WORKFLOW_HELPER"):
@@ -143,7 +195,7 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
            call_id=payload.get("tool_use_id", ""), status="failed" if event == "PostToolUseFailure" else status,
            details={k: payload[k] for k in ("tool_input", "tool_response", "error") if k in payload})
     if event in {"Stop", "SubagentStop", "SessionEnd"} and native.get("task_id"):
-        store.quarantine(native["task_id"], "Native session stopped before a ledger handoff; manager must inspect the result/checkpoint")
+        _stop_without_handoff(store, native["task_id"])
     if subagent == "manager" and not managed:
         # Only one top-level session is the manager: headless/other sessions never receive owner follow-ups.
         store.claim_followup_manager(ident, takeover=event == "SessionStart")
@@ -170,10 +222,13 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
             f"Your workflow agent ID is {ident}; workflow data directory is {store.path.parent}. "
             "Use workflow CLI to claim/checkpoint work, record evidence and queue owner planning questions; "
             f"run it exactly as: {console_command(root, store.path.parent)} <command> "
+            f"and pass --agent {ident} to next/report (next --agent {ident} --task TASK_ID); transition needs --task TASK_ID. "
+            "Never register an ad-hoc agent id. "
             "Native subagents remain your workers; do not start a second manager. "
             "If the owner is away, retain the question and continue independent authorised work. "
             "Planning answers never approve runtime tools or releases." +
             (" " + notice_line(unread) if unread else "") +
+            (" " + git_base_note(payload.get("cwd") or str(root)) if event == "SubagentStart" else "") +
             (" " + followup_message(store.open_followups(ident), root, store.path.parent)
              if event == "SessionStart" and not managed else "")}}
     return {}
@@ -237,7 +292,8 @@ def main(argv=None) -> int:
             return 0
         # Stop must not be lost to the supervisor tick holding the DB: retry once. Both tries fit inside the 3 s hook
         # timeout that bootstrap installs (1.2 + 0.3 + 1.2 s). Every other hook stays at 1.5 s.
-        is_stop = payload.get("hook_event_name") == "Stop"
+        # SubagentStart/SessionStart register the worker; losing them leaves "unknown agent" (#786), so they retry too.
+        is_stop = payload.get("hook_event_name") in {"Stop", "SubagentStart", "SessionStart"}
         store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
         agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
         try:

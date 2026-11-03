@@ -147,7 +147,12 @@ All criteria must pass at the same revision; new code clears old proof. Use
 `check --failed` for a regression. Imported scope requires explicit operator
 `authorize --task ID` after scope/dependency reconciliation; this does not grant
 runtime permissions. Recover quarantine only after inspecting the original
-process/worktree: `recover --task ID --checkpoint "writer stopped; state reconciled"`.
+process/worktree: `recover --task ID --checkpoint "writer stopped; state reconciled"`
+(back to queued) or `recover --task ID --state review --checkpoint "..."` (work and evidence
+done, awaiting review). The manager or any agent may run it after inspecting the work; it is
+the only way out of quarantine (`transition --state review` alone is refused). A native stop of
+a worker that already recorded passing evidence or validation moves the task to review instead
+of quarantining it.
 
 Codex can register with `agent --agent ID --lane ...` and use the same protocol;
 automatic Codex hooks are not claimed. Optional existing-orchestrator delivery
@@ -161,6 +166,12 @@ requires an already running allow-listed session and explicit
 - No work: inspect owner wait, dependencies, resources, scope and worker alerts.
 - GitHub unavailable: cached metadata remains visible with its age/error.
 - Present expired: select it again; polling does not count as owner activity.
+- Stale review/steward tasks of merged or superseded PRs: `close-superseded <open PR numbers>`
+  (e.g. from `gh pr list`) blocks queued tasks whose PR is not in that list. Tasks with
+  implementation=merged are never listed as ready; route them to an installed-product QA task.
+- A merged task reopened to queued stays `implementation=merged` and is never listed as ready.
+  Reopen it with `transition --task ID --state queued --implementation in_progress`, or route
+  it to a QA task.
 - Native stop without handoff: inspect the result and explicitly recover or
   record evidence. Never duplicate a potentially live writer.
 
