@@ -158,6 +158,111 @@ def stop_recorded(home: Path, port: int, *, started=None, kill=None) -> tuple[st
     return "stopped", pid
 
 
+def _windows_sockets(port: int) -> list[tuple[int, bool]] | None:
+    """(pid, listening) for every TCP socket whose LOCAL port is this port (IPv4 and IPv6), via GetExtendedTcpTable."""
+    import ctypes
+    from ctypes import wintypes
+    iphlp = ctypes.WinDLL("iphlpapi")
+    found: list[tuple[int, bool]] = []
+    # (address family, row size in DWORDs, local port index, remote address+port indexes, owning pid index) for
+    # MIB_TCP(6)ROW_OWNER_PID. A socket without a peer is the listening endpoint: dwState is not used because this
+    # Windows build reported 0 instead of MIB_TCP_STATE_LISTEN (2) for live listeners (checked 2 Nov 2026).
+    for family, row_dwords, port_at, peer_at, pid_at in ((2, 6, 2, (3, 4), 5), (23, 14, 5, (6, 7, 8, 9, 11), 13)):
+        size, rc = wintypes.DWORD(0), 122
+        iphlp.GetExtendedTcpTable(None, ctypes.byref(size), False, family, 5, 0)  # 5 = TCP_TABLE_OWNER_PID_ALL
+        for _ in range(3):
+            buf = (ctypes.c_ubyte * max(size.value, 4))()
+            rc = iphlp.GetExtendedTcpTable(buf, ctypes.byref(size), False, family, 5, 0)
+            if rc != 122:  # ERROR_INSUFFICIENT_BUFFER: the table grew, retry with the new size
+                break
+        if rc != 0:
+            return None
+        words = (wintypes.DWORD * (len(buf) // 4)).from_buffer(buf)
+        for i in range(int(words[0])):
+            row = 1 + i * row_dwords
+            raw = int(words[row + port_at]) & 0xFFFF
+            # The port is stored in network byte order; pid 0 rows are kernel leftovers (TIME_WAIT, closed), no process.
+            if ((raw & 0xFF) << 8 | raw >> 8) == int(port) and int(words[row + pid_at]):
+                no_peer = not any(int(words[row + k]) for k in peer_at)
+                found.append((int(words[row + pid_at]), no_peer))
+    return found
+
+
+def _linux_sockets(port: int) -> list[tuple[int, bool]] | None:
+    """(pid, listening) from /proc; a socket owned by another user's process reports pid 0."""
+    inodes: dict[str, bool] = {}
+    try:
+        for name in ("tcp", "tcp6"):
+            path = Path("/proc/net") / name
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="ascii", errors="replace").splitlines()[1:]:
+                f = line.split()
+                if len(f) > 9 and int(f[1].rsplit(":", 1)[1], 16) == int(port) and f[9] != "0":
+                    inodes[f[9]] = f[3] == "0A"
+    except (OSError, ValueError):
+        return None
+    found: list[tuple[int, bool]] = []
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            for fd in (proc / "fd").iterdir():
+                target = os.readlink(fd)
+                inode = target[8:-1] if target.startswith("socket:[") else ""
+                if inode in inodes:
+                    found.append((int(proc.name), inodes.pop(inode)))
+        except OSError:
+            continue
+    return found + [(0, listening) for listening in inodes.values()]
+
+
+def sockets(port: int) -> list[tuple[int, bool]] | None:
+    """(pid, listening) per TCP socket bound locally to this port; None when the OS table is unreadable."""
+    try:
+        if sys.platform == "win32":
+            return _windows_sockets(port)
+        if sys.platform.startswith("linux"):
+            return _linux_sockets(port)
+    except (OSError, ValueError, AttributeError):
+        return None
+    return None
+
+
+def census(home: Path, port: int, *, table=None, started=None) -> dict:
+    """Read-only 'one dashboard server' check (#789) for factory-check and the CLI.
+
+    Reads the OS socket table, not only the pid record: servers started by code
+    older than the record never wrote one, so the supervisor cannot reap them.
+    A process that holds accepted connections on the port without being the
+    listener is a stale server still answering an open tab with old code.
+    ok is True only when exactly one process listens, it is the recorded,
+    still-matching dashboard server, and no other process serves the port.
+    """
+    table, started = table or sockets, started or started_at
+    rows = table(port)
+    recorded = listening_pid(home, port, started=started)
+    base = {"port": int(port), "recorded_pid": recorded}
+    if rows is None:
+        return {**base, "ok": False, "state": "unknown", "listeners": [], "stale": [],
+                "detail": "the port table could not be read on this system"}
+    listening = sorted({pid for pid, listen in rows if listen})
+    stale = sorted({pid for pid, listen in rows if not listen and pid} - set(listening))
+    if len(listening) > 1:
+        state, detail = "several", f"{len(listening)} processes listen on port {port}: stop the extra ones by pid"
+    elif stale:
+        state, detail = "stale", (f"pid {', '.join(map(str, stale))} still serves port {port} without listening "
+                                  "(an older dashboard server): stop it by pid, then reload the tab")
+    elif not listening:
+        state, detail = "none", f"no dashboard server listens on port {port}"
+    elif listening[0] != recorded:
+        state, detail = "foreign", (f"pid {listening[0]} listens on port {port} but is not the recorded dashboard server"
+                                    + (f" (recorded pid {recorded})" if recorded else " (no live record)"))
+    else:
+        state, detail = "one", f"one dashboard server (pid {recorded}, port {port})"
+    return {**base, "ok": state == "one", "state": state, "listeners": listening, "stale": stale, "detail": detail}
+
+
 def reap(home: Path, port: int, record_event=None) -> tuple[str, int]:
     """Supervisor helper: stop a leftover server and log what happened (never raises)."""
     try:

@@ -23,7 +23,7 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "questions-rewrite",
-                                        "own", "release", "owners", "msg", "check-touch"])
+                                        "own", "release", "owners", "msg", "check-touch", "web-check"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -175,6 +175,12 @@ def main(argv=None) -> int:
         except PermissionError:
             pass
         return rc
+    if a.action == "web-check":
+        # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.
+        from .webchild import census
+        result = census(home, a.port)
+        print(json.dumps(result, ensure_ascii=False) if a.json else ("PASS " if result["ok"] else "FAIL ") + result["detail"])
+        return 0 if result["ok"] else 1
     store = Store(home / "workflow.db")
     try:
         if a.action == "questions-rewrite":

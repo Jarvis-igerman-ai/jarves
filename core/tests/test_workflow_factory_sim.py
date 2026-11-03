@@ -560,6 +560,59 @@ class SimTests(unittest.TestCase):
         self.assertTrue(all(b - a >= 1200 for a, b in zip(w["nudges"], w["nudges"][1:])))
         self.assertTrue(all(sched["idle"][0] <= n - t0 < sched["idle"][1] for n in w["nudges"]), "never nudged outside idle")
 
+    # 9 ------------------------------------------------------------------------------------------
+    def test_sim_dashboard_restart_loop_one_server(self):
+        """#789 acceptance: five supervisor restarts, each after a crash that left its server alive, give exactly
+        one dashboard server every time; a listener left by pre-#821 code (no pid record) is reported, not hidden."""
+        from jarves.workflow import webchild
+        home = Path(tempfile.mkdtemp(prefix="factory-sim-web-"))
+        plan = home / "plan.json"
+        plan.write_text('{"versions": []}', encoding="utf-8")
+        alive, listening, next_pid, seen = {}, [], [70001], []   # fake process and port tables, no real process
+
+        def launch(*args, **kwargs):  # the web child binds the port and records its own pid
+            pid = next_pid[0]
+            next_pid[0] += 1
+            alive[pid] = float(pid)
+            listening.append(pid)
+            webchild.record(home, 8188, pid=pid, started=alive.get)
+            return types.SimpleNamespace(pid=pid, poll=lambda: None, terminate=lambda: None, wait=lambda timeout=None: 0)
+
+        def kill(pid):
+            alive.pop(pid, None)
+            while pid in listening:
+                listening.remove(pid)
+            return True
+
+        def census():
+            return webchild.census(home, 8188, table=lambda port: [(p, True) for p in listening], started=alive.get)
+
+        def run_once():
+            stop = threading.Event()
+
+            def dispatch(*a, **k):
+                seen.append(census())
+                stop.set()
+            with mock.patch.object(control, "dispatch", dispatch), \
+                    mock.patch("jarves.workflow.autopilot_loop.step_safe", lambda *a, **k: None), \
+                    mock.patch("jarves.workflow.autopilot.step", lambda *a, **k: None), \
+                    mock.patch("jarves.workflow.sync.PLAN", plan), \
+                    mock.patch.object(webchild, "started_at", alive.get), mock.patch.object(webchild, "terminate", kill), \
+                    mock.patch.object(threading.Event, "wait", lambda self, t=None: self.is_set()):
+                control.supervisor(home, home / "profile", port=8188, interval=0, sync_github=False, stop=stop, popen=launch)
+
+        for _ in range(5):
+            launch()        # the server a crashed supervisor left behind, still recorded and listening
+            run_once()
+        self.assertEqual([c["state"] for c in seen], ["one"] * 5, seen)
+        self.assertEqual(len(set(c["recorded_pid"] for c in seen)), 5, "a fresh server each restart")
+        self.assertEqual((listening, census()["state"]), ([], "none"), "a clean stop leaves no server")
+
+        listening.append(1234)  # an orphan from code older than the pid record: the supervisor cannot reap it
+        run_once()
+        self.assertEqual(seen[-1]["state"], "several")
+        self.assertFalse(seen[-1]["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

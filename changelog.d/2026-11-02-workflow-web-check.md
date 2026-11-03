@@ -1,0 +1,1 @@
+- Added: `jarvis workflow web-check` reads the OS socket table and passes only when exactly one recorded dashboard server holds the port; older servers that never wrote a pid record (or still answer an open tab) are named by pid. The nightly factory simulation gains a five-restart dashboard scenario (#789).
