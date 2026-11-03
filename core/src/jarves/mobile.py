@@ -1252,6 +1252,9 @@ def make_selfsigned(home: Path, host: str | None) -> tuple[Path, Path]:
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "JARVES")])
     sans: list = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+    local = local_name()
+    if local:                                   # the stable <name>.local address must pass the phone's name check
+        sans.append(x509.DNSName(local))
     if host:
         try:
             sans.append(x509.IPAddress(ipaddress.ip_address(host)))
@@ -1269,6 +1272,61 @@ def make_selfsigned(home: Path, host: str | None) -> tuple[Path, Path]:
     return cert_p, key_p
 
 
+def local_name(hostname: str | None = None) -> str | None:
+    """The computer's sanitised mDNS name '<name>.local' (a-z, 0-9, '-'), or None. Resolves on the home network only."""
+    import re
+    import socket
+    try:
+        raw = hostname if hostname is not None else socket.gethostname()
+    except OSError:
+        return None
+    name = re.sub(r"[^a-z0-9-]", "", (raw or "").lower().split(".")[0]).strip("-")
+    return f"{name}.local" if name else None
+
+
+def selfsigned_needs_reissue(home: Path) -> bool:
+    """True when OUR self-signed certificate (CN=JARVES, self-issued) lacks the current '<name>.local' DNS name."""
+    local = local_name()
+    if not local:
+        return False
+    try:
+        from cryptography import x509
+        cert = x509.load_pem_x509_certificate(tls_paths(home)[0].read_bytes())
+        if cert.subject != cert.issuer or cert.subject.rfc4514_string() != "CN=JARVES":
+            return False                        # a Tailscale or local-CA certificate is never replaced here
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        return local not in san.get_values_for_type(x509.DNSName)
+    except Exception:
+        return False
+
+
+def ensure_selfsigned(home: Path, host: str | None) -> None:
+    """Create the self-signed certificate (with the .local name) only when none exists. An existing certificate is never
+    replaced here: the Android app pins its SHA-256, so a silent reissue would break every paired phone."""
+    if not tls_paths(home)[0].is_file():
+        make_selfsigned(home, host)
+
+
+def network_help(host: str | None, port: int, scheme: str = "http", *, hostname: str | None = None,
+                 cert_lacks_name: bool = False) -> dict:
+    """V5-I: guidance only (nothing is run or changed). The IP can change with DHCP, so the computer's own `<name>.local`
+    address is offered as the stable one to bookmark; the firewall rule is shown for the owner to run, private networks only."""
+    local = local_name(hostname)
+    cmd = (f'netsh advfirewall firewall add rule name="JARVES phone" dir=in action=allow protocol=TCP '
+           f'localport={int(port)} profile=private remoteip=localsubnet') if port else None
+    withheld = bool(scheme == "https" and cert_lacks_name)  # an older certificate has no .local name: the browser would warn
+    note = ("The IP address can change; the .local name stays. If the phone cannot open .local, use the IP address."
+            if not withheld else
+            "This computer's existing certificate was made before the .local name was added, so the .local address is not "
+            "offered over https. Use the IP address. JARVES never replaces the certificate by itself: paired phones pin it.")
+    return {"lan_ip": host, "port": port,
+            "stable_url": f"{scheme}://{local}:{port}/m/" if local and port and not withheld else None,
+            "stable_note": note, "cert_lacks_name": withheld,
+            "firewall": {"profile": "private",
+                         "hint": "If Windows asks about the firewall, allow Private networks only (never Public).",
+                         "command": cmd}}
+
+
 # ---------------------------------------------------------------------- owner (loopback) dashboard routes
 def dashboard_routes(register) -> None:
     def mob(ctx) -> MobileAccess:
@@ -1282,7 +1340,8 @@ def dashboard_routes(register) -> None:
                                  "name": t.get("name"), "host": a.tailnet_host(), "bind": a.bind,
                                  "url": f"{a.scheme}://{a.tailnet_host()}:{a.port}/m/" if a.tailnet_host() else None,
                                  "tls_source": a.tls_source},
-                     "reachable_from_phone": bool(a.enabled and a.host), **a.settings(), "devices": a.devices(),
+                     "reachable_from_phone": bool(a.enabled and a.host),
+                     "network": network_help(a.host, a.port, a.scheme, cert_lacks_name=a.scheme == "https" and selfsigned_needs_reissue(a.home)) if a.enabled and a.host else None, **a.settings(), "devices": a.devices(),
                      "can_enable_here": getattr(ctx, "dashboard", None) is not None,
                      "how": "jarvis features on mobile_access, then jarvis dashboard --mobile --tls-selfsigned"}
 

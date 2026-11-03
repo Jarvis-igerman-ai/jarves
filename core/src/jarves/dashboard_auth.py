@@ -129,6 +129,7 @@ class Access:
                  clock=time.time) -> None:
         self.home, self.admin_token, self.lan, self.lan_host = home, admin_token, lan, lan_host
         self.mobile = False                            # V5: set by Dashboard when the phone paths are on
+        self.local_name: str | None = None             # '<computer>.local' (mDNS), exact match, only while phone access is ON
         self.extra_hosts: set[str] = set()             # V5: tailnet address / name accepted as Host in phone mode
         self.clock = clock
         self._lock = threading.RLock()
@@ -279,6 +280,8 @@ class Access:
         if name in LOOPBACK_HOSTS:
             return True
         if name in self.extra_hosts and (self.lan or self.mobile):
+            return True
+        if self.local_name and name == self.local_name and (self.lan or self.mobile):
             return True
         return bool(self.lan_host and name == self.lan_host and (self.lan or self.mobile))
 
