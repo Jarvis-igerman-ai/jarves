@@ -45,7 +45,7 @@
   let hdr = { privacy: null, live: false };
   window.privacyChips = (privacy, live) => {
     hdr = { privacy, live };
-    if (mm.menu) mmFill();                         // an open menu follows the live state
+    if (mm.menu) { mmFill(); mmPos(); }                       // an open menu follows the live state
     return ["mic", "camera", "cloud_audio"].map((k) => {
       const v = live && privacy && privacy[k] && privacy[k].state;
       const e = (STATES[k] && STATES[k][v]) || UNKNOWN, t = tx(e[0], e[1]);
@@ -85,7 +85,7 @@
   }
   async function mmApply(x) {
     if (mm.busy || !hdr.live) return;
-    mm.busy = true; mm.err = false; mm.msg = tx("מחליף…", "Switching…"); mmFill();
+    mm.busy = true; mm.err = false; mm.msg = tx("מחליף…", "Switching…"); mmFill(); mmPos();
     try {
       const r = await api("/api/runtime", { method: "POST", body: JSON.stringify(x.body) });
       const talk = r && r.applied && r.applied.talk;
@@ -94,7 +94,7 @@
     } catch (e) { mm.err = true; mm.msg = tx("לא שונה: ", "Not changed: ") + e.message; }
     mm.busy = false;
     if (typeof window.shellPoll === "function") await window.shellPoll();
-    mmFill();
+    mmFill(); mmPos();
   }
   function mmPos() {
     const b = document.getElementById("micPill"), m = mm.menu; if (!b || !m) return;
