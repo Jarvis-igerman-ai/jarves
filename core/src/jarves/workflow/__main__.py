@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "today", "focus", "questions-rewrite",
-                                        "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "worker-watch", "handover", "handover-state"])
+                                        "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "close-dead", "worker-watch", "handover", "handover-state"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
@@ -352,6 +352,9 @@ def main(argv=None) -> int:
         elif a.action == "close-superseded":
             # rest = numbers of the currently OPEN PRs (e.g. from gh pr list); other review/steward tasks are closed.
             result = {"closed": store.close_superseded(a.rest)}
+        elif a.action == "close-dead":
+            # Report by default; --apply cancels (at most 25) blocked review/steward tasks whose PR is provably gone.
+            result = store.dead_blocked(apply=a.apply)
         elif a.action == "dispatch":
             from .control import dispatch
             store.tick()

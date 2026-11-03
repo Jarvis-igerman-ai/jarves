@@ -18,7 +18,7 @@ from pathlib import Path
 
 from . import messages
 ANNOUNCE_COOLDOWN_S = 600
-STATES = {"queued", "running", "waiting_owner", "blocked", "review", "verified", "done"}
+STATES = {"queued", "running", "waiting_owner", "blocked", "review", "verified", "done", "cancelled"}
 LANES = {"bugs", "features", "release", "ops", "any"}
 IMPLEMENTATIONS = {"planned", "in_progress", "merged"}
 VALIDATION_RANK = {"not_run": 0, "automated": 1, "app": 2, "device": 3}
@@ -34,11 +34,16 @@ ARCHIVE_OFFLINE_S = 6 * 3600
 RECOVERABLE_BLOCKERS = {"worker_offline", "worker_stalled"}
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$")
 ACTIVE_QUESTIONS = {"pending", "deferred"}
+DEAD_BLOCKER_RE = re.compile(r"^Superseded: PR #(\d+) is no longer open$")
+DEAD_SCOPE_KINDS = {"tier_r_review", "steward"}
+DEAD_PROTECTED_VERSIONS = ("V5", "V6", "V7")
+DEAD_CLOSE_LIMIT = 25
+DEAD_SYNC_MAX_AGE_S = 24 * 3600
 AGENT_RETENTION_S = 86400
 TEST_AGENT_PREFIXES = ("e2e-", "mgr-restart-test")  # test leftovers: archived at once (#730)
 
 
-STATE_ORDER = {"running": 0, "waiting_owner": 1, "blocked": 2, "review": 3, "queued": 4, "verified": 5, "done": 6}
+STATE_ORDER = {"running": 0, "waiting_owner": 1, "blocked": 2, "review": 3, "queued": 4, "verified": 5, "done": 6, "cancelled": 7}
 VERSION_ORDER = ("V4.5.1", "V5", "V6", "V7")
 
 
@@ -378,6 +383,63 @@ class Store:
                 self._event(db, "tasks_superseded", f"{len(closed)} review/steward tasks closed: PRs no longer open")
         return closed
 
+    def _dead_scan(self, db, now):
+        """(blocked count, sync_ok, provably dead blocked tasks). No network: uses the stored sync snapshot only.
+
+        Proof = a fresh, complete GitHub sync (mode github, no error, not truncated, at least one open PR) that
+        does not list the task's PR and was taken after the task was blocked.
+        """
+        source = self._meta(db, "source")
+        tasks = self._all(db, "task")
+        blocked = [t for t in tasks if t["state"] == "blocked"]
+        synced = source.get("synced_at", 0)
+        if (source.get("mode") != "github" or source.get("error") or source.get("truncated")
+                or not source.get("open_prs") or not isinstance(synced, (int, float)) or now - synced > DEAD_SYNC_MAX_AGE_S):
+            return len(blocked), False, []
+        open_numbers = {int(p["number"]) for p in source["open_prs"] if isinstance(p, dict) and "number" in p}
+        needed = {d for t in tasks if t["state"] not in {"verified", "done", "cancelled"} for d in t.get("depends_on", [])}
+        questions = self._all(db, "question")
+        dead = []
+        for task in blocked:
+            match = DEAD_BLOCKER_RE.match(str(task.get("blocker", "")))
+            scope = task.get("scope") if isinstance(task.get("scope"), dict) else {}
+            if (not match or scope.get("kind") not in DEAD_SCOPE_KINDS or scope.get("pr") != int(match.group(1))
+                    or int(match.group(1)) in open_numbers or task.get("updated_at", now) > synced
+                    or str(task.get("version", "")).upper().startswith(DEAD_PROTECTED_VERSIONS)
+                    or task.get("quarantined") or task.get("agent_id") or task.get("owner_gate")
+                    or task.get("execution_allowed", True) is not False or task["id"] in needed
+                    or self._has_locks(db, task["id"])
+                    or any(q["task_id"] == task["id"] and (q["status"] in ACTIVE_QUESTIONS or q.get("held")) for q in questions)):
+                continue
+            dead.append(task)
+        return len(blocked), True, dead
+
+    def dead_blocked(self, apply=False, limit=DEAD_CLOSE_LIMIT):
+        """Report (default) or close blocked review/steward tasks whose PR is provably no longer open.
+
+        apply=True moves at most ``limit`` of them to the terminal state ``cancelled`` with a note and a ledger
+        event. It never sets validation, delivery or verified. Never touched: V5-V7 tasks, quarantined or owned
+        tasks, held locks, owner questions, owner gates, tasks another task depends on, any other blocker text.
+        """
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        with self._tx() as db:
+            now = self.clock()
+            total, ok, dead = self._dead_scan(db, now)
+            result = {"blocked": total, "closable": len(dead), "ids": [t["id"] for t in dead], "closed": [],
+                      "skipped": 0, "sync_ok": ok, "dry_run": not apply}
+            if apply:
+                for task in dead[:limit]:
+                    task.update(state="cancelled", updated_at=now,
+                                closed_reason="dead blocked: " + task["blocker"] + "; confirmed by GitHub sync snapshot")
+                    self._put(db, "task", task)
+                    result["closed"].append(task["id"])
+                result["skipped"] = len(dead) - len(result["closed"])
+                if result["closed"]:
+                    self._event(db, "dead_blocked_closed",
+                                f"{len(result['closed'])} dead blocked tasks cancelled (PR no longer open); nothing verified or delivered")
+        return result
+
     @staticmethod
     def has_recorded_evidence(task):
         """True when the worker already recorded passing acceptance evidence or validation."""
@@ -437,6 +499,7 @@ class Store:
                 "events": [dict(r) for r in db.execute(
                     "SELECT * FROM workflow_events WHERE kind NOT IN ('layer_beat','task_flow','agent_message') ORDER BY id DESC LIMIT 100")],
                 "source": self._meta(db, "source"),
+                "dead_blocked": dict(zip(("blocked", "sync_ok", "closable"), (lambda r: (r[0], r[1], len(r[2])))(self._dead_scan(db, now)))),
             }
 
     def create_task(self, data):
@@ -1127,6 +1190,10 @@ class Store:
                 raise ValueError("use claim to start work")
             if task["state"] == "done" and state not in {"done", "queued", "blocked"}:
                 raise ValueError("reopen a done task before changing its state")
+            if state == "cancelled" and task["state"] != "cancelled":
+                raise ValueError("cancelled is set only by the dead-blocked sweep (close-dead --apply)")
+            if task["state"] == "cancelled" and state not in {"cancelled", "queued", "blocked"}:
+                raise ValueError("reopen a cancelled task before changing its state")
             if self._unanswered(db, task["id"]) and state not in {"waiting_owner", "blocked"}:
                 raise ValueError("task has unanswered owner questions")
             held = self._has_locks(db, task["id"])
