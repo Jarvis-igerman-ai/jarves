@@ -9,12 +9,14 @@ ledger over 7 days against the policy ``weekly_token_budget``; with no budget th
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from pathlib import Path
 
 SLOW_PCT, STOP_PCT = 80, 95
 MAX_AGE_S = 12 * 3600          # an older snapshot is treated as unknown (the status line only runs while a session is open)
+MAX_BYTES = 64 * 1024
 WEEK_S = 7 * 86400
 TOKEN_KEY = "autopilot_token_log"   # meta row: [[ts, tokens], ...]
 OVERRIDE_KEY = "autopilot_usage_override"
@@ -43,15 +45,23 @@ def extract(stdin_json: dict) -> dict | None:
 
 
 def read_snapshot(path: Path | None = None, now: float | None = None) -> dict | None:
+    """The fresh snapshot or None. Hostile or malformed input (huge, NaN/Infinity, bool, future ts) = unknown (#776)."""
     now = time.time() if now is None else now
     try:
-        data = json.loads(Path(path or snapshot_path()).read_text(encoding="utf-8"))
-        pct, ts = float(data["weekly_pct"]), float(data["ts"])
-    except (OSError, ValueError, KeyError, TypeError):
+        p = Path(path or snapshot_path())
+        if p.stat().st_size > MAX_BYTES:
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        raw_pct, raw_ts = data["weekly_pct"], data["ts"]
+        if type(raw_pct) not in (int, float) or type(raw_ts) not in (int, float):
+            return None
+        pct, ts = float(raw_pct), float(raw_ts)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RecursionError, OverflowError):
         return None
-    if not 0 <= pct <= 1000 or now - ts > MAX_AGE_S:
+    if not (math.isfinite(pct) and math.isfinite(ts)) or not 0 <= pct <= 1000 or not 0 <= now - ts <= MAX_AGE_S:
         return None
-    return {"pct": pct, "ts": ts, "five_hour_pct": data.get("five_hour_pct")}
+    five = data.get("five_hour_pct")
+    return {"pct": pct, "ts": ts, "five_hour_pct": five if type(five) in (int, float) and math.isfinite(five) else None}
 
 
 def _meta(store, key, default):
