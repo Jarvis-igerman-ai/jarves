@@ -333,6 +333,22 @@ def test_network_help_gives_stable_name_and_private_firewall_command():
     assert none["stable_url"] is None and none["firewall"]["command"] is None
 
 
+def test_stable_url_withheld_when_existing_cert_lacks_local_name(tmp_path, monkeypatch):
+    """#811: an old certificate without the .local name is never replaced (phones pin it); the https name is not offered."""
+    from jarves import mobile
+    old = mobile.network_help("192.168.1.9", 8443, "https", hostname="my-pc", cert_lacks_name=True)
+    assert old["stable_url"] is None and old["cert_lacks_name"] is True and "never replaces" in old["stable_note"]
+    ok = mobile.network_help("192.168.1.9", 8443, "https", hostname="my-pc")
+    assert ok["stable_url"] == "https://my-pc.local:8443/m/" and ok["cert_lacks_name"] is False
+    http = mobile.network_help("192.168.1.9", 8443, "http", hostname="my-pc", cert_lacks_name=True)
+    assert http["stable_url"] == "http://my-pc.local:8443/m/"
+    monkeypatch.setattr(mobile, "local_name", lambda hostname=None: "my-pc.local")
+    mobile.make_selfsigned(tmp_path, "192.168.1.9")
+    assert mobile.selfsigned_needs_reissue(tmp_path) is False
+    monkeypatch.setattr(mobile, "local_name", lambda hostname=None: "other-pc.local")
+    assert mobile.selfsigned_needs_reissue(tmp_path) is True
+
+
 @pytest.mark.parametrize("exc,status", [(FileNotFoundError, 404), (PermissionError, 500), (OSError, 500)])
 def test_a_read_error_gives_a_clean_error_without_a_path(srv, monkeypatch, exc, status):
     """The file can vanish or be unreadable between the check and the read: no traceback, no server path in the reply."""

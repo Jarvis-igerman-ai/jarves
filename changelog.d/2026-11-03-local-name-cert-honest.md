@@ -1,0 +1,1 @@
+- Fixed: phone access: the https .local address is no longer offered when the existing certificate lacks that name; the certificate is never replaced (paired phones pin it) (#811)

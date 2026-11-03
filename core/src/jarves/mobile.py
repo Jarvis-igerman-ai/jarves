@@ -1307,15 +1307,21 @@ def ensure_selfsigned(home: Path, host: str | None) -> None:
         make_selfsigned(home, host)
 
 
-def network_help(host: str | None, port: int, scheme: str = "http", *, hostname: str | None = None) -> dict:
+def network_help(host: str | None, port: int, scheme: str = "http", *, hostname: str | None = None,
+                 cert_lacks_name: bool = False) -> dict:
     """V5-I: guidance only (nothing is run or changed). The IP can change with DHCP, so the computer's own `<name>.local`
     address is offered as the stable one to bookmark; the firewall rule is shown for the owner to run, private networks only."""
     local = local_name(hostname)
     cmd = (f'netsh advfirewall firewall add rule name="JARVES phone" dir=in action=allow protocol=TCP '
            f'localport={int(port)} profile=private remoteip=localsubnet') if port else None
+    withheld = bool(scheme == "https" and cert_lacks_name)  # an older certificate has no .local name: the browser would warn
+    note = ("The IP address can change; the .local name stays. If the phone cannot open .local, use the IP address."
+            if not withheld else
+            "This computer's existing certificate was made before the .local name was added, so the .local address is not "
+            "offered over https. Use the IP address. JARVES never replaces the certificate by itself: paired phones pin it.")
     return {"lan_ip": host, "port": port,
-            "stable_url": f"{scheme}://{local}:{port}/m/" if local and port else None,
-            "stable_note": "The IP address can change; the .local name stays. If the phone cannot open .local, use the IP address.",
+            "stable_url": f"{scheme}://{local}:{port}/m/" if local and port and not withheld else None,
+            "stable_note": note, "cert_lacks_name": withheld,
             "firewall": {"profile": "private",
                          "hint": "If Windows asks about the firewall, allow Private networks only (never Public).",
                          "command": cmd}}
@@ -1335,7 +1341,7 @@ def dashboard_routes(register) -> None:
                                  "url": f"{a.scheme}://{a.tailnet_host()}:{a.port}/m/" if a.tailnet_host() else None,
                                  "tls_source": a.tls_source},
                      "reachable_from_phone": bool(a.enabled and a.host),
-                     "network": network_help(a.host, a.port, a.scheme) if a.enabled and a.host else None, **a.settings(), "devices": a.devices(),
+                     "network": network_help(a.host, a.port, a.scheme, cert_lacks_name=a.scheme == "https" and selfsigned_needs_reissue(a.home)) if a.enabled and a.host else None, **a.settings(), "devices": a.devices(),
                      "can_enable_here": getattr(ctx, "dashboard", None) is not None,
                      "how": "jarvis features on mobile_access, then jarvis dashboard --mobile --tls-selfsigned"}
 
