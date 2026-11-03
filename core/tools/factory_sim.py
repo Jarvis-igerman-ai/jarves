@@ -52,7 +52,7 @@ def _summary(tail: str, limit: int = 600) -> str:
              if re.match(r"^(FAILED|ERROR) |^=+ .*(passed|failed|error)", ln.strip())]
     text = "\n".join(lines[-5:]) or "(see local run for details)"
     text = re.sub(r"[A-Za-z]:[\\/][^\s:]*", "<path>", text)
-    text = re.sub(r"\b(sk-|ghp_|gho_|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
+    text = re.sub(r"\b(sk-|ghp_|gho_|ghs_|ghu_|github_pat_|AKIA|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
     return text[:limit]
 
 
@@ -70,8 +70,11 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                        "--label", "showstopper", "--label", "P1"], capture_output=True, text=True, timeout=60)
+        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
+                               "--label", "showstopper", "--label", "P1"],
+                              capture_output=True, text=True, timeout=60)
+        if made.returncode != 0:
+            print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"could not file the issue: {exc}")
 

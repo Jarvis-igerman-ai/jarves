@@ -349,6 +349,7 @@ def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
     (the schedule is not installed yet; absence is not a failure).
     """
     import json
+    import math
     import time
     from pathlib import Path
     path = Path(home) / "factory_sim_last.json"
@@ -364,7 +365,9 @@ def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
     if not data.get("ok", False):
         failed = ", ".join(str(x) for x in (data.get("failed") or ["unknown"]))[:200]
         return [{"kind": "factory_sim_failed", "summary": f"Nightly factory simulation failed: {failed}", "task_id": None, "agent_id": None}]
-    if (now if now is not None else time.time()) - at > FACTORY_SIM_STALE_S:
+    current = now if now is not None else time.time()
+    if not math.isfinite(at) or at > current + 300 or current - at > FACTORY_SIM_STALE_S:
+        # NaN, inf or a future timestamp cannot prove a recent run: treat as stale
         return [{"kind": "factory_sim_stale", "summary": "Nightly factory simulation has not run for over 36 hours",
                  "task_id": None, "agent_id": None}]
     return []
