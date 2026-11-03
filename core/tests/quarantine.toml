@@ -32,3 +32,9 @@ id = "test_voice_faults.py::test_delegated_tool_call_budget_exhausted_ends_sessi
 issue = 788
 since = "2026-11-01"
 reason = "TimeoutError/CancelledError at live.py:656 on windows shard 1/4 (PR 753 run 41341778696), unrelated to the PR; tracked in #788"
+
+[[test]]
+id = "test_mobile_access.py::test_sr4_one_turn_per_phone_at_a_time"
+issue = 911
+since = "2026-11-03"
+reason = "Windows shard 4/4 failed on PR 865 (workflow-only diff): first request thread got a socket TimeoutError so first[] stayed empty after join(20); real threads/sockets timing, make it deterministic"
