@@ -281,7 +281,8 @@ class SimTests(unittest.TestCase):
         payload = {"hook_event_name": "Stop", "session_id": "mgr-session", "cwd": str(root)}
         # all workers busy (limit 0): the strict 2/hour cap applies; below the limit it is 12/hour (#858)
         with mock.patch.object(hooks, "in_project", lambda cwd, r: True), \
-                mock.patch.object(Store, "_worker_limit", lambda self: 0):
+                mock.patch.object(Store, "_worker_limit", lambda self: 0), \
+                mock.patch("jarves.workflow.store.ANNOUNCE_COOLDOWN_S", 0):    # this sim tests the hourly cap, not the #855 cooldown
             decisions = []
             for _ in range(4):
                 decisions.append(hooks.observe(store, dict(payload), root, None).get("decision"))
