@@ -127,8 +127,9 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   the fixer run `check-touch --resource pr:N` first; a PR owned by another live
   agent is skipped with a message, not touched.
 - Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
-  installer/packaging, browser network, wake apply, workflows/secrets): automatic
-  review -> fix -> merge, see "Tier R flow" below. Excluded PRs stay with the owner.
+  installer/packaging, browser network, wake apply, workflows/secrets): request the
+  Opus sign-off; never merged by the steward. The "Tier R flow" section below is a
+  PROPOSAL only (owner approval UNVERIFIED) and does not change this rule.
 - Queue entry merged: check main CI and free the next batch.
 - Per cycle the steward decides individual vs integration with
   `core/tools/integration_branch.py plan --auto` (JSON: tiers, file-overlap and
@@ -146,9 +147,10 @@ a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## Tier R flow and merge backlog
 
-PROPOSED, owner approval UNVERIFIED (no ledger question/answer id is recorded; the owner
-must approve it and change his global instructions himself). It would narrow, but not remove, the rule that Tier R is not merged by the steward: only PRs outside the
-excluded set below may follow it.
+PROPOSED, NOT ACTIVE: owner approval UNVERIFIED (no ledger question/answer id is recorded).
+Until the owner approves it and changes his own global instructions himself, the steward
+never merges Tier R / `no-automerge` PRs and `tier_r_flow.py` is advisory only (`review`/`wait`/`owner`
+advice; ignore `queue`). If approved it would narrow the rule only for PRs outside the excluded set below.
 
 `core/tools/tier_r_flow.py plan` prints, per open PR, the next action
 `review|fix|queue|wait|owner` with reasons (read-only; it never merges).
