@@ -1,0 +1,1 @@
+- Added: skills manifest v2: optional `setup` and `diagnostic` hook names, declared only and checked against skill.py (#212).

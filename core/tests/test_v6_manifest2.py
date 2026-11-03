@@ -147,6 +147,16 @@ def test_module_has_no_network_or_install_code_and_makes_no_connection(monkeypat
     m2.parse_manifest(V2)
 
 
+def test_setup_and_diagnostic_hooks_are_declared_names_checked_against_code():
+    md = V2.replace("surfaces: [voice, phone]", "surfaces: [voice, phone]\nsetup: do_setup\ndiagnostic: check_it")
+    assert m2.parse_manifest(md).setup == "do_setup" and m2.parse_manifest(md).ok
+    py = "def do_setup():\n    pass\n\ndef check_it():\n    pass\n"
+    assert m2.parse_manifest(md, py).diagnostic == "check_it"
+    assert any("not defined" in e for e in m2.parse_manifest(md, "def other(): pass\n").errors)
+    assert not m2.parse_manifest(md.replace("do_setup", "os.system")).ok
+    assert m2.parse_manifest(V2).setup == "" and m2.parse_manifest(V2).diagnostic == ""
+
+
 def test_feature_off_by_default_unverified():
     f = feat.CATALOG["skills_manifest2"]
     assert f.default_enabled is False and f.targets["windows"]["status"] == "implemented_unverified"
