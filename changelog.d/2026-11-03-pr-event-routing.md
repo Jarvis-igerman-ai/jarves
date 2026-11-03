@@ -1,0 +1,1 @@
+- Added: the factory now tells the agent that owns a pull request (a pr or branch claim) when its checks fail, it conflicts or it gets review comments, with failing check names only, no repeats and a rate limit; the manager is told if the owner is gone.
