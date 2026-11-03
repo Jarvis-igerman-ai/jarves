@@ -1,0 +1,1 @@
+- Fixed: a test now pins the WhatsApp bridge start order, installed payload exe before the home download (#466)

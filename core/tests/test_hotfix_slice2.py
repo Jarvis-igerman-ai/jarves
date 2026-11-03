@@ -541,3 +541,25 @@ def test_installed_core_starts_the_bridge_the_hotfix_replaces(tmp_path, monkeypa
     monkeypatch.setattr(wab, "__file__", str(fake))
     assert wab.bridge_command(tmp_path / "home") == [str(exe.resolve())]
     assert s2.install_root_of(fake.parent) / s2.read_pin(json.dumps({"path": "bridge/" + exe.name, "sha256": "a" * 64}))["path"] == exe
+
+
+def test_bridge_fallback_order_payload_exe_wins_over_home_download(tmp_path, monkeypatch):
+    """#466: installed <root>/bridge exe first, then the owner-downloaded <home>/bridge (needs its manifest), else None."""
+    import sys
+    from jarves import whatsapp_bridge as wab
+    from jarves import whatsapp_bridge_install as wbi
+    root = tmp_path / "JARVES"
+    fake = root / "python" / "Lib" / "site-packages" / "jarves" / "whatsapp_bridge.py"
+    home = tmp_path / "home"
+    name = "whatsapp_bridge.exe" if sys.platform == "win32" else "whatsapp_bridge"
+    monkeypatch.delenv(wab.BRIDGE_ENV, raising=False)
+    monkeypatch.setattr(wab, "__file__", str(fake))
+    assert wab.bridge_command(home) is None                              # nothing anywhere
+    exe = wbi.installed_exe(home)
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(b"home")
+    assert wab.bridge_command(home) is None                              # bare download without its manifest is ignored
+    wbi.sidecar(home).write_bytes(b"{}")
+    assert wab.bridge_command(home) == [str(exe)]                        # fallback to <home>/bridge
+    write(root, f"bridge/{name}", b"payload")
+    assert wab.bridge_command(home) == [str((root / "bridge" / name).resolve())]   # the pinned payload wins
