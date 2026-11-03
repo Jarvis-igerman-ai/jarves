@@ -143,6 +143,9 @@ def decide(pr, main_red=False):
             return out("owner", "PR declares no Author-Agent: independence cannot be checked")
         if e["reviewer"] in authors:
             return out("owner", "reviewer is an author of the diff")
+        led = pr.get("ledger") or {}
+        if not led.get("ok") or (led.get("review_task") or "") != e["task"] or (led.get("review_agent") or "") != e["reviewer"]:
+            return out("owner", "independence not verified in the workflow ledger: " + str(led.get("why") or "no ledger facts"))
         if main_red:
             return out("wait", "main is red: only the fix PR is queued")
         if pr.get("merge_state") not in ("CLEAN", "BLOCKED", "HAS_HOOKS"):
@@ -192,14 +195,48 @@ def _ib():
     return m
 
 
-def load_prs(numbers=None):
+def _wf_json(args, home):
+    """Read-only workflow CLI call; JSON out. Any failure raises (callers fail closed)."""
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "workflow_console.py")]
+    if home:
+        cmd += ["--home", home]
+    return json.loads(_run(cmd + args))
+
+
+def ledger_facts(number, branch, task_id, reviewer, home=None, wf=_wf_json):
+    """Deterministic independence check against the workflow ledger (read-only): the Review-Task exists, its agent
+    is the declared Reviewer-Agent, and that agent holds no claim on pr:N or branch:<name> (the author's scope).
+    Fails closed: {'ok': False, 'why': ...} when anything cannot be checked."""
+    def bad(why):
+        return {"ok": False, "why": why, "review_task": task_id, "review_agent": ""}
+    try:
+        if not task_id:
+            return bad("no Review-Task")
+        task = wf(["task", "--id", task_id], home)
+        agent = str((task or {}).get("agent_id") or (task or {}).get("agent") or "").lower()
+        if not agent:
+            return bad(f"Review-Task {task_id} not found or has no agent")
+        if agent != (reviewer or "").lower():
+            return bad(f"Review-Task {task_id} belongs to {agent}, not Reviewer-Agent {reviewer}")
+        for res in (f"pr:{number}", f"branch:{branch}" if branch else ""):
+            if not res:
+                continue
+            for o in wf(["owners", "--resource", res], home) or []:
+                if str(o.get("agent_id") or o.get("owner") or "").lower() == agent:
+                    return bad(f"reviewer {agent} owns {res}")
+        return {"ok": True, "why": "", "review_task": task_id, "review_agent": agent}
+    except Exception as e:                                  # noqa: BLE001
+        return bad(f"ledger unreadable ({type(e).__name__})")
+
+
+def load_prs(numbers=None, home=None):
     """Read open PRs through gh (read-only)."""
     ib = _ib()
     nums = numbers or [x["number"] for x in json.loads(_run(["gh", "pr", "list", "--state", "open", "--limit", "100", "--json", "number"]))]
     prs = []
     for n in nums:
         info = ib.pr_info(n)
-        d = json.loads(_run(["gh", "pr", "view", str(n), "--json", "headRefOid,author,body,commits,comments,autoMergeRequest,isInMergeQueue"]))
+        d = json.loads(_run(["gh", "pr", "view", str(n), "--json", "headRefOid,headRefName,author,body,commits,comments,autoMergeRequest,isInMergeQueue"]))
         authors = {d["author"]["login"]} | {a.get("login", "") for c in d.get("commits") or [] for a in c.get("authors") or []}
         checks = info["checks"]
         pend = any((c.get("status") or "").upper() in ("QUEUED", "IN_PROGRESS", "PENDING")
@@ -212,6 +249,9 @@ def load_prs(numbers=None):
                     "author_agents": author_agents(AUTHOR_AGENT.findall(d.get("body") or "")),
                     "comments": [{"body": c.get("body") or "", "login": (c.get("author") or {}).get("login", ""),
                                   "association": c.get("authorAssociation") or ""} for c in d.get("comments") or []]})
+        here = _at(parse_evidence(prs[-1]["comments"]), prs[-1]["head_sha"])
+        if here and here[-1]["verdict"] == "SIGN-OFF":      # ledger lookup only where it can matter
+            prs[-1]["ledger"] = ledger_facts(n, d.get("headRefName") or "", here[-1]["task"], here[-1]["reviewer"], home)
     return prs
 
 
@@ -223,8 +263,9 @@ def main(argv=None):
         s.add_argument("--pr", type=int, nargs="*")
         s.add_argument("--main-red", action="store_true")
         s.add_argument("--max-workers", type=int, default=3)
+        s.add_argument("--workflow-home", default=None, help="workflow data dir for the ledger independence check")
     a = ap.parse_args(argv)
-    prs = load_prs(a.pr)
+    prs = load_prs(a.pr, a.workflow_home)
     res = {"plan": [decide(p, a.main_red) for p in prs]} if a.cmd == "plan" else focus(prs, a.max_workers, a.main_red)
     print(json.dumps(res, indent=2))
     return 0

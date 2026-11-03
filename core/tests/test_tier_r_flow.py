@@ -15,7 +15,8 @@ OLDER = "c" * 40
 def pr(**k):
     d = {"number": 1, "title": "fix thing", "tier": "R", "draft": False, "state": "OPEN", "files": ["core/src/jarves/browser_x.py"],
          "head_sha": SHA, "authors": ["author1"], "author_agents": ["agent-impl"], "checks_green": True, "checks_pending": False,
-         "merge_state": "CLEAN", "queued": False, "comments": []}
+         "merge_state": "CLEAN", "queued": False, "comments": [],
+         "ledger": {"ok": True, "why": "", "review_task": "T-9", "review_agent": "agent-rev"}}
     d.update(k)
     return d
 
@@ -169,3 +170,29 @@ def test_verdict_forms():
         assert act(comments=[c(first + tail)]) == "fix", first
     assert act(comments=[c(f"VERDICT: SIGN-OFF {SHA[:12]}" + tail)]) == "review"
     assert act(comments=[c("note\nVERDICT: SIGN-OFF " + SHA + tail)]) == "review"
+
+
+def _wf(task, owners):
+    def wf(args, home):
+        if args[0] == "task":
+            if task is None:
+                raise RuntimeError("not found")
+            return task
+        return owners
+    return wf
+
+
+def test_ledger_unverified_signoff_goes_to_owner():
+    assert act(comments=[so()], ledger=None) == "owner"
+    assert act(comments=[so()], ledger={"ok": False, "why": "x"}) == "owner"
+    assert act(comments=[so(task="T-1")]) == "owner"          # ledger facts are for another task
+    assert act(comments=[so(who="other-rev")]) == "owner"     # ledger agent differs from the declared reviewer
+
+
+def test_ledger_facts_checks_task_agent_and_claims():
+    ok = t.ledger_facts(5, "b", "T-9", "Agent-Rev", wf=_wf({"agent_id": "agent-rev"}, []))
+    assert ok["ok"] and ok["review_agent"] == "agent-rev"
+    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf(None, []))["ok"]
+    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "someone"}, []))["ok"]
+    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [{"agent_id": "agent-rev"}]))["ok"]
+    assert not t.ledger_facts(5, "b", "", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, []))["ok"]
