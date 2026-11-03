@@ -89,6 +89,23 @@ class IssueTaskTests(unittest.TestCase):
         self.assertEqual(create_issue_tasks(self.store, snap, environ={"JARVES_WORKFLOW_ISSUE_TASKS": "0"}), [])
         self.assertEqual(create_issue_tasks(self.store, snap, environ={}), ["gh-30"])
 
+    def test_device_labels_require_device_validation(self):
+        self.run_sync([issue(10, ["bug", "mic"]), issue(11, ["bug", "Phone"]), issue(12, ["bug", "wake_word"]),
+                       issue(13, ["bug"])])
+        t = self.tasks()
+        self.assertEqual([t[f"gh-{n}"]["required_validation"] for n in (10, 11, 12, 13)],
+                         ["device", "device", "device", "app"])
+
+    def test_known_issue_and_needs_owner_are_skipped(self):
+        self.run_sync([issue(20, ["bug", "known-issue-android"]), issue(21, ["bug", "needs-owner"]),
+                       issue(22, ["bug", "Owner_Gated"]), issue(23, ["bug"])])
+        self.assertEqual(sorted(k for k in self.tasks() if k.startswith("gh-")), ["gh-23"])
+
+    def test_non_dict_source_issues_do_not_abort(self):
+        self.store.create_task({"id": "m1", "title": "m", "lane": "bugs", "source_issues": ["x", 5, None]})
+        self.run_sync([issue(31, ["bug"])])
+        self.assertIn("gh-31", self.tasks())
+
 
 if __name__ == "__main__":
     unittest.main()

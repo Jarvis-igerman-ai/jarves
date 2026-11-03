@@ -199,6 +199,28 @@ def with_label_scope(plan: dict, snapshot: dict) -> dict:
     return {**plan, "versions": versions}
 
 
+# Labels that mean the defect needs a real device (microphone, wake word, voice, phone, car, hardware): app-level
+# evidence is not enough, so the task requires device validation (OPERATING_MODEL: ear/device checks stay unknown).
+DEVICE_LABELS = frozenset({"device", "mic", "microphone", "wake", "wake-word", "voice", "audio", "phone", "android",
+                           "car", "hardware", "ear", "pi5", "raspberry-pi"})
+
+
+def _norm_label(x) -> str:
+    return str(x).strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def issue_validation(labels) -> str:
+    """`device` for device-type labels (or a `device:*`/`device-*` label), else `app`."""
+    norm = {_norm_label(x) for x in labels}
+    return "device" if norm & DEVICE_LABELS or any(x.startswith(("device-", "device:")) for x in norm) else "app"
+
+
+def owner_wait_label(labels) -> bool:
+    """Owner-gated, owner-accepted known issues and anything waiting for the owner are never queued for a worker."""
+    return any(x.startswith(("owner-gated", "known-issue", "needs-owner", "owner-wait", "waiting-owner", "needs-info"))
+               for x in (_norm_label(y) for y in labels))
+
+
 def issue_tasks_enabled(environ=None) -> bool:
     value = str((environ if environ is not None else os.environ).get(ISSUE_TASK_ENV, "1")).strip().lower()
     return value not in {"0", "off", "false", "no", "disabled"}
@@ -231,7 +253,8 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
     covered: set[int] = set()
     for t in tasks:  # any task linked to the issue covers it, whatever its state or authorisation
         covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
-        covered.update(int(i["number"]) for i in t.get("source_issues", []) if str(i.get("number", "")).isdigit())
+        covered.update(int(i["number"]) for i in t.get("source_issues", [])
+                       if isinstance(i, dict) and str(i.get("number", "")).isdigit())
     authorized = authorized_versions(store)
     created = []
     for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
@@ -241,7 +264,7 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
         labels = {str(x).strip().lower() for x in row.get("labels", [])}
         if row.get("state") != "open" or f"gh-{number}" in taken or number in covered:
             continue
-        if any(x.replace("_", "-").replace(" ", "-").startswith("owner-gated") for x in labels):
+        if owner_wait_label(labels):
             continue
         defect = bool(labels & DEFECT_LABELS)
         if not defect and "agent-doable" not in labels:
@@ -253,7 +276,7 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
         store.create_task({
             "id": f"gh-{number}", "title": f"#{number} {str(row.get('title', ''))[:200]}".strip(),
             "lane": "bugs" if defect else "features", "priority": priority, "version": version,
-            "required_validation": "app", "execution_allowed": True,
+            "required_validation": issue_validation(labels), "execution_allowed": True,
             "acceptance": [{"id": "C1", "label": "Fix merged with a regression test and evidence recorded"}],
             "issue_numbers": [number], "source_url": row.get("url", ""),
             "scope_note": "Created by GitHub issue sync; issue state is not verification."})
