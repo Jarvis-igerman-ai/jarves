@@ -89,3 +89,11 @@ def test_huge_int_timestamp_and_non_list_failed(tmp_path):
     for bad in ("5", '"x"', "null"):
         f.write_text('{"at": 1.0, "ok": false, "failed": ' + bad + '}')
         assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
+
+
+def test_deep_nesting_and_string_ok(tmp_path):
+    f = tmp_path / "factory_sim_last.json"
+    f.write_text("[" * 100000)
+    assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
+    f.write_text('{"at": 1.0, "ok": "false"}')
+    assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
