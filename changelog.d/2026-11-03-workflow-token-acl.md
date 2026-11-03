@@ -1,0 +1,1 @@
+- Workflow dashboard: on Windows `access.token` and `sessions.json` now get an owner-only ACL (`icacls /inheritance:r` plus a grant to the current user), failing safe; the workflow folder itself is unchanged so authorised workers keep access (#824).
