@@ -1,0 +1,1 @@
+- Fixed: three flaky tests are back in the blocking suite (phone one-turn test socket timeout, diag overhead budget, live budget-exhausted session); their quarantine entries are removed.

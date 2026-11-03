@@ -10,12 +10,6 @@
 # reason = one line: what flakes and where
 
 [[test]]
-id = "test_diag_monitor.py::test_sampler_and_overhead_budget"
-issue = 778
-since = "2026-11-02"
-reason = "Windows shard 3/4 failed on PR 849 (unrelated mic test PR): thread_time has 15.6 ms granularity so sample_cost read 0.0625 s and the 0.1 pct CPU budget assert at line 100 tripped; passes elsewhere"
-
-[[test]]
 id = "test_agents_pr_card_browser.py::test_the_card_is_absent_when_off_or_the_api_is_missing"
 issue = 890
 since = "2026-11-02"
@@ -27,14 +21,3 @@ issue = 880
 since = "2026-11-02"
 reason = "Windows: real wall-clock bound 2.5 s exceeded once (3.19 s) on an unrelated PR, ended==idle was correct; use a fake clock"
 
-[[test]]
-id = "test_voice_faults.py::test_delegated_tool_call_budget_exhausted_ends_session"
-issue = 788
-since = "2026-11-01"
-reason = "TimeoutError/CancelledError at live.py:656 on windows shard 1/4 (PR 753 run 41341778696), unrelated to the PR; tracked in #788"
-
-[[test]]
-id = "test_mobile_access.py::test_sr4_one_turn_per_phone_at_a_time"
-issue = 911
-since = "2026-11-03"
-reason = "Windows shard 4/4 failed on PR 865 (workflow-only diff): first request thread got a socket TimeoutError so first[] stayed empty after join(20); real threads/sockets timing, make it deterministic"

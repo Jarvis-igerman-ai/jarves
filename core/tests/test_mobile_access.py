@@ -52,11 +52,11 @@ def srv(home, fake):
     d.stop()
 
 
-def req(d, method, path, *, token=None, body=None, raw=None, headers=None, ctype="application/json", tls=False):
+def req(d, method, path, *, token=None, body=None, raw=None, headers=None, ctype="application/json", tls=False, timeout=10):
     if tls:
-        conn = http.client.HTTPSConnection("127.0.0.1", d.port, timeout=10, context=ssl._create_unverified_context())
+        conn = http.client.HTTPSConnection("127.0.0.1", d.port, timeout=timeout, context=ssl._create_unverified_context())
     else:
-        conn = http.client.HTTPConnection("127.0.0.1", d.port, timeout=10)
+        conn = http.client.HTTPConnection("127.0.0.1", d.port, timeout=timeout)
     h = {"Host": f"{HOST}:{d.port}", **(headers or {})}
     if method != "GET":
         h.setdefault("X-Jarves", "1")
@@ -515,14 +515,17 @@ def test_sr4_one_turn_per_phone_at_a_time(home):
     try:
         tok, _, _ = pair(d)
         first = []
-        t = threading.Thread(target=lambda: first.append(req(d, "POST", "/api/m/chat", token=tok, body={"text": "one"})))
+        # #911: the handler holds this request open until gate.set(), so its socket timeout must outlast the gate and a
+        # stalled runner; the default 10 s socket timeout tripped on a loaded Windows shard.
+        t = threading.Thread(target=lambda: first.append(req(d, "POST", "/api/m/chat", token=tok, body={"text": "one"},
+                                                              timeout=60)))
         t.start()
         assert entered.wait(20)
         st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "one"})      # the double tap
         assert st == 409 and body["code"] == "BUSY"
         gate.set()
-        t.join(20)
-        assert first[0][0] == 200 and calls == ["one"]                    # the message ran exactly once
+        t.join(60)
+        assert first and first[0][0] == 200 and calls == ["one"]                   # the message ran exactly once
         assert req(d, "POST", "/api/m/chat", token=tok, body={"text": "two"})[0] == 200   # free again
     finally:
         gate.set()
