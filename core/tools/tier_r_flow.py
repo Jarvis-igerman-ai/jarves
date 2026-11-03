@@ -163,8 +163,8 @@ def decide(pr, main_red=False):
         if pr.get("merge_state") not in ("CLEAN", "BLOCKED", "HAS_HOOKS"):
             return out("wait", "merge state " + str(pr.get("merge_state")))
         return out("queue", "Opus SIGN-OFF bound to current head " + sha[:8] + " by task " + e["task"],
-                   "steward checks Review-Task/Reviewer-Agent in the ledger, removes no-automerge, runs gh pr merge N --auto, "
-                   "confirms merge-queue entry")
+                   "owner approval required, do not merge: this flow is advisory only and the steward "
+                   "never merges Tier R / no-automerge PRs")
     return out("review", "green on head " + sha[:8] + " with no verdict for it: one Opus review task for this SHA")
 
 
