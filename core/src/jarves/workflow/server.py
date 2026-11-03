@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import threading
 import time
 from http.cookies import SimpleCookie
@@ -24,6 +25,7 @@ from .discuss import Helper, RateLimited
 from . import unlock
 from .autopilot import owner_unlock_s
 from .store import Store
+from .winproc import hidden_popen_kwargs
 
 STATIC = Path(__file__).with_name("static")
 BODY_LIMIT = 64 * 1024
@@ -35,6 +37,38 @@ def private_directory(path: Path) -> None:
         path.chmod(0o700)
 
 
+def owner_only_file(path: Path) -> bool:
+    """Windows: drop inherited ACEs on a secret file and grant only the current user (#824).
+
+    chmod is a no-op on NTFS, so access.token / sessions.json inherited the folder ACL (for example
+    CodexSandboxUsers Modify). The folder itself is left alone so authorised workers keep database
+    access. Fails safe: returns False and never raises, so startup is never blocked."""
+    if os.name != "nt":
+        return True
+    user = os.environ.get("USERNAME")
+    if not user:
+        return False
+    domain = os.environ.get("USERDOMAIN")
+    account = f"{domain}\\{user}" if domain else user
+    try:
+        r = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:(F)"],
+                           capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+_TIGHTENED: set[str] = set()
+
+
+def _tighten_once(path: Path) -> None:
+    """Fix an existing file once per process (idempotent)."""
+    key = str(path)
+    if key not in _TIGHTENED:
+        _TIGHTENED.add(key)
+        owner_only_file(path)
+
+
 def access_token(home: Path) -> str:
     """Persist only in the per-user runtime, never the checkout or event log."""
     private_directory(home)
@@ -42,6 +76,7 @@ def access_token(home: Path) -> str:
     try:
         token = path.read_text(encoding="ascii").strip()
         if re.fullmatch(r"[0-9a-f]{64}", token):
+            _tighten_once(path)
             return token
         raise ValueError("workflow access token is malformed; move it aside before restarting")
     except FileNotFoundError:
@@ -52,6 +87,7 @@ def access_token(home: Path) -> str:
             return access_token(home)
         with os.fdopen(fd, "w", encoding="ascii") as f:
             f.write(token)
+        owner_only_file(path)
         return token
 
 
@@ -89,6 +125,7 @@ def save_sessions(home: Path, digests: dict[str, float]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "sessions": digests}, f)
     os.replace(tmp, path)
+    owner_only_file(path)
 
 
 class Server(ThreadingHTTPServer):
