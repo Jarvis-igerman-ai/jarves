@@ -1,0 +1,1 @@
+- Fixed: Browser pilot: a DNS lookup that timed out but still runs in the pool stays in the pending-lookup count until it finishes or is cancelled (#623, refs #574).
