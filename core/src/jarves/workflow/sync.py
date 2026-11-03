@@ -111,7 +111,8 @@ def collect(get=public_get) -> dict:
                     # A closed PR is not necessarily merged. Never infer merge from state alone.
                     item["merged_at"] = row.get("merged_at")
                     item["head_sha"] = (row.get("head") or {}).get("sha", "")
-                    item["head_ref"] = str((row.get("head") or {}).get("ref", ""))[:200]
+                    item["head_repo"] = str(((row.get("head") or {}).get("repo") or {}).get("full_name", ""))[:200]
+                    item["head_ref"] =str((row.get("head") or {}).get("ref", ""))[:200]
                     item["draft"] = bool(row.get("draft"))
                     item["auto_merge"] = bool(row.get("auto_merge"))
                     item["linked_issues"] = sorted({int(n) for n in re.findall(
