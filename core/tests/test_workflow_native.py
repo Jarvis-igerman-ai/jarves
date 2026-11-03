@@ -118,12 +118,26 @@ class WorkflowNativeTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()["agents"][0]["status"], "blocked")
 
     def test_manager_stop_continuation_only_for_ready_authorised_work_and_is_bounded(self):
+        from unittest import mock
+        patcher = mock.patch("jarves.workflow.store.ANNOUNCE_COOLDOWN_S", 0)  # cooldown has its own test
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.store.create_task({"id": "ready", "title": "Approved task"})
         self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop", stop_hook_active=True), {})
         for _ in range(11):  # safety cap is 12/hour while workers are below the limit (#858)
             self.assertEqual(self.event("Stop")["decision"], "block")
         self.assertEqual(self.event("Stop"), {})
+
+    def test_manager_stop_announce_cooldown_suppresses_then_blocks_again(self):
+        now = [1000.0]
+        self.store.clock = lambda: now[0]
+        self.store.create_task({"id": "ready", "title": "Approved task"})
+        self.assertEqual(self.event("Stop")["decision"], "block")
+        now[0] += 60  # inside the 600 s cooldown: task is probably delegated, not yet claimed
+        self.assertEqual(self.event("Stop"), {})
+        now[0] += 601
+        self.assertEqual(self.event("Stop")["decision"], "block")
 
     def test_subagent_start_states_worktree_base(self):
         result = self.event("SubagentStart", agent_id="c", agent_type="workflow-bugs")
