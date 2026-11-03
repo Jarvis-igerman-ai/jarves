@@ -1,1 +1,1 @@
-- Fixed: autopilot worker allow list now matches the documented workflow_console.py command (no popups or rate limit), the brief says not to chain commands, and the trace mirror waits 2 s instead of 0.05 s for the ledger lock (#784).
+- Fixed: autopilot worker allow list now matches the documented workflow_console.py command (no popups or rate limit), the brief says not to chain commands (#784).

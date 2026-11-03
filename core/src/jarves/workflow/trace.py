@@ -156,7 +156,7 @@ def provider_event(profile_home, session, event, summary, payload=None):
     path = Path(profile_home) / "workflow" / "workflow.db"
     if not path.is_file() or not session:
         return
-    ledger = Store(path, timeout_s=2.0)
+    ledger = Store(path, timeout_s=0.05)
     try:
         sid = session["id"]
         ident = "external-" + hashlib.sha256(sid.encode()).hexdigest()[:20]
