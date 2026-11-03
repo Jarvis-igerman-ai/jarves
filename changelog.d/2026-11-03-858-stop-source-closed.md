@@ -1,1 +1,1 @@
-- workflow: the manager Stop continuation no longer counts or lists tasks whose source GitHub issues are all closed (#858, #855).
+- Fixed: the workflow manager Stop continuation no longer counts or lists tasks whose source GitHub issues are all closed. (#858, #855)
