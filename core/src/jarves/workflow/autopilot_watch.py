@@ -348,23 +348,31 @@ def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
     Reads <home>/factory_sim_last.json written by core/tools/factory_sim.py --nightly. No file = no alert
     (the schedule is not installed yet; absence is not a failure).
     """
+    try:
+        return _factory_sim_alerts(home, now)
+    except Exception:  # noqa: BLE001 - RecursionError, OverflowError, anything: fail closed, never raise into /api/state
+        return [{"kind": "factory_sim_unreadable", "summary": "Nightly factory simulation result file is unreadable",
+                 "task_id": None, "agent_id": None}]
+
+
+def _factory_sim_alerts(home, now):
     import json
+    import math
     import time
     from pathlib import Path
     path = Path(home) / "factory_sim_last.json"
     if not path.exists():
         return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        at = float(data.get("at") or 0)
-    except (OSError, ValueError, TypeError, AttributeError):
-        # fail closed: a result file that exists but cannot be read must not look healthy
-        return [{"kind": "factory_sim_unreadable", "summary": "Nightly factory simulation result file is unreadable",
-                 "task_id": None, "agent_id": None}]
-    if not data.get("ok", False):
-        failed = ", ".join(str(x) for x in (data.get("failed") or ["unknown"]))[:200]
+    data = json.loads(path.read_text(encoding="utf-8"))
+    at = float(data.get("at") or 0)
+    if data.get("ok") is not True:
+        names = data.get("failed")
+        names = names if isinstance(names, list) and names else ["unknown"]
+        failed = ", ".join(str(x) for x in names)[:200]
         return [{"kind": "factory_sim_failed", "summary": f"Nightly factory simulation failed: {failed}", "task_id": None, "agent_id": None}]
-    if (now if now is not None else time.time()) - at > FACTORY_SIM_STALE_S:
+    current = now if now is not None else time.time()
+    if not math.isfinite(at) or at > current + 300 or current - at > FACTORY_SIM_STALE_S:
+        # NaN, inf or a future timestamp cannot prove a recent run: treat as stale
         return [{"kind": "factory_sim_stale", "summary": "Nightly factory simulation has not run for over 36 hours",
                  "task_id": None, "agent_id": None}]
     return []

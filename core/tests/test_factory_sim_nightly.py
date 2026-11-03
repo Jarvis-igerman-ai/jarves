@@ -68,3 +68,32 @@ def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out
     assert "/ST 03:00" in out and "--nightly" in out and "DAILY" in out
+
+
+def test_nan_future_and_non_numeric_timestamps_alert_not_crash(tmp_path):
+    f = tmp_path / "factory_sim_last.json"
+    for body in ('{"at": NaN, "ok": true}', '{"at": 99999999999, "ok": true}', '{"at": "x", "ok": true}', '[1]'):
+        f.write_text(body)
+        assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] in ("factory_sim_stale", "factory_sim_unreadable")
+
+
+def test_summary_redacts_more_tokens():
+    out = factory_sim._summary("FAILED x github_pat_ABCDEFGH1234 ghs_ABCDEFGHIJ AKIAABCDEFGHIJKL")
+    assert "github_pat_" not in out and "ghs_" not in out and "AKIA" not in out
+
+
+def test_huge_int_timestamp_and_non_list_failed(tmp_path):
+    f = tmp_path / "factory_sim_last.json"
+    f.write_text('{"at": 1' + "0" * 400 + ', "ok": true}')
+    assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_unreadable"
+    for bad in ("5", '"x"', "null"):
+        f.write_text('{"at": 1.0, "ok": false, "failed": ' + bad + '}')
+        assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
+
+
+def test_deep_nesting_and_string_ok(tmp_path):
+    f = tmp_path / "factory_sim_last.json"
+    f.write_text("[" * 100000)
+    assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
+    f.write_text('{"at": 1.0, "ok": "false"}')
+    assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
