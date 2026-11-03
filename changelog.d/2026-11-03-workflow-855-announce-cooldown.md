@@ -1,0 +1,1 @@
+- workflow: the Stop hook no longer re-announces a ready task within 10 minutes of announcing it (delegated but not yet claimed), which stops the manager loop (#855).

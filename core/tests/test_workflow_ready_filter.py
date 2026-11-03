@@ -1,6 +1,7 @@
 """#855: ready work excludes non-runnable tasks; superseded review tasks can be closed (temp home only)."""
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from jarves.workflow.store import Store
@@ -41,9 +42,30 @@ class ReadyFilterTests(unittest.TestCase):
         self.assertIn("Superseded", task["blocker"])
 
 
+class AnnounceCooldownTests(unittest.TestCase):
+    def test_task_just_announced_is_not_pushed_again_until_cooldown(self):
+        now = [1000.0]
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "workflow.db", clock=lambda: now[0])
+            try:
+                store.create_task({"id": "x", "title": "Delegated but not yet claimed"})
+                self.assertEqual(store.manager_continue("m"), ["x"])
+                now[0] += 30  # manager delegated x; its worker has not claimed yet
+                self.assertEqual(store.manager_continue("m"), [])
+                store.create_task({"id": "y", "title": "New independent work"})
+                self.assertEqual(store.manager_continue("m"), ["y"])
+                now[0] += 601  # still unclaimed after the cooldown: announce again
+                self.assertEqual(store.manager_continue("m"), ["x", "y"])
+            finally:
+                store.close()
+
+
 class ContinueCapTests(unittest.TestCase):
     def test_unrunnable_work_never_spends_a_continuation_and_cap_depends_on_busy_workers(self):
         now = [1000.0]
+        patcher = mock.patch("jarves.workflow.store.ANNOUNCE_COOLDOWN_S", 0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "workflow.db", clock=lambda: now[0])
             try:

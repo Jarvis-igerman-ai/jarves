@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import messages
+ANNOUNCE_COOLDOWN_S = 600
 STATES = {"queued", "running", "waiting_owner", "blocked", "review", "verified", "done"}
 LANES = {"bugs", "features", "release", "ops", "any"}
 IMPLEMENTATIONS = {"planned", "in_progress", "merged"}
@@ -573,6 +574,10 @@ class Store:
             worker_limit = self._worker_limit()
         with self._tx() as db:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
+            # A task announced within ANNOUNCE_COOLDOWN_S is probably delegated but not yet claimed (#855).
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='announced_ready'").fetchone()
+            seen = {k: v for k, v in (json.loads(row[0]) if row else {}).items() if self.clock() - v < ANNOUNCE_COOLDOWN_S}
+            ready = [i for i in ready if i not in seen]
             if not ready:
                 return []
             busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
@@ -585,6 +590,9 @@ class Store:
             times.append(self.clock())
             self._set_meta(db, key, times)
             self._event(db, "manager_continue", "Native manager has authorised ready work; one bounded continuation requested")
+            for i in ready[:5]:
+                seen[i] = self.clock()
+            self._set_meta(db, "announced_ready", seen)
             return ready[:5]
 
     def heartbeat(self, agent_id, note="", progress=False, observed_at=None):
