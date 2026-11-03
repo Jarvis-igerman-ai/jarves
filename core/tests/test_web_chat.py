@@ -851,19 +851,25 @@ def test_a_failed_settings_read_never_turns_a_silent_chat_into_a_speaking_one(ri
 
 
 def test_a_stale_settings_read_never_overwrites_a_newer_silent_write(rig):
-    """#722: a read that began before set_silent(True) but returns the old value afterwards must not un-silence the chat
-    (deterministic: the write lands in the middle of the read, no scheduler luck)."""
+    """#722: the read runs under the write lock, so a set_silent(True) that lands mid-read waits for the read to finish and
+    then wins; the chat is never left un-silenced by a stale "off" (deterministic: no scheduler luck)."""
     r = rig()
     r.chat.set_silent(False)
     real = r.core.memory.get_setting
+    writer = threading.Thread(target=r.chat.set_silent, args=(True,), daemon=True)
 
     def read_overtaken_by_write(key, *a, **k):
         old = real(key, *a, **k)                      # the value as it was when the read started
-        r.chat.set_silent(True)                       # the owner's write lands before the read returns
+        writer.start()                                # the owner's write arrives while the read is in flight
+        writer.join(0.2)
+        assert writer.is_alive()                      # ... and must wait: the read holds the lock
         return old
     r.core.memory.get_setting = read_overtaken_by_write
     try:
-        assert r.chat.setting_silent() is True        # the newer write wins over the stale "off"
+        assert r.chat.setting_silent() is False       # the read began before the write
     finally:
         r.core.memory.get_setting = real
+    writer.join(5)
+    assert not writer.is_alive()
+    assert r.chat.setting_silent() is True            # the newer write wins afterwards
     assert r.chat.silent_state()["on"] is True
