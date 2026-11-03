@@ -104,7 +104,7 @@ def git_base_note(cwd: str) -> str:
 
 
 _GIT_NOTE_CACHE: dict = {}
-GIT_NOTE_BUDGET_S = 1.0  # total for both git calls; the native hook limit is 3 s
+GIT_NOTE_BUDGET_S = 0.6  # total for both git calls (cached across the retry); the native hook limit is 3 s
 
 
 def _git_base_note(cwd: str) -> str:
@@ -114,7 +114,9 @@ def _git_base_note(cwd: str) -> str:
         left = deadline - time.monotonic()
         if left <= 0:
             raise subprocess.TimeoutExpired("git", GIT_NOTE_BUDGET_S)
-        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left, **hidden_popen_kwargs()).stdout.strip()
+        # (start + budget) - now can exceed the budget by an ulp (seen on Windows); keep it in (0, budget].
+        timeout = min(max(left, 0.05), GIT_NOTE_BUDGET_S)
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout, **hidden_popen_kwargs()).stdout.strip()
     try:
         remotes = git("remote", "-v")
         head = git("rev-parse", "--short", "HEAD") or "unknown"
@@ -211,8 +213,13 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
         return {"decision": "block", "reason": notice_line(unread)}
     if event == "Stop" and subagent == "manager" and not managed and payload.get("stop_hook_active") is not True:
         ready = store.manager_continue(ident)
+        # worker-watch mail, shown once; with no ready work it only blocks within manager_continue's hourly cap
+        notes = store.take_manager_notes() if ready else store.take_manager_notes_capped(ident)
+        mail = "".join(f"[{n['subject']}] {n['body']} " for n in notes)
+        if notes and not ready:
+            return {"decision": "block", "reason": mail + "Act on the workflow monitor note above, then continue."}
         if ready:
-            return {"decision": "block", "reason":
+            return {"decision": "block", "reason": mail +
                 "Authorised independent workflow tasks remain ready: " + ", ".join(ready) +
                 ". Check the ledger and continue the approved work. Do not invent approvals or bypass existing gates. "
                 "If truly blocked, checkpoint and record the exact blocker instead of repeatedly retrying."}
@@ -305,7 +312,7 @@ def main(argv=None) -> int:
             result = observe(store, payload, args.repo_root, agent_env)
         if result:
             print(json.dumps(result, ensure_ascii=False))
-    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as exc:
+    except Exception as exc:  # noqa: BLE001  hooks fail open: never exit non-zero (incl. RecursionError)
         # Do not block Claude or emit private input. The supervisor exposes the
         # missing heartbeat if telemetry cannot reach the ledger. A locked database
         # (sqlite3.Error) used to escape as a traceback and drop the event silently.

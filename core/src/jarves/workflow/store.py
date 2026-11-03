@@ -335,7 +335,15 @@ class Store:
 
     def close_superseded(self, open_prs):
         """Block queued review/steward tasks whose PR is no longer open (merged, closed or superseded)."""
-        open_prs = {int(n) for n in open_prs}
+        numbers = set()
+        for n in open_prs:
+            if isinstance(n, bool):
+                raise ValueError("PR numbers must be positive integers")
+            value = int(n)
+            if value <= 0:
+                raise ValueError("PR numbers must be positive integers")
+            numbers.add(value)
+        open_prs = numbers
         if not open_prs:
             # An empty list usually means the PR listing failed; closing against it would block every queued review.
             raise ValueError("close-superseded needs the open PR numbers; an empty list changes nothing")
@@ -558,8 +566,21 @@ class Store:
                 return default
             policy, error = autopilot.load(self.path.parent)
             return default if error else int(policy.get("max_concurrent", default))
-        except (OSError, ValueError, TypeError, ImportError):
+        except Exception:  # noqa: BLE001  incl. RecursionError from a deeply nested policy file: never break Stop
             return default
+
+    def _continue_slot(self, db, agent_id, worker_limit):
+        """Take one slot of the shared per-hour Stop-continuation cap; False when the cap is spent."""
+        busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
+        cap = 12 if busy < worker_limit else 2
+        key = "native_continue:" + _id(agent_id)
+        row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
+        times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
+        if len(times) >= cap:
+            return False
+        times.append(self.clock())
+        self._set_meta(db, key, times)
+        return True
 
     def manager_continue(self, agent_id, worker_limit=None):
         """Native Stop continuations, only for truly runnable ready work (one shared _ready filter, #855/#858).
@@ -575,15 +596,8 @@ class Store:
             ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             if not ready:
                 return []
-            busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
-            cap = 12 if busy < worker_limit else 2
-            key = "native_continue:" + _id(agent_id)
-            row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
-            times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
-            if len(times) >= cap:
+            if not self._continue_slot(db, agent_id, worker_limit):
                 return []
-            times.append(self.clock())
-            self._set_meta(db, key, times)
             self._event(db, "manager_continue", "Native manager has authorised ready work; one bounded continuation requested")
             return ready[:5]
 
@@ -658,7 +672,8 @@ class Store:
         agent_id = _id(agent_id)
         with self._tx() as db:
             agent = self._get(db, "agent", agent_id)
-            native_request = agent.get("provider") == "claude-native" and agent["status"] == "running"
+            native = agent.get("provider") == "claude-native" or str(agent.get("session_id", "")).startswith("native:")
+            native_request = native and agent["status"] == "running"
             if agent.get("task_id") or (agent["status"] != "idle" and not native_request):
                 return None
             if self.clock() - agent["heartbeat_at"] > 120:
@@ -857,6 +872,49 @@ class Store:
             self._put(db, "followup", item)
             self._event(db, "followup_asked", "Owner follow-up: " + (question["title"] if question else text)[:200])
         return item
+
+    def get_meta(self, key, default=None):
+        with self._lock:
+            row = self._db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def set_meta(self, key, value):
+        with self._tx() as db:
+            self._set_meta(db, key, value)
+
+    def followup_manager_id(self):
+        return self.get_meta("followup_manager", "") or ""
+
+    def post_manager_note(self, subject, body):
+        """Bounded unread notes for the manager; shown once at its next Stop (until the agent-message channel lands)."""
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = (json.loads(row[0]) if row else [])[-19:]
+            notes.append({"at": self.clock(), "subject": _text(subject, "subject", maximum=200),
+                          "body": _text(body, "body", maximum=1000)})
+            self._set_meta(db, "manager_notes", notes)
+
+    def take_manager_notes_capped(self, agent_id, worker_limit=None):
+        """Notes that may block a Stop with no ready work: counted in manager_continue's per-hour cap.
+
+        When the cap is spent the notes stay queued (not lost) for a later Stop."""
+        if worker_limit is None:
+            worker_limit = self._worker_limit()
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = json.loads(row[0]) if row else []
+            if not notes or not self._continue_slot(db, agent_id, worker_limit):
+                return []
+            self._set_meta(db, "manager_notes", [])
+            return notes
+
+    def take_manager_notes(self):
+        with self._tx() as db:
+            row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
+            notes = json.loads(row[0]) if row else []
+            if notes:
+                self._set_meta(db, "manager_notes", [])
+            return notes
 
     def claim_followup_manager(self, agent_id, takeover=False):
         """Designate the one session that receives owner follow-ups; returns True if agent_id is it.
