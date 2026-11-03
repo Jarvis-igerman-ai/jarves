@@ -264,6 +264,8 @@ def test_prepush_keeps_output_visible_with_hidden_flag(env, monkeypatch):
 
     def fake_run(cmd, **kw):
         if "core/tools/prepush.py" not in cmd:
+            if sys.platform != "win32":
+                kw.pop("creationflags", None)  # Windows-only flag, injected via the patched _HIDDEN
             return orig(cmd, **kw)
         seen.update(kw)
         return subprocess.CompletedProcess(cmd, 0)
@@ -286,6 +288,8 @@ def test_prepush_no_hidden_flag_when_console_attached(env, monkeypatch):
 
     def fake_run(cmd, **kw):
         if "core/tools/prepush.py" not in cmd:
+            if sys.platform != "win32":
+                kw.pop("creationflags", None)  # Windows-only flag, injected via the patched _HIDDEN
             return orig(cmd, **kw)
         seen.update(kw)
         return subprocess.CompletedProcess(cmd, 0)
