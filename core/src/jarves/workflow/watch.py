@@ -20,7 +20,8 @@ SELF_ACTIVITY_S = 30  # the handover command's own tool hooks land just after it
 IDLE_ALARM_S = 30 * 60  # free slots + open work + no worker start / task transition for this long -> owner notify
 RUN_DEAD_S = 15 * 60  # worker-watch itself has not run for this long: the wrapper is dead
 WORK_LABELS = {"agent-doable", "bug", "p0", "p1", "p2", "p3"}
-SIGNED_LABELS = {"signed-off", "opus-signed-off", "approved"}
+PUSH_REARM_S = 6 * 3600  # an unchanged idle state is pushed to the owner at most this often
+OWNER_ONLY = {"owner-gated", "no-automerge"}
 ACTIVITY_KINDS = ("agent_registered", "task_claimed", "task_transition", "task_flow", "task_created")
 
 
@@ -36,13 +37,20 @@ def open_work(snap: dict) -> dict:
         found = re.match(r"gh-(\d+)", str(task.get("id", "")))
         if found:
             covered.add(int(found.group(1)))
+    def gated(labels):
+        low = {str(x).lower() for x in labels}
+        return bool(low & OWNER_ONLY) or any(x.startswith("known-issue-") for x in low)
+
     issues = [i["number"] for i in source.get("open_issues") or []
               if i.get("state", "open") == "open" and i["number"] not in covered
-              and {str(x).lower() for x in i.get("labels", [])} & WORK_LABELS]
-    prs = [p for p in source.get("open_prs") or [] if not p.get("draft") and not p.get("auto_merge")]
-    signed = [p["number"] for p in prs if {str(x).lower() for x in p.get("labels", [])} & SIGNED_LABELS]
-    return {"issues": issues[:20], "issue_count": len(issues), "prs": [p["number"] for p in prs][:20],
-            "pr_count": len(prs), "signed_prs": signed[:20], "synced_at": source.get("synced_at", 0)}
+              and {str(x).lower() for x in i.get("labels", [])} & WORK_LABELS and not gated(i.get("labels", []))]
+    # Not idle work: drafts, PRs with auto-merge (queue data is not synced), and Tier R PRs (no-automerge) that
+    # wait for review or the owner; those are reported separately.
+    open_prs = [p for p in source.get("open_prs") or [] if not p.get("draft") and not p.get("auto_merge")]
+    tier_r = [p["number"] for p in open_prs if "no-automerge" in {str(x).lower() for x in p.get("labels", [])}]
+    prs = [p["number"] for p in open_prs if p["number"] not in tier_r]
+    return {"issues": issues[:20], "issue_count": len(issues), "prs": prs[:20], "pr_count": len(prs),
+            "tier_r_prs": tier_r[:20], "synced_at": source.get("synced_at", 0)}
 
 
 def last_activity(store: Store) -> float:
@@ -103,7 +111,18 @@ def evaluate(running, allowed, ready, state, now):
     return numbers, problem, {"active": problem, "sent_at": now, "shortfall": shortfall, "over": over}
 
 
-def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None) -> dict:
+def is_quiet(now: float) -> bool:
+    """Night in local time (22:00-07:00): no owner push."""
+    import datetime
+    hour = datetime.datetime.fromtimestamp(now).hour
+    return hour >= 22 or hour < 7
+
+
+def push_allowed(store: Store, snap: dict, now: float, quiet) -> bool:
+    return (snap.get("owner") or {}).get("effective_mode") == "present" and not quiet(now)
+
+
+def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None, quiet=is_quiet) -> dict:
     """Count, decide, and (when needed) tell the manager once. Never raises."""
     try:
         snap = store.snapshot()
@@ -118,7 +137,8 @@ def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None)
         work = open_work(snap)
         idle_s = now - last_activity(store)
         free = max(0, allowed_workers(policy) - len(running))
-        idle = idle_decision(free, work, len(ready), idle_s, idle_sent_at, now)
+        condition = idle_decision(free, work, len(ready), idle_s, 0, now)  # the state itself, without the note rate limit
+        idle = condition and now - idle_sent_at >= IDLE_ALARM_S
         numbers["open_work"] = work
         numbers["idle_alarm"] = idle
         if dry:
@@ -128,15 +148,22 @@ def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None)
             subject = f"IDLE_WORK: no worker or task moved for {int(idle_s // 60)} min"
             body = (f"{free} free worker slots; open issues without a task: {work['issue_count']} "
                     f"({', '.join('#%d' % n for n in work['issues'][:8])}); open PRs waiting: {work['pr_count']}; "
-                    f"signed-off PRs: {len(work['signed_prs'])}; ready tasks: {len(ready)}. Start a worker or assign work.")
+                    f"Tier R PRs waiting for review: {len(work['tier_r_prs'])}; ready tasks: {len(ready)}. Start a worker or assign work.")
             store.record_event("worker_watch", subject)
             (send or store.post_manager_note)(subject, body)
-            if notify is not None:
-                try:
-                    notify("idle_work", subject)
-                except Exception:  # noqa: BLE001  a push is best effort
-                    pass
             idle_sent_at = now
+        # Owner push: once per distinct idle episode (re-armed after the state ended, or every 6 h), only while
+        # the owner is present and it is not night. Away: the manager note and ledger event above are enough.
+        episode = store.get_meta("worker_watch_idle", {}) or {}
+        if not condition:
+            if episode:
+                store.set_meta("worker_watch_idle", {})
+        elif notify is not None and push_allowed(store, snap, now, quiet) and ("pushed_at" not in episode or now - episode["pushed_at"] >= PUSH_REARM_S):
+            try:
+                notify("idle_work", f"IDLE_WORK: {work['issue_count']} issues and {work['pr_count']} PRs wait, no worker")
+            except Exception:  # noqa: BLE001  a push is best effort
+                pass
+            store.set_meta("worker_watch_idle", {"pushed_at": now})
         if action:
             lane = (ready[0].get("lane") if ready else "") or "any"
             if action == "short":

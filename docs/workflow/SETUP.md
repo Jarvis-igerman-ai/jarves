@@ -184,7 +184,7 @@ requires an already running allow-listed session and explicit
 - Open work with no worker (#919): the result also carries `open_work` (open agent-doable/bug/P0-P3 issues
   without a task, open PRs, signed-off PRs; from the last GitHub sync, no network) and `idle_alarm`. With free
   slots, such work and no worker start or task transition for 30 minutes it posts an `IDLE_WORK` manager note and
-  one Core notify (same bridge as the autopilot alerts), at most once per 30 minutes. Every run stamps
+  a Core notify (same bridge as the autopilot alerts, text only). The note repeats at most every 30 minutes; the push is sent once per idle episode (6 h re-arm), only while the owner is present and not 22:00-07:00. Owner-gated, known-issue-*, no-automerge (Tier R) and auto-merge items are not counted as idle work. Every run stamps
   `worker_watch_run`; `health` shows `worker_watch.age_s` and opens a `worker_watch_dead` incident after 15 minutes
   (factory-check can read the same `health` JSON).
 - Manager restart or nudge: ask `handover-state` first. It prints `{"ready":bool,"age_s":N,"reason":"..."}`;
