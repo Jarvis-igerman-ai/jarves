@@ -27,6 +27,26 @@ FOOTER = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code
 MIN_INTEGRATION = 3
 # Windows: never flash a console window (issue #889); same contract as jarves.workflow.winproc.hidden_popen_kwargs.
 _HIDDEN = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if sys.platform == "win32" else {}
+
+
+def _has_console():
+    """True when this process is attached to a real console (output must stay visible there)."""
+    if sys.platform != "win32":
+        return True
+    try:
+        if sys.stdout.isatty():
+            return True
+        import ctypes
+        return bool(ctypes.windll.kernel32.GetConsoleWindow())
+    except Exception:
+        return True
+
+
+def _prepush_flags():
+    """No-window flag only when the parent has no console; with one, CREATE_NO_WINDOW drops the child's output."""
+    return {} if _has_console() else _HIDDEN
+
+
 FILES_LIMIT = 100  # gh pr view truncates `files` here; at or above it we cannot see everything -> Tier R
 PROTECTED = re.compile(r"^(main|master|release.*|v\d.*|HEAD)$")
 GOOD_MERGE_STATES = ("CLEAN", "BLOCKED", "HAS_HOOKS")
@@ -227,7 +247,7 @@ def cmd_build(a):
         return 3
     if not a.no_prepush:
         if subprocess.run([sys.executable, "core/tools/prepush.py"], cwd=cwd, stdin=subprocess.DEVNULL,
-                          stdout=sys.stdout, stderr=sys.stderr, **_HIDDEN).returncode != 0:
+                          stdout=sys.stdout, stderr=sys.stderr, **_prepush_flags()).returncode != 0:
             print(json.dumps({"branch": name, "error": "prepush failed"}), file=sys.stderr)
             return 4
     body = pr_body(included, skipped)

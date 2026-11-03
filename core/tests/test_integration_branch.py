@@ -269,8 +269,30 @@ def test_prepush_keeps_output_visible_with_hidden_flag(env, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(ib, "_has_console", lambda: False)
+    monkeypatch.setattr(ib, "_HIDDEN", {"creationflags": 0x08000000})
     assert run_main(work, "build", "1") == 0
     assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
     assert seen["stdin"] == subprocess.DEVNULL
-    if sys.platform == "win32":
-        assert seen["creationflags"]
+    assert seen["creationflags"] == 0x08000000
+
+
+def test_prepush_no_hidden_flag_when_console_attached(env, monkeypatch):
+    """#889: with a real console CREATE_NO_WINDOW would drop the child's output, so it is not passed."""
+    work, gh = env
+    make_pr(work, gh, 1, {"core/src/jarves/x_thing.py": "x = 1\n"})
+    seen = {}
+    orig = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if "core/tools/prepush.py" not in cmd:
+            return orig(cmd, **kw)
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(ib, "_has_console", lambda: True)
+    monkeypatch.setattr(ib, "_HIDDEN", {"creationflags": 0x08000000})
+    assert run_main(work, "build", "1") == 0
+    assert "creationflags" not in seen
+    assert seen["stdout"] is sys.stdout
