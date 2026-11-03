@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -13,6 +14,9 @@ PLAN = Path(__file__).with_name("version_plan.json")
 MAX_PAGES = 10
 MAX_OPEN_ROWS = 150
 BUG_LABELS = ("bug", "P0", "P1", "P2", "P3", "showstopper")
+ISSUE_TASK_CAP = 10
+ISSUE_TASK_ENV = "JARVES_WORKFLOW_ISSUE_TASKS"  # set to 0/off/false to disable issue->task creation
+DEFECT_LABELS = {"bug", "p0", "p1", "p2", "p3", "showstopper"}
 VERSION_LABELS = ("4.5.1", "5", "5.0", "6", "6.0", "7", "7.0")
 
 
@@ -195,6 +199,51 @@ def with_label_scope(plan: dict, snapshot: dict) -> dict:
     return {**plan, "versions": versions}
 
 
+def issue_tasks_enabled(environ=None) -> bool:
+    value = str((environ if environ is not None else os.environ).get(ISSUE_TASK_ENV, "1")).strip().lower()
+    return value not in {"0", "off", "false", "no", "disabled"}
+
+
+def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ=None) -> list[str]:
+    """Queue gh-N tasks for open agent-doable defects so ready work is not empty while issues are open.
+
+    Metadata only: it never approves, runs a worker or changes an issue. Existing tasks are never
+    touched, so a closed issue or an archived/finished gh-N task is never recreated. Imported scope
+    (execution_allowed=false) does not count as coverage, but stays unauthorised itself.
+    """
+    if not issue_tasks_enabled(environ):
+        return []
+    tasks = store.snapshot()["tasks"]
+    taken = {t["id"] for t in tasks}
+    covered: set[int] = set()
+    for t in tasks:
+        if t.get("execution_allowed", True):
+            covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
+    created = []
+    for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
+        if len(created) >= cap:
+            break
+        number = int(row["number"])
+        labels = {str(x).strip().lower() for x in row.get("labels", [])}
+        if row.get("state") != "open" or f"gh-{number}" in taken or number in covered:
+            continue
+        if any(x.replace("_", "-").replace(" ", "-").startswith("owner-gated") for x in labels):
+            continue
+        defect = bool(labels & DEFECT_LABELS)
+        if not defect and "agent-doable" not in labels:
+            continue
+        priority = next((i for i in range(4) if f"p{i}" in labels), 2)
+        version = next((v for label, v in LABEL_VERSIONS if label in labels), "V4.5.1")
+        store.create_task({
+            "id": f"gh-{number}", "title": f"#{number} {str(row.get('title', ''))[:200]}".strip(),
+            "lane": "bugs" if defect else "features", "priority": priority, "version": version,
+            "required_validation": "automated", "execution_allowed": True,
+            "issue_numbers": [number], "source_url": row.get("url", ""),
+            "scope_note": "Created by GitHub issue sync; issue state is not verification."})
+        created.append(f"gh-{number}")
+    return created
+
+
 def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
     plan = with_label_scope(plan, snapshot)
@@ -232,6 +281,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
               "ci_green": bool(snapshot.get("ci_green")), "ci_state": snapshot.get("ci_state", "unknown"),
               "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
+    create_issue_tasks(store, snapshot)
     store.set_source(source)
     return source
 

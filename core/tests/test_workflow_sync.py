@@ -44,7 +44,7 @@ class WorkflowSyncTests(unittest.TestCase):
         apply_snapshot(self.store, snap, plan)
         apply_snapshot(self.store, snap, plan)
         tasks = {t["id"]: t for t in self.store.snapshot()["tasks"]}
-        self.assertEqual(sorted(tasks), ["ISSUE-2", "ISSUE-3", "V5-ONE"])
+        self.assertEqual(sorted(k for k in tasks if not k.startswith("gh-")), ["ISSUE-2", "ISSUE-3", "V5-ONE"])
         self.assertEqual((tasks["ISSUE-2"]["version"], tasks["ISSUE-2"]["lane"]), ("V6", "bugs"))
         self.assertEqual((tasks["ISSUE-3"]["version"], tasks["ISSUE-3"]["lane"]), ("V4.5.1", "features"))
         self.assertFalse(tasks["ISSUE-2"]["execution_allowed"])

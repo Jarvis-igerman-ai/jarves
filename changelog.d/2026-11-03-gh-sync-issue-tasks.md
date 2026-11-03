@@ -1,0 +1,1 @@
+- Added: the read-only GitHub sync now queues executable gh-N workflow tasks for open bug/P0-P3/showstopper/agent-doable issues (max 10 per sync, never closed, owner-gated or existing; opt out with JARVES_WORKFLOW_ISSUE_TASKS=0), so ready work is not empty while defects are open.
