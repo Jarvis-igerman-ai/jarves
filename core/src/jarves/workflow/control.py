@@ -25,7 +25,7 @@ SUPERVISOR_LOCK_WAIT_S = 45.0  # covers a stop-then-start restart overlapping th
 
 
 @contextlib.contextmanager
-def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.monotonic):
+def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.monotonic, give_up=None):
     """A kernel-backed lock: released on a crash, never inferred from a stale PID.
 
     wait_s > 0 retries a held lock for that long (a restart that overlaps the old
@@ -52,7 +52,7 @@ def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.m
                     fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except OSError:
-                if clock() >= deadline:
+                if clock() >= deadline or (give_up is not None and give_up()):
                     raise
                 sleep(0.25)
         try:
@@ -63,6 +63,35 @@ def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.m
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _live_holder_probe(home: Path, wall=time.time):
+    """Return a give_up() that is True once the lock holder proves it is a live supervisor.
+
+    A duplicate started while a healthy supervisor runs outside the scheduled task must not linger for the whole
+    lock wait. A fresh 'running' heartbeat alone is not proof (an old instance mid-shutdown still shows one, #754),
+    so the holder must ADVANCE its heartbeat after the duplicate started; a stopping holder cannot.
+    """
+    def beat() -> float | None:
+        try:
+            db = sqlite3.connect(f"file:{(home / 'workflow.db').as_posix()}?mode=ro", uri=True, timeout=1)
+            try:
+                row = db.execute("SELECT value FROM workflow_meta WHERE key='supervisor'").fetchone()
+            finally:
+                db.close()
+            data = json.loads(row[0]) if row else {}
+            return float(data["heartbeat_at"]) if data.get("status") == "running" else None
+        except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
+            return None
+
+    first = beat()
+
+    def give_up() -> bool:
+        if first is None or wall() - first > 60:
+            return False
+        latest = beat()
+        return latest is not None and latest > first
+    return give_up
 
 
 def task_context(store: Store, task: dict) -> dict:
@@ -153,7 +182,8 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     with contextlib.ExitStack() as stack:
         try:
             stack.enter_context(exclusive(home / "supervisor.lock", wait_s=SUPERVISOR_LOCK_WAIT_S,
-                                          sleep=lock_sleep, clock=lock_clock))
+                                          sleep=lock_sleep, clock=lock_clock,
+                                          give_up=_live_holder_probe(home)))
         except OSError:
             # A healthy supervisor outside the scheduled task still holds the lock: a duplicate exits cleanly (#754).
             logging.getLogger(__name__).warning("another supervisor holds the lock; this duplicate exits")

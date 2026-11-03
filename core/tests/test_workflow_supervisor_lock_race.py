@@ -81,3 +81,37 @@ def test_supervisor_exits_cleanly_when_lock_stays_held(tmp_path, caplog):
                            lock_sleep=fake.sleep, lock_clock=fake.clock)
     assert fake.now >= control.SUPERVISOR_LOCK_WAIT_S
     assert "another supervisor holds the lock" in caplog.text
+
+
+def _write_beat(home, ts, status="running"):
+    import json
+    import sqlite3
+    db = sqlite3.connect(home / "workflow.db")
+    db.execute("CREATE TABLE IF NOT EXISTS workflow_meta (key TEXT PRIMARY KEY, value TEXT)")
+    db.execute("INSERT OR REPLACE INTO workflow_meta VALUES ('supervisor', ?)",
+               (json.dumps({"heartbeat_at": ts, "status": status}),))
+    db.commit()
+    db.close()
+
+
+def test_duplicate_exits_early_when_holder_heartbeat_advances(tmp_path):
+    _write_beat(tmp_path, 1000.0)
+    probe = control._live_holder_probe(tmp_path, wall=lambda: 1005.0)
+    assert probe() is False  # same heartbeat: could be a holder mid-shutdown
+    _write_beat(tmp_path, 1010.0)
+    assert probe() is True
+    fake = FakeTime()
+    lock = tmp_path / "supervisor.lock"
+    with exclusive(lock):
+        with pytest.raises(OSError):
+            with exclusive(lock, wait_s=45, sleep=fake.sleep, clock=fake.clock, give_up=probe):
+                pass
+    assert fake.now == 0.0
+
+
+def test_stopped_or_missing_heartbeat_keeps_waiting(tmp_path):
+    assert control._live_holder_probe(tmp_path)() is False
+    _write_beat(tmp_path, 1000.0, status="stopped")
+    probe = control._live_holder_probe(tmp_path, wall=lambda: 1001.0)
+    _write_beat(tmp_path, 1010.0, status="stopped")
+    assert probe() is False
