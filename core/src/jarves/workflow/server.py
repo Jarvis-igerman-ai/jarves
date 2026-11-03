@@ -354,7 +354,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._unlock(data)
                 return
             if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|confirm|defer|reopen|discuss|ask-more)", path)
-                    or path == "/api/followups") and not self._unlock_left():
+                    or re.fullmatch(r"/api/tasks/[A-Za-z0-9_.:-]+/transition", path)
+                    or path in {"/api/followups", "/api/owner", "/api/tasks", "/api/dispatch"}) and not self._unlock_left():
+                # #903: routes that change task state, owner mode or launch work need the same unlock.
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
                 self._json(403, {"error": "answers are locked: run 'jarvis workflow unlock' in your own terminal and type the code",
                                  "locked": True})
