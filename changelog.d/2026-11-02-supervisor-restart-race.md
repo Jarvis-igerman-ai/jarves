@@ -1,0 +1,2 @@
+- Fixed: workflow: supervisor waits up to 45 s for the old instance's lock on restart instead of exiting; the login task repeats every 5 min to restart a dead supervisor (#754)
+- Fixed: workflow: a duplicate supervisor exits as soon as the lock holder shows an advancing heartbeat, instead of living the full 45 s wait (#754)

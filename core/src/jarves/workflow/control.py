@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -20,24 +21,40 @@ from . import observability as obs
 from .store import Store
 
 MAX_LOOP_FAILURES = 20
+SUPERVISOR_LOCK_WAIT_S = 45.0  # covers a stop-then-start restart overlapping the old instance (#754)
 
 
 @contextlib.contextmanager
-def exclusive(path: Path):
-    """A kernel-backed lock: released on a crash, never inferred from a stale PID."""
+def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.monotonic, give_up=None):
+    """A kernel-backed lock: released on a crash, never inferred from a stale PID.
+
+    wait_s > 0 retries a held lock for that long (a restart that overlaps the old
+    instance's shutdown must wait for it, not exit and leave nothing running, #754).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as stream:
-        stream.seek(0)
-        if not stream.read(1):
+        # fstat, not read(): on Windows reading the byte another process has locked raises.
+        if os.fstat(stream.fileno()).st_size == 0:
             stream.write(b"0")
             stream.flush()
         stream.seek(0)
         if os.name == "nt":
             import msvcrt
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        deadline = clock() + max(0.0, wait_s)
+        while True:
+            try:
+                if os.name == "nt":
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if clock() >= deadline or (give_up is not None and give_up()):
+                    raise
+                sleep(0.25)
         try:
             yield
         finally:
@@ -46,6 +63,35 @@ def exclusive(path: Path):
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def _live_holder_probe(home: Path, wall=time.time):
+    """Return a give_up() that is True once the lock holder proves it is a live supervisor.
+
+    A duplicate started while a healthy supervisor runs outside the scheduled task must not linger for the whole
+    lock wait. A fresh 'running' heartbeat alone is not proof (an old instance mid-shutdown still shows one, #754),
+    so the holder must ADVANCE its heartbeat after the duplicate started; a stopping holder cannot.
+    """
+    def beat() -> float | None:
+        try:
+            db = sqlite3.connect(f"file:{(home / 'workflow.db').as_posix()}?mode=ro", uri=True, timeout=1)
+            try:
+                row = db.execute("SELECT value FROM workflow_meta WHERE key='supervisor'").fetchone()
+            finally:
+                db.close()
+            data = json.loads(row[0]) if row else {}
+            return float(data["heartbeat_at"]) if data.get("status") == "running" else None
+        except (sqlite3.Error, OSError, ValueError, KeyError, TypeError):
+            return None
+
+    first = beat()
+
+    def give_up() -> bool:
+        if first is None or wall() - first > 60:
+            return False
+        latest = beat()
+        return latest is not None and latest > first
+    return give_up
 
 
 def task_context(store: Store, task: dict) -> dict:
@@ -120,7 +166,8 @@ def _self_update(store, home: Path, profile_home: Path, port: int) -> bool:
 
 def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: float = 10, sync_github: bool = True,
                update_enabled: bool = False,
-               stop: threading.Event | None = None, popen=subprocess.Popen, clock=time.time) -> None:
+               stop: threading.Event | None = None, popen=subprocess.Popen, clock=time.time,
+               lock_sleep=time.sleep, lock_clock=time.monotonic) -> None:
     """Own the web child; workers are never killed or blindly re-run.
 
     An OS login task/service should supervise THIS process. No process can
@@ -132,7 +179,15 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
     stop = stop or threading.Event()
     if not 1 <= port <= 65535:
         raise ValueError("supervisor needs a fixed port between 1 and 65535")
-    with exclusive(home / "supervisor.lock"):
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(exclusive(home / "supervisor.lock", wait_s=SUPERVISOR_LOCK_WAIT_S,
+                                          sleep=lock_sleep, clock=lock_clock,
+                                          give_up=_live_holder_probe(home)))
+        except OSError:
+            # A healthy supervisor outside the scheduled task still holds the lock: a duplicate exits cleanly (#754).
+            logging.getLogger(__name__).warning("another supervisor holds the lock; this duplicate exits")
+            return
         store = Store(home / "workflow.db")
         store.seed_plan(json.loads(PLAN.read_text(encoding="utf-8")))
         from . import webchild
