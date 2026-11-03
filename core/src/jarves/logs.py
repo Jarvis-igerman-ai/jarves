@@ -69,23 +69,37 @@ _PATTERNS = [
     (re.compile(r"AQAAANCMnd8BFdERjHoAwE/Cl\+sBAAAA[A-Za-z0-9+/=]*"), "<dpapi-blob>"),   # Windows DPAPI blob (base64)
     (re.compile(r"\bwa[ab]_[A-Za-z0-9_\-]{20,}"), "<whatsapp-bridge-token>"),           # SW-V4 F bridge user/admin token
     (re.compile(r"\bwa1\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"), "<whatsapp-approval>"),   # signed approval id
+    (re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"), "<aws-key-id>"),                       # AWS access key id
+    (re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}"), "<stripe-key>"),              # Stripe secret / restricted key
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}"), "<google-api-key>"),                        # Google API key
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----(?:[\s\S]*?-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|[\s\S]*$)"),
+     "<private-key>"),                                                                   # PEM private key block
     (re.compile(r"(?i)([?&#;](?:t|k|key|token|access_token|refresh_token|id_token|code|secret|client_secret|sig|"
                 r"signature|auth|password|pwd|session|sid|apikey|api_key|state)=)[^&#\s\"'<>]+"), r"\1***"),
-    (re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|cookie|authorization)(\"?\s*[:=]\s*\"?)"
-                r"(?!\*\*\*|<\d+ chars>|<secret>)[^\s\",}&]+"), r"\1\2***"),
+    # the name may carry a prefix (access_token, client_secret, DB_PASSWORD, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN);
+    # a whole-value placeholder (${NAME}, os.environ[...], os.getenv(...), process.env.NAME) is code, not a secret
+    (re.compile(r"(?i)(?<!\w)((?:[A-Za-z0-9]+[_-]){0,4}(?:api[_-]?key|access[_-]?key|token|secret(?:[_-]access[_-]key)?|"
+                r"password|passwd|cookie|authorization))(\"?\s*[:=]\s*\"?)"
+                r"(?!\*\*\*|<\d+ chars>|<secret>|(?-i:<[a-z][a-z-]*>(?=[\"\s,}&]|$))|(?:true|false|null|none)(?=[\"\s,}&]|$)|"
+                r"\$\{(?-i:[A-Z_][A-Z0-9_]*)\}(?=[\"\s,}&]|$)|"
+                r"os\.environ\[(?:'(?-i:[A-Z_][A-Z0-9_]*)'|(?-i:[A-Z_][A-Z0-9_]*))\](?=[\"\s,}&]|$)|"
+                r"(?:os\.environ\.get|os\.getenv|getenv)\((?:'(?-i:[A-Z_][A-Z0-9_]*)'|(?-i:[A-Z_][A-Z0-9_]*))\)(?=[\"\s,}&]|$)|"
+                r"process\.env\.(?-i:[A-Z_][A-Z0-9_]*)(?=[\"\s,}&]|$))(\$\{[^}\s]*\}[^\s\",}&]*|[^\s\",}&]+)"), "KV"),
 ]
 # Windows user-profile paths: C:\Users\<name>\ (also / and JSON-escaped \\) -> C:\Users\<user>\
 _USER_PATH = re.compile(r"(?i)((?:[a-z]:)?(?:\\\\|\\|/)(?:users|documents and settings)(?:\\\\|\\|/)|(?<![\w.])/home/)"
                         r"(?!<user>|public(?:\\|/|$)|default(?:\\|/|$))[^\\/\s\"'<>:*?|]+")
 
 
-_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:14]]   # token shapes only (no bearer/key=value/URL rules)
+_TOKEN_SHAPES = [p for p, _ in _PATTERNS[:1] + _PATTERNS[3:18]]   # token shapes only (no bearer/key=value/URL rules)
 
 
 def has_secret(s: str) -> bool:
     """Does this text contain a credential-shaped string (API key, OAuth/JWT, bot/Meta/GitHub token, DPAPI blob)?
     Used by backups (such a file is left out) and by the leak checks; ***-masked values do not count."""
-    return any(p.search(m.group(0)) and "***" not in m.group(0) for p in _TOKEN_SHAPES for m in p.finditer(s))
+    # a truncated PEM key runs to the end of the text: only its first paragraph counts for the "***" check
+    return any(p.search(m.group(0)) and "***" not in re.split(r"\n\s*\n", m.group(0), maxsplit=1)[0]
+               for p in _TOKEN_SHAPES for m in p.finditer(s))
 
 
 def redact_deep(v: object, depth: int = 0) -> object:
@@ -101,10 +115,23 @@ def redact_deep(v: object, depth: int = 0) -> object:
     return v
 
 
+_BASE_KEY = re.compile(r"(?i)(api[_-]?key|token|secret|password|passwd|cookie|authorization)")
+
+
+def _kv_sub(m: "re.Match[str]") -> str:
+    """Mask a key=value / "key": value secret. A prefixed name (max_token) with an unquoted JSON number
+    (`"max_token": 100,`) is a setting, not a secret: left alone so serialized JSON stays valid."""
+    key, sep, val = m.group(1), m.group(2), m.group(3)
+    if (":" in sep and not sep.endswith('"') and not _BASE_KEY.fullmatch(key)
+            and re.fullmatch(r"-?\d+(?:\.\d+)?", val) and m.string[m.end():m.end() + 8].lstrip()[:1] in ("", ",", "}", "]")):
+        return m.group(0)
+    return key + sep + "***"
+
+
 def redact(s: str) -> str:
     """Secrets (both modes, every string) and the user name in profile paths."""
     for pat, rep in _PATTERNS:
-        s = pat.sub(rep, s)
+        s = pat.sub(_kv_sub if rep == "KV" else rep, s)
     return _USER_PATH.sub(r"\1<user>", s)
 
 
