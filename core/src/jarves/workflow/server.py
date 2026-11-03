@@ -353,7 +353,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/unlock":
                 self._unlock(data)
                 return
-            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
+            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|confirm|defer|reopen|discuss|ask-more)", path)
                     or path == "/api/followups") and not self._unlock_left():
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
                 self._json(403, {"error": "answers are locked: run 'jarvis workflow unlock' in your own terminal and type the code",
@@ -386,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.discuss.open(store, m[1], launch=data.get("launch", True))
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/defer", path):
                 result = store.defer(m[1], channel="dashboard")
+            elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/confirm", path):
+                result = store.confirm(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/questions/([A-Za-z0-9_.:-]+)/reopen", path):
                 result = store.reopen(m[1], by="owner (dashboard session)", channel="dashboard")
             elif m := re.fullmatch(r"/api/tasks/([A-Za-z0-9_.:-]+)/transition", path):

@@ -61,7 +61,7 @@
 
   function needsYou(data) {
     const tasks = new Map(data.tasks.map(task => [task.id, task]));
-    const open = data.questions.filter(q => OPEN.has(q.status || "pending"))
+    const open = data.questions.filter(q => q.held || OPEN.has(q.status || "pending"))
       // Oldest waiting first (owner research): the longest wait is the most urgent; ties by the blocked task's priority.
       .sort((a, b) => seconds(a.created_at) - seconds(b.created_at)
         || (tasks.get(a.task_id)?.priority ?? 2) - (tasks.get(b.task_id)?.priority ?? 2));

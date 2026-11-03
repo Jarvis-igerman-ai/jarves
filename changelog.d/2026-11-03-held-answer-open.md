@@ -1,0 +1,1 @@
+- Fixed: workflow dashboard counts a held (unconfirmed typed) owner answer as an open question in the question cards, Today and Overview (#904, follows #797).
