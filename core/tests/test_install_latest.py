@@ -405,7 +405,14 @@ def test_report_has_speedtest_and_features_diff(tmp_path):
     assert "[PASS] features diff: 2 features compared" in rep.render()
 
 
-def test_failed_speedtest_rolls_back(tmp_path):
+def test_speedtest_budget_fail_exit0_is_reported_not_rolled_back(tmp_path):
+    f = Fake(tmp=tmp_path, cli={"speedtest": (0, "speed test (class owner, 12 s): FAIL\nmore")})
+    rep = il.run(f.deps())
+    assert rep.ok and not rep.rolled_back and "rollback" not in f.calls
+    assert "FAIL" in dict((c[0], c[2]) for c in rep.checks)["speedtest"]
+
+
+def test_crashed_speedtest_rolls_back(tmp_path):
     f = Fake(tmp=tmp_path, cli={"speedtest": (1, "speedtest FAIL")})
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and "rollback" in f.calls

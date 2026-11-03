@@ -366,7 +366,11 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
                             ("speedtest", ["speedtest"]), ("status", ["status", "--brief"])):
             code, out = deps.run_cli(argv)
             good = code == 0 or (name == "status" and (code == 4 or (code == 1 and not core_up)))
-            ok = rep.add(name, good, "" if good else f"exit {code}: {_first_line(out)}") and ok
+            if name == "speedtest" and good:             # informational: exit 0 even on a budget FAIL; show the real result
+                detail = _first_line(out) + " (informational, never a rollback by itself)"
+            else:
+                detail = "" if good else f"exit {code}: {_first_line(out)}"
+            ok = rep.add(name, good, detail) and ok
     if install_ok or end == "timeout":                    # informational: lost features are named, rollback stays check-driven
         try:
             fcode, fout = deps.run_cli(["features"])
