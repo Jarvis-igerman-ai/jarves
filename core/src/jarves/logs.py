@@ -77,11 +77,14 @@ _PATTERNS = [
     (re.compile(r"(?i)([?&#;](?:t|k|key|token|access_token|refresh_token|id_token|code|secret|client_secret|sig|"
                 r"signature|auth|password|pwd|session|sid|apikey|api_key|state)=)[^&#\s\"'<>]+"), r"\1***"),
     # the name may carry a prefix (access_token, client_secret, DB_PASSWORD, AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN);
-    # a lookup such as os.environ.get(...) is code, not a secret value
-    (re.compile(r"(?i)(?<!\w)((?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|access[_-]?key|token|secret(?:[_-]access[_-]key)?|"
+    # a whole-value placeholder (${NAME}, os.environ[...], os.getenv(...), process.env.NAME) is code, not a secret
+    (re.compile(r"(?i)(?<!\w)((?:[A-Za-z0-9]+[_-]){0,4}(?:api[_-]?key|access[_-]?key|token|secret(?:[_-]access[_-]key)?|"
                 r"password|passwd|cookie|authorization))(\"?\s*[:=]\s*\"?)"
                 r"(?!\*\*\*|<\d+ chars>|<secret>|(?-i:<[a-z][a-z-]*>)|(?:true|false|null|none)(?=[\"\s,}&\]]|$)|"
-                r"os\.(?:environ|getenv)\b|getenv\(|process\.env|\$\{)([^\s\",}&]+)"), "KV"),
+                r"\$\{(?-i:[A-Z_][A-Z0-9_]*)\}(?=[\"\s,}&\]]|$)|"
+                r"os\.environ\[(?:'(?-i:[A-Z_][A-Z0-9_]*)'|(?-i:[A-Z_][A-Z0-9_]*))\](?=[\"\s,}&\]]|$)|"
+                r"(?:os\.environ\.get|os\.getenv|getenv)\((?:'(?-i:[A-Z_][A-Z0-9_]*)'|(?-i:[A-Z_][A-Z0-9_]*))\)(?=[\"\s,}&\]]|$)|"
+                r"process\.env\.(?-i:[A-Z_][A-Z0-9_]*)(?=[\"\s,}&\]]|$))(\$\{[^}\s]*\}[^\s\",}&]*|[^\s\",}&]+)"), "KV"),
 ]
 # Windows user-profile paths: C:\Users\<name>\ (also / and JSON-escaped \\) -> C:\Users\<user>\
 _USER_PATH = re.compile(r"(?i)((?:[a-z]:)?(?:\\\\|\\|/)(?:users|documents and settings)(?:\\\\|\\|/)|(?<![\w.])/home/)"

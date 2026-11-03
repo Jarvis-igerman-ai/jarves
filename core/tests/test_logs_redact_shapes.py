@@ -78,3 +78,33 @@ def test_json_numbers_in_prefixed_settings_stay_valid_json():
 def test_has_secret_truncated_pem_with_later_mask():
     text = "-----BEGIN PRIVATE KEY-----\nMIIEabc123\n\nlater sk-*** and ***"
     assert logs.has_secret(text)
+
+
+def test_redact_is_linear_on_kebab_and_hyphen_runs():
+    """Opus round 2 on #913: an unbounded name prefix made redact() quadratic (17 s on 40 KB). Generous bound."""
+    import random
+    import time
+    rnd = random.Random(7)
+    kebab = "-".join("".join(rnd.choice("abcdefghij") for _ in range(rnd.randint(1, 6))) for _ in range(8000))
+    for text in ("a-" * 20000, kebab[:40000], "a_b-" * 10000):
+        t0 = time.perf_counter()
+        logs.redact(text)
+        assert time.perf_counter() - t0 < 1.0
+    assert VAL not in logs.redact("--db-password=" + VAL) and "***" in logs.redact("a-b-c-api_key=" + VAL)
+
+
+@pytest.mark.parametrize("text", [
+    "password=${Hunter2" + VAL + "}", "password=getenv(" + VAL + ")", "password=process.env." + VAL.lower() + "x", "password=${DB_PASSWORD}x", "password=${" + VAL, "password=getenv('X')y", "password=getenv(VAL" + VAL,
+    "password=process.envX" + VAL, "password=os.environ['A']" + VAL,
+    "password=${NAME}" + VAL,
+])
+def test_placeholder_prefix_is_not_a_free_pass(text):
+    assert VAL not in logs.redact(text)
+
+
+@pytest.mark.parametrize("text", [
+    "password=${DB_PASSWORD}", "password=os.environ['DB_PASSWORD']", "password=os.getenv('DB_PASSWORD')",
+    "password=process.env.DB_PASSWORD", "token=os.environ.get('TOKEN')",
+])
+def test_exact_placeholders_stay_readable(text):
+    assert logs.redact(text) == text
