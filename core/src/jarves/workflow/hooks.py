@@ -114,7 +114,7 @@ def _git_base_note(cwd: str) -> str:
         left = deadline - time.monotonic()
         if left <= 0:
             raise subprocess.TimeoutExpired("git", GIT_NOTE_BUDGET_S)
-        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left).stdout.strip()
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=left, **hidden_popen_kwargs()).stdout.strip()
     try:
         remotes = git("remote", "-v")
         head = git("rev-parse", "--short", "HEAD") or "unknown"
