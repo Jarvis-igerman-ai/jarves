@@ -172,8 +172,8 @@ body[data-view="overview"] .heading-actions{display:none}
 .ov-fact-label{font-size:var(--fs-1);color:var(--muted);white-space:nowrap}
 
 /* Overview: blocks */
-.today{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"needs needs" "running blocked" "done roadmap";gap:var(--s3);margin-bottom:var(--s4)}
-.today-needs{grid-area:needs}.today-running{grid-area:running}.today-blocked{grid-area:blocked}.ov-done{grid-area:done}.today-roadmap{grid-area:roadmap}
+.today{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));grid-template-areas:none;gap:var(--s3);margin-bottom:var(--s3)}
+.today-needs{grid-column:1/-1}
 .today-block{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:var(--s3) var(--s4);box-shadow:var(--shadow)}
 .today-needs{background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--warn)}
 .today-head{gap:var(--s2);margin-bottom:var(--s3);min-height:var(--tap)}.today-head h2{font-size:var(--fs-4);font-weight:700;color:var(--text)}
@@ -260,7 +260,7 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 /* Responsive: 390 px first-class; the bottom bar scrolls when more tabs (Health, Timeline) arrive. */
 @media(max-width:1250px){.sidebar{padding:var(--s4) var(--s2)}.nav-link.active:before{right:calc(-1 * var(--s2))}main{padding:var(--s4) var(--s4) 0}.topbar{padding:0 var(--s4)}.notice{padding-inline:var(--s4)}}
 @media(max-width:1100px){.ov-status{grid-template-columns:auto minmax(0,1fr)}.ov-facts{grid-column:1/-1;grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(max-width:900px){.today{grid-template-columns:minmax(0,1fr);grid-template-areas:"needs" "running" "blocked" "done" "roadmap"}}
+@media(max-width:900px){.today{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:760px){
   .sidebar{height:auto;min-height:64px;padding:0;background:var(--surface);border-top:1px solid var(--line);backdrop-filter:none}
   .main-nav{display:flex;flex-direction:row;overflow-x:auto;gap:0;padding:var(--s1);margin:0;scrollbar-width:none}.main-nav::-webkit-scrollbar{display:none}
@@ -312,3 +312,5 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 .ov-log{gap:0}.ov-log-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--s2);padding:var(--s1) 0;border-bottom:1px solid var(--line);font-size:var(--fs-2);color:var(--text)}
 .ov-log-row:last-child{border-bottom:0}.ov-log-ms{color:var(--subtle);font-size:var(--fs-1);font-variant-numeric:tabular-nums}
 @media(max-width:760px){.ov-now-grid{grid-template-columns:minmax(0,1fr)}.ov-manager-log{max-height:280px}}
+/* #789 folding: closed blocks are one compact line (title, short summary, count); 44 px targets. */
+.ov-fold{margin-bottom:var(--s2)}.ov-fold>summary{min-height:var(--tap);font-size:var(--fs-3)}.ov-fold>summary .today-count{margin-inline-start:auto}.ov-fold-sum{color:var(--muted);font-weight:400;font-size:var(--fs-2);margin-inline-start:auto;overflow-wrap:anywhere;min-width:0}.ov-fold .today-legend{display:flex;flex-wrap:wrap;align-items:center;margin-bottom:var(--s2)}.ov-fold .ov-more-body>.text-link{margin-top:var(--s2)}.ov-id{color:var(--muted);font-size:var(--fs-1)}

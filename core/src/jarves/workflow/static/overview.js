@@ -1,7 +1,7 @@
 /* JARVES workflow Overview (owner redesign): one factory status bar, "done today", theme and shell state.
    Read-only: it renders from the state app.js already fetched (the "workflow:render" event) and reads only GET
    /api/health (the verdict) and GET /api/report (the morning report). The only thing it stores is the viewer's
-   theme choice, in guarded browser storage. */
+   theme choice and which folded blocks the viewer opened (#789), in guarded browser storage. */
 "use strict";
 
 (() => {
@@ -210,6 +210,40 @@
     put("#ov-done", (d.merged || d.verified || d.shipped ? tiles : `<p class="today-empty">${esc(T.doneEmpty)}</p>`) + `<p class="ov-note">${esc(T.doneNote)}</p>`);
     const alerts = (data.alerts || []).length;
     $("#ov-more-count").textContent = alerts ? `· ${T.alerts(alerts)}` : "";
+    fold("more", alerts > 0);
+  }
+
+  // ---- #789 folding: secondary blocks are closed <details>, one line with a count. The viewer's open/closed
+  // choice is remembered per block (guarded storage). A problem opens only its own block, once, when it appears;
+  // with no saved choice the block closes again when the problem is gone (healthy = calm). ----
+  const FOLD_KEY = "jarves.workflow.fold.";
+  const foldProblem = {};
+  function foldSaved(name) {
+    let value = null;
+    try { value = localStorage.getItem(FOLD_KEY + name); } catch (_) { /* storage blocked: default closed */ }
+    return value === "open" || value === "closed" ? value : null;
+  }
+  function setFold(el, open) {
+    if (el.open === open) return;
+    el.dataset.auto = "1";  // a change made here is not the viewer's choice and is not saved
+    el.open = open;
+  }
+  function fold(name, problem) {
+    const el = document.querySelector(`details[data-fold="${name}"]`);
+    if (!el) return;
+    if (problem && !foldProblem[name]) setFold(el, true);
+    else if (!foldSaved(name)) setFold(el, Boolean(problem));
+    foldProblem[name] = Boolean(problem);
+  }
+  function initFolds() {
+    document.querySelectorAll("details[data-fold]").forEach(el => {
+      if (foldSaved(el.dataset.fold) === "open") setFold(el, true);
+      el.addEventListener("toggle", () => {
+        if (el.dataset.auto) { delete el.dataset.auto; return; }
+        const value = el.open ? "open" : "closed";
+        try { localStorage.setItem(FOLD_KEY + el.dataset.fold, value); } catch (_) { /* remembered for this page only */ }
+      });
+    });
   }
 
   // ---- #789: what each worker is doing now, supervisor stop/start strip and the manager log (GET /api/now) ----
@@ -223,7 +257,7 @@
     return fn ? fn(a.tool || N.tool) : N.other(a.event || "?");
   }
   function workerItem(w, now, mode) {
-    const task = w.task_id ? `<span class="ov-worker-task" dir="auto"><b>${esc(w.task_id)}</b>${w.task_title ? ` · ${esc(w.task_title)}` : ""}</span>`
+    const task = w.task_id ? `<span class="ov-worker-task" dir="auto">${w.task_title ? `<b>${esc(w.task_title)}</b> ` : ""}<bdi class="ov-id">${esc(w.task_id)}</bdi></span>`
       : `<span class="ov-worker-task muted">${esc(N.noTask)}</span>`;
     const a = w.last;
     const line = a ? `<span class="ov-worker-line${a.status === "failed" ? " bad" : ""}"><span dir="auto">${esc(actionText(a))}</span> · <time>${esc(ago(a.ts, now))}</time>${a.hint ? ` · <span dir="auto">${esc(a.hint)}</span>` : ""}</span>`
@@ -236,11 +270,14 @@
     let html = list.length ? list.map(w => workerItem(w, view.now, view.trace_mode)).join("") : `<li class="today-empty">${esc(N.noWorkers)}</li>`;
     if (view.workers_total > list.length) html += `<li class="ov-note">${esc(N.more(list.length, view.workers_total))}</li>`;
     put("#ov-workers", html);
+    fold("workers", list.some(w => w.last && w.last.status === "failed"));
   }
   function renderStrip(view) {
     const r = view.restarts || {events: [], gaps: []}, span = Math.max(1, view.now - view.since);
     const x = ts => { const p = Math.min(1000, Math.max(0, (ts - view.since) / span * 1000)); return EN ? p : 1000 - p; };
     const label = N.stripLabel(r.starts || 0, r.stops || 0, (r.gaps || []).length);
+    const stops = (r.stops || 0) + (r.gaps || []).length;
+    $("#ov-restarts-count").textContent = stops ? String(stops) : "";
     if (!r.events.length && !r.gaps.length) { put("#ov-strip", `<p class="today-empty">${esc(N.stripEmpty)}</p>`); return; }
     const gaps = r.gaps.map(g => { const a = x(g.start), b = x(g.end); return `<rect class="ov-strip-gap" x="${Math.min(a, b).toFixed(1)}" y="2" width="${Math.max(3, Math.abs(b - a)).toFixed(1)}" height="20"></rect>`; }).join("");
     const marks = r.events.map(e => `<rect class="ov-strip-${e.kind}" x="${(x(e.ts) - 2).toFixed(1)}" y="0" width="4" height="24"></rect>`).join("");
@@ -254,6 +291,7 @@
   }
   function renderManager(view) {
     const m = view.manager;
+    $("#ov-manager-count").textContent = m && m.actions.length ? String(m.actions.length) : "";
     if (!m) { put("#ov-manager-log", `<p class="today-empty">${esc(N.noManager)}</p>`); return; }
     if (!m.actions.length) { put("#ov-manager-log", `<p class="today-empty">${esc(view.trace_mode === "off" ? N.traceOff : N.noActions)}</p>`); return; }
     put("#ov-manager-log", `<ol class="ov-log">${m.actions.map(a => `<li class="ov-log-row${a.status === "failed" ? " bad" : ""}"><time>${esc(clock(a.ts))}</time><span dir="auto">${esc(actionText(a))}</span>${a.duration_ms != null ? `<span class="ov-log-ms">${esc(N.ms(a.duration_ms))}</span>` : ""}</li>`).join("")}</ol>`);
@@ -325,6 +363,7 @@
     if (EN) document.querySelectorAll("[data-i18n]").forEach(el => { const text = T.static[el.dataset.i18n]; if (text) el.textContent = text; });
     $("#ov-status-title").textContent = T.loading;
     setView();
+    initFolds();
     loadVerdict();
     loadNow();
     $("#ov-report")?.addEventListener("toggle", event => { if (event.target.open) loadReport(); });
