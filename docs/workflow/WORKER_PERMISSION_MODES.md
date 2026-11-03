@@ -59,6 +59,14 @@ Verified in the repo: `merge_group` triggers exist in `.github/workflows/autolab
 UNVERIFIED: the required-check list in branch protection and the build-concurrency setting (needs a GitHub
 settings read).
 
+## Installed-product QA from a sandboxed worker (#856)
+
+A worktree-isolated worker cannot run `powershell.exe`, `cmd.exe` or `jarvis.cmd` (the sandbox cannot show they
+do not run git). The silent beta install is therefore a manager-run step: the QA task states "install: manager",
+and the worker continues with read-only checks once the manager reports the installed version. Betas are not in
+the source repo: they are releases `beta-v4.0.1.NNNN` of `igalgerman/jarvis-releases`. Without the manager step
+the worker records an UNVERIFIED blocker instead of guessing.
+
 ## Recommendation
 
 1. Keep `acceptEdits` + allow + deny now. It is safe: no bypass, deny wins, unanswered prompts are denied.
