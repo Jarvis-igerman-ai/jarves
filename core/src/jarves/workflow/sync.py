@@ -204,6 +204,19 @@ def issue_tasks_enabled(environ=None) -> bool:
     return value not in {"0", "off", "false", "no", "disabled"}
 
 
+def authorized_versions(store) -> set[str]:
+    """V4.5.1 plus the owner's autopilot authorized_versions; a bad or missing policy means V4.5.1 only."""
+    allowed = {"V4.5.1"}
+    try:
+        from . import autopilot
+        policy, error = autopilot.load(Path(store.path).parent)
+        if not error:
+            allowed |= {str(v) for v in policy.get("authorized_versions", [])}
+    except Exception:  # noqa: BLE001  fail closed
+        pass
+    return allowed
+
+
 def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ=None) -> list[str]:
     """Queue gh-N tasks for open agent-doable defects so ready work is not empty while issues are open.
 
@@ -216,9 +229,10 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
     tasks = store.snapshot()["tasks"]
     taken = {t["id"] for t in tasks}
     covered: set[int] = set()
-    for t in tasks:
-        if t.get("execution_allowed", True):
-            covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
+    for t in tasks:  # any task linked to the issue covers it, whatever its state or authorisation
+        covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
+        covered.update(int(i["number"]) for i in t.get("source_issues", []) if str(i.get("number", "")).isdigit())
+    authorized = authorized_versions(store)
     created = []
     for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
         if len(created) >= cap:
@@ -234,17 +248,20 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
             continue
         priority = next((i for i in range(4) if f"p{i}" in labels), 2)
         version = next((v for label, v in LABEL_VERSIONS if label in labels), "V4.5.1")
+        if version not in authorized:
+            continue  # autopilot.step decides for versions the owner has not authorised
         store.create_task({
             "id": f"gh-{number}", "title": f"#{number} {str(row.get('title', ''))[:200]}".strip(),
             "lane": "bugs" if defect else "features", "priority": priority, "version": version,
-            "required_validation": "automated", "execution_allowed": True,
+            "required_validation": "app", "execution_allowed": True,
+            "acceptance": [{"id": "C1", "label": "Fix merged with a regression test and evidence recorded"}],
             "issue_numbers": [number], "source_url": row.get("url", ""),
             "scope_note": "Created by GitHub issue sync; issue state is not verification."})
         created.append(f"gh-{number}")
     return created
 
 
-def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS) -> dict:
+def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS, issue_tasks=False) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
     plan = with_label_scope(plan, snapshot)
     store.seed_plan(plan)
@@ -281,7 +298,8 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
               "ci_green": bool(snapshot.get("ci_green")), "ci_state": snapshot.get("ci_state", "unknown"),
               "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
-    create_issue_tasks(store, snapshot)
+    if issue_tasks:
+        create_issue_tasks(store, snapshot)
     store.set_source(source)
     return source
 
@@ -289,7 +307,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
 def sync(store, get=public_get) -> dict:
     """On failure retain the last snapshot and prominently mark its freshness/error."""
     try:
-        source = apply_snapshot(store, collect(get))
+        source = apply_snapshot(store, collect(get), issue_tasks=True)
         try:  # #764: owned PRs with a red check, conflict or review comment -> ledger message (public reads, no hook)
             from .pr_routing import route
             route(store, source.get("open_prs", []), get)
