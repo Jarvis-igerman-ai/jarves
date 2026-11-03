@@ -516,3 +516,16 @@ def test_policy_worker_allowed_tools_is_validated(tmp_path):
             autopilot.validate({**base, "worker_allowed_tools": bad})
     autopilot.set_key(tmp_path, "worker_allowed_tools", '["Bash(ls:*)"]')
     assert autopilot.load(tmp_path)[0]["worker_allowed_tools"] == ["Bash(ls:*)"]
+
+
+def test_autopilot_allow_list_matches_workflow_console_only():
+    """#784: the documented worker command is allowed in both slash forms; nothing else is added."""
+    from jarves.orchestrator import claude
+    py, con = r"C:\py\python.exe", r"C:\repo\core\tools\workflow_console.py"
+    base = claude.autopilot_allowed_tools(py)
+    rules = claude.autopilot_allowed_tools(py, None, con)
+    assert f"Bash({py} {con}:*)" in rules
+    assert "Bash(C:/py/python.exe C:/repo/core/tools/workflow_console.py:*)" in rules
+    extra = set(rules) - set(base)
+    assert len(extra) == 4 and all(r.endswith("workflow_console.py:*)") for r in extra)
+    assert claude.autopilot_allowed_tools(py, ["Bash(x:*)"], con) == ["Bash(x:*)"]

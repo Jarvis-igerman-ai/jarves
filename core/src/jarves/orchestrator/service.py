@@ -1157,7 +1157,8 @@ class Orchestrator:
             override = None if err else pol.get("worker_allowed_tools")
         except Exception:                                  # never block a start on a policy read
             override = None
-        return claude.autopilot_allowed_tools(sys.executable, override)
+        entry = Path(__file__).resolve().parents[4] / "core" / "tools" / "workflow_console.py"
+        return claude.autopilot_allowed_tools(sys.executable, override, str(entry) if entry.is_file() else "")
 
     def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "",
                       env: dict | None = None) -> dict:
