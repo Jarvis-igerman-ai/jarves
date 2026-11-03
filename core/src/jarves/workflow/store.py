@@ -610,7 +610,8 @@ class Store:
         if worker_limit is None:
             worker_limit = self._worker_limit()
         with self._tx() as db:
-            ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
+            # source_closed: every linked GitHub issue is closed (e.g. by the owner); no Stop nudge for it (#855/#858).
+            ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t) and not t.get("source_closed")]
             # A task announced within ANNOUNCE_COOLDOWN_S is probably delegated but not yet claimed (#855).
             row = db.execute("SELECT value FROM workflow_meta WHERE key='announced_ready'").fetchone()
             seen = {k: v for k, v in (json.loads(row[0]) if row else {}).items() if self.clock() - v < ANNOUNCE_COOLDOWN_S}

@@ -1,0 +1,1 @@
+- Fixed: the workflow manager Stop continuation no longer counts or lists tasks whose source GitHub issues are all closed. (#858, #855)

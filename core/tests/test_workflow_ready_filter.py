@@ -29,6 +29,12 @@ class ReadyFilterTests(unittest.TestCase):
         self.assertEqual(self.ready(), {"ok"})
         self.assertEqual(self.store.manager_continue("mgr"), ["ok"])
 
+    def test_source_closed_task_is_not_pushed_by_stop(self):
+        self.store.create_task({"id": "ok", "title": "Runnable"})
+        self.store.create_task({"id": "closed", "title": "Issue closed by owner"})
+        self.store.update_metadata("closed", {"source_closed": True})
+        self.assertEqual(self.store.manager_continue("mgr"), ["ok"])
+
     def test_close_superseded_blocks_only_review_tasks_of_closed_prs(self):
         for n in (10, 11):
             self.store.create_task({"id": f"review-pr-{n}-abc", "title": f"Review {n}",
