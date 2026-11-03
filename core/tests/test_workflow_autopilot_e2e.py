@@ -138,7 +138,7 @@ class AutopilotLoopTests(unittest.TestCase):
         self.assertEqual(tasks["f-a"]["state"], "waiting_owner")
         self.assertEqual(tasks["f-b"]["state"], "review")
         question = next(q for q in self.store.snapshot()["questions"] if q["task_id"] == "f-a")
-        self.store.answer(question["id"], "option 2")
+        self.store.answer(question["id"], "option 2", channel="dashboard")
         fake.ask_on.clear()
         self.step(fake)                                          # old sessions stopped, A resumes
         resumed = fake.started[-1]

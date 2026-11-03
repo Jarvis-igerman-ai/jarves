@@ -86,7 +86,7 @@ class WorkflowControlTests(unittest.TestCase):
         question = self.store.ask({"task_id": "task", "title": "Which transport?",
                                    "checkpoint": "Commit abc123; local browser closed"})
         self.store.defer(question["id"])
-        self.store.answer(question["id"], "Use the existing secure phone transport")
+        self.store.answer(question["id"], "Use the existing secure phone transport", channel="dashboard")
         sent = []
         control.dispatch(self.store, self.home,
                          tell=lambda _home, _sid, text: sent.append(text) or {"ok": True})

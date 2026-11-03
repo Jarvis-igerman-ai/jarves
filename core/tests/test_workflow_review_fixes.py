@@ -74,7 +74,7 @@ class ReviewFixTests(unittest.TestCase):
     def test_answer_exposes_decision_time_in_task_context(self):
         self.running()
         q = self.store.ask({"task_id": "t", "title": "Q?", "context": "c", "choices": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}], "checkpoint": "cp"})
-        self.store.answer(q["id"], "a")
+        self.store.answer(q["id"], "a", channel="dashboard")
         task = self.store.snapshot()["tasks"][0]
         decisions = control.task_context(self.store, task)["owner_decisions"]
         self.assertIsNotNone(decisions[0]["decided_at"])

@@ -75,7 +75,7 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(self.store.claim("worker")["id"], "independent")
         by_id = lambda: {t["id"]: t for t in self.store.snapshot()["tasks"]}   # snapshot lists running work first (#730)
         self.assertEqual(by_id()["needs-owner"]["state"], "waiting_owner")
-        self.store.answer(q["id"], "Keep the existing design")
+        self.store.answer(q["id"], "Keep the existing design", channel="dashboard")
         first = by_id()["needs-owner"]
         self.assertEqual(first["state"], "queued")
         self.assertEqual(first["implementation"], "in_progress")
@@ -85,9 +85,9 @@ class WorkflowStoreTests(unittest.TestCase):
         self.task()
         q1 = self.store.ask({"task_id": "one", "title": "First?"})
         q2 = self.store.ask({"task_id": "one", "title": "Second?"})
-        self.store.answer(q1["id"], "yes")
+        self.store.answer(q1["id"], "yes", channel="dashboard")
         self.assertEqual(self.store.snapshot()["tasks"][0]["state"], "waiting_owner")
-        self.store.answer(q2["id"], "no")
+        self.store.answer(q2["id"], "no", channel="dashboard")
         self.assertEqual(self.store.snapshot()["tasks"][0]["state"], "queued")
 
     def test_unfinished_dependencies_do_not_get_skipped(self):
