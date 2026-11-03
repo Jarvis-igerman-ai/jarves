@@ -1,0 +1,280 @@
+"""Hermetic tests for core/tools/tier_r_flow.py (no network, no clock)."""
+import importlib.util
+from pathlib import Path
+
+_p = Path(__file__).resolve().parents[1] / "tools" / "tier_r_flow.py"
+_s = importlib.util.spec_from_file_location("tier_r_flow_t", _p)
+t = importlib.util.module_from_spec(_s)
+_s.loader.exec_module(t)
+
+SHA = "a" * 40
+OLD = "b" * 40
+OLDER = "c" * 40
+
+
+def pr(**k):
+    d = {"number": 1, "title": "fix thing", "tier": "R", "draft": False, "state": "OPEN", "files": ["core/src/jarves/browser_x.py"],
+         "head_sha": SHA, "authors": ["author1"], "author_agents": ["agent-impl"], "checks_green": True, "checks_pending": False,
+         "merge_state": "CLEAN", "queued": False, "comments": [],
+         "ledger": {"ok": True, "why": "", "review_task": "T-9", "review_agent": "agent-rev"}}
+    d.update(k)
+    return d
+
+
+def c(body, assoc="MEMBER", login="igalgerman"):
+    return {"body": body, "login": login, "association": assoc}
+
+
+def so(sha=SHA, who="agent-rev", model="opus-5-5", task="T-9", assoc="MEMBER"):
+    return c(f"SIGN-OFF {sha}\nReview-Head: {sha}\nReview-Task: {task}\nReviewer-Agent: {who}\nReviewer-Model: {model}", assoc)
+
+
+def cr(sha, assoc="MEMBER"):
+    return c(f"CHANGES REQUESTED {sha}\nReview-Head: {sha}\nReview-Task: T-8\nReviewer-Agent: agent-rev\nReviewer-Model: opus-5-5", assoc)
+
+
+def act(**k):
+    return t.decide(pr(**k))["action"]
+
+
+def test_green_without_verdict_gets_review():
+    assert act() == "review"
+
+
+def test_verdict_for_other_sha_does_not_count():
+    assert act(comments=[so(OLD)]) == "review"
+
+
+def test_signoff_on_head_queues():
+    assert act(comments=[so()]) == "queue"
+
+
+def test_untrusted_commenter_cannot_sign_off():
+    assert act(comments=[so(assoc="NONE")]) == "review"
+    assert act(comments=[so(assoc="CONTRIBUTOR")]) == "review"
+    assert act(comments=[so(assoc="FIRST_TIME_CONTRIBUTOR")]) == "review"
+    assert act(comments=["SIGN-OFF " + SHA + " Reviewer-Agent: x"]) == "review"      # a bare string has no author: ignored
+
+
+def test_untrusted_changes_requested_does_not_cancel_or_count():
+    assert act(comments=[so(), cr(SHA, assoc="NONE")]) == "queue"
+    assert act(comments=[cr(OLD, "NONE"), cr(OLDER, "NONE")]) == "review"
+
+
+def test_later_changes_requested_cancels_earlier_signoff():
+    assert act(comments=[so(), cr(SHA)]) == "fix"
+    assert act(comments=[cr(SHA), so()]) == "queue"          # the latest verdict on the head wins
+
+
+def test_quoted_or_buried_verdict_is_ignored():
+    assert act(comments=[c("> SIGN-OFF " + SHA + "\nReview-Head: " + SHA)]) == "review"
+    assert act(comments=[c("I reviewed it.\nSIGN-OFF " + SHA)]) == "review"
+    assert act(comments=[c("SIGN-OFF " + SHA[:12])]) == "review"                    # short sha is not machine-readable
+
+
+def test_signoff_needs_markers_opus_and_independent_agent():
+    assert act(comments=[so(model="sonnet-5-5")]) == "owner"
+    assert act(comments=[so(model="sonnet-not-opus")]) == "owner"
+    assert act(comments=[so(model="claude-opus-5-5")]) == "queue"
+    assert act(comments=[c("SIGN-OFF " + SHA + "\nReviewer-Model: opus-5-5")]) == "owner"          # no head/task/agent markers
+    assert act(comments=[c(f"SIGN-OFF {SHA}\nReview-Head: {OLD}\nReview-Task: T\nReviewer-Agent: r\nReviewer-Model: opus")]) == "owner"
+    assert act(comments=[so(who="agent-impl")]) == "owner"                           # reviewer is the declared author agent
+    assert act(comments=[so(who="author1")]) == "owner"                              # or a commit author login
+    assert act(author_agents=[], comments=[so()]) == "owner"                         # no Author-Agent declared: cannot check
+
+
+def test_changes_requested_then_fix_then_rereview():
+    assert act(comments=[cr(SHA)]) == "fix"
+    assert act(comments=[cr(OLD)]) == "review"
+
+
+def test_two_rounds_then_owner():
+    assert act(comments=[cr(OLD), cr(SHA)]) == "owner"
+    assert act(comments=[cr(OLDER), cr(OLD)]) == "owner"
+    # a sign-off in a third round does not reopen the flow
+    assert act(comments=[cr(OLDER), cr(OLD), so()]) == "owner"
+    assert "2 review rounds" in t.decide(pr(comments=[cr(OLDER), cr(OLD)]))["reasons"][0]
+    assert act(comments=[cr(OLD)]) == "review"                                       # one round used: still allowed
+
+
+def test_red_conflict_pending():
+    assert act(checks_green=False) == "fix"
+    assert act(merge_state="DIRTY") == "fix"
+    assert act(checks_pending=True, checks_green=False) == "wait"
+
+
+def test_main_red_and_queued_wait():
+    assert t.decide(pr(comments=[so()]), main_red=True)["action"] == "wait"
+    assert act(queued=True, comments=[so()]) == "wait"
+
+
+def test_excluded_always_owner():
+    for f in (".github/workflows/ci.yml", "CLAUDE.md", "core/tools/release_gate.py", "core/src/jarves/secrets_x.py",
+              "core/src/jarves/approvals.py", ".claude/settings.json",
+              "core/src/jarves/release_cmd.py", "core/src/jarves/release_flow.py", "core/src/jarves/release_run.py",
+              "core/src/jarves/release_signoff.py", "core/src/jarves/approval_keys.py", "core/src/jarves/approval_popup.py",
+              "core/src/jarves/drive_mode.py", "core/src/jarves/skills/__init__.py", "core/tools/release_notes.py",
+              "core/src/jarves/dashboard_static/signoff_steps.js"):
+        assert act(files=[f], comments=[so()]) == "owner", f
+    assert act(title="stable release 6.0", comments=[so()]) == "owner"
+    assert act(files_truncated=True, comments=[so()]) == "owner"
+
+
+def test_unknown_fails_closed():
+    assert act(files=[], comments=[so()]) == "owner"
+    assert act(files=None, comments=[so()]) == "owner"
+
+
+def test_non_tier_r_is_not_this_flow():
+    assert act(tier="N") == "wait"
+
+
+def test_backlog_thresholds():
+    many = [pr(number=i, checks_green=False) for i in range(8)]
+    b = t.backlog(many)
+    assert b["backlog"] and b["line"] == "merge backlog: 8 PRs" and b["pause_new_feature_work"]
+    assert not t.backlog(many[:7])["backlog"]
+    assert t.backlog([pr(number=i) for i in range(3)])["backlog"]
+    assert not t.backlog([pr(number=i, queued=True) for i in range(3)])["backlog"]
+    assert not t.backlog([pr(number=i, draft=True) for i in range(9)])["backlog"]
+
+
+def test_focus_respects_worker_limit_and_order():
+    prs = [pr(number=1), pr(number=2, comments=[so()]), pr(number=3, checks_green=False), pr(number=4)]
+    f = t.focus(prs, max_workers=2)
+    assert f["backlog"] and len(f["merge_pipeline_work"]) == 2
+    assert [w["action"] for w in f["merge_pipeline_work"]] == ["queue", "fix"]
+    assert f["priority"][0].startswith("P0/P1")
+    quiet = t.focus([pr()], 2)
+    assert quiet["merge_pipeline_work"] == [] and not quiet["pause_new_feature_work"]
+
+
+def test_excluded_case_insensitive_and_variants():
+    for f in ("app/src/ApprovalsUi.kt", "docs/RELEASING.md", "tools/GitHub-Approve.py", "core/src/jarves/SignOff.py",
+              "core/src/jarves/Gate.py", "CORE/TOOLS/Release_Gate.py", "core\\src\\Approvals.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f
+
+
+def test_author_agent_first_token_and_roles_unknown():
+    assert t.AUTHOR_AGENT.findall("Author-Agent: workflow-bugs-sonnet (Tier R flow author)") == ["workflow-bugs-sonnet"]
+    assert t.author_agents(["workflow-bugs-sonnet", "Agent-X (note)"]) == ["agent-x", "workflow-bugs-sonnet"]
+    assert t.author_agents(["workflow-bugs", "Claude", "unknown", ""]) == []
+    assert act(author_agents=["workflow-bugs"], comments=[so()]) == "owner"
+    assert act(author_agents=["workflow-bugs-sonnet"], comments=[so()]) == "queue"
+    assert act(author_agents=["agent-rev (extra)"], comments=[so()]) == "owner"
+
+
+def test_verdict_forms():
+    tail = f"\nReview-Head: {SHA}\nReview-Task: T-9\nReviewer-Agent: agent-rev\nReviewer-Model: opus-5-5"
+    for first in (f"SIGN-OFF {SHA}", f"VERDICT: SIGN-OFF {SHA}"):
+        assert act(comments=[c(first + tail)]) == "queue", first
+    for first in (f"CHANGES REQUESTED {SHA}", f"VERDICT: CHANGES REQUESTED {SHA}"):
+        assert act(comments=[c(first + tail)]) == "fix", first
+    assert act(comments=[c(f"VERDICT: SIGN-OFF {SHA[:12]}" + tail)]) == "review"
+    assert act(comments=[c("note\nVERDICT: SIGN-OFF " + SHA + tail)]) == "review"
+
+
+_AGENTS = [{"id": "agent-rev", "provider": "claude-native", "session_id": "s-rev"},
+           {"id": "author-x", "provider": "claude-native", "session_id": "s-auth"}]
+
+
+def _wf(task, owners, agents=None):
+    def wf(args, home):
+        if args[0] == "task":
+            if task is None:
+                raise RuntimeError("not found")
+            return task
+        if args[0] == "status":
+            return {"agents": _AGENTS if agents is None else agents}
+        return owners
+    return wf
+
+
+def test_ledger_unverified_signoff_goes_to_owner():
+    assert act(comments=[so()], ledger=None) == "owner"
+    assert act(comments=[so()], ledger={"ok": False, "why": "x"}) == "owner"
+    assert act(comments=[so(task="T-1")]) == "owner"          # ledger facts are for another task
+    assert act(comments=[so(who="other-rev")]) == "owner"     # ledger agent differs from the declared reviewer
+
+
+def test_ledger_facts_checks_task_agent_and_claims():
+    ok = _lf(_task(), [_claim("author-x")])
+    assert ok["ok"] and ok["review_agent"] == "agent-rev"
+    assert not _lf(None, [])["ok"]
+    assert not _lf(_task(agent_id="someone"), [_claim("author-x")])["ok"]
+    assert not _lf(_task(), [_claim("author-x"), _claim("agent-rev")])["ok"]        # reviewer owns pr:N
+    assert not _lf(_task(), [{"resource": "pr:5"}])["ok"]                            # no agent field: fail closed
+    assert not _lf(_task(), ["junk"])["ok"]
+    assert not _lf(_task(), [_claim("author-x")], tid="")["ok"]
+
+
+def _task(**k):
+    d = {"id": "review-pr-5-" + SHA[:8], "agent_id": "agent-rev", "state": "review", "code_revision": SHA,
+         "acceptance": [{"id": "C1", "passed": True, "evidence": "VERDICT SIGN-OFF " + SHA, "code_revision": SHA}],
+         "scope": {"kind": "tier_r_review", "pr": 5, "model": "claude-opus-5-5"}}
+    d.update(k)
+    return d
+
+
+def _claim(who):
+    return {"resource": "pr:5", "agent": who, "reason": "", "claimed_at": 0, "expires_at": 1, "stale": False, "task_id": ""}
+
+
+def _lf(task, owners, authors=("author-x",), tid="review-pr-5-" + SHA[:8], sha=SHA, agents=None):
+    return t.ledger_facts(5, "b", tid, "agent-rev", sha, authors, wf=_wf(task, owners, agents))
+
+
+def test_signoff_needs_verdict_recorded_by_the_review_task():
+    own = [_claim("author-x")]
+    assert _lf(_task(), own)["ok"]
+    assert not _lf(_task(state="running"), own)["ok"]                         # (a) reviewer still working
+    assert not _lf(_task(state="queued"), own)["ok"]
+    assert not _lf(_task(acceptance=[]), own)["ok"]                           # no evidence
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": False, "evidence": "SIGN-OFF", "code_revision": SHA}]), own)["ok"]
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": True, "evidence": "CHANGES REQUESTED", "code_revision": SHA}]), own)["ok"]
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": True, "evidence": "SIGN-OFF", "code_revision": OLD}]), own)["ok"]
+    assert not _lf(_task(code_revision=OLD), own)["ok"]                       # other head
+
+
+def test_reviewer_must_be_registered_native_session_distinct_from_author():
+    own = [_claim("author-x")]
+    assert not _lf(_task(), own, agents=[])["ok"]                             # (b) unregistered id
+    assert not _lf(_task(), own, agents=[{"id": "agent-rev", "provider": "manual", "session_id": "s1"}])["ok"]
+    assert not _lf(_task(), own, agents=[{"id": "agent-rev", "provider": "claude-native", "session_id": ""}])["ok"]
+    same = [{"id": "agent-rev", "provider": "claude-native", "session_id": "s"}, {"id": "author-x", "provider": "claude-native", "session_id": "s"}]
+    assert not _lf(_task(), own, agents=same)["ok"]                           # same session as the author
+
+
+def test_ledger_binds_task_to_pr_head_model_and_author():
+    assert _lf(_task(), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope={"kind": "tier_r_review", "pr": 6, "model": "claude-opus-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope={"kind": "steward", "pr": 5, "model": "claude-opus-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope="required"), [_claim("author-x")])["ok"]
+    assert not _lf(_task(id="review-pr-5-" + OLD[:8]), [_claim("author-x")])["ok"]           # other head
+    assert not _lf(_task(scope={"kind": "tier_r_review", "pr": 5, "model": "claude-sonnet-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(), [])["ok"]                                  # Author-Agent line not corroborated by the ledger
+    assert not _lf(_task(), [_claim("someone-else")])["ok"]
+
+
+def test_opus_review_header_format_and_sha_marker():
+    body = f"OPUS REVIEW: SIGN-OFF\nReview-Head: {SHA}\nReview-Task: T-9\nReviewer-Agent: agent-rev\nReviewer-Model: claude-opus-5-5"
+    assert act(comments=[c(body)]) == "queue"
+    assert act(comments=[c(body.replace("SIGN-OFF", "CHANGES-REQUESTED", 1))]) == "fix"
+    assert act(comments=[c(body.replace("OPUS REVIEW: SIGN-OFF", "OPUS REVIEW: CHANGES REQUESTED"))]) == "fix"
+    assert act(comments=[c(body.replace(f"Review-Head: {SHA}", "Review-Head: " + SHA[:12]))]) == "review"   # no full sha
+
+
+def test_hotfix_update_installer_paths_stay_with_owner():
+    for f in ("core/src/jarves/hotfix.py", "core/src/jarves/update_cmd.py", "installer/jarves.iss", "core/src/jarves/installer.py", "packaging/x.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f
+
+
+def test_high_risk_paths_stay_with_owner():
+    for f in ("core/pyproject.toml", "core/uv.lock", "core/src/jarves/workflow/bootstrap.py", "core/src/jarves/workflow/hooks.py", "core/tools/workflow_hook.py", "core/src/jarves/workflow/autopilot_watch.py", "core/src/jarves/workflow/unlock.py", "core/src/jarves/workflow/server.py", "core/src/jarves/isolation/x.py", "core/src/jarves/winsandbox.py", "core/src/jarves/security.py", "core/src/jarves/redact.py", "core/tools/netguard.py", "core/tests/conftest.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f
+
+
+def test_queue_reason_never_tells_anyone_to_merge():
+    text = " ".join(t.decide(pr(comments=[so()]))["reasons"]).lower()
+    assert "owner approval required" in text and "do not merge" in text
+    assert "gh pr merge" not in text and "removes no-automerge" not in text

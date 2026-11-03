@@ -127,8 +127,9 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   the fixer run `check-touch --resource pr:N` first; a PR owned by another live
   agent is skipped with a message, not touched.
 - Tier R green (Gate/approvals, release/sign-off/tag, hotfix/update write paths,
-  installer/packaging, browser network, wake apply, workflows/secrets): request
-  the Opus sign-off; never merged by the steward.
+  installer/packaging, browser network, wake apply, workflows/secrets): request the
+  Opus sign-off; never merged by the steward. The "Tier R flow" section below is a
+  PROPOSAL only (owner approval UNVERIFIED) and does not change this rule.
 - Queue entry merged: check main CI and free the next batch.
 - Per cycle the steward decides individual vs integration with
   `core/tools/integration_branch.py plan --auto` (JSON: tiers, file-overlap and
@@ -143,6 +144,10 @@ the `workflow-merger` subagent (Haiku). No cron, sleep or polling loop.
   `close-superseded` comments, closes and deletes only fully merged branches.
 No close/reopen, merge-main push, force on main, check bypass or blind rerun;
 a test that fails then passes is quarantined with a `showstopper` issue.
+
+## Tier R flow
+
+PROPOSED, NOT ACTIVE (owner approval UNVERIFIED): see [TIER_R_FLOW_PROPOSAL.md](TIER_R_FLOW_PROPOSAL.md). The steward never merges Tier R PRs.
 
 ## External observer
 
