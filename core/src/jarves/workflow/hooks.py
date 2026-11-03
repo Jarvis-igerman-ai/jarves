@@ -104,7 +104,7 @@ def git_base_note(cwd: str) -> str:
 
 
 _GIT_NOTE_CACHE: dict = {}
-GIT_NOTE_BUDGET_S = 0.9  # total for all git calls (cached across the retry); the native hook limit is 3 s
+GIT_NOTE_BUDGET_S = 0.6  # total for all git calls (cached across the retry); the native hook limit is 3 s
 
 
 def _git_base_note(cwd: str) -> str:
@@ -120,8 +120,6 @@ def _git_base_note(cwd: str) -> str:
     try:
         remotes = git("remote", "-v")
         head = git("rev-parse", "--short", "HEAD") or "unknown"
-        tip = git("rev-parse", "--short", "--verify", "-q", "refs/remotes/jarves/main")
-        behind = git("rev-list", "--count", "HEAD..refs/remotes/jarves/main") if tip else ""
     except (OSError, subprocess.SubprocessError):
         return "Worktree base could not be verified: run git remote -v and branch from jarves/main."
     if not remotes:
@@ -129,6 +127,11 @@ def _git_base_note(cwd: str) -> str:
     if "jarves" not in remotes.lower().replace(DEPRECATED_REMOTE, ""):
         return (f"WARNING worktree base HEAD {head} has no jarves remote (deprecated {DEPRECATED_REMOTE} only): "
                 "add/fetch Jarvis-igerman-ai/jarves and branch from jarves/main before any change.")
+    try:  # extra calls: a timeout here falls back to the plain note, within the same total budget
+        tip = git("rev-parse", "--short", "--verify", "-q", "refs/remotes/jarves/main")
+        behind = git("rev-list", "--count", "HEAD..refs/remotes/jarves/main") if tip else ""
+    except (OSError, subprocess.SubprocessError):
+        tip = behind = ""
     if tip and behind.isdigit() and int(behind) > 0:
         return (f"WARNING worktree base HEAD {head} is {behind} commit(s) behind jarves/main {tip} (local ref; a fetch may show more): "
                 "run `git fetch jarves main && git switch -C <branch> jarves/main` before any change (#852).")

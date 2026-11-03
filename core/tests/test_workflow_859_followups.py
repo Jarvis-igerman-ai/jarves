@@ -76,6 +76,19 @@ class GitNoteBehindTests(unittest.TestCase):
         self.assertIn("42 commit(s) behind jarves/main 7e6db095", note)
         self.assertIn("git switch -C", note)
 
+    def test_extra_call_timeout_falls_back_to_plain_note(self):
+        def fake_run(cmd, **kw):
+            if "remote" in cmd:
+                return mock.Mock(stdout="jarves\thttps://x/jarves.git\n")
+            if "refs/remotes/jarves/main" in cmd:
+                raise hooks.subprocess.TimeoutExpired("git", 0.1)
+            return mock.Mock(stdout="a13b56d0\n")
+        with mock.patch.object(hooks.subprocess, "run", fake_run):
+            note = hooks.git_base_note("C:/wt")
+        self.assertNotIn("WARNING", note)
+        self.assertIn("a13b56d0", note)
+        self.assertLessEqual(hooks.GIT_NOTE_BUDGET_S, 0.6)
+
     def test_current_or_missing_ref_keeps_plain_note(self):
         self.assertNotIn("WARNING", self._note("7e6db095\n", "0\n"))
         hooks._GIT_NOTE_CACHE.clear()
