@@ -207,7 +207,8 @@ def main(argv=None) -> int:
             return 0
         if a.action == "status":
             from .autopilot import agent_retention_s
-            result = store.snapshot(retention_s=agent_retention_s(home))
+            from .store import hide_held_answers
+            result = hide_held_answers(store.snapshot(retention_s=agent_retention_s(home)))
             from .observability import verdict
             result["verdict"] = verdict(store)
             from . import focus as _focus

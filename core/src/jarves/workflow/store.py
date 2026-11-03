@@ -85,6 +85,22 @@ def question_view(question):
     return out
 
 
+HELD_TEXT = "[held answer hidden: the owner confirms it in the dashboard or own terminal]"
+
+
+def hide_held_answers(snapshot: dict) -> dict:
+    """#902: agent-facing views (CLI status) never show unconfirmed typed answer text; the dashboard keeps it."""
+    def mask(question):
+        if not question.get("held"):
+            return question
+        out = dict(question, answer=HELD_TEXT)
+        if "history" in out:
+            out["history"] = [{**h, "answer": HELD_TEXT} if isinstance(h, dict) and "answer" in h else h for h in out["history"]]
+        return out
+    snapshot["questions"] = [mask(q) for q in snapshot.get("questions", [])]
+    return snapshot
+
+
 QUESTION_CAP = 5
 CLOSED_QUESTIONS = {"answered", "resolved", "cancelled"}
 

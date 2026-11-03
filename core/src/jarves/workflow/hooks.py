@@ -146,7 +146,14 @@ def observe(store: Store, payload: dict, root: Path, workflow_agent: str | None 
     event = payload.get("hook_event_name", "")
     if os.environ.get("JARVES_WORKFLOW_HELPER"):
         return {}      # owner "Help from Claude" window: never the manager, no claim/follow-ups/continue/context
-    if event not in EVENTS or not in_project(str(payload.get("cwd", "")), root):
+    if event not in EVENTS:
+        return {}
+    if not in_project(str(payload.get("cwd", "")), root):
+        # #902: an answer-shaped prompt typed in another directory is still never sent to the model.
+        prompt = payload.get("prompt")
+        if event == "UserPromptSubmit" and isinstance(prompt, str) and len(prompt) <= 5000 and ANSWER_RE.match(prompt):
+            return {"decision": "block", "reason": "JARVES: answer not stored (this window is outside the JARVES project). "
+                    "It was not sent to the model; answer the question in the dashboard."}
         return {}
     session = payload.get("session_id")
     if not isinstance(session, str) or not session or len(session) > 200:
