@@ -297,7 +297,7 @@ class Handler(BaseHTTPRequestHandler):
             if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|defer|reopen|discuss|ask-more)", path)
                     or path == "/api/followups") and not self._unlock_left():
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
-                self._json(403, {"error": "answers are locked: run 'workflow_console.py unlock' in your own terminal and type the code",
+                self._json(403, {"error": "answers are locked: run 'jarvis workflow unlock' in your own terminal and type the code",
                                  "locked": True})
                 return
             if path == "/api/owner":
@@ -371,12 +371,16 @@ class Handler(BaseHTTPRequestHandler):
                     path.unlink(missing_ok=True)
                     n = 0
                 self.server.unlock_wrong = (salt, n)
-                self._json(403, {"error": "wrong or expired code; run 'workflow_console.py unlock' in your own terminal", "locked": True})
+                self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = ("", 0)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
-            self.server.unlocked[session] = now + owner_unlock_s(self.server.home)
-        self._json(200, {"ok": True, "result": {"remaining_s": owner_unlock_s(self.server.home)}})
+            ttl = owner_unlock_s(self.server.home)
+            self.server.unlocked[session] = now + ttl
+            # The session must live as long as the unlock window the UI promises (same single session, no extra one).
+            self.server.sessions[session] = max(self.server.sessions.get(session, 0), now + ttl)
+        self._json(200, {"ok": True, "result": {"remaining_s": ttl}},
+                   {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max(ttl, 43200)}"})
 
     def _login(self, data):
         now = time.time()

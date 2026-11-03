@@ -156,12 +156,18 @@ def main(argv=None) -> int:
     if a.action == "unlock":
         # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
         from . import unlock
+        from .autopilot import owner_unlock_s
+
+        def unlock_span(sec: int) -> str:
+            if sec >= 86400:
+                return f"{sec // 86400} days"
+            return f"{max(sec // 3600, 1)} hours" if sec >= 3600 else f"{max(sec // 60, 1)} minutes"
         try:
             owner_only_guard("unlock")
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        print(f"Unlock code (type it in the dashboard, Questions tab; the code is valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}")
+        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {unlock.issue(home)}")
         return 0
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.

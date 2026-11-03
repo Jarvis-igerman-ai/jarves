@@ -28,7 +28,7 @@ DEFAULTS = {
     "bug_labels": ["bug", "P0", "P1", "P2", "P3", "showstopper"],
     "watchdog": {"idle_s": 300, "stale_s": 120, "stuck_s": 1800, "max_restarts_per_task": 1,
                  "agent_retention_s": 86400,  # console hides agents offline longer than this (#730)
-                 "owner_unlock_s": 28800},  # dashboard answer-unlock lifetime: 8 h (#750)
+                 "owner_unlock_s": 604800},  # dashboard answer-unlock lifetime: 1 week (#750, owner 2 Nov)
 }
 
 
@@ -102,7 +102,7 @@ def validate(policy: dict) -> dict:
         raise ValueError("watchdog has invalid keys")
     for key, value in watchdog.items():
         _int(value, f"watchdog {key}", 0 if key == "max_restarts_per_task" else 1,
-             30 * 86400 if key == "agent_retention_s" else 86400)
+             30 * 86400 if key == "agent_retention_s" else 7 * 86400 if key == "owner_unlock_s" else 86400)
     return policy
 
 

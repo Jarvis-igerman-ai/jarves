@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 CODE_TTL_S = 300      # how long a shown code can be typed
-UNLOCK_TTL_S = 8 * 3600  # default session unlock (owner decision 1 Nov); policy watchdog.owner_unlock_s overrides
+UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 _SCRYPT = {"n": 2 ** 14, "r": 8, "p": 1, "maxmem": 64 * 1024 * 1024, "dklen": 32}
 
