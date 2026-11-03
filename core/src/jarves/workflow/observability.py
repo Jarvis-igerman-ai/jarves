@@ -285,6 +285,10 @@ def detect_incidents(store, now: float | None = None) -> list[dict]:
     if ran["state"] == "dead":
         add("worker_watch_dead", "worker_watch_dead", ran["last_run_at"],
             f"worker-watch has not run for {_dur(ran['age_s'])}; the wrapper may be dead")
+    idle = _meta(store, "worker_watch_idle", {})
+    if idle and now - idle.get("since", now) >= _watch.IDLE_ALARM_S:
+        add("idle_work", "idle_work", idle["since"],
+            f"IDLE_WORK: {idle.get('issues', 0)} issues and {idle.get('prs', 0)} PRs wait, {idle.get('free', 0)} free worker slots, no worker started")
     from . import autopilot
     policy, _ = autopilot.load(store.path.parent)
     with store._tx() as db:

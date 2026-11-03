@@ -182,11 +182,12 @@ requires an already running allow-listed session and explicit
   event; dedupe state lives in workflow_meta. A recovery writes a `WORKERS_OK` event. The note is shown at the
   manager's next Stop (once, never while stop_hook_active). `status` also reports `workers` (numbers only).
 - Open work with no worker (#919): the result also carries `open_work` (open agent-doable/bug/P0-P3 issues
-  without a task, open PRs, signed-off PRs; from the last GitHub sync, no network) and `idle_alarm`. With free
-  slots, such work and no worker start or task transition for 30 minutes it posts an `IDLE_WORK` manager note and
-  a Core notify (same bridge as the autopilot alerts, text only). The note repeats at most every 30 minutes; the push is sent once per idle episode (6 h re-arm), only while the owner is present and not 22:00-07:00. Owner-gated, known-issue-*, no-automerge (Tier R) and auto-merge items are not counted as idle work. Every run stamps
-  `worker_watch_run`; `health` shows `worker_watch.age_s` and opens a `worker_watch_dead` incident after 15 minutes
-  (factory-check can read the same `health` JSON).
+  without a task, open PRs, `tier_r_prs`; from the last GitHub sync, no network) and `idle_alarm`. With free
+  slots, such work and no worker start or task transition for 30 minutes it posts an `IDLE_WORK` manager note
+  (at most every 30 minutes) plus a ledger event, and `health` shows an `idle_work` incident. There is NO Core
+  push: Core notify shows a toast and can speak. Owner-gated, known-issue-*, no-automerge (Tier R), auto-merge
+  and draft items are not counted. Every run stamps `worker_watch_run`; `health` shows `worker_watch.age_s` and
+  opens a `worker_watch_dead` incident after 15 minutes (factory-check can read the same `health` JSON).
 - Manager restart or nudge: ask `handover-state` first. It prints `{"ready":bool,"age_s":N,"reason":"..."}`;
   ready is true when the manager ran `handover --note "state and next steps"` after its last activity, or has
   been silent for the 10 minute grace period, or no manager is registered. Hold a restart/nudge while ready is false.

@@ -20,7 +20,6 @@ SELF_ACTIVITY_S = 30  # the handover command's own tool hooks land just after it
 IDLE_ALARM_S = 30 * 60  # free slots + open work + no worker start / task transition for this long -> owner notify
 RUN_DEAD_S = 15 * 60  # worker-watch itself has not run for this long: the wrapper is dead
 WORK_LABELS = {"agent-doable", "bug", "p0", "p1", "p2", "p3"}
-PUSH_REARM_S = 6 * 3600  # an unchanged idle state is pushed to the owner at most this often
 OWNER_ONLY = {"owner-gated", "no-automerge"}
 ACTIVITY_KINDS = ("agent_registered", "task_claimed", "task_transition", "task_flow", "task_created")
 
@@ -74,7 +73,7 @@ def run_age(store: Store, now: float | None = None) -> dict:
     last = (store.get_meta("worker_watch_run", {}) or {}).get("at", 0)
     if not last:
         return {"last_run_at": 0, "age_s": None, "state": "never"}
-    age = round(now - last, 1)
+    age = max(0.0, round(now - last, 1))  # a clock that went backwards reads as 0, never a crash or false alarm
     return {"last_run_at": last, "age_s": age, "state": "dead" if age > RUN_DEAD_S else "ok"}
 
 
@@ -111,18 +110,7 @@ def evaluate(running, allowed, ready, state, now):
     return numbers, problem, {"active": problem, "sent_at": now, "shortfall": shortfall, "over": over}
 
 
-def is_quiet(now: float) -> bool:
-    """Night in local time (22:00-07:00): no owner push."""
-    import datetime
-    hour = datetime.datetime.fromtimestamp(now).hour
-    return hour >= 22 or hour < 7
-
-
-def push_allowed(store: Store, snap: dict, now: float, quiet) -> bool:
-    return (snap.get("owner") or {}).get("effective_mode") == "present" and not quiet(now)
-
-
-def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None, quiet=is_quiet) -> dict:
+def watch(store: Store, policy: dict, send=None, dry: bool = False) -> dict:
     """Count, decide, and (when needed) tell the manager once. Never raises."""
     try:
         snap = store.snapshot()
@@ -135,7 +123,7 @@ def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None,
         numbers["action"] = action or "none"
         idle_sent_at = (store.get_meta("worker_watch", {}) or {}).get("idle_sent_at", 0)
         work = open_work(snap)
-        idle_s = now - last_activity(store)
+        idle_s = max(0.0, now - last_activity(store))
         free = max(0, allowed_workers(policy) - len(running))
         condition = idle_decision(free, work, len(ready), idle_s, 0, now)  # the state itself, without the note rate limit
         idle = condition and now - idle_sent_at >= IDLE_ALARM_S
@@ -152,18 +140,14 @@ def watch(store: Store, policy: dict, send=None, dry: bool = False, notify=None,
             store.record_event("worker_watch", subject)
             (send or store.post_manager_note)(subject, body)
             idle_sent_at = now
-        # Owner push: once per distinct idle episode (re-armed after the state ended, or every 6 h), only while
-        # the owner is present and it is not night. Away: the manager note and ledger event above are enough.
-        episode = store.get_meta("worker_watch_idle", {}) or {}
-        if not condition:
-            if episode:
-                store.set_meta("worker_watch_idle", {})
-        elif notify is not None and push_allowed(store, snap, now, quiet) and ("pushed_at" not in episode or now - episode["pushed_at"] >= PUSH_REARM_S):
-            try:
-                notify("idle_work", f"IDLE_WORK: {work['issue_count']} issues and {work['pr_count']} PRs wait, no worker")
-            except Exception:  # noqa: BLE001  a push is best effort
-                pass
-            store.set_meta("worker_watch_idle", {"pushed_at": now})
+        # No owner push (Core notify toasts and speaks). The state is a dashboard incident (IDLE_WORK) instead;
+        # the manager note above repeats at most every 30 minutes.
+        if condition:
+            episode = store.get_meta("worker_watch_idle", {}) or {}
+            store.set_meta("worker_watch_idle", {"since": episode.get("since", now), "issues": work["issue_count"],
+                                                 "prs": work["pr_count"], "free": free})
+        elif store.get_meta("worker_watch_idle", {}):
+            store.set_meta("worker_watch_idle", {})
         if action:
             lane = (ready[0].get("lane") if ready else "") or "any"
             if action == "short":

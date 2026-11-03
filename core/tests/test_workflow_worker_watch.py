@@ -1,5 +1,4 @@
 """Worker-count monitor, Stop continuity and handover signal (temp home, fake clock)."""
-import functools
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +7,6 @@ from jarves.workflow import watch
 from jarves.workflow.hooks import observe
 from jarves.workflow.store import NATIVE_GRACE_S, Store
 
-_orig = watch.watch
 POLICY = {"lanes": {"bugs": {"workers": 2}, "features": {"workers": 2}}}
 
 
@@ -136,37 +134,45 @@ class WorkerWatchTests(unittest.TestCase):
         work = watch.open_work(self.store.snapshot())
         self.assertEqual((work["issues"], work["prs"]), ([11], [5]))
 
-    def test_idle_alarm_notifies_once_and_is_rate_limited(self):
+    def test_idle_alarm_notes_rate_limited_and_never_pushes_to_core(self):
         self.seed_source()
         self.start(0)
-        pushed = []
-        self.store.set_owner("present")
-        day = lambda n: False
-        notify = lambda kind, text: pushed.append((kind, text))
-        watch.watch = functools.partial(_orig, quiet=day)
-        self.addCleanup(setattr, watch, "watch", _orig)
-        self.assertFalse(watch.watch(self.store, POLICY, notify=notify)["idle_alarm"])  # activity is fresh
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])  # activity is fresh
         self.now[0] += watch.IDLE_ALARM_S + 1
-        self.store.set_owner("present")
-        res = watch.watch(self.store, POLICY, notify=notify)
-        self.assertTrue(res["idle_alarm"])
-        self.assertEqual(len(pushed), 1)
-        self.assertEqual(pushed[0][0], "idle_work")
+        self.assertTrue(watch.watch(self.store, POLICY)["idle_alarm"])
         self.assertTrue(any("IDLE_WORK" in n["subject"] for n in self.store.take_manager_notes()))
-        for _ in range(10):  # same episode, owner still present: notes continue, the push does not repeat
-            self.now[0] += watch.IDLE_ALARM_S
-            self.store.set_owner("present")
-            watch.watch(self.store, POLICY, notify=notify)
-        self.assertEqual(len(pushed), 1)
-        self.now[0] += watch.PUSH_REARM_S
-        self.store.set_owner("present")
-        watch.watch(self.store, POLICY, notify=notify)
-        self.assertEqual(len(pushed), 2)  # unchanged state: re-armed after 6 h
+        self.now[0] += 400  # inside the 30 min note rate limit
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])
+        self.assertEqual(self.store.take_manager_notes(), [])
+        # the watcher has no Core notify path at all: a Core notify toasts and speaks
+        import inspect
+        self.assertNotIn("notify", inspect.signature(watch.watch).parameters)
+        self.assertNotIn("bridge_notify", inspect.getsource(watch))
+
+    def test_idle_state_becomes_incident_and_clears(self):
+        from jarves.workflow import observability
+        self.seed_source()
+        self.start(0)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        watch.watch(self.store, POLICY)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        watch.watch(self.store, POLICY)
+        self.assertTrue(any(i["kind"] == "idle_work" for i in observability.health(self.store)["incidents"]))
+        self.store.set_source({"mode": "github", "synced_at": 2, "open_issues": [], "open_prs": []})
+        watch.watch(self.store, POLICY)
+        self.assertFalse(any(i["kind"] == "idle_work" for i in observability.health(self.store)["incidents"]))
+
+    def test_backwards_clock_is_clamped(self):
+        watch.watch(self.store, POLICY)
+        self.now[0] -= 500
+        age = watch.run_age(self.store)
+        self.assertEqual((age["age_s"], age["state"]), (0.0, "ok"))
+        self.assertIn("action", watch.watch(self.store, POLICY))
 
     def test_no_idle_alarm_without_free_slots_or_work(self):
         self.start(0)
         self.now[0] += watch.IDLE_ALARM_S + 1
-        self.assertFalse(watch.watch(self.store, POLICY, notify=lambda *a: None)["idle_alarm"])  # no work
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])  # no work
         self.seed_source()
         self.assertFalse(watch.watch(self.store, {})["idle_alarm"])  # allowed 0: no free slot
 
@@ -182,22 +188,14 @@ class WorkerWatchTests(unittest.TestCase):
         self.assertTrue(any(i["kind"] == "worker_watch_dead" for i in health["incidents"]))
 
 
-    def test_eight_hours_away_makes_at_most_one_push_and_night_is_silent(self):
+    def test_eight_hours_makes_no_push_and_few_notes(self):
         self.seed_source()
         self.start(0)
-        pushed = []
-        for _ in range(96):  # wrapper every 5 min for 8 h, owner away (default)
+        notes = []
+        for _ in range(96):  # wrapper every 5 min for 8 h
             self.now[0] += 300
-            _orig(self.store, POLICY, send=lambda a, b: None, notify=lambda k, t: pushed.append(t), quiet=lambda n: False)
-        self.assertEqual(pushed, [])  # away: manager note and ledger event only
-        self.store.set_owner("present")
-        _orig(self.store, POLICY, send=lambda a, b: None, notify=lambda k, t: pushed.append(t), quiet=lambda n: True)
-        self.assertEqual(pushed, [])  # night
-        for _ in range(96):
-            self.now[0] += 300
-            self.store.set_owner("present")
-            _orig(self.store, POLICY, send=lambda a, b: None, notify=lambda k, t: pushed.append(t), quiet=lambda n: False)
-        self.assertEqual(len(pushed), 2)  # one on first daytime run, one re-arm after 6 h of 8 h
+            watch.watch(self.store, POLICY, send=lambda a, b: notes.append(a))
+        self.assertLessEqual(len(notes), 17)  # one note per 30 min at most; never a per-run repeat
 
     def test_owner_gated_work_is_not_idle_work(self):
         self.store.set_source({"mode": "github", "synced_at": 1,
@@ -209,7 +207,7 @@ class WorkerWatchTests(unittest.TestCase):
         self.assertEqual((work["issue_count"], work["pr_count"], work["tier_r_prs"]), (0, 0, [3]))
         self.start(0)
         self.now[0] += watch.IDLE_ALARM_S + 1
-        self.assertFalse(_orig(self.store, POLICY)["idle_alarm"])
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])
 
 
 if __name__ == "__main__":
