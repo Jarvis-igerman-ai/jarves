@@ -283,10 +283,10 @@ class SimTests(unittest.TestCase):
         with mock.patch.object(hooks, "in_project", lambda cwd, r: True), \
                 mock.patch.object(Store, "_worker_limit", lambda self: 0):
             decisions = []
-            for _ in range(4):
+            for _ in range(14):   # no busy workers (< worker limit): the safety cap is 12/hour
                 decisions.append(hooks.observe(store, dict(payload), root, None).get("decision"))
                 now[0] += 60
-            self.assertEqual(decisions, ["block", "block", None, None], "2 continuations per hour, then the cap holds")
+            self.assertEqual(decisions, ["block"] * 12 + [None, None], "12 continuations per hour while workers are idle, then the cap holds")
             now[0] += H
             self.assertEqual(hooks.observe(store, dict(payload), root, None).get("decision"), "block", "cap is per hour")
 
