@@ -38,11 +38,11 @@ class GitNoteTests(unittest.TestCase):
         # Fake clock: 252557.90562814512 + 0.6 - 252557.90562814512 > 0.6 in floating point, which failed
         # on Windows with the real clock. The timeouts must still stay inside (0, budget].
         with mock.patch.object(hooks.subprocess, "run", fake_run), \
-                mock.patch.object(hooks.time, "monotonic", side_effect=[252557.90562814512, 252557.90562814512, 252557.9056281452]):
+                mock.patch.object(hooks.time, "monotonic", side_effect=[252557.90562814512] + [252557.9056281452] * 4):
             first = hooks.git_base_note("C:/nowhere")
             second = hooks.git_base_note("C:/nowhere")  # database retry path
         self.assertEqual(first, second)
-        self.assertEqual(len(calls), 2)  # not re-run
+        self.assertEqual(len(calls), 4)  # not re-run
         self.assertTrue(all(0 < t <= hooks.GIT_NOTE_BUDGET_S for t in calls))
         self.assertLessEqual(hooks.GIT_NOTE_BUDGET_S, 1.0)
 
@@ -52,6 +52,47 @@ class GitNoteTests(unittest.TestCase):
             note = hooks.git_base_note("C:/other")
         self.assertIn("could not be verified", note)
         self.assertEqual(run.call_count, 1)
+
+
+class GitNoteBehindTests(unittest.TestCase):
+    """#852: a worktree base behind jarves/main is warned about with the exact tip and command."""
+
+    def setUp(self):
+        hooks._GIT_NOTE_CACHE.clear()
+
+    def _note(self, tip, behind):
+        def fake_run(cmd, **kw):
+            if "remote" in cmd:
+                return mock.Mock(stdout="jarves\thttps://x/jarves.git\n")
+            if "--count" in cmd:
+                return mock.Mock(stdout=behind)
+            return mock.Mock(stdout=tip if "refs/remotes/jarves/main" in cmd else "a13b56d0\n")
+        with mock.patch.object(hooks.subprocess, "run", fake_run):
+            return hooks.git_base_note("C:/wt")
+
+    def test_behind_names_tip_and_command(self):
+        note = self._note("7e6db095\n", "42\n")
+        self.assertIn("WARNING", note)
+        self.assertIn("42 commit(s) behind jarves/main 7e6db095", note)
+        self.assertIn("git switch -C", note)
+
+    def test_extra_call_timeout_falls_back_to_plain_note(self):
+        def fake_run(cmd, **kw):
+            if "remote" in cmd:
+                return mock.Mock(stdout="jarves\thttps://x/jarves.git\n")
+            if "refs/remotes/jarves/main" in cmd:
+                raise hooks.subprocess.TimeoutExpired("git", 0.1)
+            return mock.Mock(stdout="a13b56d0\n")
+        with mock.patch.object(hooks.subprocess, "run", fake_run):
+            note = hooks.git_base_note("C:/wt")
+        self.assertNotIn("WARNING", note)
+        self.assertIn("a13b56d0", note)
+        self.assertLessEqual(hooks.GIT_NOTE_BUDGET_S, 0.6)
+
+    def test_current_or_missing_ref_keeps_plain_note(self):
+        self.assertNotIn("WARNING", self._note("7e6db095\n", "0\n"))
+        hooks._GIT_NOTE_CACHE.clear()
+        self.assertNotIn("WARNING", self._note("", ""))
 
 
 class WorkerLimitTests(unittest.TestCase):

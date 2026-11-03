@@ -1,0 +1,1 @@
+- Fixed: the worker start hook now warns with the exact jarves/main tip and a ready switch command when a native worktree base is behind jarves/main (#852, Tier R).
