@@ -31,6 +31,10 @@ jobs:
       REPO: ${{ github.repository }}
       ONE: ${{ github.event.pull_request.number }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1: the base branch (pull_request_target), never the PR head
+        with:
+          persist-credentials: false
+          sparse-checkout: core/tools/risk_class.py
       - name: Turn on auto-merge (merge queue) for labelled, unblocked, ready PRs
         run: |
           set -uo pipefail
@@ -42,6 +46,19 @@ jobs:
             info=$(gh pr view "$n" -R "$REPO" --json isDraft,labels,autoMergeRequest) || { echo "#$n: unreadable"; rc=1; continue; }
             if echo "$info" | jq -e '[.labels[].name] | (index("needs-review") or index("no-automerge") or index("do-not-merge") or index("wip"))' >/dev/null; then
               echo "#$n: blocked by a label"; continue; fi
+            # Tier R guard (#906): a human-added `automerge` label must not enqueue a high-risk PR. Match the words, not the exit code.
+            gh api --paginate "repos/$REPO/pulls/$n/files" --jq '.[] | .filename, (.previous_filename // empty)' > "files-$n.txt" || { echo "#$n: file list unreadable, not queued"; rc=1; continue; }
+            [ -s "files-$n.txt" ] || { echo "#$n: empty file list, risk check failed, not queued"; rc=1; continue; }
+            out=$(python3 core/tools/risk_class.py --files-from "files-$n.txt" --mode all 2>&1)
+            first=$(printf '%s\n' "$out" | head -n 1)
+            if printf '%s\n' "$first" | grep -q '^none: high-risk path'; then
+              echo "#$n: Tier R ($first), adding no-automerge, not queued"
+              gh pr edit "$n" -R "$REPO" --add-label no-automerge --remove-label automerge || rc=1
+              if [ "$(echo "$info" | jq -r '.autoMergeRequest != null')" = "true" ]; then
+                gh pr merge "$n" -R "$REPO" --disable-auto || rc=1; fi
+              continue
+            elif ! printf '%s\n' "$first" | grep -qE '^(automerge [a-z]+|none): '; then
+              echo "#$n: risk check failed (unexpected output: ${first:0:200}), not queued"; rc=1; continue; fi
             [ "$(echo "$info" | jq -r .isDraft)" = "true" ] && { echo "#$n: draft, skipped"; continue; }
             [ "$(echo "$info" | jq -r '.autoMergeRequest != null')" = "true" ] && { echo "#$n: auto-merge already on"; continue; }
             gh pr merge "$n" -R "$REPO" --auto --merge && echo "#$n: auto-merge on (enters the merge queue when green)" || { echo "#$n: could not turn on auto-merge"; rc=1; }

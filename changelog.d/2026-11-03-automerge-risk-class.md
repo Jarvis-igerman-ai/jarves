@@ -1,0 +1,1 @@
+- Fixed: jarves-automerge now runs risk_class.py on the PR files and adds no-automerge instead of enqueueing high-risk PRs (#906).
