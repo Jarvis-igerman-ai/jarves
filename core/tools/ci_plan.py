@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fnmatch
 import json
 import re
 import subprocess
@@ -49,6 +50,39 @@ RULES = {
 PR_INSTALLER = r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_)"
 
 
+def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[str]:
+    """Changed doc-class files (docs/, root *.md ...) that a Core test reads from disk, so a docs-only change can
+    still fail that test.
+
+    The docs-free content tree (ci_reuse.py) is only a sound proof when no test depends on a doc. Tests the quick
+    `validate` stage already runs (tools/prepush.py CHECKS) are covered there and ignored here. A file counts when its
+    name appears in any other test source, or matches a glob/rglob pattern used there (wildcard reads such as
+    docs/reviews/*BUG_TABLE*.md). Fails closed: an unreadable tests dir counts every file."""
+    docs = list(files)
+    if not docs:
+        return set()
+    tests_dir = tests_dir or TESTS
+    try:
+        covered = set(re.findall(r"tests/(test_\w+\.py)", (tests_dir.parent / "tools" / "prepush.py").read_text(encoding="utf-8")))
+        text = "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in sorted(tests_dir.glob("test_*.py"))
+                        if p.name not in covered)
+    except OSError:
+        return set(docs)
+    # only glob calls on a repo path: a line naming docs (any pattern, so rglob("*") over docs counts) or ROOT/REPO
+    # (specific patterns only: a bare "*" under ROOT is a code-tree scan, not a doc read). tmp_path globs never count.
+    patterns = [m.group(2) for line in text.splitlines() if re.search(r"docs|\bROOT\b|\bREPO\b", line)
+                for m in re.finditer(r"\.r?glob\(\s*([\"'])([^\"']+)\1", line)
+                if "docs" in line or m.group(2) != "*"]
+
+    def read(f: str) -> bool:
+        name = f.rsplit("/", 1)[-1]
+        if re.search(r"(?<![\w.-])" + re.escape(name), text):
+            return True
+        return any(fnmatch.fnmatchcase(name, pat.rsplit("/", 1)[-1]) or fnmatch.fnmatchcase(f, pat) for pat in patterns)
+
+    return {f for f in docs if read(f)}
+
+
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
              reuse_tests_only: bool = False) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
@@ -75,10 +109,11 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     if any(SELF.match(f) for f in files):
         return {k: True for k in FLAGS}
     rest = [f for f in files if not DOCS.match(f)]
+    read = docs_read_by_tests([f for f in files if DOCS.match(f)])   # docs a Core test reads: Linux shards must run
     out = {k: any(re.match(p, f) for f in files) for k, p in RULES.items()}
     if event == "pull_request":
         out["installer"] = any(re.match(PR_INSTALLER, f) for f in files)
-    out["code"] = bool(rest)
+    out["code"] = bool(rest) or bool(read)
     out["full"] = any(not GUIDES.match(f) for f in rest)      # guides-only: just the Linux shard
     if not out["full"]:
         out = {**out, **{k: False for k in RULES}}

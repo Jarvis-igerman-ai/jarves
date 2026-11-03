@@ -26,7 +26,7 @@ WF = ROOT / ".github" / "workflows"
 
 # ------------------------------------------------------------------------------------------------ change classification
 def test_docs_claude_md_and_readme_changes_need_no_job():
-    f = ci_plan.classify(["docs/HANDOFF.md", "CLAUDE.md", "README.md"])
+    f = ci_plan.classify(["docs/HANDOFF.md", "ZZ_UNREFERENCED_NOTE.md"])
     assert not any(f.values())
 
 
@@ -717,3 +717,35 @@ def test_timing_job_resolves_the_upstream_run_and_tolerates_missing_junit():
     wf = (WF / "jarves-checks.yml").read_text(encoding="utf-8")
     assert "ci_reuse.py junit-source" in wf and "steps.src.outputs.run_id" in wf
     assert "no measured junit" in wf
+
+
+def test_docs_read_by_a_core_test_are_not_docs_only(tmp_path):
+    """V451-MERGE-PROOF: the docs-free tree proof is sound only if no test reads the changed doc. A doc named in a
+    test the quick stage does not run needs the Linux shards (merge gate); prepush-covered and unreferenced docs stay free."""
+    tests = tmp_path / "tests"
+    tools = tmp_path / "tools"
+    tests.mkdir()
+    tools.mkdir()
+    (tools / "prepush.py").write_text('tests=("tests/test_covered.py",)', encoding="utf-8")
+    (tests / "test_covered.py").write_text('read("docs/ONLY_QUICK.md")', encoding="utf-8")
+    (tests / "test_other.py").write_text('read(ROOT / "docs" / "READ_BY_CORE.md")', encoding="utf-8")
+    got = ci_plan.docs_read_by_tests(["docs/ONLY_QUICK.md", "docs/READ_BY_CORE.md", "docs/FREE.md", "README.md"], tests)
+    assert got == {"docs/READ_BY_CORE.md"}
+    assert ci_plan.docs_read_by_tests(["docs/x.md"], tmp_path / "missing" / "tests") == {"docs/x.md"}   # fails closed
+    f = ci_plan.classify(["docs/NOW.md"])                          # real repo: a test reads NOW.md
+    assert f["code"] and not f["full"] and not f["installer"]      # Linux shards only
+
+
+def test_root_md_and_glob_read_docs_are_not_docs_only(tmp_path):
+    """Review holes: a root *.md and a doc read through a glob pattern are read by a test too."""
+    tests = tmp_path / "tests"
+    tools = tmp_path / "tools"
+    tests.mkdir()
+    tools.mkdir()
+    (tools / "prepush.py").write_text("tests=()", encoding="utf-8")
+    (tests / "test_a.py").write_text('read(ROOT / "CHANGELOG.md")', encoding="utf-8")
+    (tests / "test_b.py").write_text('sorted((ROOT / "docs" / "reviews").glob("*BUG_TABLE*.md"))', encoding="utf-8")
+    got = ci_plan.docs_read_by_tests(["CHANGELOG.md", "README.md", "docs/reviews/BUG_TABLE_V50.md", "docs/reviews/OTHER.md"], tests)
+    assert got == {"CHANGELOG.md", "docs/reviews/BUG_TABLE_V50.md"}
+    assert ci_plan.classify(["CHANGELOG.md"])["code"]               # real repo: test_manual_test_sheet reads it
+    assert ci_plan.classify(["docs/reviews/BUG_TABLE_V50_2026-10-25.md"])["code"]
