@@ -81,3 +81,27 @@ def test_release_tag_comes_from_the_ref_on_a_tag_and_a_differing_input_fails():
     find = next(s for s in job["steps"] if s.get("id") == "find")
     assert '[ "$INPUT_TAG" != "$REF_NAME" ]' in find["run"] and 'REF_TYPE" = "tag"' in find["run"]
     assert job["env"]["INPUT_TAG"] == "${{ github.event.inputs.tag }}"
+
+
+def test_automerge_runs_risk_class_before_enqueue():
+    """#906: automerge.yml must classify changed files and label Tier R PRs no-automerge before `gh pr merge`."""
+    text = (WORKFLOWS / "automerge.yml").read_text(encoding="utf-8")
+    assert "core/tools/risk_class.py" in text
+    assert 'grep -q "high-risk path"' in text
+    assert "--add-label no-automerge" in text
+    doc = yaml.safe_load(text)
+    steps = doc["jobs"]["enqueue"]["steps"]
+    run = steps[-1]["run"]
+    assert run.index("risk_class.py --files-from") < run.index("gh pr merge")
+    assert any("checkout" in str(s.get("uses", "")) and "ref" not in s.get("with", {}) for s in steps)
+
+
+def test_risk_class_flags_release_and_bootstrap_paths(tmp_path):
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[2]
+    f = tmp_path / "files.txt"
+    f.write_text(".github/workflows/release.yml\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(root / "core/tools/risk_class.py"), "--files-from", str(f), "--mode", "all"],
+                       capture_output=True, text=True)
+    assert "high-risk path" in r.stdout + r.stderr
