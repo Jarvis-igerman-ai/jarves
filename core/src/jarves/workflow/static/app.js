@@ -62,7 +62,9 @@
       groupSubmit: "שמור למסומנות", groupDefer: "לא עכשיו", groupPick: "בחר מה לעשות וסמן לפחות משימה אחת.",
       groupSaved: n => n === 1 ? "נשמרה תשובה למשימה אחת." : `נשמרו תשובות ל־${n} משימות.`,
       groupDeferred: n => `${n} משימות נשמרו להמשך.`, groupPartial: n => `נשמרו ${n}, ואז הייתה שגיאה. `,
-      note: "הערה (לא חובה)"},
+      note: "הערה (לא חובה)",
+      lastGood: n => n < 1 ? "הנתונים הטובים האחרונים התקבלו לפני פחות מדקה." : `הנתונים הטובים האחרונים התקבלו לפני ${n} דק׳.`,
+      unreachable: "השירות המקומי לא זמין כרגע, אולי הוא מופעל מחדש. מנסים שוב אוטומטית."},
     en: {moreInfo: "Get more info", moreInfoTitle: "The manager explains why you are asked, what each option does, what it recommends and what happens if you skip",
       waiting: n => n < 1 ? "Sent, waiting for the manager (under a minute)" : `Sent, waiting for the manager since ${n} min`,
       idle: "The manager is idle. Switch to the Claude window or wait for the next worker event. The message is saved and is delivered at its next step.",
@@ -86,7 +88,9 @@
       groupSubmit: "Save for the ticked ones", groupDefer: "Not now", groupPick: "Pick what to do and tick at least one task.",
       groupSaved: n => n === 1 ? "Saved the answer for one task." : `Saved answers for ${n} tasks.`,
       groupDeferred: n => `${n} tasks kept for later.`, groupPartial: n => `Saved ${n}, then this error. `,
-      note: "Note (optional)"},
+      note: "Note (optional)",
+      lastGood: n => n < 1 ? "Last good data arrived under a minute ago." : `Last good data arrived ${n} min ago.`,
+      unreachable: "The local service is not reachable right now, maybe it is restarting. Retrying automatically."},
   };
   const L = I18N[String(document.documentElement.lang || "he").toLowerCase().startsWith("en") ? "en" : "he"];
   views.work = ["באגים, מיזוגים ומדיניות", "מה פתוח ומה מותר לעשות", "באגים פתוחים ובקשות מיזוג יחד, והמדיניות שהמנוע האוטומטי פועל לפיה. שינוי מדיניות: jarvis workflow autopilot set.", "DEVELOPMENT / WORK AND POLICY"];
@@ -225,7 +229,8 @@
 
   async function api(path, body) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    // #789: a hung or restarting service gives up after 8 s and shows the stale-data banner.
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const options = {credentials: "same-origin", cache: "no-store", signal: controller.signal};
       if (body !== undefined) {
@@ -263,7 +268,9 @@
     indicator.innerHTML = `<span class="status-dot ${ok ? "good" : "warn"}" aria-hidden="true"></span>${ok ? "מחובר לשירות" : "החיבור נותק"}`;
     const banner = $("#connection-banner");
     banner.hidden = ok;
-    banner.textContent = ok ? "" : `${error || "לא ניתן להגיע לשירות המקומי."}${data ? " הנתונים המוצגים הם העדכון האחרון שהתקבל; השלמות חדשות לא יוצגו עד לחיבור מחדש." : " הפעל את השירות ופתח את הקישור המאומת שהוא מציג."}`;
+    // #789: say how old the shown data is, instead of a blank page or an endless spinner.
+    const stale = data && lastGoodAt ? ` ${L.lastGood(Math.floor((Date.now() - lastGoodAt) / 60000))}` : "";
+    banner.textContent = ok ? "" : `${error || "לא ניתן להגיע לשירות המקומי."}${data ? `${stale} הנתונים המוצגים הם העדכון האחרון שהתקבל; השלמות חדשות לא יוצגו עד לחיבור מחדש.` : " הפעל את השירות ופתח את הקישור המאומת שהוא מציג."}`;
     $("#agents-live-label").innerHTML = `<span class="status-dot ${ok ? "good" : "warn"}" aria-hidden="true"></span>${ok ? "מצב מדווח" : "נתונים אחרונים"}`;
     syncControls();
     $$("#trace-agent, #trace-task, #trace-range, #trace-from, #trace-to, #trace-mode").forEach(field => { field.disabled = !ok; });
@@ -294,7 +301,7 @@
         connectionState(true);
         renderLiveStatus();
         if (changed) render();
-      } catch (error) { if (!error.sessionEnded) connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error.message); }
+      } catch (error) { if (!error.sessionEnded) connectionState(false, error.name === "AbortError" ? "השירות לא ענה בזמן." : error instanceof TypeError ? L.unreachable : error.message); }
       finally {
         requestInFlight = null;
         if (refreshAgain) { refreshAgain = false; queueMicrotask(refresh); }
