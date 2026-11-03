@@ -5,7 +5,7 @@
     jarvis release run --version 5.0.0 --approved-by-owner "<quote or time UTC>"   # records the sign-off, prints next steps
     jarvis release run --version 5.0.0 --dry-run [--approved-by-owner ...]  # same checks, writes and signs nothing
 
-Steps: (1) the same evidence as `release status` (main green, zero open P0-P2 minus known-issue-* labels, the owner
+Steps: (1) the same evidence as `release status` (main green, zero open P0-P2 minus the exact owner-only label known-issue-4.5, the owner
 sheet); (2) REFUSE when main is red, an open P0-P2 remains, or the sheet cannot be signed (rows open); (3) only with an
 explicit --approved-by-owner, the same sign-off as `release signoff --finish` (the chat approval is recorded in the sheet's
 owner field and in the evidence file); (4) print the exact next commands: docs PR, release_gate.py, tag. This module never

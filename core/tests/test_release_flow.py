@@ -30,7 +30,8 @@ def test_issues_use_live_labels_only():
     later = {"number": 8, "state": "open", "labels": [{"name": "P2"}, {"name": "v6"}]}
     pr = {"number": 9, "pull_request": {}, "labels": [{"name": "P0"}]}
     assert not rf.check_issues([p1]).ok and "#7 P1" in rf.check_issues([p1]).detail
-    assert rf.check_issues([later, pr]).ok
+    assert not rf.check_issues([later, pr]).ok and "#8 P2" in rf.check_issues([later, pr]).detail   # version label never exempts
+    assert rf.check_issues([pr]).ok
 
 
 def test_reduced_sheet_keeps_smoke_pending_and_accepts_the_rest(tmp_path):
@@ -125,12 +126,13 @@ def test_status_and_gate_share_one_issue_rule():
     st = rf.check_issues(mixed)
     assert not st.ok
     blockers = st.detail.split("; accepted")[0]
-    for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P0")):
+    # owner decision: version/enhancement labels never exempt a P0-P2, with or without a bug label
+    for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P0"), (7, "P2"), (8, "P2")):
         assert f"#{n} {s}" in blockers
-    for n in (7, 8, 9, 10, 11):
+    for n in (9, 10, 11):
         assert f"#{n} " not in blockers
     # the gate sees exactly the same blockers and accepted set
-    assert [p.split(" issue ")[1].split(":")[0] for p in gate.issue_problems(mixed)] == ["#3", "#4", "#5", "#6"]
+    assert [p.split(" issue ")[1].split(":")[0] for p in gate.issue_problems(mixed)] == ["#3", "#4", "#5", "#6", "#7", "#8"]
     assert gate.accepted_issues(mixed) == ["#1 (P1): t1", "#2 (P2): t2"]
 
 

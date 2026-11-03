@@ -1,0 +1,1 @@
+- Fixed: the release gate and `jarvis release status` now block on every open P0-P2 issue, even one labelled only enhancement, v5-v9 or 4.5.1 without a bug label; only the owner label known-issue-4.5 exempts it.
