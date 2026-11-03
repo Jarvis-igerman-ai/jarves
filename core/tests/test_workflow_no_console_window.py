@@ -21,7 +21,7 @@ def _hidden(call: ast.Call) -> bool:
             return True
         if kw.arg is None and isinstance(kw.value, ast.Name) and kw.value.id == "_HIDDEN":
             return True
-        if kw.arg is None and isinstance(kw.value, ast.Call) and getattr(kw.value.func, "id", "") == "hidden_popen_kwargs":
+        if kw.arg is None and isinstance(kw.value, ast.Call) and getattr(kw.value.func, "id", "") in ("hidden_popen_kwargs", "_prepush_flags"):  # _prepush_flags = _HIDDEN only when no console
             return True
     return False
 
