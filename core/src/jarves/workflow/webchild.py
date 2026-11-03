@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -277,3 +278,29 @@ def reap(home: Path, port: int, record_event=None) -> tuple[str, int]:
         except Exception:  # noqa: BLE001
             pass
     return outcome, pid
+
+
+def watch_parent(server, parent_pid: int, poll_s: float = 5.0, *, started=None, wait=None) -> threading.Thread:
+    """Shut this server down when its supervisor (parent_pid) is gone, so a dead supervisor leaves no orphan (#789).
+
+    Only this process stops itself; nothing is matched by name and no other PID is touched. The parent's start
+    time is captured now, so a reused PID counts as gone. If the start time cannot be read the watch does nothing.
+    """
+    started = started or started_at
+    born = started(parent_pid)
+    stop = threading.Event()
+    wait = wait or stop.wait
+
+    def run() -> None:
+        if born is None:
+            return
+        while True:
+            wait(poll_s)
+            now = started(parent_pid)
+            if now is None or abs(now - born) > _START_TOLERANCE_S:
+                server.shutdown()
+                return
+
+    thread = threading.Thread(target=run, name="parent-watch", daemon=True)
+    thread.start()
+    return thread
