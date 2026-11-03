@@ -146,8 +146,8 @@ a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## Tier R flow and merge backlog
 
-Owner decision: the owner approved this flow in chat on 2 Nov 2026. It narrows, but
-does not remove, the rule that Tier R is not merged by the steward: only PRs outside the
+PROPOSED, owner approval UNVERIFIED (no ledger question/answer id is recorded; the owner
+must approve it and change his global instructions himself). It would narrow, but not remove, the rule that Tier R is not merged by the steward: only PRs outside the
 excluded set below may follow it.
 
 `core/tools/tier_r_flow.py plan` prints, per open PR, the next action

@@ -239,3 +239,8 @@ def test_opus_review_header_format_and_sha_marker():
 def test_hotfix_update_installer_paths_stay_with_owner():
     for f in ("core/src/jarves/hotfix.py", "core/src/jarves/update_cmd.py", "installer/jarves.iss", "core/src/jarves/installer.py", "packaging/x.py"):
         assert act(files=[f], comments=[so()]) == "owner", f
+
+
+def test_high_risk_paths_stay_with_owner():
+    for f in ("core/pyproject.toml", "core/uv.lock", "core/src/jarves/workflow/bootstrap.py", "core/src/jarves/workflow/hooks.py", "core/tools/workflow_hook.py", "core/src/jarves/workflow/autopilot_watch.py", "core/src/jarves/workflow/unlock.py", "core/src/jarves/workflow/server.py", "core/src/jarves/isolation/x.py", "core/src/jarves/winsandbox.py", "core/src/jarves/security.py", "core/src/jarves/redact.py", "core/tools/netguard.py", "core/tests/conftest.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f

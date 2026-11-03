@@ -47,6 +47,11 @@ EXCLUDED = (
     "docs/workflow/OPERATING_MODEL.md", "core/tools/tier_r_flow.py",
     # Supply-chain paths that reach the owner PC: hotfix/update write paths and installer/packaging stay with the owner.
     "*hotfix*", "*update*", "*install*", "*packag*", "*.iss", "*pyinstaller*", "*.spec",
+    # Dependencies, workflow/settings writers, autopilot, owner-presence, isolation/security, test harness: owner.
+    "*pyproject.toml", "*uv.lock", "*requirements*.txt",
+    "*/workflow/*", "core/tools/workflow_*", "*autopilot*", "*unlock*",
+    "*isolation*", "*sandbox*", "*winsandbox*", "*security*", "*redact*", "*privacy*", "*netguard*",
+    "*conftest.py", "core/tools/ci_*", "*helper*", "*mobile*",
 )
 EXCLUDED_TITLE = re.compile(r"\b(release|sign-?off|tag|stable|promot\w*)\b", re.I)
 
