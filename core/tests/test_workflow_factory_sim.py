@@ -279,7 +279,9 @@ class SimTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp(prefix="factory-sim-root-"))
         bug(store, "ready1")
         payload = {"hook_event_name": "Stop", "session_id": "mgr-session", "cwd": str(root)}
-        with mock.patch.object(hooks, "in_project", lambda cwd, r: True):
+        # all workers busy (limit 0): the strict 2/hour cap applies; below the limit it is 12/hour (#858)
+        with mock.patch.object(hooks, "in_project", lambda cwd, r: True), \
+                mock.patch.object(Store, "_worker_limit", lambda self: 0):
             decisions = []
             for _ in range(4):
                 decisions.append(hooks.observe(store, dict(payload), root, None).get("decision"))
