@@ -94,7 +94,7 @@ def questions_view(questions: list, tasks: list, cap: int = QUESTION_CAP) -> dic
     Cards are ordered by how many tasks they hold up (their own task plus everything that depends on it), then oldest
     first. `shown` holds the first `cap` cards, `later` the rest: both list every open question id, nothing is dropped,
     and no status, answer or blocking flag is touched. The dashboard, the Overview and the status line all use this."""
-    open_qs = [q for q in questions if (q.get("status") or "pending") not in CLOSED_QUESTIONS]
+    open_qs = [q for q in questions if q.get("held") or (q.get("status") or "pending") not in CLOSED_QUESTIONS]
     counts: dict = {}
     for q in open_qs:
         if q.get("group"):
