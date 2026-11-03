@@ -108,3 +108,60 @@ def test_placeholder_prefix_is_not_a_free_pass(text):
 ])
 def test_exact_placeholders_stay_readable(text):
     assert logs.redact(text) == text
+
+
+# ---- r4: generic differential test against main's key=value rule (no new leak, whatever the suffix) ----
+import itertools
+import re as _re
+
+import pytest as _pytest
+
+from jarves.logs import redact as _redact
+
+_MAIN_KV = _re.compile(r"(?i)\b(api[_-]?key|token|secret|password|passwd|cookie|authorization)(\"?\s*[:=]\s*\"?)"
+                       r"(?!\*\*\*|<\d+ chars>|<secret>)[^\s\",}&]+")
+
+
+def _main_redact(s: str) -> str:
+    """Frozen copy of main's (32d3c091) key=value rule: the reference the PR must never be weaker than."""
+    return _MAIN_KV.sub(r"\1\2***", s)
+
+
+_SECRET = "Hunter2xyz"
+_KEYS = ["password", "token", "api_key", "secret", "PASSWORD", "db_password", "access_token", "client_secret",
+         "authorization", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN"]
+_SEPS = ["=", ": ", ":", "=\"", "\": \"", "\":\""]
+_HEADS = ["", "true", "false", "null", "none", "<x>", "<aws-key-id>", "<user>", "<X>", "${A}", "${A_B}", "${a}",
+          "os.environ['X']", "os.environ[X]", "os.environ.get('X')", "os.getenv('X')", "getenv(X)",
+          "process.env.A", "process.env.a", "***", "<secret>", "<5 chars>", "abc", "a1"]
+_SUFFIXES = ["", "]", ">", "}", ")", ";", "'", "\"", "a", "Z", "1", "_", "-", ".", "/", "x]", "]]", ")]", "[", "\\"]
+
+
+def _corpus():
+    for k, sep, head, suf in itertools.product(_KEYS, _SEPS, _HEADS, _SUFFIXES):
+        yield f"{k}{sep}{head}{suf}{_SECRET}"
+
+
+def test_differential_no_new_leak_vs_main():
+    """For every input where main masks the secret tail, the PR masks it too (placeholders only exempt when they
+    are the WHOLE value, so a glued suffix never exposes the tail)."""
+    leaks = [s for s in _corpus() if _SECRET not in _main_redact(s) and _SECRET in _redact(s)]
+    assert not leaks, leaks[:20]
+
+
+@_pytest.mark.parametrize("value", ["true", "false", "null", "none", "<x>", "<aws-key-id>", "${NAME}",
+                                    "os.environ['X']", "os.environ[X]", "os.environ.get('X')", "os.getenv(X)",
+                                    "getenv('X')", "process.env.NAME"])
+@_pytest.mark.parametrize("end", ["", " ", ",", "}", "\"", "&"])
+def test_exact_placeholder_is_the_only_exemption(value, end):
+    """The explicit exemption list: a placeholder that is the whole value stays readable ..."""
+    s = f"password={value}{end}"
+    assert _redact(s) == s
+
+
+@_pytest.mark.parametrize("s", ["password=true]Hunter2xyz", "token=null]Hunter2xyz", "secret=process.env.A]Hunter2xyz",
+                               "password=${A}]Hunter2xyz", "api_key=os.environ.get('X')]Hunter2xyz",
+                               "password=<x>Hunter2xyz", "password=<aws-key-id>Hunter2xyz",
+                               "{\"password\": \"<x>Hunter2xyz\"}", "password=<user>Hunter2xyz"])
+def test_r3_regressions_bracket_and_tag_suffix(s):
+    assert _SECRET not in _redact(s)
