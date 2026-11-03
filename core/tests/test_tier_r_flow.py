@@ -174,12 +174,18 @@ def test_verdict_forms():
     assert act(comments=[c("note\nVERDICT: SIGN-OFF " + SHA + tail)]) == "review"
 
 
-def _wf(task, owners):
+_AGENTS = [{"id": "agent-rev", "provider": "claude-native", "session_id": "s-rev"},
+           {"id": "author-x", "provider": "claude-native", "session_id": "s-auth"}]
+
+
+def _wf(task, owners, agents=None):
     def wf(args, home):
         if args[0] == "task":
             if task is None:
                 raise RuntimeError("not found")
             return task
+        if args[0] == "status":
+            return {"agents": _AGENTS if agents is None else agents}
         return owners
     return wf
 
@@ -203,7 +209,8 @@ def test_ledger_facts_checks_task_agent_and_claims():
 
 
 def _task(**k):
-    d = {"id": "review-pr-5-" + SHA[:8], "agent_id": "agent-rev",
+    d = {"id": "review-pr-5-" + SHA[:8], "agent_id": "agent-rev", "state": "review", "code_revision": SHA,
+         "acceptance": [{"id": "C1", "passed": True, "evidence": "VERDICT SIGN-OFF " + SHA, "code_revision": SHA}],
          "scope": {"kind": "tier_r_review", "pr": 5, "model": "claude-opus-5-5"}}
     d.update(k)
     return d
@@ -213,8 +220,29 @@ def _claim(who):
     return {"resource": "pr:5", "agent": who, "reason": "", "claimed_at": 0, "expires_at": 1, "stale": False, "task_id": ""}
 
 
-def _lf(task, owners, authors=("author-x",), tid="review-pr-5-" + SHA[:8], sha=SHA):
-    return t.ledger_facts(5, "b", tid, "agent-rev", sha, authors, wf=_wf(task, owners))
+def _lf(task, owners, authors=("author-x",), tid="review-pr-5-" + SHA[:8], sha=SHA, agents=None):
+    return t.ledger_facts(5, "b", tid, "agent-rev", sha, authors, wf=_wf(task, owners, agents))
+
+
+def test_signoff_needs_verdict_recorded_by_the_review_task():
+    own = [_claim("author-x")]
+    assert _lf(_task(), own)["ok"]
+    assert not _lf(_task(state="running"), own)["ok"]                         # (a) reviewer still working
+    assert not _lf(_task(state="queued"), own)["ok"]
+    assert not _lf(_task(acceptance=[]), own)["ok"]                           # no evidence
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": False, "evidence": "SIGN-OFF", "code_revision": SHA}]), own)["ok"]
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": True, "evidence": "CHANGES REQUESTED", "code_revision": SHA}]), own)["ok"]
+    assert not _lf(_task(acceptance=[{"id": "C1", "passed": True, "evidence": "SIGN-OFF", "code_revision": OLD}]), own)["ok"]
+    assert not _lf(_task(code_revision=OLD), own)["ok"]                       # other head
+
+
+def test_reviewer_must_be_registered_native_session_distinct_from_author():
+    own = [_claim("author-x")]
+    assert not _lf(_task(), own, agents=[])["ok"]                             # (b) unregistered id
+    assert not _lf(_task(), own, agents=[{"id": "agent-rev", "provider": "manual", "session_id": "s1"}])["ok"]
+    assert not _lf(_task(), own, agents=[{"id": "agent-rev", "provider": "claude-native", "session_id": ""}])["ok"]
+    same = [{"id": "agent-rev", "provider": "claude-native", "session_id": "s"}, {"id": "author-x", "provider": "claude-native", "session_id": "s"}]
+    assert not _lf(_task(), own, agents=same)["ok"]                           # same session as the author
 
 
 def test_ledger_binds_task_to_pr_head_model_and_author():

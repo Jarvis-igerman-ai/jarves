@@ -157,7 +157,10 @@ excluded set below may follow it.
    task/agent id different from the PR's declared `Author-Agent:` id(s).
 2. Verdict format (machine-readable, first line): `SIGN-OFF <40-char head sha>` or
    `CHANGES REQUESTED <40-char head sha>`, then marker lines `Review-Head: <same sha>`,
-   `Review-Task: <ledger task id>`, `Reviewer-Agent: <agent id>`, `Reviewer-Model: opus-5-5`.
+   `Review-Task: <ledger task id>`, `Reviewer-Agent: <agent id>`, `Reviewer-Model: opus-5-5`. The manager also requires the review task to be in
+   review/verified/done with passing SIGN-OFF evidence at the full head sha, and the reviewer to be a registered
+   `claude-native` session different from the author's. Honest limit: all agents share one OS user and one GitHub
+   account, so this is tamper-evidence, not authentication.
    Only comments whose GitHub association is OWNER, MEMBER or COLLABORATOR count;
    quoted or buried text, short SHAs and incomplete markers do not. The LATEST verdict
    for the current head wins, so a later CHANGES REQUESTED cancels an earlier SIGN-OFF.

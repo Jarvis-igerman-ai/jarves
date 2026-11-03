@@ -239,6 +239,24 @@ def ledger_facts(number, branch, task_id, reviewer, head_sha="", authors=(), hom
             return bad(f"Review-Task {task_id} did not request an Opus model")
         if agent != (reviewer or "").lower():
             return bad(f"Review-Task {task_id} belongs to {agent}, not Reviewer-Agent {reviewer}")
+        # The verdict must come from the ledger, not from the comment: the review task itself is in review/verified/done,
+        # at this exact head, with every acceptance row passed at this head and the evidence stating SIGN-OFF.
+        head = head_sha.lower()
+        if task.get("state") not in {"review", "verified", "done"}:
+            return bad(f"Review-Task {task_id} is {task.get('state')}, no finished review")
+        rows = task.get("acceptance")
+        if str(task.get("code_revision") or "").lower() != head or not isinstance(rows, list) or not rows or not all(
+                isinstance(r, dict) and r.get("passed") and str(r.get("code_revision") or "").lower() == head
+                and "sign-off" in str(r.get("evidence") or "").lower().replace("signoff", "sign-off")
+                and "changes" not in str(r.get("evidence") or "").lower() for r in rows):
+            return bad(f"Review-Task {task_id} has no passing SIGN-OFF evidence at head {head[:8]}")
+        agents = {str(a.get("id") or "").lower(): a for a in ((wf(["status"], home) or {}).get("agents") or []) if isinstance(a, dict)}
+        rev = agents.get(agent) or {}
+        if rev.get("provider") != "claude-native" or not str(rev.get("session_id") or "").strip():
+            return bad(f"reviewer {agent} is not a registered claude-native session")
+        author_sessions = {str((agents.get(str(a).lower()) or {}).get("session_id") or "") for a in authors or ()} - {""}
+        if str(rev["session_id"]) in author_sessions:
+            return bad("reviewer shares a session with the author")
         claimed = set()
         for res in (f"pr:{number}", f"branch:{branch}" if branch else ""):
             if not res:
