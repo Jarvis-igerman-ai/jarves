@@ -48,3 +48,33 @@ def test_has_secret_sees_new_token_shapes(text):
 ])
 def test_normal_text_unchanged(text):
     assert logs.redact(text) == text
+
+
+@pytest.mark.parametrize("text", [
+    f"cmd --password={VAL}",
+    f"cmd --token={VAL}",
+    f"jarvis login --api-key={VAL}",
+    f"password=${VAL}",
+    f"password=<{VAL}>",
+    f"password=null-{VAL}",
+    f"token=environ{VAL}",
+    f"secret=true-{VAL}",
+    f"password=$ENV{VAL}",
+])
+def test_old_leak_cases_stay_masked(text):
+    """Opus review of PR #913: all of these were masked on main and must stay masked."""
+    out = logs.redact(text)
+    assert VAL not in out
+    assert out != text
+
+
+def test_json_numbers_in_prefixed_settings_stay_valid_json():
+    import json
+    for text in ('{"max_token": 100}', '{"session_token": 7, "a": 1}'):
+        assert json.loads(logs.redact(text)) == json.loads(text)
+    assert logs.redact('{"token": 100}') != '{"token": 100}'          # main masked a plain token key
+
+
+def test_has_secret_truncated_pem_with_later_mask():
+    text = "-----BEGIN PRIVATE KEY-----\nMIIEabc123\n\nlater sk-*** and ***"
+    assert logs.has_secret(text)
