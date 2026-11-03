@@ -163,9 +163,15 @@ excluded set below may follow it.
    for the current head wins, so a later CHANGES REQUESTED cancels an earlier SIGN-OFF.
    Honest limit: every agent posts through one GitHub account, so account != author
    proves nothing about independence. The check is only that the declared reviewer id
-   differs from the declared author id; the steward must confirm that `Review-Task`
-   exists in the workflow ledger with that agent id and model before queueing. A missing
-   `Author-Agent:` or marker means owner.
+   differs from the declared author id, and `tier_r_flow.py` itself checks the ledger
+   (fail closed to owner): the `Review-Task` is a `tier_r_review` task for this PR number
+   and head (id ends with the 8-char sha), requested Opus (a requested, not a verified
+   effective, model), belongs to the declared reviewer, who holds no claim on `pr:N` or
+   the branch; and the declared `Author-Agent:` must be corroborated by a ledger claim
+   on the PR or branch. A missing `Author-Agent:` or marker means owner.
+   `OPUS REVIEW: SIGN-OFF` / `OPUS REVIEW: CHANGES REQUESTED` is also read as the first
+   line; the sha then comes from `Review-Head:`. Hotfix/update and installer/packaging
+   paths are never automatic (owner).
 3. CHANGES REQUESTED: a Sonnet fixer pushes to the PR's own branch only
    (`check-touch pr:N` first, `--force-with-lease` only on that branch); the new
    head is reviewed again. At most 2 review rounds (two heads with CHANGES REQUESTED);

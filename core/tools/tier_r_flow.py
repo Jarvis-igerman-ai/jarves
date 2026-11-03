@@ -27,7 +27,10 @@ BACKLOG_GREEN = 3       # green PRs not yet queued
 # Machine-readable verdict: FIRST line "SIGN-OFF <40-hex head sha>" or "CHANGES REQUESTED <40-hex head sha>", plus
 # marker lines "Review-Head: <same sha>", "Review-Task: <id>", "Reviewer-Agent: <id>", "Reviewer-Model: <model>".
 # Quoted text and anything below line 1 never counts as the verdict.
-VERDICT = re.compile(r"^(?:VERDICT:[ \t]*)?(SIGN-OFF|CHANGES REQUESTED)[ \t]+([0-9a-f]{40})\b", re.I)
+# Also accepted: first line "OPUS REVIEW: SIGN-OFF" / "OPUS REVIEW: CHANGES REQUESTED" (or CHANGES-REQUESTED); the sha is then
+# on that line or, absent there, taken from the "Review-Head:" marker (it must still be 40-hex and match the head).
+VERDICT = re.compile(r"^(?:VERDICT:[ \t]*|OPUS REVIEW:[ \t]*)?(SIGN-OFF|CHANGES[ -]REQUESTED)(?:[ \t]+([0-9a-f]{40})\b|(?=[ \t]*(?:\n|$)))", re.I)
+OPUS = re.compile(r"^(anthropic/)?(claude[- ])?opus([- ]|$)")
 MARK = {k: re.compile(r"^" + k + r":[ \t]*(\S+)[ \t]*$", re.I | re.M)
         for k in ("Review-Head", "Review-Task", "Reviewer-Agent", "Reviewer-Model")}
 AUTHOR_AGENT = re.compile(r"^Author-Agent:[ \t]*(\S+)", re.I | re.M)     # first token only; extra text ignored
@@ -42,6 +45,8 @@ EXCLUDED = (
     "*promote*", "*gate*", "*github-approve*", "core/tools/manual_test_sheet.py", "*dashboard_auth*", "*settings.json", "*settings.local.json",
     "core/src/jarves/drive_mode.py", "core/src/jarves/skills/__init__.py", "core/tools/risk_class.py",
     "docs/workflow/OPERATING_MODEL.md", "core/tools/tier_r_flow.py",
+    # Supply-chain paths that reach the owner PC: hotfix/update write paths and installer/packaging stay with the owner.
+    "*hotfix*", "*update*", "*install*", "*packag*", "*.iss", "*pyinstaller*", "*.spec",
 )
 EXCLUDED_TITLE = re.compile(r"\b(release|sign-?off|tag|stable|promot\w*)\b", re.I)
 
@@ -88,9 +93,11 @@ def parse_evidence(comments):
         m = VERDICT.match(body)
         if not m:
             continue
-        sha = m.group(2).lower()
         mk = {k: (r.search(body).group(1) if r.search(body) else "") for k, r in MARK.items()}
-        out.append({"verdict": m.group(1).upper().replace(" ", "_"), "sha": sha, "task": mk["Review-Task"],
+        sha = (m.group(2) or mk["Review-Head"]).lower()
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            continue
+        out.append({"verdict": m.group(1).upper().replace(" ", "_").replace("-", "_") if "CHANGES" in m.group(1).upper() else "SIGN-OFF", "sha": sha, "task": mk["Review-Task"],
                     "reviewer": mk["Reviewer-Agent"].lower(), "model": mk["Reviewer-Model"].lower(),
                     "complete": mk["Review-Head"].lower() == sha and bool(mk["Review-Task"] and mk["Reviewer-Agent"])})
     return out
@@ -135,7 +142,7 @@ def decide(pr, main_red=False):
         return out("fix", "CHANGES REQUESTED on current head: Sonnet fixer pushes to the PR branch")
     if here and here[-1]["verdict"] == "SIGN-OFF":
         e = here[-1]
-        if not re.match(r"^(anthropic/)?(claude[- ])?opus([- ]|$)", e["model"]):
+        if not OPUS.match(e["model"]):
             return out("owner", "sign-off is not from an Opus review", "model=" + (e["model"] or "unknown"))
         if not e["complete"]:
             return out("owner", "sign-off lacks Review-Head / Review-Task / Reviewer-Agent markers")
@@ -203,30 +210,43 @@ def _wf_json(args, home):
     return json.loads(_run(cmd + args))
 
 
-def ledger_facts(number, branch, task_id, reviewer, home=None, wf=_wf_json):
-    """Deterministic independence check against the workflow ledger (read-only): the Review-Task exists, its agent
-    is the declared Reviewer-Agent, and that agent holds no claim on pr:N or branch:<name> (the author's scope).
-    Fails closed: {'ok': False, 'why': ...} when anything cannot be checked."""
+def ledger_facts(number, branch, task_id, reviewer, head_sha="", authors=(), home=None, wf=_wf_json):
+    """Deterministic independence check against the workflow ledger (read-only). All must hold, else fail closed:
+    the Review-Task exists; it is a tier_r_review task for THIS PR number (scope.pr) and THIS head (task id ends with
+    the 8-char head sha); its requested model is Opus; its agent is the declared Reviewer-Agent; that agent holds no
+    claim on pr:N / branch:<name>; and the declared Author-Agent is corroborated by a ledger claim on pr:N / branch
+    (a body line alone proves nothing). The model is the REQUESTED model, not a verified effective one."""
     def bad(why):
         return {"ok": False, "why": why, "review_task": task_id, "review_agent": ""}
     try:
-        if not task_id:
-            return bad("no Review-Task")
+        if not task_id or not re.fullmatch(r"[0-9a-f]{40}", (head_sha or "").lower()):
+            return bad("no Review-Task or head sha")
         task = wf(["task", "--id", task_id], home)
         agent = str((task or {}).get("agent_id") or (task or {}).get("agent") or "").lower()
         if not agent:
             return bad(f"Review-Task {task_id} not found or has no agent")
+        sc = (task or {}).get("scope")
+        if not isinstance(sc, dict) or sc.get("kind") != "tier_r_review" or str(sc.get("pr")) != str(number):
+            return bad(f"Review-Task {task_id} is not a tier_r_review task for PR {number}")
+        if not str(task.get("id") or task_id).lower().endswith("-" + head_sha.lower()[:8]):
+            return bad(f"Review-Task {task_id} is not bound to head {head_sha[:8]}")
+        if not OPUS.match(str(sc.get("model") or "").lower()):
+            return bad(f"Review-Task {task_id} did not request an Opus model")
         if agent != (reviewer or "").lower():
             return bad(f"Review-Task {task_id} belongs to {agent}, not Reviewer-Agent {reviewer}")
+        claimed = set()
         for res in (f"pr:{number}", f"branch:{branch}" if branch else ""):
             if not res:
                 continue
             for o in wf(["owners", "--resource", res], home) or []:
-                who = str(o.get("agent") or o.get("agent_id") or o.get("owner") or "").lower()
+                who = str(o.get("agent") or o.get("agent_id") or o.get("owner") or "").lower() if isinstance(o, dict) else ""
                 if not who:
                     return bad(f"owner row for {res} has no recognised agent field")
                 if who == agent:
                     return bad(f"reviewer {agent} owns {res}")
+                claimed.add(who)
+        if not claimed & {str(a).lower() for a in authors or ()}:
+            return bad("Author-Agent is not corroborated by a ledger claim on the PR or branch")
         return {"ok": True, "why": "", "review_task": task_id, "review_agent": agent}
     except Exception as e:                                  # noqa: BLE001
         return bad(f"ledger unreadable ({type(e).__name__})")
@@ -254,7 +274,7 @@ def load_prs(numbers=None, home=None):
                                   "association": c.get("authorAssociation") or ""} for c in d.get("comments") or []]})
         here = _at(parse_evidence(prs[-1]["comments"]), prs[-1]["head_sha"])
         if here and here[-1]["verdict"] == "SIGN-OFF":      # ledger lookup only where it can matter
-            prs[-1]["ledger"] = ledger_facts(n, d.get("headRefName") or "", here[-1]["task"], here[-1]["reviewer"], home)
+            prs[-1]["ledger"] = ledger_facts(n, d.get("headRefName") or "", here[-1]["task"], here[-1]["reviewer"], prs[-1]["head_sha"], prs[-1]["author_agents"], home)
     return prs
 
 

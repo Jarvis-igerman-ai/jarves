@@ -192,13 +192,50 @@ def test_ledger_unverified_signoff_goes_to_owner():
 
 
 def test_ledger_facts_checks_task_agent_and_claims():
-    ok = t.ledger_facts(5, "b", "T-9", "Agent-Rev", wf=_wf({"agent_id": "agent-rev"}, []))
+    ok = _lf(_task(), [_claim("author-x")])
     assert ok["ok"] and ok["review_agent"] == "agent-rev"
-    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf(None, []))["ok"]
-    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "someone"}, []))["ok"]
-    row = {"resource": "pr:5", "agent": "agent-rev", "reason": "", "claimed_at": 0, "expires_at": 1, "stale": False, "task_id": ""}
-    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [row]))["ok"]
-    assert not t.ledger_facts(887, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [dict(row, resource="pr:887")]))["ok"]
-    assert t.ledger_facts(887, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [dict(row, agent="author-x")]))["ok"]
-    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [{"resource": "pr:5"}]))["ok"]  # no agent field: fail closed
-    assert not t.ledger_facts(5, "b", "", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, []))["ok"]
+    assert not _lf(None, [])["ok"]
+    assert not _lf(_task(agent_id="someone"), [_claim("author-x")])["ok"]
+    assert not _lf(_task(), [_claim("author-x"), _claim("agent-rev")])["ok"]        # reviewer owns pr:N
+    assert not _lf(_task(), [{"resource": "pr:5"}])["ok"]                            # no agent field: fail closed
+    assert not _lf(_task(), ["junk"])["ok"]
+    assert not _lf(_task(), [_claim("author-x")], tid="")["ok"]
+
+
+def _task(**k):
+    d = {"id": "review-pr-5-" + SHA[:8], "agent_id": "agent-rev",
+         "scope": {"kind": "tier_r_review", "pr": 5, "model": "claude-opus-5-5"}}
+    d.update(k)
+    return d
+
+
+def _claim(who):
+    return {"resource": "pr:5", "agent": who, "reason": "", "claimed_at": 0, "expires_at": 1, "stale": False, "task_id": ""}
+
+
+def _lf(task, owners, authors=("author-x",), tid="review-pr-5-" + SHA[:8], sha=SHA):
+    return t.ledger_facts(5, "b", tid, "agent-rev", sha, authors, wf=_wf(task, owners))
+
+
+def test_ledger_binds_task_to_pr_head_model_and_author():
+    assert _lf(_task(), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope={"kind": "tier_r_review", "pr": 6, "model": "claude-opus-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope={"kind": "steward", "pr": 5, "model": "claude-opus-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(scope="required"), [_claim("author-x")])["ok"]
+    assert not _lf(_task(id="review-pr-5-" + OLD[:8]), [_claim("author-x")])["ok"]           # other head
+    assert not _lf(_task(scope={"kind": "tier_r_review", "pr": 5, "model": "claude-sonnet-5-5"}), [_claim("author-x")])["ok"]
+    assert not _lf(_task(), [])["ok"]                                  # Author-Agent line not corroborated by the ledger
+    assert not _lf(_task(), [_claim("someone-else")])["ok"]
+
+
+def test_opus_review_header_format_and_sha_marker():
+    body = f"OPUS REVIEW: SIGN-OFF\nReview-Head: {SHA}\nReview-Task: T-9\nReviewer-Agent: agent-rev\nReviewer-Model: claude-opus-5-5"
+    assert act(comments=[c(body)]) == "queue"
+    assert act(comments=[c(body.replace("SIGN-OFF", "CHANGES-REQUESTED", 1))]) == "fix"
+    assert act(comments=[c(body.replace("OPUS REVIEW: SIGN-OFF", "OPUS REVIEW: CHANGES REQUESTED"))]) == "fix"
+    assert act(comments=[c(body.replace(f"Review-Head: {SHA}", "Review-Head: " + SHA[:12]))]) == "review"   # no full sha
+
+
+def test_hotfix_update_installer_paths_stay_with_owner():
+    for f in ("core/src/jarves/hotfix.py", "core/src/jarves/update_cmd.py", "installer/jarves.iss", "core/src/jarves/installer.py", "packaging/x.py"):
+        assert act(files=[f], comments=[so()]) == "owner", f
