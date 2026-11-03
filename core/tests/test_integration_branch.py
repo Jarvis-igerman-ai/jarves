@@ -253,3 +253,50 @@ def test_many_files_treated_as_tier_r(env):
     make_pr(work, gh, 1, {"docs/a.md": "x"})
     gh.prs[1]["files"] = [{"path": f"docs/f{i}.md"} for i in range(100)]
     assert ib.pr_info(1, work)["tier"] == "R"
+
+
+def test_prepush_keeps_output_visible_with_hidden_flag(env, monkeypatch):
+    """#889: the no-window flag detaches stdio on Windows; prepush must be given explicit streams."""
+    work, gh = env
+    make_pr(work, gh, 1, {"core/src/jarves/x_thing.py": "x = 1\n"})
+    seen = {}
+    orig = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if "core/tools/prepush.py" not in cmd:
+            if sys.platform != "win32":
+                kw.pop("creationflags", None)  # Windows-only flag, injected via the patched _HIDDEN
+            return orig(cmd, **kw)
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(ib, "_has_console", lambda: False)
+    monkeypatch.setattr(ib, "_HIDDEN", {"creationflags": 0x08000000})
+    assert run_main(work, "build", "1") == 0
+    assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
+    assert seen["stdin"] == subprocess.DEVNULL
+    assert seen["creationflags"] == 0x08000000
+
+
+def test_prepush_no_hidden_flag_when_console_attached(env, monkeypatch):
+    """#889: with a real console CREATE_NO_WINDOW would drop the child's output, so it is not passed."""
+    work, gh = env
+    make_pr(work, gh, 1, {"core/src/jarves/x_thing.py": "x = 1\n"})
+    seen = {}
+    orig = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if "core/tools/prepush.py" not in cmd:
+            if sys.platform != "win32":
+                kw.pop("creationflags", None)  # Windows-only flag, injected via the patched _HIDDEN
+            return orig(cmd, **kw)
+        seen.update(kw)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(ib, "_has_console", lambda: True)
+    monkeypatch.setattr(ib, "_HIDDEN", {"creationflags": 0x08000000})
+    assert run_main(work, "build", "1") == 0
+    assert "creationflags" not in seen
+    assert seen["stdout"] is sys.stdout

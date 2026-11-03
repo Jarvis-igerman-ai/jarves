@@ -27,6 +27,8 @@ from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
 REPO = CORE.parent
+# Windows: never flash a console window (issue #889); same contract as jarves.workflow.winproc.hidden_popen_kwargs.
+_HIDDEN = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if sys.platform == "win32" else {}
 MARK = "# jarves-prepush-hook"
 DASH_PAGES = ("/", "/api/overview", "/api/sessions", "/api/costs?days=30", "/api/issues", "/api/skills",
               "/api/memory", "/api/settings")
@@ -178,7 +180,7 @@ def _command(c: Check) -> list[str]:
 def run_check(c: Check) -> Result:
     cmd = _command(c)
     t = time.perf_counter()
-    p = subprocess.run(cmd, cwd=CORE, env=_env(), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    p = subprocess.run(cmd, cwd=CORE, env=_env(), capture_output=True, text=True, encoding="utf-8", errors="replace", **_HIDDEN)
     out = (p.stdout or "") + "\n" + (p.stderr or "")
     shown = ["python" if i == 0 else a for i, a in enumerate(cmd) if a != "no:cacheprovider" and a != "-p"]
     rerun = "cd core && " + " ".join(shown)
@@ -195,10 +197,10 @@ def run_check(c: Check) -> Result:
 
 def changed_files(base: str | None = None) -> list[str]:
     for b in ([base] if base else ["jarves/main", "origin/main", "main"]):
-        r = subprocess.run(["git", "diff", "--name-only", f"{b}...HEAD"], cwd=REPO, capture_output=True, text=True)
+        r = subprocess.run(["git", "diff", "--name-only", f"{b}...HEAD"], cwd=REPO, capture_output=True, text=True, **_HIDDEN)
         if r.returncode == 0:
             dirty = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=REPO, capture_output=True,
-                                   text=True).stdout
+                                   text=True, **_HIDDEN).stdout
             return sorted({x for x in (r.stdout + dirty).splitlines() if x.strip()})
     return []
 
@@ -240,7 +242,7 @@ def dash_probe() -> int:
 
 def hook_path() -> Path:
     r = subprocess.run(["git", "rev-parse", "--git-path", "hooks/pre-push"], cwd=REPO, capture_output=True,
-                       text=True, check=True)
+                       text=True, check=True, **_HIDDEN)
     p = Path(r.stdout.strip())
     return p if p.is_absolute() else REPO / p
 

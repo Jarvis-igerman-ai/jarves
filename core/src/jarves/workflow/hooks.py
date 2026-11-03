@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .messages import notice_line, unread_count
 from .store import Store
+from .winproc import hidden_popen_kwargs
 
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Notification", "SubagentStart", "SubagentStop", "Stop", "SessionEnd")
 
@@ -39,7 +40,7 @@ def in_project(cwd: str, root: Path) -> bool:
     try:
         def common(path):
             result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                                    capture_output=True, text=True, timeout=2, check=True)
+                                    capture_output=True, text=True, timeout=2, check=True, **hidden_popen_kwargs())
             return Path(result.stdout.strip()).resolve()
         return common(current) == common(root)
     except (OSError, subprocess.SubprocessError):

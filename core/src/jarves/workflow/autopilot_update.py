@@ -13,14 +13,14 @@ import sys
 from pathlib import Path
 
 from .autopilot_watch import _load, _save, raise_alert
+from .winproc import hidden_popen_kwargs
 
 REMOTE = "jarves"
 STATE_KEY = "autopilot_update"
 
 
 def run_git(repo: Path, args: list[str]) -> tuple[int, str]:
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120, creationflags=flags)
+    p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=120, **hidden_popen_kwargs())
     return p.returncode, (p.stdout or "").strip()
 
 
@@ -87,7 +87,7 @@ def relaunch(home: Path, profile_home: Path, port: int, popen=subprocess.Popen) 
             "        with exclusive(Path(sys.argv[1]) / 'supervisor.lock'): break\n"
             "    except OSError: time.sleep(0.5)\n"
             "subprocess.Popen([sys.executable, sys.argv[4], 'supervise', '--home', sys.argv[1], '--profile-home', sys.argv[2],"
-            " '--port', sys.argv[3]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n")
-    flags = (getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)) if sys.platform == "win32" else 0
+            " '--port', sys.argv[3]], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,"
+            " creationflags=0x08000000 if sys.platform == 'win32' else 0)\n")
     popen([sys.executable, "-c", code, str(home), str(profile_home), str(port), str(entry), str(entry.parents[1] / "src")],
-          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **hidden_popen_kwargs(detached=True))
