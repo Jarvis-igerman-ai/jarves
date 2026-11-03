@@ -179,6 +179,19 @@ class TypedAnswerTests(unittest.TestCase):
     def test_hook_is_synchronous_so_it_can_block(self):
         self.assertNotIn("UserPromptSubmit", bootstrap.ASYNC_EVENTS)
 
+    def test_held_answer_stays_open_in_questions_view(self):
+        from jarves.workflow.store import questions_view
+        held = {"id": "q1", "status": "answered", "held": True, "task_id": "t1", "blocks": True, "created_at": 1}
+        done = {"id": "q2", "status": "answered", "held": False, "task_id": "t2", "blocks": True, "created_at": 2}
+        view = questions_view([held, done], [{"id": "t1"}, {"id": "t2"}])
+        self.assertEqual(view["open"], 1)
+        self.assertEqual(view["shown"][0]["ids"], ["q1"])
+
+    def test_dashboard_scripts_count_held_as_open(self):
+        base = ROOT / "core" / "src" / "jarves" / "workflow" / "static"
+        for name in ("today.js", "overview.js"):
+            self.assertIn("q.held ||", (base / name).read_text(encoding="utf-8"), name)
+
 
 if __name__ == "__main__":
     unittest.main()

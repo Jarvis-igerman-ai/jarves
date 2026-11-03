@@ -124,7 +124,7 @@
     const observed = seconds(data.observed_at);
     const dataAge = observed ? Math.max(0, now - observed) : Infinity;
     const count = state => data.tasks.filter(task => task.state === state).length;
-    const questions = data.questions.filter(q => ["pending", "deferred", "open"].includes(q.status || "pending")).length;
+    const questions = data.questions.filter(q => q.held || ["pending", "deferred", "open"].includes(q.status || "pending")).length;
     // Queued counts only tasks that may run, the same rule as the "Working now" block.
     const queued = data.tasks.filter(task => task.state === "queued" && task.execution_allowed !== false).length;
     const verdict = dataAge > 180 ? "unknown" : !supOk ? "bad" : !active ? "stopped" : questions ? "needs" : "ok";
