@@ -1,0 +1,1 @@
+- Tests: `test_concurrent_writers_never_hit_database_is_locked` is deterministic now (barrier start, 10 s timeout, handles closed in finally); removed from quarantine (#908).
