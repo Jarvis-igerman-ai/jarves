@@ -111,6 +111,7 @@ def collect(get=public_get) -> dict:
                     # A closed PR is not necessarily merged. Never infer merge from state alone.
                     item["merged_at"] = row.get("merged_at")
                     item["head_sha"] = (row.get("head") or {}).get("sha", "")
+                    item["head_ref"] = str((row.get("head") or {}).get("ref", ""))[:200]
                     item["draft"] = bool(row.get("draft"))
                     item["auto_merge"] = bool(row.get("auto_merge"))
                     item["linked_issues"] = sorted({int(n) for n in re.findall(
@@ -237,7 +238,13 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
 def sync(store, get=public_get) -> dict:
     """On failure retain the last snapshot and prominently mark its freshness/error."""
     try:
-        return apply_snapshot(store, collect(get))
+        source = apply_snapshot(store, collect(get))
+        try:  # #764: owned PRs with a red check, conflict or review comment -> ledger message (public reads, no hook)
+            from .pr_routing import route
+            route(store, source.get("open_prs", []), get)
+        except Exception:  # noqa: BLE001  routing is best effort and never fails the sync
+            pass
+        return source
     except (OSError, ValueError, KeyError, TypeError, urllib.error.URLError):
         old = store.snapshot().get("source", {})
         source = {**old, "error": "GitHub sync unavailable; last known snapshot retained", "failed_at": store.clock()}
