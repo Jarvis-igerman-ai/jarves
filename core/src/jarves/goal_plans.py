@@ -178,6 +178,14 @@ class PlanStore:
                 c.rollback()
                 raise
 
+    def _set_if(self, pid: int, expected: tuple, state: str, **extra) -> bool:
+        """Runner write that never overwrites a concurrent owner change (#813): False when the plan left `expected`."""
+        try:
+            self._cas(pid, expected, state, **extra)
+            return True
+        except ValueError:
+            return False
+
     def approve(self, pid: int, *, by: str = "user") -> dict:
         """The owner approved the whole plan, once. The caller has already shown the steps and got the approval."""
         p = self._plan(pid)
@@ -247,8 +255,9 @@ class PlanStore:
         s = self.db.row("SELECT * FROM goal_plan_steps WHERE plan_id=? AND idx=?", (int(pid), int(step_idx)))
         if not s or s["status"] in ("done", "running"):
             raise ValueError("no such step to skip")
-        self.db.x("UPDATE goal_plan_steps SET status='skipped', error='' WHERE id=?", (s["id"],))
-        self._set(pid, "paused" if p["state"] == "failed" else p["state"], finished=None)
+        self._cas(pid, (p["state"],), "paused" if p["state"] == "failed" else p["state"],      # #813: a racing cancel wins
+                  (("UPDATE goal_plan_steps SET status='skipped', error='' WHERE id=? AND status NOT IN ('done','running')",
+                    (s["id"],)),), finished=None)
         logs.info("goals", "PLAN_STEP_SKIPPED", "plan step skipped", id=pid, step=int(step_idx), by=by)
         return self.get(pid)
 
@@ -383,7 +392,8 @@ class PlanRunner:
         self._stop = True
 
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
-        self.store._set(pid, state, note=_short(note, 200), **extra)
+        if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
+            return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
 
     async def run_plan(self, pid: int) -> dict:
@@ -409,10 +419,12 @@ class PlanRunner:
         if p["state"] not in ("ready", "running"):
             return st.get(pid)
         if not p["started"]:
-            st._set(pid, "running", started=self.clock(),
-                    ai_base=self.budget.used("ai_requests") if self.budget is not None else 0)
+            ok = st._set_if(pid, ("ready", "running"), "running", started=self.clock(),
+                            ai_base=self.budget.used("ai_requests") if self.budget is not None else 0)
         else:
-            st._set(pid, "running")
+            ok = st._set_if(pid, ("ready", "running"), "running")
+        if not ok:
+            return st.get(pid)                       # cancelled/paused between the read and the write (#813)
         if not p["tainted"]:
             self.registry.clear_taint(ROUTE)       # a resumed plan is a new turn for the untrusted-content guard
         while True:
@@ -515,7 +527,9 @@ class PlanRunner:
         lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
         text = _short("; ".join(lines), RESULT_CHARS)
         done = sum(1 for s in steps if s["status"] == "done")
-        st._set(pid, "done", finished=self.clock(), note="", result=f"{done}/{len(steps)} steps done. {text}")
+        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="",
+                          result=f"{done}/{len(steps)} steps done. {text}"):
+            return st.get(pid)                       # cancelled/paused meanwhile (#813)
         logs.info("goals", "PLAN_DONE", "plan done", id=pid, count=done)
         return st.get(pid)
 

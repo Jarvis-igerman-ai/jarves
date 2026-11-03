@@ -593,3 +593,24 @@ async def test_plan_done_gives_one_quiet_line_only_at_pc_and_outside_quiet_hours
     state["pc"] = True
     assert await cheer.check() and len(said) == 1          # one line
     assert await cheer.check() == "" and len(said) == 1    # never twice
+
+
+def test_813_skip_racing_a_cancel_never_overwrites_the_cancel(env):
+    p = env.store.propose("s", steps(("fake_read", {"text": "a"}), ("fake_read", {"text": "b"})))
+    env.store.approve(p["id"])
+    old = _stale(env, p["id"])                                    # skip passes its state check on a 'ready' view
+    env.store.cancel(p["id"])
+    with pytest.raises(ValueError):
+        env.store.skip(p["id"], 0)
+    env.store._plan = old
+    assert env.store.get(p["id"])["state"] == "cancelled"
+
+
+def test_813_runner_writes_do_not_overwrite_a_cancel(env):
+    p = env.store.propose("r", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    env.store.cancel(p["id"])
+    env.runner._stop_plan(p["id"], "blocked", "cap reached")      # runner decided on an old view
+    assert env.store.get(p["id"])["state"] == "cancelled"
+    assert env.runner._finish(p["id"])["state"] == "cancelled"
+    assert env.store._set_if(p["id"], ("ready", "running"), "running") is False

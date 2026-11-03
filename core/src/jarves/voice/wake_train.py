@@ -634,6 +634,7 @@ def train_phrase(phrase: str, out: Path, *, say: list[str] | None = None, sample
     gate_peaks = [p for p in near_peaks if p["text"] in held_list]
     threshold, ev, curve = wake_prod.calibrate(
         head, embs, last, events, len(audio), own_peaks, held_idx, near_peaks=gate_peaks,
+        usable_count=len(own) - len(too_long),
         # the same caps as gate(): a bad baseline must not steer the threshold to a level the gate then refuses
         near_budget=(min(int(base["near_miss_false"]), wake_prod.MAX_NEAR_MISS_WAKES) if base else 0),
         fph_budget=(min(float(base["false_per_hour"]), wake_prod.MAX_FALSE_PER_HOUR)

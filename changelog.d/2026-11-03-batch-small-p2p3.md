@@ -1,0 +1,2 @@
+- Fixed: goal plans: skipping a step and the runner's own state writes are now compare-and-set, so a cancel made at the same moment is never overwritten (#813, part 1). The approval-path warning for retried steps is Tier R and stays open.
+- Fixed: wake-word calibration and gate count only usable own recordings towards the minimum, not clips skipped as too long (#898).
