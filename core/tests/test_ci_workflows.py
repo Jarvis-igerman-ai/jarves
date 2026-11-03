@@ -5,6 +5,7 @@ failure is only visible on github.com). This catches that locally, offline.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -87,13 +88,35 @@ def test_automerge_runs_risk_class_before_enqueue():
     """#906: automerge.yml must classify changed files and label Tier R PRs no-automerge before `gh pr merge`."""
     text = (WORKFLOWS / "automerge.yml").read_text(encoding="utf-8")
     assert "core/tools/risk_class.py" in text
-    assert 'grep -q "high-risk path"' in text
+    assert "^none: high-risk path" in text
     assert "--add-label no-automerge" in text
     doc = yaml.safe_load(text)
     steps = doc["jobs"]["enqueue"]["steps"]
     run = steps[-1]["run"]
     assert run.index("risk_class.py --files-from") < run.index("gh pr merge")
     assert any("checkout" in str(s.get("uses", "")) and "ref" not in s.get("with", {}) for s in steps)
+    co = steps[0]
+    assert co["with"]["persist-credentials"] is False
+    assert re.search(r"@[0-9a-f]{40}$", co["uses"].split()[0])
+
+
+def test_automerge_risk_guard_fails_closed():
+    """#906 review blocker 1: queue only on a well-formed verdict and a non-empty file list; no `|| true` pass-through."""
+    run = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))["jobs"]["enqueue"]["steps"][-1]["run"]
+    assert "risk_class.py --files-from \"files-$n.txt\" --mode all 2>&1 || true" not in run
+    assert "|| true)" not in run
+    assert '[ -s "files-$n.txt" ]' in run
+    assert "grep -qE '^(automerge [a-z]+|none): '" in run
+    assert "risk check failed" in run
+    assert run.index("risk check failed") < run.index("gh pr merge \"$n\" -R \"$REPO\" --auto")
+
+
+def test_automerge_tier_r_disables_existing_auto_merge():
+    """#906 review blocker 2: a Tier R PR that already has auto-merge on must have it turned off."""
+    run = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))["jobs"]["enqueue"]["steps"][-1]["run"]
+    assert "--disable-auto" in run
+    assert ".autoMergeRequest != null" in run[: run.index("--disable-auto")]
+    assert run.index("--add-label no-automerge") < run.index("--disable-auto") < run.index("--auto --merge")
 
 
 def test_risk_class_flags_release_and_bootstrap_paths(tmp_path):

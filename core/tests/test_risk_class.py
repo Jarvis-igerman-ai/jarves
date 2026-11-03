@@ -82,7 +82,7 @@ def test_automerge_only_turns_on_auto_merge_for_the_native_queue():
     no checkout of PR code, drafts and blocking labels are skipped, labels set with GITHUB_TOKEN are swept after CI."""
     doc = yaml.safe_load((WF / "automerge.yml").read_text(encoding="utf-8"))
     run = doc["jobs"]["enqueue"]["steps"][-1]["run"]
-    assert 'gh pr merge "$n" -R "$REPO" --auto --merge' in run and run.count("gh pr merge") == 1
+    assert 'gh pr merge "$n" -R "$REPO" --auto --merge' in run and run.count("gh pr merge") == 2 and run.count("--disable-auto") == 1  # 2nd = --disable-auto (#906)
     assert "isDraft" in run and all(lbl in run for lbl in ("needs-review", "no-automerge", "do-not-merge", "wip"))
     # #906: only the BASE branch is checked out (sparse, risk_class.py); never the PR head
     assert not any("checkout" in s.get("uses", "") and "ref" in s.get("with", {}) for s in doc["jobs"]["enqueue"]["steps"])
