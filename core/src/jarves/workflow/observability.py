@@ -280,6 +280,11 @@ def detect_incidents(store, now: float | None = None) -> list[dict]:
     wrapper = rows["wrapper"]
     if wrapper["last_beat_at"] and wrapper["state"] != "stopped" and wrapper["age_s"] > WRAPPER_DEAD_S:
         add("wrapper_dead", "wrapper_dead", wrapper["last_beat_at"], f"Wrapper silent for {_dur(wrapper['age_s'])}")
+    from . import watch as _watch
+    ran = _watch.run_age(store, now)
+    if ran["state"] == "dead":
+        add("worker_watch_dead", "worker_watch_dead", ran["last_run_at"],
+            f"worker-watch has not run for {_dur(ran['age_s'])}; the wrapper may be dead")
     from . import autopilot
     policy, _ = autopilot.load(store.path.parent)
     with store._tx() as db:
@@ -356,8 +361,9 @@ def health(store, now: float | None = None) -> dict:
         focus_view = focus.current(store, policy, shown.get("level", "ok"))
     except Exception:  # noqa: BLE001
         focus_view = None
+    from . import watch as _watch
     return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now),
-            "focus": focus_view}
+            "focus": focus_view, "worker_watch": _watch.run_age(store, now)}
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------

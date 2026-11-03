@@ -330,7 +330,9 @@ def main(argv=None) -> int:
         elif a.action == "worker-watch":
             from . import watch
             from .autopilot import load
-            result = watch.watch(store, load(home)[0])
+            from .autopilot_loop import bridge_notify
+            profile = a.profile_home.resolve()
+            result = watch.watch(store, load(home)[0], notify=lambda kind, text: bridge_notify(profile, kind, text))
             print(json.dumps(result, ensure_ascii=False))
             return 0  # always 0: the wrapper must not treat a monitor problem as a failure
         elif a.action == "handover":

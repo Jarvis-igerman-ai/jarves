@@ -1,0 +1,1 @@
+- Fixed: worker-watch now also counts open agent-doable issues without a task and open or signed-off PRs, raises an IDLE_WORK manager note plus a Core notify after 30 minutes with free slots and no movement, and health shows the age of the last worker-watch run with an alarm after 15 minutes (#919).
