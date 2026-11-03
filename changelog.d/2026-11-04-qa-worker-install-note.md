@@ -1,0 +1,1 @@
+- Fixed: document the manager-run install step and the beta repo for sandboxed QA workers (#856).
