@@ -135,7 +135,7 @@ def decide(pr, main_red=False):
         return out("fix", "CHANGES REQUESTED on current head: Sonnet fixer pushes to the PR branch")
     if here and here[-1]["verdict"] == "SIGN-OFF":
         e = here[-1]
-        if "opus" not in e["model"]:
+        if not re.match(r"^(anthropic/)?(claude[- ])?opus([- ]|$)", e["model"]):
             return out("owner", "sign-off is not from an Opus review", "model=" + (e["model"] or "unknown"))
         if not e["complete"]:
             return out("owner", "sign-off lacks Review-Head / Review-Task / Reviewer-Agent markers")
@@ -222,7 +222,10 @@ def ledger_facts(number, branch, task_id, reviewer, home=None, wf=_wf_json):
             if not res:
                 continue
             for o in wf(["owners", "--resource", res], home) or []:
-                if str(o.get("agent_id") or o.get("owner") or "").lower() == agent:
+                who = str(o.get("agent") or o.get("agent_id") or o.get("owner") or "").lower()
+                if not who:
+                    return bad(f"owner row for {res} has no recognised agent field")
+                if who == agent:
                     return bad(f"reviewer {agent} owns {res}")
         return {"ok": True, "why": "", "review_task": task_id, "review_agent": agent}
     except Exception as e:                                  # noqa: BLE001

@@ -74,6 +74,8 @@ def test_quoted_or_buried_verdict_is_ignored():
 
 def test_signoff_needs_markers_opus_and_independent_agent():
     assert act(comments=[so(model="sonnet-5-5")]) == "owner"
+    assert act(comments=[so(model="sonnet-not-opus")]) == "owner"
+    assert act(comments=[so(model="claude-opus-5-5")]) == "queue"
     assert act(comments=[c("SIGN-OFF " + SHA + "\nReviewer-Model: opus-5-5")]) == "owner"          # no head/task/agent markers
     assert act(comments=[c(f"SIGN-OFF {SHA}\nReview-Head: {OLD}\nReview-Task: T\nReviewer-Agent: r\nReviewer-Model: opus")]) == "owner"
     assert act(comments=[so(who="agent-impl")]) == "owner"                           # reviewer is the declared author agent
@@ -194,5 +196,9 @@ def test_ledger_facts_checks_task_agent_and_claims():
     assert ok["ok"] and ok["review_agent"] == "agent-rev"
     assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf(None, []))["ok"]
     assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "someone"}, []))["ok"]
-    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [{"agent_id": "agent-rev"}]))["ok"]
+    row = {"resource": "pr:5", "agent": "agent-rev", "reason": "", "claimed_at": 0, "expires_at": 1, "stale": False, "task_id": ""}
+    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [row]))["ok"]
+    assert not t.ledger_facts(887, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [dict(row, resource="pr:887")]))["ok"]
+    assert t.ledger_facts(887, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [dict(row, agent="author-x")]))["ok"]
+    assert not t.ledger_facts(5, "b", "T-9", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, [{"resource": "pr:5"}]))["ok"]  # no agent field: fail closed
     assert not t.ledger_facts(5, "b", "", "agent-rev", wf=_wf({"agent_id": "agent-rev"}, []))["ok"]
