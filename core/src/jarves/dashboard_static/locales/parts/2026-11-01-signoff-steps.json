@@ -1,0 +1,25 @@
+{
+ "dict": {
+  "A reason is needed to accept.": "צריך סיבה כדי לאשר.",
+  "Accept as untestable": "אישור כלא ניתן לבדיקה",
+  "accepted as untestable": "אושר כלא ניתן לבדיקה",
+  "Cannot be tested at all? Accept with a reason": "לא ניתן לבדיקה בכלל? אשרו עם סיבה",
+  "Cannot test now": "אי אפשר לבדוק עכשיו",
+  "does not work": "לא עובד",
+  "Installed beta: ": "בטא מותקנת: ",
+  "Note: ": "הערה: ",
+  "One check per screen. Only what you press is recorded.": "בדיקה אחת בכל מסך. נרשם רק מה שאתם לוחצים.",
+  "Release sign-off ": "אישור גרסה ",
+  "Sign off this release": "לחתום על הגרסה",
+  "Signing records the installed beta, its commit and the date. The server refuses while any row is open.": "החתימה רושמת את הבטא המותקנת, הקומיט שלה ואת התאריך. השרת מסרב כל עוד שורה פתוחה.",
+  "Something did not work: the stable release is blocked. Report it on the ": "משהו לא עבד: הגרסה היציבה חסומה. דווחו בעמוד ",
+  "Summary": "סיכום",
+  "Table view": "תצוגת טבלה",
+  "The step-by-step view is off (beta). Turn it on: jarvis features on signoff_steps": "תצוגת צעד אחר צעד כבויה (בטא). להפעלה: jarvis features on signoff_steps",
+  "What happened? (one sentence)": "מה קרה? (משפט אחד)",
+  "What should happen": "מה אמור לקרות",
+  "Why can this not be tested? (written in the sheet)": "למה אי אפשר לבדוק את זה? (נרשם בגיליון)",
+  "Why it cannot be tested": "למה אי אפשר לבדוק",
+  "Write one short sentence about what did not work.": "כתבו משפט קצר על מה שלא עבד."
+ }
+}
