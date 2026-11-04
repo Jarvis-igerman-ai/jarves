@@ -601,8 +601,9 @@ class ChatSession:
             if cmd == "/model":
                 self.say(f"{st.get('ai')}")
                 self.say(f"text model: {st.get('text_model')}; connection: {st.get('connection')}")
-                if st.get("billing"):
-                    self.say(f"billing: {json.dumps(st.get('billing'), ensure_ascii=False)}")
+                routes = st.get("routes")                  # which route is used per feature (names only, no amounts)
+                if isinstance(routes, dict) and routes:
+                    self.say("routes: " + ", ".join(f"{k}={v}" for k, v in routes.items()))
             else:
                 self.say(f"session: {self.mode()}; Core voice mode: {st.get('voice_mode')}; "
                          f"speaker: {'yes' if st.get('can_speak') else 'no'}")

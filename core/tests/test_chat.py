@@ -498,6 +498,7 @@ async def test_status_model_new_and_undo(core, spy):
     assert await finish(asyncio.create_task(session.run())) == 0
     text = out.getvalue()
     assert "Core: " in text and "fake model (test)" in text
+    assert "routes: " in text and "billing" not in text.lower()      # CodeQL: no sensitive-named dump
     assert agent.resets == 1 and "New conversation." in text
     assert "Restored: USER.md" in text and ws.read("USER.md") == "version one\n"
     assert "Unknown command" in text
