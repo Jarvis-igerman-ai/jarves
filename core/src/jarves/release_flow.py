@@ -69,6 +69,10 @@ def _severity(issue: dict) -> str | None:
     return f"P{min(sevs)}" if sevs else None
 
 
+# P1s that never block a stable (owner rule 3 Nov 2026): test flakes and developer tooling, not a user scenario.
+NON_BLOCKING_P1_LABELS = ("flaky-test", "dev-tool")
+
+
 def _classify(issues: list[dict]):
     blockers: list[tuple[int | None, str, str]] = []
     accepted: list[tuple[int | None, str, str]] = []
@@ -85,6 +89,8 @@ def _classify(issues: list[dict]):
         elif sev == "P1":
             if any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
                 accepted.append(row)
+            elif any(l.lower() in NON_BLOCKING_P1_LABELS for l in _label_names(i)):
+                carried.append(row)                    # flaky-test / dev-tool P1: printed as known issue, not blocking
             else:
                 blockers.append(row)
         else:

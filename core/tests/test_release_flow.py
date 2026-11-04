@@ -38,6 +38,16 @@ def test_issues_use_live_labels_only():
     assert rf.check_issues([p1, later]).name == "zero open P0/P1"
 
 
+def test_flaky_and_dev_tool_p1_do_not_block_but_p0_does():
+    flaky = {"number": 21, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}]}
+    tool = {"number": 22, "state": "open", "labels": [{"name": "P1"}, {"name": "dev-tool"}]}
+    p0 = {"number": 23, "state": "open", "labels": [{"name": "P0"}, {"name": "flaky-test"}]}
+    plain = {"number": 24, "state": "open", "labels": [{"name": "P1"}]}
+    assert rf.check_issues([flaky, tool]).ok
+    assert [n for n, _, _ in rf.carried_issues([flaky, tool])] == [21, 22]
+    assert not rf.check_issues([p0]).ok and not rf.check_issues([plain]).ok
+
+
 def test_p3_carried_and_highest_severity_wins():
     p3 = {"number": 3, "state": "open", "labels": [{"name": "P3"}]}
     both = {"number": 4, "state": "open", "labels": [{"name": "P2"}, {"name": "P1"}]}
