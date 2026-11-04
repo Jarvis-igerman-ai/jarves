@@ -265,3 +265,17 @@ def test_gate_blocks_a_head_that_does_not_fit_and_names_the_next_step_inputs():
     assert any("your recordings wake it only 40%" in w for w in wp.gate(ok))
     ok["owner"]["recall_at_threshold"] = 0.9
     assert wp.gate(ok) == []
+
+
+def test_898_min_usable_counts_usable_clips_not_skipped_ones(monkeypatch):
+    peaks = [0.9, 0.85, 0.5, 0.45]                                 # 4 clips, but only 2 are usable (2 skipped too long)
+    embs, last = np.zeros((40, wt.EMB), np.float32), np.arange(40)
+    safe = {"recall": 1.0, "false_per_hour": 0.0, "false_wakes": 0, "hours": 1, "positives": 1}
+    monkeypatch.setattr(wt, "evaluate", lambda *a, **k: safe)
+    th_all, _, curve = wp.calibrate({}, embs, last, [], 100, peaks, [3])
+    th_few, _, _ = wp.calibrate({}, embs, last, [], 100, peaks, [3], usable_count=2)
+    assert th_all == 0.45 and th_few == curve[0]["threshold"]      # owner-tuned vs the plain first safe threshold
+    rep = {"near_miss": {"false_wakes": []}, "eval": {"recall": 0.9},
+           "owner": {"recordings": 5, "usable_recordings": 2, "held_out_indices": [], "held_out_recall_at_threshold": None,
+                     "recall_at_threshold": 0.4}}
+    assert not any("your recordings wake it only" in w for w in wp.gate(rep))     # 2 usable < MIN: not judged on recall

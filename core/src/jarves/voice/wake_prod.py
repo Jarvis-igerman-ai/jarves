@@ -182,7 +182,7 @@ THRESHOLDS = [float(x) for x in np.round(np.arange(0.3, 0.96, 0.05), 2)] + [0.97
 
 def calibrate(head, embs, last, events, n_samples, own_peaks: list[float], held_idx: list[int],
               target_fph: float = 0.5, *, near_peaks: list[dict] | None = None, near_budget: int = 0,
-              fph_budget: float | None = None) -> tuple[float, dict, list[dict]]:
+              fph_budget: float | None = None, usable_count: int | None = None) -> tuple[float, dict, list[dict]]:
     """(threshold, synthetic evaluation at it, the curve). The curve has one row per candidate threshold:
     synthetic recall and false wakes per hour on the held-out stream, the owner's recordings (all / held out) and,
     with `near_peaks`, the held-out near-miss false wakes. Choice, in tiers (first tier with a row wins):
@@ -210,7 +210,7 @@ def calibrate(head, embs, last, events, n_samples, own_peaks: list[float], held_
     if near_peaks is not None:
         tiers.append([r for r in curve if near_ok(r)])
     ok = next((t for t in tiers if t), [])
-    if ok and len(own_peaks) >= MIN_USABLE_SAMPLES:
+    if ok and (len(own_peaks) if usable_count is None else usable_count) >= MIN_USABLE_SAMPLES:   # skipped clips do not count (#898)
         th = max(ok, key=lambda row: (row["owner_recall"], row["threshold"]))["threshold"]
     elif ok:
         th = ok[0]["threshold"]
@@ -436,7 +436,7 @@ def gate(report: dict) -> list[str]:
             why.append(f"{fph} false wakes/hour on the synthetic stream, the {base['name']} has "
                        f"{base['false_per_hour']}")
         mine, theirs = own.get("recall_at_threshold"), base.get("owner_recall")
-        if mine is not None and theirs is not None and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES \
+        if mine is not None and theirs is not None and (own.get("usable_recordings", own.get("recordings")) or 0) >= MIN_USABLE_SAMPLES \
                 and mine < min(1.0, theirs + RECALL_MARGIN) - 1e-9:
             why.append(f"your recordings wake it {mine:.0%}, the {base['name']} {theirs:.0%}: it must beat it by "
                        f"{RECALL_MARGIN:.0%}")
@@ -444,7 +444,7 @@ def gate(report: dict) -> list[str]:
     if held is not None and len(own.get("held_out_indices") or []) >= 1 and held < MIN_OWNER_RECALL:
         why.append(f"your held-out recordings wake it only {held:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
     allr = own.get("recall_at_threshold")
-    if (held is None or held >= MIN_OWNER_RECALL) and allr is not None and (own.get("recordings") or 0) >= MIN_USABLE_SAMPLES and allr < MIN_OWNER_RECALL:
+    if (held is None or held >= MIN_OWNER_RECALL) and allr is not None and (own.get("usable_recordings", own.get("recordings")) or 0) >= MIN_USABLE_SAMPLES and allr < MIN_OWNER_RECALL:
         why.append(f"your recordings wake it only {allr:.0%} of the time (need {MIN_OWNER_RECALL:.0%})")
     syn = (report.get("eval") or {}).get("recall")
     if syn is not None and syn < MIN_SYNTH_RECALL:
