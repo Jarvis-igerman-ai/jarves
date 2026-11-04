@@ -297,7 +297,7 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 .ov-report{white-space:pre-wrap;margin:0;padding:var(--s3) var(--s4);font:inherit;font-size:var(--fs-2);line-height:1.6;color:var(--text)}
 .questions-later{margin:8px 0 15px}.questions-later>summary{cursor:pointer;color:#cfb27a;font-size:12px;padding:8px 0}
 .unlock-bar{margin:0 0 12px}.unlock-form{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.unlock-form input{width:6ch;text-align:center}.unlock-help{color:var(--muted,inherit);font-size:.9em}
-/* #789 Overview "now": workers, supervisor stop/start strip, manager log. Tokens only, so dark and light both work. */
+/* issue 789 Overview "now": workers, supervisor stop/start strip, manager log. Tokens only, so dark and light both work. */
 .ov-now-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s3);margin-bottom:var(--s3)}.ov-now{grid-column:1/-1}
 .ov-workers,.ov-log,.ov-strip-list{list-style:none;margin:0;padding:0;display:grid;gap:var(--s2)}
 .ov-worker{display:grid;gap:2px;padding:var(--s2) var(--s3);border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface-2);min-width:0}
@@ -312,12 +312,12 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 .ov-log{gap:0}.ov-log-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--s2);padding:var(--s1) 0;border-bottom:1px solid var(--line);font-size:var(--fs-2);color:var(--text)}
 .ov-log-row:last-child{border-bottom:0}.ov-log-ms{color:var(--subtle);font-size:var(--fs-1);font-variant-numeric:tabular-nums}
 @media(max-width:760px){.ov-now-grid{grid-template-columns:minmax(0,1fr)}.ov-manager-log{max-height:280px}}
-/* #789 folding: closed blocks are one compact line (title, short summary, count); 44 px targets. */
+/* issue 789 folding: closed blocks are one compact line (title, short summary, count); 44 px targets. */
 .ov-fold{margin-bottom:var(--s2)}.ov-fold>summary{min-height:var(--tap);font-size:var(--fs-3)}.ov-fold>summary .today-count{margin-inline-start:auto}.ov-fold-sum{color:var(--muted);font-weight:400;font-size:var(--fs-2);margin-inline-start:auto;overflow-wrap:anywhere;min-width:0}.ov-fold .today-legend{display:flex;flex-wrap:wrap;align-items:center;margin-bottom:var(--s2)}.ov-fold .ov-more-body>.text-link{margin-top:var(--s2)}.ov-id{color:var(--muted);font-size:var(--fs-1)}
 /* #733: what runs NOW comes first: a one-line count banner, Working now full width, the plan's Now strip, hidden-state note. */
 .ov-banner{margin:0 0 var(--s2);padding:var(--s2) var(--s3);border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface-2);color:var(--text);font-size:var(--fs-2);font-weight:600;overflow-wrap:anywhere}.today-running{grid-column:1/-1}
 .now-strip{margin-bottom:var(--s3);padding:var(--s3) var(--s4);border:1px solid var(--line);border-top:4px solid var(--ok);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}.now-strip .today-head h2{font-size:var(--fs-4);font-weight:700;color:var(--text)}.hidden-note{margin-top:var(--s2);font-size:var(--fs-1);color:var(--muted)}
-/* #789 rule 5: five primary tabs plus "עוד"; phone bottom bar = four big targets, no horizontal scroll. */
+/* issue 789 rule 5: five primary tabs plus "עוד"; phone bottom bar = four big targets, no horizontal scroll. */
 .nav-more>summary{list-style:none;cursor:pointer}.nav-more>summary::-webkit-details-marker{display:none}
 .nav-more-menu{display:flex;flex-direction:column;gap:var(--s1);margin-top:var(--s1);padding-right:var(--s3)}
 .nav-phone{display:none}.nav-more:has(.nav-link.active:not(.nav-phone))>summary{color:var(--text);font-weight:600}
