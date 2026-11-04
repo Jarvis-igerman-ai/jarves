@@ -1,0 +1,1 @@
+- Fixed: quarantined the timing-flaky WhatsApp bridge kill-file test (issue 963) until it uses an injected clock.
