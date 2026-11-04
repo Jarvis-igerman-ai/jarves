@@ -1,0 +1,1 @@
+- Added: `jarvis workflow manager` chooses native Claude or JARVES as the workflow manager (default native, beta, off) with one live scheduler lock per profile; it starts and approves nothing (#715, slice 1).

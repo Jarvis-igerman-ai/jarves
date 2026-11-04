@@ -26,7 +26,7 @@ REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task"
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "today", "focus", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "manager", "layer-beat", "timeline", "health", "now", "today", "focus", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "worker-watch", "handover", "handover-state"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -272,6 +272,13 @@ def main(argv=None) -> int:
                 return 0
         elif a.action in {"own", "release", "owners", "msg", "check-touch"}:
             return agent_messages(store, a)
+        elif a.action == "manager":
+            from .manager_mode import ManagerConflict, command as manager_command
+            try:
+                result = manager_command(home, a.rest or ["status"])
+            except (ManagerConflict, ValueError) as exc:
+                print(json.dumps({"error": str(exc), "owner": getattr(exc, "owner", {})}, ensure_ascii=False), file=sys.stderr)
+                return 3
         elif a.action == "autopilot":
             from .autopilot import command
             result = command(store, home, (a.rest or ["status"])[0], a.rest[1:])
