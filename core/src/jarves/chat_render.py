@@ -195,6 +195,23 @@ def reason(code: str) -> str:
     return T(*he_en) if he_en else ""
 
 
+def tool_group(names: list[str], width: int = 80) -> str:
+    """Consecutive successful tools of one answer as ONE line (#331, like Claude Code collapsing its tool calls):
+    "  ✓ get_time" for one, "  ✓ a, b, c  (3)" for more. The newest names are kept, older ones become "…", and the
+    line fits `width` so a terminal never wraps it (the caller rewrites it in place). No words, so no Hebrew (#329)."""
+    room = max(20, width - 1)
+    if len(names) == 1:
+        return f"  ✓ {names[0]}"[:room]
+    tail = f"  ({len(names)})"
+    shown: list[str] = []
+    for n in reversed(names):                          # newest first, then restore the order
+        if shown and 4 + len(", ".join([n] + shown)) + 3 + len(tail) > room:
+            break
+        shown.insert(0, n)
+    more = "…, " if len(shown) < len(names) else ""
+    return ("  ✓ " + more + ", ".join(shown))[:room - len(tail)] + tail
+
+
 def status_line(mode: str, voice: bool, model: str) -> str:
     """One quiet line like Claude Code's footer: session mode, voice and the text model."""
     parts = [mode, T("קול: ", "voice ") + (T("פועל", "on") if voice else T("כבוי", "off"))]
