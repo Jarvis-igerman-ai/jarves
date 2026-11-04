@@ -5,7 +5,7 @@ from __future__ import annotations
 def add_cli(sub) -> None:
     import argparse
     p = sub.add_parser("workflow", help="live development console, owner question inbox and external supervisor")
-    p.add_argument("workflow_args", nargs=argparse.REMAINDER, help="serve | supervise | open | status | seed | sync | agent | report | next | ask | check")
+    p.add_argument("workflow_args", nargs=argparse.REMAINDER, help="serve | supervise | open | status | today | seed | sync | agent | report | next | ask | check")
 
 
 def cmd_workflow(args, cfg, home) -> int:

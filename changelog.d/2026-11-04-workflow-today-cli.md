@@ -1,0 +1,1 @@
+- Added: `jarvis workflow today` prints a short plain Hebrew 'what needs me now' summary (running, top 3 questions with minutes, blocked, next step) for the claude-j wrapper to keep on screen (#732).
