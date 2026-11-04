@@ -182,7 +182,10 @@ class WorkflowHTTPTests(unittest.TestCase):
     def test_console_side_scripts_report_session_ended_static_contract(self):
         # #741 follow-up: health/overview/timeline used raw fetch; a 401/403 must reach the one session-ended notice.
         static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
-        self.assertIn("window.workflowSessionEnded = () => sessionEnded();", (static / "app.js").read_text(encoding="utf-8"))
+        app = (static / "app.js").read_text(encoding="utf-8")
+        # #789: an early 401 while the one-time #token is being exchanged must not end the new session.
+        self.assertIn("window.workflowSessionEnded = () => { if (sessionReady) sessionEnded(); };", app)
+        self.assertLess(app.index('await api("/api/session", {token})'), app.index("    sessionReady = true;"))
         guard = "response.status === 401 || response.status === 403"
         for name, minimum in (("health.js", 1), ("timeline.js", 1), ("overview.js", 3)):
             text = (static / name).read_text(encoding="utf-8")

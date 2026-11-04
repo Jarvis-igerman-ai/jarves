@@ -14,7 +14,7 @@
 
   const EN = String(root.lang || "he").toLowerCase().startsWith("en");
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-  const VIEWS = new Set(["overview", "roadmap", "questions", "work", "trace", "health", "timeline"]);
+  const VIEWS = new Set(["overview", "roadmap", "questions", "work", "trace", "health", "timeline", "blocked"]);
   // Page language: <html lang>, Hebrew by default. Each number keeps its own label; nothing is added together.
   const T = EN ? {
     allWorking: n => `Everything is working: ${n === 1 ? "1 worker is active" : `${n} workers are active`}`,
@@ -362,7 +362,7 @@
     const {data, complete = () => false, age = () => ""} = event.detail || {};
     if (!data || !Array.isArray(data.tasks) || !Array.isArray(data.agents) || !Array.isArray(data.questions)) return;
     // The first render means the private session is ready: load the "now" panels at once instead of waiting 15 s.
-    if (!last) loadNow();
+    if (!last) { loadNow(); loadVerdict().then(() => { if (last) renderStatus(last.data, last.age, last.complete); }); }
     last = {data, complete, age};
     renderStatus(data, age, complete);
     renderDone(data, complete);
