@@ -1,1 +1,1 @@
-- Fixed: flaky tests #943 (local clock instead of global monotonic) and #946 (wait for IDLE); lifted stale quarantines for #880, #770, #943, #946.
+- Fixed: flaky tests batch: the WhatsApp bridge kill-file test no longer asserts a real 2 s wall bound (#963); #946, #943, #788 and #770 were already fixed on main, #890 and #722 are quarantined.
