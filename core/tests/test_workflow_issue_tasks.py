@@ -1,7 +1,9 @@
 """Issue sync queues executable gh-N tasks for open agent-doable defects (metadata only)."""
 import json
 import tempfile
+import os
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from jarves.workflow.store import Store
@@ -28,6 +30,10 @@ class IssueTaskTests(unittest.TestCase):
         return {t["id"]: t for t in self.store.snapshot()["tasks"]}
 
     def run_sync(self, issues):
+        with mock.patch.dict(os.environ, {"JARVES_WORKFLOW_ISSUE_TASKS": "1"}):
+            self.sync_now(issues)
+
+    def sync_now(self, issues):
         apply_snapshot(self.store, {"sha": "m", "prs": [], "issues": issues}, PLAN, issue_tasks=True)
 
     def test_plain_apply_snapshot_creates_nothing(self):
@@ -42,7 +48,7 @@ class IssueTaskTests(unittest.TestCase):
         self.assertEqual(sorted(k for k in t if k.startswith("gh-")), ["gh-3", "gh-6"])
         self.assertEqual((t["gh-6"]["lane"], t["gh-6"]["priority"], t["gh-6"]["version"]), ("bugs", 1, "V4.5.1"))
         self.assertEqual((t["gh-3"]["lane"], t["gh-3"]["priority"]), ("features", 2))
-        self.assertTrue(t["gh-6"]["execution_allowed"])
+        self.assertFalse(t["gh-6"]["execution_allowed"])
         self.assertEqual(t["gh-6"]["required_validation"], "app")
         self.assertEqual(len(t["gh-6"]["acceptance"]), 1)
 
@@ -53,26 +59,36 @@ class IssueTaskTests(unittest.TestCase):
         self.assertFalse(t["V5-ONE"]["execution_allowed"])
         self.assertFalse(t["ISSUE-2"]["execution_allowed"])
 
-    def test_unauthorised_version_creates_nothing_until_policy_allows(self):
-        create_issue_tasks(self.store, {"issues": [issue(20, ["bug", "v6"])]}, environ={})
-        self.assertNotIn("gh-20", self.tasks())
-        (Path(self.temp.name) / "autopilot.json").write_text("{bad", encoding="utf-8")
-        create_issue_tasks(self.store, {"issues": [issue(20, ["bug", "v6"])]}, environ={})
-        self.assertNotIn("gh-20", self.tasks())  # unreadable policy fails closed
+    def test_default_off_without_opt_in(self):
+        self.sync_now([issue(9, ["bug"])])
+        self.assertNotIn("gh-9", self.tasks())
 
-    def test_policy_authorised_version_is_created(self):
+    def _write_policy(self, **over):
         from jarves.workflow import autopilot
-        policy = autopilot.DEFAULTS.copy()
-        policy["authorized_versions"] = ["V4.5.1", "V6"]
+        policy = {**autopilot.DEFAULTS, **over}
         (Path(self.temp.name) / "autopilot.json").write_text(json.dumps(policy), encoding="utf-8")
-        create_issue_tasks(self.store, {"issues": [issue(20, ["bug", "v6"])]}, environ={})
-        self.assertEqual(self.tasks()["gh-20"]["version"], "V6")
+
+    def test_created_tasks_never_authorised_autopilot_off_or_killed(self):
+        on = {"JARVES_WORKFLOW_ISSUE_TASKS": "1"}
+        for n, over in ((40, {"enabled": False}), (41, {"enabled": True, "kill": True})):
+            self._write_policy(**over)
+            create_issue_tasks(self.store, {"issues": [issue(n, ["bug"])]}, environ=on)
+            self.assertFalse(self.tasks()[f"gh-{n}"]["execution_allowed"])
+
+    def test_v451_removed_from_policy_stays_unauthorised(self):
+        self._write_policy(authorized_versions=["V5"], versions=["V4.5.1", "V5"])
+        create_issue_tasks(self.store, {"issues": [issue(50, ["bug"]), issue(51, ["bug", "v6"])]},
+                           environ={"JARVES_WORKFLOW_ISSUE_TASKS": "1"})
+        t = self.tasks()
+        self.assertFalse(t["gh-50"]["execution_allowed"])
+        self.assertFalse(t["gh-51"]["execution_allowed"])
 
     def test_cap_and_existing_tasks_untouched(self):
         issues = [issue(n, ["bug"]) for n in range(10, 25)]
         self.run_sync(issues)
         self.assertEqual(len([k for k in self.tasks() if k.startswith("gh-")]), 10)
         self.store.register_agent({"id": "a", "name": "a"})
+        self.store.update_metadata("gh-10", {"execution_allowed": True}, authorize_execution=True)
         self.store.claim("a", "gh-10")
         self.run_sync(issues)
         t = self.tasks()
@@ -84,10 +100,10 @@ class IssueTaskTests(unittest.TestCase):
         self.run_sync([issue(7, ["bug"]), issue(8, ["bug"], "closed")])
         self.assertFalse([k for k in self.tasks() if k.startswith("gh-")])
 
-    def test_opt_out_switch(self):
+    def test_opt_in_switch(self):
         snap = {"issues": [issue(30, ["bug"])]}
-        self.assertEqual(create_issue_tasks(self.store, snap, environ={"JARVES_WORKFLOW_ISSUE_TASKS": "0"}), [])
-        self.assertEqual(create_issue_tasks(self.store, snap, environ={}), ["gh-30"])
+        self.assertEqual(create_issue_tasks(self.store, snap, environ={}), [])
+        self.assertEqual(create_issue_tasks(self.store, snap, environ={"JARVES_WORKFLOW_ISSUE_TASKS": "1"}), ["gh-30"])
 
     def test_device_labels_require_device_validation(self):
         self.run_sync([issue(10, ["bug", "mic"]), issue(11, ["bug", "Phone"]), issue(12, ["bug", "wake_word"]),

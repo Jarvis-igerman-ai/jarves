@@ -15,7 +15,7 @@ MAX_PAGES = 10
 MAX_OPEN_ROWS = 150
 BUG_LABELS = ("bug", "P0", "P1", "P2", "P3", "showstopper")
 ISSUE_TASK_CAP = 10
-ISSUE_TASK_ENV = "JARVES_WORKFLOW_ISSUE_TASKS"  # set to 0/off/false to disable issue->task creation
+ISSUE_TASK_ENV = "JARVES_WORKFLOW_ISSUE_TASKS"  # opt-in: set to 1 to queue gh-N tasks from issues (always unauthorised)
 DEFECT_LABELS = {"bug", "p0", "p1", "p2", "p3", "showstopper"}
 VERSION_LABELS = ("4.5.1", "5", "5.0", "6", "6.0", "7", "7.0")
 
@@ -222,21 +222,9 @@ def owner_wait_label(labels) -> bool:
 
 
 def issue_tasks_enabled(environ=None) -> bool:
-    value = str((environ if environ is not None else os.environ).get(ISSUE_TASK_ENV, "1")).strip().lower()
-    return value not in {"0", "off", "false", "no", "disabled"}
-
-
-def authorized_versions(store) -> set[str]:
-    """V4.5.1 plus the owner's autopilot authorized_versions; a bad or missing policy means V4.5.1 only."""
-    allowed = {"V4.5.1"}
-    try:
-        from . import autopilot
-        policy, error = autopilot.load(Path(store.path).parent)
-        if not error:
-            allowed |= {str(v) for v in policy.get("authorized_versions", [])}
-    except Exception:  # noqa: BLE001  fail closed
-        pass
-    return allowed
+    """Opt-in (beta): off unless JARVES_WORKFLOW_ISSUE_TASKS is 1/on/true/yes."""
+    value = str((environ if environ is not None else os.environ).get(ISSUE_TASK_ENV, "0")).strip().lower()
+    return value in {"1", "on", "true", "yes", "enabled"}
 
 
 def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ=None) -> list[str]:
@@ -244,7 +232,7 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
 
     Metadata only: it never approves, runs a worker or changes an issue. Existing tasks are never
     touched, so a closed issue or an archived/finished gh-N task is never recreated. Imported scope
-    (execution_allowed=false) does not count as coverage, but stays unauthorised itself.
+    (execution_allowed=false) is covered too; created tasks are unauthorised, only the autopilot grant authorises.
     """
     if not issue_tasks_enabled(environ):
         return []
@@ -255,7 +243,6 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
         covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
         covered.update(int(i["number"]) for i in t.get("source_issues", [])
                        if isinstance(i, dict) and str(i.get("number", "")).isdigit())
-    authorized = authorized_versions(store)
     created = []
     for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
         if len(created) >= cap:
@@ -271,12 +258,10 @@ def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ
             continue
         priority = next((i for i in range(4) if f"p{i}" in labels), 2)
         version = next((v for label, v in LABEL_VERSIONS if label in labels), "V4.5.1")
-        if version not in authorized:
-            continue  # autopilot.step decides for versions the owner has not authorised
         store.create_task({
             "id": f"gh-{number}", "title": f"#{number} {str(row.get('title', ''))[:200]}".strip(),
             "lane": "bugs" if defect else "features", "priority": priority, "version": version,
-            "required_validation": issue_validation(labels), "execution_allowed": True,
+            "required_validation": issue_validation(labels), "execution_allowed": False,  # autopilot.step authorises under the owner grant
             "acceptance": [{"id": "C1", "label": "Fix merged with a regression test and evidence recorded"}],
             "issue_numbers": [number], "source_url": row.get("url", ""),
             "scope_note": "Created by GitHub issue sync; issue state is not verification."})
