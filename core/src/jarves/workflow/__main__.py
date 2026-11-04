@@ -140,6 +140,30 @@ def _action_of(av) -> str:
         return ""
 
 
+# #784 allow list (fail closed): a workflow agent (JARVES_WORKFLOW_AGENT set) may run ONLY these console actions, decided on
+# what argparse really parses. Every other action (create, dispatch, seed, sync, recover, questions-rewrite, authorize,
+# bootstrap, handover, close-superseded, agent, serve ...) is owner/manager only.
+WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
+                                    "msg", "check-touch", "layer-beat", "timeline", "health", "now", "trace", "autopilot"})
+
+
+def worker_refusal(av) -> str:
+    """A refusal message when a workflow agent line is not a plain worker command, else ""."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            ns = parser().parse_known_args(list(av))[0]
+    except SystemExit:
+        return "refused: the line does not parse (agent environment)"
+    action = ns.action or ""
+    sub = (list(ns.rest or []) or ["status"])[0]
+    if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
+            or (action == "release" and ns.force) or (action == "trace" and ns.capture)):
+        return f"refused: '{action}' is an owner/manager command (agent environment)"
+    return ""
+
+
 def _home_count(av) -> int:
     """How many times the real parser sees --home (also --home=X and abbreviations such as --hom X)."""
     import argparse
@@ -170,11 +194,11 @@ def main(argv=None) -> int:
         # #784: a later --home wins in argparse and would run on a path the allow rule never saw
         print(json.dumps({"error": "refused: --home may appear only once in an agent environment"}), file=sys.stderr)
         return 2
-    if os.environ.get("JARVES_WORKFLOW_AGENT") and _action_of(_av) in AGENT_REFUSED:
-        # #784 defense in depth: a worker never starts autopilot, grants authority or rewrites hooks, even if allowed
-        print(json.dumps({"error": "refused: autopilot, authorize and bootstrap are owner/manager commands (agent environment)"}),
-              file=sys.stderr)
-        return 2
+    if os.environ.get("JARVES_WORKFLOW_AGENT"):
+        _msg = worker_refusal(_av)
+        if _msg:
+            print(json.dumps({"error": _msg}), file=sys.stderr)
+            return 2
     if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])

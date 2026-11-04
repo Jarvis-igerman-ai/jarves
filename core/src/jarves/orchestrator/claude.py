@@ -253,9 +253,8 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(python:*)", "Bash(py:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(node:*)", "Bash(npm:*)", "Bash(npx:*)",
-    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(jarvis workflow:*)", "Bash(sed:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)",
-    "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)",
+    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
+    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
     "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
     "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
@@ -263,7 +262,7 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
-                                "Bash(taskkill*)", "Bash(powershell*)")
+                                "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)")
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
