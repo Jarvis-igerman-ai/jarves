@@ -15,7 +15,9 @@ class WorkerOwnerOnlyActionsTests(unittest.TestCase):
             home = Path(tmp)
             for args in (("autopilot", "set", "worker_allowed_tools", '["Bash(*)"]'), ("autopilot", "start"),
                          ("autopilot", "grant"), ("authorize", "--task", "t1"), ("bootstrap", "--apply"),
-                         ("unlock",), ("dispatch",)):
+                         ("unlock",), ("dispatch",), ("create", "--title", "x"), ("recover", "--task", "t1"),
+                         ("trace", "--capture", "details"), ("release", "--resource", "pr:1", "--force"),
+                         ("questions-rewrite", "--apply"), ("close-superseded", "1"), ("sync",), ("seed",), ("handover",)):
                 code, _out, err = run_cli(home, *args, tty=True, env=AGENT_ENV)
                 self.assertEqual(code, 3, args)
                 self.assertIn("owner-only", err)
