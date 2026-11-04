@@ -1,6 +1,6 @@
 """One simple release flow (docs/plans/SIMPLE_RELEASES_2026-10-26.md): `jarvis release status` and `jarvis release sheet`.
 
-`status` runs every automatable gate (main green, open P0-P2 issues from live labels, the owner
+`status` runs every automatable gate (main green, open P0/P1 issues from live labels, the owner
 sheet: its one signature) and says exactly what remains for the owner. `sheet` writes the reduced owner sheet: a tiny smoke
 set stays `pending`, every other row is recorded `accepted-blocked` with an "accepted by automation" note naming its
 evidence, so the existing gate (release_gate.py) and sign-off file format work unchanged. Pure functions; the network is
@@ -19,7 +19,7 @@ from pathlib import Path
 from . import release_signoff as so
 
 REPO = "Jarvis-igerman-ai/jarves"
-ACCEPTED_LABEL = "known-issue-4.5"   # OWNER-ONLY label: the owner accepts an open P0-P2 as a known issue for the 4.5 stable
+ACCEPTED_LABEL = "known-issue-4.5"   # OWNER-ONLY label: the owner accepts an open P1 as a known issue for the 4.5 stable
 AUTOMATION_NOTE = "accepted by automation: {ev}"
 
 SMOKE = (
@@ -63,27 +63,48 @@ def _label_names(issue: dict) -> list[str]:
     return [(str(l.get("name", "")) if isinstance(l, dict) else str(l)).strip() for l in issue.get("labels", [])]
 
 
-def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str]], list[tuple[int | None, str, str]]]:
-    """THE one open-P0-P2 rule, shared by `jarvis release status` and core/tools/release_gate.py (#535).
+def _severity(issue: dict) -> str | None:
+    """Highest P-label (P0 > P1 > P2 > P3) of an issue, or None when it has none."""
+    sevs = [int(l[1]) for l in _label_names(issue) if re.fullmatch(r"(?i)P[0-3]", l)]
+    return f"P{min(sevs)}" if sevs else None
 
-    Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs) labelled P0-P2.
-    Label `known-issue-4.5` (owner-only, exact) makes an issue accepted: printed, not a blocker, even when labelled bug.
-    Owner decision: every open P0-P2 blocks, whatever its bug/version/enhancement labels; only the accepted label exempts."""
+
+def _classify(issues: list[dict]):
     blockers: list[tuple[int | None, str, str]] = []
     accepted: list[tuple[int | None, str, str]] = []
+    carried: list[tuple[int | None, str, str]] = []
     for i in issues:
         if "pull_request" in i or str(i.get("state", "open")) != "open":
             continue
-        labels = _label_names(i)
-        sev = next((l.upper() for l in labels if re.fullmatch(r"(?i)P[0-2]", l)), None)
+        sev = _severity(i)
         if not sev:
             continue
         row = (i.get("number"), sev, str(i.get("title", ""))[:70])
-        if any(l.lower() == ACCEPTED_LABEL for l in labels):
-            accepted.append(row)
+        if sev == "P0":
+            blockers.append(row)                       # P0 always blocks, even with the accepted label
+        elif sev == "P1":
+            if any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
+                accepted.append(row)
+            else:
+                blockers.append(row)
         else:
-            blockers.append(row)
-    return blockers, accepted
+            carried.append(row)                        # P2/P3 no longer block (owner rule 3 Nov 2026)
+    return blockers, accepted, carried
+
+
+def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str]], list[tuple[int | None, str, str]]]:
+    """THE one release-gate issue rule, shared by `jarvis release status` and core/tools/release_gate.py (#535).
+
+    Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs).
+    Blockers: every open P0, and every open P1 without the owner-only label `known-issue-4.5` (exact).
+    Accepted: open P1 carrying that label (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
+    b, a, _ = _classify(issues)
+    return b, a
+
+
+def carried_issues(issues: list[dict]) -> list[tuple[int | None, str, str]]:
+    """Open P2/P3 issues: printed as 'known issues carried into this release', never blocking."""
+    return _classify(issues)[2]
 
 
 def check_issues(issues: list[dict]) -> Check:
@@ -91,8 +112,11 @@ def check_issues(issues: list[dict]) -> Check:
     note = ""
     if accepted:
         note = f"; accepted known issues ({ACCEPTED_LABEL}): " + ", ".join(f"#{n} {s}" for n, s, _ in accepted)
+    carried = carried_issues(issues)
+    if carried:
+        note += f"; known issues carried into this release: {len(carried)} open P2/P3"
     detail = ("none open" if not bad else "open: " + ", ".join(f"#{n} {s}" for n, s, _ in bad)) + note
-    return Check("zero open P0-P2", not bad, detail)
+    return Check("zero open P0/P1", not bad, detail)
 
 
 def check_sheet(root: Path, version: str) -> Check:
@@ -113,7 +137,7 @@ def collect(root: Path, version: str, fetch=None, head: str | None = None, now: 
     fetch = fetch or github_fetch
     out: list[Check] = []
     for name, fn in (("main green", lambda: check_main(fetch("checks"), head)),
-                     ("zero open P0-P2", lambda: check_issues(fetch("issues")))):
+                     ("zero open P0/P1", lambda: check_issues(fetch("issues")))):
         try:
             out.append(fn())
         except Exception as e:                                    # network or API trouble is a TODO, never a pass

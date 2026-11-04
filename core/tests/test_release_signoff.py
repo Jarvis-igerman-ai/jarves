@@ -177,26 +177,40 @@ def _issue(n, *labels, **kw):
     return {"number": n, "title": f"t{n}", "state": "open", "labels": [{"name": x} for x in labels], **kw}
 
 
-def test_gate_blocks_on_every_open_p0_p2_github_issue_whatever_its_other_labels(tmp_path):
-    # not blockers: P3, pull requests. Everything P0-P2 blocks, even when labelled v7/enhancement/4.5.1 (owner decision)
-    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(4, "P1", "bug", pull_request={})]) == []
+def test_gate_blocks_on_open_p0_and_p1_only_whatever_its_other_labels(tmp_path):
+    # not blockers: P2, P3, pull requests. P0 and P1 block, even when labelled v7/enhancement/4.5.1 (owner rule 3 Nov)
+    assert _gate(tmp_path, issues=[_issue(1, "P3", "bug"), _issue(4, "P1", "bug", pull_request={}), _issue(6, "P2", "bug")]) == []
     planned = _gate(tmp_path, issues=[_issue(2, "P1", "v7"), _issue(3, "P2", "enhancement"), _issue(7, "P1", "4.5.1")])
-    assert [p for p in planned if "open P" in p] == ["open P1 issue #2: t2", "open P2 issue #3: t3", "open P1 issue #7: t7"]
+    assert [p for p in planned if "open P" in p] == ["open P1 issue #2: t2", "open P1 issue #7: t7"]
     both = _gate(tmp_path, issues=[_issue(8, "P1", "bug", "v7"), _issue(9, "P2", "bug", "4.5.1"), _issue(10, "P0", "bug", "enhancement")])
-    assert [p for p in both if "open P" in p] == ["open P1 issue #8: t8", "open P2 issue #9: t9", "open P0 issue #10: t10"]
+    assert [p for p in both if "open P" in p] == ["open P1 issue #8: t8", "open P0 issue #10: t10"]
     probs = _gate(tmp_path, issues=[_issue(5, "P0", "bug"), _issue(6, "P2", "ci")])
-    assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5", "open P2 issue #6: t6"]
+    assert [p for p in probs if "open P" in p] == ["open P0 issue #5: t5"]
+
+
+def test_open_p2_p3_are_carried_in_the_report_not_blocking(capsys):
+    iss = [_issue(1, "P2", "bug"), _issue(2, "P3"), _issue(3, "P1", pull_request={})]
+    assert gate.carried_list(iss) == ["#1 (P2): t1", "#2 (P3): t2"]
+    gate._print_carried(gate.carried_list(iss))
+    assert "known issues carried into this release (2" in capsys.readouterr().out
+
+
+def test_main_red_still_blocks_with_only_p2(tmp_path):
+    red = [{"head_sha": SHA, "conclusion": "failure", "status": "completed"}]
+    probs = _gate(tmp_path, issues=[_issue(1, "P2", "bug")], checks_runs=red)
+    assert probs and not any("open P" in p for p in probs)
 
 
 def test_known_issue_label_skips_only_with_exact_label_and_is_listed(tmp_path, capsys):
-    acc = [_issue(1, "P2", "bug", "known-issue-4.5"), _issue(2, "P1", "bug", " Known-Issue-4.5 ")]
+    acc = [_issue(1, "P1", "bug", "known-issue-4.5"), _issue(2, "P1", "bug", " Known-Issue-4.5 ")]
     assert [p for p in _gate(tmp_path, issues=acc) if "open P" in p] == []
-    assert gate.accepted_issues(acc) == ["#1 (P2): t1", "#2 (P1): t2"]
+    assert gate.accepted_issues(acc) == ["#1 (P1): t1", "#2 (P1): t2"]
+    assert [p for p in _gate(tmp_path, issues=[_issue(9, "P0", "known-issue-4.5")]) if "open P" in p] == ["open P0 issue #9: t9"]
     # a bug without it counts; planned-work labels alone never skip a bug; near-miss labels do not skip
-    rest = [_issue(3, "P1", "bug"), _issue(4, "P1", "bug", "v5"), _issue(5, "P2", "bug", "4.5.1"),
-            _issue(6, "P2", "bug", "known-issue-4.5.1"), _issue(7, "P2", "bug", "known-issue")]
+    rest = [_issue(3, "P1", "bug"), _issue(4, "P1", "bug", "v5"), _issue(5, "P1", "bug", "4.5.1"),
+            _issue(6, "P1", "bug", "known-issue-4.5.1"), _issue(7, "P1", "bug", "known-issue")]
     assert [p for p in _gate(tmp_path, issues=acc + rest) if "open P" in p] == [
-        f"open {s} issue #{n}: t{n}" for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P2"), (7, "P2"))]
+        f"open {s} issue #{n}: t{n}" for n, s in ((3, "P1"), (4, "P1"), (5, "P1"), (6, "P1"), (7, "P1"))]
     assert gate.accepted_issues(rest) == []
     gate._print_accepted(gate.accepted_issues(acc))
     assert "accepted known issues (2" in capsys.readouterr().out
@@ -370,13 +384,13 @@ def test_cli_bug_tables_option_warns_and_legacy_never_gates(tmp_path, monkeypatc
     """Slice 3: legacy rows are printed as 'legacy, not gating'; live issues are the only issue source."""
     (tmp_path / "docs" / "reviews").mkdir(parents=True)
     (tmp_path / "docs" / "reviews" / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
-    monkeypatch.setattr(gate, "gh_issues", lambda repo: [_issue(1, "P2", "bug", "known-issue-4.5")])
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [_issue(1, "P1", "bug", "known-issue-4.5"), _issue(2, "P2", "bug")])
     monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
     rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--bug-tables", "docs/reviews/*BUG_TABLE*.md"])
     out = capsys.readouterr().out
     assert rc == 1                                            # no sheet and no green run still gate
     assert "--bug-tables no longer gates" in out and "legacy, not gating" in out and "bug B2 (P1)" in out
-    assert "accepted known issues (1" in out
+    assert "accepted known issues (1" in out and "known issues carried into this release (1" in out
     assert "open P1 issue" not in out
 
 

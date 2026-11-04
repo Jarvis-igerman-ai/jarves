@@ -1,0 +1,1 @@
+- Changed: the stable release gate now blocks only on open P0 and on open P1 without the owner-only known-issue label; open P2/P3 are printed as known issues carried into the release (main-red, signed sheet and tag checks unchanged, Tier R).

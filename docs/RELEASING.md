@@ -25,7 +25,7 @@ Every green `main` is already a beta (layer 2). A stable release promotes a beta
 
 1. Pick the version: `version` in `core/pyproject.toml` (for example `4.0.1`); the tag will be `v4.0.1`.
 2. (Retired 26 Oct 2026) The per-version release checklist and the bug tables no longer gate a release: the gate prints
-   them as "legacy, not gating" and decides on the live GitHub P0-P2 issues. Writing `RELEASE_CHECKLIST_<version>.md` is optional.
+   them as "legacy, not gating" and decides on the live GitHub P0/P1 issues. Writing `RELEASE_CHECKLIST_<version>.md` is optional.
    Fold the one-file-per-change entries into their base files in the release PR: `python core/tools/catalog_add.py --fold`
    (dashboard texts, `locales/parts`) and `python core/tools/changelog_build.py --write` (`changelog.d` into CHANGELOG.md).
 3. Make the sign-off sheet (`manual_test_sheet.py`, below), install the newest beta, test it and sign it off
@@ -51,7 +51,7 @@ All of these must hold, else the tag is refused:
   `docs/reviews/*BUG_TABLE*.md` do NOT gate: the gate prints their open rows as "legacy, not gating" so nothing is hidden. The
   `--bug-tables` option is still accepted for compatibility, warns once and never gates. The live issue check below is the single
   source of truth, and `jarvis release status` uses the same helper (`release_flow.classify_issues`);
-- no open GitHub issue labelled P0-P2 (every one blocks, whatever its `bug`, `enhancement`, `v5` to `v9` or `4.5.1` labels). The ONE exception is the owner-only label `known-issue-4.5`: an open P0-P2 carrying it is an accepted known issue for the 4.5 stable, not a blocker even when labelled `bug`; the gate prints each as "accepted known issues" (number + title) and the owner applies the label only by his own decision. If GitHub cannot be read the gate refuses;
+- no open GitHub issue labelled P0, and no open P1 (every one blocks, whatever its `bug`, `enhancement`, `v5` to `v9` or `4.5.1` labels). The ONE exception is the owner-only label `known-issue-4.5`: an open P1 carrying it is an accepted known issue for the stable, not a blocker; the gate prints each as "accepted known issues" (number + title) and the owner applies the label only by his own decision. The label never exempts a P0. Open P2 and P3 issues do not block (owner rule, 3 Nov 2026); the gate and `jarvis release status` print them as "known issues carried into this release". If GitHub cannot be read the gate refuses;
 - the owner's **manual test sign-off** `docs/reviews/MANUAL_TEST_<X.Y.Z>.md` is complete and signed, and the tested beta
   commit equals the tag commit, or is an ancestor with **only documentation changes** since.
 

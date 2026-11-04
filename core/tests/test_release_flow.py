@@ -30,8 +30,22 @@ def test_issues_use_live_labels_only():
     later = {"number": 8, "state": "open", "labels": [{"name": "P2"}, {"name": "v6"}]}
     pr = {"number": 9, "pull_request": {}, "labels": [{"name": "P0"}]}
     assert not rf.check_issues([p1]).ok and "#7 P1" in rf.check_issues([p1]).detail
-    assert not rf.check_issues([later, pr]).ok and "#8 P2" in rf.check_issues([later, pr]).detail   # version label never exempts
+    p0 = {"number": 10, "state": "open", "labels": [{"name": "P0"}]}
+    assert not rf.check_issues([p0]).ok and "#10 P0" in rf.check_issues([p0]).detail       # open P0 blocks
+    c = rf.check_issues([later, pr])                                                       # P2 does not block, is carried
+    assert c.ok and "carried into this release" in c.detail
     assert rf.check_issues([pr]).ok
+    assert rf.check_issues([p1, later]).name == "zero open P0/P1"
+
+
+def test_p3_carried_and_highest_severity_wins():
+    p3 = {"number": 3, "state": "open", "labels": [{"name": "P3"}]}
+    both = {"number": 4, "state": "open", "labels": [{"name": "P2"}, {"name": "P1"}]}
+    assert rf.check_issues([p3]).ok and rf.carried_issues([p3]) == [(3, "P3", "")]
+    assert rf._severity(both) == "P1" and not rf.check_issues([both]).ok
+    # the owner label exempts only P1, never P0
+    p0acc = {"number": 5, "state": "open", "labels": [{"name": "P0"}, {"name": "known-issue-4.5"}]}
+    assert not rf.check_issues([p0acc]).ok
 
 
 def test_reduced_sheet_keeps_smoke_pending_and_accepts_the_rest(tmp_path):
@@ -65,7 +79,7 @@ def test_write_sheet_refuses_to_clobber_results(tmp_path):
 def test_status_lists_what_remains_then_ready(tmp_path):
     checks = rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)
     todo = rf.remaining(checks)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0-P2"]
+    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
     assert any("owner sheet" in t and t.startswith("[you]") for t in todo)
     assert "## What remains" in rf.report("4.1.0", checks, today="2026-10-26")
     rf.write_sheet(tmp_path, "4.1.0")
@@ -117,7 +131,7 @@ def _load_gate():
 def test_status_and_gate_share_one_issue_rule():
     """#535 / #518 item 5: known-issue-4.5 is skipped and printed, a bug without it counts, planned-work labels never skip a bug."""
     gate = _load_gate()
-    accepted = [_iss(1, "P1", "bug", "known-issue-4.5"), _iss(2, "P2", "known-issue-4.5")]
+    accepted = [_iss(1, "P1", "bug", "known-issue-4.5"), _iss(2, "P1", "known-issue-4.5")]
     c = rf.check_issues(accepted)
     assert c.ok and "#1 P1" in c.detail and "known-issue-4.5" in c.detail
     mixed = accepted + [_iss(3, "P1", "bug"), _iss(4, "P1", "bug", "v7"), _iss(5, "P2", "bug", "4.5.1"),
@@ -126,14 +140,15 @@ def test_status_and_gate_share_one_issue_rule():
     st = rf.check_issues(mixed)
     assert not st.ok
     blockers = st.detail.split("; accepted")[0]
-    # owner decision: version/enhancement labels never exempt a P0-P2, with or without a bug label
-    for n, s in ((3, "P1"), (4, "P1"), (5, "P2"), (6, "P0"), (7, "P2"), (8, "P2")):
+    # owner rule 3 Nov: version/enhancement labels never exempt a P0/P1; P2/P3 never block
+    for n, s in ((3, "P1"), (4, "P1"), (6, "P0")):
         assert f"#{n} {s}" in blockers
-    for n in (9, 10, 11):
+    for n in (5, 7, 8, 9, 10, 11):
         assert f"#{n} " not in blockers
-    # the gate sees exactly the same blockers and accepted set
-    assert [p.split(" issue ")[1].split(":")[0] for p in gate.issue_problems(mixed)] == ["#3", "#4", "#5", "#6", "#7", "#8"]
-    assert gate.accepted_issues(mixed) == ["#1 (P1): t1", "#2 (P2): t2"]
+    # the gate sees exactly the same blockers, accepted and carried sets
+    assert [p.split(" issue ")[1].split(":")[0] for p in gate.issue_problems(mixed)] == ["#3", "#4", "#6"]
+    assert gate.accepted_issues(mixed) == ["#1 (P1): t1", "#2 (P1): t2"]
+    assert gate.carried_list(mixed) == ["#5 (P2): t5", "#7 (P2): t7", "#8 (P2): t8", "#9 (P3): t9"]
 
 
 def test_status_gh_failure_refuses_and_signed_sheet_required(tmp_path):
@@ -153,4 +168,4 @@ def test_status_ignores_legacy_bug_tables_and_checklists(tmp_path):
     (rev / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
     (rev / "RELEASE_CHECKLIST_4.5.0.md").write_text("| 3 | thing | open |\n")
     checks = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0-P2"]
+    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]

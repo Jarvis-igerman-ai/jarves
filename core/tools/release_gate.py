@@ -4,9 +4,9 @@
   2. the SHA being published is exactly the SHA that was verified (candidate commit; its jarves-checks run is green)
   3. (retired) the legacy bug tables and release checklist rows are printed as information ("legacy, not gating"); the
      live GitHub P0-P2 issues (item 4) are the single source of truth (owner 26 Oct 2026, simple-releases OD-S2)
-  4. no open GitHub issue labelled P0-P2. Planned work (label enhancement, v5-v9 or 4.5.1) is not a defect and is
+  4. no open GitHub issue labelled P0, and no open P1 without the owner label (P2/P3 are carried, not blocking). Planned work (label enhancement, v5-v9 or 4.5.1) is not a defect and is
      skipped ONLY when the issue is not also labelled bug.
-     An open P0-P2 labelled `known-issue-4.5` (owner-only label) is an accepted known issue: not a blocker, printed in the report
+     An open P1 labelled `known-issue-4.5` (owner-only label) is an accepted known issue: not a blocker, printed in the report
   5. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
      or accepted-blocked with a note, signed, and the tested beta commit is the tag commit or an ancestor with only
      documentation changes since (docs/, docs/release/, root *.md; git failures refuse). The installer commit must equal
@@ -144,17 +144,22 @@ def bug_table_open(text: str, name: str = "") -> list[str]:
     return out
 
 
-ACCEPTED_LABEL = rf.ACCEPTED_LABEL   # OWNER-ONLY label: the owner accepts an open P0-P2 as a known issue for the 4.5 stable
+ACCEPTED_LABEL = rf.ACCEPTED_LABEL   # OWNER-ONLY label: the owner accepts an open P1 as a known issue for the 4.5 stable
 
 
 def issue_problems(issues: list[dict]) -> list[str]:
-    """Open GitHub issues labelled P0-P2 that block (shared rule: jarves.release_flow.classify_issues, #535)."""
+    """Open GitHub issues (P0, and P1 without the owner label) that block (shared rule: jarves.release_flow.classify_issues, #535)."""
     return [f"open {sev} issue #{n}: {title}" for n, sev, title in rf.classify_issues(issues)[0]]
 
 
 def accepted_issues(issues: list[dict]) -> list[str]:
     """Open P0-P2 issues the owner accepted for this stable (label `known-issue-4.5`); printed, never blocking."""
     return [f"#{n} ({sev}): {title}" for n, sev, title in rf.classify_issues(issues)[1]]
+
+
+def carried_list(issues: list[dict]) -> list[str]:
+    """Open P2/P3 issues carried into this release; printed, never blocking."""
+    return [f"#{n} ({sev}): {title}" for n, sev, title in rf.carried_issues(issues)]
 
 
 def legacy_report(checklist_text: str | None, bug_tables: list) -> list[str]:
@@ -231,7 +236,7 @@ def gh_issues(repo: str) -> list[dict]:
     if os.environ.get("GITHUB_TOKEN"):
         h["Authorization"] = f"Bearer {os.environ['GITHUB_TOKEN']}"
     out: list[dict] = []
-    for label in ("P0", "P1", "P2"):
+    for label in ("P0", "P1", "P2", "P3"):
         for page in range(1, 11):
             url = f"https://api.github.com/repos/{repo}/issues?state=open&labels={label}&per_page=100&page={page}"
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=30) as r:
@@ -275,6 +280,13 @@ def _print_accepted(accepted: list[str]) -> None:
             print(f"  - {a}")
 
 
+def _print_carried(carried: list[str]) -> None:
+    if carried:
+        print(f"known issues carried into this release ({len(carried)}, open P2/P3, not blocking):")
+        for c in carried:
+            print(f"  - {c}")
+
+
 def _print_legacy(legacy: list[str]) -> None:
     print(f"legacy, not gating ({len(legacy)} line(s); bug tables and checklist are retired, live issues decide):")
     for x in legacy:
@@ -306,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     root = a.repo_root.resolve()
     version = (TAG_RE.match(a.tag) or [None, "0.0.0"])[1]
     if a.bug_tables:
-        print("warning: --bug-tables no longer gates (retired, legacy information only); live P0-P2 issues decide")
+        print("warning: --bug-tables no longer gates (retired, legacy information only); live P0/P1 issues decide")
     cl = find_checklist(root, version, a.checklist)
     tables = [(Path(p).name, Path(p).read_text(encoding="utf-8"))
               for p in sorted(glob.glob(str(root / (a.bug_tables or "docs/reviews/*BUG_TABLE*.md"))))]
@@ -318,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"RELEASE GATE FAILED for {a.tag}: cannot read open issues from GitHub ({type(e).__name__}: {e})")
         return 1
     accepted = accepted_issues(issues)
+    carried = carried_list(issues)
     legacy = legacy_report(cl.read_text(encoding="utf-8") if cl else None, tables)
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
@@ -336,11 +349,13 @@ def main(argv: list[str] | None = None) -> int:
         for p in problems:
             print(f"  - {p}")
         _print_accepted(accepted)
+        _print_carried(carried)
         _print_legacy(legacy)
         return 1
     print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, "
-          "no open P0-P2, manual sign-off complete and signed")
+          "no open P0/P1, manual sign-off complete and signed")
     _print_accepted(accepted)
+    _print_carried(carried)
     _print_legacy(legacy)
     return 0
 

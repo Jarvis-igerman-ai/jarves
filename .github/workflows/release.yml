@@ -1,6 +1,6 @@
 name: jarves-release
 # STABLE release, tag-driven (docs/RELEASING.md). Push a tag vX.Y.Z. The gate (core/tools/release_gate.py) must pass:
-# the tested commit has a green jarves-checks run, no open P0-P2 (live GitHub labels; legacy bug tables and checklist are
+# the tested commit has a green jarves-checks run, no open P0/P1 (live GitHub labels; legacy bug tables and checklist are
 # printed as information only, not gating), and the owner's manual test sign-off
 # docs/reviews/MANUAL_TEST_<X.Y.Z>.md (recorded with `jarvis release signoff`) names the tested beta commit = this
 # tag's commit (or only documentation changed since: the tag commit contains the signed sheet, so it is normally a docs-only
@@ -93,7 +93,7 @@ jobs:
               [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"
             fi
           fi
-      - name: Release gate (sign-off, SHA, live P0-P2 issues)
+      - name: Release gate (sign-off, SHA, live P0/P1 issues)
         working-directory: core
         run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)
       - name: Plan (dry run)
