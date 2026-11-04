@@ -1,0 +1,1 @@
+- Fixed: autopilot workers get exact workflow_console.py allow rules and a no-chaining instruction, trace mirror writes wait 2 s instead of failing on a locked database, and a finished autopilot turn without a checkpoint is blocked as worker_ended_without_checkpoint (#784).

@@ -267,7 +267,7 @@ WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh re
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
-def autopilot_allowed_tools(python: str = "", override: list[str] | None = None) -> list[str]:
+def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
     Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
     if override:
@@ -276,6 +276,9 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None)
     if python:
         for p in sorted({python, python.replace("\\", "/")}):
             rules.append(f"Bash({p} -m pytest:*)")
+            if console:        # #784: exactly the workflow CLI, in both slash forms; not the whole interpreter
+                for c in sorted({console, console.replace("\\", "/")}):
+                    rules.append(f"Bash({p} {c}:*)")
     return rules
 
 
