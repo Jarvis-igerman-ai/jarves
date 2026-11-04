@@ -147,6 +147,9 @@ WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transit
                                     "msg", "check-touch", "timeline", "health", "now", "trace", "autopilot"})
 
 
+OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more"})
+
+
 def worker_refusal(av) -> str:
     """A refusal message when a workflow agent line is not a plain worker command, else ""."""
     import contextlib
@@ -158,6 +161,8 @@ def worker_refusal(av) -> str:
         return "refused: the line does not parse (agent environment)"
     action = ns.action or ""
     sub = (list(ns.rest or []) or ["status"])[0]
+    if action in OWNER_GUARDED_ACTIONS:
+        return ""       # refused by owner_only_guard with its own message and exit code
     if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
             or (action == "release" and ns.force) or (action == "trace" and ns.capture)):
         return f"refused: '{action}' is an owner/manager command (agent environment)"
