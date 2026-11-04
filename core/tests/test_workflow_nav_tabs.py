@@ -34,7 +34,7 @@ class NavTabsContractTests(unittest.TestCase):
         self.assertIn('body[data-view="health"] .subnav,body[data-view="timeline"] .subnav{display:flex}', self.css)
 
     def test_phone_has_four_targets_and_no_horizontal_scroll(self):
-        tail = self.css[self.css.index("/* #789 rule 5"):]
+        tail = self.css[self.css.index("/* issue 789 rule 5"):]
         phone = tail[tail.index("@media(max-width:760px){"):]
         self.assertIn("grid-template-columns:repeat(4,minmax(0,1fr))", phone)
         self.assertIn("overflow:visible", phone)
