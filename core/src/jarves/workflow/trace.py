@@ -164,7 +164,7 @@ def provider_event(profile_home, session, event, summary, payload=None):
     path = Path(profile_home) / "workflow" / "workflow.db"
     if not path.is_file() or not session:
         return
-    ledger = Store(path, timeout_s=2.0)   # #784: 0.05 s lost mirror writes to 'database is locked'
+    ledger = Store(path, timeout_s=0.5)   # #784: 0.05 s lost mirror writes to 'database is locked'; 0.5 s bounds the Core event thread
     try:
         sid = session["id"]
         ident = "external-" + hashlib.sha256(sid.encode()).hexdigest()[:20]

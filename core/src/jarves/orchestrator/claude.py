@@ -267,6 +267,11 @@ WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh re
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
+# #784: the only workflow_console subcommands an autopilot worker may run unprompted. autopilot, authorize, bootstrap,
+# dispatch, seed, sync, recover, close-superseded, answer, confirm, reopen, unlock and open are deliberately absent.
+WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
+
+
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
     Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
@@ -278,7 +283,9 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None,
             rules.append(f"Bash({p} -m pytest:*)")
             if console:        # #784: exactly the workflow CLI, in both slash forms; not the whole interpreter
                 for c in sorted({console, console.replace("\\", "/")}):
-                    rules.append(f"Bash({p} {c}:*)")
+                    for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home HOME <sub> ...`
+                        rules.append(f"Bash({p} {c} --home * {sub})")
+                        rules.append(f"Bash({p} {c} --home * {sub} *)")
     return rules
 
 

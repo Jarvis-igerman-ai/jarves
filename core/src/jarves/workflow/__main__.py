@@ -79,6 +79,7 @@ def utf8_streams() -> None:
             pass
 
 
+AGENT_REFUSED = ("autopilot", "authorize", "bootstrap")
 OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your own terminal"
 
 
@@ -128,9 +129,19 @@ def agent_messages(store, a) -> int:
     return 0
 
 
+def _action_of(av) -> str:
+    choices = next(act for act in parser()._actions if act.dest == "action").choices
+    return next((x for x in av if x in choices), "")
+
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
+    if os.environ.get("JARVES_WORKFLOW_AGENT") and _action_of(_av) in AGENT_REFUSED:
+        # #784 defense in depth: a worker never starts autopilot, grants authority or rewrites hooks, even if allowed
+        print(json.dumps({"error": "refused: autopilot, authorize and bootstrap are owner/manager commands (agent environment)"}),
+              file=sys.stderr)
+        return 2
     if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])
