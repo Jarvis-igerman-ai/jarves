@@ -16,22 +16,10 @@ since = "2026-11-02"
 reason = "Windows real browser: Page.goto net::ERR_NO_BUFFER_SPACE (host socket exhaustion, seen on PR 868, unrelated to its diff); retry fix PR 875 merged, prior issue 874 closed"
 
 [[test]]
-id = "test_web_chat.py::test_silent_turns_never_speak_ring_or_light_the_face"
-issue = 722
-since = "2026-11-04"
-reason = "silent turn spoke (2 == 1) once on CI; real timing between turns, make it deterministic"
-
-[[test]]
 id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeout_kills"
 issue = 660
 since = "2026-11-04"
 reason = "Linux: shell pipe exited 2 in the timeout-kill step; depends on shell and process timing"
-
-[[test]]
-id = "test_say_engine.py::test_default_output_is_one_line_without_espeak_on_windows"
-issue = 422
-since = "2026-11-04"
-reason = "Windows shard 3/4: an extra 'unhandled exception' line appeared in the captured output once"
 
 [[test]]
 id = "test_dashboard_mic_stop_browser.py::test_mic_menu_narrow_width_stays_on_screen_and_hebrew"
