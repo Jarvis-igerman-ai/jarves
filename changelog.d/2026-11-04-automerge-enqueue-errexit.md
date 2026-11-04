@@ -1,0 +1,1 @@
+- Fixed: the jarves-automerge enqueue job no longer fails silently with exit 1 on ordinary (non Tier R) PRs such as Dependabot; the risk check's exit code 1 no longer aborts the script under bash -e.

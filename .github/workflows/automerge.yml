@@ -37,7 +37,9 @@ jobs:
           sparse-checkout: core/tools/risk_class.py
       - name: Turn on auto-merge (merge queue) for labelled, unblocked, ready PRs
         run: |
+          # GitHub runs bash with -e; risk_class.py exits 1 for ordinary Tier N code, which silently killed the script.
           set -uo pipefail
+          set +e
           [ -n "$GH_TOKEN" ] || { echo "::error::AUTOMERGE_TOKEN is not set"; exit 1; }
           if [ -n "$ONE" ]; then prs="$ONE"; else
             prs=$(gh pr list -R "$REPO" --state open --base main --label automerge --json number --jq '.[].number'); fi
@@ -49,7 +51,7 @@ jobs:
             # Tier R guard (#906): a human-added `automerge` label must not enqueue a high-risk PR. Match the words, not the exit code.
             gh api --paginate "repos/$REPO/pulls/$n/files" --jq '.[] | .filename, (.previous_filename // empty)' > "files-$n.txt" || { echo "#$n: file list unreadable, not queued"; rc=1; continue; }
             [ -s "files-$n.txt" ] || { echo "#$n: empty file list, risk check failed, not queued"; rc=1; continue; }
-            out=$(python3 core/tools/risk_class.py --files-from "files-$n.txt" --mode all 2>&1)
+            out=$(python3 core/tools/risk_class.py --files-from "files-$n.txt" --mode all 2>&1) || true
             first=$(printf '%s\n' "$out" | head -n 1)
             if printf '%s\n' "$first" | grep -q '^none: high-risk path'; then
               echo "#$n: Tier R ($first), adding no-automerge, not queued"

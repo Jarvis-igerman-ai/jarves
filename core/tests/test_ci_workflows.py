@@ -128,3 +128,10 @@ def test_risk_class_flags_release_and_bootstrap_paths(tmp_path):
     r = subprocess.run([sys.executable, str(root / "core/tools/risk_class.py"), "--files-from", str(f), "--mode", "all"],
                        capture_output=True, text=True)
     assert "high-risk path" in r.stdout + r.stderr
+
+
+def test_automerge_enqueue_survives_risk_class_exit_1():
+    """GitHub runs `bash -e`; risk_class.py exits 1 for Tier N, so the script must not die on it silently."""
+    run = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))["jobs"]["enqueue"]["steps"][-1]["run"]
+    assert "set +e" in run
+    assert re.search(r"risk_class\.py[^\n]*2>&1\) \|\| true", run)
