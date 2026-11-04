@@ -139,6 +139,7 @@ SAFE_OFF = frozenset({
     "provider_openrouter",
     "self_diagnosis_handoff",
     "skills_manifest2",
+    "smart_format",
     "telegram",
     "whatsapp_archive",
     "whatsapp_bridge",
@@ -267,6 +268,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "phone_trust",
         "companion_api",
         "web_chat",
+        "smart_format",
         "context_trace",
     )),
     ("updates", "עדכונים וגיבוי", "Updates & backup", (
@@ -1369,6 +1371,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "mobile_access": [_mod("jarves.mobile"), _mod("jarves.tailnet"), _mod("jarves.qrmini"), _data("jarves", "dashboard_static/mobile/index.html")],
     "web_chat": [_mod("jarves.chat_engine"), _mod("jarves.web_cli"), _data("jarves", "dashboard_static/chatview.js"),
                  _data("jarves", "dashboard_static/chat.js"), _data("jarves.guides", "data/web_chat.toml")],
+    "smart_format": [_mod("jarves.ui_blocks"), _data("jarves", "dashboard_static/chatview.js"), _data("jarves.guides", "data/smart_chat.toml")],
     "context_trace": [_mod("jarves.context_trace"), _data("jarves", "dashboard_static/context.js")],
     "agent_orchestrator": [_mod("jarves.orchestrator"), _mod("jarves.orchestrator.service"),
                            _mod("jarves.orchestrator.hook"), _mod("jarves.orchestrator.channel"),

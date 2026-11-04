@@ -1,0 +1,1 @@
+- Added: beta switch `smart_format` (OFF by default): in the browser chat the assistant may pick the format on its own (a small table to compare things, choice buttons, or a checklist for steps) even when you did not ask for a list. Turn it on with `jarvis features on smart_format`; guide "Checklists in the chat". (#365)
