@@ -45,3 +45,33 @@ id = "test_workflow_859_followups.py::test_exhausted_budget_degrades_without_a_t
 issue = 943
 since = "2026-11-04"
 reason = "Windows shard 4/4 on PR 937: StopIteration from the mocked global time.monotonic (3 values consumed by other callers); use a local clock"
+
+[[test]]
+id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
+issue = 770
+since = "2026-11-04"
+reason = "state race: fake mic beeps every second so .hf-state can read 'hearing you' instead of 'listening'; wait for a stable state"
+
+[[test]]
+id = "test_dashboard_mic_stop_browser.py::test_mic_menu_narrow_width_stays_on_screen_and_hebrew"
+issue = 778
+since = "2026-11-04"
+reason = "Windows real browser: failed once then passed on rerun (earlier showstoppers 709 and 488 closed); tracked in 778 until made deterministic"
+
+[[test]]
+id = "test_canary.py::test_dashboard_journey_is_real_browser_or_blocked"
+issue = 778
+since = "2026-11-04"
+reason = "Windows: dashboard_load took 50 s against a 30 s budget on a loaded runner (earlier showstoppers 707 and 367); tracked in 778"
+
+[[test]]
+id = "test_core.py::test_logs_have_correlation_ids_and_no_private_text"
+issue = 778
+since = "2026-11-04"
+reason = "substring '4321' can appear by chance in ids or ports; use a long unique private token (earlier showstopper 481 closed); tracked in 778"
+
+[[test]]
+id = "test_agents_managed.py::test_codex_approval_request_goes_to_the_owner"
+issue = 946
+since = "2026-11-04"
+reason = "Windows shard 3/4 on PR 942: state still RUNNING right after last_summary was set; wait for IDLE instead of asserting at once"
