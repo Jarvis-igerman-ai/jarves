@@ -153,7 +153,7 @@
 
   function isRequired(task) { return !task.scope || task.scope === "required"; }
   // What is working now comes first (owner, #730): running, waiting for you, blocked, review, queued, then finished.
-  const stateRank = {running: 0, waiting_owner: 1, blocked: 2, review: 3, queued: 4, verified: 5, done: 6};
+  const stateRank = {running: 0, waiting_owner: 1, blocked: 2, review: 3, queued: 4, verified: 5, done: 6, cancelled: 7};
   const versionRank = version => { const i = versions.indexOf(version); return i < 0 ? versions.length : i; };
   function taskOrder(a, b) {
     return (stateRank[a.state] ?? 4) - (stateRank[b.state] ?? 4) || (a.priority ?? 2) - (b.priority ?? 2)
