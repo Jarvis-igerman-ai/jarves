@@ -79,6 +79,7 @@ def utf8_streams() -> None:
             pass
 
 
+AGENT_REFUSED = ("autopilot", "authorize", "bootstrap")
 OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your own terminal"
 
 
@@ -128,9 +129,76 @@ def agent_messages(store, a) -> int:
     return 0
 
 
+def _action_of(av) -> str:
+    """The action argparse itself will run (option values never count); "" when the line does not parse."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            return parser().parse_known_args(list(av))[0].action or ""
+    except SystemExit:
+        return ""
+
+
+# #784 allow list (fail closed): a workflow agent (JARVES_WORKFLOW_AGENT set) may run ONLY these console actions, decided on
+# what argparse really parses. Every other action (create, dispatch, seed, sync, recover, questions-rewrite, authorize,
+# bootstrap, handover, close-superseded, agent, serve ...) is owner/manager only.
+WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
+                                    "msg", "check-touch", "layer-beat", "timeline", "health", "now", "trace", "autopilot"})
+
+
+def worker_refusal(av) -> str:
+    """A refusal message when a workflow agent line is not a plain worker command, else ""."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            ns = parser().parse_known_args(list(av))[0]
+    except SystemExit:
+        return "refused: the line does not parse (agent environment)"
+    action = ns.action or ""
+    sub = (list(ns.rest or []) or ["status"])[0]
+    if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
+            or (action == "release" and ns.force) or (action == "trace" and ns.capture)):
+        return f"refused: '{action}' is an owner/manager command (agent environment)"
+    return ""
+
+
+def _home_count(av) -> int:
+    """How many times the real parser sees --home (also --home=X and abbreviations such as --hom X)."""
+    import argparse
+    import contextlib
+    import io
+    p = parser()
+    seen = []
+
+    class Count(argparse.Action):
+        def __call__(self, ap, ns, values, option_string=None):
+            seen.append(values)
+
+    for act in p._actions:
+        if act.dest == "home":
+            act.__class__ = Count
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            p.parse_known_args(list(av))
+    except SystemExit:
+        return 2        # does not parse: treat as repeated so the agent never reaches the filesystem code
+    return len(seen)
+
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
+    if os.environ.get("JARVES_WORKFLOW_AGENT") and _home_count(_av) > 1:
+        # #784: a later --home wins in argparse and would run on a path the allow rule never saw
+        print(json.dumps({"error": "refused: --home may appear only once in an agent environment"}), file=sys.stderr)
+        return 2
+    if os.environ.get("JARVES_WORKFLOW_AGENT"):
+        _msg = worker_refusal(_av)
+        if _msg:
+            print(json.dumps({"error": _msg}), file=sys.stderr)
+            return 2
     if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])

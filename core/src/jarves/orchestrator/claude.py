@@ -253,9 +253,8 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(python:*)", "Bash(py:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(node:*)", "Bash(npm:*)", "Bash(npx:*)",
-    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(jarvis workflow:*)", "Bash(sed:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)",
-    "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)",
+    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
+    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
     "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
     "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
@@ -263,11 +262,17 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
-                                "Bash(taskkill*)", "Bash(powershell*)")
+                                "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)")
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
-def autopilot_allowed_tools(python: str = "", override: list[str] | None = None) -> list[str]:
+# #784: the only workflow_console subcommands an autopilot worker may run unprompted. autopilot, authorize, bootstrap,
+# dispatch, seed, sync, recover, close-superseded, answer, confirm, reopen, unlock and open are deliberately absent.
+WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
+
+
+def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
+                           home: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
     Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
     if override:
@@ -276,6 +281,12 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None)
     if python:
         for p in sorted({python, python.replace("\\", "/")}):
             rules.append(f"Bash({p} -m pytest:*)")
+        if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
+            for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
+                p, c, h = conv
+                for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home <exact HOME> <sub> ...`
+                    rules.append(f"Bash({p} {c} --home {h} {sub})")
+                    rules.append(f"Bash({p} {c} --home {h} {sub} *)")
     return rules
 
 
