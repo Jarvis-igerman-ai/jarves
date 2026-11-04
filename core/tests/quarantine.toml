@@ -57,3 +57,10 @@ id = "test_agents_managed.py::test_codex_approval_request_goes_to_the_owner"
 issue = 946
 since = "2026-11-04"
 reason = "Windows shard 3/4 on PR 942: state still RUNNING right after last_summary was set; wait for IDLE instead of asserting at once"
+
+[[test]]
+id = "test_whatsapp_bridge_contract.py::test_kill_file_stops_within_two_seconds_and_release"
+issue = 963
+since = "2026-11-04"
+reason = "Windows shard 2/4 failed on PR 960 (unrelated diff): real 2.0 s wall-clock wait for the KILL file watcher; make the bound deterministic with an injected clock"
+
