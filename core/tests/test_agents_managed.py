@@ -107,6 +107,8 @@ def test_codex_approval_request_goes_to_the_owner(world, policy_, expect):
     assert o.tell(sid, "RUN: git push origin main")["code"] == "SENT"
     s = wait_for(lambda: expect in ((o.db.session(sid) or {}).get("last_summary") or "") and o.db.session(sid),
                  what=expect)
+    wait_for(lambda: (o.db.session(sid) or {}).get("state") == "IDLE", what="IDLE")   # #946: last_summary lands before IDLE
+    s = o.db.session(sid)
     a = owner.asked[-1][1]
     assert a.typed_code and "git push" in a.prompt and a.details["provider"] == "codex"   # risky: typed code
     row = o.db.approvals(None)[0]
