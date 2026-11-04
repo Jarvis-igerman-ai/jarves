@@ -13,7 +13,7 @@ CORE = Path(__file__).resolve().parents[1]
 if str(CORE) not in sys.path:
     sys.path.insert(0, str(CORE))
 
-from tools.fake_whatsapp_bridge import FakeBridge  # noqa: E402
+from tools.fake_whatsapp_bridge import KILL_POLL_S, FakeBridge  # noqa: E402
 
 DANA = "972541112222@s.whatsapp.net"
 DANA2 = "972549990000@s.whatsapp.net"          # a second "Dana" (same-name contacts)

@@ -1,0 +1,1 @@
+- Fixed: flaky WhatsApp bridge kill-file test (#963, duplicate #967) no longer asserts a 2 s wall-clock bound (poll period asserted by value, plain event wait); lifted the #946 quarantine (fixed on main by waiting for IDLE). #722, #660, #422 and #890 stay quarantined (no deterministic root cause yet).
