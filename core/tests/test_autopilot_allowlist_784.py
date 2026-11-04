@@ -91,6 +91,25 @@ def test_refusal_uses_the_real_parsed_action(monkeypatch, capsys, argv):
     assert wf._action_of(argv) in wf.AGENT_REFUSED
 
 
+@pytest.mark.parametrize("extra", [["--home", "/x"], ["--home=/x"], ["--hom", "/x"], ["--hom=/x"]])
+def test_repeated_home_is_refused_in_agent_environment(monkeypatch, capsys, tmp_path, extra):
+    from jarves.workflow import __main__ as wf
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    evil = tmp_path / "evil"
+    argv = ["--home", str(tmp_path / "ok"), "status", *[str(evil) if e == "/x" else e.replace("/x", str(evil)) for e in extra]]
+    assert wf.main(argv) == 2
+    assert "only once" in capsys.readouterr().err
+    assert not evil.exists()
+
+
+def test_single_home_is_not_refused_by_the_home_guard(monkeypatch):
+    from jarves.workflow import __main__ as wf
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    assert wf._home_count(["--home", "H", "status"]) == 1
+    assert wf._home_count(["--hom=H", "status"]) == 1
+    assert wf._home_count(["status"]) == 0
+
+
 def test_agent_environment_does_not_refuse_ordinary_text_mentioning_autopilot(monkeypatch):
     from jarves.workflow import __main__ as wf
     monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")

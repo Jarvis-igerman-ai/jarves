@@ -140,9 +140,36 @@ def _action_of(av) -> str:
         return ""
 
 
+def _home_count(av) -> int:
+    """How many times the real parser sees --home (also --home=X and abbreviations such as --hom X)."""
+    import argparse
+    import contextlib
+    import io
+    p = parser()
+    seen = []
+
+    class Count(argparse.Action):
+        def __call__(self, ap, ns, values, option_string=None):
+            seen.append(values)
+
+    for act in p._actions:
+        if act.dest == "home":
+            act.__class__ = Count
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            p.parse_known_args(list(av))
+    except SystemExit:
+        return 2        # does not parse: treat as repeated so the agent never reaches the filesystem code
+    return len(seen)
+
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
+    if os.environ.get("JARVES_WORKFLOW_AGENT") and _home_count(_av) > 1:
+        # #784: a later --home wins in argparse and would run on a path the allow rule never saw
+        print(json.dumps({"error": "refused: --home may appear only once in an agent environment"}), file=sys.stderr)
+        return 2
     if os.environ.get("JARVES_WORKFLOW_AGENT") and _action_of(_av) in AGENT_REFUSED:
         # #784 defense in depth: a worker never starts autopilot, grants authority or rewrites hooks, even if allowed
         print(json.dumps({"error": "refused: autopilot, authorize and bootstrap are owner/manager commands (agent environment)"}),
