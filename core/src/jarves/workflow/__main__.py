@@ -95,6 +95,24 @@ def owner_only_guard(action: str) -> str:
     return "terminal"
 
 
+# #784 review: the worker allow rule covers the whole workflow_console.py script, so a workflow agent
+# (JARVES_WORKFLOW_AGENT set) may run only these worker actions; everything else is refused (allow list, fail closed).
+WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
+                                    "msg", "check-touch", "layer-beat", "timeline", "health", "now", "trace", "autopilot",
+                                    "answer", "confirm", "reopen", "ask-more"})  # last four: refused by owner_only_guard itself
+
+
+def worker_refusal(action: str, rest, force: bool = False, capture: str | None = None) -> str:
+    """Return a refusal message when a workflow agent calls a non-worker action, else an empty string."""
+    if not os.environ.get("JARVES_WORKFLOW_AGENT"):
+        return ""
+    sub = (list(rest or []) or ["status"])[0]
+    if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
+            or (action == "release" and force) or (action == "trace" and capture)):
+        return f"'{action}' is owner-only: refused in a workflow agent environment"
+    return ""
+
+
 def agent_messages(store, a) -> int:
     """Ownership claims and agent messages. Exit 3 = the resource is owned by another agent (see AGENT_MESSAGES.md)."""
     from .messages import ClaimConflict
@@ -132,9 +150,17 @@ def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
     if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
+        _msg = worker_refusal("autopilot", _av[1:])
+        if _msg:
+            print(json.dumps({"error": _msg}, ensure_ascii=False), file=sys.stderr)
+            return 3
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])
     a = parser().parse_args(argv)
+    _msg = worker_refusal(a.action, a.rest, a.force, a.capture)
+    if _msg:
+        print(json.dumps({"error": _msg}, ensure_ascii=False), file=sys.stderr)
+        return 3
     if not 0 <= a.port <= 65535:
         parser().error("invalid port")
     home = (a.home or a.profile_home / "workflow").resolve()
