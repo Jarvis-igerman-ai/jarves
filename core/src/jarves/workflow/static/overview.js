@@ -29,6 +29,9 @@
     doneEmpty: "Nothing was finished yet today.", doneNote: "Each number is counted on its own, by the task's last update today.",
     alerts: n => n === 1 ? "1 alert" : `${n} alerts`, themeLight: "Light theme", themeDark: "Dark theme",
     reportLoading: "Loading the report", reportFailed: "The report is not available now.",
+    // #733 one-line banner: the same numbers as `workflow status` / the verdict (workers, open PRs, open questions).
+    banner: {workers: n => n === 1 ? "1 worker running" : `${n} workers running`, prs: n => n === 1 ? "1 PR waiting" : `${n} PRs waiting`,
+      you: n => `${n} need you`},
     // Same codes as observability.VERDICT_TEXT (the server also sends the English reason).
     v: {working: d => `Everything is working: ${d.active} worker(s) active`, supervisor_dead: () => "The supervisor is not running: no new work starts",
       supervisor_late: () => "The supervisor heartbeat is late", no_data: () => "No heartbeat data yet", no_core: () => "The Core is not reachable (NO_CORE): no new work starts",
@@ -66,6 +69,8 @@
     doneEmpty: "עוד לא הושלם דבר היום.", doneNote: "כל מספר נספר בנפרד, לפי העדכון האחרון של המשימה היום.",
     alerts: n => n === 1 ? "התראה אחת" : `${n} התראות`, themeLight: "ערכה בהירה", themeDark: "ערכה כהה",
     reportLoading: "טוען את הדוח", reportFailed: "הדוח לא זמין כרגע.",
+    banner: {workers: n => n === 1 ? "עובד אחד רץ" : `${n} עובדים רצים`, prs: n => n === 1 ? "בקשת מיזוג אחת ממתינה" : `${n} בקשות מיזוג ממתינות`,
+      you: n => n === 1 ? "שאלה אחת מחכה לך" : `${n} שאלות מחכות לך`},
     v: {working: d => `הכול עובד: ${d.active === 1 ? "עובד אחד פעיל" : `${d.active} עובדים פעילים`}`, supervisor_dead: () => "המשגיח לא פעיל: עבודה חדשה לא מתחילה",
       supervisor_late: () => "פעימת המשגיח מאחרת", no_data: () => "עדיין אין נתוני דופק", no_core: () => "הליבה לא זמינה (NO_CORE): עבודה חדשה לא מתחילה",
       usage_stop: d => `נעצר בגלל שימוש: ${d.why}`, idle_ready: d => `בטלה: ${d.ready} משימות מוכנות ואין עובד פעיל`,
@@ -143,7 +148,7 @@
   // The one trusted verdict comes from GET /api/health (observability.verdict). Without it (old service, fetch
   // failed, or older than 2 min) the local logic above is used unchanged.
   const REMOTE_TONE = {working: "ok", idle_with_work: "attention", owner_wait: "attention", stopped: "bad", unknown: "unknown"};
-  let remote = null, remoteAt = 0, remoteBusy = false, remoteFocus = null;
+  let remote = null, remoteAt = 0, remoteBusy = false, remoteFocus = null, remotePrs = null;
   async function loadVerdict() {
     if (remoteBusy || typeof fetch !== "function") return;
     remoteBusy = true;
@@ -152,8 +157,9 @@
       const body = response.ok ? await response.json() : null;
       remote = body && body.verdict && REMOTE_TONE[body.verdict.verdict] ? body.verdict : null;
       remoteFocus = body && body.focus && typeof body.focus.he === "string" ? body.focus : null;
+      remotePrs = body && body.focus && body.focus.prs && Number.isFinite(body.focus.prs.total) ? body.focus.prs.total : null;
       remoteAt = Date.now() / 1000;
-    } catch (_) { remote = null; remoteFocus = null; } finally { remoteBusy = false; }
+    } catch (_) { remote = null; remoteFocus = null; remotePrs = null; } finally { remoteBusy = false; }
   }
   function remoteVerdict(now = Date.now() / 1000) {
     if (!remote || now - remoteAt > 120) return null;
@@ -163,9 +169,26 @@
     return {tone: REMOTE_TONE[remote.verdict], text, kind: remote.verdict};
   }
 
+  // #733: "N workers running · M PRs waiting · K need you". Numbers come from the /api/health verdict and focus (the
+  // same source as `workflow status`); without a fresh answer, from the local factory() counts. An unknown count is left out.
+  function bannerText(f, data, now = Date.now() / 1000) {
+    const fresh = remote && now - remoteAt <= 120;
+    const d = fresh ? remote.detail || {} : {};
+    const workers = Number.isFinite(d.active) ? d.active : f.active;
+    const questions = Number.isFinite(d.questions) ? d.questions : f.questions;
+    const prs = fresh && remotePrs !== null ? remotePrs : Array.isArray(data.source && data.source.open_prs) ? data.source.open_prs.length : null;
+    return [T.banner.workers(workers), prs === null ? "" : T.banner.prs(prs), T.banner.you(questions)].filter(Boolean).join(" · ");
+  }
+
   function renderStatus(data, age, complete) {
     const f = factory(data);
     const rv = remoteVerdict();
+    const banner = $("#ov-banner");
+    if (banner) {
+      const line = bannerText(f, data);
+      if (banner.textContent !== line) banner.textContent = line;
+      banner.hidden = false;
+    }
     const title = rv ? rv.text : verdictText(f);
     if (rv) f.tone = rv.tone;
     $("#ov-status").dataset.tone = f.tone;
@@ -364,7 +387,8 @@
     $("#ov-status-title").textContent = T.loading;
     setView();
     initFolds();
-    loadVerdict();
+    // The banner and the status bar show the server verdict as soon as it arrives, not 15 s later.
+    loadVerdict().then(() => { if (last) renderStatus(last.data, last.age, last.complete); });
     loadNow();
     $("#ov-report")?.addEventListener("toggle", event => { if (event.target.open) loadReport(); });
     window.addEventListener("hashchange", () => { setView(); if (document.body.dataset.view === "overview") loadNow(); });

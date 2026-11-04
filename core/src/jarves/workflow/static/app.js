@@ -63,6 +63,9 @@
       groupSaved: n => n === 1 ? "נשמרה תשובה למשימה אחת." : `נשמרו תשובות ל־${n} משימות.`,
       groupDeferred: n => `${n} משימות נשמרו להמשך.`, groupPartial: n => `נשמרו ${n}, ואז הייתה שגיאה. `,
       note: "הערה (לא חובה)",
+      nowTitle: "עובד עכשיו", min: n => `${n} דק׳`, hours: n => `${n} שע׳`, runningFor: d => `רץ ${d}`,
+      lastActivity: sec => sec < 60 ? "פעילות אחרונה עכשיו" : `פעילות אחרונה לפני ${sec < 3600 ? `${Math.floor(sec / 60)} דק׳` : `${Math.floor(sec / 3600)} שע׳`}`, noWorker: "אין עובד מחובר",
+      hiddenStates: n => n === 1 ? "משימה אחת שבוטלה או במצב לא מוכר מוסתרת." : `${n} משימות שבוטלו או במצב לא מוכר מוסתרות.`,
       lastGood: n => n < 1 ? "הנתונים הטובים האחרונים התקבלו לפני פחות מדקה." : `הנתונים הטובים האחרונים התקבלו לפני ${n} דק׳.`,
       unreachable: "השירות המקומי לא זמין כרגע, אולי הוא מופעל מחדש. מנסים שוב אוטומטית."},
     en: {moreInfo: "Get more info", moreInfoTitle: "The manager explains why you are asked, what each option does, what it recommends and what happens if you skip",
@@ -89,6 +92,9 @@
       groupSaved: n => n === 1 ? "Saved the answer for one task." : `Saved answers for ${n} tasks.`,
       groupDeferred: n => `${n} tasks kept for later.`, groupPartial: n => `Saved ${n}, then this error. `,
       note: "Note (optional)",
+      nowTitle: "Working now", min: n => `${n} min`, hours: n => `${n} h`, runningFor: d => `running ${d}`,
+      lastActivity: sec => sec < 60 ? "last activity just now" : `last activity ${sec < 3600 ? `${Math.floor(sec / 60)} min` : `${Math.floor(sec / 3600)} h`} ago`, noWorker: "No worker connected",
+      hiddenStates: n => n === 1 ? "1 cancelled or unknown-state task is hidden." : `${n} cancelled or unknown-state tasks are hidden.`,
       lastGood: n => n < 1 ? "Last good data arrived under a minute ago." : `Last good data arrived ${n} min ago.`,
       unreachable: "The local service is not reachable right now, maybe it is restarting. Retrying automatically."},
   };
@@ -152,6 +158,21 @@
   function taskOrder(a, b) {
     return (stateRank[a.state] ?? 4) - (stateRank[b.state] ?? 4) || (a.priority ?? 2) - (b.priority ?? 2)
       || versionRank(a.version) - versionRank(b.version) || String(a.id).localeCompare(String(b.id));
+  }
+  // #733: a state this page does not know (e.g. "cancelled" from a newer service, or a dead row) is hidden from the lists.
+  const listed = task => Object.prototype.hasOwnProperty.call(stateRank, task.state);
+  // #733: how long a running task has run (since its claim, the last state change) and when its worker last reported.
+  const minutesText = sec => { const m = Math.max(1, Math.floor(sec / 60)); return m < 60 ? L.min(m) : L.hours(Math.floor(m / 60)); };
+  function nowRows(tasks) {
+    const now = Date.now() / 1000;
+    return tasks.filter(task => task.state === "running").sort(taskOrder).map(task => {
+      const agent = data.agents.find(item => item.id === task.agent_id) || data.agents.find(item => item.task_id === task.id);
+      const beat = agent ? Math.max(seconds(agent.heartbeat_at), seconds(agent.progress_at)) : 0;
+      const fresh = beat && now - beat < 120;
+      const ran = seconds(task.updated_at) ? `<span>${esc(L.runningFor(minutesText(now - seconds(task.updated_at))))}</span>` : "";
+      const last = `<span class="${fresh ? "" : "today-warn"}">${esc(beat ? L.lastActivity(Math.max(0, now - beat)) : L.noWorker)}</span>`;
+      return `<li><button type="button" class="today-row" data-task="${esc(task.id)}"><span class="status-dot ${fresh ? "good" : "warn"}" aria-hidden="true"></span><span class="today-row-main"><span class="today-row-title" dir="auto">${esc(task.title)}</span><span class="today-row-meta"><span dir="auto">${esc(agent?.label || task.agent_id || L.noWorker)}</span>${ran}${last}${task.version ? `<span dir="ltr">${esc(task.version)}</span>` : ""}</span></span></button></li>`;
+    }).join("");
   }
 
   function scopeLabel(task) {
@@ -449,7 +470,7 @@
   }
 
   function renderActive() {
-    const work = data.tasks.filter(task => ["running", "review", "waiting_owner", "blocked"].includes(task.state)).sort(taskOrder).slice(0, 7);
+    const work = data.tasks.filter(task => ["running", "review", "waiting_owner", "blocked"].includes(task.state)).sort(taskOrder).slice(0, 7);  // unknown/cancelled states never match
     $("#active-tasks").innerHTML = work.length ? work.map(task => `<button type="button" class="work-row" data-task="${esc(task.id)}"><span class="work-state-icon ${["waiting_owner", "blocked"].includes(task.state) ? "amber" : ""}" aria-hidden="true">${task.state === "waiting_owner" ? "◇" : task.state === "blocked" ? "!" : task.state === "review" ? "◌" : "↗"}</span><span class="work-row-main"><span class="work-row-title">${esc(task.title)}</span><span class="work-row-meta"><span class="mono">${esc(task.id)}</span><span dir="ltr">${esc(task.version || "ללא גרסה")}</span><span>${esc(stateNames[task.state] || task.state)}</span></span></span><span class="priority ${(task.priority ?? 2) < 2 ? "high" : ""}">P${esc(task.priority ?? 2)}</span></button>`).join("") : empty("אין משימות פעילות כרגע", data.tasks.length ? "משימות התור והחסימות זמינות בתוכנית המלאה. הכפתור 'בדוק הקצאה' משבץ רק סשנים שחוברו עם הקצאה אוטומטית. סוכני Claude רגילים לוקחים משימות דרך המנהל." : "הוסף משימה או ייבא את תוכנית העבודה כדי להתחיל.", true);
   }
 
@@ -501,22 +522,28 @@
     $("#roadmap-context").innerHTML = data.source?.scope_note ? `<details class="scope-note"${scopeOpen ? " open" : ""}><summary>היקף התוכנית והמקור</summary><p dir="auto">${esc(data.source.scope_note)}</p><p>סגירת Issue או מיזוג PR מוצגים בנפרד מהוכחת תרחיש. פריט שטרם מופה נשאר לא ידוע.</p></details>` : "";
     const versionChoices = ["all", ...versions, ...new Set(data.tasks.map(t => t.version || "ללא גרסה").filter(v => !versions.includes(v)))];
     $("#version-nav").innerHTML = versionChoices.map(v => {
-      const count = v === "all" ? data.tasks.length : data.tasks.filter(t => (t.version || "ללא גרסה") === v).length;
+      const count = v === "all" ? data.tasks.filter(listed).length : data.tasks.filter(t => listed(t) && (t.version || "ללא גרסה") === v).length;
       return `<button type="button" class="version-filter${roadmapVersion === v ? " active" : ""}" data-version="${esc(v)}" aria-pressed="${roadmapVersion === v}"><span dir="auto">${esc(v === "all" ? "כל הגרסאות" : v)}</span><span class="version-count">${count}</span></button>`;
     }).join("");
     const search = $("#task-search").value.trim().toLocaleLowerCase("he-IL");
-    let tasks = data.tasks.filter(task => !search || `${task.title} ${task.id} ${task.version}`.toLocaleLowerCase("he-IL").includes(search));
+    // #733: cancelled or unknown-state rows stay out of the plan; one line says how many are hidden.
+    const hidden = data.tasks.filter(task => !listed(task)).length;
+    const hiddenNote = hidden ? `<p class="hidden-note">${esc(L.hiddenStates(hidden))}</p>` : "";
+    let tasks = data.tasks.filter(listed).filter(task => !search || `${task.title} ${task.id} ${task.version}`.toLocaleLowerCase("he-IL").includes(search));
     if (roadmapVersion !== "all") tasks = tasks.filter(t => (t.version || "ללא גרסה") === roadmapVersion);
     if (filter === "queued") tasks = tasks.filter(t => t.state === "queued");
     if (filter === "active") tasks = tasks.filter(task => ["running", "review"].includes(task.state));
     if (filter === "waiting") tasks = tasks.filter(task => ["waiting_owner", "blocked"].includes(task.state));
     if (filter === "done") tasks = tasks.filter(complete);
     if (!tasks.length) {
-      $("#roadmap").innerHTML = empty(data.tasks.length ? "אין משימות שמתאימות לסינון" : "התוכנית המלאה עדיין לא מופתה", data.tasks.length ? "נסה לבחור סינון אחר או לשנות את החיפוש." : "הוסף משימות או ייבא דרישות. כל סעיף יופיע עם סטטוס קוד, אימות, הפצה ותנאי קבלה — בלי להסיק שמיזוג הוא השלמה.");
+      $("#roadmap").innerHTML = hiddenNote + empty(data.tasks.length ? "אין משימות שמתאימות לסינון" : "התוכנית המלאה עדיין לא מופתה", data.tasks.length ? "נסה לבחור סינון אחר או לשנות את החיפוש." : "הוסף משימות או ייבא דרישות. כל סעיף יופיע עם סטטוס קוד, אימות, הפצה ותנאי קבלה — בלי להסיק שמיזוג הוא השלמה.");
       return;
     }
     const groups = [...versions, ...new Set(tasks.map(task => task.version || "ללא גרסה").filter(version => !versions.includes(version)))];
-    $("#roadmap").innerHTML = groups.map(version => {
+    // #733: what is running NOW comes first, across versions (a running V7 task is not buried under V4.5.1).
+    const now = ["all", "active"].includes(filter) ? nowRows(tasks) : "";
+    const nowStrip = now ? `<section class="now-strip" aria-labelledby="now-strip-title"><div class="today-head"><span class="today-icon ok" aria-hidden="true">▶</span><h2 id="now-strip-title">${esc(L.nowTitle)}</h2><span class="today-count">${tasks.filter(t => t.state === "running").length}</span></div><ul class="today-list">${now}</ul></section>` : "";
+    $("#roadmap").innerHTML = nowStrip + groups.map(version => {
       const group = tasks.filter(task => (task.version || "ללא גרסה") === version);
       if (!group.length) return "";
       const fullGroup = data.tasks.filter(task => (task.version || "ללא גרסה") === version);
@@ -532,7 +559,7 @@
         const source = sourceSummary(task);
         return `<button type="button" class="roadmap-row" data-task="${esc(task.id)}"><span class="task-check ${iconClass}" aria-hidden="true">${icon}</span><span><span class="roadmap-task-title">${esc(task.title)}</span><span class="task-progress-fields">${taskFields(task)}</span>${source ? `<span class="source-summary">${esc(source)}</span>` : ""}</span><span class="task-row-end">${scopeLabel(task) ? `<span class="pill scope-pill">${esc(scopeLabel(task))}</span>` : ""}${task.execution_allowed === false && task.state === "queued" ? `<span class="state-pill gray">למיפוי ואימות</span>` : statusPill(task.state)}<span class="task-row-agent">${esc(agent?.label || task.agent_id || task.id)}</span></span></button>`;
       }).join("") + (partIndex && part.length ? "</details>" : "")).join("")}</details>`;
-    }).join("");
+    }).join("") + hiddenNote;
   }
 
   function stashDrafts() {
