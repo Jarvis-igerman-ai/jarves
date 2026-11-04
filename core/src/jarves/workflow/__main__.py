@@ -32,6 +32,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
     ap.add_argument("--port", type=int, default=8188)
+    ap.add_argument("--parent-pid", type=int, default=0, help="serve: exit when this supervisor process is gone (set by the supervisor)")
     ap.add_argument("--no-sync", action="store_true", help="supervisor: no periodic public GitHub metadata reads")
     ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser (open alone prints no link)")
     ap.add_argument("--repo-root", type=Path, default=Path.cwd(), help="bootstrap: current JARVES checkout")
@@ -149,7 +150,7 @@ def main(argv=None) -> int:
             return 1
     if a.action == "serve":
         from .server import serve
-        serve(home, a.port, profile_home=a.profile_home.resolve())
+        serve(home, a.port, profile_home=a.profile_home.resolve(), parent_pid=a.parent_pid)
         return 0
     if a.action == "supervise":
         from .control import supervisor

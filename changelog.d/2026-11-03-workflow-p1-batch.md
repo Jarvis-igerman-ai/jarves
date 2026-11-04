@@ -1,0 +1,1 @@
+- Fixed: the workflow dashboard server now stops itself when its supervisor is gone (it was left running as an orphan), checked by the supervisor PID and start time, never by command line (#789).

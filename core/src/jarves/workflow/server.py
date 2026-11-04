@@ -509,7 +509,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 
 
-def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None = None) -> None:
+def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None = None, parent_pid: int = 0,
+          parent_poll_s: float = 5.0) -> None:
     from . import webchild
     server = Server(home, port, profile_home=profile_home)
     webchild.record(home, server.server_port)  # the pid that actually listens, for the supervisor (#789)
@@ -517,6 +518,8 @@ def serve(home: Path, port: int = 8188, *, ready=None, profile_home: Path | None
     gh_cached(time.time() - 24 * 3600)  # warm the report's GitHub list in the background (#789)
     if ready:
         ready(server)
+    if parent_pid:
+        webchild.watch_parent(server, int(parent_pid), parent_poll_s)  # no orphan once its supervisor is gone (#789)
     try:
         server.serve_forever(poll_interval=0.2)
     finally:

@@ -229,7 +229,8 @@ def supervisor(home: Path, profile_home: Path, port: int = 8188, *, interval: fl
                         command = ([sys.executable, str(entry)] if entry.is_file() else
                                    [sys.executable, "-m", "jarves.workflow"])
                         webchild.reap(home, port, store.record_event)  # the launcher can exit while the server lives
-                        child = popen([*command, "serve", "--home", str(home), "--profile-home", str(profile_home), "--port", str(port)],
+                        child = popen([*command, "serve", "--home", str(home), "--profile-home", str(profile_home), "--port", str(port),
+                                       "--parent-pid", str(os.getpid())],
                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                       **hidden_popen_kwargs())
                         restarts.append(now)
