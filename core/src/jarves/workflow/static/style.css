@@ -317,3 +317,24 @@ dialog{background:var(--surface);border-color:var(--line-strong);color:var(--tex
 /* #733: what runs NOW comes first: a one-line count banner, Working now full width, the plan's Now strip, hidden-state note. */
 .ov-banner{margin:0 0 var(--s2);padding:var(--s2) var(--s3);border:1px solid var(--line);border-radius:var(--radius-s);background:var(--surface-2);color:var(--text);font-size:var(--fs-2);font-weight:600;overflow-wrap:anywhere}.today-running{grid-column:1/-1}
 .now-strip{margin-bottom:var(--s3);padding:var(--s3) var(--s4);border:1px solid var(--line);border-top:4px solid var(--ok);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}.now-strip .today-head h2{font-size:var(--fs-4);font-weight:700;color:var(--text)}.hidden-note{margin-top:var(--s2);font-size:var(--fs-1);color:var(--muted)}
+/* #789 rule 5: five primary tabs plus "עוד"; phone bottom bar = four big targets, no horizontal scroll. */
+.nav-more>summary{list-style:none;cursor:pointer}.nav-more>summary::-webkit-details-marker{display:none}
+.nav-more-menu{display:flex;flex-direction:column;gap:var(--s1);margin-top:var(--s1);padding-right:var(--s3)}
+.nav-phone{display:none}.nav-more:has(.nav-link.active:not(.nav-phone))>summary{color:var(--text);font-weight:600}
+body[data-view="blocked"] :is(.heading-actions,.roadmap-toolbar,#version-nav,.evidence-legend,#roadmap-context){display:none}
+.subnav{display:none;gap:var(--s1);margin-bottom:var(--s3);border-bottom:1px solid var(--line)}
+body[data-view="health"] .subnav,body[data-view="timeline"] .subnav{display:flex}
+.subnav .nav-link{min-height:var(--tap);padding:var(--s2) var(--s3);border-radius:var(--radius-s) var(--radius-s) 0 0;color:var(--muted);font-size:var(--fs-3);display:inline-flex;align-items:center}
+.subnav .nav-link.active{background:var(--accent-soft);color:var(--text);font-weight:600}.subnav .nav-link.active:before{display:none}
+@media(max-width:760px){
+  .main-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-flow:row;grid-auto-columns:auto;overflow:visible;gap:0;padding:var(--s1)}
+  .main-nav>.nav-link,.nav-more>summary{min-height:60px;flex-direction:column;justify-content:center;align-items:center;font-size:var(--fs-1);text-align:center}
+  .main-nav>.nav-wide{display:none}
+  .nav-more>summary{display:flex;height:100%}
+  .nav-more:has(.nav-link.active)>summary{background:var(--accent-soft);color:var(--text);font-weight:600}
+  .nav-more-menu{position:fixed;left:var(--s2);right:var(--s2);bottom:80px;margin:0;padding:var(--s2);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:var(--shadow);z-index:30}
+  .nav-more-menu .nav-link{flex:none;flex-direction:row;justify-content:flex-start;min-height:48px;font-size:var(--fs-3);text-align:start;padding:var(--s2) var(--s3)}
+  .nav-more-menu .nav-count{position:static;margin-right:auto}
+  .nav-phone{display:flex}
+  .subnav .nav-link{flex:1;justify-content:center}
+}

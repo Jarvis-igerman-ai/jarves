@@ -1,0 +1,1 @@
+- Fixed: the workflow dashboard no longer shows "session ended" on the first open from `jarvis workflow open`; navigation is five tabs plus a "more" menu, and the phone bar has four big buttons (#789).

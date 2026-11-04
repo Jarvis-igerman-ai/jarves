@@ -104,6 +104,7 @@
   // health.js and timeline.js draw these two read-only views; app.js only switches to them.
   views.health = ["בריאות", "מי שומר על השומר", "כל שכבה במפעל, מתי נראתה לאחרונה ומה עצר. מתעדכן לבד.", "DEVELOPMENT / FACTORY HEALTH"];
   views.timeline = ["ציר זמן", "מה רץ ומתי זה עצר", "השכבות על ציר זמן, העצירות ותנועת המשימות. אפשר להעתיק כטקסט לדיווח באג.", "DEVELOPMENT / TIMELINE"];
+  views.blocked = ["תקוע", "מה תקוע ולמה", "משימות חסומות, הסיבה ומי יכול לשחרר כל אחת.", "DEVELOPMENT / BLOCKED"];
   let traceRows = [], traceBefore = null, traceLive = true, traceBusy = false, traceUntil = Date.now() / 1000, traceRenderedKey = "", traceRefreshPending = false;
 
   function seconds(value) {
@@ -200,7 +201,10 @@
   // #741: a 401/403 means the private session is gone. Stop everything, drop stale data and show ONE notice, never zeros.
   const OPEN_COMMAND = "jarvis workflow open";
   let ended = false;
-  window.workflowSessionEnded = () => sessionEnded(); // #741: the other scripts report 401/403 through this
+  // #789: overview.js/health.js may fetch while the one-time #token is still being exchanged for the session cookie;
+  // their early 401 must not end a session that is just starting. After the exchange, their 401/403 counts (#741).
+  let sessionReady = false;
+  window.workflowSessionEnded = () => { if (sessionReady) sessionEnded(); }; // #741: the other scripts report 401/403 through this
   function sessionEnded() {
     if (ended) return;
     ended = true;
@@ -536,6 +540,12 @@
     if (filter === "active") tasks = tasks.filter(task => ["running", "review"].includes(task.state));
     if (filter === "waiting") tasks = tasks.filter(task => ["waiting_owner", "blocked"].includes(task.state));
     if (filter === "done") tasks = tasks.filter(complete);
+    // #789 rule 5: the "תקוע" tab is this list with only blocked tasks (the same rule as the Overview "stuck" block).
+    if (filter === "blocked") tasks = tasks.filter(task => task.state === "blocked");
+    if (!tasks.length && filter === "blocked") {
+      $("#roadmap").innerHTML = empty("שום דבר לא תקוע", "כשמשימה תיחסם היא תופיע כאן, עם הסיבה ומי יכול לשחרר אותה.");
+      return;
+    }
     if (!tasks.length) {
       $("#roadmap").innerHTML = hiddenNote + empty(data.tasks.length ? "אין משימות שמתאימות לסינון" : "התוכנית המלאה עדיין לא מופתה", data.tasks.length ? "נסה לבחור סינון אחר או לשנות את החיפוש." : "הוסף משימות או ייבא דרישות. כל סעיף יופיע עם סטטוס קוד, אימות, הפצה ותנאי קבלה — בלי להסיק שמיזוג הוא השלמה.");
       return;
@@ -809,7 +819,7 @@
     const focused = document.activeElement;
     const focusKey = ["data-task", "data-agent-history", "data-task-history", "data-version", "data-version-toggle", "data-filter", "data-overview-metric"].find(k => focused?.hasAttribute(k));
     const focusValue = focusKey && focused.getAttribute(focusKey);
-    renderMetrics(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
+    renderMetrics(); renderBlockedCount(); renderAlerts(); renderAgents(); renderActive(); renderEvents(); renderRoadmap(); renderQuestions(); renderWork();
     // #732: today.js draws the "Today" rows (incl. the former Now strip) from the same state; read-only.
     document.dispatchEvent(new CustomEvent("workflow:render", {detail: {data, complete, age}}));
     const selected = $("#trace-agent").value;
@@ -926,12 +936,30 @@
     catch { /* Presence is never assumed from polling or a failed activity update. */ }
   }
 
+  // Badge on the "תקוע" tab: blocked tasks only, hidden at zero (healthy = calm).
+  function renderBlockedCount() {
+    const stuck = data.tasks.filter(task => task.state === "blocked").length;
+    $$("[data-count=blocked]").forEach(badge => { badge.textContent = String(stuck); badge.hidden = !stuck; });
+  }
+
+  function setFilter(next) {
+    filter = next;
+    $$("[data-filter]").forEach(b => { b.classList.toggle("active", b.dataset.filter === filter); b.setAttribute("aria-pressed", String(b.dataset.filter === filter)); });
+  }
+
   function switchView() {
     const requested = location.hash.replace(/^#/, "");
+    const previous = view;
     view = views[requested] ? requested : "overview";
-    $$(".view").forEach(section => { section.hidden = section.id !== `view-${view}`; });
-    $$(".nav-link").forEach(link => {
-      const active = link.dataset.view === view;
+    // "תקוע" reuses the plan list with a blocked-only filter; leaving it restores the full plan.
+    if (view === "blocked") { roadmapVersion = "all"; $("#task-search").value = ""; setFilter("blocked"); renderRoadmap(); }
+    else if (previous === "blocked" && view === "roadmap") { setFilter("all"); renderRoadmap(); }
+    const section = view === "blocked" ? "roadmap" : view;
+    $$(".view").forEach(item => { item.hidden = item.id !== `view-${section}`; });
+    const more = $("#nav-more");
+    if (more) more.open = false;
+    $$(".nav-link[data-view]").forEach(link => {
+      const active = link.dataset.view === view || link.dataset.also === view;
       link.classList.toggle("active", active);
       if (active) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
     });
@@ -1180,6 +1208,9 @@
     finally { busyButtons.delete(button); button.disabled = !connected; }
   });
   window.addEventListener("hashchange", switchView);
+  // The "עוד" menu closes on an outside click or Escape (focus returns to its button).
+  document.addEventListener("click", event => { const more = $("#nav-more"); if (more?.open && !more.contains(event.target)) more.open = false; });
+  document.addEventListener("keydown", event => { const more = $("#nav-more"); if (event.key === "Escape" && more?.open) { more.open = false; $("summary", more).focus(); } });
   window.addEventListener("online", refresh);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   document.addEventListener("pointerdown", renewPresence, {passive: true});
@@ -1205,6 +1236,7 @@
       try { await api("/api/session", {token}); }
       catch (error) { if (error.sessionEnded) return; connectionState(false, error.message); switchView(); return; }
     }
+    sessionReady = true;
     switchView();
     await refresh();
     if (ended) return;
