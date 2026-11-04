@@ -120,6 +120,95 @@ class WorkerWatchTests(unittest.TestCase):
         self.store.post_manager_note("WORKERS_SHORT", "later")
         self.assertEqual(self.event("Stop").get("decision"), "block")
 
+    def seed_source(self):
+        self.store.set_source({"mode": "github", "synced_at": 1,
+                               "open_issues": [{"number": 11, "state": "open", "labels": ["bug", "P2"], "title": "a"},
+                                               {"number": 12, "state": "open", "labels": ["docs"], "title": "b"},
+                                               {"number": 919, "state": "open", "labels": ["agent-doable"], "title": "c"}],
+                               "open_prs": [{"number": 5, "labels": [], "draft": False},
+                                            {"number": 6, "labels": [], "draft": True}]})
+
+    def test_open_work_counts_issues_without_task_and_prs(self):
+        self.seed_source()
+        self.store.create_task({"id": "gh-919", "title": "Has task", "execution_allowed": False})
+        work = watch.open_work(self.store.snapshot())
+        self.assertEqual((work["issues"], work["prs"]), ([11], [5]))
+
+    def test_idle_alarm_notes_rate_limited_and_never_pushes_to_core(self):
+        self.seed_source()
+        self.start(0)
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])  # activity is fresh
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        self.assertTrue(watch.watch(self.store, POLICY)["idle_alarm"])
+        self.assertTrue(any("IDLE_WORK" in n["subject"] for n in self.store.take_manager_notes()))
+        self.now[0] += 400  # inside the 30 min note rate limit
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])
+        self.assertEqual(self.store.take_manager_notes(), [])
+        # the watcher has no Core notify path at all: a Core notify toasts and speaks
+        import inspect
+        self.assertNotIn("notify", inspect.signature(watch.watch).parameters)
+        self.assertNotIn("bridge_notify", inspect.getsource(watch))
+
+    def test_idle_state_becomes_incident_and_clears(self):
+        from jarves.workflow import observability
+        self.seed_source()
+        self.start(0)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        watch.watch(self.store, POLICY)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        watch.watch(self.store, POLICY)
+        self.assertTrue(any(i["kind"] == "idle_work" for i in observability.health(self.store)["incidents"]))
+        self.store.set_source({"mode": "github", "synced_at": 2, "open_issues": [], "open_prs": []})
+        watch.watch(self.store, POLICY)
+        self.assertFalse(any(i["kind"] == "idle_work" for i in observability.health(self.store)["incidents"]))
+
+    def test_backwards_clock_is_clamped(self):
+        watch.watch(self.store, POLICY)
+        self.now[0] -= 500
+        age = watch.run_age(self.store)
+        self.assertEqual((age["age_s"], age["state"]), (0.0, "ok"))
+        self.assertIn("action", watch.watch(self.store, POLICY))
+
+    def test_no_idle_alarm_without_free_slots_or_work(self):
+        self.start(0)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])  # no work
+        self.seed_source()
+        self.assertFalse(watch.watch(self.store, {})["idle_alarm"])  # allowed 0: no free slot
+
+    def test_run_age_and_dead_wrapper_incident(self):
+        from jarves.workflow import observability
+        self.assertEqual(observability.health(self.store)["worker_watch"]["state"], "never")
+        watch.watch(self.store, POLICY)
+        self.now[0] += 60
+        self.assertEqual(observability.health(self.store)["worker_watch"]["age_s"], 60.0)
+        self.now[0] += watch.RUN_DEAD_S
+        health = observability.health(self.store)
+        self.assertEqual(health["worker_watch"]["state"], "dead")
+        self.assertTrue(any(i["kind"] == "worker_watch_dead" for i in health["incidents"]))
+
+
+    def test_eight_hours_makes_no_push_and_few_notes(self):
+        self.seed_source()
+        self.start(0)
+        notes = []
+        for _ in range(96):  # wrapper every 5 min for 8 h
+            self.now[0] += 300
+            watch.watch(self.store, POLICY, send=lambda a, b: notes.append(a))
+        self.assertLessEqual(len(notes), 17)  # one note per 30 min at most; never a per-run repeat
+
+    def test_owner_gated_work_is_not_idle_work(self):
+        self.store.set_source({"mode": "github", "synced_at": 1,
+                               "open_issues": [{"number": 1, "state": "open", "labels": ["bug", "owner-gated"]},
+                                               {"number": 2, "state": "open", "labels": ["bug", "known-issue-x"]}],
+                               "open_prs": [{"number": 3, "labels": ["no-automerge"], "draft": False},
+                                            {"number": 4, "labels": [], "draft": False, "auto_merge": True}]})
+        work = watch.open_work(self.store.snapshot())
+        self.assertEqual((work["issue_count"], work["pr_count"], work["tier_r_prs"]), (0, 0, [3]))
+        self.start(0)
+        self.now[0] += watch.IDLE_ALARM_S + 1
+        self.assertFalse(watch.watch(self.store, POLICY)["idle_alarm"])
+
 
 if __name__ == "__main__":
     unittest.main()
