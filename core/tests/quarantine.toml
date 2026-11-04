@@ -51,3 +51,9 @@ issue = 778
 since = "2026-11-04"
 reason = "substring '4321' can appear by chance in ids or ports; use a long unique private token (earlier showstopper 481 closed); tracked in 778"
 
+
+[[test]]
+id = "test_agents_managed.py::test_codex_approval_request_goes_to_the_owner"
+issue = 946
+since = "2026-11-04"
+reason = "Windows shard 3/4 on PR 942: state still RUNNING right after last_summary was set; wait for IDLE instead of asserting at once"

@@ -66,7 +66,7 @@ def test_default_output_is_one_line_without_espeak_on_windows(say_env, capsys, m
     assert cli.main(["say", "שלום"]) == 0
     out = capsys.readouterr()
     lines = [x for x in (out.out + out.err).splitlines() if x.strip()]
-    assert len(lines) == 1 and lines[0].startswith("Speaking with openai-tts")
+    assert len(lines) == 1 and lines[0].startswith("Speaking with openai-tts"), lines   # #422: show the extra line
     assert "espeak" not in (out.out + out.err).lower()
 
 

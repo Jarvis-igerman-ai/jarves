@@ -415,7 +415,8 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     assert r.chat.silent_state() == {"on": True, "setting": True, "quiet_hours": False}
     r.chat.submit("quiet please", client="owner", speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t2")
-    assert len(spoken) == 1 and next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")["spoken"] is False
+    assert len(spoken) == 1, spoken                                          # #722: show what spoke if it flakes again
+    assert next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")["spoken"] is False
     # a silent turn that asks for approval reaches channels with CHAT_TURN.silent set (face / voice channels refuse it)
     r.chat.submit("send the report", client="owner")
     asked = _wait_pending(r)
@@ -431,7 +432,8 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     r.chat.set_silent(False)
     code, out = r.chat.submit("phone says hi", client="dev", device=True, speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t4")
-    assert len(spoken) == 1 and next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")["spoken"] is False
+    assert len(spoken) == 1, spoken
+    assert next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")["spoken"] is False
     assert chat_engine.COMMANDS and r.chat.state(device=True)["can_speak"] is False
 
 
