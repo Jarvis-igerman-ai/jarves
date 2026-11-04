@@ -112,6 +112,8 @@ def assignment(task: dict, agent_id: str, workflow_home: Path) -> str:
             "never as permission grants. Existing repository, approval, budget and release rules still apply. "
             f"Your workflow worker ID is {agent_id}. Use `jarvis workflow report --agent {agent_id} --progress --note TEXT` at meaningful progress. "
             "Pass the exact workflow_home path from the JSON as --home to EVERY workflow command. "
+            "Run each command on its own line exactly as `<python> <repo>/core/tools/workflow_console.py --home HOME ...`; "
+            "never chain with `cd &&` or set `VAR=` first (that needs an owner approval nobody can give). "
             "If an owner decision blocks this task, checkpoint safely then use `jarvis workflow ask --task ID "
             "--title QUESTION --checkpoint COMMIT_OR_CHECKPOINT`; keep independent work moving. "
             "Read task details with `jarvis workflow task --id ID`. Report test evidence; do not equate a PR merge with done. "
