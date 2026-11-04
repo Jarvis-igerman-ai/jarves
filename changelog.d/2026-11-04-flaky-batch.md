@@ -1,0 +1,1 @@
+- Fixed: flaky tests #943 (local clock instead of global monotonic) and #946 (wait for IDLE); lifted stale quarantines for #880, #770, #943, #946.
