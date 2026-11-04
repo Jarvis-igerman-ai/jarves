@@ -45,6 +45,11 @@ he = "מיקוד דינמי: המנהל והטייס האוטומטי קובעי
 en = "Dynamic focus: the manager and the autopilot set priorities from the load. Many open PRs (6 or more, or 3 green ones waiting) move the focus to merge. Two or more showstopper/P0 issues move it to fix. A red main beats everything. jarvis workflow focus shows the focus, the reasons and the lane plan (--json for machines). The focus changes only after two looks in a row, never exceeds max_concurrent and never leaves merging without a worker. Beta, OFF by default. Turn on: jarvis workflow autopilot set focus_enabled true. A lane configured with 0 workers stays at 0 in every focus. Thresholds: focus_pr_high, focus_green_high, focus_showstopper_high."
 action = "command:jarvis workflow focus"
 
+[[steps]]
+he = "מי מנהל את זרימת העבודה: jarvis workflow manager status מראה אם המנהל הוא Claude המקורי (ברירת מחדל) או JARVES. jarvis workflow manager set jarves רק בוחר ורק מהמסוף של הבעלים (לא מסוכן או תת-סוכן); הוא לא מפעיל כלום ולא מאשר כלום. רק מתזמן אחד מחזיק את הנעילה בפרופיל, עם מזהה התהליך הארוך שלו ואסימון סודי לשחרור: אם מתזמן שלקח את הנעילה עדיין רץ ההחלפה נדחית, ובהפעלה מחדש לא מתחיל מתזמן שני. הנעילה נאכפת רק על מי שלוקח אותה. המצב הזה בטא וכבוי."
+en = "Who manages the workflow: jarvis workflow manager status shows whether the manager is native Claude (default) or JARVES. jarvis workflow manager set jarves only chooses, and only from the owner's own terminal (not agents or subagents); it starts nothing and approves nothing. Only one scheduler holds the lock per profile, recorded with its long-lived process id and a secret release token: switching is refused while a scheduler that took the lock still runs, and a restart never starts a second scheduler. The lock binds only schedulers that acquire it. This mode is beta and off."
+action = "command:jarvis workflow manager status"
+
 [[problems]]
 he = "משימה נחסמה אחרי שני קיפאונות"
 en = "A task was blocked after two stalls"
