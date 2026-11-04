@@ -1158,7 +1158,8 @@ class Orchestrator:
         except Exception:                                  # never block a start on a policy read
             override = None
         console = Path(__file__).resolve().parents[2].parent / "tools" / "workflow_console.py"
-        return claude.autopilot_allowed_tools(sys.executable, override, str(console) if console.is_file() else "")
+        return claude.autopilot_allowed_tools(sys.executable, override, str(console) if console.is_file() else "",
+                                             str(self.home / "workflow"))
 
     def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "",
                       env: dict | None = None) -> dict:

@@ -31,24 +31,24 @@ def test_allow_list_has_only_the_worker_subcommands_of_the_workflow_console():
     from jarves.orchestrator import claude
     py, con = r"C:\py\python.exe", r"C:\repo\core\tools\workflow_console.py"
     fwd = py.replace("\\", "/")
-    rules = claude.autopilot_allowed_tools(py, console=con)
-    for p in (py, fwd):
-        for c in (con, con.replace("\\", "/")):
-            for sub in claude.WORKER_CONSOLE_SUBCOMMANDS:
-                assert f"Bash({p} {c} --home * {sub} *)" in rules
+    home = r"C:\wf\home"
+    rules = claude.autopilot_allowed_tools(py, console=con, home=home)
+    for p, c, h in ((py, con, home), (fwd, con.replace("\\", "/"), home.replace("\\", "/"))):
+        for sub in claude.WORKER_CONSOLE_SUBCOMMANDS:
+            assert f"Bash({p} {c} --home {h} {sub} *)" in rules
     assert set(claude.WORKER_CONSOLE_SUBCOMMANDS) == {"next", "report", "task", "check", "transition", "ask", "check-touch",
                                                       "own", "msg", "status"}
     assert not any(r.endswith(":*)") and "workflow_console" in r for r in rules)
     assert f"Bash({py}:*)" not in rules and f"Bash({fwd}:*)" not in rules
     assert not any("workflow_console" in r for r in claude.autopilot_allowed_tools(py))
-    assert claude.autopilot_allowed_tools(py, override=["Bash(ls:*)"], console=con) == ["Bash(ls:*)"]
+    assert claude.autopilot_allowed_tools(py, override=["Bash(ls:*)"], console=con, home=home) == ["Bash(ls:*)"]
 
 
 @pytest.mark.parametrize("sub", ["autopilot", "authorize", "bootstrap", "dispatch", "seed", "sync", "recover",
                                  "close-superseded", "answer", "confirm", "reopen", "unlock", "open"])
 def test_owner_subcommands_are_not_allowed_for_workers(sub):
     from jarves.orchestrator import claude
-    rules = claude.autopilot_allowed_tools("/py/python", console="/r/workflow_console.py")
+    rules = claude.autopilot_allowed_tools("/py/python", console="/r/workflow_console.py", home="/h")
     assert not any(f" {sub} " in r or r.endswith(f" {sub})") for r in rules if "workflow_console" in r)
 
 
@@ -59,6 +59,36 @@ def test_autopilot_authorize_bootstrap_refuse_in_agent_environment(monkeypatch, 
     monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
     assert wf.main(argv) == 2
     assert "refused" in capsys.readouterr().err
+
+
+def _matches(rules, line):
+    """Claude-Code-style match: `*` spans anything including spaces."""
+    import fnmatch
+    return any(fnmatch.fnmatchcase(line, r[len("Bash("):-1]) for r in rules if r.startswith("Bash(") and ":*" not in r)
+
+
+def test_allow_rules_are_anchored_on_the_exact_home_and_first_subcommand():
+    from jarves.orchestrator import claude
+    py, con, home = "/py/python", "/r/workflow_console.py", "/h/workflow"
+    rules = claude.autopilot_allowed_tools(py, console=con, home=home)
+    base = f"{py} {con}"
+    assert _matches(rules, f"{base} --home {home} next --agent a --task t")
+    assert not _matches(rules, f"{base} --home {home} dispatch --note next")
+    assert not _matches(rules, f"{base} --home x authorize --task t --note next")
+    assert not _matches(rules, f"{base} --home {home} authorize --task T --note next")
+    assert not _matches(rules, f"{base} --home ask --home {home} autopilot start next x")
+    assert not _matches(rules, f"{base} --home /other next")
+    assert not any("workflow_console" in r for r in claude.autopilot_allowed_tools(py, console=con))   # no home, no rule
+
+
+@pytest.mark.parametrize("argv", [["--home", "ask", "--home", "H", "autopilot", "start", "next", "x"],
+                                  ["--home", "H", "--note", "status", "authorize", "--task", "T", "--note", "next"]])
+def test_refusal_uses_the_real_parsed_action(monkeypatch, capsys, argv):
+    from jarves.workflow import __main__ as wf
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    assert wf.main(argv) == 2
+    assert "refused" in capsys.readouterr().err
+    assert wf._action_of(argv) in wf.AGENT_REFUSED
 
 
 def test_agent_environment_does_not_refuse_ordinary_text_mentioning_autopilot(monkeypatch):

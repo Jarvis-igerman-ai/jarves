@@ -130,8 +130,14 @@ def agent_messages(store, a) -> int:
 
 
 def _action_of(av) -> str:
-    choices = next(act for act in parser()._actions if act.dest == "action").choices
-    return next((x for x in av if x in choices), "")
+    """The action argparse itself will run (option values never count); "" when the line does not parse."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            return parser().parse_known_args(list(av))[0].action or ""
+    except SystemExit:
+        return ""
 
 
 def main(argv=None) -> int:

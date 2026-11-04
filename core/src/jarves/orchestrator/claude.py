@@ -272,7 +272,8 @@ WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own
 WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
 
 
-def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "") -> list[str]:
+def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
+                           home: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
     Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
     if override:
@@ -281,11 +282,12 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None,
     if python:
         for p in sorted({python, python.replace("\\", "/")}):
             rules.append(f"Bash({p} -m pytest:*)")
-            if console:        # #784: exactly the workflow CLI, in both slash forms; not the whole interpreter
-                for c in sorted({console, console.replace("\\", "/")}):
-                    for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home HOME <sub> ...`
-                        rules.append(f"Bash({p} {c} --home * {sub})")
-                        rules.append(f"Bash({p} {c} --home * {sub} *)")
+        if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
+            for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
+                p, c, h = conv
+                for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home <exact HOME> <sub> ...`
+                    rules.append(f"Bash({p} {c} --home {h} {sub})")
+                    rules.append(f"Bash({p} {c} --home {h} {sub} *)")
     return rules
 
 
