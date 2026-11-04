@@ -1,1 +1,1 @@
-- Fixed: flaky tests #943 (local clock instead of global monotonic) and #946 (wait for IDLE); lifted stale quarantines for #880, #770, #943, #946.
+- Fixed: flaky-test batch: the undeclared slow probe test no longer relies on a 0.3 s wall-clock budget (#968), and the correlation-id log test is back in the blocking suite (it already uses a unique token, #548).

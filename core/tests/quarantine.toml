@@ -45,9 +45,4 @@ issue = 778
 since = "2026-11-04"
 reason = "Windows: dashboard_load took 50 s against a 30 s budget on a loaded runner (earlier showstoppers 707 and 367); tracked in 778"
 
-[[test]]
-id = "test_core.py::test_logs_have_correlation_ids_and_no_private_text"
-issue = 778
-since = "2026-11-04"
-reason = "substring '4321' can appear by chance in ids or ports; use a long unique private token (earlier showstopper 481 closed); tracked in 778"
 
