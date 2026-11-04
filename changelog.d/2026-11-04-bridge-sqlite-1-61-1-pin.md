@@ -1,0 +1,1 @@
+- Fixed: WhatsApp bridge: bump modernc.org/sqlite to 1.61.1 and update the pinned bridge SHA256 in packaging/bridge_pin.json (the pin check failed on the dependency bump).
