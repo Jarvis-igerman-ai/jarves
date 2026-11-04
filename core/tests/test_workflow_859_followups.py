@@ -38,7 +38,7 @@ class GitNoteTests(unittest.TestCase):
         # Fake clock: 252557.90562814512 + 0.6 - 252557.90562814512 > 0.6 in floating point, which failed
         # on Windows with the real clock. The timeouts must still stay inside (0, budget].
         with mock.patch.object(hooks.subprocess, "run", fake_run), \
-                mock.patch.object(hooks.time, "monotonic", side_effect=[252557.90562814512] + [252557.9056281452] * 4):
+                mock.patch.object(hooks, "time", mock.Mock(monotonic=mock.Mock(side_effect=[252557.90562814512] + [252557.9056281452] * 4))):
             first = hooks.git_base_note("C:/nowhere")
             second = hooks.git_base_note("C:/nowhere")  # database retry path
         self.assertEqual(first, second)
@@ -47,7 +47,7 @@ class GitNoteTests(unittest.TestCase):
         self.assertLessEqual(hooks.GIT_NOTE_BUDGET_S, 1.0)
 
     def test_exhausted_budget_degrades_without_a_third_call(self):
-        with mock.patch.object(hooks.time, "monotonic", side_effect=[0.0, 0.1, 5.0]), \
+        with mock.patch.object(hooks, "time", mock.Mock(monotonic=mock.Mock(side_effect=[0.0, 0.1, 5.0]))), \
                 mock.patch.object(hooks.subprocess, "run", return_value=mock.Mock(stdout="x")) as run:
             note = hooks.git_base_note("C:/other")
         self.assertIn("could not be verified", note)

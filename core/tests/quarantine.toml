@@ -41,12 +41,6 @@ since = "2026-11-04"
 reason = "Windows shard 3/4: an extra 'unhandled exception' line appeared in the captured output once"
 
 [[test]]
-id = "test_workflow_859_followups.py::test_exhausted_budget_degrades_without_a_third_call"
-issue = 943
-since = "2026-11-04"
-reason = "Windows shard 4/4 on PR 937: StopIteration from the mocked global time.monotonic (3 values consumed by other callers); use a local clock"
-
-[[test]]
 id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
 issue = 770
 since = "2026-11-04"
