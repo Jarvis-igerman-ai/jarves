@@ -4,7 +4,7 @@
   2. the SHA being published is exactly the SHA that was verified (candidate commit; its jarves-checks run is green)
   3. (retired) the legacy bug tables and release checklist rows are printed as information ("legacy, not gating"); the
      live GitHub P0-P2 issues (item 4) are the single source of truth (owner 26 Oct 2026, simple-releases OD-S2)
-  4. no open GitHub issue labelled P0, and no open P1 without the owner label (P2/P3 are carried, not blocking). Planned work (label enhancement, v5-v9 or 4.5.1) is not a defect and is
+  4. no open GitHub issue labelled P0, and no open P1 without the owner label (a P1 labelled flaky-test/dev-tool without `security` is printed separately and does not block; P2/P3 are carried, not blocking). Planned work (label enhancement, v5-v9 or 4.5.1) is not a defect and is
      skipped ONLY when the issue is not also labelled bug.
      An open P1 labelled `known-issue-4.5` (owner-only label) is an accepted known issue: not a blocker, printed in the report
   5. the owner's manual test sign-off exists for this version (docs/reviews/MANUAL_TEST_<version>.md): every row pass
@@ -162,6 +162,11 @@ def carried_list(issues: list[dict]) -> list[str]:
     return [f"#{n} ({sev}): {title}" for n, sev, title in rf.carried_issues(issues)]
 
 
+def exempted_p1_list(issues: list[dict]) -> list[str]:
+    """Open P1s not blocking via flaky-test/dev-tool (no security label); printed as P1s, apart from P2/P3."""
+    return [f"#{n} ({sev}): {title}" for n, sev, title in rf.exempted_p1_issues(issues)]
+
+
 def legacy_report(checklist_text: str | None, bug_tables: list) -> list[str]:
     """INFORMATION only (retired from the gate): the old checklist rows and bug-table rows that still read as open."""
     out: list[str] = []
@@ -287,6 +292,13 @@ def _print_carried(carried: list[str]) -> None:
             print(f"  - {c}")
 
 
+def _print_exempted(exempt: list[str]) -> None:
+    if exempt:
+        print(f"non-blocking P1 issues ({len(exempt)}, label flaky-test/dev-tool, no security label; verify the label is justified):")
+        for e in exempt:
+            print(f"  - {e}")
+
+
 def _print_legacy(legacy: list[str]) -> None:
     print(f"legacy, not gating ({len(legacy)} line(s); bug tables and checklist are retired, live issues decide):")
     for x in legacy:
@@ -331,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     accepted = accepted_issues(issues)
     carried = carried_list(issues)
+    exempt = exempted_p1_list(issues)
     legacy = legacy_report(cl.read_text(encoding="utf-8") if cl else None, tables)
     problems = run_gate(tag=a.tag, sha=a.sha, verified_sha=verified, build_version=build_version, root=root,
                         checklist_text=cl.read_text(encoding="utf-8") if cl else None, bug_tables=tables,
@@ -349,12 +362,14 @@ def main(argv: list[str] | None = None) -> int:
         for p in problems:
             print(f"  - {p}")
         _print_accepted(accepted)
+        _print_exempted(exempt)
         _print_carried(carried)
         _print_legacy(legacy)
         return 1
     print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, "
           "no open P0/P1, manual sign-off complete and signed")
     _print_accepted(accepted)
+    _print_exempted(exempt)
     _print_carried(carried)
     _print_legacy(legacy)
     return 0

@@ -69,10 +69,15 @@ def _severity(issue: dict) -> str | None:
     return f"P{min(sevs)}" if sevs else None
 
 
+# P1s that never block a stable (owner rule 3 Nov 2026): test flakes and developer tooling, not a user scenario.
+NON_BLOCKING_P1_LABELS = ("flaky-test", "dev-tool")
+
+
 def _classify(issues: list[dict]):
     blockers: list[tuple[int | None, str, str]] = []
     accepted: list[tuple[int | None, str, str]] = []
     carried: list[tuple[int | None, str, str]] = []
+    exempt: list[tuple[int | None, str, str]] = []
     for i in issues:
         if "pull_request" in i or str(i.get("state", "open")) != "open":
             continue
@@ -83,13 +88,16 @@ def _classify(issues: list[dict]):
         if sev == "P0":
             blockers.append(row)                       # P0 always blocks, even with the accepted label
         elif sev == "P1":
-            if any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
+            names = [l.lower() for l in _label_names(i)]
+            if ACCEPTED_LABEL in names:
                 accepted.append(row)
+            elif "security" not in names and any(n in NON_BLOCKING_P1_LABELS for n in names):
+                exempt.append(row)                     # flaky-test / dev-tool P1 (no security label): own list, not blocking
             else:
                 blockers.append(row)
         else:
             carried.append(row)                        # P2/P3 no longer block (owner rule 3 Nov 2026)
-    return blockers, accepted, carried
+    return blockers, accepted, carried, exempt
 
 
 def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str]], list[tuple[int | None, str, str]]]:
@@ -97,8 +105,9 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
 
     Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs).
     Blockers: every open P0, and every open P1 without the owner-only label `known-issue-4.5` (exact).
-    Accepted: open P1 carrying that label (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
-    b, a, _ = _classify(issues)
+    Accepted: open P1 carrying that label (printed, not a blocker). Open P2/P3 never block: see carried_issues.
+    A P1 labelled flaky-test/dev-tool (case-insensitive) is not a blocker unless it also has `security`: see exempted_p1_issues."""
+    b, a, _, _ = _classify(issues)
     return b, a
 
 
@@ -107,11 +116,19 @@ def carried_issues(issues: list[dict]) -> list[tuple[int | None, str, str]]:
     return _classify(issues)[2]
 
 
+def exempted_p1_issues(issues: list[dict]) -> list[tuple[int | None, str, str]]:
+    """Open P1s not blocking because of flaky-test/dev-tool (never with `security`): reported as P1, apart from P2/P3."""
+    return _classify(issues)[3]
+
+
 def check_issues(issues: list[dict]) -> Check:
     bad, accepted = classify_issues(issues)
     note = ""
     if accepted:
         note = f"; accepted known issues ({ACCEPTED_LABEL}): " + ", ".join(f"#{n} {s}" for n, s, _ in accepted)
+    exempt = exempted_p1_issues(issues)
+    if exempt:
+        note += "; non-blocking P1 (flaky-test/dev-tool): " + ", ".join(f"#{n} {t}" for n, _, t in exempt)
     carried = carried_issues(issues)
     if carried:
         note += f"; known issues carried into this release: {len(carried)} open P2/P3"

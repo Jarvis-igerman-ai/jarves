@@ -1,0 +1,1 @@
+- Fixed: release gate no longer blocks on open P1 issues labelled flaky-test or dev-tool (owner rule 3 Nov 2026); they are printed as known issues. P0 and other P1 still block.
