@@ -144,7 +144,7 @@ def _action_of(av) -> str:
 # what argparse really parses. Every other action (create, dispatch, seed, sync, recover, questions-rewrite, authorize,
 # bootstrap, handover, close-superseded, agent, serve ...) is owner/manager only.
 WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
-                                    "msg", "check-touch", "layer-beat", "timeline", "health", "now", "trace", "autopilot"})
+                                    "msg", "check-touch", "timeline", "health", "now", "trace", "autopilot"})
 
 
 def worker_refusal(av) -> str:
