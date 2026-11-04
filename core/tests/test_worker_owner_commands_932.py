@@ -47,3 +47,11 @@ def test_no_blanket_interpreter_or_file_writer_rule(word):
 
 def test_policy_file_name_is_denied_in_any_command():
     assert "Bash(*autopilot.json*)" in WORKER_DENY
+
+
+def test_unlock_for_an_agent_reaches_the_owner_guard_not_the_allow_list(monkeypatch, tmp_path):
+    """unlock is owner-only: the agent is refused by owner_only_guard (exit 3), never allowed through."""
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    assert wf.worker_refusal(["--home", "H", "unlock"]) == ""
+    assert wf.main(["--home", str(tmp_path), "--profile-home", str(tmp_path), "unlock"]) == 3
+    assert not (tmp_path / "unlock.json").exists()

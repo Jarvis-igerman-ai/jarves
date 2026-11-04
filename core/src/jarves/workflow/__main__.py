@@ -147,7 +147,7 @@ WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transit
                                     "msg", "check-touch", "timeline", "health", "now", "trace", "autopilot"})
 
 
-OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more"})
+OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more", "unlock"})
 
 
 def worker_refusal(av) -> str:
