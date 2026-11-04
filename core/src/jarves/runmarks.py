@@ -75,7 +75,7 @@ def _face_running() -> bool:
     if sys.platform != "win32":
         return False
     out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq JARVES Face.exe", "/NH"], capture_output=True, text=True,
-                         timeout=10).stdout
+                         timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     return "JARVES Face.exe" in out
 
 
