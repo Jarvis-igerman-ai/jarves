@@ -44,7 +44,8 @@ def test_flaky_and_dev_tool_p1_do_not_block_but_p0_does():
     p0 = {"number": 23, "state": "open", "labels": [{"name": "P0"}, {"name": "flaky-test"}]}
     plain = {"number": 24, "state": "open", "labels": [{"name": "P1"}]}
     assert rf.check_issues([flaky, tool]).ok
-    assert [n for n, _, _ in rf.carried_issues([flaky, tool])] == [21, 22]
+    assert [n for n, _, _ in rf.exempted_p1_issues([flaky, tool])] == [21, 22]
+    assert rf.carried_issues([flaky, tool]) == []
     assert not rf.check_issues([p0]).ok and not rf.check_issues([plain]).ok
 
 
@@ -179,3 +180,25 @@ def test_status_ignores_legacy_bug_tables_and_checklists(tmp_path):
     (rev / "RELEASE_CHECKLIST_4.5.0.md").write_text("| 3 | thing | open |\n")
     checks = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
     assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
+
+
+def test_security_p1_still_blocks_with_flaky_or_dev_tool_label():
+    sec = {"number": 31, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}, {"name": "Security"}]}
+    sec2 = {"number": 32, "state": "open", "labels": [{"name": "P1"}, {"name": "dev-tool"}, {"name": "security"}]}
+    assert not rf.check_issues([sec]).ok and not rf.check_issues([sec2]).ok
+    assert [n for n, _, _ in rf.classify_issues([sec, sec2])[0]] == [31, 32]
+    assert rf.exempted_p1_issues([sec, sec2]) == []
+
+
+def test_mixed_case_flaky_label_is_exempt_and_listed_as_p1_not_carried():
+    mixed = {"number": 33, "state": "open", "title": "t", "labels": [{"name": "P1"}, {"name": " Flaky-Test "}]}
+    assert rf.check_issues([mixed]).ok
+    assert rf.exempted_p1_issues([mixed]) == [(33, "P1", "t")]
+    assert rf.carried_issues([mixed]) == []
+    assert "non-blocking P1" in rf.check_issues([mixed]).detail
+
+
+def test_known_issue_label_takes_precedence_over_flaky_test():
+    both = {"number": 34, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}, {"name": "known-issue-4.5"}]}
+    assert [n for n, _, _ in rf.classify_issues([both])[1]] == [34]
+    assert rf.exempted_p1_issues([both]) == []

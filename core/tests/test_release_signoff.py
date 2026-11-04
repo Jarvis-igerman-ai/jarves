@@ -465,3 +465,11 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
     assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
+
+
+def test_gate_prints_exempted_p1_as_p1(capsys):
+    iss = [{"number": 41, "state": "open", "title": "t41", "labels": [{"name": "P1"}, {"name": "dev-tool"}]}]
+    lst = gate.exempted_p1_list(iss)
+    assert lst == ["#41 (P1): t41"] and gate.carried_list(iss) == []
+    gate._print_exempted(lst)
+    assert "non-blocking P1 issues (1" in capsys.readouterr().out
