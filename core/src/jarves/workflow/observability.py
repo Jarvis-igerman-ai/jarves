@@ -367,7 +367,20 @@ def health(store, now: float | None = None) -> dict:
         focus_view = None
     from . import watch as _watch
     return {"layers": layers(store, now), "incidents": incidents, "usage": shown, "now": now, "verdict": verdict(store, now),
-            "focus": focus_view, "worker_watch": _watch.run_age(store, now)}
+            "focus": focus_view, "worker_watch": _watch.run_age(store, now), "merge_policy": merge_policy_view(store)}
+
+
+def merge_policy_view(store) -> dict | None:
+    """Merge steward threshold and recorded-cycle numbers (#777); None when the tools dir is not shipped."""
+    try:
+        import sys
+        tools = Path(__file__).resolve().parents[4] / "core" / "tools"
+        if str(tools) not in sys.path:
+            sys.path.append(str(tools))
+        import merge_policy
+        return merge_policy.view(merge_policy.history_from_store(store))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ---- supervisor wiring ----------------------------------------------------------------------------------------
