@@ -1000,7 +1000,15 @@ def api_updates_install(ctx, m, body):
     silent = (body or {}).get("silent") is True
     try:
         r = _checker(ctx).prepare_install((body or {}).get("approve") is True)
-        launch_installer(r["installer"], verified=r, silent=silent, restart=silent)
+        was = None
+        if silent:                          # #166: the Core serves this request, so it ran; hand setup the rest too
+            from .runmarks import detect_running
+            try:
+                was = detect_running(ctx.home, core_up=True)
+                record_was_running(ctx.home, was)
+            except Exception:
+                was = None                  # unknown: setup detects by itself
+        launch_installer(r["installer"], verified=r, silent=silent, restart=silent, was_running=was)
     except UpdateError as e:
         return 409, {"error": e.message, "code": e.code}
     return 200, {**r, "note": "setup is running; it closes JARVES, keeps your data and starts it again" if silent else

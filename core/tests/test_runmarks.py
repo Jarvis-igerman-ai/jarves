@@ -28,3 +28,19 @@ def test_marker_is_removed_by_its_owner_only(tmp_path):
 
 def test_unwritable_home_never_stops_the_dashboard(tmp_path):
     runmarks.write_dashboard(tmp_path / "missing" / "dir", [])
+
+
+def test_face_probe_hides_the_console_window(monkeypatch):
+    import subprocess
+    import sys
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen.update(kw)
+        return SimpleNamespace(stdout="JARVES Face.exe  123 Console")
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    assert runmarks._face_running() is True
+    assert seen["creationflags"] == 0x08000000
