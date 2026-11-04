@@ -396,7 +396,10 @@ class Store:
         if (source.get("mode") != "github" or source.get("error") or source.get("truncated")
                 or not source.get("open_prs") or not isinstance(synced, (int, float)) or now - synced > DEAD_SYNC_MAX_AGE_S):
             return len(blocked), False, []
-        open_numbers = {int(p["number"]) for p in source["open_prs"] if isinstance(p, dict) and "number" in p}
+        try:
+            open_numbers = {int(p["number"]) for p in source["open_prs"] if isinstance(p, dict) and "number" in p}
+        except (TypeError, ValueError):
+            return len(blocked), False, []
         needed = {d for t in tasks if t["state"] not in {"verified", "done", "cancelled"} for d in t.get("depends_on", [])}
         questions = self._all(db, "question")
         dead = []
@@ -407,6 +410,7 @@ class Store:
                     or int(match.group(1)) in open_numbers or task.get("updated_at", now) > synced
                     or str(task.get("version", "")).upper().startswith(DEAD_PROTECTED_VERSIONS)
                     or task.get("quarantined") or task.get("agent_id") or task.get("owner_gate")
+                    or self.has_recorded_evidence(task) or task.get("delivery", "none") != "none" or task.get("artifact")
                     or task.get("execution_allowed", True) is not False or task["id"] in needed
                     or self._has_locks(db, task["id"])
                     or any(q["task_id"] == task["id"] and (q["status"] in ACTIVE_QUESTIONS or q.get("held")) for q in questions)):

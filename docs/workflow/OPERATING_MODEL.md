@@ -147,6 +147,8 @@ a test that fails then passes is quarantined with a `showstopper` issue.
 
 ## Cleanup steward
 
+PROPOSED, NOT ACTIVE (owner approval UNVERIFIED): the paragraph below does not change worker accounting or limits.
+
 Blocked review/steward tasks whose PR is merged or closed can never run. `workflow close-dead`
 (dry run, no network, uses the stored GitHub sync) reports them; the dashboard shows "dead blocked: N,
 closable". When it reports closable tasks the manager may run one Haiku cleanup agent (proposed, not yet

@@ -65,6 +65,27 @@ class CloseDeadTests(unittest.TestCase):
         self.assertEqual(store.dead_blocked(apply=True)["closed"], [])  # idempotent
         self.assertIn("dead_blocked_closed", [e["kind"] for e in store.snapshot()["events"]])
 
+    def test_task_with_recorded_evidence_is_not_cancelled(self):
+        store, clock = self.build()
+        self._stamp(store, clock)
+        dead_task(store, "proved", 30, acceptance=[{"id": "A1", "label": "reviewed"}])
+        store.record_check("proved", "A1", "review passed, run link")
+        clock.now = 6000.0
+        self.assertEqual(store.dead_blocked()["ids"], [])
+        self.assertEqual(store.dead_blocked(apply=True)["closed"], [])
+        self.assertEqual({t["id"]: t["state"] for t in store.snapshot()["tasks"]}["proved"], "blocked")
+
+    def test_malformed_open_pr_number_does_not_crash_snapshot(self):
+        store, clock = self.build()
+        self._stamp(store, clock)
+        dead_task(store, "gone2", 31)
+        store.set_source({"mode": "github", "synced_at": 5000.0, "error": "", "truncated": False,
+                          "open_prs": [{"number": "abc"}, {"number": 7}]})
+        clock.now = 6000.0
+        result = store.dead_blocked(apply=True)
+        self.assertEqual((result["sync_ok"], result["closed"]), (False, []))
+        self.assertTrue(store.snapshot()["tasks"])
+
     def test_bounded_per_run(self):
         store, clock = self.build()
         self._stamp(store, clock)
