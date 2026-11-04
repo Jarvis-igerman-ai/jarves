@@ -1,0 +1,1 @@
+- Added: `workflow close-dead` (dry run by default, `--apply` cancels at most 25) closes blocked review/steward tasks whose PR is merged or closed, using the stored GitHub sync only; the new `cancelled` state is never verified or delivered, and the dashboard shows the closable count.

@@ -76,6 +76,11 @@ en = "Help from Claude and simple questions: every question is plain Hebrew with
 action = "command:jarvis workflow status"
 
 
+[[steps]]
+he = "ניקוי משימות חסומות מתות: jarvis workflow close-dead מציג (בלי לשנות דבר) כמה משימות חסומות בדיקה או מיזוג שבקשת המיזוג שלהן כבר סגורה או מוזגה, לפי סנכרון GitHub טרי. jarvis workflow close-dead --apply מעביר עד 25 מהן למצב מבוטל עם הערה ואירוע ביומן. זה לא מסמן שום דבר כמאומת או כנמסר, ולא נוגע בגרסאות 5 עד 7, בשאלות פתוחות או בעבודה של סוכן חי. שחזור: jarvis workflow transition --task ID --state queued."
+en = "Dead blocked cleanup: jarvis workflow close-dead only reports how many blocked review or steward tasks have a PR that is merged or closed, judged by a fresh GitHub sync. jarvis workflow close-dead --apply moves up to 25 of them to cancelled with a note and a ledger event. It never marks anything verified or delivered and never touches V5-V7 scope, open owner questions or a live worker. Undo with jarvis workflow transition --task ID --state queued."
+action = "command:jarvis workflow close-dead"
+
 [[problems]]
 he = "לחצתי 'עזרה מ־Claude' ולא נפתח חלון"
 en = "I clicked 'Help from Claude' and no window opened"
