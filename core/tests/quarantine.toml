@@ -57,3 +57,9 @@ id = "test_agents_managed.py::test_codex_approval_request_goes_to_the_owner"
 issue = 946
 since = "2026-11-04"
 reason = "Windows shard 3/4 on PR 942: state still RUNNING right after last_summary was set; wait for IDLE instead of asserting at once"
+
+[[test]]
+id = "test_whatsapp_bridge_contract.py::test_kill_file_stops_within_two_seconds_and_release"
+issue = 967
+since = "2026-11-04"
+reason = "Windows CI: connection not yet disconnected after KILL file (WinError 10053 socket abort); timing race, seen on PR 960 unrelated to its diff"
