@@ -15,6 +15,7 @@ from jarves.chat_cli import ChatSession, LinkTransport, StdinLines
 
 EOF_ = object()
 CTRL_C = object()
+ESC_KEY = "\x1b"
 
 
 class Block:
@@ -334,6 +335,65 @@ async def test_ctrl_c_cancels_the_answer_and_the_chat_continues(core, spy):
     assert "(cancelled)" in text and "jarvis> second answer" in text
 
 
+class FakeKeys:
+    """The Windows console key reads (msvcrt kbhit/getwch) with keys the test presses."""
+    def __init__(self):
+        self.queue: list[str] = []
+
+    def press(self, keys):
+        self.queue.extend(keys)
+
+    def kbhit(self):
+        return bool(self.queue)
+
+    def getwch(self):
+        return self.queue.pop(0)
+
+
+async def test_esc_stops_the_answer_and_typed_ahead_keys_wait_for_the_next_prompt(core, spy):
+    """#331: Esc = Ctrl+C while an answer is written; letters typed meanwhile (an arrow key dropped, a backspace
+    applied) become the start of the next message instead of being lost."""
+    started = asyncio.Event()
+
+    async def script(agent, text, on_delta):
+        if text == "slow":
+            on_delta("partial ")
+            started.set()
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                agent.cancelled.set()
+                raise
+        return "got: " + text
+    agent = install(core, script)
+    out = io.StringIO()
+    lines = StdinLines(io.StringIO("slow\nagain\n"), out)
+    keys = FakeKeys()
+    tr = await LinkTransport.connect(core.home, core.cfg.link.port)
+    session = ChatSession(tr, lines, out, keys=keys)
+    run = asyncio.create_task(session.run())
+    await asyncio.wait_for(started.wait(), WAIT_S)
+    keys.press(["n", "x", "\b", "\xe0", "H", "e", "w", " ", ESC_KEY])
+    assert await finish(run) == 0
+    assert agent.cancelled.is_set()
+    text = out.getvalue()
+    assert "(cancelled)" in text
+    assert agent.seen == ["slow", "new again"]                      # "nx" + backspace + arrow-up dropped + "ew "
+    assert "> new " in text and "jarvis> got: new again" in text   # shown after the prompt as if just typed
+
+
+async def test_typed_ahead_keys_never_answer_an_approval(core, spy):
+    lines = StdinLines(io.StringIO("\n"), io.StringIO())
+    for ch in "y\r":
+        lines.type_ahead(ch)
+    lines.drop_ahead()                                              # what chat.approval_request does
+    assert lines.ahead == ""
+    for ch in "hi\r":
+        lines.type_ahead(ch)
+    assert await lines.read("Approve? ") == ""                     # an approval read never takes typed-ahead keys
+    assert lines.ahead == "hi\n"
+
+
 async def test_ctrl_c_at_the_prompt_only_hints_and_clears(core, spy):
     async def script(agent, text, on_delta):
         return "fine"
@@ -438,6 +498,7 @@ async def test_status_model_new_and_undo(core, spy):
     assert await finish(asyncio.create_task(session.run())) == 0
     text = out.getvalue()
     assert "Core: " in text and "fake model (test)" in text
+    assert "routes: " in text and "billing" not in text.lower()      # CodeQL: no sensitive-named dump
     assert agent.resets == 1 and "New conversation." in text
     assert "Restored: USER.md" in text and ws.read("USER.md") == "version one\n"
     assert "Unknown command" in text

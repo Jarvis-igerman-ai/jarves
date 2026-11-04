@@ -6,7 +6,9 @@ history lives in <home>/chat_history.txt (also fed to `readline` where Python ha
 order exactly as received/typed; the terminal does the right-to-left display and nothing here ever reverses text.
 
 Keys: Enter sends. A line ending in a backslash continues on the next line; a line of just \"\"\" opens/closes a
-block. Ctrl+C = cancel the answer being written (at the prompt: clear the line). Ctrl+D or /exit = leave.
+block. Ctrl+C = cancel the answer being written (at the prompt: clear the line); in a Windows console Esc does the
+same while an answer is written (#331), and what you type meanwhile is kept for the next prompt. Ctrl+D or /exit
+= leave. Successful tool calls in a row share one line on a colour terminal.
 """
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ import asyncio
 import getpass
 import json
 import os
+import shutil
 import signal
 import sys
 import uuid
@@ -26,6 +29,9 @@ HISTORY_FILE = "chat_history.txt"
 HISTORY_KEEP = 1000
 CANCEL_WAIT_S = 15.0
 CODE_TRIES = 3
+KEY_POLL_S = 0.05                 # how often the Windows console is checked for Esc while an answer is written
+ESC = "\x1b"
+UP_ERASE = "\x1b[1A\r\x1b[2K"     # cursor to the previous line and clear it: the collapsed tool line is rewritten
 YES = frozenset({"y", "yes", "כן", "אישור", "approve"})
 NO = frozenset({"n", "no", "לא", "deny", "cancel", ""})
 FENCE = '"""'
@@ -59,6 +65,35 @@ def prepare_streams() -> None:
                 s.reconfigure(encoding="utf-8", errors="replace")
             except (OSError, ValueError):
                 pass
+    enable_vt()
+
+
+def enable_vt() -> None:
+    """Windows: let the console itself understand colour/cursor codes (older consoles show them as text otherwise).
+    A plain console-mode switch: no subprocess, no window."""
+    if os.name != "nt" or not getattr(sys.stdout, "isatty", lambda: False)():
+        return
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.GetStdHandle(-11)                       # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if k32.GetConsoleMode(h, ctypes.byref(mode)):
+            k32.SetConsoleMode(h, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def console_keys(stdin=None):
+    """Key reads for Esc-to-stop: the Windows console (msvcrt kbhit/getwch), else None (pipes, POSIX, tests)."""
+    stdin = stdin or sys.stdin
+    if os.name != "nt" or not getattr(stdin, "isatty", lambda: False)():
+        return None
+    try:
+        import msvcrt
+    except ImportError:
+        return None
+    return msvcrt
 
 
 # ---------------------------------------------------------------------- history
@@ -99,20 +134,55 @@ class StdinLines:
         self.stdin = stdin or sys.stdin
         self.out = out or sys.stdout
         self._pending: asyncio.Future | None = None
+        self.ahead = ""                    # keys typed while an answer was written (Windows console, #331)
 
-    def _blocking(self, prompt: str, secret: bool) -> str:
+    @property
+    def busy(self) -> bool:
+        """A read is running (or was abandoned and still waits): nobody else may read keys now."""
+        return self._pending is not None
+
+    def type_ahead(self, ch: str) -> None:
+        if ch == "\b":
+            self.ahead = self.ahead[:-1]
+        elif ch in ("\r", "\n"):
+            self.ahead += "\n"
+        elif ch == "\t" or ch >= " ":
+            self.ahead += ch
+
+    def drop_ahead(self) -> None:
+        """An approval is asked: keys typed before it must never answer it, nor turn up later as a message."""
+        self.ahead = ""
+
+    def _take_ahead(self, prompt: str) -> tuple[str, bool]:
+        """(text typed ahead, whole line?), shown after the prompt as if just typed."""
+        if not self.ahead:
+            return "", False
+        line, nl, rest = self.ahead.partition("\n")
+        self.ahead = rest
+        self.out.write(prompt + line + ("\n" if nl else ""))
+        self.out.flush()
+        return line, bool(nl)
+
+    def _blocking(self, prompt: str, secret: bool, ahead: bool = False) -> str:
+        got, whole = self._take_ahead(prompt) if ahead and not secret else ("", False)
+        if whole:
+            return got
+        if got:
+            prompt = ""                                   # already shown with the typed-ahead start
         if getattr(self.stdin, "isatty", lambda: False)():
-            return getpass.getpass(prompt) if secret else input(prompt)
+            return got + (getpass.getpass(prompt) if secret else input(prompt))
         self.out.write(prompt)
         self.out.flush()
         line = self.stdin.readline()
-        if line == "":
+        if line == "" and not got:
             raise EOFError
-        return line.rstrip("\r\n")
+        return got + line.rstrip("\r\n")
 
-    async def read(self, prompt: str, *, secret: bool = False) -> str:
+    async def read(self, prompt: str, *, secret: bool = False, ahead: bool = False) -> str:
+        """`ahead`: a chat message prompt, which may start with keys typed while the answer was written. Approval
+        and code prompts never pass it."""
         if self._pending is None:
-            self._pending = asyncio.get_running_loop().run_in_executor(None, self._blocking, prompt, secret)
+            self._pending = asyncio.get_running_loop().run_in_executor(None, self._blocking, prompt, secret, ahead)
         try:
             return await asyncio.shield(self._pending)
         finally:
@@ -157,9 +227,14 @@ class LinkTransport:
 # ---------------------------------------------------------------------- the REPL
 class ChatSession:
     def __init__(self, transport, lines, out=None, *, history: History | None = None, silent: bool = False,
-                 verbose: bool = False) -> None:
+                 verbose: bool = False, keys=None) -> None:
         self.t, self.lines = transport, lines
         self.out = out or sys.stdout
+        self.keys = keys                      # Windows console keys for Esc-to-stop, or None
+        self._writes = 0                      # writes so far: tells whether a tool line is still the last one
+        self._bol = True                      # the cursor is at the start of a line
+        self._tools: list[str] = []           # successful tools collapsed into the last line
+        self._tools_at = -1
         self.history = history or History(None)
         self.forced_silent = silent
         self.verbose = verbose
@@ -183,8 +258,13 @@ class ChatSession:
         return f"\x1b[{code}m{text}\x1b[0m" if self.color else text
 
     def say(self, text: str = "", end: str = "\n") -> None:
-        self.out.write(text + end)
+        s = text + end
+        if not s:
+            return
+        self.out.write(s)
         self.out.flush()
+        self._writes += 1
+        self._bol = s.endswith("\n")
 
     @property
     def silent(self) -> bool:
@@ -243,6 +323,8 @@ class ChatSession:
         ask_req: dict = {}
         tries = 0
         loop = asyncio.get_running_loop()
+        self._tools, self._tools_at = [], -1
+        esc = asyncio.ensure_future(self._watch_keys(lambda: ask is None)) if tid and self.keys is not None else None
         try:
             while True:
                 if cancelled_at is not None and loop.time() - cancelled_at > CANCEL_WAIT_S:
@@ -281,7 +363,7 @@ class ChatSession:
                     self.say(md.feed(str(p.get("text", ""))), end="")
                 elif t == "chat.tool" and p.get("id") == tid:
                     if streamed:
-                        self.out.write(md.flush())
+                        self.say(md.flush(), end="")
                     self._tool_line(p, streamed)
                 elif t == "chat.display" and p.get("id") == tid:
                     if streamed:
@@ -302,6 +384,7 @@ class ChatSession:
                         streamed = False
                     ask_req = p
                     tries = 0
+                    getattr(self.lines, "drop_ahead", lambda: None)()
                     self._show_request(p)
                     ask = asyncio.ensure_future(self._ask_line(p))
                 elif t == "chat.approval_result":
@@ -338,9 +421,28 @@ class ChatSession:
             self.in_wait = False
             if ask is not None:
                 ask.cancel()
+            if esc is not None:
+                esc.cancel()
+
+    async def _watch_keys(self, idle) -> None:
+        """While an answer is written and no approval is asked: Esc cancels it like Ctrl+C; other keys are kept for
+        the next prompt. Arrow/function keys (two codes) are dropped. Windows console only."""
+        while True:
+            await asyncio.sleep(KEY_POLL_S)
+            if not idle() or getattr(self.lines, "busy", False):
+                continue
+            while self.keys.kbhit():
+                ch = self.keys.getwch()
+                if ch in ("\x00", "\xe0"):
+                    if self.keys.kbhit():
+                        self.keys.getwch()
+                elif ch == ESC:
+                    self.interrupt()
+                elif hasattr(self.lines, "type_ahead"):
+                    self.lines.type_ahead(ch)
 
     def _tool_line(self, p: dict, streaming: bool) -> None:
-        if streaming:
+        if not self._bol:
             self.say()
         name = logs.redact(str(p.get("name", "?")))[:60]
         ok = bool(p.get("ok"))
@@ -351,6 +453,15 @@ class ChatSession:
         extra = f" [{code}]" if (self.verbose or not ok) else ""
         why = "" if ok else chat_render.reason(code)
         if self.color:                                 # #331: compact Claude Code style marks on a terminal
+            if ok and not extra:                       # successful tools in a row share one line, rewritten
+                again = bool(self._tools) and self._tools_at == self._writes
+                self._tools = (self._tools if again else []) + [name]
+                if again:
+                    self.out.write(UP_ERASE)
+                self.say(self.paint("2", chat_render.tool_group(self._tools, shutil.get_terminal_size((80, 24)).columns)))
+                self._tools_at = self._writes
+                return
+            self._tools = []
             mark = "✓" if ok else "✗"
             self.say(self.paint("2" if ok else "31", f"  {mark} {name}" + (f"  {why}" if why else "") + extra))
             return
@@ -396,7 +507,8 @@ class ChatSession:
         block = False
         while True:
             try:
-                line = await self.lines.read(self.prompt(bool(parts) or block))
+                kw = {"ahead": True} if hasattr(self.lines, "type_ahead") else {}
+                line = await self.lines.read(self.prompt(bool(parts) or block), **kw)
             except EOFError:
                 return None
             except KeyboardInterrupt:
@@ -424,6 +536,9 @@ class ChatSession:
             self.say(f"  {c:<14} {T(he, en)}")
         self.say(T('שורה שמסתיימת ב-\\ ממשיכה; """ פותח/סוגר בלוק. Ctrl+C מבטל תשובה, Ctrl+D יוצא.',
                    'A line ending in \\ continues; """ opens/closes a block. Ctrl+C cancels an answer, Ctrl+D leaves.'))
+        if self.keys is not None:
+            self.say(T("גם Esc עוצר את התשובה; מה שמקלידים בינתיים נשמר לשורה הבאה.",
+                       "Esc also stops the answer; what you type meanwhile waits for the next prompt."))
 
     def show_status(self, st: dict) -> None:
         self.state = st or self.state
@@ -486,8 +601,9 @@ class ChatSession:
             if cmd == "/model":
                 self.say(f"{st.get('ai')}")
                 self.say(f"text model: {st.get('text_model')}; connection: {st.get('connection')}")
-                if st.get("billing"):
-                    self.say(f"billing: {json.dumps(st.get('billing'), ensure_ascii=False)}")
+                routes = st.get("routes")                  # which route is used per feature (names only, no amounts)
+                if isinstance(routes, dict) and routes:
+                    self.say("routes: " + ", ".join(f"{k}={v}" for k, v in routes.items()))
             else:
                 self.say(f"session: {self.mode()}; Core voice mode: {st.get('voice_mode')}; "
                          f"speaker: {'yes' if st.get('can_speak') else 'no'}")
@@ -654,7 +770,7 @@ async def run_chat(home: Path, port: int, *, silent: bool, verbose: bool) -> int
     prepare_streams()
     transport = await LinkTransport.connect(home, port)
     session = ChatSession(transport, StdinLines(), history=History(home / HISTORY_FILE), silent=silent,
-                          verbose=verbose)
+                          verbose=verbose, keys=console_keys())
     loop = asyncio.get_running_loop()
     old = None
     try:

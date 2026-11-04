@@ -1,0 +1,1 @@
+- Added: `jarvis chat` (#331, second slice): Esc stops the answer in a Windows console (like Ctrl+C) and keys typed meanwhile are kept for the next prompt (never used to answer an approval); successful tool calls in a row fold into one rewritten line on a colour terminal; the Windows console is switched to colour/cursor-code mode without a subprocess.
