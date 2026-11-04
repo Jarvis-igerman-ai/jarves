@@ -26,7 +26,7 @@ REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task"
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
-                                        "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "focus", "questions-rewrite",
+                                        "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "today", "focus", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "worker-watch", "handover", "handover-state"])
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
@@ -253,6 +253,15 @@ def main(argv=None) -> int:
         elif a.action == "now":
             from .observability import now_view
             result = now_view(store)   # same read-only data as the Overview "now" panels (#789)
+        elif a.action == "today":
+            # #732: short 'what needs me now' text for the claude-j wrapper; same rules as the Today screen.
+            from . import today
+            from .autopilot import agent_retention_s
+            view = today.build(store.snapshot(retention_s=agent_retention_s(home)), store.clock())
+            if not a.json:
+                print(today.text(view))
+                return 0
+            result = view
         elif a.action == "timeline":
             from . import observability as obs
             tl = obs.timeline(store, since=store.clock() - a.hours * 3600)

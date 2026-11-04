@@ -172,6 +172,11 @@ requires an already running allow-listed session and explicit
 - A merged task reopened to queued stays `implementation=merged` and is never listed as ready.
   Reopen it with `transition --task ID --state queued --implementation in_progress`, or route
   it to a QA task.
+- Short summary that stays on screen (#732): the wrapper (claude-j) prints
+  `workflow_console.py --home HOME today` (also `jarvis workflow today`) after start and after each
+  worker-watch, at the bottom, so it does not scroll away. About ten plain Hebrew lines, read-only:
+  running tasks, open questions (oldest three with minutes), blocked count and the next step. `--json`
+  gives `{"now","running","needs_total","needs","blocked_total","blocked","queued"}`.
 - Fewer workers than the policy allows: run `workflow_console.py --home HOME worker-watch` every few
   minutes from the wrapper (claude-j). It prints and always exits 0 with
   `{"running":1,"allowed":4,"shortfall":3,"over":0,"ready_ids":["t1"],"action":"short|over|recovered|none|error"}`.
