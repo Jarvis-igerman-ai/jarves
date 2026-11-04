@@ -200,6 +200,7 @@
   // #741: a 401/403 means the private session is gone. Stop everything, drop stale data and show ONE notice, never zeros.
   const OPEN_COMMAND = "jarvis workflow open";
   let ended = false;
+  window.workflowSessionEnded = () => sessionEnded(); // #741: the other scripts report 401/403 through this
   function sessionEnded() {
     if (ended) return;
     ended = true;

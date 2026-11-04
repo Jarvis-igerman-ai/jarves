@@ -125,6 +125,7 @@
       failure = "";
       try {
         const response = await fetch(`/api/timeline?hours=${hours}`, {credentials: "same-origin", cache: "no-store"});
+        (response.status === 401 || response.status === 403) && typeof window.workflowSessionEnded === "function" && window.workflowSessionEnded();
         if (response.status !== 404) {
           if (!response.ok) throw new Error(String(response.status));
           result = await response.json();

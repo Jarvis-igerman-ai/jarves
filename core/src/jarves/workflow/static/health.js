@@ -76,6 +76,7 @@
 
   async function get(path) {
     const response = await fetch(path, {credentials: "same-origin", cache: "no-store"});
+    (response.status === 401 || response.status === 403) && typeof window.workflowSessionEnded === "function" && window.workflowSessionEnded();
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(String(response.status));
     return response.json();
