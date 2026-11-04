@@ -274,8 +274,14 @@ def main(argv=None) -> int:
             return agent_messages(store, a)
         elif a.action == "manager":
             from .manager_mode import ManagerConflict, command as manager_command
+            margs = a.rest or ["status"]
             try:
-                result = manager_command(home, a.rest or ["status"])
+                if margs[0] == "set" or (margs[0] == "release" and a.force):
+                    owner_only_guard(f"manager {margs[0]}")      # agents and native subagents never switch or force-release
+                result = manager_command(home, margs, force=bool(a.force))
+            except PermissionError as exc:
+                print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+                return 3
             except (ManagerConflict, ValueError) as exc:
                 print(json.dumps({"error": str(exc), "owner": getattr(exc, "owner", {})}, ensure_ascii=False), file=sys.stderr)
                 return 3

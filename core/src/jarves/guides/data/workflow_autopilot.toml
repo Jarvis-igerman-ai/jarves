@@ -46,8 +46,8 @@ en = "Dynamic focus: the manager and the autopilot set priorities from the load.
 action = "command:jarvis workflow focus"
 
 [[steps]]
-he = "מי מנהל את זרימת העבודה: jarvis workflow manager status מראה אם המנהל הוא Claude המקורי (ברירת מחדל) או JARVES. jarvis workflow manager set jarves רק בוחר; הוא לא מפעיל כלום ולא מאשר כלום. רק מתזמן אחד מחזיק את הנעילה בפרופיל: אם המנהל השני עדיין רץ ההחלפה נדחית, ובהפעלה מחדש לא מתחיל מתזמן שני. המצב הזה בטא וכבוי."
-en = "Who manages the workflow: jarvis workflow manager status shows whether the manager is native Claude (default) or JARVES. jarvis workflow manager set jarves only chooses; it starts nothing and approves nothing. Only one scheduler holds the lock per profile: switching is refused while the other manager still runs, and a restart never starts a second scheduler. This mode is beta and off."
+he = "מי מנהל את זרימת העבודה: jarvis workflow manager status מראה אם המנהל הוא Claude המקורי (ברירת מחדל) או JARVES. jarvis workflow manager set jarves רק בוחר ורק מהמסוף של הבעלים (לא מסוכן או תת-סוכן); הוא לא מפעיל כלום ולא מאשר כלום. רק מתזמן אחד מחזיק את הנעילה בפרופיל, עם מזהה התהליך הארוך שלו ואסימון סודי לשחרור: אם מתזמן שלקח את הנעילה עדיין רץ ההחלפה נדחית, ובהפעלה מחדש לא מתחיל מתזמן שני. הנעילה נאכפת רק על מי שלוקח אותה. המצב הזה בטא וכבוי."
+en = "Who manages the workflow: jarvis workflow manager status shows whether the manager is native Claude (default) or JARVES. jarvis workflow manager set jarves only chooses, and only from the owner's own terminal (not agents or subagents); it starts nothing and approves nothing. Only one scheduler holds the lock per profile, recorded with its long-lived process id and a secret release token: switching is refused while a scheduler that took the lock still runs, and a restart never starts a second scheduler. The lock binds only schedulers that acquire it. This mode is beta and off."
 action = "command:jarvis workflow manager status"
 
 [[problems]]
