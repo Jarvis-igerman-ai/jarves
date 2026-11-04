@@ -154,6 +154,7 @@
     remoteBusy = true;
     try {
       const response = await fetch("/api/health", {credentials: "same-origin", cache: "no-store"});
+      (response.status === 401 || response.status === 403) && typeof window.workflowSessionEnded === "function" && window.workflowSessionEnded();
       const body = response.ok ? await response.json() : null;
       remote = body && body.verdict && REMOTE_TONE[body.verdict.verdict] ? body.verdict : null;
       remoteFocus = body && body.focus && typeof body.focus.he === "string" ? body.focus : null;
@@ -326,6 +327,7 @@
     nowBusy = true;
     try {
       const response = await fetch("/api/now", {credentials: "same-origin", cache: "no-store"});
+      (response.status === 401 || response.status === 403) && typeof window.workflowSessionEnded === "function" && window.workflowSessionEnded();
       if (!response.ok) throw new Error(String(response.status));
       const view = await response.json();
       if (!view || !Array.isArray(view.workers)) throw new Error("shape");
@@ -377,6 +379,7 @@
     box.textContent = T.reportLoading;
     try {
       const response = await fetch("/api/report", {credentials: "same-origin", cache: "no-store"});
+      (response.status === 401 || response.status === 403) && typeof window.workflowSessionEnded === "function" && window.workflowSessionEnded();
       if (!response.ok) throw new Error(String(response.status));
       box.textContent = (await response.json()).he || "";
     } catch (_) { box.textContent = T.reportFailed; }

@@ -179,6 +179,17 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertIn(".session-ended", css)
         self.assertNotIn("style=", body)  # strict CSP: no inline styles
 
+    def test_console_side_scripts_report_session_ended_static_contract(self):
+        # #741 follow-up: health/overview/timeline used raw fetch; a 401/403 must reach the one session-ended notice.
+        static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
+        self.assertIn("window.workflowSessionEnded = () => sessionEnded();", (static / "app.js").read_text(encoding="utf-8"))
+        guard = "response.status === 401 || response.status === 403"
+        for name, minimum in (("health.js", 1), ("timeline.js", 1), ("overview.js", 3)):
+            text = (static / name).read_text(encoding="utf-8")
+            self.assertGreaterEqual(text.count(guard), minimum, name)
+            self.assertEqual(text.count(guard), text.count("window.workflowSessionEnded()"), name)
+            self.assertEqual(text.count(guard), text.count("fetch("), name)
+
     def test_console_agent_list_ui_static_contract(self):
         # #730: the toggle is keyboard reachable, remembered with guarded storage and not an aria-live region.
         static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)

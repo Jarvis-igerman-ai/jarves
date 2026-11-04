@@ -1,0 +1,1 @@
+- Fixed: the workflow console health, overview and timeline panels now show the "private session ended" notice on a 401/403 instead of silent zeros (#741).
