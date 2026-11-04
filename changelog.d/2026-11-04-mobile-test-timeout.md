@@ -1,0 +1,1 @@
+- Fixed: mobile access tests no longer time out on loaded Windows CI shards (socket timeout 10 s to 60 s in the test helper)

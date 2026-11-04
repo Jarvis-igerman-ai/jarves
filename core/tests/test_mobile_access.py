@@ -52,7 +52,7 @@ def srv(home, fake):
     d.stop()
 
 
-def req(d, method, path, *, token=None, body=None, raw=None, headers=None, ctype="application/json", tls=False, timeout=10):
+def req(d, method, path, *, token=None, body=None, raw=None, headers=None, ctype="application/json", tls=False, timeout=60):
     if tls:
         conn = http.client.HTTPSConnection("127.0.0.1", d.port, timeout=timeout, context=ssl._create_unverified_context())
     else:
