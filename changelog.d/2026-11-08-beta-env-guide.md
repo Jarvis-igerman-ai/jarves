@@ -1,0 +1,1 @@
+- Fixed: beta_features guide (EN+HE) now says JARVES_BETA_FEATURES=1 applies only while features.json has no saved choice and never writes the file (#469).
