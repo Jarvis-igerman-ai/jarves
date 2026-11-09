@@ -1,0 +1,1 @@
+- Added: security review T11 of goal_plans, continuity, devstatus, projectmgr, preferences (docs/reviews).
