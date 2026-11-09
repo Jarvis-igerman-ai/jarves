@@ -1584,6 +1584,18 @@ class Core:
         except Exception as e:
             logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio on a wake session; continuing without it",
                       error_type=type(e).__name__)
+            await self._greeting_tts_fallback()
+
+    async def _greeting_tts_fallback(self) -> None:
+        """#179: nudge and the one retry already failed: say a short hello through TTS (counted in selfspeed)."""
+        try:
+            logs.warn("voice", "LIVE_GREETING_TTS_FALLBACK", "greeting audio never arrived; speaking a short TTS hello")
+            await self.speak(self.hello_text())
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logs.warn("voice", "LIVE_GREETING_TTS_FALLBACK_FAILED", "TTS greeting fallback failed",
+                      error_type=type(e).__name__)
 
     async def _tasks_changed(self, views: list[dict]) -> None:
         """Background task list for the screen (tasks.py docstring: message shape)."""
@@ -1635,7 +1647,8 @@ class Core:
                         raise
                     logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio; continuing without a greeting",
                               error_type=type(e).__name__)
-                    self._startup_stage("waiting_audio", "No greeting audio arrived; continuing without a greeting.")
+                    self._startup_stage("waiting_audio", "No greeting audio arrived; speaking a short TTS hello.")
+                    await self._greeting_tts_fallback()
                 self._greeted = True                # greeting comes from this same live session, never a second TTS call
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")

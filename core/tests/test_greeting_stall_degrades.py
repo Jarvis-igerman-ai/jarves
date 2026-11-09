@@ -106,8 +106,10 @@ async def test_no_greeting_audio_leaves_an_open_usable_silent_room(home, cfg, mo
         assert st["ready"] and st["phase"] == "ready"
         voice = holder[0]
         assert core.live is voice and voice.running and voice.greeting_outcome == "missed"
-        assert core._greeted and not core.tts.spoken                   # no second TTS greeting
+        assert core._greeted
+        assert len(core.tts.spoken) == 1                               # nudge + retry failed: ONE short TTS hello
         assert ("warn", "LIVE_GREETING_MISSED") in fast                # information code, not an error/crash
+        assert ("warn", "LIVE_GREETING_TTS_FALLBACK") in fast          # counted by selfspeed
         assert not [c for lvl, c in fast if lvl == "warn" and c in ("LIVE_STOP_FAILED",)]
         assert await _user_turn_works(voice, said)                     # a later user turn works
     finally:

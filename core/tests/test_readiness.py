@@ -130,7 +130,7 @@ class _NoGreetingLive:
 
 async def test_missing_greeting_with_open_session_degrades_instead_of_failing(home, cfg, monkeypatch):
     """#122: 1 of 5 GPT-Live starts got no greeting audio; the Core crashed at the 15 s limit. A live session that is
-    still open continues WITHOUT a greeting (truthful log + startup detail), no second TTS greeting, no crash."""
+    still open continues; since #179 ONE short TTS hello replaces the missing greeting, no crash."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-not-real")
     cfg.voice.activation = "conversation"
     cfg.voice.greeting = True
@@ -145,7 +145,7 @@ async def test_missing_greeting_with_open_session_degrades_instead_of_failing(ho
     try:
         await core.prepare_desktop()
         st = core.snapshot()["startup"]
-        assert st["ready"] and core.live is not None and not speech.spoken and "stop" not in Live.calls
+        assert st["ready"] and core.live is not None and len(speech.spoken) == 1 and "stop" not in Live.calls
     finally:
         await core.stop()
 
