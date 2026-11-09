@@ -1,0 +1,1 @@
+- Fixed: shortened the permission wait in one agent test (about 29 s to about 14 s), test-only; ci_health.py now reports job queue wait separately from work.

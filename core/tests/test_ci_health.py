@@ -43,6 +43,19 @@ def test_render_has_every_number():
         assert k in text
 
 
+def test_queue_wait_is_separate_from_work():
+    jobs = [{"created_at": "2026-10-24T09:00:00Z", "started_at": "2026-10-24T09:05:00Z", "completed_at": "2026-10-24T09:15:00Z",
+             "conclusion": "success"},
+            {"created_at": "2026-10-24T09:00:00Z", "started_at": "2026-10-24T09:09:00Z", "completed_at": "2026-10-24T09:12:00Z",
+             "conclusion": "failure"},
+            {"created_at": "2026-10-24T09:00:00Z", "started_at": "2026-10-24T09:00:00Z", "completed_at": "2026-10-24T09:00:00Z",
+             "conclusion": "skipped"}]
+    assert ch.queue_waits(jobs) == ([5.0, 9.0], [10.0, 3.0])
+    text = ch.render(7, RUNS, [], 1, 1, jobs)
+    assert "job queue wait, median / p90 min | 7.0 / 8.6 (n=2)" in text and "job work" in text
+    assert "job queue wait" not in ch.render(7, RUNS, [], 1, 1)
+
+
 def test_nightly_posts_the_number_with_issue_write_only():
     job = yaml.safe_load(NIGHTLY.read_text(encoding="utf-8"))["jobs"]["flake-scan"]
     assert job["permissions"] == {"contents": "read", "actions": "read", "issues": "write"}
