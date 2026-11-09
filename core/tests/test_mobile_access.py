@@ -678,3 +678,11 @@ def test_selfsigned_certificate_carries_local_name_and_is_never_replaced(home, m
     monkeypatch.setattr("socket.gethostname", lambda: "New-PC")
     mobile.ensure_selfsigned(home, HOST)
     assert cert_p.read_bytes() == first and "new-pc.local" not in dns()         # existing cert kept (phones pin it)
+
+
+def test_phone_cli_empty_scope_list_stays_empty(capsys):
+    """F7 #206 (phone_cli copy): [] means no scopes, not the defaults."""
+    import types
+    from jarves import phone_cli
+    src = open(phone_cli.__file__, encoding="utf-8").read()
+    assert 'hit.get("scopes") or DEFAULT_SCOPES' not in src and 'd.get("scopes") or DEFAULT_SCOPES' not in src

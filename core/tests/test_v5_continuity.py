@@ -452,3 +452,8 @@ def test_sync_hides_the_turns_when_the_chat_page_is_not_granted(srv, fake):
     assert [t["text"] for t in call(srv, "GET", "/api/m/sync?since=0", tok)[1]["turns"]] == ["typed at the pc"]
     assert srv.mobile.set_pages(dev, [p for p in mobile.PAGES if p != "chat"], "test")
     assert call(srv, "GET", "/api/m/sync?since=0", tok)[1]["turns"] == []
+
+
+def test_nan_age_is_refused_like_a_stale_one(cont):
+    """F9 #206: NaN compared False against the window and counted as fresh."""
+    assert cont.stale(float("nan")) and cont.stale(float("inf")) and not cont.stale(-5) and not cont.stale(None)
