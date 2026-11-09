@@ -1,0 +1,1 @@
+- Added: suggestions report round 2 with 5 improvement ideas (docs only, JAR-116)
