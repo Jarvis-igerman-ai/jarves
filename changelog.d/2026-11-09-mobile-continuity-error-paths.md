@@ -1,0 +1,1 @@
+- Fixed: phone goal/snooze and dashboard continuity ops no longer crash (HTTP 500) on an Infinity or NaN number; they answer 400 or clamp. Added error-path tests for mobile and continuity.

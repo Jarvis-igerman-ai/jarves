@@ -1162,7 +1162,7 @@ def goal_action(mob: MobileAccess, d: dict) -> tuple[int, dict]:
             return 200, {"goal": _goal_brief(goals.set_step(int(d.get("step", 0)), bool(d.get("done", True)), by="phone"))}
     except KeyError:
         return 404, {"error": "no such goal"}
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, OverflowError) as e:
         return 400, {"error": str(e)}
     return 400, {"error": "op must be " + " or ".join(GOAL_OPS)}
 
@@ -1172,7 +1172,7 @@ def signals_action(mob: MobileAccess, d: dict, device: str) -> tuple[int, dict]:
     if op == "snooze":
         try:
             until = c.snooze(float(d.get("minutes", 60)), by=device)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 400, {"error": "minutes must be a number"}
         return 200, {"snoozed_until": until}
     if op == "stop":

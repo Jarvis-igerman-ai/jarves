@@ -299,9 +299,11 @@ class Continuity:
         return self.signals_state()
 
     def snooze(self, minutes: float, *, by: str = "user") -> float:
-        until = self.clock() + max(1.0, min(float(minutes), SNOOZE_MAX_MIN)) * 60
+        mins = float(minutes)
+        mins = 1.0 if mins != mins else max(1.0, min(mins, SNOOZE_MAX_MIN))      # NaN -> the minimum, +-inf clamp
+        until = self.clock() + mins * 60
         self._set("sig.snooze_until", until)
-        logs.info("continuity", "SIGNALS_SNOOZED", "proactive signals snoozed", by=by, minutes=round(float(minutes)))
+        logs.info("continuity", "SIGNALS_SNOOZED", "proactive signals snoozed", by=by, minutes=round(mins))
         return until
 
     def stop_signals(self, *, by: str = "user") -> None:
@@ -373,6 +375,8 @@ def api_continuity(ctx, m, body, q=None):
 
 def api_continuity_op(ctx, m, body):
     c, b = _cont(ctx), body or {}
+    if not isinstance(b, dict):
+        return 400, {"error": "JSON object expected"}
     op = b.get("op")
     try:
         if op == "config":
@@ -385,7 +389,7 @@ def api_continuity_op(ctx, m, body):
             return 200, c.signals_state()
         if op == "ack":
             return 200, {"ok": c.ack_notice("desktop", int(b.get("id", 0) or 0))}
-    except (ValueError, TypeError) as e:
+    except (ValueError, TypeError, OverflowError) as e:
         return 400, {"error": str(e)}
     return 400, {"error": "op must be config, snooze, stop or ack"}
 
