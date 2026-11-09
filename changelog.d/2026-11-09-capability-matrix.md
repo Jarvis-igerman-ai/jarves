@@ -1,0 +1,1 @@
+- Added: capability matrix proposal (docs/proposals/2026-11-09-capability-matrix.md), documentation only, no scope authorised.
