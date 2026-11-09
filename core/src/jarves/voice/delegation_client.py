@@ -238,8 +238,9 @@ class DelegationState:
         if self.health is not None:
             try:
                 self.health(status, detail, action)
-            except Exception:
-                pass
+            except Exception as e:
+                logs.warn("delegation", "DELEG_HEALTH_CB_FAILED", "the health callback raised",
+                          error_type=type(e).__name__)
 
     def count(self, key: str, n: int = 1) -> None:
         self.counters[key] = self.counters.get(key, 0) + n
@@ -275,8 +276,9 @@ class DelegationState:
                                        "in_flight": list(self.jobs.values()), "saved": time.time()},
                                       ensure_ascii=False), encoding="utf-8")
             tmp.replace(p)
-        except OSError:
-            pass
+        except OSError as e:
+            logs.warn("delegation", "DELEG_STATE_SAVE_FAILED", "could not save the delegation state",
+                      error_type=type(e).__name__)
 
 
 def read_state(home: Path) -> dict:

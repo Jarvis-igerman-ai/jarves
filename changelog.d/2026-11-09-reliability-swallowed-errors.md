@@ -1,0 +1,1 @@
+- Fixed: delegation state-save failures, a failing delegation health callback, wake-confirm warm-up failures and audio close failures now leave a structured log line instead of being silently swallowed.
