@@ -1,0 +1,1 @@
+- Fixed: verified flaky tests #946 #943 #788 #770 pass in repeated local runs (0 failures); evidence report only, no code change.
