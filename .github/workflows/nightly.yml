@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           if uv run python -c "import playwright" 2>/dev/null; then
-            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium ffmpeg; else echo "using the preinstalled Edge"; uv run playwright install ffmpeg; fi
           fi
       - name: Cache tool downloads (Godot, Inno Setup)
         uses: actions/cache@v6
@@ -168,7 +168,7 @@ jobs:
       - name: Redaction audit (privacy, secrets and diagnostics redaction tests)
         run: uv run pytest -q -p no:cacheprovider tests/test_privacy.py tests/test_privacy_state.py tests/test_security.py tests/test_ci_diagnostics.py
       - name: Browser for the dashboard canary
-        run: uv run playwright install --with-deps chromium
+        run: uv run playwright install --with-deps chromium ffmpeg
       - name: Synthetic journey canaries (package O; voice stack, music fake, calendar fake, dashboard, installer, scheduler)
         env:
           JARVES_HOME: ${{ runner.temp }}/jarves-ci-home

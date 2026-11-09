@@ -1,0 +1,1 @@
+- Fixed: nightly workflow now installs Playwright ffmpeg like PR CI, so the ffmpeg-dependent tests stop failing the nightly (JAR-51).
