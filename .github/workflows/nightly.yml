@@ -37,7 +37,7 @@ jobs:
         shell: bash
         run: |
           if uv run python -c "import playwright" 2>/dev/null; then
-            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium; else echo "using the preinstalled Edge"; fi
+            if [ "$RUNNER_OS" = "Linux" ]; then uv run playwright install --with-deps chromium ffmpeg; else echo "using the preinstalled Edge"; uv run playwright install ffmpeg; fi
           fi
       - name: Cache tool downloads (Godot, Inno Setup)
         uses: actions/cache@v6

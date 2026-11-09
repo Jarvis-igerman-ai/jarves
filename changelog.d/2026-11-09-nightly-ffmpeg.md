@@ -1,0 +1,1 @@
+- Fixed: nightly Playwright setup now installs ffmpeg (Linux and Windows), matching jarves-checks.
