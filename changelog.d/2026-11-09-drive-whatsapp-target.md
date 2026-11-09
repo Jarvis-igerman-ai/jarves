@@ -1,0 +1,1 @@
+- Fixed: drive mode now matches WhatsApp send targets stored as digits only against saved "+" contacts, and reads the passenger setting over one reused database connection.
