@@ -31,3 +31,15 @@ check = "enabled:background_tasks"
 he = "את המשימות רואים בעמוד \"Background tasks\" בלוח הבקרה."
 en = "See the tasks on the dashboard's Background tasks page."
 action = "open:#/tasks"
+
+[[problems]]
+he = "הוא אומר שאי אפשר להתחיל משימה ברקע"
+en = "He says he cannot start a background task"
+fix_he = "בדקו שיש מפתח OpenAI API (מנוי ChatGPT לבד לא מספיק) ושהמתג \"משימות ברקע\" דולק. את הסיבה המדויקת רואים בעמוד המשימות."
+fix_en = "Check that there is an OpenAI API key (a ChatGPT plan alone is not enough) and that the Background tasks switch is on. The exact reason shows on the Tasks page."
+
+[[problems]]
+he = "המשימה לא נגמרת או לא התחילה"
+en = "The task never finishes or did not start"
+fix_he = "פתחו את עמוד המשימות וראו את המצב שלה. אם הגעתם לתקרה היומית, המשימה תחכה למחר, ואפשר להעלות את התקרה במדריך \"תקציב API\"."
+fix_en = "Open the Tasks page and check its state. If the daily cap was reached the task waits until tomorrow; you can raise the cap in the API budget guide."
