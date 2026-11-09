@@ -151,7 +151,14 @@ def check_page(p, url: str, frag: str, lang: str, width: int, *, reduced: bool, 
                theme: str, errs: list) -> dict:
     errs.clear()
     p.goto(url + "#/" + frag)
-    p.wait_for_selector("#langSlot select", timeout=90000)
+    try:
+        p.wait_for_selector("#langSlot select", timeout=45000)
+    except Exception as e:                      # Playwright TimeoutError: Windows runner dropped the shell's fetches
+        if "Timeout" not in type(e).__name__ and "Timeout" not in str(e):      # (WinError 10053, #994). Reload once;
+            raise                                                              # a page that is really broken fails again
+        errs.clear()
+        p.reload()
+        p.wait_for_selector("#langSlot select", timeout=45000)
     p.wait_for_load_state("networkidle", timeout=30000)
     p.wait_for_function("() => !/^\\s*(Loading…|טוען…)\\s*$/.test((document.getElementById('main')||{}).innerText||'')",
                         timeout=15000)

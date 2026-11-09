@@ -111,11 +111,24 @@ def test_two_profiles_have_separate_pipes_and_tokens(tmp_path):
         sb.stop()
 
 
+def _start_after_stop(home, tries: int = 50):
+    """Restart on the same address. On a loaded Windows runner the old pipe instance is released a moment after
+    stop() returns, and CreateNamedPipe(FIRST_PIPE_INSTANCE) fails with PermissionError [WinError 5] (#992).
+    The test is about token rotation, not release timing, so retry the start for up to ~5 s."""
+    for i in range(tries):
+        try:
+            return bridge.BridgeServer(home, echo).start()
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.1)
+
+
 def test_restart_rotates_the_token(tmp_path):
     s = bridge.BridgeServer(tmp_path, echo).start()
     old = bridge.read_token(tmp_path)
     s.stop()
-    s2 = bridge.BridgeServer(tmp_path, echo).start()
+    s2 = _start_after_stop(tmp_path)
     try:
         assert bridge.read_token(tmp_path) != old
         with pytest.raises(bridge.BridgeError):
