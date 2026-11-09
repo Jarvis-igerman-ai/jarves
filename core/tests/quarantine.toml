@@ -32,3 +32,9 @@ id = "test_say_engine.py::test_default_output_is_one_line_without_espeak_on_wind
 issue = 422
 since = "2026-11-04"
 reason = "Windows shard 3/4: an extra 'unhandled exception' line appeared in the captured output once"
+
+[[test]]
+id = "test_agents_bridge.py::test_restart_rotates_the_token"
+issue = 992
+since = "2026-11-09"
+reason = "Windows: CreateNamedPipe WinError 5 when a bridge restarts right after stop() on the same pipe address (seen on PR 987, unrelated to its diff)"
