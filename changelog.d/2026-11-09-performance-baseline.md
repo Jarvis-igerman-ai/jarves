@@ -1,0 +1,1 @@
+- Added: performance baseline report (idle CPU, RSS, log growth) with method and UNVERIFIED wake/Pi 5 gaps (docs only, JAR-65).
