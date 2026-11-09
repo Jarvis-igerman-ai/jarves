@@ -1,0 +1,1 @@
+- Fixed: the Hebrew dashboard now shows a Hebrew hint (command kept as code) when Playwright's ffmpeg is missing, which made the real-browser accessibility test fail on machines without it.
