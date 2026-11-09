@@ -1,0 +1,1 @@
+- Fixed: a missing or corrupt built-in names snapshot now adds a visible warning to the Skill draft report, and the Core rewrites it (#565 item 1).
