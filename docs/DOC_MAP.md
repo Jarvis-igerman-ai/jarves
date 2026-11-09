@@ -92,6 +92,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [proposals/2026-11-09-ui-review](proposals/2026-11-09-ui-review.md) | UI/UX review proposal: phone page and dashboard (Hebrew/RTL, accessibility, clutter); proposal only, no code changed | general | proposal | itself |
 | [proposals/2026-11-09-feature-gaps](proposals/2026-11-09-feature-gaps.md) | Feature gap analysis: scope and roadmap vs shipped code; proposal only, nothing authorised | general | proposal | itself |
 | [proposals/2026-11-09-capability-matrix](proposals/2026-11-09-capability-matrix.md) | Capability matrix spike: unverified vs device-verified rows, generated table design; proposal only, nothing authorised | general | proposal | itself |
+| [proposals/2026-11-09-unmapped-requirements](proposals/2026-11-09-unmapped-requirements.md) | The 18 scope requirements with no issue link: what exists, what is unproven; proposal only, nothing authorised | general | proposal | itself |
 | [MIGRATION_STATUS](archive/MIGRATION_STATUS.md), [MIGRATION_HANDOFF](archive/MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
