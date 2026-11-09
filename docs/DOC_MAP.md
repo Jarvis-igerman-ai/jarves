@@ -90,6 +90,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
 | [reports/README](reports/README.md) | New reports, reviews and audits, one dated file each (`docs/reports/<date>-<topic>.md`); the reports are covered by this row, so adding one does not edit this file | general | current | itself |
 | [proposals/2026-11-09-ui-review](proposals/2026-11-09-ui-review.md) | UI/UX review proposal: phone page and dashboard (Hebrew/RTL, accessibility, clutter); proposal only, no code changed | general | proposal | itself |
+| [proposals/2026-11-09-feature-gaps](proposals/2026-11-09-feature-gaps.md) | Feature gap analysis: scope and roadmap vs shipped code; proposal only, nothing authorised | general | proposal | itself |
 | [MIGRATION_STATUS](archive/MIGRATION_STATUS.md), [MIGRATION_HANDOFF](archive/MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
