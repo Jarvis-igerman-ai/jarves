@@ -1,0 +1,2 @@
+addons = ["jarves.action_receipts"]
+cli = ["jarves.action_receipts"]

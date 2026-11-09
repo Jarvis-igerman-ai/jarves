@@ -323,6 +323,8 @@ class SkillRegistry:
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
         # drive mode (V6 #216, drive_mode.Gate): consulted before the approval prompt; None = not wired (no change)
         self.drive = None
+        # action receipts (V7-X1 #420, action_receipts.ReceiptLog): tool name/result/time only; None = not wired
+        self.receipts = None
         # self-diagnosis (#336): (tool, failed result, route) after every failed call; asks the owner, never raises
         self.on_failure: Callable[[str, "ToolResult", str], None] | None = None
 
@@ -621,6 +623,9 @@ class SkillRegistry:
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
+        if self.receipts is not None:                     # observation only: never arguments or results
+            self.receipts.record(name, res.ok, res.code, origin,
+                                 round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         _blocks_seen(res.ui_blocks)                       # #444: validated UI blocks, owner-facing only
         _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)

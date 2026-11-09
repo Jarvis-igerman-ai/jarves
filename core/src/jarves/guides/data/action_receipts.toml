@@ -1,0 +1,41 @@
+order = 67
+category = "system"
+features = ["action_receipts"]
+suggest = false
+aliases = ["קבלות פעולה", "יומן פעולות", "action receipts", "tool receipts", "what did you do"]
+title_he = "קבלות פעולה"
+title_en = "Action receipts"
+what_he = "לכל קריאה לכלי נכתבת קבלה קצרה: שם הכלי, הצלחה או כישלון, קוד תוצאה וכמה זמן לקח. בלי פרמטרים ובלי תוצאות. כבוי כברירת מחדל; לא משנה אישורים ולא חוסם כלום."
+what_en = "Every tool call leaves a short receipt: tool name, success or failure, result code and how long it took. No arguments and no results. Off by default; it never changes approvals and never blocks anything."
+say = [["מה עשית עכשיו?", "What did you just do?"], ["קבלות פעולה", "Action receipts"]]
+expect_he = "כשהמצב דלוק, jarvis receipts list מציג את הקבלות האחרונות. כשהוא כבוי לא נכתב כלום."
+expect_en = "While it is on, jarvis receipts list shows the latest receipts. While it is off nothing is written."
+test_he = "הריצו  jarvis receipts status  ובדקו שכתוב \"action receipts: off\", ואז jarvis features on action_receipts."
+test_en = "Run  jarvis receipts status  and check it says \"action receipts: off\", then jarvis features on action_receipts."
+cost_he = "חינם. הכול מקומי."
+cost_en = "Free. All local."
+privacy_he = "נשמרים רק שם הכלי, הצלחה, קוד תוצאה וזמן, במחשב הזה בלבד. לעולם לא פרמטרים, טקסט, כתובות או תוצאות. אפשר למחוק בכל עת."
+privacy_en = "Only the tool name, success, result code and time are kept, on this PC only. Never arguments, text, URLs or results. You can delete them at any time."
+
+[parity.features]
+action_receipts = "receipts"
+
+[[steps]]
+he = "הפעילו את \"קבלות פעולה\". היא כבויה כברירת מחדל. בשורת הפקודה: jarvis features on action_receipts."
+en = "Turn on \"Action receipts\". It is off by default. From the command line: jarvis features on action_receipts."
+action = "feature_on:action_receipts"
+check = "enabled:action_receipts"
+
+[[steps]]
+he = "לצפייה בקבלות האחרונות: jarvis receipts list. לספירה: jarvis receipts status."
+en = "To see the latest receipts: jarvis receipts list. To count them: jarvis receipts status."
+
+[[steps]]
+he = "למחיקה: jarvis receipts clear. לכיבוי: jarvis features off action_receipts."
+en = "To delete them: jarvis receipts clear. To turn off: jarvis features off action_receipts."
+
+[[problems]]
+he = "אין קבלות ברשימה"
+en = "The list has no receipts"
+fix_he = "ודאו שהתכונה דלוקה (jarvis receipts status). קבלות נכתבות רק אחרי שהדלקתם אותה."
+fix_en = "Check the feature is on (jarvis receipts status). Receipts are only written after you turn it on."
