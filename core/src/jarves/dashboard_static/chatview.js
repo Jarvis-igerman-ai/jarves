@@ -7,7 +7,7 @@
 //   tx(he, en): the text in the page language;  device: true on a paired phone / PC (no speech, no typed codes)
 //   phone (optional, the phone app only): { icon(name) -> svg node, start: [nodes], end: [nodes], onEvent(e) }: icon send
 //     button, extra composer controls (attach, mic), a thinking row, Copy under each answer and the raw events (history).
-//   returns { destroy(), submit(text), local(role, text) }
+//   returns { destroy(), submit(text, {quiet}), local(role, text) }; quiet = a command the page itself sent: no user bubble
 // Messages are rendered from server events only (the server echoes a sent message), so a second device or the terminal
 // chat shows the same conversation. Message ids are reused on a resend: the computer answers once.
 "use strict";
@@ -397,7 +397,11 @@
     function onEvent(e) {
       if (phone && typeof phone.onEvent === "function") { try { phone.onEvent(e); } catch (x) { /* the page's own hook */ } }
       if (["delta", "reply", "notice", "error", "reset"].includes(e.type)) pending = false;
-      if (e.type === "user") { bubble("user", e.text, e.turn, e.ts); scroll(true); }
+      if (e.type === "user") {
+        const q = quietEcho.indexOf(e.text);
+        if (q >= 0) quietEcho.splice(q, 1);                 // sent by the page itself (e.g. /resume from the drawer): the answer shows, not the command
+        else { bubble("user", e.text, e.turn, e.ts); scroll(true); }
+      }
       else if (e.type === "delta") {
         let b = turns.get(e.turn);
         if (!b) { b = bubble("assistant", "", e.turn, e.ts); b.classList.add("streaming"); b.setAttribute("aria-busy", "true"); turns.set(e.turn, b); }
@@ -432,7 +436,7 @@
       return h("div", { class: "jc-card risk-" + a.risk, role: "group", "aria-labelledby": title },
         h("div", { class: "jc-chead" }, h("b", { id: title }, a.headline),
           h("span", { class: "jc-pill" }, tx("סיכון: ", "Risk: ") + ({ low: tx("נמוך", "low"), medium: tx("בינוני", "medium"), high: tx("גבוה", "high") })[a.risk]),
-          h("span", { class: "jc-small" }, tx(`נדחה אוטומטית בעוד ${a.seconds_left} שנ׳`, `auto-deny in ${a.seconds_left} s`))),
+          h("span", { class: "jc-small" }, tx(`נדחה אוטומטית בעוד ${a.seconds_left} ${phone ? "ש׳" : "שנ׳"}`, `auto-deny in ${a.seconds_left} s`))),
         h("div", { dir: "auto", class: "jc-sentence" }, a.sentence),
         a.rows.length ? h("details", { class: "jc-rows" }, h("summary", {}, tx("פרטים", "Details")),
           h("dl", {}, a.rows.flatMap((r) => [h("dt", {}, r.label), h("dd", { dir: "auto", class: r.mono ? "mono" : "" }, r.value)]))) : null,
@@ -444,9 +448,11 @@
           device && !phoneAp ? null : h("button", { type: "button", onclick: () => answer(false) }, tx("דחייה", "Deny"))), msg);
     }
 
-    async function submit(text, again) {
+    const quietEcho = [];
+    async function submit(text, again, quiet) {
       text = String(text || "").trim();
       if (!text) return;
+      if (quiet) quietEcho.push(text);
       const body = { text, id: again || uid(), lang: lang(), speak: !!(speakBox && speakBox.checked) };
       sendBtn.disabled = true;
       try {
@@ -501,7 +507,7 @@
       if (role !== "user") addCopy(d, text);
       return d;
     }
-    return { destroy() { alive = false; }, submit: (t) => submit(t), local };
+    return { destroy() { alive = false; }, submit: (t, o) => submit(t, undefined, !!(o && o.quiet)), local };
   }
 
   window.JarvesChat = { mount, WORDS };
