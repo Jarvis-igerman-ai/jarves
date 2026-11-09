@@ -1,0 +1,1 @@
+- Fixed: dependency lock refresh (core/uv.lock): pydantic 2.14.1 to 2.14.3, pydantic-core 2.50.1 to 2.50.4, pytest 9.1.1 to 9.2.0, pytest-asyncio 1.4.0 to 1.4.1.post1, tzdata 2026.5 to 2026.6 (PyPI, checked 2026-11-09). Skipped: websockets 17 (openai-agents pins below 17), opencv 5.x and playwright 1.64 (packaging/major, Tier R); Android versions not checked.
