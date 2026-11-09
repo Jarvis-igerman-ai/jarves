@@ -64,14 +64,16 @@ def attach(registry, features, home) -> ReceiptLog:
 def read(home: Path, limit: int = 20) -> list[dict]:
     try:
         lines = (Path(home) / RECEIPT_FILE).read_text(encoding="utf-8").splitlines()[-max(1, int(limit)):]
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return []
     out = []
     for line in lines:
         try:
-            out.append(json.loads(line))
+            row = json.loads(line)
         except ValueError:
             continue
+        if isinstance(row, dict):
+            out.append(row)
     return out
 
 
@@ -88,10 +90,17 @@ def cmd_receipts(a, cfg, home) -> int:
     from .cli import _cli_features
     path = Path(home) / RECEIPT_FILE
     if a.action == "clear":
-        try:
-            path.unlink()
-        except OSError:
-            pass
+        files = (path, path.with_suffix(".1.jsonl"))            # the live file and the rotated one
+        for f in files:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+        left = [f.name for f in files if f.exists()]
+        if left:
+            print(clilang.fmt("לא ניתן למחוק את כל הקבלות: " + ", ".join(left),
+                              "could not delete all receipts: " + ", ".join(left)))
+            return 1
         print(clilang.fmt("הקבלות נמחקו", "receipts cleared"))
         return 0
     rows = read(home, a.limit)

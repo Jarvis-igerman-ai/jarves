@@ -44,18 +44,20 @@ def test_write_failure_is_swallowed(tmp_path, monkeypatch):
 
 def test_registry_records_every_call_but_never_args_or_result(tmp_path):
     from jarves.skills import SkillRegistry, ToolResult
+    from jarves.skills.builtin import ClockSkill
     reg = SkillRegistry()
+    reg.register(ClockSkill())
     log, state = mk(tmp_path)
     reg.receipts = log
 
     async def fake_call(name, raw_args=None, *, origin="model"):
         return ToolResult(True, "result text " + SECRET, code="OK")
     reg._call = fake_call
-    asyncio.run(reg.call("lights", {"token": SECRET}))
+    asyncio.run(reg.call("get_time", {"token": SECRET}))
     state["on"] = False
-    asyncio.run(reg.call("lights", {}))                  # switched off live: no receipt
+    asyncio.run(reg.call("get_time", {}))                  # switched off live: no receipt
     rows = lines(tmp_path)
-    assert len(rows) == 1 and rows[0]["tool"] == "lights" and rows[0]["ok"] is True and rows[0]["origin"] == "model"
+    assert len(rows) == 1 and rows[0]["tool"] == "get_time" and rows[0]["ok"] is True and rows[0]["origin"] == "model"
     assert SECRET not in json.dumps(rows)
 
 
@@ -87,3 +89,81 @@ def test_cli_status_list_clear(tmp_path, capsys, monkeypatch):
     assert json.loads(capsys.readouterr().out) == {"action_receipts": "on", "stored": 1}
     ar.cmd_receipts(ns(action="clear"), None, tmp_path)
     assert ar.read(tmp_path) == []
+
+
+def _reg(tmp_path, fake):
+    from jarves.skills import SkillRegistry
+    from jarves.skills.builtin import ClockSkill
+    reg = SkillRegistry()
+    reg.register(ClockSkill())
+    log, _ = mk(tmp_path)
+    reg.receipts = log
+    reg._call = fake
+    return reg
+
+
+def test_unknown_model_tool_names_never_reach_the_file(tmp_path):
+    from jarves.skills import ToolResult
+
+    async def fake_call(name, raw_args=None, *, origin="model"):
+        return ToolResult(False, "no such tool", code="UNKNOWN_TOOL")
+    reg = _reg(tmp_path, fake_call)
+    for bad in ("hunter2_password", "user.name:0541234567"):
+        asyncio.run(reg.call(bad, {}))
+    text = (tmp_path / ar.RECEIPT_FILE).read_text(encoding="utf-8")
+    assert "hunter2" not in text and "0541234567" not in text
+    assert [r["tool"] for r in lines(tmp_path)] == ["unknown_tool", "unknown_tool"]
+
+
+def test_cancelled_call_leaves_a_receipt(tmp_path):
+    async def fake_call(name, raw_args=None, *, origin="model"):
+        raise asyncio.CancelledError
+    reg = _reg(tmp_path, fake_call)
+    try:
+        asyncio.run(reg.call("get_time", {}))
+    except asyncio.CancelledError:
+        pass
+    rows = lines(tmp_path)
+    assert len(rows) == 1 and rows[0]["ok"] is False and rows[0]["code"] == "CANCELLED"
+
+
+def test_attach_wires_registry_and_follows_feature_state(tmp_path):
+    from jarves.skills import SkillRegistry
+    state = {"on": False}
+    reg = SkillRegistry()
+    log = ar.attach(reg, types.SimpleNamespace(active=lambda f: state["on"]), tmp_path)
+    assert reg.receipts is log
+    assert log.record("clock", True) is None
+    state["on"] = True
+    assert log.record("clock", True)["tool"] == "clock"
+
+
+def test_clear_removes_rotated_file_and_reports_leftovers(tmp_path, capsys):
+    ns = types.SimpleNamespace(limit=20, json=False, action="clear")
+    d = tmp_path / "receipts"
+    d.mkdir()
+    (d / "tool_receipts.jsonl").write_text("{}\n", encoding="utf-8")
+    (d / "tool_receipts.1.jsonl").write_text("{}\n", encoding="utf-8")
+    assert ar.cmd_receipts(ns, None, tmp_path) == 0
+    assert not list(d.glob("tool_receipts*"))
+    # a leftover that cannot be removed: no success message, non-zero exit
+    (d / "tool_receipts.1.jsonl").write_text("{}\n", encoding="utf-8")
+    capsys.readouterr()
+    import pathlib
+    orig = pathlib.Path.unlink
+    pathlib.Path.unlink = lambda self, *a, **k: (_ for _ in ()).throw(PermissionError("locked"))
+    try:
+        assert ar.cmd_receipts(ns, None, tmp_path) == 1
+    finally:
+        pathlib.Path.unlink = orig
+    out = capsys.readouterr().out
+    assert "cleared" not in out and "tool_receipts.1.jsonl" in out
+
+
+def test_read_tolerates_corrupt_file(tmp_path):
+    d = tmp_path / "receipts"
+    d.mkdir()
+    (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n\xff\xfe\n')
+    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}] or ar.read(tmp_path) == []
+    (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n')
+    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}]
