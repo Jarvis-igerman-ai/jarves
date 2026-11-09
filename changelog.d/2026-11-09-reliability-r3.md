@@ -1,0 +1,1 @@
+- Fixed: log swallowed errors in health snapshot writes and phone bridge (replay lookup, presence, self-test history), bounded and without secrets (JAR-103)

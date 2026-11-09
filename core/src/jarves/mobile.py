@@ -458,7 +458,9 @@ class MobileAccess:
                 return hit[1]
         try:
             return self.cont.seen(device, mid, REPLY_TTL_S)          # survives a PC restart (the in-memory copy is gone then)
-        except Exception:
+        except Exception as e:                    # the message may now run a second time: say so, never silently
+            logs.warn("mobile", "MOBILE_REPLAY_LOOKUP_FAILED", "idempotent reply lookup failed; message not de-duplicated",
+                      error_type=type(e).__name__)
             return None
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -548,7 +550,8 @@ def core_bridge(core, loop) -> Bridge:
         from .calm import owner_at_pc
         try:
             return bool(owner_at_pc(core))
-        except Exception:
+        except Exception as e:                    # unknown presence is reported as "away", but visibly
+            logs.warn("mobile", "MOBILE_PRESENCE_UNKNOWN", "owner presence could not be read", error_type=type(e).__name__)
             return False
     def audio() -> dict:
         from . import mobile_audio
@@ -1108,8 +1111,10 @@ def health_view(mob: MobileAccess) -> dict:
         for kind, d in hist.get("latest", {}).items():
             out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
                                   "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
-    except Exception:
-        pass                                      # no test history yet, or the feature is not installed
+    except ImportError:
+        pass                                      # the feature is not installed
+    except Exception as e:                        # no history yet is normal; a corrupt one is not
+        logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read", error_type=type(e).__name__)
     return out
 
 
