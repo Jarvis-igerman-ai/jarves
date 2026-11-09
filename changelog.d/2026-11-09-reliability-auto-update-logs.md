@@ -1,0 +1,1 @@
+- Fixed: auto-update now logs (code and error type only) when its switch, channel check or busy probes fail, instead of failing silently.

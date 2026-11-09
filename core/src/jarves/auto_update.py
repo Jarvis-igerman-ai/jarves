@@ -109,7 +109,9 @@ def is_enabled(cfg, home: Path) -> bool:
     try:
         f = features.Features(cfg, home)
         return f.enabled(FEATURE) and f.enabled("update_check")
-    except Exception:
+    except Exception as e:                                  # reported as OFF, but say why (JAR-86)
+        logs.warn("updates", "AUTO_UPDATE_SWITCH_UNREADABLE", "auto-update switch unreadable; treated as off",
+                  error_type=type(e).__name__)
         return False
 
 
@@ -211,8 +213,9 @@ class AutoUpdater:
             f.enabled(FEATURE)
             if FEATURE not in f._state["enabled"]:
                 return "beta" if f.enabled("beta_channel") else "stable"
-        except Exception:
-            pass
+        except Exception as e:
+            logs.warn("updates", "AUTO_UPDATE_DEFAULT_NOTE_FAILED", "could not tell the channel default",
+                      error_type=type(e).__name__)
         return None
 
     # ------------------------------------------------------------------ the owner's answer to the notice
@@ -254,8 +257,9 @@ class AutoUpdater:
                 st["channel_chosen"] = True
                 _save(self.home, st)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logs.warn("updates", "AUTO_UPDATE_CHANNEL_CHECK_FAILED", "could not read the channel choice",
+                      error_type=type(e).__name__)
         st["prompted"] = True
         self._emit(st, "choose", "", "")
         _save(self.home, st)
@@ -527,13 +531,13 @@ def core_busy(core) -> list[str]:
     try:
         if core.approvals.has_pending():
             out.append("pending_approval")
-    except Exception:
-        pass
+    except Exception as e:
+        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (approvals)", error_type=type(e).__name__)
     try:
         if getattr(core.chat, "turns", None):
             out.append("chat_turn")
-    except Exception:
-        pass
+    except Exception as e:
+        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (chat)", error_type=type(e).__name__)
     try:
         from .orchestrator.envelope import LIVE_STATES
         busy_states = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"} & set(LIVE_STATES)
@@ -541,14 +545,14 @@ def core_busy(core) -> list[str]:
         db = getattr(o, "db", None)
         if db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True)):
             out.append("coding_agent")
-    except Exception:
-        pass
+    except Exception as e:
+        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (agents)", error_type=type(e).__name__)
     try:
         eng = core.ops.alerts
         if eng.quiet_now() or eng.paused():
             out.append("quiet_hours")
-    except Exception:
-        pass
+    except Exception as e:
+        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (quiet)", error_type=type(e).__name__)
     return out
 
 

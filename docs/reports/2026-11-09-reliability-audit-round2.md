@@ -1,0 +1,4 @@
+# Reliability audit round 2 (JAR-86)
+- goal_plans runner: no silent swallow found. Tick and step crashes already log `PLAN_TICK_FAILED` / `PLAN_STEP_CRASH`; the argument-validation `except` re-raises as a ValueError. No change.
+- auto_update (read-only paths): 7 bare `except Exception: pass/return False` fixed (switch read, channel default, channel check, 4 busy probes) -> `logs.warn` with codes `AUTO_UPDATE_SWITCH_UNREADABLE`, `AUTO_UPDATE_DEFAULT_NOTE_FAILED`, `AUTO_UPDATE_CHANNEL_CHECK_FAILED`, `AUTO_UPDATE_BUSY_PROBE_FAILED`. Behaviour unchanged. Install/write path untouched (Tier R). Tests: `core/tests/test_reliability_auto_update_logs.py`.
+- whatsapp_bridge.py: NOT changed, PR #980 edits this file. Candidates for a follow-up after #980 merges: lines ~479, ~1416 (`except ... pass`), timeouts at ~1282/~1332 with no log. UNVERIFIED whether each is intentional.
