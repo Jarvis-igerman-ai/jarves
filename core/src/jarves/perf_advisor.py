@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import re
 import statistics
 import time
 from pathlib import Path

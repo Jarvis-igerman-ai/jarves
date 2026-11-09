@@ -10,8 +10,7 @@ import re
 import subprocess
 import sys
 import time
-import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__, clilang, logs

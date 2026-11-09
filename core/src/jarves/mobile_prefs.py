@@ -12,7 +12,6 @@ and counts only.
 """
 from __future__ import annotations
 
-import time
 
 from . import logs
 
