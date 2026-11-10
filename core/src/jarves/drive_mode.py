@@ -510,9 +510,13 @@ class Gate:
 def attach(registry, features, home, memory=None) -> Gate:
     """Wire drive mode into a SkillRegistry (Core and text session). With the switch off it does nothing."""
     contacts = (lambda: contacts_from_memory(memory)) if memory is not None else _no_contacts
+    db = []                                    # one connection for the Gate's lifetime, opened on first use (#833)
+
     def passenger() -> str:
-        from .userdata import open_db
-        return str(open_db(home).setting("drive_briefing.passenger") or "ask")
+        if not db:
+            from .userdata import open_db
+            db.append(open_db(home))
+        return str(db[0].setting("drive_briefing.passenger") or "ask")
     gate = Gate(active=lambda: features.active(FEATURE), queue=queue_for(home), contacts=contacts, passenger=passenger)
     registry.drive = gate
     return gate

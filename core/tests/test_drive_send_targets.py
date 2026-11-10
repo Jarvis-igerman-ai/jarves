@@ -99,3 +99,27 @@ async def test_gate_lock_wait_does_not_block_the_event_loop(tmp_path, monkeypatc
     t.cancel()
     assert not res.ok                              # failed closed (lock timeout)
     assert len(ticks) > 10                         # the loop kept running during the 0.6 s wait
+
+
+def test_whatsapp_digits_only_number_gets_plus_so_non_israeli_contact_is_known(tmp_path):
+    """#833: the bridge number is digits-only; a saved +1 contact must match (fake data, in-car check UNVERIFIED)."""
+    from jarves import whatsapp_bridge as wb
+    skill = wb.WhatsAppBridgeSkill(tmp_path)
+    tgt = _real_target(skill, "whatsapp_send", {"name": "Sam", "number": "12025550123"})
+    assert tgt == "+12025550123"
+    gate = dm.Gate(active=lambda: True, queue=dm.DriveQueue(tmp_path / "q.json"),
+                   contacts=lambda: [{"name": "Sam", "phone": "+12025550123"}])
+    assert gate.known("Sam", tgt)
+    assert not gate.known("Sam", "12025550123")                            # control: without "+" it deferred
+
+
+def test_passenger_opens_one_db_connection(tmp_path, monkeypatch):
+    from jarves import userdata
+    calls = []
+    real = userdata.open_db
+    monkeypatch.setattr(userdata, "open_db", lambda h: calls.append(1) or real(h))
+    reg = SimpleNamespace()
+    feats = SimpleNamespace(active=lambda f: True)
+    gate = dm.attach(reg, feats, tmp_path)
+    assert gate.passenger() == "ask" and gate.passenger() == "ask"
+    assert len(calls) == 1
