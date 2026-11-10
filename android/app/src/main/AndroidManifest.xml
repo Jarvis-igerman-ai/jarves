@@ -8,9 +8,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- A3b: a count of waiting approvals, never their content. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- T04: reminders and timers. The exact-alarm permission is granted by the owner in system settings; without it alarms are slightly inexact. -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- T04 reminders: the exact-alarm and boot permissions and AlarmReceiver are NOT registered until part 2 (UI, sync, guide, off switch) lands (#1029). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
 
     <application
@@ -35,12 +33,6 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
-        <receiver android:name=".AlarmReceiver" android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
         <!-- WorkManager's foreground service is not used (no expedited/long work): it is not part of this app. -->
         <service android:name="androidx.work.impl.foreground.SystemForegroundService" tools:node="remove" />
     </application>
