@@ -136,6 +136,26 @@
     $("drawerClose").addEventListener("click", close);
     $("drawerScrim").addEventListener("click", close);
     document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+    // The drawer is a modal dialog: Tab stays inside it, and the arrow keys / Home / End move between its page tabs.
+    const drawerEl = $("drawer");
+    const visible = (root, sel) => Array.from(root.querySelectorAll(sel)).filter((x) => !x.hidden && !x.closest("[hidden]") && !x.disabled);
+    drawerEl.addEventListener("keydown", (ev) => {
+      if (drawerEl.hidden) return;
+      if (ev.key === "Tab") {
+        const f = visible(drawerEl.querySelector(".drawer-panel"), "button, a[href], input");
+        if (!f.length) return;
+        const first = f[0], last = f[f.length - 1];
+        if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+        else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+        return;
+      }
+      const cur = document.activeElement;
+      if (!cur || cur.getAttribute("role") !== "tab") return;
+      const tabs = visible(drawerEl, "[role=tab]"), i = tabs.indexOf(cur);
+      const to = ev.key === "ArrowDown" ? tabs[(i + 1) % tabs.length] : ev.key === "ArrowUp" ? tabs[(i - 1 + tabs.length) % tabs.length]
+        : ev.key === "Home" ? tabs[0] : ev.key === "End" ? tabs[tabs.length - 1] : null;
+      if (to) { ev.preventDefault(); to.focus(); }
+    });
     document.querySelectorAll("#drawer [data-tab]").forEach((b) => b.addEventListener("click", close));
     const fresh = () => { close(); chatCmd("/new"); };
     $("newChat").addEventListener("click", fresh); $("drawerNew").addEventListener("click", fresh);
