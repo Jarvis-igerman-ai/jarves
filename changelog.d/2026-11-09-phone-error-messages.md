@@ -1,0 +1,1 @@
+- Fixed: phone page and phone API errors now say what happened and what to do, in English and Hebrew (JAR-142).

@@ -697,3 +697,23 @@ def test_phone_cli_empty_scope_list_stays_empty(home, capsys, monkeypatch):
     assert f"{did}  empty-phone: (none)" in out
     assert mobile.DEFAULT_SCOPES[0] not in out                                  # not turned back into the defaults
     assert mobile.MobileAccess(home).devices()[0]["scopes"] == []
+
+
+# ---------------------------------------------------------------- JAR-142: error text says what happened and what to do
+def test_phone_errors_are_actionable_in_en_and_he(srv):
+    token, _, _ = pair(srv)
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, body={"text": "  "})
+    assert st == 400
+    assert body["error"] == "the message is empty: type something and send again"
+    assert body["error_he"] == "ההודעה ריקה: כתבו משהו ושלחו שוב"
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{nope")
+    assert st == 400 and "reload the page" in body["error"] and "רעננו" in body["error_he"]
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, body={"text": "hi"}, headers={"X-Jarves": "0"})
+    assert st == 403 and "try again" in body["error"] and "נסו שוב" in body["error_he"]
+
+
+def test_phone_error_hebrew_has_no_bare_english_runs():
+    import re
+    src = open(mobile.__file__, encoding="utf-8").read()
+    for he in re.findall(r'"error_he": "([^"]+)"', src):
+        assert not re.search(r"(?:[A-Za-z]+[ ,]+){2}[A-Za-z]+", he.replace("JARVES", "").replace("https", "")), he

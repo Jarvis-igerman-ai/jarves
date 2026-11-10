@@ -603,7 +603,7 @@ def _body(h, limit: int) -> bytes | None:
     except ValueError:
         n = -1
     if n < 0 or n > limit:
-        h._json(413 if n > limit else 400, {"error": "too large" if n > limit else "bad Content-Length"})
+        h._json(413 if n > limit else 400, ({"error": "that is too big to send: try something smaller", "error_he": "זה גדול מדי לשליחה: נסו משהו קטן יותר"} if n > limit else {"error": "the request was cut off: try again", "error_he": "הבקשה נקטעה: נסו שוב"}))
         return None
     return h.rfile.read(n) if n else b""
 
@@ -615,10 +615,10 @@ def _json_body(h) -> dict | None:
     try:
         d = json.loads(raw or b"{}")
     except ValueError:
-        h._json(400, {"error": "invalid JSON"})
+        h._json(400, {"error": "the request was not readable: reload the page and try again", "error_he": "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"})
         return None
     if not isinstance(d, dict):
-        h._json(400, {"error": "JSON object expected"})
+        h._json(400, {"error": "the request was not readable: reload the page and try again", "error_he": "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"})
         return None
     return d
 
@@ -676,10 +676,10 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if not mob.rate_ok(("ipev:" if events else "ip:") + ip, EVENTS_PER_MIN if events else IP_RATE_PER_MIN):
         mob.audit_noisy("rate_limited", ip, path=path, scope="address")
         logs.warn("mobile", "MOBILE_RATE_LIMITED", "phone API rate limit hit", path=path)
-        return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
+        return h._json_extra(429, {"error": "too many requests: wait a minute and try again", "error_he": "יותר מדי בקשות: חכו דקה ונסו שוב"}, {"Retry-After": "60"})
     if method != "GET" and (h.headers.get("X-Jarves") != "1" or not _origin_ok(h)):
         mob.audit_noisy("refused_cross_origin", ip, path=path)
-        return h._json(403, {"error": "cross-origin or missing X-Jarves header"})
+        return h._json(403, {"error": "this request was blocked for safety: open the phone page from the address on the computer and try again", "error_he": "הבקשה נחסמה מטעמי בטיחות: פתחו את דף הטלפון מהכתובת שמוצגת במחשב ונסו שוב"})
     if path == "/api/m/pair" and method == "POST":
         d = _json_body(h)
         if d is None:
@@ -702,7 +702,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         return h._json(401, {"error": "not paired or revoked: pair again on the computer"})
     if not mob.rate_ok(("devev:" if events else "dev:") + dev["id"], EVENTS_PER_MIN if events else DEVICE_RATE_PER_MIN):
         mob.audit("rate_limited", device=dev["id"], path=path, scope="device")
-        return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
+        return h._json_extra(429, {"error": "too many requests: wait a minute and try again", "error_he": "יותר מדי בקשות: חכו דקה ונסו שוב"}, {"Retry-After": "60"})
 
     def need(scope: str) -> bool:
         if scope in dev["scopes"]:
@@ -804,16 +804,16 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json_extra(429, {"error": "too many messages, slow down"}, {"Retry-After": "30"})
         text = str(d.get("text", "")).strip()[:MAX_CHAT_CHARS]
         if not text:
-            return h._json(400, {"error": "text is empty"})
+            return h._json(400, {"error": "the message is empty: type something and send again", "error_he": "ההודעה ריקה: כתבו משהו ושלחו שוב"})
         if mob.bridge is None:
-            return done(503, {"error": "the Core is not connected"}, chars=len(text))
+            return done(503, {"error": "JARVES is not running on the computer: start it there and try again", "error_he": "JARVES לא פועל במחשב: הפעילו אותו שם ונסו שוב"}, chars=len(text))
         if not mob.begin(dev["id"]):
             return h._json(409, {"error": "the previous message is still being answered", "code": "BUSY"})
         try:
             r = mob.bridge.chat(text, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_CHAT_FAILED", "a phone message could not be answered", error_type=type(e).__name__)
-            return done(502, {"error": "JARVES could not answer right now"}, chars=len(text))
+            return done(502, {"error": "JARVES could not answer: try again in a moment", "error_he": "JARVES לא הצליח לענות: נסו שוב בעוד רגע"}, chars=len(text))
         finally:
             mob.end(dev["id"])
         out = {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}
@@ -830,7 +830,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if not need("voice") or not need_page("chat"):
             return
         if mob.scheme != "https" or mob.bridge is None or not mob.bridge.voice_available():
-            return h._json(409, {"error": "voice needs TLS (https) and the voice pipeline"})
+            return h._json(409, {"error": "voice is not ready: open the secure (https) phone address and make sure voice is on at the computer", "error_he": "הקול לא מוכן: פתחו את כתובת הטלפון המאובטחת (https) והפעילו קול במחשב"})
         if not mob.rate_ok("voice:" + dev["id"], VOICE_RATE_PER_MIN):
             return h._json_extra(429, {"error": "too many voice requests"}, {"Retry-After": "30"})
         raw = _body(h, MAX_AUDIO_BYTES)
@@ -844,7 +844,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             r = mob.bridge.voice(raw, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_VOICE_FAILED", "a phone voice request failed", error_type=type(e).__name__)
-            return done(502, {"error": "JARVES could not understand the audio"}, bytes=len(raw))
+            return done(502, {"error": "JARVES could not understand the recording: try again and speak closer to the phone", "error_he": "JARVES לא הצליח להבין את ההקלטה: נסו שוב ודברו קרוב יותר לטלפון"}, bytes=len(raw))
         finally:
             mob.end(dev["id"])
         return done(200, {"transcript": str(r.get("transcript", "")), "reply": str(r.get("reply", "")),
