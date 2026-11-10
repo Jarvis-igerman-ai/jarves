@@ -69,22 +69,32 @@ class AlarmReceiver : BroadcastReceiver() {
                 val id = intent.getStringExtra(EXTRA_ITEM_ID) ?: return
                 val item = store.list().firstOrNull { it.id == id } ?: return
                 store.complete(id)
-                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    nm.createNotificationChannel(NotificationChannel(ALARM_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_HIGH))
-                }
-                try {
-                    nm.notify(
-                        id.hashCode(),
-                        NotificationCompat.Builder(context, ALARM_CHANNEL)
-                            .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                            .setContentText(item.text).setAutoCancel(true).build(),
-                    )
-                } catch (e: SecurityException) {
-                    // Notifications not allowed: the item is still marked done and visible in the app.
+                show(context, item)
+            }
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                // Reminders that came due while the phone was off are shown now, not dropped.
+                for (item in store.rescheduleAll()) {
+                    store.complete(item.id)
+                    show(context, item)
                 }
             }
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> store.rescheduleAll()
+        }
+    }
+
+    private fun show(context: Context, item: Item) {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(NotificationChannel(ALARM_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_HIGH))
+        }
+        try {
+            nm.notify(
+                item.id.hashCode(),
+                NotificationCompat.Builder(context, ALARM_CHANNEL)
+                    .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                    .setContentText(item.text).setAutoCancel(true).build(),
+            )
+        } catch (e: SecurityException) {
+            // Notifications not allowed: the item is still marked done and visible in the app.
         }
     }
 }

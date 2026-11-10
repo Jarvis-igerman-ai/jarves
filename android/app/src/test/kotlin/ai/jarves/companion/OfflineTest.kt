@@ -71,6 +71,18 @@ class OfflineTest {
         assertEquals(mapOf(future.id to 9_000L), al.set)
     }
 
+    @Test fun missedWhilePhoneOffAreReturnedUntilShown() {
+        val st = MemStorage()
+        val s = store(st)
+        val a = s.addReminder("a", 2_000)
+        val b = s.startTimer("b", 1_500)
+        now = 10_000 // phone was off past both due times
+        val restarted = store(st)
+        assertEquals(listOf(a.id, b.id), restarted.rescheduleAll().map { it.id })
+        restarted.complete(a.id) // the caller shows it and marks it done
+        assertEquals(listOf(b.id), restarted.rescheduleAll().map { it.id })
+    }
+
     @Test fun damagedFileStartsEmpty() {
         assertTrue(store(MemStorage("{not json")).all().isEmpty())
     }
