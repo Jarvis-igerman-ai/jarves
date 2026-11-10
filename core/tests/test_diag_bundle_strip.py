@@ -121,3 +121,15 @@ def test_a_privacy_mode_log_ships_clean_too(home, tmp_path):
     assert not ra.scan_bytes(path.read_bytes())
     _, members = build(home, tmp_path)
     assert all(not ra.scan_bytes(t.encode("utf-8")) for t in members.values())
+
+
+def test_inventory_names_receipts_files_but_pseudonymizes_unknown(tmp_path):
+    """JAR-145: the action-receipts files are JARVES's own, so the inventory shows their names (support can see
+    whether receipts exist); any other file under the same folder family stays a per-bundle pseudonym."""
+    (tmp_path / "receipts").mkdir()
+    (tmp_path / "receipts" / "tool_receipts.jsonl").write_text("{}", encoding="utf-8")
+    (tmp_path / "receipts" / "tool_receipts.1.jsonl").write_text("{}", encoding="utf-8")
+    (tmp_path / "Dana Cohen notes.txt").write_text("x", encoding="utf-8")
+    shown = {x["file"] for x in diagbundle._inventory(tmp_path)}
+    assert {"receipts/tool_receipts.jsonl", "receipts/tool_receipts.1.jsonl"} <= shown
+    assert not any("Dana" in f for f in shown)
