@@ -134,3 +134,28 @@ async def test_connection_drop_right_after_session_started_fails_cleanly_without
         assert ("warn", "LIVE_GREETING_MISSED") not in fast
     finally:
         await core.stop()
+
+
+async def test_wake_path_missing_greeting_speaks_no_tts_hello(home, cfg, monkeypatch, fast):
+    """#1028: on a wake session the live mic is already open, so a missed greeting must stay silent (no TTS hello)."""
+    holder, said = [], []
+
+    def behaviour(conn, voice):                  # silent server: the greeting (and its nudge/retry) never arrives
+        conn.session.thinking = _Note(conn)
+        conn.session.commentary = _Note(conn)
+
+    core = await _core(home, cfg, monkeypatch, _factory(holder, behaviour, said))
+    try:
+        await core._start_live(greeting="hello", ack=True)       # the wake-word entry point (ack=True)
+        voice = holder[0]
+        assert core.live is voice and voice.running
+        for _ in range(200):
+            if ("warn", "LIVE_GREETING_MISSED") in fast:
+                break
+            await asyncio.sleep(0.02)
+        assert ("warn", "LIVE_GREETING_MISSED") in fast
+        assert core.tts.spoken == []                             # nothing spoken through TTS with the mic open
+        assert ("warn", "LIVE_GREETING_TTS_FALLBACK") not in fast
+        assert voice.running                                     # the session stays open and usable
+    finally:
+        await core.stop()

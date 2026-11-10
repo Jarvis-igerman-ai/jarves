@@ -1582,12 +1582,14 @@ class Core:
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            # #1028: no TTS hello here. The live microphone is already open on a wake session, so a spoken
+            # fallback could be heard by the model (self-echo); the wake cue already played. Silent, truthful.
             logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio on a wake session; continuing without it",
                       error_type=type(e).__name__)
-            await self._greeting_tts_fallback()
 
     async def _greeting_tts_fallback(self) -> None:
-        """#179: nudge and the one retry already failed: say a short hello through TTS (counted in selfspeed)."""
+        """#179: STARTUP path only (the mic is not open yet): nudge and the one retry already failed, so say a short
+        hello through TTS (counted in selfspeed). Never call this on a wake session (#1028)."""
         try:
             logs.warn("voice", "LIVE_GREETING_TTS_FALLBACK", "greeting audio never arrived; speaking a short TTS hello")
             await self.speak(self.hello_text())
@@ -1649,7 +1651,7 @@ class Core:
                               error_type=type(e).__name__)
                     self._startup_stage("waiting_audio", "No greeting audio arrived; speaking a short TTS hello.")
                     await self._greeting_tts_fallback()
-                self._greeted = True                # greeting comes from this same live session, never a second TTS call
+                self._greeted = True                # the greeting is this live session's, or the one startup TTS hello above
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")
                 deadline = time.monotonic() + 20

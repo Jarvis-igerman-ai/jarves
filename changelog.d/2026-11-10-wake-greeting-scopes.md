@@ -1,0 +1,1 @@
+- Fixed: a missed wake-session greeting no longer plays a spoken TTS hello while the microphone is open (the startup fallback is unchanged), and `jarvis phone scopes` now prints "(none)" for a phone with no scopes (#1028, #1030).
