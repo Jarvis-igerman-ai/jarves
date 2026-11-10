@@ -59,7 +59,8 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 7, "weekly": 4, "manual": 3, "checkpoints": 2, "max_total_mb": 3072, "include_faces": False,
+            "auto": True}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -93,11 +94,16 @@ def get_settings(home: Path) -> dict:
 def set_settings(home: Path, changes: dict) -> dict:
     clean = {}
     for k, v in (changes or {}).items():
-        if k in ("daily", "weekly", "manual", "checkpoints"):
+        if k in ("daily", "weekly", "manual", "checkpoints", "max_total_mb"):
             try:
                 n = int(v)
             except (TypeError, ValueError):
                 raise ValueError(f"{k} must be a whole number")
+            if k == "max_total_mb":
+                if not 0 <= n <= 1_000_000:
+                    raise ValueError("max_total_mb must be between 0 (no size limit) and 1000000")
+                clean[k] = n
+                continue
             if not 0 <= n <= 365 or (k == "daily" and n < 1):
                 raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
             clean[k] = n
@@ -380,6 +386,20 @@ def prune(home: Path) -> list[str]:
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
     if autos:
         keep.add(autos[0]["name"])
+    # Size budget: drop the oldest kept backups until the folder fits; the newest backup overall and the newest of
+    # each kind are never dropped (a restore point always remains).
+    budget = int(s.get("max_total_mb") or 0) * 1024 * 1024
+    if budget:
+        protected = {items[0]["name"]} if items else set()
+        for kind in {b["kind"] for b in items}:
+            protected.add(next(b["name"] for b in items if b["kind"] == kind))
+        total = sum(b["size"] for b in items if b["name"] in keep)
+        for b in reversed(items):                             # oldest first
+            if total <= budget:
+                break
+            if b["name"] in keep and b["name"] not in protected:
+                keep.discard(b["name"])
+                total -= b["size"]
     gone = []
     for b in items:
         if b["name"] not in keep:
@@ -693,6 +713,9 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="how many manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="how many pre-migration / pre-restore backups to keep (each)")
+    b.add_argument("--max-total-mb", type=int, help="total size budget of the backup folder, 0 = no limit")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +762,9 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k, v in (
+                ("daily", a.daily), ("weekly", a.weekly), ("manual", a.manual), ("checkpoints", a.checkpoints),
+                ("max_total_mb", a.max_total_mb)) if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:

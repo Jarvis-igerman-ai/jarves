@@ -234,7 +234,7 @@ def test_retention_7_daily_4_weekly(profile):
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
     assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == backup.DEFAULTS["manual"] == 3
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
@@ -364,3 +364,37 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+def test_size_budget_prunes_oldest_but_keeps_newest_of_each_kind(profile):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    base = datetime(2026, 11, 1, 3, 0)
+    mb = 1024 * 1024
+
+    def fake(kind, when, size):
+        (bdir / f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x" * size)
+    for i in range(5):
+        fake("auto", base + timedelta(days=i), 2 * mb)
+        fake("pre-migration", base + timedelta(hours=i), 2 * mb)
+    backup.set_settings(profile, {"daily": 5, "weekly": 0, "checkpoints": 5, "max_total_mb": 5})
+    backup.prune(profile)
+    left = backup.list_backups(profile)
+    assert sum(b["size"] for b in left) <= 6 * mb                      # budget 5 MB, newest of each kind is 2 MB
+    newest = {k: max(b["ts"] for b in left if b["kind"] == k) for k in ("auto", "pre-migration")}
+    assert newest["auto"] == (base + timedelta(days=4)).timestamp()    # the latest backup of a kind survives
+    assert newest["pre-migration"] == (base + timedelta(hours=4)).timestamp()
+    backup.set_settings(profile, {"max_total_mb": 0})                  # 0 = no limit
+    assert backup.get_settings(profile)["max_total_mb"] == 0
+    with pytest.raises(ValueError):
+        backup.set_settings(profile, {"max_total_mb": -1})
+
+
+def test_cli_backup_settings_manual_and_checkpoints(profile, capsys):
+    import argparse
+    ap = argparse.ArgumentParser()
+    backup.add_cli(ap.add_subparsers())
+    a = ap.parse_args(["backup", "settings", "--manual", "2", "--checkpoints", "1", "--max-total-mb", "900"])
+    assert backup.cmd_backup(a, None, profile) == 0
+    s = backup.get_settings(profile)
+    assert (s["manual"], s["checkpoints"], s["max_total_mb"]) == (2, 1, 900)

@@ -41,3 +41,9 @@ he = "אחרי שחזור הוא לא מחובר לגוגל"
 en = "After a restore Google is not connected"
 fix_he = "זה בכוונה: מפתחות לא נשמרים בגיבוי. הריצו jarvis key ו-jarvis google start."
 fix_en = "On purpose: keys are not backed up. Run jarvis key and jarvis google start."
+
+[[problems]]
+he = "הגיבויים תופסים יותר מדי מקום בדיסק"
+en = "Backups take too much disk space"
+fix_he = "המערכת שומרת מעט גיבויים ומגבילה את הגודל הכולל (ברירת מחדל 3 ג'יגה). לשינוי: jarvis backup settings --manual 2 --checkpoints 1 --max-total-mb 2000. לניקוי מיידי: jarvis backup prune. הגיבוי החדש ביותר לעולם לא נמחק."
+fix_en = "Few backups are kept and the folder has a total size limit (default 3 GB). To change it: jarvis backup settings --manual 2 --checkpoints 1 --max-total-mb 2000. To clean up now: jarvis backup prune. The newest backup is never deleted."

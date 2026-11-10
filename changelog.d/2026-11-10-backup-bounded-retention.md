@@ -1,0 +1,1 @@
+- Fixed: backups no longer fill the disk - fewer manual/pre-migration backups kept by default (3 / 2), a total size limit (default 3 GB, `jarvis backup settings --max-total-mb`) that prunes the oldest first while always keeping the newest backup, and CLI flags `--manual` / `--checkpoints` (#1016)
