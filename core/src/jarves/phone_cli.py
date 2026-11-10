@@ -236,7 +236,7 @@ def cmd_phone(a, cfg, home) -> int:
                 m.set_scopes(a.device, cur, by="cli")
             devs = [dict(hit, scopes=[x for x in ALL_SCOPES if x in cur])]
         for d in devs:
-            print(f"{d['id']}  {d['name']}: " + ", ".join(DEFAULT_SCOPES if d.get("scopes") is None else d["scopes"]) or "(none)")
+            print(f"{d['id']}  {d['name']}: " + (", ".join(DEFAULT_SCOPES if d.get("scopes") is None else d["scopes"]) or "(none)"))
         return 0
     if a.action == "bind":
         m.set_bind_tailnet_only(a.where == "tailnet", by="cli")
