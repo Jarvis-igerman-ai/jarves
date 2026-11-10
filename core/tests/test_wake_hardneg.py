@@ -1,6 +1,9 @@
 """Hard negatives in the wake trainer, the disjoint held-out gate list and the relative gate (issue wake-hardneg).
 Fake synthesizer + fake front end + a fake baseline model: hermetic, silent, frozen seeds, no engine, no owner audio."""
+import shutil
+
 import numpy as np
+import pytest
 
 from jarves.voice import wake_prod as wp
 from jarves.voice import wake_train as wt
@@ -24,6 +27,13 @@ class FlatScorer:
 def small_train(out, **kw):
     return wt.train_phrase("hey max", out, say=["היי מקס"], voices=VOICES, synth=kw.pop("synth", fake_synth),
                            embedder=fake_embedder, rates=(1.0,), pitches=(0.9, 1.1), progress=lambda s: None, **kw)
+
+
+@pytest.fixture(scope="module")
+def trained_without_baseline(tmp_path_factory):
+    """One shared no-baseline training run (frozen seeds, so identical to a fresh one); read-only for the tests."""
+    out = tmp_path_factory.mktemp("nobase") / "m.npz"
+    return small_train(out, baseline=None), out
 
 
 def test_gate_list_is_disjoint_from_everything_the_trainer_sees():
@@ -140,13 +150,13 @@ def test_baseline_is_measured_on_the_same_renderings():
     assert cold["near_miss_false"] == 0 and cold["owner_recall"] == 0.0
 
 
-def test_train_phrase_reports_the_baseline_and_the_comparison_table(tmp_path):
+def test_train_phrase_reports_the_baseline_and_the_comparison_table(tmp_path, trained_without_baseline):
     rep = small_train(tmp_path / "m.npz", baseline=FlatScorer(0.9))
     assert rep["baseline"]["near_miss_false"] == 31 and rep["baseline"]["name"] == "standard fake"
     table = "\n".join(wp.format_comparison(rep))
     assert "candidate" in table and "standard fake" in table and "near-miss false wakes" in table
     assert all("near-miss" not in w for w in wp.gate(rep))                       # 0 <= the baseline's 31
-    none = small_train(tmp_path / "n.npz")
+    none = trained_without_baseline[0]
     assert none["baseline"] is None and wp.format_comparison(none) == []
 
 
@@ -157,9 +167,9 @@ def test_595_absolute_ceilings_hold_even_when_the_baseline_is_just_as_bad():
     assert wp.gate({**_cand(wakes=wp.MAX_NEAR_MISS_WAKES, fph=wp.MAX_FALSE_PER_HOUR), "baseline": bad}) == []
 
 
-def test_595_the_baseline_is_the_live_custom_head_at_the_configured_level_when_there_is_one(tmp_path):
+def test_595_the_baseline_is_the_live_custom_head_at_the_configured_level_when_there_is_one(tmp_path, trained_without_baseline):
     live = tmp_path / "live.npz"
-    small_train(live, baseline=None)                                 # an earlier custom head
+    shutil.copy(trained_without_baseline[1], live)                   # an earlier custom head
     sc = wt.pick_baseline(fake_embedder, tmp_path / "cand.npz", live, 0.62, 0.62)
     assert isinstance(sc, wp.HeadScorer) and sc.threshold == 0.62 and sc.name == "your current model"
     stock = wt.pick_baseline(fake_embedder, tmp_path / "cand.npz", None, None, 0.62)         # no live head: the stock model

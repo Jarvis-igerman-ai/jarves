@@ -1,0 +1,1 @@
+- Docs: evidence pack C, an honest-stage audit of eight shipped beta features (docs/reports/2026-11-09-evidence-pack-c.md); report only, no code change.

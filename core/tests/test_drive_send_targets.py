@@ -101,25 +101,24 @@ async def test_gate_lock_wait_does_not_block_the_event_loop(tmp_path, monkeypatc
     assert len(ticks) > 10                         # the loop kept running during the 0.6 s wait
 
 
-def test_whatsapp_digits_only_number_gets_plus_so_non_israeli_contact_is_known(tmp_path):
-    """#833: the bridge number is digits-only; a saved +1 contact must match (fake data, in-car check UNVERIFIED)."""
+def test_bridge_digits_only_number_matches_plus_contact(tmp_path):
+    """#833: the bridge keeps digits only (447911123456); a saved '+447911123456' contact must match it."""
     from jarves import whatsapp_bridge as wb
     skill = wb.WhatsAppBridgeSkill(tmp_path)
-    tgt = _real_target(skill, "whatsapp_send", {"name": "Sam", "number": "12025550123"})
-    assert tgt == "+12025550123"
-    gate = dm.Gate(active=lambda: True, queue=dm.DriveQueue(tmp_path / "q.json"),
-                   contacts=lambda: [{"name": "Sam", "phone": "+12025550123"}])
-    assert gate.known("Sam", tgt)
-    assert not gate.known("Sam", "12025550123")                            # control: without "+" it deferred
+    gate = _gate(tmp_path, "+447911123456")
+    for num in ("447911123456", "+447911123456"):
+        tgt = _real_target(skill, "whatsapp_send", {"name": "Dana", "number": num})
+        assert gate.known("Dana", tgt)
+    assert not gate.known("Dana", _real_target(skill, "whatsapp_send", {"name": "Dana", "number": "447911999999"}))
+    assert not gate.known("Dana", _real_target(skill, "whatsapp_send", {"name": "Dana"}))
 
 
-def test_passenger_opens_one_db_connection(tmp_path, monkeypatch):
+def test_attach_passenger_reuses_one_connection(tmp_path, monkeypatch):
     from jarves import userdata
-    calls = []
+    opened = []
     real = userdata.open_db
-    monkeypatch.setattr(userdata, "open_db", lambda h: calls.append(1) or real(h))
+    monkeypatch.setattr(userdata, "open_db", lambda h: opened.append(h) or real(h))
     reg = SimpleNamespace()
-    feats = SimpleNamespace(active=lambda f: True)
-    gate = dm.attach(reg, feats, tmp_path)
-    assert gate.passenger() == "ask" and gate.passenger() == "ask"
-    assert len(calls) == 1
+    gate = dm.attach(reg, SimpleNamespace(active=lambda f: True), tmp_path)
+    assert [gate.passenger(), gate.passenger(), gate.passenger()] == ["ask"] * 3
+    assert len(opened) == 1

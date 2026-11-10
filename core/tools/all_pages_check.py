@@ -148,10 +148,17 @@ def launch_kwargs(channel: str) -> dict:
 
 
 def check_page(p, url: str, frag: str, lang: str, width: int, *, reduced: bool, focus: bool, shots: Path | None,
-               theme: str, errs: list) -> dict:
+               theme: str, errs: list, clipping: bool = False) -> dict:
     errs.clear()
     p.goto(url + "#/" + frag)
-    p.wait_for_selector("#langSlot select", timeout=90000)
+    try:
+        p.wait_for_selector("#langSlot select", timeout=45000)
+    except Exception as e:                      # Playwright TimeoutError: Windows runner dropped the shell's fetches
+        if "Timeout" not in type(e).__name__ and "Timeout" not in str(e):      # (WinError 10053, #994). Reload once;
+            raise                                                              # a page that is really broken fails again
+        errs.clear()
+        p.reload()
+        p.wait_for_selector("#langSlot select", timeout=45000)
     p.wait_for_load_state("networkidle", timeout=30000)
     p.wait_for_function("() => !/^\\s*(Loading…|טוען…)\\s*$/.test((document.getElementById('main')||{}).innerText||'')",
                         timeout=15000)
@@ -187,7 +194,7 @@ def check_page(p, url: str, frag: str, lang: str, width: int, *, reduced: bool, 
         p.wait_for_timeout(150)
     # closed <details> hold texts too: open them for the rules (translation, contrast, names)
     p.evaluate("() => document.querySelectorAll('#main details:not([open])').forEach((d) => d.open = true)")
-    r = p.evaluate(RULES, {"lang": lang, "width": width, "reduced": reduced})
+    r = p.evaluate(RULES, {"lang": lang, "width": width, "reduced": reduced, "clipping": clipping})
     probs += r["issues"]
     if focus:
         p.evaluate("() => { document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0); }")
@@ -209,7 +216,7 @@ def check_page(p, url: str, frag: str, lang: str, width: int, *, reduced: bool, 
 
 
 def run(*, langs, widths, themes=("light",), pages=None, channel="", focus=False, shots: Path | None = None,
-        sweeps=1, quiet=False, json_path: Path | None = None) -> list[dict]:
+        sweeps=1, quiet=False, json_path: Path | None = None, clipping=False) -> list[dict]:
     from playwright.sync_api import sync_playwright
     groups = nav_groups() + [("details", EXTRA)]
     if pages:
@@ -252,7 +259,7 @@ def run(*, langs, widths, themes=("light",), pages=None, channel="", focus=False
                                                 row = check_page(p, d.url, frag.format(sid=sid), lang, width,
                                                                  reduced=reduced, focus=focus and width >= 1024,
                                                                  shots=shots if sweep == 0 else None, theme=theme,
-                                                                 errs=errs)
+                                                                 errs=errs, clipping=clipping)
                                                 # Windows runners exhaust socket buffers under many page loads
                                                 # (net::ERR_NO_BUFFER_SPACE): an OS limit, not a page defect.
                                                 # Re-check once; a real defect still fails the second time.
