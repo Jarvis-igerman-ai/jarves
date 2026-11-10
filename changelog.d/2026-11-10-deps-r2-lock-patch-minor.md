@@ -1,0 +1,1 @@
+- Fixed: core lockfile refreshed to latest patch/minor releases (pydantic 2.14.3, pydantic-core 2.50.4, tzdata 2026.6, pytest 9.2.0, pytest-asyncio 1.4.1.post1); no pyproject bounds or major versions changed.
