@@ -220,6 +220,7 @@ def test_retention_7_daily_4_weekly(profile):
     start = datetime(2026, 10, 19, 3, 0)
     bdir = profile / "backups"
     bdir.mkdir()
+    backup.set_settings(profile, {"max_total": 0})                     # 0 = no overall cap: per-kind rules only
 
     def fake(kind, when):                       # retention looks at names only: placeholders keep the test fast
         (bdir / f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
@@ -240,6 +241,26 @@ def test_retention_7_daily_4_weekly(profile):
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
     with pytest.raises(ValueError):
         backup.set_settings(profile, {"daily": 0})
+
+
+def test_install_backups_are_capped_by_max_total_issue_1016(profile):
+    """#1016: each beta install leaves a manual + a pre-migration backup; six installs must not keep all twelve."""
+    start = datetime(2026, 11, 1, 3, 0)
+    bdir = profile / "backups"
+    bdir.mkdir()
+    for i in range(6):                                                 # six installs, one day apart
+        when = start + timedelta(days=i)
+        for kind, sec in (("manual", 0), ("pre-migration", 5)):
+            (bdir / f"jarves-backup-{when + timedelta(seconds=sec):%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
+    assert backup.get_settings(profile)["max_total"] >= 1              # a cap is on by default
+    backup.set_settings(profile, {"max_total": 4})
+    gone = backup.prune(profile)
+    left = backup.list_backups(profile)
+    assert len(left) <= 4 and len(gone) == 12 - len(left)
+    assert {b["kind"] for b in left} == {"manual", "pre-migration"}     # the newest of each kind survives
+    assert max(b["ts"] for b in left) == (start + timedelta(days=5, seconds=5)).timestamp()
+    with pytest.raises(ValueError):
+        backup.set_settings(profile, {"max_total": -1})
 
 
 def test_auto_backup_due_daily_and_switchable(profile):

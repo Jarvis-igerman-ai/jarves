@@ -1,0 +1,1 @@
+- Fixed: backups now keep at most `backup.max_total` archives overall (default 8, `jarvis backup settings --max-total N`, 0 = no cap), so repeated beta installs no longer fill the disk; the newest backup of each kind always stays (#1016, JAR-218).
