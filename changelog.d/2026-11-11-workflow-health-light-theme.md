@@ -1,0 +1,1 @@
+- Fixed: the workflow console Health and Timeline pages now use the theme colours, so the banner, layer names and legend are readable in the light theme (JAR-194, #950).
