@@ -8,7 +8,7 @@
   const LABEL = { free: ["ok", "חינמי", "Free"], local: ["ok", "מקומי", "Local"], paid: ["medium", "בתשלום", "Paid"],
     unknown: ["plain", "לא ידוע", "Unknown"] };
   const pct = (q) => q === null || q === undefined ? "—" : Math.round(q * 100) + "%";
-  const secs = (v) => v === null || v === undefined ? "—" : v + " s";
+  const secs = (v) => v === null || v === undefined ? "—" : v + tx(" שנ׳", " s");
 
   async function load() {
     st.err = "";
