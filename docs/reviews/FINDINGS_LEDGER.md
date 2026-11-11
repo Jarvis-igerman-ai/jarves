@@ -54,6 +54,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 614e | wake gate: recall-margin check passes trivially when the live head is for another phrase | wake | Gate weaker than it looks | review |
 | 667a | workflows other than release.yml pin first-party actions by tag (actions/checkout@v7, codeql-action@v4, cache@v6, upload-artifact@v7), release.yml pins by SHA; the pull_request_target workflows (autolabel, dependabot-automerge) use the tag form | CI | A moved tag runs new code in a workflow with a write token; pin by SHA and let Dependabot bump | review (agent 1 read-through 27 Oct) |
 | 385a | the new goal_plans texts ("it may already have happened", "the plan changed in the meantime", unknown-step phone refusal) are English only, like the existing goal_plans strings | goals | Hebrew users see English in the retry popup and errors; add to hebrew_parts and the dashboard locale part | review (Opus review of #812) |
+| 1059a | workflow console: the shared `.demo-notice` band keeps hard-coded dark colours (#221d13 / #dfba76) in the light theme | workflow console UI | Dark band on the light Health/Timeline/Today demo pages; out of JAR-194 scope (.hl-*/.tl-* only) | review #1059 |
 
 ## Kept as issues
 

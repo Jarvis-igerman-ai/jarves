@@ -47,9 +47,35 @@ def test_health_and_timeline_rules_exist():
 
 
 def test_health_and_timeline_rules_use_theme_tokens_not_raw_hex():
-    offenders = [f"{sel} {{ {HEX.findall(body)} }}" for sel, body in _theme_rules()
-                 if not sel.lstrip().startswith(":root") and HEX.search(body)]
+    offenders = [f"{sel} {{ {HEX.findall(body)} }}" for sel, body in _theme_rules() if HEX.search(body)]
     assert not offenders, "raw hex colours in .hl-*/.tl-* rules:\n" + "\n".join(offenders)
+
+
+def _theme_tokens():
+    """Custom properties per theme block: dark default `:root`, OS-light media block, explicit light."""
+    text = re.sub(r"/\*.*?\*/", "", CSS.read_text(encoding="utf-8"), flags=re.S)
+    themes = {"dark": set(), "light-os": set(), "light": set()}
+    for sel, body in _rules(text):
+        key = {":root": "dark", '@media(prefers-color-scheme:light) :root:not([data-theme="dark"])': "light-os",
+               ':root[data-theme="light"]': "light"}.get(sel)
+        if key:
+            themes[key] |= set(re.findall(r"(--[\w-]+)\s*:", body))
+    return themes
+
+
+def test_every_token_used_is_defined_in_every_theme():
+    """A typo (var(--subtel)) or an undefined token silently falls back to the inherited colour."""
+    used = {name for _, body in _theme_rules() for name in re.findall(r"var\((--[\w-]+)", body)}
+    assert used, "no var(--...) found in .hl-*/.tl-* rules"
+    for theme, defined in _theme_tokens().items():
+        missing = sorted(used - defined)
+        assert not missing, f"{theme} theme does not define {missing}"
+
+
+def test_shadow_token_is_a_full_box_shadow():
+    text = CSS.read_text(encoding="utf-8")
+    for value in re.findall(r"--shadow:([^;}]+)", text):
+        assert re.fullmatch(r"\s*-?\d+(px)? -?\d+(px)? \d+(px)? #[0-9a-fA-F]{3,8}\s*", value), value
 
 
 def test_named_text_rules_take_a_colour_token():
