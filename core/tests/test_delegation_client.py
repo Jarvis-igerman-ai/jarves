@@ -110,35 +110,42 @@ def _mp_worker(path: str, cap: float, n: int, out: str) -> None:
     from jarves.memory import MemoryStore
     cfg = Config()
     cfg.ai.delegation_daily_usd, cfg.ai.daily_request_limit = cap, 100000
-    b = Budget(MemoryStore(Path(path)), cfg.ai)
-    got = 0
-    for _ in range(n):
-        try:
-            for r in b.reserve_many([("ai_requests", 1), (USD_KIND, 7000)]):
-                r.commit()
-            got += 1
-        except BudgetExceeded:
-            pass
-    Path(out).write_text(str(got))
+    try:
+        b = Budget(MemoryStore(Path(path)), cfg.ai)
+        got = 0
+        for _ in range(n):
+            try:
+                for r in b.reserve_many([("ai_requests", 1), (USD_KIND, 7000)]):
+                    r.commit()
+                got += 1
+            except BudgetExceeded:
+                pass
+        Path(out).write_text(str(got))
+    except Exception as e:                        # e.g. sqlite 'database is locked': show it, not a bare exit code
+        Path(out).write_text(f"ERROR {type(e).__name__}: {e}")
+        raise
 
 
 def test_strict_cap_holds_across_processes(tmp_path):
     """Two processes (the Core and e.g. `jarvis ask`) racing for the last dollars never both take them."""
     import multiprocessing as mp
     db = tmp_path / "shared.db"
-    MemoryStore(db).close()
+    cfg = Config()
+    cfg.ai.delegation_daily_usd = 0.10
+    # Like the long-running Core: hold the db open for the whole race, with every table already created. Workers
+    # then never race to create the schema, and none is the LAST connection to close (which checkpoints and deletes
+    # the WAL while another worker is still opening it): the sqlite 'database is locked' flake on Windows (#1048).
+    b = Budget(MemoryStore(db), cfg.ai)
     ctx = mp.get_context("spawn")
     ps = [ctx.Process(target=_mp_worker, args=(str(db), 0.10, 20, str(tmp_path / f"o{i}"))) for i in range(3)]
     for p in ps:
         p.start()
     for p in ps:
         p.join(120)
-    assert all(p.exitcode == 0 for p in ps)
-    total = sum(int((tmp_path / f"o{i}").read_text()) for i in range(3))
+    outs = [(tmp_path / f"o{i}").read_text() if (tmp_path / f"o{i}").exists() else "no output" for i in range(3)]
+    assert [p.exitcode for p in ps] == [0, 0, 0], outs
+    total = sum(int(o) for o in outs)
     assert total == 14                                                # 14 * $0.007 = $0.098 <= $0.10 < 15 * $0.007
-    cfg = Config()
-    cfg.ai.delegation_daily_usd = 0.10
-    b = Budget(MemoryStore(db), cfg.ai)
     assert b.used(USD_KIND) == 14 * 7000 <= b.limit(USD_KIND)
 
 
