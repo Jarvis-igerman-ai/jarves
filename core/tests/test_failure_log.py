@@ -78,8 +78,36 @@ async def test_a_failed_tool_call_is_recorded_and_self_diagnosis_still_runs(home
     reg, seen = SkillRegistry(), []
     reg.register(_Fail())
     reg.on_failure = lambda tool, res, route: seen.append(tool)            # the existing self-diagnosis hook
-    fl.attach(SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: on)))
+    core = SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: on))
+    fl.attach(core)
+    fl.attach(core)                                                         # a second attach never doubles rows
     assert not (await reg.call("calendar_list", {})).ok
     assert seen == ["calendar_list"]
     assert fl.weekly(home, now=NOW) == (["1x tool_error: calendar_list (CAL_TIMEOUT)"] if on else [])
     assert "Dana" not in (fl.path(home).read_text(encoding="utf-8") if on else "")
+
+
+def test_a_missing_code_is_not_stored_as_none(home, monkeypatch):
+    monkeypatch.setattr(fl, "_now", lambda: NOW)
+    reg = SkillRegistry()
+    hook = fl.attach(SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: True)))
+    hook("unknown_tool", SimpleNamespace(ok=False, code=None), "text")
+    assert fl.weekly(home, now=NOW) == ["1x tool_error: other"]
+
+
+class _Probe(_Fail):
+    name = "zz_probe"
+
+    def tools(self):
+        t = super().tools()[0]
+        t.name = "zz_probe_run"
+        return [t]
+
+
+async def test_the_started_core_records_one_row_per_failed_tool(core, monkeypatch):
+    monkeypatch.setattr(fl, "_now", lambda: NOW)
+    core.features.set_beta(True)
+    core.features.set(fl.FEATURE, True)
+    core.registry.register(_Probe())
+    assert not (await core.registry.call("zz_probe_run", {})).ok
+    assert fl.weekly(core.home, now=NOW) == ["1x tool_error: zz_probe_run (CAL_TIMEOUT)"]

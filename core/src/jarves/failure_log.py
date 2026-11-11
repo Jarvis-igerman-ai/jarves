@@ -63,17 +63,21 @@ def record(home, kind: str, *, tool: str = "", code: str = "", on: bool, now: da
 
 def attach(core):
     """Record every failed tool call (tool_error) in front of the existing registry failure hook (self-diagnosis).
-    Only registered tool names are kept; anything else becomes "other"."""
+    Only tool names the registry knows (public get()) are kept; anything else becomes "other". Idempotent: a second
+    attach never wraps the hook again, so one failure is always one row."""
     reg, prev = core.registry, core.registry.on_failure
+    if getattr(prev, "failure_log_hook", False):
+        return prev
 
     def hook(name, res, route):
         try:
-            record(core.home, "tool_error", tool=name if name in reg._tools else "other",
-                   code=str(getattr(res, "code", "")), on=core.features.active(FEATURE))
+            record(core.home, "tool_error", tool=name if reg.get(name) is not None else "other",
+                   code=str(getattr(res, "code", "") or ""), on=core.features.active(FEATURE))
         except Exception:
             logs.warn("failure_log", "FAILURE_LOG_WRITE_FAILED", "could not write the failure log")
         if prev is not None:
             prev(name, res, route)
+    hook.failure_log_hook = True
     reg.on_failure = hook
     return hook
 
