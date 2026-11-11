@@ -120,6 +120,7 @@ SAFE_OFF = frozenset({
     "calendar_write",
     "camera",
     "camera_when_away",
+    "conversation_eval",
     "dashboard_lan",
     "drive_briefing",
     "face_recognition",
@@ -296,6 +297,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "project_manager",
         "provider_openrouter",
         "model_lab",
+        "conversation_eval",
     )),
 )
 ANSWER_KEYS = {"beta_features", "language", "connection", "api_key_from_env", "display_name", "spoken_name", "address_me",
@@ -1464,6 +1466,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "task_triage": [_mod("jarves.triage"), _data("jarves.guides", "data/task_triage.toml")],
     "github": [_mod("jarves.github_client"), _mod("httpx"), _data("jarves.guides", "data/github.toml")],
     "model_lab": [_mod("jarves.model_lab"), _mod("jarves.model_policy"), _data("jarves.guides", "data/model_lab.toml")],
+    "conversation_eval": [_mod("jarves.conversation_eval"), _data("jarves.guides", "data/conversation_eval.toml")],
     "provider_openrouter": [_mod("jarves.openrouter"), _mod("httpx"), _data("jarves.guides", "data/provider_openrouter.toml")],
     "github_approve_reviews": [_mod("jarves.github_prs")],
     "github_merge_queue": [_mod("jarves.github_merge"), _data("jarves.guides", "data/github_write.toml")],
