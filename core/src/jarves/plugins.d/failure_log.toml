@@ -1,0 +1,3 @@
+dashboard = ["jarves.failure_log"]
+addons = ["jarves.failure_log"]
+cli = ["jarves.failure_log"]
