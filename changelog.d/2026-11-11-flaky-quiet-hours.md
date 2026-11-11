@@ -1,0 +1,1 @@
+- Fixed: the quiet-hours web chat test no longer fails during the last minute before midnight; it now uses a fixed clock (JAR-216, #1052).
