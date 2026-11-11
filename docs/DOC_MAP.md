@@ -15,6 +15,7 @@
 - [Version scope mapping](workflow/VERSION_MAPPING_2026-10-30.md): 94 requirements, unknown proof and mapping gaps.
 - [Industry research](workflow/INDUSTRY_RESEARCH_2026-10-30.md): verified official sources and compatibility limits.
 - [Worker permission modes](workflow/WORKER_PERMISSION_MODES.md): dontAsk vs acceptEdits evaluation for autopilot workers (#768).
+- [Factory 2 rehearsal](factory2-rehearsal.md): throwaway marker from the Factory 2 go-live gate rehearsal (JAR-206, not counted).
 
 Entry point for every document. Last aligned: 24 Oct 2026 for V4.5 planning (older version-status snapshots below remain historical until implementation). [README](README.md) (user view) and [CONTEXT_MAP](CONTEXT_MAP.md) (agent view, open only what the task needs) point here instead of keeping their own full lists. **Browse by topic:** [README](README.md) (curated subject navigation). The exhaustive registry stays here; existing document paths remain stable to preserve agents and links. A test (`core/tests/test_docs_links.py`) fails if a file under `docs/` is missing from this map or a relative link breaks: **add a row when you add a document**.
 
