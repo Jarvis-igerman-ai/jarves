@@ -1,6 +1,6 @@
 {
- "keeps a local list of what went wrong (not understood, tool error, repeated request, you said wrong or stop): only the kind, day, tool name and error code, never what was said; jarvis report weekly lists the top items": "שומר במחשב רשימה של מה שהשתבש (לא הבין, שגיאת כלי, בקשה שחזרה, אמרתם לא נכון או עצור): רק סוג, יום, שם כלי וקוד שגיאה, אף פעם לא מה שנאמר; jarvis report weekly מציג את הנפוצים",
  "unit tests only (test_failure_log.py); not run on the owner's PC": "בדיקות יחידה בלבד (test_failure_log.py); לא הורץ במחשב של הבעלים",
  "unit tests only; not run on a Pi": "בדיקות יחידה בלבד; לא הורץ על Pi",
- "local file only; nothing leaves the PC": "קובץ מקומי בלבד; שום דבר לא יוצא מהמחשב"
+ "local file only; nothing leaves the PC": "קובץ מקומי בלבד; שום דבר לא יוצא מהמחשב",
+ "keeps a local list of what went wrong (tool errors now; not understood, repeated request and wrong/stop are planned): only the kind, day, tool name and error code, never what was said; jarvis report weekly lists them": "שומר במחשב רשימה של מה שהשתבש (שגיאות כלים כבר עכשיו; לא הבין, בקשה שחזרה ולא נכון/עצור מתוכננים): רק סוג, יום, שם כלי וקוד שגיאה, אף פעם לא מה שנאמר; jarvis report weekly מציג אותם"
 }

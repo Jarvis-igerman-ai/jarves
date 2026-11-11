@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
 from jarves import cli, failure_log as fl
 from jarves.features import CATALOG
+from jarves.skills import NoArgs, Skill, SkillRegistry, Tool, ToolResult
 
 NOW = datetime(2026, 11, 11, 12, 0)
 
@@ -46,9 +48,38 @@ def test_the_log_is_bounded(home, monkeypatch):
     assert len(fl.path(home).read_text(encoding="utf-8").splitlines()) == 5
 
 
-def test_cli_report_weekly(home, capsys):
+def test_seven_day_window_boundary(home):
+    fl.record(home, "tool_error", tool="six", on=True, now=NOW - timedelta(days=6))
+    fl.record(home, "tool_error", tool="seven", on=True, now=NOW - timedelta(days=7))
+    assert fl.weekly(home, now=NOW) == ["1x tool_error: six"]
+
+
+def test_cli_report_weekly(home, capsys, monkeypatch):
+    monkeypatch.setattr(fl, "_now", lambda: NOW)
     assert cli.main(["report", "weekly"]) == 0
     assert "No failures" in capsys.readouterr().out
-    fl.record(home, "tool_error", tool="music", code="OFFLINE", on=True, now=datetime.now())
+    fl.record(home, "tool_error", tool="music", code="OFFLINE", on=True)
     assert cli.main(["report", "weekly"]) == 0
     assert "1x tool_error: music (OFFLINE)" in capsys.readouterr().out
+
+
+class _Fail(Skill):
+    name = "calendar"
+
+    def tools(self):
+        async def bad(_a):
+            return ToolResult(False, "timed out for Dana", code="CAL_TIMEOUT")
+        return [Tool("calendar_list", "x", bad, NoArgs, permission="read")]
+
+
+@pytest.mark.parametrize("on", [True, False])
+async def test_a_failed_tool_call_is_recorded_and_self_diagnosis_still_runs(home, monkeypatch, on):
+    monkeypatch.setattr(fl, "_now", lambda: NOW)
+    reg, seen = SkillRegistry(), []
+    reg.register(_Fail())
+    reg.on_failure = lambda tool, res, route: seen.append(tool)            # the existing self-diagnosis hook
+    fl.attach(SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: on)))
+    assert not (await reg.call("calendar_list", {})).ok
+    assert seen == ["calendar_list"]
+    assert fl.weekly(home, now=NOW) == (["1x tool_error: calendar_list (CAL_TIMEOUT)"] if on else [])
+    assert "Dana" not in (fl.path(home).read_text(encoding="utf-8") if on else "")
