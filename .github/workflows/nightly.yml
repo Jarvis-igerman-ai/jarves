@@ -109,7 +109,9 @@ jobs:
           path: ${{ runner.temp }}/jarves-test-tools
           key: jarves-test-tools-${{ runner.os }}-${{ hashFiles('core/tests/_tools.py') }}
       - name: Playwright ffmpeg (real-recording browser test)
-        run: uv run playwright install ffmpeg
+        shell: bash
+        run: |
+          if uv run python -c "import playwright" 2>/dev/null; then uv run playwright install ffmpeg; fi
       - name: pytest x3
         shell: bash
         env:
