@@ -597,6 +597,34 @@ def test_layouts_at_390px_have_no_sideways_scroll_big_targets_and_contrast(brows
     assert page.errors == []
 
 
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_phone_polish_halo_focus_ring_and_no_echo_of_drawer_commands(browser, phone, lang, locale):
+    """JAR-78 (ui-review 4, 5, 9): the connection dot's halo is not clipped, the composer shows a 2 px focus ring, and
+    /resume sent by the drawer's history button is not shown as a user message."""
+    p = phone()
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    page.wait_for_selector(".jc-in")
+    halo = page.evaluate("""(() => { const e = document.querySelector('.bar .pill');
+      return e ? parseFloat(getComputedStyle(e).paddingInlineStart) : -1; })()""")
+    assert halo >= 3                                                    # room for the 3 px halo inside overflow:hidden
+    page.focus(".jc-in")
+    ring = page.evaluate("getComputedStyle(document.querySelector('#tab-chat .jc-form')).boxShadow")
+    assert "4px" in ring                                                # the 2 px gap + 2 px ring around the composer
+    page.tap("#menuBtn")
+    page.wait_for_selector("#drawer:not([hidden])")
+    page.tap("#histLoad")
+    page.wait_for_selector("#drawer.closing", state="detached")
+    for _ in range(100):
+        if "/resume" in p.fake.chats or page.evaluate("document.querySelectorAll('.jc-notice').length") > 0:
+            break
+        page.wait_for_timeout(100)
+    page.wait_for_timeout(500)
+    users = page.evaluate("[...document.querySelectorAll('.jc-user')].map(m => m.textContent)")
+    assert not any("/resume" in u for u in users)
+    assert page.errors == []
+
+
 # ------------------------------------------------------------------ V5 G5 (#185): mic / cloud-audio indicator, notice stop / snooze
 TRACKS = """(() => { const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); window.__tracks = [];
   navigator.mediaDevices.getUserMedia = async (c) => { const s = await g(c); s.getTracks().forEach((t) => window.__tracks.push(t)); return s; }; })()"""

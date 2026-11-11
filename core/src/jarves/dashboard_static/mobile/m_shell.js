@@ -69,7 +69,7 @@
   }
   function chatCmd(text) {
     const c = cfg.chat(); cfg.go("chat");
-    const run = () => { const v = cfg.chat(); if (v) v.submit(text); };
+    const run = () => { const v = cfg.chat(); if (v) v.submit(text, { quiet: true }); };
     if (c) run(); else setTimeout(run, 300);              // the chat view mounts on the first visit
   }
   // Recent conversations: the answer to /resume carries the list (chat_engine._resume -> notice.sessions). No new API.
