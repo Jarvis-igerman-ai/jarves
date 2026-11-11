@@ -1,0 +1,1 @@
+- Added: a hermetic test proves a dashboard rename changes his greeting at once and his chat system prompt from the next Core start, and that renaming back undoes it (JAR-196, R-027).
