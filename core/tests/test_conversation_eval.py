@@ -46,3 +46,39 @@ def test_cli_off_by_default_then_fake_run_and_gate(tmp_path, capsys, monkeypatch
     assert (tmp_path / "evalsuite" / "baseline.json").exists()
     assert ce.cmd_evalsuite(SimpleNamespace(action="scenarios", fake=False, beta=""), None, tmp_path) == 0
     assert ce.feat.CATALOG[ce.FEATURE].default_enabled is False
+
+
+def _on(monkeypatch):
+    monkeypatch.setattr("jarves.cli._cli_features", lambda cfg, home: SimpleNamespace(active=lambda f: True))
+
+
+def test_cli_blocked_run_exits_2_keeps_baseline_and_writes_bug(tmp_path, capsys, monkeypatch):
+    _on(monkeypatch)
+    a = SimpleNamespace(action="run", fake=True, beta="b2")
+    assert ce.cmd_evalsuite(a, None, tmp_path) == 0
+    base = (tmp_path / "evalsuite" / "baseline.json").read_bytes()
+    monkeypatch.setattr(ce, "scripted_reply", lambda s: "sorry" if s.kind == "device" else " ".join(s.expect))
+    assert ce.cmd_evalsuite(a, None, tmp_path) == 2
+    assert (tmp_path / "evalsuite" / "baseline.json").read_bytes() == base
+    assert json.loads((tmp_path / "evalsuite" / "last.json").read_text(encoding="utf-8"))["gate"]["bug"]
+
+
+def test_baseline_never_ratchets_down(tmp_path, capsys, monkeypatch):
+    _on(monkeypatch)
+    a = SimpleNamespace(action="run", fake=True, beta="b3")
+    ce.cmd_evalsuite(a, None, tmp_path)
+    base = (tmp_path / "evalsuite" / "baseline.json").read_bytes()
+    monkeypatch.setattr(ce, "MAX_DROP", 0.5)
+    monkeypatch.setattr(ce, "scripted_reply", lambda s: "sorry" if s.id == "cha-en-1" else " ".join(s.expect))
+    assert ce.cmd_evalsuite(a, None, tmp_path) == 0          # a small drop passes ...
+    assert (tmp_path / "evalsuite" / "baseline.json").read_bytes() == base   # ... but does not lower the baseline
+
+
+def test_exactly_max_drop_does_not_block_and_corrupt_baseline_is_ignored(tmp_path, capsys, monkeypatch):
+    cur = dict(score=0.95, by_kind={"chat": 0.95}, rows=[])
+    assert not ce.gate(cur, dict(score=1.0, by_kind={"chat": 1.0}))["block"]
+    _on(monkeypatch)
+    (tmp_path / "evalsuite").mkdir()
+    (tmp_path / "evalsuite" / "baseline.json").write_text("{bad", encoding="utf-8")
+    assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 0
+    assert "EVALSUITE_BAD_BASELINE" in capsys.readouterr().out

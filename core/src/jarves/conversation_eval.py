@@ -3,8 +3,9 @@ scored by an INJECTED judge `judge(scenario, reply) -> 0..1` against the expecte
 
 Rules: the scenarios are built in and public (no owner conversation is used or sent); nothing runs unless the owner
 starts it (`jarvis evalsuite run`); results and the baseline stay in <home>/evalsuite. A live LLM judge is not wired
-yet (`--fake` = scripted replies + keyword judge). `gate()` blocks promotion when a beta scores lower than the
-baseline and returns a LOCAL bug draft; filing it on GitHub stays an explicit owner action.
+yet and no beta reply source is connected: `--fake` (scripted replies + keyword judge) is demo/plumbing only and does
+not evaluate a beta. `gate()` compares a run with the baseline and returns a LOCAL bug draft on a drop; filing it on
+GitHub stays an explicit owner action. The baseline is never lowered automatically.
 """
 from __future__ import annotations
 
@@ -30,11 +31,11 @@ class Scenario:
 
 _S = [
     ("rem-he-1", "he", "reminder", "תזכיר לי מחר בשמונה להתקשר לרופא", ("set_reminder", "08:00")),
-    ("rem-he-2", "he", "reminder", "תזכורת בעוד עשר דקות להוציא את הכביסה", ("set_reminder", "10")),
+    ("rem-he-2", "he", "reminder", "תזכורת בעוד עשר דקות להוציא את הכביסה", ("set_reminder", "10 דקות")),
     ("rem-he-3", "he", "reminder", "אילו תזכורות יש לי היום?", ("list_reminders",)),
     ("rem-he-4", "he", "reminder", "תבטל את התזכורת של הרופא", ("cancel_reminder",)),
     ("rem-en-1", "en", "reminder", "Remind me tomorrow at 9 to pay the bill", ("set_reminder", "09:00")),
-    ("rem-en-2", "en", "reminder", "Set a timer for 5 minutes", ("set_timer", "5")),
+    ("rem-en-2", "en", "reminder", "Set a timer for 5 minutes", ("set_timer", "5 min")),
     ("rem-en-3", "en", "reminder", "What reminders do I have?", ("list_reminders",)),
     ("rem-en-4", "en", "reminder", "Cancel the bill reminder", ("cancel_reminder",)),
     ("sea-he-1", "he", "search", "מה מזג האוויר בחיפה מחר?", ("web_search", "חיפה")),
@@ -43,13 +44,13 @@ _S = [
     ("sea-he-4", "he", "search", "מתי נפתח הסניף של הדואר ברחובות?", ("web_search", "רחובות")),
     ("sea-en-1", "en", "search", "What is the weather in Tel Aviv today?", ("web_search", "Tel Aviv")),
     ("sea-en-2", "en", "search", "Latest news about the Raspberry Pi 5", ("web_search", "Raspberry Pi")),
-    ("sea-en-3", "en", "search", "How tall is Mount Hermon?", ("web_search", "m")),
+    ("sea-en-3", "en", "search", "How tall is Mount Hermon?", ("web_search", "2,814")),
     ("sea-en-4", "en", "search", "Who wrote the book Dune?", ("Herbert",)),
     ("cha-he-1", "he", "chat", "שלום, מה שלומך?", ("שלום",)),
     ("cha-he-2", "he", "chat", "ספר לי בדיחה קצרה", ("בדיחה",)),
     ("cha-he-3", "he", "chat", "תודה רבה", ("בבקשה",)),
     ("cha-he-4", "he", "chat", "מה אתה יודע לעשות?", ("תזכורות", "חיפוש")),
-    ("cha-en-1", "en", "chat", "Hi Jarvis, how are you?", ("Hi",)),
+    ("cha-en-1", "en", "chat", "Hi Jarvis, how are you?", ("doing well",)),
     ("cha-en-2", "en", "chat", "Tell me a short joke", ("joke",)),
     ("cha-en-3", "en", "chat", "Thanks a lot", ("welcome",)),
     ("cha-en-4", "en", "chat", "What can you do?", ("reminders", "search")),
@@ -92,9 +93,11 @@ def gate(current: dict, baseline: dict | None, beta: str = "", max_drop: float =
     """Promotion decision: block when the overall or any per-kind score falls more than `max_drop` below baseline."""
     if not baseline:
         return dict(block=False, reason="no baseline yet: this run becomes the baseline", bug=None)
-    drops = [f"overall {baseline['score']} -> {current['score']}"] if baseline["score"] - current["score"] > max_drop else []
+    def dropped(b: float, c: float) -> bool:
+        return round(b - c, 4) > max_drop
+    drops = [f"overall {baseline['score']} -> {current['score']}"] if dropped(baseline["score"], current["score"]) else []
     drops += [f"{k} {baseline['by_kind'].get(k, 0)} -> {v}" for k, v in current["by_kind"].items()
-              if baseline["by_kind"].get(k, 0) - v > max_drop]
+              if dropped(baseline["by_kind"].get(k, 0), v)]
     if not drops:
         return dict(block=False, reason="no score drop", bug=None)
     failed = [r["id"] for r in current["rows"] if r["score"] < 1.0]
@@ -109,7 +112,7 @@ def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
 
 
 feat.register(FEATURE, "בדיקת שיחות", "Conversation eval", False, probe=_probe, risk="low", stage="beta",
-              about="scripted Hebrew and English conversations scored against expected behaviour; a score drop on a beta blocks promotion and drafts a bug",
+              about="scripted Hebrew and English conversations scored against expected behaviour; demo/plumbing only, does not evaluate a beta yet",
               targets={"windows": {"status": "implemented_unverified", "blocker": "scripted replies and keyword judge only; no live LLM judge yet"},
                        "linux_arm64_pi": {"status": "implemented_unverified", "blocker": "not run on a Pi",
                                           "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}},
@@ -118,7 +121,7 @@ feat.register(FEATURE, "בדיקת שיחות", "Conversation eval", False, prob
 
 def add_cli(sub) -> None:
     m = sub.add_parser("evalsuite", help="Conversation eval: `status`, `scenarios`, `run --fake [--beta V]`. "
-                                         "A score drop vs the baseline blocks promotion and drafts a local bug")
+                                         "Demo/plumbing only: does not evaluate a beta yet")
     m.add_argument("action", choices=["status", "scenarios", "run"])
     m.add_argument("--fake", action="store_true", help="offline: scripted replies and keyword judge (no network)")
     m.add_argument("--beta", default="", help="the beta version being evaluated")
@@ -142,11 +145,15 @@ def cmd_evalsuite(a, cfg, home) -> int:
         print("EVALSUITE_NO_JUDGE: the live LLM judge is not wired yet; use --fake")
         return 1
     rep = run_suite(scripted_reply, keyword_judge)
-    base = json.loads(base_p.read_text(encoding="utf-8")) if base_p.exists() else None
-    g = gate(rep, base, a.beta)
+    try:
+        base = json.loads(base_p.read_text(encoding="utf-8")) if base_p.exists() else None
+    except (OSError, ValueError):
+        print("EVALSUITE_BAD_BASELINE: baseline.json is unreadable; treated as no baseline")
+        base = None
+    g = gate(rep, base, a.beta, max_drop=MAX_DROP)
     d.mkdir(parents=True, exist_ok=True)
     (d / "last.json").write_text(json.dumps(dict(rep, beta=a.beta, gate=g), ensure_ascii=False), encoding="utf-8")
-    if not g["block"]:
+    if not g["block"] and (base is None or rep["score"] >= base.get("score", 0)):     # never lowered automatically
         base_p.write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(dict(score=rep["score"], by_kind=rep["by_kind"], gate=g), ensure_ascii=False))
     return 2 if g["block"] else 0
