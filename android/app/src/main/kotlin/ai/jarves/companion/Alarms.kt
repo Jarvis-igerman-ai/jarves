@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import java.io.File
 
 const val ALARM_CHANNEL = "reminders"
@@ -60,7 +61,11 @@ class AndroidAlarmScheduler(private val ctx: Context) : AlarmScheduler {
     override fun cancel(id: String) = am.cancel(pending(id))
 }
 
-/** Fires the reminder: marks it done and shows the text the owner wrote (their own words, on their own phone). */
+/** Shows a due reminder and marks it done only when the notification was really posted; otherwise it stays pending. */
+fun fireReminder(store: OfflineStore, item: Item, show: (Item) -> Boolean): Boolean =
+    show(item).also { if (it) store.complete(item.id) }
+
+/** Fires the reminder with the text the owner wrote (their own words, on their own phone). */
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val store = offlineStore(context)
@@ -68,33 +73,31 @@ class AlarmReceiver : BroadcastReceiver() {
             ACTION_ALARM -> {
                 val id = intent.getStringExtra(EXTRA_ITEM_ID) ?: return
                 val item = store.list().firstOrNull { it.id == id } ?: return
-                store.complete(id)
-                show(context, item)
+                fireReminder(store, item) { show(context, it) }
             }
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 // Reminders that came due while the phone was off are shown now, not dropped.
-                for (item in store.rescheduleAll()) {
-                    store.complete(item.id)
-                    show(context, item)
-                }
+                for (item in store.rescheduleAll()) fireReminder(store, item) { show(context, it) }
             }
         }
     }
 
-    private fun show(context: Context, item: Item) {
+    private fun show(context: Context, item: Item): Boolean {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(NotificationChannel(ALARM_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_HIGH))
         }
-        try {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return try {
             nm.notify(
                 item.id.hashCode(),
                 NotificationCompat.Builder(context, ALARM_CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_popup_reminder)
                     .setContentText(item.text).setAutoCancel(true).build(),
             )
+            true
         } catch (e: SecurityException) {
-            // Notifications not allowed: the item is still marked done and visible in the app.
+            false // Notifications not allowed: the reminder stays pending and visible in the app.
         }
     }
 }
