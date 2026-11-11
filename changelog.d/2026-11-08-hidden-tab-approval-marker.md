@@ -1,0 +1,1 @@
+- Fixed: a hidden/throttled dashboard tab now keeps counting as a place to answer an approval (heartbeat + 90 s grace); nothing is auto-approved (#477)
