@@ -46,12 +46,11 @@ class ConcurrentSubagentStartTests(unittest.TestCase):
         for n in range(8):
             payload = {"hook_event_name": "SubagentStart", "session_id": "s", "agent_id": f"child-{n}",
                        "agent_type": "workflow-bugs", "cwd": str(self.root)}
-            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-            procs.append((proc, json.dumps(payload).encode()))
-        for proc, data in procs:   # feed every hook before reading any, so all eight run at once
-            proc.stdin.write(data)
-            proc.stdin.close()
-        outputs = [proc.communicate(timeout=60) for proc, _ in procs]
+            stdin = Path(self.temp.name) / f"payload-{n}.json"   # a file: every hook gets its input at once
+            stdin.write_text(json.dumps(payload), encoding="utf-8")
+            with stdin.open("rb") as fh:
+                procs.append(subprocess.Popen(cmd, stdin=fh, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env))
+        outputs = [proc.communicate(timeout=60) for proc in procs]
         errors_log = self.home / "hook_errors.log"
         errors = errors_log.read_text(encoding="utf-8") if errors_log.exists() else ""
         self.assertNotIn("OperationalError", errors)   # main() logs a 'database is locked' failure by type name
