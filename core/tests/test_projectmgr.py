@@ -32,11 +32,12 @@ FAKE = textwrap.dedent('''
         print(json.dumps({"type": "result", "is_error": False, "result": out, "session_id": "plan"}))
         sys.exit(0)
     here = os.path.join(os.getcwd(), "..")
-    def bump(name):
+    def bump(name):                     # append-only (#1051): approximate under concurrency, never invalid
         f = os.path.join(here, name)
-        n = int(open(f).read()) + 1 if os.path.exists(f) else 1
-        open(f, "w").write(str(n))
-        return n
+        with open(f, "a") as fh:
+            fh.write("x")
+        with open(f) as fh:
+            return len(fh.read())
     def say(text):
         print(json.dumps({"type": "result", "is_error": False, "result": text, "session_id": "s-" + model}))
         sys.exit(0)
@@ -237,6 +238,20 @@ def test_parallel_tasks_merge_and_dependent_gets_handoff(env):
     assert "pushed" not in sh(repo, "git", "log", "--all", "--format=%s")
     assert m.db.project(1)["status"] == "done"
     assert m.call("status", project="demo")["ok"]
+
+
+def test_fake_review_counter_survives_a_concurrent_reviewer(tmp_path):
+    """#1051: parallel reviews share the fake's counter file; a reader that lands while another process has just
+    truncated it (an empty file) must still give a verdict, or the task is blocked with "no reviewer gave a verdict"."""
+    fake = tmp_path / "fake_agent.py"
+    fake.write_text(FAKE)
+    wt = tmp_path / "wt" / "t2-a1"
+    wt.mkdir(parents=True)
+    (wt.parent / "reviews_default").write_text("")                             # the other reviewer is mid-write
+    p = subprocess.run([sys.executable, str(fake)], cwd=str(wt), input="Review this change", capture_output=True,
+                       text=True, timeout=60)
+    assert p.returncode == 0, p.stderr[-300:]
+    assert cards.parse_review(json.loads(p.stdout)["result"])["verdict"] == "approve"
 
 
 def test_overlapping_scopes_never_run_together(env):

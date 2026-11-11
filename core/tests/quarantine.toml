@@ -34,12 +34,6 @@ since = "2026-11-11"
 reason = "Windows shard: #bvType not visible while state is HUMAN (line 264); seen on queue runs of docs-only PR 1042 and PR 1001, passes on PR runs"
 
 [[test]]
-id = "test_projectmgr.py::test_parallel_tasks_merge_and_dependent_gets_handoff"
-issue = 1051
-since = "2026-11-11"
-reason = "merge_group run 42990726192 failed on i18n-only PR 1018, passes on PR runs"
-
-[[test]]
 id = "test_web_chat.py::test_quiet_hours_make_the_chat_silent"
 issue = 1052
 since = "2026-11-11"
