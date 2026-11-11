@@ -53,7 +53,8 @@ async def test_hebrew_chat_gets_the_hebrew_sources_label_the_guide_quotes(tmp_pa
                                                  "annotations": [cite("https://www.weather.example/tlv")]},
                          web_search=True, question="מה מזג האוויר בתל אביב?")
     assert text == "בתל אביב 24 מעלות.\n\nמקורות: weather.example"
-    assert "\"מקורות:\"" in tomllib.loads(GUIDE.read_text(encoding="utf-8"))["problems"][-1]["fix_he"]
+    problems = tomllib.loads(GUIDE.read_text(encoding="utf-8"))["problems"]
+    assert any("\"מקורות:\"" in p.get("fix_he", "") for p in problems if "Sources:" in p.get("fix_en", ""))
 
 
 async def test_switch_off_never_offers_web_search(tmp_path, monkeypatch):
