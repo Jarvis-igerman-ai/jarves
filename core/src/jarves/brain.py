@@ -13,8 +13,9 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
+from urllib.parse import urlsplit
 
-from . import logs
+from . import hebrew, logs
 from .budget import Budget, BudgetExceeded
 from .config import AIConfig, openai_key_present
 from .memory import MemoryStore
@@ -535,7 +536,8 @@ class AgentBrain:
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
                   duration_s=round(time.monotonic() - t0, 2), model=self.cfg.text_model, web_searches=searches,
                   **usage_fields(tokens))
-        answer, line = str(res.final_output or "").strip(), sources_line(cited)
+        answer = str(res.final_output or "").strip()
+        line = sources_line(cited, hebrew_label=bool(_HEBREW.search(answer)))
         return f"{answer}\n\n{line}" if answer and line else answer
 
 
@@ -547,15 +549,19 @@ def cited_urls(resp: Any) -> list[str]:
             for c in (g(o, "content") or []) for a in (g(c, "annotations") or []) if g(a, "type") == "url_citation"]
 
 
-def sources_line(urls: list[str], limit: int = 3) -> str:
-    """"Sources: example.com, other.org": up to `limit` distinct domains, never raw URLs (they are spoken aloud)."""
-    from urllib.parse import urlsplit
+_HEBREW = re.compile("[\u0590-\u05ff]")
+
+
+def sources_line(urls: list[str], limit: int = 3, *, hebrew_label: bool = False) -> str:
+    """"Sources: example.com, other.org": up to `limit` distinct domains, never raw URLs (they are spoken aloud).
+    hebrew_label: a Hebrew answer gets the Hebrew label (hebrew_parts), so Hebrew TTS does not read English."""
     doms: list[str] = []
     for u in urls:
         h = (urlsplit(u).hostname or "").removeprefix("www.")
         if h and h not in doms:
             doms.append(h)
-    return "Sources: " + ", ".join(doms[:limit]) if doms else ""
+    label = (hebrew.he("Sources") if hebrew_label else None) or "Sources"
+    return f"{label}: " + ", ".join(doms[:limit]) if doms else ""
 
 
 class _Find:
