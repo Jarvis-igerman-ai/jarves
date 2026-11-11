@@ -1,1 +1,1 @@
-- Fixed: cloud workers can no longer use scheduling or trigger tools, edit Claude settings, force-push, push to main or merge, so they never stop to ask for permission.
+- Fixed: Claude sessions in this repo (including cloud workers) are refused scheduling/trigger tools, gh pr merge and force-push instead of asking the owner to approve them; main stays protected by the repo ruleset.
