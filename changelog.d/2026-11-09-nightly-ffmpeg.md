@@ -1,0 +1,1 @@
+- Fixed: nightly workflow installs Playwright ffmpeg in the nightly jobs that run the real-recording browser test, as PR CI does (JAR-51).
