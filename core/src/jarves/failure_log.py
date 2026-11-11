@@ -26,7 +26,8 @@ feat.register(FEATURE, "יומן מה השתבש", "What went wrong log", False,
               targets={"windows": {"status": "implemented_unverified",
                                    "blocker": "unit tests only (test_failure_log.py); not run on the owner's PC"},
                        "linux_arm64_pi": {"status": "implemented_unverified",
-                                          "blocker": "unit tests only; not run on a Pi"}},
+                                          "blocker": "unit tests only; not run on a Pi",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}},
               permissions=["local file only; nothing leaves the PC"], settings="jarvis report weekly")
 
 
