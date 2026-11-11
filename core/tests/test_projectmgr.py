@@ -32,7 +32,7 @@ FAKE = textwrap.dedent('''
         print(json.dumps({"type": "result", "is_error": False, "result": out, "session_id": "plan"}))
         sys.exit(0)
     here = os.path.join(os.getcwd(), "..")
-    def bump(name):                     # append-only: parallel reviewers never see a truncated file (#1051)
+    def bump(name):                     # append-only (#1051): approximate under concurrency, never invalid
         f = os.path.join(here, name)
         with open(f, "a") as fh:
             fh.write("x")
