@@ -1,0 +1,1 @@
+- Fixed: the WhatsApp kill-file test (#967) now checks the watcher in-process with atomic writes over 20 kill/release cycles, so it has no socket or partial-write race on Windows CI (JAR-211).
