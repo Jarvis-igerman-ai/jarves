@@ -122,18 +122,39 @@ def _mp_worker(path: str, cap: float, n: int, out: str) -> None:
     Path(out).write_text(str(got))
 
 
+def _shared_db(tmp_path):
+    """Like the Core, which creates the whole schema before `jarvis ask` opens the same file. Before #1048 only the
+    memory tables existed, so every spawned worker's Budget() ran CREATE TABLE reservations (a write) at the same
+    moment as the others' BEGIN IMMEDIATE, and on slow Windows CI one died with 'database is locked'. The owner stays
+    open while the workers run, so the WAL/shm files are never torn down and rebuilt between them."""
+    db = tmp_path / "shared.db"
+    return db, Budget(MemoryStore(db), Config().ai)
+
+
+def test_cross_process_setup_leaves_worker_startup_lock_free(tmp_path):
+    """#1048: a worker's startup must not need the write lock, or it can die with 'database is locked'."""
+    import sqlite3
+    db, owner = _shared_db(tmp_path)
+    writer = sqlite3.connect(db, timeout=0, isolation_level=None)
+    writer.execute("BEGIN IMMEDIATE")                                 # another process is mid-reservation
+    try:
+        Budget(MemoryStore(db), Config().ai)                          # reads only: does not wait for the lock
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
+
+
 def test_strict_cap_holds_across_processes(tmp_path):
     """Two processes (the Core and e.g. `jarvis ask`) racing for the last dollars never both take them."""
     import multiprocessing as mp
-    db = tmp_path / "shared.db"
-    MemoryStore(db).close()
+    db, owner = _shared_db(tmp_path)
     ctx = mp.get_context("spawn")
     ps = [ctx.Process(target=_mp_worker, args=(str(db), 0.10, 20, str(tmp_path / f"o{i}"))) for i in range(3)]
     for p in ps:
         p.start()
     for p in ps:
         p.join(120)
-    assert all(p.exitcode == 0 for p in ps)
+    assert [p.exitcode for p in ps] == [0, 0, 0]                      # a crashed worker's traceback is in stderr
     total = sum(int((tmp_path / f"o{i}").read_text()) for i in range(3))
     assert total == 14                                                # 14 * $0.007 = $0.098 <= $0.10 < 15 * $0.007
     cfg = Config()

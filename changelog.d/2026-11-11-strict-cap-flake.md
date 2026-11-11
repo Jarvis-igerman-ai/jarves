@@ -1,0 +1,1 @@
+- Fixed: test_strict_cap_holds_across_processes no longer flakes on Windows CI (#1048, #1034): the test now creates the whole budget schema before spawning workers, so no worker startup needs the SQLite write lock (JAR-187).
