@@ -1,0 +1,1 @@
+- Fixed: Claude sessions in this repo (including cloud workers) are refused scheduling/trigger tools, gh pr merge and force-push instead of asking the owner to approve them; main stays protected by the repo ruleset.
