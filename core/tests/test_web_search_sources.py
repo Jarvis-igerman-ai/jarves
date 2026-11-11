@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from openai_fakes import ResponsesHTTPServer
@@ -55,4 +56,6 @@ def test_sources_label_has_hebrew_in_server_and_dashboard_parts():
     name = "2026-11-11-web-sources.json"
     server = json.loads((PKG / "hebrew_parts" / name).read_text(encoding="utf-8"))
     dash = json.loads((PKG / "dashboard_static" / "locales" / "parts" / name).read_text(encoding="utf-8"))
-    assert server["Sources"] == dash["dict"]["Sources"] == "מקורות"
+    assert server["Sources"] == "מקורות"
+    rx, to = dash["rules"][0]
+    assert re.sub(rx, to.replace("$1", r"\1"), "Sources: example.com, other.org") == "מקורות: example.com, other.org"
