@@ -13,8 +13,9 @@ import re
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable
+from urllib.parse import urlsplit
 
-from . import logs
+from . import hebrew, logs
 from .budget import Budget, BudgetExceeded
 from .config import AIConfig, openai_key_present
 from .memory import MemoryStore
@@ -524,17 +525,43 @@ class AgentBrain:
             raise BrainUnavailable("AI_BUDGET", str(e), e.action) from e
         raw = getattr(res, "raw_responses", []) or []      # already counted per call by BudgetedModel
         tokens = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
-        searches = 0
+        searches, cited = 0, []
         for r in raw:
             u = getattr(r, "usage", None)
             for k in ("input_tokens", "output_tokens"):
                 tokens[k] += int(getattr(u, k, 0) or 0)
             tokens["cached_tokens"] += int(getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0)
             searches += sum(1 for o in (getattr(r, "output", None) or []) if getattr(o, "type", "") == "web_search_call")
+            cited += cited_urls(r)
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
                   duration_s=round(time.monotonic() - t0, 2), model=self.cfg.text_model, web_searches=searches,
                   **usage_fields(tokens))
-        return str(res.final_output or "").strip()
+        answer = str(res.final_output or "").strip()
+        line = sources_line(cited, hebrew_label=bool(_HEBREW.search(answer)))
+        return f"{answer}\n\n{line}" if answer and line else answer
+
+
+def cited_urls(resp: Any) -> list[str]:
+    """url_citation annotations of the answer messages in one Responses API response (SDK objects or dicts)."""
+    def g(o, k):
+        return o.get(k) if isinstance(o, dict) else getattr(o, k, None)
+    return [str(g(a, "url") or "") for o in (g(resp, "output") or []) if g(o, "type") == "message"
+            for c in (g(o, "content") or []) for a in (g(c, "annotations") or []) if g(a, "type") == "url_citation"]
+
+
+_HEBREW = re.compile("[\u0590-\u05ff]")
+
+
+def sources_line(urls: list[str], limit: int = 3, *, hebrew_label: bool = False) -> str:
+    """"Sources: example.com, other.org": up to `limit` distinct domains, never raw URLs (they are spoken aloud).
+    hebrew_label: a Hebrew answer gets the Hebrew label (hebrew_parts), so Hebrew TTS does not read English."""
+    doms: list[str] = []
+    for u in urls:
+        h = (urlsplit(u).hostname or "").removeprefix("www.")
+        if h and h not in doms:
+            doms.append(h)
+    label = (hebrew.he("Sources") if hebrew_label else None) or "Sources"
+    return f"{label}: " + ", ".join(doms[:limit]) if doms else ""
 
 
 class _Find:
