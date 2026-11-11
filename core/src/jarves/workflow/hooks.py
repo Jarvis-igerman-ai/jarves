@@ -13,6 +13,7 @@ import sqlite3
 import time
 import subprocess
 import sys
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from .messages import notice_line, unread_count
@@ -291,6 +292,26 @@ def _log_error(home: Path, exc: BaseException) -> None:
         pass
 
 
+@contextmanager
+def _one_transaction(store: Store):
+    """JAR-214 (#786): a registration hook takes the write lock once, not once per store call.
+
+    Each store call opened its own IMMEDIATE transaction (about four per SubagentStart, each a synced commit),
+    so eight workers starting together queued past the busy timeout and lost their registration. Inside this
+    block the store's nested transactions join the single outer one; any error rolls the whole event back.
+    """
+    with store._tx() as db:
+        store._tx = lambda: nullcontext(db)
+        try:
+            yield
+        finally:
+            del store._tx
+
+
+def _separate_transactions(store: Store):
+    return nullcontext()
+
+
 def main(argv=None) -> int:
     import argparse
     from .__main__ import utf8_streams
@@ -318,13 +339,19 @@ def main(argv=None) -> int:
         is_stop = payload.get("hook_event_name") in {"Stop", "SubagentStart", "SessionStart"}
         store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
         agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
+        event = payload.get("hook_event_name")
+        if event == "SubagentStart":
+            git_base_note(str(payload.get("cwd") or args.repo_root))   # cached: no git call while holding the lock
+        once = _one_transaction if event in {"SubagentStart", "SessionStart"} else _separate_transactions
         try:
-            result = observe(store, payload, args.repo_root, agent_env)
+            with once(store):
+                result = observe(store, payload, args.repo_root, agent_env)
         except sqlite3.OperationalError:
             if not is_stop:
                 raise
             time.sleep(0.3)
-            result = observe(store, payload, args.repo_root, agent_env)
+            with once(store):
+                result = observe(store, payload, args.repo_root, agent_env)
         if result:
             print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001  hooks fail open: never exit non-zero (incl. RecursionError)
