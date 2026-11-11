@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "CronCreate", "CronDelete", "RemoteTrigger", "ScheduleWakeup",
+      "Bash(schtasks *)", "Bash(crontab *)",
+      "Bash(git push --force*)", "Bash(git push -f*)", "Bash(git push * --force*)",
+      "Bash(git push * main)", "Bash(git push * HEAD:main)", "Bash(git push * HEAD:refs/heads/main)",
+      "Bash(gh pr merge*)", "Bash(gh api * -X *)", "Bash(gh api * --method*)",
+      "Edit(.claude/**)", "Write(.claude/**)", "Edit(CLAUDE.md)", "Write(CLAUDE.md)", "Edit(AGENTS.md)", "Write(AGENTS.md)"
+    ]
+  }
+}
