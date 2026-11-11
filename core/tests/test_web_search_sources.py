@@ -57,4 +57,4 @@ async def test_sources_line_is_not_kept_in_the_conversation_memory(tmp_path, mon
     """The model never sees the line in later turns, so it does not learn to write source lines itself."""
     text, items = await ask(tmp_path, monkeypatch, {"searches": 1, "text": "בתל אביב 24 מעלות.",
                                                     "annotations": [cite("https://example.com/a")]})
-    assert "מקורות" in text and "מקורות" not in str(items) and "example.com" in str(items)
+    assert "מקורות" in text and "מקורות" not in str(items) and "בתל אביב 24 מעלות." in str(items)
