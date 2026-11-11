@@ -47,6 +47,15 @@ async def test_switch_on_offers_web_search_and_the_reply_cites_its_sources(tmp_p
     assert text == "It is 24 degrees in Tel Aviv.\n\nSources: weather.example, news.example.org"
 
 
+async def test_hebrew_chat_gets_the_hebrew_sources_label_the_guide_quotes(tmp_path, monkeypatch):
+    """brain.sources_line(hebrew_label=...) localizes the label for a Hebrew answer: fix_he quotes "מקורות:"."""
+    text, _ = await chat(tmp_path, monkeypatch, {"searches": 1, "text": "בתל אביב 24 מעלות.",
+                                                 "annotations": [cite("https://www.weather.example/tlv")]},
+                         web_search=True, question="מה מזג האוויר בתל אביב?")
+    assert text == "בתל אביב 24 מעלות.\n\nמקורות: weather.example"
+    assert "\"מקורות:\"" in tomllib.loads(GUIDE.read_text(encoding="utf-8"))["problems"][-1]["fix_he"]
+
+
 async def test_switch_off_never_offers_web_search(tmp_path, monkeypatch):
     text, bodies = await chat(tmp_path, monkeypatch, {"text": "I cannot check the web right now."}, web_search=False)
     assert bodies and all("web_search" not in tool_types(b) for b in bodies)
