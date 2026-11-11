@@ -1,0 +1,1 @@
+- Fixed: cloud workers can no longer use scheduling or trigger tools, edit Claude settings, force-push, push to main or merge, so they never stop to ask for permission.
