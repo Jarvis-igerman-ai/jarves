@@ -96,15 +96,26 @@ def gate(current: dict, baseline: dict | None, beta: str = "", max_drop: float =
     def dropped(b: float, c: float) -> bool:
         return round(b - c, 4) > max_drop
     drops = [f"overall {baseline['score']} -> {current['score']}"] if dropped(baseline["score"], current["score"]) else []
-    drops += [f"{k} {baseline['by_kind'].get(k, 0)} -> {v}" for k, v in current["by_kind"].items()
-              if dropped(baseline["by_kind"].get(k, 0), v)]
+    kinds = [k for k, v in current["by_kind"].items() if dropped(baseline["by_kind"].get(k, 0), v)]
+    drops += [f"{k} {baseline['by_kind'].get(k, 0)} -> {current['by_kind'][k]}" for k in kinds]
     if not drops:
         return dict(block=False, reason="no score drop", bug=None)
-    failed = [r["id"] for r in current["rows"] if r["score"] < 1.0]
+    failed = [r["id"] for r in current["rows"] if r["score"] < 1.0 and (not kinds or r["kind"] in kinds)]
     bug = dict(title=f"Conversation eval score dropped on beta {beta or '?'}", labels=["bug", "P1"],
                body="Promotion blocked by the conversation eval suite.\n" + "\n".join(f"- {d}" for d in drops)
                     + "\nFailing scenarios: " + ", ".join(failed))
     return dict(block=True, reason="; ".join(drops), bug=bug)
+
+
+def keeps_baseline(current: dict, baseline: dict | None) -> bool:
+    """True when `current` may replace the baseline: overall AND every kind at least as high (never lowered)."""
+    return baseline is None or (current["score"] >= baseline["score"] and all(
+        v >= baseline["by_kind"].get(k, 0) for k, v in current["by_kind"].items()))
+
+
+def _valid(base) -> bool:
+    return (isinstance(base, dict) and isinstance(base.get("score"), (int, float))
+            and isinstance(base.get("by_kind"), dict))
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
@@ -147,13 +158,15 @@ def cmd_evalsuite(a, cfg, home) -> int:
     rep = run_suite(scripted_reply, keyword_judge)
     try:
         base = json.loads(base_p.read_text(encoding="utf-8")) if base_p.exists() else None
+        if base is not None and not _valid(base):
+            raise ValueError("wrong shape")
     except (OSError, ValueError):
         print("EVALSUITE_BAD_BASELINE: baseline.json is unreadable; treated as no baseline")
         base = None
     g = gate(rep, base, a.beta, max_drop=MAX_DROP)
     d.mkdir(parents=True, exist_ok=True)
     (d / "last.json").write_text(json.dumps(dict(rep, beta=a.beta, gate=g), ensure_ascii=False), encoding="utf-8")
-    if not g["block"] and (base is None or rep["score"] >= base.get("score", 0)):     # never lowered automatically
+    if not g["block"] and keeps_baseline(rep, base):     # never lowered automatically, overall or per kind
         base_p.write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(dict(score=rep["score"], by_kind=rep["by_kind"], gate=g), ensure_ascii=False))
     return 2 if g["block"] else 0

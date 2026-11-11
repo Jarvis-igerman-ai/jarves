@@ -82,3 +82,23 @@ def test_exactly_max_drop_does_not_block_and_corrupt_baseline_is_ignored(tmp_pat
     (tmp_path / "evalsuite" / "baseline.json").write_text("{bad", encoding="utf-8")
     assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 0
     assert "EVALSUITE_BAD_BASELINE" in capsys.readouterr().out
+
+
+def test_per_kind_drop_with_equal_overall_does_not_lower_the_baseline():
+    base = dict(score=0.95, by_kind={"device": 1.0, "chat": 0.9})
+    assert not ce.keeps_baseline(dict(score=0.95, by_kind={"device": 0.96, "chat": 0.94}), base)
+    assert ce.keeps_baseline(dict(score=0.96, by_kind={"device": 1.0, "chat": 0.92}), base)
+    assert ce.keeps_baseline(base, None)
+
+
+def test_wrong_shape_baseline_is_bad_and_bug_lists_only_regressed_kinds(tmp_path, capsys, monkeypatch):
+    _on(monkeypatch)
+    (tmp_path / "evalsuite").mkdir()
+    for bad in ('{"x": 1}', '"s"', '{"score": 1, "by_kind": []}'):
+        (tmp_path / "evalsuite" / "baseline.json").write_text(bad, encoding="utf-8")
+        assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 0
+        assert "EVALSUITE_BAD_BASELINE" in capsys.readouterr().out
+    rows = [dict(id="c1", kind="chat", score=0.5), dict(id="d1", kind="device", score=0.0)]
+    g = ce.gate(dict(score=0.25, by_kind={"chat": 0.5, "device": 0.0}, rows=rows),
+                dict(score=0.75, by_kind={"chat": 0.5, "device": 1.0}))
+    assert g["block"] and g["bug"]["body"].endswith("Failing scenarios: d1")
