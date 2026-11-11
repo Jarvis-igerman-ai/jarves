@@ -88,6 +88,10 @@ class AlarmReceiver : BroadcastReceiver() {
             nm.createNotificationChannel(NotificationChannel(ALARM_CHANNEL, "Reminders", NotificationManager.IMPORTANCE_HIGH))
         }
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        // A blocked "Reminders" channel drops the notification silently, so it does not count as shown.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            nm.getNotificationChannel(ALARM_CHANNEL)?.importance == NotificationManager.IMPORTANCE_NONE
+        ) return false
         return try {
             nm.notify(
                 item.id.hashCode(),
