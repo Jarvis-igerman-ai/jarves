@@ -1,0 +1,1 @@
+- Fixed: quarantine flaky test_browser_tab_fits_390_and_360_px_in_english_and_hebrew (#1049)
