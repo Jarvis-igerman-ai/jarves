@@ -1,0 +1,1 @@
+- Fixed: re-verified the #788 voice-fault budget test (JAR-212): 200/200 alone and the whole file 900/900 under full CPU load; the fix itself landed in #868, no code change.
