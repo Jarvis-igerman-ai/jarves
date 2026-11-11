@@ -1,0 +1,5 @@
+page = "feedback"
+group = "assistant"
+he = "משוב"
+en = "Feedback"
+scripts = ["/static/feedback.js"]

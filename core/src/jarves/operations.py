@@ -302,6 +302,11 @@ class Operations:
             self_aware.attach(self.core)
         except Exception:
             logs.error("self_aware", "SELF_AWARE_ATTACH_FAILED", "self-awareness tools not started", exc=True)
+        from . import wrong_feedback                 # JAR-230: report_wrong voice tool ("that was wrong")
+        try:
+            wrong_feedback.attach(self.core)
+        except Exception:
+            logs.error("feedback", "FEEDBACK_ATTACH_FAILED", "feedback tool not started", exc=True)
         from . import issue_registry                 # owner request 21 Oct: issues registry, log sink, list_issues, fixed-in check
         try:
             self.issues = issue_registry.attach(self.core, self)
