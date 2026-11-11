@@ -83,6 +83,15 @@ class OfflineTest {
         assertEquals(listOf(b.id), restarted.rescheduleAll().map { it.id })
     }
 
+    @Test fun reminderStaysPendingWhenNotificationCannotBeShown() {
+        val s = store()
+        val r = s.addReminder("call", 2_000)
+        assertEquals(false, fireReminder(s, r) { false })
+        assertEquals(false, s.list().single().done) // still pending and visible in the app
+        assertEquals(true, fireReminder(s, r) { true })
+        assertTrue(s.list().single().done)
+    }
+
     @Test fun damagedFileStartsEmpty() {
         assertTrue(store(MemStorage("{not json")).all().isEmpty())
     }
