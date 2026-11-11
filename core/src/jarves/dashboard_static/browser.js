@@ -155,7 +155,7 @@ PAGES.browser = async function () {
   const rows = d.sites.map((s) => el("tr", {},
     el("td", {}, el("code", {}, s), el("span", { class: "muted small" }, "  + subdomains")),
     el("td", {}, el("button", { type: "button", class: "ghost", onclick: () => change("remove", s) }, "Remove"))));
-  const state = f.active ? pill("ok", "on") : !f.enabled ? pill("plain", "off") : pill("fail", "unavailable");
+  const state = f.active ? pill("ok", "on") : !f.enabled ? pill("plain", "off") : f.health === "checking" ? pill("plain", "checking") : pill("fail", "unavailable");
   const act = d.activity || {};
   render(header("Browser", "Web pages JARVES opens for you. Full control only on the sites below; every other site is read-only and opens only after you approve it on the screen."),
     el("div", { class: "card" },

@@ -1,0 +1,1 @@
+- Fixed: a feature that is switched on but not yet checked is shown as "checking" instead of "unavailable" (CLI, model tool and Browser page).
