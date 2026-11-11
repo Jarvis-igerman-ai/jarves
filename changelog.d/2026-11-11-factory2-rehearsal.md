@@ -1,0 +1,1 @@
+- Added: docs/factory2-rehearsal.md, a one-sentence marker written by the Factory 2 gate rehearsal (JAR-206, not counted).
