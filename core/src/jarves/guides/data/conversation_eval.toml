@@ -1,0 +1,46 @@
+order = 32
+category = "system"
+features = ["conversation_eval"]
+suggest = false
+aliases = ["בדיקת שיחות", "מבחן שיחות", "conversation eval", "eval suite", "evalsuite"]
+error_codes = ["EVALSUITE_OFF", "EVALSUITE_NO_JUDGE"]
+title_he = "בדיקת שיחות"
+title_en = "Conversation eval"
+what_he = "32 שיחות מתוסרטות בעברית ובאנגלית (תזכורות, חיפוש, שיחה, שליטה במכשירים) מקבלות ציון מול ההתנהגות הצפויה. אם הציון של גרסת בטא יורד לעומת הקודמת, הקידום נחסם ונכתבת טיוטת באג מקומית."
+what_en = "32 scripted Hebrew and English conversations (reminders, search, chat, device control) are scored against the expected behaviour. If a beta scores lower than the previous one, promotion is blocked and a local bug draft is written."
+say = [["תריץ בדיקת שיחות", "Run the conversation eval"]]
+expect_he = "כבוי כברירת מחדל (בטא). השופט החי (מודל שפה) עדיין לא מחובר: יש רק הרצת הדגמה מדומה. ירידה של יותר מ-5 נקודות אחוז חוסמת."
+expect_en = "Off by default (beta). The live judge (a language model) is not wired yet: only a scripted demo run works. A drop of more than 5 percentage points blocks."
+cost_he = "הדגמה: חינם."
+cost_en = "Demo: free."
+privacy_he = "השיחות מובנות וציבוריות; שום שיחה שלכם לא נשלחת. התוצאות נשמרות רק בתיקיית evalsuite במחשב. באג נפתח ב-GitHub רק אם אתם עושים זאת."
+privacy_en = "The conversations are built in and public; none of your conversations is sent. Results stay in the evalsuite folder on this PC. A bug is filed on GitHub only if you do it."
+
+[parity.features]
+conversation_eval = "evalsuite"
+
+[[steps]]
+he = "הפעילו יכולות בטא: jarvis features beta on. אחר כך: jarvis features on conversation_eval."
+en = "Turn on beta features: jarvis features beta on. Then: jarvis features on conversation_eval."
+action = "feature_on:conversation_eval"
+check = "active:conversation_eval"
+
+[[steps]]
+he = "ראו את השיחות: jarvis evalsuite scenarios. הרצת הדגמה: jarvis evalsuite run --fake --beta 5.1.0b2."
+en = "See the conversations: jarvis evalsuite scenarios. Demo run: jarvis evalsuite run --fake --beta 5.1.0b2."
+
+[[steps]]
+he = "ריצה ראשונה הופכת לבסיס. קוד יציאה 2 פירושו ירידה בציון: הקידום חסום, וטיוטת הבאג נמצאת ב-evalsuite/last.json."
+en = "The first run becomes the baseline. Exit code 2 means a score drop: promotion is blocked and the bug draft is in evalsuite/last.json."
+
+[[problems]]
+he = "כתוב EVALSUITE_OFF"
+en = "It says EVALSUITE_OFF"
+fix_he = "הפעילו קודם את יכולות הבטא ואז את המתג conversation_eval."
+fix_en = "Turn on beta features first, then the conversation_eval switch."
+
+[[problems]]
+he = "כתוב EVALSUITE_NO_JUDGE"
+en = "It says EVALSUITE_NO_JUDGE"
+fix_he = "השופט החי עוד לא מחובר. הוסיפו --fake להרצת הדגמה."
+fix_en = "The live judge is not wired yet. Add --fake for a demo run."

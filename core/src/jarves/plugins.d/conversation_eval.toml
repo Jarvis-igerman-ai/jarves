@@ -1,0 +1,3 @@
+dashboard = ["jarves.conversation_eval"]
+addons = ["jarves.conversation_eval"]
+cli = ["jarves.conversation_eval"]

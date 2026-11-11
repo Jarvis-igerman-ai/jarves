@@ -1,0 +1,1 @@
+- Added: conversation eval suite (beta, off by default): 32 scripted Hebrew and English scenarios (reminders, search, chat, device control) scored against expected behaviour; a score drop vs the baseline blocks promotion and drafts a local bug. `jarvis evalsuite status|scenarios|run --fake`. (JAR-231)
