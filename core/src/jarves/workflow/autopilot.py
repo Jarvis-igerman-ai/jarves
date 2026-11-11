@@ -47,11 +47,33 @@ OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "we
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
+# #932: a worker must never touch the owner's policy file, whatever command its allow list admits (python, sed, cp ...).
+WORKER_POLICY_DENY: tuple[str, ...] = (f"Bash(*{POLICY_NAME}*)", f"Edit(**/{POLICY_NAME})", f"Write(**/{POLICY_NAME})")
+_CMD_SPLIT = re.compile(r"&&|\|\||[;|&\n]")
+
+
+def _rule_allows(rule: str, segment: str) -> bool:
+    m = re.fullmatch(r"Bash\((.+?)(:\*)?\)", rule)
+    if not m:
+        return False
+    prefix = m.group(1)
+    return segment == prefix or (bool(m.group(2)) and segment.startswith(prefix + " "))
+
+
+def worker_command_allowed(command: str, allow) -> bool:
+    """Model of the worker allow list: every part of a compound command must match an allow rule, and no command
+    that names the policy file is ever allowed (WORKER_POLICY_DENY wins over any allow rule)."""
+    if POLICY_NAME in command.lower():
+        return False
+    parts = [p.strip() for p in _CMD_SPLIT.split(command)]
+    return all(p and any(_rule_allows(r, p) for r in allow) for p in parts)
 
 
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
+    if any(re.fullmatch(r"Bash\([\s*:]*\)", x) or POLICY_NAME in x.lower() for x in value):
+        raise ValueError("worker_allowed_tools: catch-all rules and rules naming autopilot.json cannot be allowed")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):

@@ -122,6 +122,26 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(autopilot.command(self.store, self.home, "status", [])["policy"]["max_starts_per_hour"], 3)
         json.dumps(view)
 
+    def test_worker_allow_list_cannot_rewrite_policy_file(self):
+        # #932: broad rules such as Bash(python:*) and Bash(sed:*) must not let a worker edit autopilot.json.
+        allow = ["Bash(python:*)", "Bash(py:*)", "Bash(sed:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(node:*)",
+                 "Bash(cat:*)", "Bash(pytest:*)"]
+        for cmd in ('python -c "open(\'autopilot.json\',\'w\').write(\'{}\')"',
+                    "sed -i s/false/true/ C:\\Users\\o\\.jarvis\\AUTOPILOT.JSON",
+                    "cp evil.json ~/.jarvis/autopilot.json", "mv x.json autopilot.json",
+                    "node -e \"require('fs').writeFileSync('autopilot.json','{}')\"",
+                    "py -m json.tool autopilot.json", "cat autopilot.json > /tmp/x",
+                    "sed -n 1p a.txt && cp b autopilot.json"):
+            self.assertFalse(autopilot.worker_command_allowed(cmd, allow), cmd)
+        self.assertTrue(autopilot.worker_command_allowed("python -m pytest core/tests", allow))
+        self.assertTrue(autopilot.worker_command_allowed("sed -n 1,5p README.md", allow))
+        self.assertFalse(autopilot.worker_command_allowed("curl x", allow))
+        self.assertIn("Bash(*autopilot.json*)", autopilot.WORKER_POLICY_DENY)
+        # A catch-all or policy-file rule in the owner's override is refused.
+        for rule in ("Bash(*)", "Bash(*:*)", "Bash(:*)", "Bash(cp autopilot.json:*)"):
+            with self.assertRaises(ValueError, msg=rule):
+                autopilot._worker_tools([rule])
+
 
 if __name__ == "__main__":
     unittest.main()

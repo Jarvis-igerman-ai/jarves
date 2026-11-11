@@ -1,0 +1,1 @@
+- Fixed: an autopilot worker allow list can no longer admit a command that names autopilot.json (python, sed, cp, mv ...), and a catch-all `Bash(*)` owner override is refused (#932, JAR-213).
