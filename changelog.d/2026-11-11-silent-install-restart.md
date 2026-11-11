@@ -1,0 +1,1 @@
+- Fixed: `jarvis install-latest` now starts the Core again when a silent install did not bring it back, and checks that the running Core reports the new version (rolls back if it does not) (JAR-221).

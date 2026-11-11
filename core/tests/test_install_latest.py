@@ -73,7 +73,7 @@ class Fake:
             record_was_running=rec("record"), stop_core=rec("stop"),
             launch=launch,
             wait=lambda c: self.wait_end, run_cli=run_cli, rollback=rec("rollback", {}),
-            now=lambda: NOW)
+            core_version=lambda: "4.5.1-beta.9", now=lambda: NOW)
 
 
 def test_happy_path_order_and_report(tmp_path):
@@ -423,3 +423,24 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
     f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks
+
+
+def test_silent_install_restarts_the_core_on_the_new_version(tmp_path):
+    f = Fake(tmp=tmp_path, wait="timeout")                 # setup ended, but it did not bring the Core back
+    d = f.deps()
+    up = iter([True])                                      # running before the install, stopped after setup
+    d.core_running = lambda: next(up, "start_core" in f.calls)
+    d.core_version = lambda: "4.5.1-beta.9" if "start_core" in f.calls else None
+    rep = il.run(d)
+    assert f.calls.index("wait_installer") < f.calls.index("start_core") < f.calls.index("cli:update status")
+    assert rep.ok and not rep.rolled_back
+    assert ("Core restarted on the new version", True, "running 4.5.1-beta.9") in rep.checks
+
+
+def test_core_still_on_the_old_version_after_install_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.core_version = lambda: "4.5.0"
+    rep = il.run(d)
+    assert not rep.ok and rep.rolled_back and "start_core" not in f.calls
+    assert ("Core restarted on the new version", False, "running 4.5.0") in rep.checks

@@ -65,6 +65,7 @@ class Deps:
     rollback: Callable[[], dict]
     spawn_finisher: Callable[[Path], None] | None = None      # (state file) start the waiter; None: finish in this process
     publish_pid: Callable[[int | None], None] = lambda pid: None   # tell the waiter the setup pid (None = cancelled)
+    core_version: Callable[[], str | None] = lambda: None      # the version the RUNNING Core reports (None: no answer)
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     clock: Callable[[], float] = time.time                    # file ages (pending-run guard)
 
@@ -340,6 +341,14 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     return finish(deps, state)
 
 
+def _core_on(deps: Deps, shown) -> tuple[bool, str]:
+    """(True, detail) when the running Core reports one of the wanted versions."""
+    if not deps.core_running():
+        return False, "the Core is not running; start it with: jarvis start"
+    v = str(deps.core_version() or "")
+    return _has_version(v, shown), f"running {v or 'an unknown version'}"
+
+
 def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
     """Phase two. Never judges or rolls back while the setup process is still running."""
     from .updates import UpdateError
@@ -353,6 +362,13 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         _save_report(deps, rep)
         return rep
     end = deps.wait(core_up) if core_up else "done"
+    if core_up and end == "timeout" and not deps.core_running():   # setup ended but did not bring the Core back
+        try:
+            deps.start_core()                             # once, from the NEW program (finish runs there)
+        except Exception:                                 # noqa: BLE001  (judged by the check below)
+            pass
+        if _core_on(deps, shown)[0]:
+            end = "done"
     install_ok = rep.add("silent install", end == "done" or (end == "timeout" and not core_up),
                          {"done": "setup finished" + (" and the new Core is healthy" if core_up else ""),
                           "failed": "setup or health check failed",
@@ -371,6 +387,8 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
             else:
                 detail = "" if good else f"exit {code}: {_first_line(out)}"
             ok = rep.add(name, good, detail) and ok
+        if core_up:                                       # the Core ran before: it must run again, on the new version
+            ok = rep.add("Core restarted on the new version", *_core_on(deps, shown)) and ok
     if install_ok or end == "timeout":                    # informational: lost features are named, rollback stays check-driven
         try:
             fcode, fout = deps.run_cli(["features"])
@@ -524,6 +542,10 @@ def real_deps(a, cfg, home: Path) -> Deps:
         if pid is not None:
             proc.pop("p", None)                           # the waiter owns the wait from here on
 
+    def core_version() -> str | None:
+        s = cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+        return str(s.get("version") or "") if s else None
+
     def start_core() -> None:
         cli.cmd_start(argparse.Namespace(show=False), cfg, home)
 
@@ -539,7 +561,8 @@ def real_deps(a, cfg, home: Path) -> Deps:
                 wait=lambda core_ran: up.watch(home, lambda _l: None, timeout_s=420.0),
                 run_cli=_cli_subprocess,
                 rollback=lambda: rollback(home, approved=True, restore_data=True, silent=True, port=cfg.link.port),
-                spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid)
+                spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid,
+                core_version=core_version)
 
 
 def wait_report(home: Path, since: float, *, timeout_s: float = 1500.0, sleep=time.sleep, clock=time.time) -> str | None:
