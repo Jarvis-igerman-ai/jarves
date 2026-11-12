@@ -1,0 +1,1 @@
+- Added: local 'what went wrong' log (beta, off by default): privacy-safe failure metadata on this PC and `jarvis report weekly` (JAR-229).

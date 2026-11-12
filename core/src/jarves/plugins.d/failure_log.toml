@@ -1,0 +1,6 @@
+# dashboard: importing the module registers the failure_log row on the dashboard Features page (no routes).
+# addons: the setup wizard imports it so the row is offered on first run. The live hook is attached ONCE by
+# Core.start (app.py); these loaders only import, they never call attach().
+dashboard = ["jarves.failure_log"]
+addons = ["jarves.failure_log"]
+cli = ["jarves.failure_log"]

@@ -39,7 +39,10 @@ def _full_choices() -> list[str]:
 
 
 def test_every_command_is_routed():
-    known = set(cli._INLINE_COMMANDS) | {c for r in ROWS for c in r[1]}
+    from jarves import plugin_registry
+    plugins = {c for m in plugin_registry.modules("cli") for c in m.COMMANDS}     # plugins.d/*.toml `cli` modules
+    assert not plugins & (set(cli._INLINE_COMMANDS) | {c for r in ROWS for c in r[1]})   # a plugin never shadows one
+    known = set(cli._INLINE_COMMANDS) | {c for r in ROWS for c in r[1]} | plugins
     assert set(_full_choices()) <= known
     assert not set(cli._INLINE_COMMANDS) & {c for r in ROWS for c in r[1]}
 

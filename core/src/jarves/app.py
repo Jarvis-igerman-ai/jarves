@@ -398,6 +398,8 @@ class Core:
         self.ops = ops_attach(self)
         from .diag import failure_gate                  # #336: ask once when a tool fails visibly (switch, cooldown)
         failure_gate.attach(self)
+        from . import failure_log                       # JAR-229: tool errors -> local log (beta, off)
+        failure_log.attach(self)
         if self.agent is not None:                      # V5: confirmed preferences in every typed/delegated request
             from . import preferences as prefs_mod
             prefs_mod.augment_instructions(self.agent, self.ops.prefs, self.features)
