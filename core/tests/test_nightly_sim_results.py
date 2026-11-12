@@ -33,7 +33,7 @@ def _state(srv):
         return resp.code, json.loads(resp.read())
 
 
-@pytest.mark.parametrize("body", MALFORMED)
+@pytest.mark.parametrize("body", MALFORMED, ids=[f"case{i}" for i in range(len(MALFORMED))])  # short ids: Windows env-var limit
 def test_malformed_result_file_gives_200_with_warning(server, tmp_path, body):
     (tmp_path / "factory_sim_last.json").write_text(body, encoding="utf-8")
     status, state = _state(server)
