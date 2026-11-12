@@ -146,7 +146,7 @@ def _action_of(av) -> str:
 WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
                                     "msg", "check-touch", "timeline", "health", "now", "trace", "autopilot"})
 # Owner answers keep their own refusal (owner_only_guard, exit 1, before any store write).
-OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more"})
+OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more", "unlock"})
 
 
 def worker_refusal(av) -> str:
