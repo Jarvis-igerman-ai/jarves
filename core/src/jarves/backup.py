@@ -102,6 +102,8 @@ def set_settings(home: Path, changes: dict) -> dict:
                 raise ValueError(f"{k} must be a whole number")
             if not 0 <= n <= 365 or (k == "daily" and n < 1):
                 raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
+            if k == "max_total" and 0 < n < len(KINDS):       # room for the newest backup of every kind
+                raise ValueError(f"max_total must be 0 (no cap) or at least {len(KINDS)}")
             clean[k] = n
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
@@ -380,12 +382,11 @@ def prune(home: Path) -> list[str]:
     keep |= set(list(days.values())[:s["daily"]]) | set(list(weeks.values())[:s["weekly"]])
     for kind, n in (("manual", s["manual"]), ("pre-migration", s["checkpoints"]), ("pre-restore", s["checkpoints"])):
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
-    if s["max_total"] > 0:                                    # overall cap, newest first (#1016)
-        keep = {b["name"] for b in [x for x in items if x["name"] in keep][:s["max_total"]]}
-    for kind in KINDS:                                        # never the newest of a kind
-        newest = next((b["name"] for b in items if b["kind"] == kind), None)
-        if newest:
-            keep.add(newest)
+    newest = {next(b["name"] for b in items if b["kind"] == k) for k in {b["kind"] for b in items}}
+    keep |= newest                                            # never the newest of a kind
+    if s["max_total"] > 0:                                    # overall cap (#1016): those first, then newest others
+        rest = [b["name"] for b in items if b["name"] in keep and b["name"] not in newest]
+        keep = newest | set(rest[:max(s["max_total"] - len(newest), 0)])
     gone = []
     for b in items:
         if b["name"] not in keep:
