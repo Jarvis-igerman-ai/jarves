@@ -43,6 +43,7 @@ type Config struct {
 	// BackfillBuffer bounds the in-memory history backfill buffer (default 2000 messages); BackfillWait is how long
 	// one on-demand request may stay unanswered before its chat counts as finished (default 60 s).
 	BackfillBuffer int
+	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
 	BackfillWait   time.Duration
 }
 

@@ -252,3 +252,21 @@ func TestBackfillConcurrentStartsRunOnce(t *testing.T) {
 		t.Fatalf("%d starts accepted, %d requests", ok, len(e.requests()))
 	}
 }
+
+func TestBackfillBufferIsAlsoBoundedInBytes(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBytes = 10000 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	now := float64(e.clk.Now().Unix())
+	for i := 0; i < 5; i++ { // five 4 KB messages: only two fit in 10 KB
+		e.fake.Emit(engine.MessageEvent{Msg: msgstore.Message{ID: fmt.Sprintf("huge%d", i), Chat: dana,
+			TS: now - 90*86400 - float64(i), Kind: "text", Text: strings.Repeat("x", 4000)},
+			Chat: msgstore.ChatInfo{ID: dana}, History: true, OnDemand: true})
+	}
+	e.fake.Emit(engine.HistoryAnswerEvent{Chats: []string{dana}})
+	if n := e.bufLen(); n != 2 {
+		t.Fatalf("byte bound: %d messages buffered", n)
+	}
+	if got := e.drain(0); got.body["dropped"] != 3.0 {
+		t.Fatalf("dropped %s", got.raw)
+	}
+}

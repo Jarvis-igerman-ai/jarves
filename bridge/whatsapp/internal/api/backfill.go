@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	BackfillBatch  = 50   // messages per on-demand request (whatsmeow's recommendation)
-	backfillBufMax = 2000 // default buffer bound; requests pause until Core drains
+	BackfillBatch  = 50       // messages per on-demand request (whatsmeow's recommendation)
+	backfillBufMax = 2000     // default buffer bound in messages; requests pause until Core drains
+	backfillBytes  = 16 << 20 // default buffer bound in bytes (texts can be long)
 	backfillWait   = 60 * time.Second
 	// backfillRetries: a truncated answer is asked again from the same anchor (after Core drains) this many times
 	// before the chat moves on and the overflow counts as dropped.
@@ -53,8 +54,25 @@ type backfill struct {
 	skipped   int // readable chats without a stored message to anchor on
 	received  int
 	buf       []bfMsg
+	bytes     int // approximate size of buf
 	seq       int
 	errorCode string
+}
+
+func (s *Server) bfBytesMax() int {
+	if s.cfg.BackfillBytes > 0 {
+		return s.cfg.BackfillBytes
+	}
+	return backfillBytes
+}
+
+// msgSize approximates the memory a buffered message holds.
+func msgSize(m msgstore.Message) int {
+	n := 64 + len(m.ID) + len(m.Chat) + len(m.SenderName) + len(m.Kind) + len(m.Text)
+	if m.Media != nil {
+		n += len(m.Media.Mime) + len(m.Media.Caption)
+	}
+	return n
 }
 
 func (s *Server) bfBufMax() int {
@@ -70,7 +88,7 @@ func (s *Server) bfClearLocked(state string) {
 		return
 	}
 	wipe(s.bf.buf)
-	s.bf.buf, s.bf.queue, s.bf.waiting = nil, nil, false
+	s.bf.buf, s.bf.queue, s.bf.waiting, s.bf.bytes = nil, nil, false, 0
 	s.bf.gen++
 	if s.bf.state == "running" || state != "stopped" {
 		s.bf.state = state
@@ -98,7 +116,7 @@ func wipe(l []bfMsg) {
 func (s *Server) bfNext() {
 	s.mu.Lock()
 	b := &s.bf
-	if b.state != "running" || b.waiting || len(b.buf)+BackfillBatch > s.bfBufMax() {
+	if b.state != "running" || b.waiting || len(b.buf)+BackfillBatch > s.bfBufMax() || b.bytes >= s.bfBytesMax() {
 		s.mu.Unlock()
 		return
 	}
@@ -151,7 +169,8 @@ func (s *Server) bfMessage(m msgstore.Message) {
 		!s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
 		return
 	}
-	if len(b.buf) >= s.bfBufMax() { // hard bound, whatever the phone sends
+	size := msgSize(m)
+	if len(b.buf) >= s.bfBufMax() || b.bytes+size > s.bfBytesMax() { // hard bounds, whatever the phone sends
 		b.truncated = true
 		b.dropped++
 		return
@@ -162,6 +181,7 @@ func (s *Server) bfMessage(m msgstore.Message) {
 	}
 	b.seq++
 	b.received++
+	b.bytes += size
 	b.buf = append(b.buf, bfMsg{seq: b.seq, m: m})
 }
 
@@ -315,6 +335,8 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 	for _, x := range b.buf {
 		if x.seq > cursor {
 			keep = append(keep, x)
+		} else {
+			b.bytes -= msgSize(x.m)
 		}
 	}
 	wipe(b.buf) // acknowledged text must not linger in the old backing array
