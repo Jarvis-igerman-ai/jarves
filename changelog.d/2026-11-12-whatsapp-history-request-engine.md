@@ -1,1 +1,0 @@
-- Added: WhatsApp bridge engine can send an on-demand history request (oldest known message as anchor) — first slice of the long history backfill (JAR-272); not yet wired to the API, CLI or dashboard; real-phone behaviour UNVERIFIED.

@@ -165,3 +165,10 @@ func (f *Fake) RequestHistory(ctx context.Context, chat string, anchor HistoryAn
 	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{Chat: chat, Anchor: anchor, Count: count})
 	return nil
 }
+
+// Requests returns a copy of the history requests received so far.
+func (f *Fake) Requests() []FakeHistoryRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]FakeHistoryRequest(nil), f.HistoryRequests...)
+}

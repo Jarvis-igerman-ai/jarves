@@ -1,0 +1,1 @@
+- Added: WhatsApp bridge history backfill: admin endpoint POST/GET/DELETE /history/backfill asks the phone for older messages (batches of 50, no age limit by default) and keeps them only in a bounded memory buffer for the archive to drain (JAR-272, beta; real-phone behaviour UNVERIFIED).

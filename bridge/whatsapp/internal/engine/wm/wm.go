@@ -23,6 +23,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -346,7 +347,7 @@ func (e *Engine) handle(raw any) {
 			e.emit(engine.AccountWarningEvent{Code: engine.WarnAccountRestricted})
 		}
 	case *events.Message:
-		e.onMessage(ev, false)
+		e.onMessage(ev, false, false)
 	case *events.HistorySync:
 		e.onHistory(ev)
 	case *events.Receipt:
@@ -453,7 +454,7 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-func (e *Engine) onMessage(ev *events.Message, history bool) {
+func (e *Engine) onMessage(ev *events.Message, history, onDemand bool) {
 	ctx := context.Background()
 	chat := ev.Info.Chat.ToNonAD()
 	if chat.Server != types.DefaultUserServer && chat.Server != types.HiddenUserServer && chat.Server != types.GroupServer {
@@ -487,8 +488,9 @@ func (e *Engine) onMessage(ev *events.Message, history bool) {
 	e.emit(engine.MessageEvent{
 		Msg: msgstore.Message{ID: ev.Info.ID, Chat: chat.String(), FromMe: ev.Info.IsFromMe, SenderName: sender,
 			TS: float64(ev.Info.Timestamp.UnixNano()) / 1e9, Kind: kind, Text: text, Media: media, Edited: ev.IsEdit},
-		Chat:    e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
-		History: history,
+		Chat:     e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
+		History:  history,
+		OnDemand: onDemand,
 	})
 }
 
@@ -542,6 +544,8 @@ func onlySKD(m *waE2E.Message) bool {
 func (e *Engine) onHistory(ev *events.HistorySync) {
 	cli := e.client()
 	data := ev.Data
+	onDemand := data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND
+	chats := []string{}
 	for _, p := range data.GetPushnames() {
 		if p.GetPushname() != "" {
 			if jid, err := types.ParseJID(p.GetID()); err == nil {
@@ -554,6 +558,7 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 		if err != nil {
 			continue
 		}
+		chats = append(chats, jid.ToNonAD().String())
 		if jid.Server == types.GroupServer {
 			if n := firstNonEmpty(conv.GetName(), conv.GetDisplayName()); n != "" {
 				e.mu.Lock()
@@ -570,7 +575,10 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			e.onMessage(msg, true)
+			e.onMessage(msg, true, onDemand)
 		}
+	}
+	if onDemand {
+		e.emit(engine.HistoryAnswerEvent{Chats: chats})
 	}
 }

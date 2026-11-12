@@ -46,12 +46,18 @@ var ErrAlreadyLinked = errors.New("already linked")
 // Event is anything an engine reports.
 type Event interface{ isEvent() }
 
-// MessageEvent = one message (live, or from a history sync when History is true).
+// MessageEvent = one message (live, or from a history sync when History is true; OnDemand = the answer to a
+// RequestHistory call).
 type MessageEvent struct {
-	Msg     msgstore.Message
-	Chat    msgstore.ChatInfo
-	History bool
+	Msg      msgstore.Message
+	Chat     msgstore.ChatInfo
+	History  bool
+	OnDemand bool
 }
+
+// HistoryAnswerEvent = one on-demand history answer was fully delivered (its MessageEvents came first). Chats lists
+// the conversations it carried; empty means WhatsApp had nothing more to send.
+type HistoryAnswerEvent struct{ Chats []string }
 
 // EditEvent = the sender edited a message.
 type EditEvent struct{ Chat, ID, Text string }
@@ -91,6 +97,7 @@ func (AccountWarningEvent) isEvent() {}
 func (LoggedOutEvent) isEvent()      {}
 func (ContactEvent) isEvent()        {}
 func (LinkEvent) isEvent()           {}
+func (HistoryAnswerEvent) isEvent()  {}
 
 // Engine is a WhatsApp transport.
 type Engine interface {

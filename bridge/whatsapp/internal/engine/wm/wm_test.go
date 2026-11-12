@@ -9,6 +9,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -215,5 +216,26 @@ func TestRequestHistoryOfflineIsNotConnected(t *testing.T) {
 	var _ engine.Engine = e
 	if err := e.RequestHistory(ctx, "972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", TS: 1}, 50); err != engine.ErrNotConnected {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestOnDemandHistoryEndsWithAnswerEvent(t *testing.T) {
+	ctx := context.Background()
+	db, _ := memdb.Open(ctx, nil)
+	defer db.Close()
+	e, _ := New(ctx, db.DB)
+	var got []engine.Event
+	e.SetHandler(func(ev engine.Event) { got = append(got, ev) })
+	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
+		Conversations: []*waHistorySync.Conversation{{ID: proto.String("972541112222@s.whatsapp.net")}}}})
+	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum()}})
+	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_RECENT.Enum()}})
+	if len(got) != 2 {
+		t.Fatalf("events %v", got)
+	}
+	a, _ := got[0].(engine.HistoryAnswerEvent)
+	b, _ := got[1].(engine.HistoryAnswerEvent)
+	if len(a.Chats) != 1 || a.Chats[0] != "972541112222@s.whatsapp.net" || b.Chats == nil || len(b.Chats) != 0 {
+		t.Fatalf("answers %v", got)
 	}
 }
