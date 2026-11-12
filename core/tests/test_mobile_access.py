@@ -717,3 +717,14 @@ def test_phone_error_hebrew_has_no_bare_english_runs():
     src = open(mobile.__file__, encoding="utf-8").read()
     for he in re.findall(r'"error_he": "([^"]+)"', src):
         assert not re.search(r"(?:[A-Za-z]+[ ,]+){2}[A-Za-z]+", he.replace("JARVES", "").replace("https", "")), he
+
+
+def test_phone_auth_and_size_errors_are_actionable_in_en_and_he(srv):
+    st, body, _ = req(srv, "POST", "/api/m/chat", token="nope", body={"text": "hi"})
+    assert st == 401 and "pair again" in body["error"] and body["error_he"]
+    token, _, _ = pair(srv)
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{}", headers={"Content-Length": "x"})
+    assert st == 400 and body["error"] == mobile._UNREADABLE["error"] and body["error_he"] == mobile._UNREADABLE["error_he"]
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{}",
+                      headers={"Content-Length": str(mobile.MAX_JSON_BYTES + 1)})
+    assert st == 413 and body == mobile._TOO_BIG
