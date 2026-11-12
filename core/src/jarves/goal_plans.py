@@ -220,9 +220,9 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] in ("done", "cancelled"):
             raise ValueError("this plan is already finished")
-        self.db.x("UPDATE goal_plan_steps SET status='skipped' WHERE plan_id=? AND status IN ('pending','blocked','unknown')",
-                  (int(pid),))
-        self._set(pid, "cancelled", note="cancelled by the owner", finished=self.clock())
+        self._cas(pid, (p["state"],), "cancelled",              # #813: a stale view never overwrites a finished plan
+                  (("UPDATE goal_plan_steps SET status='skipped' WHERE plan_id=? AND status IN ('pending','blocked','unknown')",
+                    (int(pid),)),), note="cancelled by the owner", finished=self.clock())
         logs.info("goals", "PLAN_CANCELLED", "plan cancelled", id=pid, by=by)
         return self.get(pid)
 
@@ -278,11 +278,13 @@ class PlanStore:
         that was in flight is run again; a consequential one is 'unknown' (the owner decides)."""
         n = 0
         for p in self.db.rows("SELECT id FROM goal_plans WHERE state='running'"):
-            for s in self.db.rows("SELECT * FROM goal_plan_steps WHERE plan_id=? AND status='running'", (p["id"],)):
-                st = "unknown" if s["consequential"] else "pending"
-                self.db.x("UPDATE goal_plan_steps SET status=?, error=? WHERE id=?",
-                          (st, "interrupted by a restart" if st == "unknown" else "", s["id"]))
-            self._set(p["id"], "paused", note="interrupted by a restart: resume when ready")
+            sql = tuple(("UPDATE goal_plan_steps SET status=?, error=? WHERE id=? AND status='running'",
+                         ("unknown", "interrupted by a restart", s["id"]) if s["consequential"] else ("pending", "", s["id"]))
+                        for s in self.db.rows("SELECT * FROM goal_plan_steps WHERE plan_id=? AND status='running'", (p["id"],)))
+            try:                                         # #813: a cancel that landed after the read wins
+                self._cas(p["id"], ("running",), "paused", sql, note="interrupted by a restart: resume when ready")
+            except ValueError:
+                continue
             n += 1
         if n:
             logs.warn("goals", "PLAN_RECOVERED", "running plans paused after a restart", count=n)
@@ -468,8 +470,11 @@ class PlanRunner:
                 p = st._plan(pid)
                 if p["state"] != "running":                   # cancelled / paused while the popup was open
                     return st.get(pid)
-            st.db.x("UPDATE goal_plan_steps SET status='running', consequential=?, started=?, attempts=attempts+1 "
-                    "WHERE id=?", (1 if consequential else 0, self.clock(), step["id"]))
+            cur = st.db.x("UPDATE goal_plan_steps SET status='running', consequential=?, started=?, attempts=attempts+1 "
+                          "WHERE id=? AND status='pending' AND (SELECT state FROM goal_plans WHERE id=?)='running'",
+                          (1 if consequential else 0, self.clock(), step["id"], pid))
+            if cur.rowcount != 1:                             # #813: cancelled / paused after the step was picked
+                return st.get(pid)
             t0 = self.clock()
             remaining = max(1.0, p["timeout_s"] - p["spent_s"])
             try:
