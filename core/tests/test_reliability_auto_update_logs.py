@@ -25,7 +25,7 @@ def _core():
 
 
 def _boom(*a, **k):
-    raise OSError("disk")
+    raise OSError("secret disk path")
 
 
 def test_busy_probe_failures_are_logged_once_each(seen):
@@ -48,11 +48,16 @@ def _updater(tmp_path):
                                    busy=lambda: [], notify=lambda n: None)
 
 
-def test_default_note_and_channel_check_failures_are_logged(seen, monkeypatch, tmp_path):
+def test_default_note_failure_is_logged_once(seen, monkeypatch, tmp_path):
     au = _updater(tmp_path)
     monkeypatch.setattr(features, "Features", _boom)
-    assert au._default_note() is None
+    assert au._default_note() is None and au._default_note() is None   # status() reads it on every poll
+    assert seen == [("AUTO_UPDATE_DEFAULT_NOTE_FAILED", {"error_type": "OSError"})]
+
+
+def test_channel_check_failure_is_logged_and_owner_still_asked(seen, monkeypatch, tmp_path):
+    au = _updater(tmp_path)
+    monkeypatch.setattr(features, "Features", _boom)
     au._first_run_prompt()
-    codes = [c for c, _ in seen]
-    assert codes == ["AUTO_UPDATE_DEFAULT_NOTE_FAILED", "AUTO_UPDATE_CHANNEL_CHECK_FAILED"]
+    assert seen == [("AUTO_UPDATE_CHANNEL_CHECK_FAILED", {"error_type": "OSError"})]
     assert au.state()["prompted"] is True   # behaviour unchanged: the owner is still asked
