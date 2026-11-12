@@ -79,9 +79,15 @@ def test_exactly_max_drop_does_not_block_and_corrupt_baseline_is_ignored(tmp_pat
     assert not ce.gate(cur, dict(score=1.0, by_kind={"chat": 1.0}))["block"]
     _on(monkeypatch)
     (tmp_path / "evalsuite").mkdir()
-    (tmp_path / "evalsuite" / "baseline.json").write_text("{bad", encoding="utf-8")
-    assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 0
+    bp = tmp_path / "evalsuite" / "baseline.json"
+    bp.write_text("{bad", encoding="utf-8")
+    assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 3   # fails closed
     assert "EVALSUITE_BAD_BASELINE" in capsys.readouterr().out
+    assert bp.read_text(encoding="utf-8") == "{bad" and not (tmp_path / "evalsuite" / "last.json").exists()
+    reset = SimpleNamespace(action="run", fake=True, beta="", set_baseline=True)     # explicit owner rebaseline
+    assert ce.cmd_evalsuite(reset, None, tmp_path) == 0
+    assert (tmp_path / "evalsuite" / "baseline.bad.json").read_text(encoding="utf-8") == "{bad"
+    assert json.loads(bp.read_text(encoding="utf-8"))["score"] == 1.0
 
 
 def test_per_kind_drop_with_equal_overall_does_not_lower_the_baseline():
@@ -89,16 +95,32 @@ def test_per_kind_drop_with_equal_overall_does_not_lower_the_baseline():
     assert not ce.keeps_baseline(dict(score=0.95, by_kind={"device": 0.96, "chat": 0.94}), base)
     assert ce.keeps_baseline(dict(score=0.96, by_kind={"device": 1.0, "chat": 0.92}), base)
     assert ce.keeps_baseline(base, None)
+    assert not ce.keeps_baseline(dict(score=1.0, by_kind={"device": 1.0}), base)          # a missing kind never drops
 
 
 def test_wrong_shape_baseline_is_bad_and_bug_lists_only_regressed_kinds(tmp_path, capsys, monkeypatch):
     _on(monkeypatch)
     (tmp_path / "evalsuite").mkdir()
-    for bad in ('{"x": 1}', '"s"', '{"score": 1, "by_kind": []}'):
+    for bad in ('{"x": 1}', '"s"', '{"score": 1, "by_kind": []}', '{"score": 1, "by_kind": {"chat": "x"}}',
+                '{"score": true, "by_kind": {}}'):
         (tmp_path / "evalsuite" / "baseline.json").write_text(bad, encoding="utf-8")
-        assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 0
+        assert ce.cmd_evalsuite(SimpleNamespace(action="run", fake=True, beta=""), None, tmp_path) == 3
         assert "EVALSUITE_BAD_BASELINE" in capsys.readouterr().out
     rows = [dict(id="c1", kind="chat", score=0.5), dict(id="d1", kind="device", score=0.0)]
     g = ce.gate(dict(score=0.25, by_kind={"chat": 0.5, "device": 0.0}, rows=rows),
                 dict(score=0.75, by_kind={"chat": 0.5, "device": 1.0}))
     assert g["block"] and g["bug"]["body"].endswith("Failing scenarios: d1")
+
+
+def test_cli_main_routes_the_plugin_command(tmp_path):
+    """`jarvis evalsuite status` through the real cli.main (plugins.d `cli` route), in a tmp home."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    src = Path(ce.__file__).resolve().parents[1]
+    env = dict(os.environ, JARVES_HOME=str(tmp_path), PYTHONPATH=str(src), PYTHONIOENCODING="utf-8")
+    code = "import jarves.cli as c\ntry: c.main(['evalsuite', 'status'])\nexcept SystemExit: pass\n"
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=180).stdout
+    line = next(x for x in out.splitlines() if x.startswith("{"))
+    assert json.loads(line) == {"switch_on": False, "scenarios": len(ce.SCENARIOS), "baseline": False}

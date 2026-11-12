@@ -10,6 +10,7 @@ GitHub stays an explicit owner action. The baseline is never lowered automatical
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,12 +111,23 @@ def gate(current: dict, baseline: dict | None, beta: str = "", max_drop: float =
 def keeps_baseline(current: dict, baseline: dict | None) -> bool:
     """True when `current` may replace the baseline: overall AND every kind at least as high (never lowered)."""
     return baseline is None or (current["score"] >= baseline["score"] and all(
-        v >= baseline["by_kind"].get(k, 0) for k, v in current["by_kind"].items()))
+        current["by_kind"].get(k, -1) >= baseline["by_kind"].get(k, 0) for k in {*baseline["by_kind"], *current["by_kind"]}))
+
+
+def _num(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 def _valid(base) -> bool:
-    return (isinstance(base, dict) and isinstance(base.get("score"), (int, float))
-            and isinstance(base.get("by_kind"), dict))
+    return (isinstance(base, dict) and _num(base.get("score")) and isinstance(base.get("by_kind"), dict)
+            and all(_num(v) for v in base["by_kind"].values()))
+
+
+def _write(p: Path, data: dict) -> None:
+    """Atomic: a crash never leaves a half-written file."""
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
 
 
 def _probe(c: feat.ProbeCtx) -> tuple[bool, str]:
@@ -136,6 +148,8 @@ def add_cli(sub) -> None:
     m.add_argument("action", choices=["status", "scenarios", "run"])
     m.add_argument("--fake", action="store_true", help="offline: scripted replies and keyword judge (no network)")
     m.add_argument("--beta", default="", help="the beta version being evaluated")
+    m.add_argument("--set-baseline", action="store_true",
+                   help="owner action: make this run the baseline (a damaged one is kept as baseline.bad.json)")
 
 
 def cmd_evalsuite(a, cfg, home) -> int:
@@ -156,18 +170,25 @@ def cmd_evalsuite(a, cfg, home) -> int:
         print("EVALSUITE_NO_JUDGE: the live LLM judge is not wired yet; use --fake")
         return 1
     rep = run_suite(scripted_reply, keyword_judge)
+    d.mkdir(parents=True, exist_ok=True)
+    if getattr(a, "set_baseline", False):            # the only way to replace a damaged or lower baseline
+        if base_p.exists():
+            os.replace(base_p, d / "baseline.bad.json")
+        _write(base_p, rep)
+        print(json.dumps(dict(score=rep["score"], by_kind=rep["by_kind"], baseline="set"), ensure_ascii=False))
+        return 0
     try:
         base = json.loads(base_p.read_text(encoding="utf-8")) if base_p.exists() else None
         if base is not None and not _valid(base):
             raise ValueError("wrong shape")
-    except (OSError, ValueError):
-        print("EVALSUITE_BAD_BASELINE: baseline.json is unreadable; treated as no baseline")
-        base = None
+    except (OSError, ValueError):                    # fail closed: keep the file, compare nothing, write nothing
+        print("EVALSUITE_BAD_BASELINE: baseline.json is damaged; kept as is. "
+              "Check it, then: jarvis evalsuite run --fake --set-baseline")
+        return 3
     g = gate(rep, base, a.beta, max_drop=MAX_DROP)
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "last.json").write_text(json.dumps(dict(rep, beta=a.beta, gate=g), ensure_ascii=False), encoding="utf-8")
+    _write(d / "last.json", dict(rep, beta=a.beta, gate=g))
     if not g["block"] and keeps_baseline(rep, base):     # never lowered automatically, overall or per kind
-        base_p.write_text(json.dumps(rep, ensure_ascii=False), encoding="utf-8")
+        _write(base_p, rep)
     print(json.dumps(dict(score=rep["score"], by_kind=rep["by_kind"], gate=g), ensure_ascii=False))
     return 2 if g["block"] else 0
 

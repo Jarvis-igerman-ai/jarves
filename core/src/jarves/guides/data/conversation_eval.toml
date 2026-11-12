@@ -48,5 +48,5 @@ fix_en = "The live judge is not wired yet. Add --fake for a demo run."
 [[problems]]
 he = "כתוב EVALSUITE_BAD_BASELINE"
 en = "It says EVALSUITE_BAD_BASELINE"
-fix_he = "קובץ הבסיס evalsuite/baseline.json פגום. ההרצה ממשיכה בלי בסיס וכותבת בסיס חדש."
-fix_en = "The baseline file evalsuite/baseline.json is damaged. The run carries on without a baseline and writes a new one."
+fix_he = "קובץ הבסיס evalsuite/baseline.json פגום. ההרצה נעצרת (קוד יציאה 3) והקובץ נשאר כמו שהוא. בדקו אותו, ואז: jarvis evalsuite run --fake --set-baseline. הקובץ הפגום נשמר בשם baseline.bad.json."
+fix_en = "The baseline file evalsuite/baseline.json is damaged. The run stops (exit code 3) and the file is kept as is. Check it, then: jarvis evalsuite run --fake --set-baseline. The damaged file is kept as baseline.bad.json."
