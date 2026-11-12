@@ -497,6 +497,11 @@ class AgentBrain:
     async def reply(self, text: str, on_delta=None) -> str:
         ok, code, action = self.available()
         if not ok:
+            if code == "AI_BUDGET":         # JAR-262: no silent limit - check() tells the owner (Budget.on_exceeded)
+                try:
+                    self.budget.check("ai_requests")
+                except BudgetExceeded:
+                    pass
             raise BrainUnavailable(code, action, action)
         import openai
         from agents import Runner
@@ -674,6 +679,7 @@ TRANSIENT_REPLY = {
     "CHATGPT_UNAVAILABLE": "השירות של ChatGPT לא זמין כרגע. נסה שוב מאוחר יותר.",
     "AI_ERROR": "משהו השתבש מול שירות הבינה המלאכותית, והבקשה לא הושלמה. אפשר לנסות שוב.",
     "AI_MAX_TURNS": "הבקשה דרשה יותר מדי שלבים ולא הושלמה. נסה לבקש בצורה פשוטה יותר.",
+    "AI_BUDGET": "הגעתי למגבלת הבקשות היומית, אז לא שלחתי את הבקשה. אפשר להעלות אותה ב-ai.daily_request_limit.",
 }
 
 

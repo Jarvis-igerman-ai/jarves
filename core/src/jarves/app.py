@@ -13,6 +13,7 @@ from pathlib import Path
 from . import __version__, calm, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from . import limits as limits_mod
+from . import daily_limits
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
 from .deviceport import INBOUND, DevicePort
@@ -1376,12 +1377,11 @@ class Core:
             return
         self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
-        if self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"]:
+        gate = daily_limits.admit_voice(self.budget)
+        if not gate.allowed:
             # No cloud session for a budget that cannot carry one (it would end ~1 s later and reconnect in a loop).
-            vv = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
-            vv["level"] = "exhausted"
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
-            await self.announce_limit(vv)
+            await self.announce_limit(gate.view)
             return
         v = self.cfg.voice
         async def output_level(level: float) -> None:
@@ -1426,12 +1426,10 @@ class Core:
             logs.info("voice", "LIVE_ENDED", "live conversation ended", reason=reason)
             self.limits_refresh()
             he_ = self.cfg.voice.language == "he"
-            out_of_voice = (reason == "timeout"
-                            and self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"])
+            gate2 = daily_limits.admit_voice(self.budget)
+            out_of_voice = reason == "timeout" and not gate2.allowed
             if out_of_voice and not self.stopping:      # the budget ran out mid-session: say so, and do not reconnect
-                v2 = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
-                v2["level"] = "exhausted"
-                self._spawn(self.announce_limit(v2))
+                self._spawn(self.announce_limit(gate2.view))
             elif reason == "timeout" and not self.stopping:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה הגיעה לאורך המקסימלי (voice.session_max_s) ומתחברת מחדש" if he_
