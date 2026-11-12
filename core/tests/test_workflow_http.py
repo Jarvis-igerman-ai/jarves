@@ -65,8 +65,8 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/api/owner", {"mode": "present"}, {"X-Workflow-Request": ""})[0], 403)
         self.assertEqual(self.server.store.snapshot()["owner"]["effective_mode"], "away")
 
-    def test_state_changing_routes_are_locked_without_unlock(self):
-        # #903: a private session alone (no terminal unlock code) must not change state or launch work.
+    def test_state_changing_routes_refuse_while_unlock_gate_locked(self):
+        # #903 / JAR-259: a private session alone (no terminal unlock code) must not change state or launch work.
         store = self.server.store
         store.create_task({"id": "t1", "title": "t1", "lane": "bugs"})
         self.login()
@@ -78,7 +78,7 @@ class WorkflowHTTPTests(unittest.TestCase):
                                ("/api/dispatch", {})):
                 with self.subTest(path=path):
                     status, _, data = self.request(path, body)
-                    self.assertIn(status, (401, 403))
+                    self.assertEqual(status, 403)
                     self.assertTrue(data.get("locked"))
             dispatched.assert_not_called()
         snap = store.snapshot()
