@@ -255,9 +255,18 @@ class PlanStore:
         s = self.db.row("SELECT * FROM goal_plan_steps WHERE plan_id=? AND idx=?", (int(pid), int(step_idx)))
         if not s or s["status"] in ("done", "running"):
             raise ValueError("no such step to skip")
-        self._cas(pid, (p["state"],), "paused" if p["state"] == "failed" else p["state"],      # #813: a racing cancel wins
-                  (("UPDATE goal_plan_steps SET status='skipped', error='' WHERE id=? AND status NOT IN ('done','running')",
-                    (s["id"],)),), finished=None)
+        for _ in range(3):              # #813: re-read on an open-state move; a racing cancel/done always wins
+            try:
+                self._cas(pid, (p["state"],), "paused" if p["state"] == "failed" else p["state"],
+                          (("UPDATE goal_plan_steps SET status='skipped', error='' WHERE id=? AND status NOT IN ('done','running')",
+                            (s["id"],)),), finished=None)
+                break
+            except ValueError:
+                p = self.db.row("SELECT state FROM goal_plans WHERE id=?", (int(pid),))
+                if not p or p["state"] in ("done", "cancelled"):
+                    raise ValueError("this plan is already finished") from None
+        else:
+            raise ValueError("the plan changed in the meantime: look at it again")
         logs.info("goals", "PLAN_STEP_SKIPPED", "plan step skipped", id=pid, step=int(step_idx), by=by)
         return self.get(pid)
 

@@ -82,3 +82,38 @@ def test_cancel_on_a_stale_open_view_still_cancels_a_plan_that_moved_on(env, see
         env.store._plan = real
     d = env.store.get(p["id"])
     assert d["state"] == "cancelled" and [s["status"] for s in d["steps"]] == ["skipped"]
+
+
+@pytest.mark.parametrize("seen,now,kept", [("ready", "running", "running"), ("paused", "blocked", "blocked"),
+                                           ("blocked", "failed", "paused")])
+def test_skip_on_a_stale_open_view_uses_the_current_state(env, seen, now, kept):
+    p = env.store.propose("k", steps(("fake_read", {"text": "a"}), ("fake_read", {"text": "b"})))
+    env.store.approve(p["id"])
+    real = env.store._plan
+    env.db.x("UPDATE goal_plans SET state=? WHERE id=?", (seen, p["id"]))
+    old = dict(real(p["id"]))
+    env.db.x("UPDATE goal_plans SET state=? WHERE id=?", (now, p["id"]))
+    env.store._plan = lambda pid: dict(old)
+    try:
+        env.store.skip(p["id"], 1)
+    finally:
+        env.store._plan = real
+    d = env.store.get(p["id"])
+    assert d["state"] == kept and d["steps"][1]["status"] == "skipped"
+
+
+@pytest.mark.parametrize("seen", ["ready", "running", "paused"])
+def test_skip_on_a_stale_view_after_a_cancel_keeps_cancelled(env, seen):
+    p = env.store.propose("c", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    real = env.store._plan
+    env.db.x("UPDATE goal_plans SET state=? WHERE id=?", (seen, p["id"]))
+    old = dict(real(p["id"]))
+    env.store.cancel(p["id"])
+    env.store._plan = lambda pid: dict(old)
+    try:
+        with pytest.raises(ValueError):
+            env.store.skip(p["id"], 0)
+    finally:
+        env.store._plan = real
+    assert env.store.get(p["id"])["state"] == "cancelled"
