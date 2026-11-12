@@ -220,7 +220,7 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] in ("done", "cancelled"):
             raise ValueError("this plan is already finished")
-        self._cas(pid, (p["state"],), "cancelled",              # #813: a stale view never overwrites a finished plan
+        self._cas(pid, (*OPEN, "failed"), "cancelled",           # #813: any cancellable state, never a done/cancelled one
                   (("UPDATE goal_plan_steps SET status='skipped' WHERE plan_id=? AND status IN ('pending','blocked','unknown')",
                     (int(pid),)),), note="cancelled by the owner", finished=self.clock())
         logs.info("goals", "PLAN_CANCELLED", "plan cancelled", id=pid, by=by)
