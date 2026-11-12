@@ -1,0 +1,1 @@
+- Added: proposal on what remains of the terminal chat request #331 (JAR-102, docs only).

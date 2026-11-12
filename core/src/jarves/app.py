@@ -319,6 +319,8 @@ class Core:
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         from . import drive_mode                         # V6 #216: off by default; never approves, only defers
         drive_mode.attach(self.registry, self.features, self.home, self.memory)
+        from . import action_receipts                    # V7-X1 #420: off by default; observes, never decides
+        action_receipts.attach(self.registry, self.features, self.home)
         self.registry.register(ClockSkill())
         self.registry.register(UiBlocksSkill())
         self.registry.register(CalcSkill())
