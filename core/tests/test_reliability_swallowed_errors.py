@@ -23,7 +23,7 @@ def test_state_save_failure_is_logged_not_swallowed(tmp_path, monkeypatch):
     seen = _capture(monkeypatch, "warn")
     monkeypatch.setattr(type(tmp_path), "replace", lambda self, t: (_ for _ in ()).throw(PermissionError("x")))
     st.save()                                   # must not raise
-    assert [c for _, c, _ in seen] == ["DELEG_STATE_SAVE_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_STATE_SAVE_FAILED")]
     assert seen[0][2]["error_type"] == "PermissionError"
 
 
@@ -33,7 +33,8 @@ def test_health_callback_failure_is_logged(tmp_path, monkeypatch):
     st = dc.DelegationState(tmp_path, _ai(), health=boom)
     seen = _capture(monkeypatch, "warn")
     st._health("ok", "d", "")                   # must not raise
-    assert [c for _, c, _ in seen] == ["DELEG_HEALTH_CB_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_HEALTH_CB_FAILED")]
+    assert seen[0][2]["error_type"] == "RuntimeError"
 
 
 async def test_wake_confirm_warm_failure_is_logged(monkeypatch):
@@ -44,7 +45,8 @@ async def test_wake_confirm_warm_failure_is_logged(monkeypatch):
     obj = wc.ConfirmingDetector.__new__(wc.ConfirmingDetector)
     obj.confirm = Confirm().confirm
     await obj._warm()
-    assert [c for _, c, _ in seen] == ["WAKE_CONFIRM_WARM_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("voice", "WAKE_CONFIRM_WARM_FAILED")]
+    assert seen[0][2]["error_type"] == "RuntimeError"
 
 
 async def test_audio_close_failure_is_logged_and_session_still_ends(monkeypatch):
@@ -64,6 +66,6 @@ async def test_audio_close_failure_is_logged_and_session_still_ends(monkeypatch)
     s.audio_io = Audio()
     seen = _capture(monkeypatch, "debug")
     await s._finalize("user")                   # must not raise
-    assert [c for _, c, _ in seen] == ["VOICE_AUDIO_CLOSE_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("voice", "VOICE_AUDIO_CLOSE_FAILED")]   # _log_area resolved
     assert seen[0][2]["error_type"] == "OSError"
     assert ended == ["user"]
