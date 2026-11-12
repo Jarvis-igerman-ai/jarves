@@ -1,0 +1,1 @@
+- Added: regression test that drive mode checks the real WhatsApp number of a `whatsapp_send` (its declared Tool.target), not only the contact name (JAR-257).
