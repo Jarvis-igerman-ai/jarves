@@ -46,3 +46,14 @@ def test_test_history_missing_is_silent_corrupt_logged_once(monkeypatch, tmp_pat
     mobile.health_view(b)
     mobile.health_view(b)                                        # polled again: still one line per outage
     assert [c for c, _ in seen].count("MOBILE_TEST_HISTORY_FAILED") == 1
+
+
+def test_test_history_file_not_found_is_silent(monkeypatch, tmp_path):
+    from jarves import selfspeed
+    seen = _capture(monkeypatch)
+
+    def gone(self):
+        raise FileNotFoundError("selfspeed.json")
+    monkeypatch.setattr(selfspeed.History, "view", gone)          # a missing history is "no tests yet", never a warning
+    assert mobile.health_view(mobile.MobileAccess(tmp_path))["tests"] == {}
+    assert not [c for c, _ in seen if c == "MOBILE_TEST_HISTORY_FAILED"]
