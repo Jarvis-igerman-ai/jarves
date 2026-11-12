@@ -64,8 +64,12 @@ async def test_audio_close_failure_is_logged_and_session_still_ends(monkeypatch)
     s = SessionLifecycle()
     s._init_lifecycle(on_end, None, None)
     s.audio_io = Audio()
+    flush = types.SimpleNamespace(cancelled=False)
+    flush.cancel = lambda: setattr(flush, "cancelled", True)
+    s._flush_task = flush
     seen = _capture(monkeypatch, "debug")
-    await s._finalize("user")                   # must not raise
+    await s._finalize("user")                   # must not raise; the steps after audio close still run
     assert [(a, c) for a, c, _ in seen] == [("voice", "VOICE_AUDIO_CLOSE_FAILED")]   # _log_area resolved
     assert seen[0][2]["error_type"] == "OSError"
+    assert flush.cancelled is True
     assert ended == ["user"]

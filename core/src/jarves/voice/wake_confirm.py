@@ -21,12 +21,12 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .. import logs
-
 try:            # eagerly, before anything loads WinRT (voice/stt.py: faster-whisper after WinRT crashes the process)
     import faster_whisper as _fw  # noqa: F401
 except ImportError:              # voice extra not installed: the confirm stage reports unavailable
     _fw = None
+
+from .. import logs  # after faster_whisper: keep the WinRT-safe import order
 
 SR = 16000
 FRAME_SAMPLES = 1280
