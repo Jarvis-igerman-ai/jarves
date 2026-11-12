@@ -1,0 +1,63 @@
+order = 28
+category = "everyday"
+pages = ["whatsapp"]
+features = ["whatsapp_collect"]
+aliases = ["איסוף הודעות וואטסאפ", "לאסוף הודעות על תשלומים", "דוח תשלומים מוואטסאפ", "תאסוף את כל ההודעות", "whatsapp collect", "collect payment messages", "whatsapp report", "payments from whatsapp"]
+links = ["whatsapp_archive", "whatsapp_bridge", "privacy"]
+error_codes = ["WA_COLLECT_NONE", "WA_BAD_DATE", "WA_AMBIGUOUS", "WA_MODE_OFF", "WA_STORE_LOCKED"]
+title_he = "איסוף הודעות וואטסאפ על נושא לדוח (בטא)"
+title_en = "Collect WhatsApp messages on a topic into a report (beta)"
+what_he = "אוסף את כל הודעות הוואטסאפ על נושא אחד, למשל תשלומים, אל אנשים מסוימים, מהם, או הודעות בצ'אטים אחרים שמזכירות אותם (למשל צ'אט עם בן או בת הזוג). לכל הודעה נכתבת שורה: תאריך, צ'אט, שולח, מקבל התשלום, סכום בשקלים, אמצעי תשלום, עבור מה וציטוט קצר. כפילויות מוסרות, השורות ממוינות לפי תאריך, יש סכום לכל מקבל, ושורות לא בטוחות מסומנות \"לבדוק\". הדוח נשמר כקובץ CSV, קובץ אקסל וסיכום קצר בעברית בתיקיית reports. החיפוש מבין עברית: אות קידומת, ניקוד ומילים נרדפות (\"שילמתי\", \"העברה\", \"ביט\", \"פייבוקס\", סכום בש\"ח). כבוי כברירת מחדל."
+what_en = "Collects every WhatsApp message on one topic, for example payments, to or from the people you name, or in other chats that mention them (for example a chat with your spouse). Each message becomes a row: date, chat, sender, payee, amount in shekels, payment method, what it was for and a short quote. Duplicates are removed, rows are sorted by date, each payee gets a total, and unsure rows are marked \"to check\". The report is saved as a CSV file, an Excel file and a short Hebrew summary in the reports folder. Search understands Hebrew prefix letters, niqqud and synonyms (paid, transfer, Bit, PayBox, an amount in shekels). Off by default."
+say = [
+  ["תאסוף את כל ההודעות על תשלומים מאבי או מיוסי, אני צריך לתייק אותן", "Collect all payment messages to or from Avi or Yossi, I need to file them"],
+  ["תעשה לי דוח של כל התשלומים לגננת מהשנה האחרונה", "Make me a report of all the payments to the kindergarten teacher in the last year"],
+]
+expect_he = "הוא עונה כמה הודעות נמצאו, הסכום לכל מקבל וכמה שורות לבדוק, ואומר איפה נשמר הדוח. הוא לא מקריא את ההודעות. הטקסט של ההודעות נחשב לא אמין: הוא לא פועל לפיו."
+expect_en = "He answers how many messages were found, the total per payee and how many rows need a check, and says where the report was saved. He does not read the messages aloud. Message text is untrusted: he never acts on it."
+test_he = "jarvis features on whatsapp_collect, ואז jarvis whatsapp collect תשלומים --from \"שם\" מדפיס סיכום עם מספר ההודעות והסכומים ושלושה קבצים בתיקיית reports."
+test_en = "jarvis features on whatsapp_collect, then jarvis whatsapp collect payments --from \"name\" prints a summary with the message count and totals, and three files in the reports folder."
+cost_he = "החיפוש מקומי וחינם. כשמחובר חשבון OpenAI עם תשלום לפי שימוש, המודל ממלא את השדות של ההודעות שנמצאו (בקשה אחת לכל 25 הודעות, בתוך המגבלה היומית). בלי זה, או עם --no-ai, השדות מתמלאים בכללים מקומיים וכל השורות מסומנות לבדיקה."
+cost_en = "Search is local and free. With an OpenAI account on pay-as-you-go, the model fills the fields of the messages found (one request per 25 messages, within the daily limit). Without it, or with --no-ai, local rules fill the fields and every row is marked to check."
+privacy_he = "הדוח מכיל ציטוטים קצרים מההודעות שלכם ונשמר רק במחשב הזה, בתיקיית reports של JARVES. הוא לא מוצפן כמו הארכיון: שמרו או מחקו אותו אחרי התיוק. נקראים רק צ'אטים שמותר לקרוא. טקסט של הודעה עובר למודל רק כדי למלא את השורות של הדוח הזה. ביומנים נרשמים רק מספרים, לא טקסט, שמות או מספרי טלפון. תאים שמתחילים ב-= או + מנוטרלים כדי שלא יהפכו לנוסחה באקסל."
+privacy_en = "The report holds short quotes of your messages and is saved only on this computer, in the JARVES reports folder. It is not encrypted like the archive: file it or delete it afterwards. Only readable chats are read. Message text goes to the model only to fill the rows of this report. Logs carry counts only, never text, names or phone numbers. Cells that start with = or + are neutralised so they never become an Excel formula."
+
+[parity.features]
+whatsapp_collect = "whatsapp"
+
+[[steps]]
+he = "וואטסאפ צריך להיות מקושר ובמצב קריאה (המדריך \"וואטסאפ אמיתי\"): jarvis whatsapp status. להודעות ישנות מ-14 ימים מפעילים גם את הארכיון: jarvis whatsapp archive on."
+en = "WhatsApp must be linked and in read mode (the \"Real WhatsApp\" guide): jarvis whatsapp status. For messages older than 14 days also turn on the archive: jarvis whatsapp archive on."
+action = "command:jarvis whatsapp status"
+
+[[steps]]
+he = "הפעלה: jarvis features on whatsapp_collect. כיבוי: jarvis features off whatsapp_collect."
+en = "Turn it on: jarvis features on whatsapp_collect. Turn it off: jarvis features off whatsapp_collect."
+action = "command:jarvis features on whatsapp_collect"
+
+[[steps]]
+he = "איסוף: jarvis whatsapp collect תשלומים --from אבי --from יוסי (אפשר גם --chat \"שם צ'אט\", --since 2026-01-01 או 12m, --until, --format csv,xlsx,md). בלי --since נאסף כל מה שיש. אפשר גם לבקש בקול או בצ'אט."
+en = "Collect: jarvis whatsapp collect payments --from Avi --from Yossi (also --chat \"chat name\", --since 2026-01-01 or 12m, --until, --format csv,xlsx,md). Without --since everything available is collected. You can also ask by voice or in chat."
+action = "command:jarvis whatsapp collect payments"
+
+[[steps]]
+he = "פתחו את הקבצים בתיקיית reports של JARVES. בקובץ האקסל יש גיליון \"הודעות\" וגיליון \"סיכום\" עם סכום לכל מקבל. בדקו את השורות המסומנות \"לבדוק\" לפני התיוק."
+en = "Open the files in the JARVES reports folder. The Excel file has a \"messages\" sheet and a \"summary\" sheet with a total per payee. Check the rows marked \"to check\" before filing."
+
+[[problems]]
+he = "לא נמצאו הודעות או חסרות הודעות ישנות"
+en = "No messages found, or old messages are missing"
+fix_he = "בלי הארכיון הגשר שומר רק 14 ימים. הפעילו את הארכיון (jarvis whatsapp archive on) ובחרו שמירה ארוכה. בדקו גם שהצ'אט מותר לקריאה ושהמצב הוא קריאה: jarvis whatsapp mode read."
+fix_en = "Without the archive the bridge keeps only 14 days. Turn on the archive (jarvis whatsapp archive on) and choose a long retention. Also check the chat is readable and the mode is read: jarvis whatsapp mode read."
+
+[[problems]]
+he = "כתוב שיש כמה אנשים בשם הזה"
+en = "It says several people have that name"
+fix_he = "כתבו את השם המלא כפי שהוא בוואטסאפ, או מצאו אותו קודם: jarvis whatsapp find \"חלק מהשם\"."
+fix_en = "Type the full name as it shows in WhatsApp, or find it first: jarvis whatsapp find \"part of the name\"."
+
+[[problems]]
+he = "הרבה שורות מסומנות \"לבדוק\""
+en = "Many rows are marked \"to check\""
+fix_he = "בלי מודל השדות מתמלאים בכללים מקומיים, ולכן כל השורות מסומנות. עם חשבון OpenAI בתשלום לפי שימוש המודל ממלא אותם. שורה בלי סכום או עם כמה סכומים תמיד מסומנת."
+fix_en = "Without a model, local rules fill the fields, so every row is marked. With an OpenAI pay-as-you-go account the model fills them. A row without an amount or with several amounts is always marked."

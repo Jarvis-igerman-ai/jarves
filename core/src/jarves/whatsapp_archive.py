@@ -412,6 +412,20 @@ class Archive:
                                         + extra + " ORDER BY m.ts DESC LIMIT ?", [needle, *args, lim]).fetchall()
             return [self._row(r) for r in rows]
 
+    def chat_messages(self, chat: str, *, since: float | None = None, limit: int = 2000) -> list[dict]:
+        """Every archived message of ONE chat (newest first), for whatsapp_collect: amounts without a topic word."""
+        with self.lock:
+            if not self._has():
+                return []
+            args: list = [chat]
+            extra = ""
+            if since is not None:
+                extra = " AND ts >= ?"
+                args.append(since)
+            rows = self._open().execute("SELECT * FROM msg WHERE chat = ?" + extra + " ORDER BY ts DESC LIMIT ?",
+                                        [*args, max(1, min(int(limit), 5000))]).fetchall()
+            return [self._row(r) for r in rows]
+
     @staticmethod
     def _row(r: tuple) -> dict:
         media = None

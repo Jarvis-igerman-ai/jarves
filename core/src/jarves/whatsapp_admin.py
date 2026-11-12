@@ -313,20 +313,75 @@ def search(home: Path, query: str, *, who: str = "", since: str = "", until: str
     return {"messages": rows, "order": "newest_first", "archive": bool(archive_on), "untrusted": True}
 
 
+def collect(home: Path, topic: str, *, contacts: list[str] | None = None, chat: str = "", since: str = "",
+            until: str = "", formats: list[str] | None = None, archive_on: bool = False, model=None) -> dict:
+    """`jarvis whatsapp collect` (JAR-273): the same pipeline as the whatsapp_collect tool, at the PC. A named person
+    who is not a chat is still found where other chats mention them. Returns counts, totals and the file paths."""
+    from . import whatsapp_collect as wcol
+    now = time.time()
+    t0, t1 = arc.parse_when(since, now), arc.parse_when(until, now, end=True)
+    user = BridgeClient(home)
+    chats = wab.merge_aliases(user.chats(None, 500))
+    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
+    book = wab.contacts_book(home)
+    people, mention_only = [], []
+    for who in contacts or []:
+        hits = wab.resolve(chats, who, book)
+        if len(hits) > 1:
+            raise BridgeError("WA_AMBIGUOUS", "", 409)
+        if not hits:
+            mention_only.append(who)
+            people.append(wcol.Contact(who, set(), wcol.mention_words(who)))
+            continue
+        name = names.get(hits[0]["id"], "")
+        people.append(wcol.Contact(name or who, set(hits[0].get("alias_ids") or [hits[0]["id"]]),
+                                   wcol.mention_words(who, name)))
+    only = None
+    if chat.strip():
+        hits = wab.resolve(chats, chat, book)
+        if len(hits) != 1:
+            raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
+        only = hits[0]["id"]
+    arch = arc.get(home) if archive_on else None
+    msgs = wcol.gather(user, arch, terms=wcol.terms_for(topic), contacts=people, readable=set(names), since=t0)
+    res = asyncio.run(wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
+                                   model=model, formats=formats or list(wcol.FORMATS),
+                                   clean=lambda t: pol.clean_text(t or "")[0], now=now))
+    return {"counts": res.counts(), "totals_per_payee": res.totals, "files": [str(p) for p in res.files],
+            "archive": bool(archive_on), "mention_only": mention_only, "untrusted": True,
+            "summary": (res.files[-1].read_text(encoding="utf-8") if res.files else "")}
+
+
+def _cli_collect_model(cfg, home: Path, no_ai: bool):
+    """The text model labels the rows when API billing is allowed (shared daily budget), else local rules only."""
+    from .config import api_billing_allowed
+    if no_ai or not api_billing_allowed(cfg.ai):
+        return None
+    from . import whatsapp_collect as wcol
+    from .budget import Budget
+    from .memory import MemoryStore
+    return wcol.openai_model(cfg.ai.text_model, Budget(MemoryStore(home / "memory.db"), cfg.ai))
+
+
 # ---------------------------------------------------------------------- CLI
 ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "find", "send", "kill",
-           "purge", "retention", "audit", "search", "archive")
+           "purge", "retention", "audit", "search", "archive", "collect")
 
 
 def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
                                         "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
                                         "remove read|send <contact> | scope | inbox | find <part of a name, typos/patterns ok> | send <contact> \"<text>\" | "
-                                        "kill | purge | retention <days|year|forever> | audit | search \"<words>\" | archive on|off|status|sync|wipe")
+                                        "kill | purge | retention <days|year|forever> | audit | search \"<words>\" | archive on|off|status|sync|wipe | collect <topic> [--from X ...]")
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
-                                          "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe")
-    w.add_argument("--from", dest="from_who", default="", help="search: only the chat with this contact")
+                                          "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe; collect: <topic>")
+    w.add_argument("--from", dest="from_who", action="append", default=[],
+                   help="search: only the chat with this contact; collect: a person (repeat for several)")
+    w.add_argument("--chat", default="", help="collect: only this one chat")
+    w.add_argument("--format", dest="formats", default="csv,xlsx,md", help="collect: csv,xlsx,md (md summary always)")
+    w.add_argument("--no-ai", action="store_true", help="collect: local rules only, no model labelling")
     w.add_argument("--since", default="", help="search: from this date (2026-09-01) or ago (30d, 2w, 3m, 1y)")
     w.add_argument("--until", default="", help="search: up to this date (inclusive)")
     w.add_argument("--phone", default="", help="link: get an 8-character pairing code for this number instead of a QR")
@@ -721,7 +776,7 @@ def cmd_whatsapp(a, cfg, home) -> int:
                       file=sys.stderr)
                 return 2
             try:
-                res = search(home, " ".join(args), who=a.from_who, since=a.since, until=a.until, limit=a.limit,
+                res = search(home, " ".join(args), who=(a.from_who[0] if a.from_who else ""), since=a.since, until=a.until, limit=a.limit,
                              archive_on=_cli_features(cfg, home).enabled(arc.FEATURE))
             except arc.DateError:
                 print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
@@ -739,6 +794,32 @@ def cmd_whatsapp(a, cfg, home) -> int:
                           f"{m['text'] if m['kind'] == 'text' else m.get('media', '')}")
                 if not res["messages"]:
                     print(clilang.fmt("לא נמצאו הודעות.", "No messages found."))
+            return 0
+        if a.action == "collect":
+            from .cli import _cli_features
+            if not args:
+                print("usage: jarvis whatsapp collect <topic> [--from <contact> ...] [--chat <chat>] [--since <date>] "
+                      "[--until <date>] [--format csv,xlsx,md] [--no-ai]", file=sys.stderr)
+                return 2
+            feats = _cli_features(cfg, home)
+            if not feats.enabled("whatsapp_collect"):
+                print(clilang.fmt("איסוף הודעות לדוח כבוי (בטא). מפעילים: jarvis features on whatsapp_collect",
+                                  "WhatsApp collect is off (beta). Turn it on: jarvis features on whatsapp_collect"))
+                return 1
+            try:
+                res = collect(home, " ".join(args), contacts=a.from_who, chat=a.chat, since=a.since, until=a.until,
+                              formats=[f.strip() for f in a.formats.split(",") if f.strip()],
+                              archive_on=feats.enabled(arc.FEATURE), model=_cli_collect_model(cfg, home, a.no_ai))
+            except arc.DateError:
+                print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
+                return 2
+            if a.json:
+                _print({k: v for k, v in res.items() if k != "summary"}, True)
+            else:
+                if not res["archive"]:
+                    print(clilang.fmt("(רק הודעות שהגשר שומר. לטווח ארוך: jarvis whatsapp archive on)",
+                                      "(only what the bridge keeps. For the long archive: jarvis whatsapp archive on)"))
+                print(res["summary"])
             return 0
         if a.action == "archive":
             return _archive_cli(home, cfg, a, args)
