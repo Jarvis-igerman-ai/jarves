@@ -1,0 +1,73 @@
+name: pr-demo
+# JAR-251 (owner 12 Nov 2026: "I expect videos or images, something easy to understand"). For a PR that changes
+# something a user sees (dashboard pages, phone site, guides, CLI output) this job renders a visual demo with the same
+# hermetic DEMO dashboard the page audit uses (synthetic data, 127.0.0.1 only, network blocked, no secrets):
+# before/after screenshots (main vs PR), a side-by-side image, a short walkthrough video and terminal images.
+# Uploaded as the artifact demo-<PR> with demo.json (title, one line "what changed for you", files, checks).
+# Informational: not part of the required checks and never blocks a merge. No secrets, read-only token, fork-safe
+# (pull_request, never pull_request_target). Tool: core/tools/pr_demo.py.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - core/src/jarves/dashboard_static/**
+      - core/src/jarves/pages.d/**
+      - core/src/jarves/guides/data/**
+      - core/src/jarves/cli.py
+      - core/src/jarves/*_cli.py
+      - core/src/jarves/clilang.py
+      - core/tools/pr_demo.py
+      - .github/workflows/pr-demo.yml
+permissions:
+  contents: read
+concurrency:
+  group: pr-demo-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  demo:
+    name: Visual demo (before/after)
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: core/uv.lock
+      - name: "System libraries (PortAudio for sounddevice)"
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libportaudio2
+      - name: Install (locked, all extras)
+        run: uv sync --frozen --all-extras
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('core/uv.lock') }}
+      - name: Browser (Chromium + ffmpeg for the video)
+        run: uv run playwright install --with-deps chromium ffmpeg
+      - name: Checkout of main at the merge base (the "before" side)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: git worktree add --detach "$RUNNER_TEMP/demo-base" "$(git merge-base "$BASE" HEAD)"
+      - name: Render the demo
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          uv run python tools/pr_demo.py ci --base "$BASE" --base-core "$RUNNER_TEMP/demo-base/core" --pr "$PR" \
+            --out "$RUNNER_TEMP/demo" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload the demo
+        uses: actions/upload-artifact@v7
+        with:
+          name: demo-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/demo
+          retention-days: 30
+          if-no-files-found: warn

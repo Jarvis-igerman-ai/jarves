@@ -1,0 +1,1 @@
+- Added: every pull request that changes a dashboard page, a guide or the command line gets a visual demo from CI (artifact `demo-<PR>`): before/after screenshots side by side, a short walkthrough video and terminal images, with a one-line "what changed for you" and browser-error checks (`core/tools/pr_demo.py`, workflow `pr-demo`; informational, never blocks a merge). (JAR-251)
