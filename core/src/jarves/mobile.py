@@ -172,6 +172,7 @@ class MobileAccess:
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
+        self._history_failed = False               # health_view: one warn per unreadable-history outage, not per poll
         self.tailnet: dict = {}                  # tailnet.detect() result of THIS run (empty = Tailscale not used)
         self.tls_source = "none"                 # tailscale | localca | selfsigned | none
         self.bind: str | None = None             # the address the server listens on
@@ -1107,18 +1108,26 @@ def health_view(mob: MobileAccess) -> dict:
     out = {**st, "tls": mob.scheme == "https", "tests": {}}
     try:
         from . import selfspeed
-        hist = selfspeed.History(mob.home).view()
-        for kind, d in hist.get("latest", {}).items():
+    except ImportError:
+        return out                                # the self-test feature is not installed
+    # load() already answers a missing or unparseable file with an empty history, so "no tests yet" never
+    # raises; only the "latest" entries are read (view() also runs perf_advisor, whose faults are not ours).
+    bad = None
+    try:
+        latest = selfspeed.History(mob.home).load()["latest"]
+        items = list(latest.items())
+    except Exception as e:                        # valid JSON of the wrong shape (e.g. a list)
+        bad, items = e, []
+    for kind, d in items:
+        try:
             out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
                                   "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
-        mob._history_failed = False
-    except (ImportError, FileNotFoundError):
-        pass                                      # the feature is not installed, or no test history yet
-    except Exception as e:                        # anything else is a corrupt history, not a missing one
-        if not getattr(mob, "_history_failed", False):       # the phone polls: one line per outage, not per poll
-            logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read",
-                      error_type=type(e).__name__)
-        mob._history_failed = True
+        except Exception as e:                    # one malformed entry hides only itself, not the others
+            bad = e
+    if bad is not None and not mob._history_failed:   # the phone polls: one line per outage, not per poll
+        logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read",
+                  error_type=type(bad).__name__)
+    mob._history_failed = bad is not None
     return out
 
 

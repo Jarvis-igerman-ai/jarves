@@ -48,12 +48,30 @@ def test_test_history_missing_is_silent_corrupt_logged_once(monkeypatch, tmp_pat
     assert [c for c, _ in seen].count("MOBILE_TEST_HISTORY_FAILED") == 1
 
 
-def test_test_history_file_not_found_is_silent(monkeypatch, tmp_path):
-    from jarves import selfspeed
+def test_one_bad_history_entry_hides_only_itself_and_recovery_resets(monkeypatch, tmp_path):
+    import json
+    seen = _capture(monkeypatch)
+    b = mobile.MobileAccess(tmp_path)
+    good = {"ts": 1.0, "status": "pass", "deep": False, "audio": False, "ms": 5.0, "checks": []}
+    f = tmp_path / "selfspeed.json"
+    f.write_text(json.dumps({"latest": {"speedtest": {"status": "ok"}, "selftest": good}}), encoding="utf-8")
+    tests = mobile.health_view(b)["tests"]
+    assert list(tests) == ["selftest"] and tests["selftest"]["status"] == "pass"
+    assert [c for c, _ in seen].count("MOBILE_TEST_HISTORY_FAILED") == 1
+    f.write_text(json.dumps({"latest": {"selftest": good}}), encoding="utf-8")
+    mobile.health_view(b)                                        # repaired: the outage flag clears
+    f.write_text("[]", encoding="utf-8")                         # valid JSON, wrong shape: a new outage
+    assert mobile.health_view(b)["tests"] == {}
+    assert [c for c, _ in seen].count("MOBILE_TEST_HISTORY_FAILED") == 2
+
+
+def test_test_history_never_reads_perf_advisor(monkeypatch, tmp_path):
+    from jarves import perf_advisor
     seen = _capture(monkeypatch)
 
-    def gone(self):
-        raise FileNotFoundError("selfspeed.json")
-    monkeypatch.setattr(selfspeed.History, "view", gone)          # a missing history is "no tests yet", never a warning
+    def boom(*a, **k):
+        raise RuntimeError("unrelated")
+    monkeypatch.setattr(perf_advisor, "recommendations", boom)  # a fault outside the history is not "corrupt history"
+    monkeypatch.setattr(perf_advisor, "options", boom)
     assert mobile.health_view(mobile.MobileAccess(tmp_path))["tests"] == {}
     assert not [c for c, _ in seen if c == "MOBILE_TEST_HISTORY_FAILED"]
