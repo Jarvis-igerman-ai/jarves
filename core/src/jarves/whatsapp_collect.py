@@ -60,7 +60,7 @@ _NUM = r"(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?"
 _CUR = r"(?:₪|ש[\"״]?ח|שקלים|שקל|nis|ils)"
 AMOUNT_RES = (re.compile(r"₪\s*" + _NUM, re.I), re.compile(_NUM + r"\s*" + _CUR + r"(?![A-Za-z])", re.I))
 _CELL_DANGER = ("=", "+", "-", "@", "\t", "\r")
-_XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
+_XML_BAD = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 
 
 # ---------------------------------------------------------------------- topic words
