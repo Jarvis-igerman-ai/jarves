@@ -12,10 +12,10 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 
 | # | Module | Sev | Finding | Fix route |
 |---|---|---|---|---|
-| 1 | projectmgr/gitops | P1 | `.github/` is not in `PROTECTED` | Tier R proposal (workflows) |
-| 2 | projectmgr/gitops | P2 | `PROTECTED` check is case-sensitive | Tier R proposal (gate) |
-| 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | follow-up fix PR (Tier N) |
-| 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | follow-up fix PR (Tier N) |
+| 1 | projectmgr/gitops | P1 | `.github/` is not in `PROTECTED` | Tier R proposal, #1096 |
+| 2 | projectmgr/gitops | P2 | `PROTECTED` check is case-sensitive | Tier R proposal, #1097 |
+| 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | fix PR (Tier N), #1098 |
+| 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | fix PR (Tier N), #1099 |
 | 5 | projectmgr/gitops | P3 | `remove_worktree` guard is `"projects" in parts` | follow-up |
 | 6 | projectmgr/gitops, service | P3 | refs passed to git without `--` / leading `-` check | follow-up |
 | 7 | devstatus | P3 | read token reuses `JARVES_UPDATE_TOKEN`; cache holds issue/PR titles in plain JSON | follow-up |
@@ -75,5 +75,9 @@ check command.
    Positives: proposals need owner confirmation and evidence, expire, are capped, and a model edit re-proposes.
 
 ## P0-P2 disposition
-- P1 #1, P2 #2: Tier R, **proposed only**; a PR touching `PROTECTED` needs the owner's decision.
-- P2 #3, #4: Tier N fixes **not done in this task** (report-only, Tier L); follow-up issues/PRs requested, one per fix.
+One issue per defect (AGENTS.md rule 8):
+- P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Tier R (workflows/secrets): **proposed only**; a PR touching `PROTECTED` needs the owner's decision.
+- P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Tier R (gate, `no-automerge`): **proposed only**, same reason.
+- P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
+- P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
+- P3 #5-#10: hardening notes, no issue each; track in `docs/reviews/FINDINGS_LEDGER.md` when picked up.
