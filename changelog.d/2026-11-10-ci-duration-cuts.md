@@ -1,0 +1,1 @@
+- Added: docs/proposals/2026-11-10-ci-duration-cuts.md - measured jarves-checks job times and three proposed CI cuts (proposal only, JAR-154).
