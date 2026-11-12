@@ -46,7 +46,7 @@ DESKTOP = {"width": 1280, "height": 800}
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 SECRET = re.compile(r"(?i)((?:token|secret|password|passwd|api[_-]?key|authorization)\S*\s*[=:]\s*)\S+")
 STORY = re.compile(r"(?im)^\s*(?:\*\*)?(?:what changed for you|now you can)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$")
-CHILD_TIMEOUT = 420                                  # s per side; both sides + setup stay under the job's 30 min
+CHILD_TIMEOUT = 300                                  # s per child; at most 4 children (20 min) + setup stay under the job's 30 min
 PHONE = {"width": 390, "height": 844}
 CLI_FILE = re.compile(r"^core/src/jarves/(?:([a-z0-9]+)_cli|cli|clilang|cli_parity)\.py$")
 
