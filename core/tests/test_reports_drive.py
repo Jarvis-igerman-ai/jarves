@@ -28,7 +28,7 @@ def test_off_copies_nothing(tmp_path):
     rd.save(tmp_path, folder=str(dest))
     rep = tmp_path / "reports" / "wa.csv"
     rep.parent.mkdir()
-    rep.write_text("a,b\n", encoding="utf-8")
+    rep.write_bytes(b"a,b\n")
     assert rd.after_report(tmp_path, rep, active=False) is None
     assert not list(dest.iterdir())
 
@@ -36,18 +36,18 @@ def test_off_copies_nothing(tmp_path):
 def test_folder_copy_and_api_upload_converts_csv_to_sheet(tmp_path):
     rep = tmp_path / "reports" / "wa.csv"
     rep.parent.mkdir()
-    rep.write_text("a,b\n", encoding="utf-8")
+    rep.write_bytes(b"a,b\n")
     dest = tmp_path / "gdrive"
     dest.mkdir()
     rd.save(tmp_path, folder=str(dest))
     out = rd.after_report(tmp_path, rep, active=True)
-    assert out["mode"] == "folder" and (dest / "wa.csv").read_text(encoding="utf-8") == "a,b\n"
+    assert out["mode"] == "folder" and (dest / "wa.csv").read_bytes() == b"a,b\n"
     rd.save(tmp_path, mode="api")
     fake = FakeDrive()
     out = rd.upload(tmp_path, rep, client=fake)
     assert out["mode"] == "api" and fake.sent == [("wa", b"a,b\n", "text/csv", rd.SHEET)]
     md = tmp_path / "reports" / "x.md"
-    md.write_text("hi", encoding="utf-8")
+    md.write_bytes(b"hi")
     rd.upload(tmp_path, md, client=fake)
     assert fake.sent[-1] == ("x.md", b"hi", "text/markdown", None)
 
