@@ -144,7 +144,9 @@ def _action_of(av) -> str:
 # what argparse really parses. Every other action (create, dispatch, seed, sync, recover, questions-rewrite, authorize,
 # bootstrap, handover, close-superseded, agent, serve ...) is owner/manager only.
 WORKER_ALLOWED_ACTIONS = frozenset({"status", "next", "report", "task", "transition", "check", "ask", "own", "release", "owners",
-                                    "msg", "check-touch", "layer-beat", "timeline", "health", "now", "trace", "autopilot"})
+                                    "msg", "check-touch", "timeline", "health", "now", "trace", "autopilot"})
+# Owner answers keep their own refusal (owner_only_guard, exit 1, before any store write).
+OWNER_GUARDED_ACTIONS = frozenset({"answer", "confirm", "reopen", "ask-more"})
 
 
 def worker_refusal(av) -> str:
@@ -157,6 +159,8 @@ def worker_refusal(av) -> str:
     except SystemExit:
         return "refused: the line does not parse (agent environment)"
     action = ns.action or ""
+    if action in OWNER_GUARDED_ACTIONS:
+        return ""
     sub = (list(ns.rest or []) or ["status"])[0]
     if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
             or (action == "release" and ns.force) or (action == "trace" and ns.capture)):

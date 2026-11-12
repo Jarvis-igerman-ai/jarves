@@ -99,3 +99,43 @@ async def test_gate_lock_wait_does_not_block_the_event_loop(tmp_path, monkeypatc
     t.cancel()
     assert not res.ok                              # failed closed (lock timeout)
     assert len(ticks) > 10                         # the loop kept running during the 0.6 s wait
+
+
+def test_bridge_digits_only_number_matches_plus_contact(tmp_path):
+    """#833: the bridge keeps digits only (447911123456); a saved '+447911123456' contact must match it."""
+    from jarves import whatsapp_bridge as wb
+    skill = wb.WhatsAppBridgeSkill(tmp_path)
+    gate = _gate(tmp_path, "+447911123456")
+    for num in ("447911123456", "+447911123456"):
+        tgt = _real_target(skill, "whatsapp_send", {"name": "Dana", "number": num})
+        assert gate.known("Dana", tgt)
+    assert not gate.known("Dana", _real_target(skill, "whatsapp_send", {"name": "Dana", "number": "447911999999"}))
+    assert not gate.known("Dana", _real_target(skill, "whatsapp_send", {"name": "Dana"}))
+
+
+def test_attach_passenger_reuses_one_connection(tmp_path, monkeypatch):
+    from jarves import userdata
+    opened = []
+    real = userdata.open_db
+    monkeypatch.setattr(userdata, "open_db", lambda h: opened.append(h) or real(h))
+    reg = SimpleNamespace()
+    gate = dm.attach(reg, SimpleNamespace(active=lambda f: True), tmp_path)
+    assert [gate.passenger(), gate.passenger(), gate.passenger()] == ["ask"] * 3
+    assert len(opened) == 1
+
+
+def test_whatsapp_send_declares_real_target_for_drive_gate(tmp_path):
+    """JAR-257: the real whatsapp_send Tool declares a target (the draft's number, not the display name), so the
+    drive Gate lets a saved contact through and defers a same-named stranger or an unknown (LID) number."""
+    from jarves import whatsapp_bridge as wb
+    skill = wb.WhatsAppBridgeSkill(tmp_path)
+    tool = next(t for t in skill.tools() if t.name == "whatsapp_send")
+    assert tool.target is not None and tool.recipient is not None
+    gate = _gate(tmp_path, "+972541234567")
+    for draft, known in (({"name": "Dana", "number": "972541234567"}, True),
+                         ({"name": "Dana", "number": "972509999999"}, False),
+                         ({"name": "Dana"}, False)):
+        skill._drafts["d1"] = draft
+        args = SimpleNamespace(draft_id="d1")
+        assert tool.recipient(args) == "Dana"
+        assert gate.known(tool.recipient(args), tool.target(args)) is known

@@ -1,0 +1,1 @@
+- Added: the workflow Health data now shows the merge steward threshold, its reason and recorded merge-cycle numbers (#777).

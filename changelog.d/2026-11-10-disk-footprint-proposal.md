@@ -1,0 +1,1 @@
+- Docs: disk-footprint measurement and proposed bounds (docs/reports/2026-11-10-disk-footprint.md) plus a backup-count regression test.

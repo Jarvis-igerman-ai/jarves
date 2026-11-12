@@ -47,7 +47,10 @@ class GitNoteTests(unittest.TestCase):
         self.assertLessEqual(hooks.GIT_NOTE_BUDGET_S, 1.0)
 
     def test_exhausted_budget_degrades_without_a_third_call(self):
-        with mock.patch.object(hooks.time, "monotonic", side_effect=[0.0, 0.1, 5.0]), \
+        # #943: a local clock for the hooks module only; patching the global time.monotonic let other callers
+        # (logging, subprocess, threads) consume the three values and raise StopIteration on Windows.
+        local_clock = mock.Mock(monotonic=mock.Mock(side_effect=[0.0, 0.1, 5.0]))
+        with mock.patch.object(hooks, "time", local_clock), \
                 mock.patch.object(hooks.subprocess, "run", return_value=mock.Mock(stdout="x")) as run:
             note = hooks.git_base_note("C:/other")
         self.assertIn("could not be verified", note)

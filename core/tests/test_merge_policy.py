@@ -125,3 +125,17 @@ def test_simulation_adapts_to_bad_integration_runs():
     log = mp.simulate([(3, bad), (3, bad), (3, bad), (3, bad)])
     assert log[:2] == ["integration"] * 2
     assert log[3] == "individual"  # threshold rose to 4 after two bad runs
+
+
+def test_health_shows_merge_policy(tmp_path):
+    from jarves.workflow import observability
+    from jarves.workflow.store import Store
+    store = Store(tmp_path / "w.db")
+    try:
+        for _ in range(2):
+            mp.record_cycle(store, cyc("integration", 4, skipped=2))
+        view = observability.health(store)["merge_policy"]
+        assert view["threshold"] == 4 and view["cycles"] == 2
+        assert view["stats"]["integration"]["cycles"] == 2
+    finally:
+        store.close()

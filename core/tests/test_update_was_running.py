@@ -40,3 +40,19 @@ def test_pending_record_gets_was_running(tmp_path):
     updates.record_was_running(tmp_path, {"core": True, "face": False, "dashboard": None})
     d = json.loads((tmp_path / "updates" / updates.PENDING_FILE).read_text())
     assert d["was_running"] == {"core": True, "face": False, "dashboard": None} and d["state"] == "installing"
+
+
+def test_dashboard_install_hands_setup_what_ran(tmp_path, monkeypatch):
+    """#166: the in-app (dashboard) install passes /WASRUNNING= so only what ran is restarted."""
+    seen = {}
+    monkeypatch.setattr(updates, "_checker", lambda ctx: type("C", (), {
+        "prepare_install": lambda self, approve: {"installer": "x.exe", "version": "9", "signed": True}})())
+    monkeypatch.setattr(runmarks, "detect_running",
+                        lambda home, core_up, face_up=None: {"core": core_up, "face": False, "dashboard": None})
+    monkeypatch.setattr(updates, "launch_installer", lambda *a, **k: seen.update(k))
+    ctx = type("X", (), {"home": tmp_path})()
+    code, _ = updates.api_updates_install(ctx, None, {"approve": True, "silent": True})
+    assert code == 200 and seen["was_running"] == {"core": True, "face": False, "dashboard": None}
+    seen.clear()
+    updates.api_updates_install(ctx, None, {"approve": True})
+    assert seen["was_running"] is None and seen["restart"] is False

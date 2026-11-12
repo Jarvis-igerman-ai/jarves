@@ -1,0 +1,1 @@
+- Fixed: phone page polish (JAR-78): connection dot halo no longer clipped, clear 2 px focus ring on the composer, drawer history no longer shows a "/resume" message from you, and the approval countdown uses the same short seconds form (ש׳ / s) everywhere on the phone. Quiet-hours pill overlap (ui-review 3) was rechecked and does not reproduce.

@@ -10,68 +10,19 @@
 # reason = one line: what flakes and where
 
 [[test]]
-id = "test_agents_pr_card_browser.py::test_the_card_is_absent_when_off_or_the_api_is_missing"
-issue = 890
-since = "2026-11-02"
-reason = "Windows real browser: Page.goto net::ERR_NO_BUFFER_SPACE (host socket exhaustion, seen on PR 868, unrelated to its diff); retry fix PR 875 merged, prior issue 874 closed"
+id = "test_agents_bridge.py::test_restart_rotates_the_token"
+issue = 992
+since = "2026-11-09"
+reason = "Windows: CreateNamedPipe WinError 5 when a bridge restarts right after stop() on the same pipe address (seen on PR 987, unrelated to its diff)"
 
 [[test]]
-id = "test_suite_voice_fixes.py::test_room_noise_alone_cannot_keep_the_session_open"
-issue = 880
-since = "2026-11-02"
-reason = "Windows: real wall-clock bound 2.5 s exceeded once (3.19 s) on an unrelated PR, ended==idle was correct; use a fake clock"
-
-
-[[test]]
-id = "test_web_chat.py::test_silent_turns_never_speak_ring_or_light_the_face"
-issue = 722
-since = "2026-11-04"
-reason = "silent turn spoke (2 == 1) once on CI; real timing between turns, make it deterministic"
+id = "test_mobile_browser_e2e.py::test_browser_tab_fits_390_and_360_px_in_english_and_hebrew"
+issue = 1049
+since = "2026-11-11"
+reason = "Windows shard: #bvType not visible while state is HUMAN (line 264); seen on queue runs of docs-only PR 1042 and PR 1001, passes on PR runs"
 
 [[test]]
-id = "test_helper_approvals.py::test_dangerous_command_needs_the_code_and_timeout_kills"
-issue = 660
-since = "2026-11-04"
-reason = "Linux: shell pipe exited 2 in the timeout-kill step; depends on shell and process timing"
-
-[[test]]
-id = "test_say_engine.py::test_default_output_is_one_line_without_espeak_on_windows"
-issue = 422
-since = "2026-11-04"
-reason = "Windows shard 3/4: an extra 'unhandled exception' line appeared in the captured output once"
-
-[[test]]
-id = "test_workflow_859_followups.py::test_exhausted_budget_degrades_without_a_third_call"
-issue = 943
-since = "2026-11-04"
-reason = "Windows shard 4/4 on PR 937: StopIteration from the mocked global time.monotonic (3 values consumed by other callers); use a local clock"
-
-[[test]]
-id = "test_phone_hands_free_e2e.py::test_hidden_page_and_a_refused_wake_lock"
-issue = 770
-since = "2026-11-04"
-reason = "state race: fake mic beeps every second so .hf-state can read 'hearing you' instead of 'listening'; wait for a stable state"
-
-[[test]]
-id = "test_dashboard_mic_stop_browser.py::test_mic_menu_narrow_width_stays_on_screen_and_hebrew"
-issue = 778
-since = "2026-11-04"
-reason = "Windows real browser: failed once then passed on rerun (earlier showstoppers 709 and 488 closed); tracked in 778 until made deterministic"
-
-[[test]]
-id = "test_canary.py::test_dashboard_journey_is_real_browser_or_blocked"
-issue = 778
-since = "2026-11-04"
-reason = "Windows: dashboard_load took 50 s against a 30 s budget on a loaded runner (earlier showstoppers 707 and 367); tracked in 778"
-
-[[test]]
-id = "test_core.py::test_logs_have_correlation_ids_and_no_private_text"
-issue = 778
-since = "2026-11-04"
-reason = "substring '4321' can appear by chance in ids or ports; use a long unique private token (earlier showstopper 481 closed); tracked in 778"
-
-[[test]]
-id = "test_agents_managed.py::test_codex_approval_request_goes_to_the_owner"
-issue = 946
-since = "2026-11-04"
-reason = "Windows shard 3/4 on PR 942: state still RUNNING right after last_summary was set; wait for IDLE instead of asserting at once"
+id = "test_web_chat.py::test_quiet_hours_make_the_chat_silent"
+issue = 1052
+since = "2026-11-11"
+reason = "merge_group run 42909649255 failed in the PR 1042 queue, passes on PR runs"

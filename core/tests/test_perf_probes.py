@@ -150,10 +150,14 @@ def test_slow_cli_probe_never_blocks_features_list_and_its_result_lands(home, cf
 
 def test_an_undeclared_probe_measured_slow_is_rechecked_in_the_background(home, cfg):
     state = {"ok": False, "threads": []}
+    gate = threading.Event()   # structural, not a wall-clock budget (#968): later probe runs block until released
 
     def probe(_c):
         state["threads"].append(threading.get_ident())
-        time.sleep(0.3)
+        if len(state["threads"]) == 1:
+            time.sleep(0.02)                                              # > SLOW_PROBE_S: measured slow
+        else:
+            gate.wait(10)
         return state["ok"], "" if state["ok"] else "not yet"
     feat.register("zz_perf_undeclared", "בדיקה", "Undeclared slow", True, probe=probe)
     try:
@@ -162,8 +166,9 @@ def test_an_undeclared_probe_measured_slow_is_rechecked_in_the_background(home, 
         assert f.is_slow("zz_perf_undeclared")                            # ...and now known to be slow
         state["ok"] = True
         _expire(f)
-        t = time.perf_counter()
-        assert f.list() and (time.perf_counter() - t) < 0.3               # stale answer, no 0.3 s wait
+        assert f.list()                                                   # stale answer; the gated probe is still blocked
+        assert not gate.is_set()
+        gate.set()
         assert _wait(lambda: f._probe_cache["zz_perf_undeclared"][1] is True)
         assert state["threads"][0] == threading.get_ident() != state["threads"][1]
     finally:

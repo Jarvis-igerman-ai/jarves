@@ -414,6 +414,19 @@ class GeneratedSkills:
         d = d if isinstance(d, dict) else {}
         return ({x for x in d.get("skills", []) if isinstance(x, str)}, {x for x in d.get("tools", []) if isinstance(x, str)})
 
+    def _names_unreadable(self) -> bool:
+        d = _read_json(self._names_file, {})
+        return not isinstance(d, dict) or not d
+
+    def snapshot_missing(self) -> bool:
+        """True when this process relies on the names file and it is absent, corrupt or empty (clash check is empty)."""
+        return self.taken == self._snapshot_taken and self._names_unreadable()
+
+    def _warn_snapshot(self, rep: dict) -> None:
+        if self.snapshot_missing():
+            rep.setdefault("warnings", []).append("built-in names snapshot missing or corrupt: the name-clash check is empty "
+                                                  "until the Core has started once; re-check before approving")
+
     def save_taken_snapshot(self) -> None:
         """Core only: record the built-in Skill and tool names for the other processes (best effort)."""
         try:
@@ -564,6 +577,7 @@ class GeneratedSkills:
         skills, tools = self._taken(exclude=sid if upgrading else None)
         v2 = self.v2()
         rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading, v2=v2)
+        self._warn_snapshot(rep)
         if v2:
             self._apply_v2(rep, md, py, upgrading)
         d = self.drafts / sid
@@ -610,6 +624,7 @@ class GeneratedSkills:
         skills, tools = self._taken(exclude=sid if upgrading else None)
         v2 = self.v2()
         rep = validate(md, py, taken_skills=skills, taken_tools=tools, upgrading=upgrading, v2=v2)   # re-check now
+        self._warn_snapshot(rep)
         if v2:
             self._apply_v2(rep, md, py, upgrading)          # a tampered / invalid manifest is never installed
         if not rep["ok"]:
@@ -1093,7 +1108,7 @@ def attach(core) -> GeneratedSkills:
             await asyncio.sleep(2.0)
             try:
                 now = taken()
-                if now != seen:                  # #565: tools registered late reach the CLI and the dashboard too
+                if now != seen or mgr._names_unreadable():                  # #565: tools registered late reach the CLI and the dashboard too
                     seen = now
                     mgr.save_taken_snapshot()
                 if sync(mgr, core.registry):

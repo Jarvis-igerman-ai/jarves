@@ -25,7 +25,7 @@ function liveViewCard() {
         if ((r.state === "HUMAN") !== mine.on) setMine(r.state === "HUMAN");
         contBtn.disabled = r.state !== "PAUSED";                     // "let the assistant continue" follows the SERVER state (also after a reload)
       }
-      clockEl.textContent = tx("פג בעוד ", "Expires in ") + r.expires_in_s + " s";
+      clockEl.textContent = tx("פג בעוד {n} שנ׳", "Expires in {n} s").replace("{n}", r.expires_in_s);
     } catch (e) {
       if (/busy/i.test(e.message || "")) { clockEl.textContent = tx("הדף עסוק, מנסה שוב", "The page is busy, trying again"); return; }   // keep the view
       img.style.display = "none"; end(e.message);
@@ -155,7 +155,7 @@ PAGES.browser = async function () {
   const rows = d.sites.map((s) => el("tr", {},
     el("td", {}, el("code", {}, s), el("span", { class: "muted small" }, "  + subdomains")),
     el("td", {}, el("button", { type: "button", class: "ghost", onclick: () => change("remove", s) }, "Remove"))));
-  const state = f.active ? pill("ok", "on") : !f.enabled ? pill("plain", "off") : pill("fail", "unavailable");
+  const state = f.active ? pill("ok", "on") : !f.enabled ? pill("plain", "off") : f.health === "checking" ? pill("plain", "checking") : pill("fail", "unavailable");
   const act = d.activity || {};
   render(header("Browser", "Web pages JARVES opens for you. Full control only on the sites below; every other site is read-only and opens only after you approve it on the screen."),
     el("div", { class: "card" },

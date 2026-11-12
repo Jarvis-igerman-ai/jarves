@@ -39,6 +39,7 @@ from jarves import whatsapp_policy as pol  # noqa: E402
 from jarves.whatsapp_store import SecureStore, StoreLocked  # noqa: E402
 
 VERSION = "fake-1"
+KILL_POLL_S = 0.1   # kill-file poll period; contract promises <= 250 ms (asserted by value, not wall clock)
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_BODY = 64 * 1024
 DEFAULT_POLICY = {"v": 1, "mode": "off", "read_scope": {"all_direct": True, "groups": False}, "read_allow": [],
@@ -629,7 +630,7 @@ class FakeBridge:
         return self.port
 
     def _watch_kill(self) -> None:
-        while not self._stop.wait(0.1):
+        while not self._stop.wait(KILL_POLL_S):
             present = (self.dir / "KILL").exists()
             if present and not self.killed:
                 try:

@@ -1,0 +1,1 @@
+- Docs: the Android companion acceptance sheet (`docs/reviews/ANDROID_COMPANION_ACCEPTANCE.md`) and its EN/HE guide are re-checked against main; every device row (exact-alarm prompt, airplane mode, OEM battery) stays NOT-RUN until the owner runs it on a phone.

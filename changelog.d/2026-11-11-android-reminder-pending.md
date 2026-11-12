@@ -1,0 +1,1 @@
+- Fixed: Android reminders that come due while notifications are blocked now stay pending in the app instead of being marked done unseen (JAR-188).

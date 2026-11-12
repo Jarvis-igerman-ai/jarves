@@ -1,0 +1,1 @@
+- Fixed: `test_strict_cap_holds_across_processes` no longer flakes with sqlite "database is locked" on Windows: the test holds the shared budget db open (schema created) for the whole multi-process race, like the Core, and a failing worker now reports its error (JAR-210, #1048, #1034).

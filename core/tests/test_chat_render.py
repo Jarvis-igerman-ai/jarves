@@ -1,8 +1,9 @@
 """#331: `jarvis chat` rendering (Markdown while streaming, compact tool lines, status line). Pure functions: no Core,
 no terminal, no clock."""
 import io
+import os
 
-from jarves import chat_render
+from jarves import chat_cli, chat_render
 from jarves.chat_cli import ChatSession
 from jarves.chat_render import MarkdownStream, render
 
@@ -68,3 +69,41 @@ def test_status_line_and_prompt():
     assert s.status_line() == "text · voice off · gpt-test"
     s.forced_silent, s.voice = True, True
     assert s.prompt() == "[silent] > " and "voice off" in s.status_line()
+
+
+def test_tool_group_line_fits_the_width_and_keeps_the_newest_names():
+    assert chat_render.tool_group(["get_time"]) == "  ✓ get_time"
+    assert chat_render.tool_group(["a", "b", "c"]) == "  ✓ a, b, c  (3)"
+    names = [f"tool_{i:02d}" for i in range(30)]
+    line = chat_render.tool_group(names, 60)
+    assert len(line) <= 59 and line.endswith("tool_29  (30)") and "…, " in line and "tool_00" not in line
+
+
+def test_successful_tools_in_a_row_collapse_into_one_rewritten_line(monkeypatch):
+    """#331: on a colour terminal a run of successful tools is ONE line, rewritten in place; a failure or any other
+    output starts a new line. Pipes keep one line per tool (checked above)."""
+    tty = io.StringIO()
+    tty.isatty = lambda: True
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr(chat_cli.shutil, "get_terminal_size", lambda *_: os.terminal_size((80, 24)))
+    s = ChatSession(None, None, tty)
+    for n in ("get_time", "web_search", "open_page"):
+        s._tool_line({"name": n, "ok": True}, False)
+    s._tool_line({"name": "send_mail", "ok": False, "code": "TOOL_DECLINED"}, False)
+    s.say("answer")
+    s._tool_line({"name": "get_time", "ok": True}, False)
+    out = tty.getvalue()
+    assert out.count(chat_cli.UP_ERASE) == 2                        # two rewrites: 1 -> 2 -> 3 tools
+    assert "✓ get_time, web_search, open_page  (3)" in out
+    assert "✗ send_mail  not approved [TOOL_DECLINED]" in out
+    assert out.endswith("answer\n\x1b[2m  ✓ get_time\x1b[0m\n")       # after other output: a fresh line
+
+
+def test_a_tool_line_after_streamed_text_starts_on_a_new_line():
+    out = io.StringIO()
+    s = ChatSession(None, None, out)
+    s.say("partial", end="")
+    s._tool_line({"name": "get_time", "ok": True}, True)
+    s.say("done\n", end="")
+    s._tool_line({"name": "get_time", "ok": True}, True)
+    assert out.getvalue() == "partial\n  > get_time  ok\ndone\n  > get_time  ok\n"

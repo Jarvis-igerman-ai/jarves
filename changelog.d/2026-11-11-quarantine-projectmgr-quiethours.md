@@ -1,0 +1,1 @@
+- Fixed: quarantine flaky test_parallel_tasks_merge_and_dependent_gets_handoff (#1051) and test_quiet_hours_make_the_chat_silent (#1052)

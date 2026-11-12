@@ -1,0 +1,52 @@
+order = 32
+category = "system"
+features = ["conversation_eval"]
+suggest = false
+aliases = ["בדיקת שיחות", "מבחן שיחות", "conversation eval", "eval suite", "evalsuite"]
+error_codes = ["EVALSUITE_OFF", "EVALSUITE_NO_JUDGE", "EVALSUITE_BAD_BASELINE"]
+title_he = "בדיקת שיחות"
+title_en = "Conversation eval"
+what_he = "32 שיחות מתוסרטות בעברית ובאנגלית (תזכורות, חיפוש, שיחה, שליטה במכשירים) מקבלות ציון מול ההתנהגות הצפויה. כרגע זו הדגמה של המנגנון בלבד: היא עדיין לא בודקת גרסת בטא אמיתית."
+what_en = "32 scripted Hebrew and English conversations (reminders, search, chat, device control) are scored against the expected behaviour. For now this is a demo of the plumbing only: it does not evaluate a real beta yet."
+say = [["תריץ בדיקת שיחות", "Run the conversation eval"]]
+expect_he = "כבוי כברירת מחדל (בטא). השופט החי (מודל שפה) עדיין לא מחובר: יש רק הרצת הדגמה מדומה, והציון שלה תמיד מלא. ירידה של יותר מ-5 נקודות אחוז מסומנת כחסימה."
+expect_en = "Off by default (beta). The live judge (a language model) is not wired yet: only a scripted demo run works, and it always scores full marks. A drop of more than 5 percentage points is marked as a block."
+cost_he = "הדגמה: חינם."
+cost_en = "Demo: free."
+privacy_he = "השיחות מובנות וציבוריות; שום שיחה שלכם לא נשלחת. התוצאות נשמרות רק בתיקיית evalsuite במחשב. באג נפתח ב-GitHub רק אם אתם עושים זאת."
+privacy_en = "The conversations are built in and public; none of your conversations is sent. Results stay in the evalsuite folder on this PC. A bug is filed on GitHub only if you do it."
+
+[parity.features]
+conversation_eval = "evalsuite"
+
+[[steps]]
+he = "הפעילו יכולות בטא: jarvis features beta on. אחר כך: jarvis features on conversation_eval."
+en = "Turn on beta features: jarvis features beta on. Then: jarvis features on conversation_eval."
+action = "feature_on:conversation_eval"
+check = "active:conversation_eval"
+
+[[steps]]
+he = "ראו את השיחות: jarvis evalsuite scenarios. הרצת הדגמה: jarvis evalsuite run --fake --beta 5.1.0b2."
+en = "See the conversations: jarvis evalsuite scenarios. Demo run: jarvis evalsuite run --fake --beta 5.1.0b2."
+
+[[steps]]
+he = "ריצה ראשונה הופכת לבסיס, והבסיס לעולם לא יורד מעצמו. קוד יציאה 2 פירושו ירידה בציון, וטיוטת הבאג נמצאת ב-evalsuite/last.json."
+en = "The first run becomes the baseline, and the baseline is never lowered on its own. Exit code 2 means a score drop, and the bug draft is in evalsuite/last.json."
+
+[[problems]]
+he = "כתוב EVALSUITE_OFF"
+en = "It says EVALSUITE_OFF"
+fix_he = "הפעילו קודם את יכולות הבטא ואז את המתג conversation_eval."
+fix_en = "Turn on beta features first, then the conversation_eval switch."
+
+[[problems]]
+he = "כתוב EVALSUITE_NO_JUDGE"
+en = "It says EVALSUITE_NO_JUDGE"
+fix_he = "השופט החי עוד לא מחובר. הוסיפו --fake להרצת הדגמה."
+fix_en = "The live judge is not wired yet. Add --fake for a demo run."
+
+[[problems]]
+he = "כתוב EVALSUITE_BAD_BASELINE"
+en = "It says EVALSUITE_BAD_BASELINE"
+fix_he = "קובץ הבסיס evalsuite/baseline.json פגום. ההרצה נעצרת (קוד יציאה 3) והקובץ נשאר כמו שהוא. בדקו אותו, ואז: jarvis evalsuite run --fake --set-baseline. הקובץ הפגום נשמר בשם baseline.bad.json."
+fix_en = "The baseline file evalsuite/baseline.json is damaged. The run stops (exit code 3) and the file is kept as is. Check it, then: jarvis evalsuite run --fake --set-baseline. The damaged file is kept as baseline.bad.json."

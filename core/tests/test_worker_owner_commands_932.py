@@ -15,6 +15,7 @@ OWNER_LINES = [
     ["--home", "H", "close-superseded", "1"], ["--home", "H", "agent"],
     ["--home", "H", "autopilot", "set", "worker_allowed_tools", "[]"],
     ["--home", "H", "authorize", "--task", "T"], ["--home", "H", "bootstrap", "--apply"],
+    ["--home", "H", "layer-beat", "--layer", "supervisor"],
 ]
 
 

@@ -1,0 +1,1 @@
+- Fixed: flaky-test batch: the undeclared slow probe test no longer relies on a 0.3 s wall-clock budget (#968), and the correlation-id log test is back in the blocking suite (it already uses a unique token, #548).

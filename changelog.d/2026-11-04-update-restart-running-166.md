@@ -1,0 +1,1 @@
+- Fixed: the in-app dashboard update now tells setup exactly what was running (Core, face, dashboard) so only that is restarted (#166).

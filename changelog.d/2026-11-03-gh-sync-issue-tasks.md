@@ -1,0 +1,1 @@
+- Added: the read-only GitHub sync now queues unauthorised (execution_allowed false) gh-N workflow tasks for open bug/P0-P3/showstopper/agent-doable issues (max 10 per sync, never closed, owner-gated or existing; opt-in beta, off by default: JARVES_WORKFLOW_ISSUE_TASKS=1; only the autopilot grant authorises them), so ready work is not empty while defects are open.

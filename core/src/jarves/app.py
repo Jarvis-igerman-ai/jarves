@@ -13,6 +13,7 @@ from pathlib import Path
 from . import __version__, calm, logs, store
 from .brain import AgentBrain, Brain, billing_routes
 from . import limits as limits_mod
+from . import daily_limits
 from .budget import Budget, BudgetExceeded
 from .config import Config, api_billing_allowed, openai_key_present
 from .deviceport import INBOUND, DevicePort
@@ -318,6 +319,8 @@ class Core:
         self.registry.gate = self.features.gate          # inactive features: tools not offered, calls refused
         from . import drive_mode                         # V6 #216: off by default; never approves, only defers
         drive_mode.attach(self.registry, self.features, self.home, self.memory)
+        from . import action_receipts                    # V7-X1 #420: off by default; observes, never decides
+        action_receipts.attach(self.registry, self.features, self.home)
         self.registry.register(ClockSkill())
         self.registry.register(UiBlocksSkill())
         self.registry.register(CalcSkill())
@@ -1374,12 +1377,11 @@ class Core:
             return
         self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
-        if self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"]:
+        gate = daily_limits.admit_voice(self.budget)
+        if not gate.allowed:
             # No cloud session for a budget that cannot carry one (it would end ~1 s later and reconnect in a loop).
-            vv = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
-            vv["level"] = "exhausted"
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
-            await self.announce_limit(vv)
+            await self.announce_limit(gate.view)
             return
         v = self.cfg.voice
         async def output_level(level: float) -> None:
@@ -1424,12 +1426,10 @@ class Core:
             logs.info("voice", "LIVE_ENDED", "live conversation ended", reason=reason)
             self.limits_refresh()
             he_ = self.cfg.voice.language == "he"
-            out_of_voice = (reason == "timeout"
-                            and self._voice_budget_left_s() < limits_mod.SPECS["voice_seconds"]["min_useful"])
+            gate2 = daily_limits.admit_voice(self.budget)
+            out_of_voice = reason == "timeout" and not gate2.allowed
             if out_of_voice and not self.stopping:      # the budget ran out mid-session: say so, and do not reconnect
-                v2 = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
-                v2["level"] = "exhausted"
-                self._spawn(self.announce_limit(v2))
+                self._spawn(self.announce_limit(gate2.view))
             elif reason == "timeout" and not self.stopping:
                 self._spawn(self.link.send_face("assistant.activity", {"kind": "limit", "detail": "", "text": (
                     "השיחה הגיעה לאורך המקסימלי (voice.session_max_s) ומתחברת מחדש" if he_
@@ -1582,7 +1582,21 @@ class Core:
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            # #1028: no TTS hello here. The live microphone is already open on a wake session, so a spoken
+            # fallback could be heard by the model (self-echo); the wake cue already played. Silent, truthful.
             logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio on a wake session; continuing without it",
+                      error_type=type(e).__name__)
+
+    async def _greeting_tts_fallback(self) -> None:
+        """#179: STARTUP path only (the mic is not open yet): nudge and the one retry already failed, so say a short
+        hello through TTS (counted in selfspeed). Never call this on a wake session (#1028)."""
+        try:
+            logs.warn("voice", "LIVE_GREETING_TTS_FALLBACK", "greeting audio never arrived; speaking a short TTS hello")
+            await self.speak(self.hello_text())
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logs.warn("voice", "LIVE_GREETING_TTS_FALLBACK_FAILED", "TTS greeting fallback failed",
                       error_type=type(e).__name__)
 
     async def _tasks_changed(self, views: list[dict]) -> None:
@@ -1635,8 +1649,9 @@ class Core:
                         raise
                     logs.warn("voice", "LIVE_GREETING_MISSED", "no greeting audio; continuing without a greeting",
                               error_type=type(e).__name__)
-                    self._startup_stage("waiting_audio", "No greeting audio arrived; continuing without a greeting.")
-                self._greeted = True                # greeting comes from this same live session, never a second TTS call
+                    self._startup_stage("waiting_audio", "No greeting audio arrived; speaking a short TTS hello.")
+                    await self._greeting_tts_fallback()
+                self._greeted = True                # the greeting is this live session's, or the one startup TTS hello above
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")
                 deadline = time.monotonic() + 20

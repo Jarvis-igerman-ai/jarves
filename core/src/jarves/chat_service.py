@@ -116,7 +116,7 @@ class ChatService:
             ai = "AI on"
         return {"core": snap.get("core"), "version": snap.get("version"), "uptime_s": snap.get("uptime_s"),
                 "components": comps, "ai": ai, "text_model": getattr(c.cfg.ai, "text_model", ""),
-                "connection": getattr(c.cfg.ai, "connection", ""), "billing": snap.get("billing"),
+                "connection": getattr(c.cfg.ai, "connection", ""), "billing": snap.get("billing"), "routes": snap.get("billing"),
                 "voice_mode": getattr(c, "voice_mode", "off"), "ai_requests_today": snap.get("ai_requests_today"),
                 "quiet": self.quiet_now(), "quiet_window": self.quiet_window(),
                 "can_speak": bool(getattr(c, "dev", None) is not None and c.dev.audio is not None),

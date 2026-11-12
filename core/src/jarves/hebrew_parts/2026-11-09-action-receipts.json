@@ -1,0 +1,5 @@
+{
+ "writes a short receipt for every tool call: tool name, ok, result code and time; never arguments or results. Off by default; it never changes approvals and never blocks anything": "כותב קבלה קצרה לכל קריאה לכלי: שם הכלי, הצלחה, קוד תוצאה וזמן; אף פעם לא פרמטרים או תוצאות. כבוי כברירת מחדל; לא משנה אישורים ולא חוסם כלום",
+ "UNIT test_action_receipts.py (fake registry and clock, no real tools)": "בדיקות יחידה test_action_receipts.py (רישום ושעון מדומים, בלי כלים אמיתיים)",
+ "not run with a real assistant session yet": "עדיין לא הורץ עם שיחה אמיתית עם העוזר"
+}

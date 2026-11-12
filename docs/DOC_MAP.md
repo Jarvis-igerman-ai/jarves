@@ -89,6 +89,16 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [AGENT_HANDOFF_TEMPLATE](archive/AGENT_HANDOFF_TEMPLATE.md) | Copy-paste resume prompt for a new agent | general | current | [AGENTS](../AGENTS.md) |
 | [handoff/README](handoff/README.md) | Handoff notes, one file per task (`docs/handoff/<date>-<topic>.md`, newest by file name); the notes are covered by this row | general | current | itself |
 | [reports/README](reports/README.md) | New reports, reviews and audits, one dated file each (`docs/reports/<date>-<topic>.md`); the reports are covered by this row, so adding one does not edit this file | general | current | itself |
+| [proposals/2026-11-09-ui-review](proposals/2026-11-09-ui-review.md) | UI/UX review proposal: phone page and dashboard (Hebrew/RTL, accessibility, clutter); proposal only, no code changed | general | proposal | itself |
+| [proposals/2026-11-09-dashboard-home-settings-ux](proposals/2026-11-09-dashboard-home-settings-ux.md) | UX proposal: dashboard Home and Settings (clutter, Hebrew/RTL, empty states), from fresh renders; proposal only, no code changed | general | proposal | itself |
+| [proposals/2026-11-09-feature-gaps](proposals/2026-11-09-feature-gaps.md) | Feature gap analysis: scope and roadmap vs shipped code; proposal only, nothing authorised | general | proposal | itself |
+| [proposals/2026-11-09-capability-matrix](proposals/2026-11-09-capability-matrix.md) | Capability matrix spike: unverified vs device-verified rows, generated table design; proposal only, nothing authorised | general | proposal | itself |
+| [proposals/2026-11-09-unmapped-requirements](proposals/2026-11-09-unmapped-requirements.md) | The 18 scope requirements with no issue link: what exists, what is unproven; proposal only, nothing authorised | general | proposal | itself |
+| [reviews/2026-11-09-diag-coverage](reviews/2026-11-09-diag-coverage.md) | Diagnostics coverage check: action receipts and ci_health against the support bundle (JAR-145) | general | report | itself |
+| [proposals/2026-11-09-dashboard-states](proposals/2026-11-09-dashboard-states.md) | Dashboard empty, loading and error states review with EN and HE copy; proposal only, no code changed | general | proposal | itself |
+| [proposals/2026-11-09-security-hygiene-audit](proposals/2026-11-09-security-hygiene-audit.md) | Security hygiene audit: file permissions and secret handling in core; proposal only, no code changed | security | proposal | itself |
+| [proposals/2026-11-10-ci-duration-cuts](proposals/2026-11-10-ci-duration-cuts.md) | jarves-checks per-job p50/p95 on main and three proposed CI speed cuts; proposal only, .github untouched | general | proposal | itself |
+| [proposals/2026-11-09-terminal-chat-remainder](proposals/2026-11-09-terminal-chat-remainder.md) | What remains of terminal chat request #331: built vs missing, options; proposal only, nothing authorised | general | proposal | itself |
 | [MIGRATION_STATUS](archive/MIGRATION_STATUS.md), [MIGRATION_HANDOFF](archive/MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
@@ -153,6 +163,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 |---|---|---|---|---|
 | [USER_GUIDE](USER_GUIDE.md), [USER_GUIDE.he](USER_GUIDE.he.md) | End-user guide, English and Hebrew (same sections, tested) | V4 | current | in-app guides in `core/src/jarves/guides/data/` |
 | In-app guide `whats_new_card` (`core/src/jarves/guides/data/whats_new_card.toml`) | Home card "What changed since your version" after an update (#167); same items as `jarvis whatsnew --since V`, closed with `jarvis whatsnew --dismiss`; code `core/src/jarves/whats_new_card.py` | V4.5.1 | beta, OFF by default | [USER_GUIDE](USER_GUIDE.md) |
+| In-app guide `smart_chat` (`core/src/jarves/guides/data/smart_chat.toml`) | Chat UI blocks (checklist, table, choices, text; cards come from `task_triage`) and the beta switch `smart_format` that lets the assistant pick the format itself (#365); code `core/src/jarves/ui_blocks.py`, renderer `dashboard_static/chatview.js` | V5 | beta, `smart_format` OFF by default | [design](plans/SMART_CHAT_AND_TASK_TRIAGE_DESIGN_2026-10-26.md) |
 | [Model policy guide](../core/src/jarves/guides/data/model_policy.toml) | In-app guide (EN+HE) for the V7 M1 model registry and spend policy (modes, caps, no silent paid fallback) | V7 | beta | `core/src/jarves/model_policy.py` |
 | [INSTALL_TEST](INSTALL_TEST.md) | Windows installer owner test | V4 | current | itself |
 | [GOOGLE_SETUP](GOOGLE_SETUP.md) | Google connection | V3 | current | itself |

@@ -67,6 +67,7 @@ RATE_LIMIT = (6, 60.0)           # at most 6 NEW requests per 60 s; more are den
 DENY_COOLDOWN_S = 30.0           # an identical request denied by the owner is not asked again for 30 s, unless the
                                  # owner spoke / typed since (note_user_turn): a model retry loop cannot nag
 DASHBOARD_FRESH_S = 15.0         # a dashboard that polled within this time counts as a place to answer
+DASHBOARD_HIDDEN_FRESH_S = 90.0  # a HIDDEN tab's timers are throttled (~1/min): its heartbeat keeps the marker fresh this long (#477)
 VOICE_MIN_AGE_S = 1.5            # speech transcribed sooner than this after the request is not an answer to it
 POLL_S = 0.4                    # answers written by another process (dashboard, CLI)
 AUDIT_MAX_BYTES = 1_000_000
@@ -1018,11 +1019,16 @@ class TrayChannel:
 
 
 # ---------------------------------------------------------------------- dashboard
-def api_approvals(ctx, m, body):
+def api_approvals(ctx, m, body, q=None):
     home = Path(ctx.home)
+    hidden = str(((q or {}).get("hidden") or [""])[0]) == "1"
     try:
         (home / "approvals").mkdir(parents=True, exist_ok=True)
-        (home / "approvals" / "dashboard_seen").write_text(str(time.time()), encoding="utf-8")
+        seen = home / "approvals" / "dashboard_seen"
+        seen.write_text(str(time.time()), encoding="utf-8")
+        if hidden:       # throttled background tab: date the marker forward so it stays fresh until the next beat (#477)
+            t = time.time() + DASHBOARD_HIDDEN_FRESH_S - DASHBOARD_FRESH_S
+            os.utime(seen, (t, t))
     except OSError:
         pass
     svc = _current
