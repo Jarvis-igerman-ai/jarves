@@ -220,7 +220,7 @@ def test_retention_7_daily_4_weekly(profile):
     start = datetime(2026, 10, 19, 3, 0)
     bdir = profile / "backups"
     bdir.mkdir()
-    backup.set_settings(profile, {"max_total": 0})                     # 0 = no overall cap: per-kind rules only
+    backup.set_settings(profile, {"max_install": 0})                   # 0 = no install cap: per-kind rules only
 
     def fake(kind, when):                       # retention looks at names only: placeholders keep the test fast
         (bdir / f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
@@ -243,30 +243,37 @@ def test_retention_7_daily_4_weekly(profile):
         backup.set_settings(profile, {"daily": 0})
 
 
-def test_install_backups_are_capped_by_max_total_issue_1016(profile):
+def test_install_backups_are_capped_by_max_install_issue_1016(profile, capsys):
     """#1016: each beta install leaves a manual + a pre-migration backup; six installs must not keep all twelve."""
+    from jarves import cli
     start = datetime(2026, 11, 1, 3, 0)
     bdir = profile / "backups"
     bdir.mkdir()
-    for i in range(6):                                                 # six installs, one day apart
-        when = start + timedelta(days=i)
-        for kind, sec in (("manual", 0), ("pre-migration", 5)):
-            (bdir / f"jarves-backup-{when + timedelta(seconds=sec):%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
-    assert backup.get_settings(profile)["max_total"] >= 1              # a cap is on by default
-    backup.set_settings(profile, {"max_total": 4})
+
+    def fake(kind, when):
+        name = f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip"
+        (bdir / name).write_bytes(b"x")
+        return name
+    auto = fake("auto", start - timedelta(days=30))                    # old automatic history: not counted
+    installs = [[fake(k, start + timedelta(days=i, seconds=sec)) for k, sec in (("manual", 0), ("pre-migration", 5))]
+                for i in range(6)]                                     # six installs, one day apart
+    assert backup.get_settings(profile)["max_install"] == 8            # a cap is on by default
+    assert cli.main(["backup", "settings", "--max-install", "4"]) == 0
+    assert '"max_install": 4' in capsys.readouterr().out
     gone = backup.prune(profile)
-    left = backup.list_backups(profile)
-    assert len(left) <= 4 and len(gone) == 12 - len(left)
-    assert {b["kind"] for b in left} == {"manual", "pre-migration"}     # the newest of each kind survives
-    assert max(b["ts"] for b in left) == (start + timedelta(days=5, seconds=5)).timestamp()
-    for bad in (-1, 3):                                                # 1-3 cannot hold the newest of every kind
+    names = {b["name"] for b in backup.list_backups(profile)}
+    assert names == {auto, *installs[5], *installs[4]} and len(gone) == 8
+    for bad in (-1, 2):                                                # 1-2 cannot hold the newest of every kind
         with pytest.raises(ValueError):
-            backup.set_settings(profile, {"max_total": bad})
-    for when, kind in ((start - timedelta(days=9), "auto"), (start - timedelta(days=8), "pre-restore")):
-        (bdir / f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
-    backup.prune(profile)                                              # four kinds present: the cap still holds
-    left = backup.list_backups(profile)
-    assert len(left) == 4 and {b["kind"] for b in left} == set(backup.KINDS)
+            backup.set_settings(profile, {"max_install": bad})
+    restore = fake("pre-restore", start - timedelta(days=8))           # an old one is still its kind's newest
+    backup.set_settings(profile, {"max_install": 3})
+    backup.prune(profile)
+    assert {b["name"] for b in backup.list_backups(profile)} == {auto, *installs[5], restore}
+    backup.set_settings(profile, {"max_install": 0})                   # 0 = no cap: per-kind rules only
+    more = [fake("manual", start + timedelta(days=10 + i)) for i in range(4)]
+    assert backup.prune(profile) == []
+    assert {b["name"] for b in backup.list_backups(profile)} == {auto, *installs[5], restore, *more}
 
 
 def test_auto_backup_due_daily_and_switchable(profile):
