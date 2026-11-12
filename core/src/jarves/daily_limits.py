@@ -32,13 +32,15 @@ def set_daily(ai, *, voice_minutes: int | None = None, requests: int | None = No
         ai.daily_request_limit = requests
 
 
-def admit(budget, kind: str, language: str = "he") -> Decision:
+def admit(budget, kind: str, language: str = "he", *, left: float | None = None) -> Decision:
     """May one more voice conversation (`voice_seconds`) or AI request (`ai_requests`) start today?
     Voice needs at least the useful minimum left (a near-zero session would end at once and reconnect). Voice use
     is only known afterwards (Budget.record), so this check is its gate; AI requests still go through
-    Budget.reserve, which stays the atomic gate (this answer is only advice for them)."""
-    need = max(1.0, float(limits.SPECS[kind]["min_useful"]))
-    if budget.remaining(kind) >= need:
+    Budget.reserve, which stays the atomic gate (this answer is only advice for them).
+    `left` (raw units) overrides budget.remaining(kind), so a caller keeps its own source of "what is left".
+    Refused exactly when the shared limits view calls it exhausted: left < min_useful, or nothing left at all."""
+    left = float(budget.remaining(kind) if left is None else left)
+    if not (left < float(limits.SPECS[kind]["min_useful"]) or left <= 0):
         return Decision(True, kind)
     v = limits.view(kind, budget.used(kind), budget.limit(kind))
     return Decision(False, kind, v["code"], f"{v['text_en']} - {v['action_en']}",

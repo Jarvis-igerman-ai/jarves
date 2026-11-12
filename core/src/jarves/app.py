@@ -1375,7 +1375,8 @@ class Core:
             return
         self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
-        if not daily_limits.admit(self.budget, "voice_seconds", self.cfg.voice.language).allowed:
+        if not daily_limits.admit(self.budget, "voice_seconds", self.cfg.voice.language,
+                                  left=self._voice_budget_left_s()).allowed:
             # No cloud session for a budget that cannot carry one (it would end ~1 s later and reconnect in a loop).
             vv = limits_mod.view("voice_seconds", self.memory.usage_today("voice_seconds"), self.budget.limit("voice_seconds"))
             vv["level"] = "exhausted"

@@ -142,3 +142,16 @@ async def test_core_voice_start_goes_through_the_daily_limits_gate(home, cfg, mo
         assert err["max"] == 1 and "daily_realtime_minutes" in err["setting"]
     finally:
         await c.stop()
+
+
+def test_voice_gate_keeps_the_old_min_useful_boundary(budget):
+    """Same threshold as the gate it replaced in Core._start_live (left < min_useful refuses): 20 s left starts,
+    19 s does not, and a caller-supplied `left` is the value judged."""
+    from jarves import daily_limits
+    useful = int(limits.SPECS["voice_seconds"]["min_useful"])
+    budget.record("voice_seconds", 30 * MIN - useful)
+    assert daily_limits.admit(budget, "voice_seconds").allowed
+    budget.record("voice_seconds", 1)
+    assert not daily_limits.admit(budget, "voice_seconds").allowed
+    assert daily_limits.admit(budget, "voice_seconds", left=useful).allowed
+    assert not daily_limits.admit(budget, "voice_seconds", left=useful - 1).allowed
