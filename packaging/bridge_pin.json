@@ -1,6 +1,6 @@
 {
   "path": "bridge/whatsapp_bridge.exe",
-  "sha256": "1cda8af6af496f08aa5b73150095dc6e76c2330f0757ff0b13b683e11ff78c48",
+  "sha256": "ffda47c4bd597086b9d3f0fbac40207ae73fb399f165bfe3f555a8e1957f4c72",
   "version": "0.1.0",
   "toolchain": "go1.27.0 windows/amd64, CGO_ENABLED=0, -trimpath",
   "build": "scripts/build_whatsapp_bridge.ps1 -Version 0.1.0 (verified reproducible with -Verify)"

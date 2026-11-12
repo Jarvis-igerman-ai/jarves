@@ -171,3 +171,84 @@ func TestBackfillSinceAndUnansweredRequest(t *testing.T) {
 		t.Fatal("a request WhatsApp never answers must not hang the backfill")
 	}
 }
+
+func (e *env) bufLen() int {
+	e.s.mu.Lock()
+	defer e.s.mu.Unlock()
+	return len(e.s.bf.buf)
+}
+
+func TestBackfillBufferBoundHoldsForOversizedAnswersWithoutLoss(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBuffer = 60 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 80, 30*86400, "big") // the phone sends more than asked for
+	if n := e.bufLen(); n != 60 {
+		t.Fatalf("buffer must stop at its bound: %d", n)
+	}
+	got := e.drain(0)
+	if got.body["dropped"] != 20.0 || got.body["state"] != "running" {
+		t.Fatalf("dropped messages must be reported and the chat kept: %s", got.raw)
+	}
+	e.drain(60) // acknowledge: room again
+	reqs := e.requests()
+	if len(reqs) != 2 || reqs[1].Anchor.ID != "d1" {
+		t.Fatalf("a truncated answer must be asked again from the same anchor: %+v", reqs)
+	}
+}
+
+func TestBackfillIgnoresUnsolicitedHistory(t *testing.T) {
+	e := readyBackfill(t)
+	e.msg(stranger, "s1", 500, "other chat", false)
+	e.answer(dana, 5, 30*86400, "early") // no backfill running yet
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{"chat": dana}))
+	e.answer(stranger, 5, 30*86400, "other") // readable, but not the chat that was asked
+	if n := e.bufLen(); n != 0 {
+		t.Fatalf("unsolicited history buffered: %d", n)
+	}
+}
+
+func TestBackfillAckWipesMessagesAndSkipsChatsThatLeftTheScope(t *testing.T) {
+	e := readyBackfill(t)
+	e.msg(stranger, "s1", 500, "other chat", false)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	first := e.requests()[0].Chat
+	e.answer(first, 3, 30*86400, "w")
+	e.s.mu.Lock()
+	old := e.s.bf.buf[:cap(e.s.bf.buf)]
+	e.s.mu.Unlock()
+	e.drain(3)
+	for _, x := range old {
+		if x.m.Text != "" {
+			t.Fatal("acknowledged message text stays in memory")
+		}
+	}
+	e.mustOK(e.do("POST", "/allow", e.admin, map[string]any{"list": "read", "op": "add", "chat": first}))
+	e.mustOK(e.do("POST", "/read_scope", e.admin, map[string]any{"all_direct": false}))
+	e.answer(first, 1, 40*86400, "x") // `first` is still readable (allow-list); the other chat is not
+	e.answer(first, 0, 0, "end")
+	for _, r := range e.requests() {
+		if r.Chat != first {
+			t.Fatalf("requested history of a chat that left the read scope: %+v", e.requests())
+		}
+	}
+	if got := e.drain(0); got.body["state"] != "done" {
+		t.Fatalf("state %s", got.raw)
+	}
+}
+
+func TestBackfillConcurrentStartsRunOnce(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillWait = time.Minute })
+	codes := make(chan int, 8)
+	for i := 0; i < 8; i++ {
+		go func() { codes <- e.do("POST", "/history/backfill", e.admin, map[string]any{}).code }()
+	}
+	ok := 0
+	for i := 0; i < 8; i++ {
+		if <-codes == 200 {
+			ok++
+		}
+	}
+	if ok != 1 || len(e.requests()) != 1 {
+		t.Fatalf("%d starts accepted, %d requests", ok, len(e.requests()))
+	}
+}

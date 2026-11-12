@@ -21,6 +21,9 @@ const (
 	BackfillBatch  = 50   // messages per on-demand request (whatsmeow's recommendation)
 	backfillBufMax = 2000 // default buffer bound; requests pause until Core drains
 	backfillWait   = 60 * time.Second
+	// backfillRetries: a truncated answer is asked again from the same anchor (after Core drains) this many times
+	// before the chat moves on and the overflow counts as dropped.
+	backfillRetries = 3
 )
 
 type bfChat struct {
@@ -38,9 +41,13 @@ type backfill struct {
 	state     string // idle | running | done | stopped | failed
 	queue     []bfChat
 	since     float64
-	waiting   bool // a request for queue[0] is out
-	gen       int  // invalidates the timer of an earlier request
-	older     bool // the current answer brought a message older than the anchor
+	waiting   bool                 // a request for queue[0] is out
+	gen       int                  // invalidates the timer of an earlier request
+	older     bool                 // the current answer brought a message older than the anchor
+	reqAnchor engine.HistoryAnchor // the anchor of the request that is out
+	truncated bool                 // the current answer did not fit the buffer
+	retries   int                  // truncated answers of the current chat asked again
+	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	total     int
 	done      int
 	skipped   int // readable chats without a stored message to anchor on
@@ -62,6 +69,7 @@ func (s *Server) bfClearLocked(state string) {
 	if s.bf.state == "" || s.bf.state == "idle" {
 		return
 	}
+	wipe(s.bf.buf)
 	s.bf.buf, s.bf.queue, s.bf.waiting = nil, nil, false
 	s.bf.gen++
 	if s.bf.state == "running" || state != "stopped" {
@@ -79,6 +87,13 @@ func (s *Server) bfStop() {
 	}
 }
 
+// wipe zeroes buffered messages so their text does not linger in a slice's backing array.
+func wipe(l []bfMsg) {
+	for i := range l {
+		l[i] = bfMsg{}
+	}
+}
+
 // bfNext sends the request for the current chat when nothing is out and the buffer has room. Called without s.mu.
 func (s *Server) bfNext() {
 	s.mu.Lock()
@@ -86,6 +101,10 @@ func (s *Server) bfNext() {
 	if b.state != "running" || b.waiting || len(b.buf)+BackfillBatch > s.bfBufMax() {
 		s.mu.Unlock()
 		return
+	}
+	for len(b.queue) > 0 && !s.readableLocked(b.queue[0].chat) { // left the read scope: never ask for it again
+		b.queue, b.retries = b.queue[1:], 0
+		b.done++
 	}
 	if len(b.queue) == 0 {
 		b.state = "done"
@@ -95,7 +114,7 @@ func (s *Server) bfNext() {
 		return
 	}
 	c := b.queue[0]
-	b.waiting, b.older = true, false
+	b.waiting, b.older, b.truncated, b.reqAnchor = true, false, false, c.anchor
 	b.gen++
 	gen := b.gen
 	s.mu.Unlock()
@@ -127,10 +146,17 @@ func (s *Server) bfMessage(m msgstore.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b := &s.bf
-	if b.state != "running" || !s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
+	// only the answer to the request that is out, for a readable chat; nothing unsolicited
+	if b.state != "running" || !b.waiting || len(b.queue) == 0 || b.queue[0].chat != m.Chat ||
+		!s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
 		return
 	}
-	if len(b.queue) > 0 && b.queue[0].chat == m.Chat && m.TS < b.queue[0].anchor.TS {
+	if len(b.buf) >= s.bfBufMax() { // hard bound, whatever the phone sends
+		b.truncated = true
+		b.dropped++
+		return
+	}
+	if m.TS < b.queue[0].anchor.TS {
 		b.queue[0].anchor = engine.HistoryAnchor{ID: m.ID, FromMe: m.FromMe, TS: m.TS}
 		b.older = true
 	}
@@ -164,8 +190,13 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		return
 	}
 	b.waiting = false
-	if timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since) {
-		b.queue = b.queue[1:]
+	switch {
+	case b.truncated && !timeout && b.retries < backfillRetries:
+		// part of the answer did not fit: ask again from the same anchor once Core has drained (no loss)
+		b.queue[0].anchor = b.reqAnchor
+		b.retries++
+	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
+		b.queue, b.retries = b.queue[1:], 0
 		b.done++
 	}
 	s.mu.Unlock()
@@ -183,7 +214,7 @@ func (s *Server) bfProgressLocked() map[string]any {
 		ec = b.errorCode
 	}
 	return map[string]any{"state": st, "chats_total": b.total, "chats_done": b.done, "chats_skipped": b.skipped,
-		"received": b.received, "buffered": len(b.buf), "error": ec, "batch": BackfillBatch}
+		"received": b.received, "buffered": len(b.buf), "dropped": b.dropped, "error": ec, "batch": BackfillBatch}
 }
 
 // hBackfillStart: POST /history/backfill {"chat"?, "since"?} (ADMIN).
@@ -247,6 +278,11 @@ func (s *Server) hBackfillStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
+	if s.bf.state == "running" { // a concurrent start won the race
+		s.mu.Unlock()
+		writeErr(w, 409, "WA_BACKFILL_RUNNING", nil)
+		return
+	}
 	nb.gen = s.bf.gen + 1
 	s.bf = nb
 	s.mu.Unlock()
@@ -275,12 +311,13 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	b := &s.bf
-	keep := b.buf[:0]
+	keep := make([]bfMsg, 0, len(b.buf))
 	for _, x := range b.buf {
 		if x.seq > cursor {
 			keep = append(keep, x)
 		}
 	}
+	wipe(b.buf) // acknowledged text must not linger in the old backing array
 	b.buf = keep
 	s.mu.Unlock()
 	s.bfNext() // room again: resume a paused backfill
