@@ -91,6 +91,8 @@ HE = {   # Hebrew answers for bridge codes (fixed strings)
     "WA_BAD_PATTERN": "תבנית החיפוש לא תקינה. אפשר לחפש חלק מהשם, או להשתמש ב-* ? \"..\" א|ב ^ $.",
     "WA_ARCHIVE_OFF": "שמירה ארוכה מ-90 ימים דורשת את הארכיון המוצפן. מפעילים במחשב: jarvis whatsapp archive on.",
     "WA_BAD_DATE": "התאריך לא ברור. אפשר 2026-09-01 או 30d (ימים), 2w, 3m, 1y.",
+    "WA_KEEP_NOTHING": "\"לא לשמור כלום\" פועל, אז לא מביאים היסטוריה. מכבים אותו קודם בעמוד וואטסאפ.",
+    "WA_BACKFILL_RUNNING": "הבאת היסטוריה כבר רצה. מחכים שתסתיים או עוצרים: jarvis whatsapp archive backfill --stop.",
 }
 
 

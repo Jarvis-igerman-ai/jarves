@@ -1,0 +1,1 @@
+- Added: jarvis whatsapp archive backfill [--from CONTACT] [--since DATE] [--stop] and a dashboard WhatsApp page button fetch older WhatsApp history from the phone into the encrypted archive (no age limit by default, progress and a stop; JAR-272, beta inside the archive feature, OFF by default; real-phone behaviour UNVERIFIED).

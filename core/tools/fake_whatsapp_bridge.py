@@ -42,6 +42,7 @@ VERSION = "fake-1"
 KILL_POLL_S = 0.1   # kill-file poll period; contract promises <= 250 ms (asserted by value, not wall clock)
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 MAX_BODY = 64 * 1024
+BF_BATCH, BF_BUF = 50, 2000                    # history backfill: per request, memory buffer bound (PROTOCOL.md 3a)
 DEFAULT_POLICY = {"v": 1, "mode": "off", "read_scope": {"all_direct": True, "groups": False}, "read_allow": [],
                   "send_allow": [], "retention_days": 14, "keep_nothing": False, "read_since": None,
                   "warnings_since_read": 0}
@@ -105,6 +106,13 @@ class FakeBridge:
             self.connection = "disconnected" if self.linked else self.connection
         self._stop = threading.Event()
         self.httpd: ThreadingHTTPServer | None = None
+        # history backfill: what the "phone" still has but the bridge never stored, the requests sent, the buffer
+        self.phone_history: dict[str, list[dict]] = {}
+        self.history_requests: list[tuple[str, int]] = []
+        self.bf_buf_max = BF_BUF
+        self.bf: dict = {"state": "idle"}
+        self.bf_buf: list[tuple[int, dict]] = []
+        self.bf_seq = 0
 
     # ------------------------------------------------------------------ files
     def _read_or_make(self, name: str, prefix: str) -> str:
@@ -246,6 +254,7 @@ class FakeBridge:
 
     def kill(self, reason: str = "owner", logout: bool = False) -> None:
         with self.lock:
+            self._bf_clear()
             _write_private(self.dir / "KILL", reason + "\n")
             was = self.killed
             self.killed, self.kill_reason = True, reason
@@ -413,6 +422,8 @@ class FakeBridge:
             if mode == "read" and (self.policy["mode"] != "read" or self.policy.get("read_since") is None):
                 self.policy["read_since"], self.policy["warnings_since_read"] = self.now(), 0
             self.policy["mode"] = mode
+            if mode == "off":
+                self._bf_clear()
             self._save_policy()
         self.emit("mode.changed", mode=mode)
         return {"mode": mode}
@@ -467,6 +478,7 @@ class FakeBridge:
         with self.lock:
             self.linked, self.connection = False, "not_linked"
             self.chats, self.messages, self.link["state"] = {}, {}, "idle"
+            self._bf_clear()
             self.store.wipe()
             self.locked = False
         self.emit("logged_out", reason="unlinked_by_owner")
@@ -480,6 +492,8 @@ class FakeBridge:
             self.policy["retention_days"] = days
             if isinstance(b.get("keep_nothing"), bool):
                 self.policy["keep_nothing"] = b["keep_nothing"]
+            if self.policy["keep_nothing"]:
+                self._bf_clear()
             self._save_policy()
             self._purge()
             self._seal()
@@ -504,6 +518,93 @@ class FakeBridge:
         except OSError:
             lines = []
         return {"lines": [json.loads(x) for x in lines[-limit:] if x.strip()]}
+
+    # ------------------------------------------------------------------ history backfill (PROTOCOL.md section 3a)
+    def phone_has(self, chat: str, text: str, *, ts: float, from_me: bool = False) -> str:
+        """Test control: a message the phone still has, older than anything the bridge stored."""
+        mid = "3EB0" + secrets.token_hex(8).upper()
+        with self.lock:
+            self.phone_history.setdefault(chat, []).append(
+                {"id": mid, "chat": chat, "from_me": from_me, "sender_name": "", "ts": float(ts), "kind": "text",
+                 "text": text, "media": None, "edited": False, "deleted": False})
+        return mid
+
+    def _bf_clear(self) -> None:
+        if self.bf.get("state") == "running":
+            self.bf["state"] = "stopped"
+        self.bf["queue"], self.bf_buf = [], []
+
+    def _bf_pump(self) -> None:
+        """Answer requests at once (a real phone answers later) while the buffer has room."""
+        b = self.bf
+        while b.get("state") == "running" and len(self.bf_buf) + BF_BATCH <= self.bf_buf_max:
+            if not b["queue"]:
+                b["state"] = "done"
+                return
+            chat, anchor = b["queue"][0]
+            self.history_requests.append((chat, BF_BATCH))
+            older = sorted((m for m in self.phone_history.get(chat, []) if m["ts"] < anchor), key=lambda m: -m["ts"])
+            got = older[:BF_BATCH]
+            for m in got:
+                if m["ts"] >= b["since"] and self._readable(chat):
+                    self.bf_seq += 1
+                    b["received"] += 1
+                    self.bf_buf.append((self.bf_seq, dict(m)))
+            if not got or got[-1]["ts"] < b["since"]:
+                b["queue"].pop(0)
+                b["done"] += 1
+            else:
+                b["queue"][0] = (chat, got[-1]["ts"])
+
+    def _bf_progress(self) -> dict:
+        b = self.bf
+        return {"state": b.get("state", "idle"), "chats_total": b.get("total", 0), "chats_done": b.get("done", 0),
+                "chats_skipped": b.get("skipped", 0), "received": b.get("received", 0), "buffered": len(self.bf_buf),
+                "error": None, "batch": BF_BATCH}
+
+    def h_backfill_start(self, b: dict) -> dict:
+        if self.locked:
+            raise ApiError(409, "WA_STORE_LOCKED", "the store does not decrypt for this Windows user or PC")
+        self._need_read()
+        since, only = b.get("since") or 0, str(b.get("chat") or "")
+        if not isinstance(since, (int, float)) or since < 0:
+            raise ApiError(400, "WA_BAD_REQUEST", "since must be a timestamp")
+        with self.lock:
+            if self.killed:
+                raise ApiError(423, "WA_KILLED", pol.MESSAGES["WA_KILLED"])
+            if self.policy["keep_nothing"]:
+                raise ApiError(409, "WA_KEEP_NOTHING", "keep-nothing is on: history is not collected")
+            if self.bf.get("state") == "running":
+                raise ApiError(409, "WA_BACKFILL_RUNNING", "a history backfill is already running")
+            if self.connection != "connected":
+                raise ApiError(503, "WA_NOT_CONNECTED", "WhatsApp is not connected")
+            chats = [j for j in self.chats if self._readable(j) and (not only or j == only)]
+            if only and not chats:
+                raise ApiError(404, "WA_CHAT_NOT_FOUND", "no readable chat with this id")
+            queue_ = [(j, min(m["ts"] for m in self.messages[j])) for j in chats if self.messages.get(j)]
+            self.bf = {"state": "running", "since": float(since), "queue": queue_, "total": len(chats),
+                       "done": len(chats) - len(queue_), "skipped": len(chats) - len(queue_), "received": 0}
+            self.bf_buf = []
+            self._bf_pump()
+            return self._bf_progress()
+
+    def h_backfill_get(self, q: dict) -> dict:
+        self._need_read()
+        cursor = int(q.get("cursor") or 0)
+        with self.lock:
+            self.bf_buf = [x for x in self.bf_buf if x[0] > cursor]
+            self._bf_pump()
+            out, nxt = [], cursor
+            for seq, m in self.bf_buf[:500]:
+                nxt = seq
+                if self._readable(m["chat"]):
+                    out.append(m)
+            return {**self._bf_progress(), "messages": out, "next_cursor": nxt}
+
+    def h_backfill_stop(self) -> dict:
+        with self.lock:
+            self._bf_clear()
+            return self._bf_progress()
 
     def h_fake(self, what: str, b: dict) -> dict:
         if what == "deliver":
@@ -593,6 +694,9 @@ class FakeBridge:
                              ("POST", "/retention"): lambda: bridge.h_retention(b),
                              ("POST", "/purge"): lambda: bridge.h_purge(b), ("GET", "/audit"): lambda: bridge.h_audit(q),
                              ("GET", "/policy"): lambda: dict(bridge.policy),
+                             ("POST", "/history/backfill"): lambda: bridge.h_backfill_start(b),
+                             ("GET", "/history/backfill"): lambda: bridge.h_backfill_get(q),
+                             ("DELETE", "/history/backfill"): lambda: bridge.h_backfill_stop(),
                              ("POST", "/shutdown"): lambda: (threading.Thread(target=bridge.stop, daemon=True).start(),
                                                              {"ok": True})[1]}
                     if (method, p) in user:
@@ -614,6 +718,9 @@ class FakeBridge:
 
             def do_POST(self):
                 self._route("POST")
+
+            def do_DELETE(self):
+                self._route("DELETE")
 
         class Server(ThreadingHTTPServer):
             daemon_threads = True

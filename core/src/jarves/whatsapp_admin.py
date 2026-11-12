@@ -288,6 +288,25 @@ def unlink_bridge(home: Path) -> dict:
     return r
 
 
+BACKFILL_EN = ("Fetching older WhatsApp history from your phone, 50 messages per request, with no age limit (beta; "
+               "WhatsApp may send less than it has). It goes straight into the encrypted archive. Ctrl+C stops.")
+BACKFILL_HE = ("מביא היסטוריה ישנה של וואטסאפ מהטלפון, 50 הודעות בכל בקשה, בלי הגבלת גיל (בטא; ייתכן שוואטסאפ ישלח "
+               "פחות ממה שיש לו). זה נכנס ישר לארכיון המוצפן. Ctrl+C עוצר.")
+
+
+def backfill_target(home: Path, who: str = "", since: str = "") -> tuple[str | None, float | None]:
+    """(chat JID or None = every readable chat, since ts or None = no age limit). Raises DateError / BridgeError."""
+    t0 = arc.parse_when(since, time.time()) if since.strip() else None
+    if not who.strip():
+        return None, t0
+    if any(ch.isdigit() for ch in who) and pol.number_to_jid(who):
+        return pol.number_to_jid(who), t0
+    hits = wab.resolve(BridgeClient(home).chats(None, 500), who, wab.contacts_book(home))
+    if len(hits) != 1:
+        raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
+    return hits[0]["id"], t0
+
+
 def search(home: Path, query: str, *, who: str = "", since: str = "", until: str = "", limit: int = 10,
            archive_on: bool = False) -> dict:
     """`jarvis whatsapp search`: the owner's own search at the PC. Archive when its switch is on, else the bridge's own
@@ -322,12 +341,14 @@ def add_cli(sub) -> None:
     w = sub.add_parser("whatsapp", help="real WhatsApp access through the local bridge (PC only): status | start | "
                                         "stop | install | setup | link | unlink | mode off|read|send | allow read|send <contact> | "
                                         "remove read|send <contact> | scope | inbox | find <part of a name, typos/patterns ok> | send <contact> \"<text>\" | "
-                                        "kill | purge | retention <days|year|forever> | audit | search \"<words>\" | archive on|off|status|sync|wipe")
+                                        "kill | purge | retention <days|year|forever> | audit | search \"<words>\" | archive on|off|status|sync|wipe|backfill")
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
-                                          "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe")
-    w.add_argument("--from", dest="from_who", default="", help="search: only the chat with this contact")
-    w.add_argument("--since", default="", help="search: from this date (2026-09-01) or ago (30d, 2w, 3m, 1y)")
+                                          "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe|backfill")
+    w.add_argument("--from", dest="from_who", default="", help="search, archive backfill: only the chat with this contact")
+    w.add_argument("--since", default="", help="search, archive backfill: from this date (2026-09-01) or ago (30d, 2w, "
+                                               "3m, 1y); backfill default: no age limit")
+    w.add_argument("--stop", action="store_true", help="archive backfill: stop a running history backfill")
     w.add_argument("--until", default="", help="search: up to this date (inclusive)")
     w.add_argument("--phone", default="", help="link: get an 8-character pairing code for this number instead of a QR")
     w.add_argument("--window", action="store_true", help="link: also show the QR on the dashboard WhatsApp page")
@@ -514,9 +535,12 @@ def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
     from .cli import _cli_features
     op = args[0] if args else "status"
     f = _cli_features(cfg, home)
-    if op not in ("on", "off", "status", "sync", "wipe"):
-        print("usage: jarvis whatsapp archive on|off|status|sync|wipe", file=sys.stderr)
+    if op not in ("on", "off", "status", "sync", "wipe", "backfill"):
+        print("usage: jarvis whatsapp archive on|off|status|sync|wipe|backfill [--from <contact>] [--since <date>] "
+              "[--stop]", file=sys.stderr)
         return 2
+    if op == "backfill":
+        return _backfill_cli(home, f, a)
     if op == "on":
         print(clilang.fmt(ARCHIVE_ON_HE, ARCHIVE_ON_EN))
         if not a.yes and not _confirm(clilang.fmt("להפעיל את הארכיון? [y/N] ", "Turn the archive on? [y/N] ")):
@@ -548,6 +572,55 @@ def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
         _print(res, a.json)
         return 0 if not res.get("skipped") else 1
     _print({"enabled": f.enabled(arc.FEATURE), **arc.get(home).stats()}, a.json)
+    return 0
+
+
+def _backfill_cli(home: Path, f, a) -> int:
+    if a.stop:
+        _print(admin(home).call("DELETE", "/history/backfill"), a.json)
+        return 0
+    if not f.enabled(arc.FEATURE):
+        print(clilang.fmt("הארכיון כבוי: jarvis whatsapp archive on", "archive is off: jarvis whatsapp archive on"))
+        return 1
+    try:
+        chat, since = backfill_target(home, a.from_who, a.since)
+    except arc.DateError:
+        print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
+        return 2
+    ar = arc.get(home)
+    print(clilang.fmt(BACKFILL_HE, BACKFILL_EN))
+    if ar.keep_days:
+        print(clilang.fmt(f"שימו לב: הארכיון שומר {ar.keep_days} ימים, הודעות ישנות יותר יימחקו. לשמור הכול: "
+                          "jarvis whatsapp retention forever",
+                          f"Note: the archive keeps {ar.keep_days} days, so older messages are dropped. To keep "
+                          "everything: jarvis whatsapp retention forever"))
+    last = [None]
+
+    def show(p: dict) -> None:
+        line = (p.get("chats_done"), p.get("chats_total"), p.get("added"))
+        if line != last[0]:
+            last[0] = line
+            print(clilang.fmt(f"צ'אטים {line[0]}/{line[1]}, הועתקו {line[2]}", f"chats {line[0]}/{line[1]}, copied {line[2]}"),
+                  flush=True)
+    ad = admin(home)
+    try:
+        res = ar.backfill(ad, chat=chat, since=since, progress=show)
+    except KeyboardInterrupt:
+        try:
+            ad.call("DELETE", "/history/backfill")
+        except BridgeError:
+            pass
+        ar.flush(force=True)
+        print(clilang.fmt("נעצר.", "stopped."))
+        return 1
+    if a.json:
+        _print(res, True)
+    else:
+        print(clilang.fmt(f"סיום: {res.get('state')}, הועתקו {res['added']}, בארכיון עכשיו {ar.count()}",
+                          f"finished: {res.get('state')}, copied {res['added']}, archive now holds {ar.count()}"))
+    if res.get("skipped"):
+        print(f"{res['skipped']}: {clilang.fmt(wab.HE.get(res['skipped'], ''), 'not started')}")
+        return 1
     return 0
 
 
@@ -794,7 +867,9 @@ def view(ctx) -> dict:
            "bridge_download": wbi.status(ctx.home),
            "tos": TOS_NOTE, "tos_he": TOS_NOTE_HE, "local": _local(ctx),
            "archive": {**arc.get(ctx.home).stats(), "feature": f.status(arc.FEATURE),
-                       "enabled": f.enabled(arc.FEATURE), "about": ARCHIVE_ON_EN, "about_he": ARCHIVE_ON_HE}}
+                       "enabled": f.enabled(arc.FEATURE), "about": ARCHIVE_ON_EN, "about_he": ARCHIVE_ON_HE,
+                       "backfill": arc.backfill_status(ctx.home), "backfill_about": BACKFILL_EN,
+                       "backfill_about_he": BACKFILL_HE}}
     if st is not None and _local(ctx):
         try:
             ad = admin(ctx.home)
@@ -930,7 +1005,21 @@ def dashboard_routes(register) -> None:
                 raise BridgeError("WA_BAD_REQUEST", "this cannot be undone: send {\"confirm\": true}", 400)
             arc.get(ctx.home).wipe()
             return {"ok": True, "archive": arc.get(ctx.home).stats()}
-        raise BridgeError("WA_BAD_REQUEST", "op must be on, off or wipe", 400)
+        if op == "backfill":
+            if not _ctx_features(ctx).enabled(arc.FEATURE):
+                raise BridgeError("WA_ARCHIVE_OFF", "turn the archive on first", 409)
+            try:
+                chat, since = backfill_target(ctx.home, str(b.get("from") or ""), str(b.get("since") or ""))
+            except arc.DateError:
+                raise BridgeError("WA_BAD_DATE", "bad date", 400) from None
+            return {"ok": True, "backfill": arc.start_backfill(ctx.home, admin(ctx.home), chat=chat, since=since)}
+        if op == "backfill_stop":
+            try:
+                admin(ctx.home).call("DELETE", "/history/backfill")
+            finally:
+                st = arc.stop_backfill(ctx.home)
+            return {"ok": True, "backfill": st}
+        raise BridgeError("WA_BAD_REQUEST", "op must be on, off, wipe, backfill or backfill_stop", 400)
 
     def purge(ctx, b):
         if b.get("confirm") is not True:

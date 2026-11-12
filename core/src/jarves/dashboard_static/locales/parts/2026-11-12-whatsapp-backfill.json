@@ -1,0 +1,9 @@
+{
+ "dict": {
+  "Fetch all the history WhatsApp still has?": "להביא את כל ההיסטוריה שיש לוואטסאפ?",
+  "Fetch older history (beta)": "הבאת היסטוריה ישנה (בטא)",
+  "Fetching older history in the background. Refresh to see progress.": "מביא היסטוריה ישנה ברקע. רעננו כדי לראות התקדמות.",
+  "History fetch stopped.": "הבאת ההיסטוריה נעצרה.",
+  "Stop fetching history": "עצירת הבאת היסטוריה"
+ }
+}

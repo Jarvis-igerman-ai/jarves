@@ -39,6 +39,7 @@ DEFAULT_KEEP = 14
 FLUSH_EVERY_S = 5.0
 OVERLAP_S = 2 * 86400                       # re-read this much on each pull: edits and deletions of recent messages
 PAGE = 500                                  # the bridge returns at most 500 messages per call
+BACKFILL_POLL_S = 1.0                       # history backfill: wait between empty drains while the phone answers
 PREFIX_LETTERS = "והבלמשכ"
 FINALS = str.maketrans("םןץףך", "מנצפכ")
 _DROP = set("'’‘ʼ׳״\"`´")                   # apostrophes / geresh: "don't" -> "dont", "צ'ק" -> "צק"
@@ -463,6 +464,102 @@ class Archive:
         if added or dropped:
             logs.info("whatsapp", "WA_ARCHIVE_SYNCED", "WhatsApp archive updated", added=added, removed=dropped)
         return {"added": added, "dropped": dropped}
+
+    # -- long history backfill (JAR-272; bridge PROTOCOL.md section 3a; real-phone behaviour UNVERIFIED)
+    def backfill(self, admin, *, chat: str | None = None, since: float | None = None,
+                 stop: threading.Event | None = None, progress=None, sleep=time.sleep,
+                 poll_s: float = BACKFILL_POLL_S) -> dict:
+        """Ask the bridge (ADMIN client) to fetch older history from the phone, 50 messages per request, with no age
+        limit unless `since`, and copy what it hands over. The bridge keeps that history only in memory; each drain
+        acknowledges the previous one. Same gates as sync: mode, kill switch, keep-nothing, locked store, read scope.
+        `stop` ends it (the bridge then drops its buffer). Never raises for a bridge refusal."""
+        from .whatsapp_bridge import BridgeError
+        stop = stop or threading.Event()
+        out = {"added": 0, "received": 0, "chats_done": 0, "chats_total": 0, "buffered": 0, "state": "idle"}
+        try:
+            st = admin.status()
+            if st.get("mode") not in ("read", "send") or st.get("killed"):
+                return {**out, "skipped": "WA_KILLED" if st.get("killed") else "WA_MODE_OFF"}
+            if st.get("keep_nothing"):
+                return {**out, "skipped": "WA_KEEP_NOTHING"}
+            if st.get("store_locked") or st.get("store") == "locked":
+                return {**out, "skipped": "WA_STORE_LOCKED"}
+            body = {k: v for k, v in (("chat", chat), ("since", since)) if v}
+            try:
+                admin.call("POST", "/history/backfill", body=body)
+            except BridgeError as e:
+                if e.code != "WA_BACKFILL_RUNNING":                   # already running (e.g. the dashboard): join it
+                    raise
+            logs.info("whatsapp", "WA_ARCHIVE_BACKFILL", "WhatsApp history backfill started",
+                      target_kind="chat" if chat else "all")
+            cursor = 0
+            while True:
+                if stop.is_set():
+                    r = admin.call("DELETE", "/history/backfill")
+                    out.update(state="stopped", buffered=0)
+                    break
+                r = admin.call("GET", "/history/backfill", params={"cursor": cursor})
+                msgs = [m for m in r.get("messages", []) if isinstance(m, dict)
+                        and (since is None or (isinstance(m.get("ts"), (int, float)) and m["ts"] >= since))]
+                if msgs:
+                    out["added"] += self.add(msgs)
+                    self.flush()
+                cursor = r.get("next_cursor", cursor) if isinstance(r.get("next_cursor"), int) else cursor
+                out.update(received=r.get("received", 0), chats_done=r.get("chats_done", 0),
+                           chats_total=r.get("chats_total", 0), buffered=r.get("buffered", 0), state=r.get("state"))
+                if progress:
+                    progress(dict(out))
+                if not msgs:
+                    if out["state"] != "running":
+                        break
+                    sleep(poll_s)
+        except BridgeError as e:
+            out["skipped"] = e.code
+        except StoreLocked:
+            out["skipped"] = "WA_STORE_LOCKED"
+        self.enforce()
+        self.flush(force=True)
+        logs.info("whatsapp", "WA_ARCHIVE_BACKFILL", "WhatsApp history backfill ended", added=out["added"],
+                  state=out["state"], reason=out.get("skipped", ""))
+        return out
+
+
+# One background backfill per home (the dashboard button); the CLI runs in the foreground.
+_JOBS: dict[str, dict] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+def start_backfill(home: Path, admin, *, chat: str | None = None, since: float | None = None) -> dict:
+    key = str(Path(home).resolve())
+    with _JOBS_LOCK:
+        job = _JOBS.get(key)
+        if job and job["thread"].is_alive():
+            return dict(job["progress"])
+        job = _JOBS[key] = {"stop": threading.Event(), "progress": {"state": "running", "added": 0}}
+
+        def run() -> None:
+            res = get(home).backfill(admin, chat=chat, since=since, stop=job["stop"],
+                                     progress=lambda p: job["progress"].update(p))
+            job["progress"] = {**res, "state": res.get("state") if not res.get("skipped") else "failed"}
+
+        job["thread"] = threading.Thread(target=run, name="wa-backfill", daemon=True)
+        job["thread"].start()
+        return dict(job["progress"])
+
+
+def stop_backfill(home: Path) -> dict:
+    with _JOBS_LOCK:
+        job = _JOBS.get(str(Path(home).resolve()))
+    if job:
+        job["stop"].set()
+        job["thread"].join(timeout=10)
+    return backfill_status(home)
+
+
+def backfill_status(home: Path) -> dict:
+    with _JOBS_LOCK:
+        job = _JOBS.get(str(Path(home).resolve()))
+        return dict(job["progress"]) if job else {"state": "idle"}
 
 
 _REG: dict[str, Archive] = {}

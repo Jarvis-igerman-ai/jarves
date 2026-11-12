@@ -86,6 +86,10 @@ PAGES.whatsapp = async function () {
   const rate = st.rate || {};
   const lim = rate.limits || {};
   const ar = d.archive || {};
+  const bf = ar.backfill || {};
+  const bfRunning = bf.state === "running";
+  const bfText = bf.state && bf.state !== "idle" ? tx(`היסטוריה: ${bfRunning ? "רץ" : bf.state === "done" ? "הסתיים" : "נעצר"}, צ'אטים ${bf.chats_done ?? 0}/${bf.chats_total ?? 0}, הועתקו ${bf.added ?? 0}`,
+    `History: ${bf.state}, chats ${bf.chats_done ?? 0}/${bf.chats_total ?? 0}, copied ${bf.added ?? 0}`) : "";
   const cur = ar.enabled && Number.isInteger(ar.keep_days) ? ar.keep_days : (st.retention_days || 14);
   const opts = [[14, tx("14 ימים (ברירת מחדל)", "14 days (default)"), true], [90, tx("90 ימים", "90 days"), true],
     [365, tx("שנה (דורש ארכיון)", "1 year (needs the archive)"), !!ar.enabled], [0, tx("לתמיד (דורש ארכיון)", "Forever (needs the archive)"), !!ar.enabled]];
@@ -170,6 +174,10 @@ PAGES.whatsapp = async function () {
           : el("button", { type: "button", class: "primary", disabled: !d.local || !st.linked, onclick: () => window.confirm(tx(d.archive.about_he, d.archive.about) + "\n\n" + tx("להפעיל את הארכיון?", "Turn the archive on?")) && post("archive", { op: "on" }, tx("הארכיון פועל. בחרו כמה זמן לשמור למעלה.", "Archive on. Choose how long to keep above.")) }, tx("הפעלת הארכיון", "Turn the archive on")),
         el("button", { type: "button", class: "ghost", disabled: !d.local || !(ar.messages || ar.bytes), onclick: () => window.confirm(tx("למחוק את כל הארכיון ואת אינדקס החיפוש?", "Delete the whole archive and its search index?")) && post("archive", { op: "wipe", confirm: true }) }, tx("מחיקת הארכיון", "Wipe the archive"))),
       el("div", { class: "small" }, sizeText),
+      ar.enabled ? el("div", { class: "row", style: "margin-top:8px" },
+        bfRunning ? el("button", { type: "button", class: "ghost", disabled: !d.local, onclick: () => post("archive", { op: "backfill_stop" }, tx("הבאת ההיסטוריה נעצרה.", "History fetch stopped.")) }, tx("עצירת הבאת היסטוריה", "Stop fetching history"))
+          : el("button", { type: "button", disabled: !d.local || !st.linked || st.keep_nothing, onclick: () => window.confirm(tx(ar.backfill_about_he, ar.backfill_about) + "\n\n" + tx("להביא את כל ההיסטוריה שיש לוואטסאפ?", "Fetch all the history WhatsApp still has?")) && post("archive", { op: "backfill" }, tx("מביא היסטוריה ישנה ברקע. רעננו כדי לראות התקדמות.", "Fetching older history in the background. Refresh to see progress.")) }, tx("הבאת היסטוריה ישנה (בטא)", "Fetch older history (beta)")),
+        el("span", { class: "small" }, bfText)) : "",
       el("div", { class: "row", style: "margin-top:8px" }, bq, bfrom, bsince, el("button", { type: "button", disabled: !d.local, onclick: runSearch }, tx("חיפוש", "Search"))),
       found),
     el("h2", {}, tx("תיבת הודעות (האחרונה קודם)", "Inbox (most recent first)")),
