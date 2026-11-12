@@ -262,7 +262,9 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
     local = row.amount
     row.why_unsure = [w for w in row.why_unsure if w not in ("payee guessed", "no amount")]
     if amt is not None:
-        if local is not None and abs(local - amt) > 0.005 and amt not in amounts(row.quote):
+        if local is None:                                   # the text states no amount: the model's is a guess
+            row.why_unsure.append("amount not in text")
+        elif abs(local - amt) > 0.005 and amt not in amounts(row.quote):
             row.flag("amount differs from the text")
         row.amount = amt
     elif local is None:
@@ -321,15 +323,20 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
 
 
 def dedup(rows: list[Row]) -> tuple[list[Row], int]:
-    """One row per message; the same text on the same day in two chats (a forward) counts once."""
+    """One row per message; the same text on the same day in ANOTHER chat (a forward) counts once. Two identical
+    messages in one chat are two payments and both stay."""
     out: list[Row] = []
     seen: set[str] = set()
+    content: dict[str, str] = {}                            # same day + text + amount -> the chat id it was first in
     for r in sorted(rows, key=lambda r: (r.ts, r._key)):
         f = " ".join(fold(r.quote).split())
-        keys = {r._key} | ({f"{r.date}|{f}|{r.amount}"} if len(f) >= 15 else set())
-        if keys & seen:
+        ck = f"{r.date}|{f}|{r.amount}" if len(f) >= 15 else ""
+        cid = r._key.split("|", 1)[0]
+        if r._key in seen or (ck and content.get(ck, cid) != cid):
             continue
-        seen |= keys
+        seen.add(r._key)
+        if ck:
+            content.setdefault(ck, cid)
         out.append(r)
     return out, len(rows) - len(out)
 
@@ -448,7 +455,7 @@ def _ils(v: float) -> str:
 
 
 def summary_he(topic: str, rows: list[Row], sums: list[dict], *, cut: int = 0, dupes: int = 0,
-               model: bool = True, files: list[str] | None = None) -> str:
+               model: bool = True, files: list[str] | None = None, truncated: list[str] | None = None) -> str:
     """The short Hebrew summary (also the .md file). Counts, totals and file names only: no message text."""
     unsure = sum(r.uncertain for r in rows)
     total = round(sum(r.amount or 0.0 for r in rows), 2)
@@ -464,6 +471,8 @@ def summary_he(topic: str, rows: list[Row], sums: list[dict], *, cut: int = 0, d
         notes.append(f"{dupes} כפילויות הוסרו.")
     if cut:
         notes.append(f"הדוח נחתך: {cut} הודעות ישנות לא נכנסו. צמצמו עם --since או --from.")
+    if truncated:
+        notes.append("לא כל ההודעות נקראו (הגעתי לתקרת החיפוש), ייתכן שחסרות הודעות. צמצמו עם --since או --from.")
     if not model:
         notes.append("השדות מולאו בכללים מקומיים בלבד (בלי בדיקת מודל): כל השורות מסומנות לבדיקה.")
     if notes:
@@ -474,12 +483,14 @@ def summary_he(topic: str, rows: list[Row], sums: list[dict], *, cut: int = 0, d
 
 
 def slug(topic: str) -> str:
+    """File-name part: fold() leaves letters and digits only, so no separator, drive or '..' can survive."""
     s = "-".join(fold(topic).split())[:30].strip("-")
     return s or "topic"
 
 
 def write_report(home: Path, topic: str, rows: list[Row], sums: list[dict], *, formats: Iterable[str] = FORMATS,
-                 cut: int = 0, dupes: int = 0, model: bool = True, now: float | None = None) -> list[Path]:
+                 cut: int = 0, dupes: int = 0, model: bool = True, now: float | None = None,
+                 truncated: list[str] | None = None) -> list[Path]:
     """<home>/reports/whatsapp-collect-<topic>-<stamp>.{csv,xlsx,md}; the .md summary is always written."""
     fmts = [f for f in FORMATS if f in set(formats)] or list(FORMATS)
     if "md" not in fmts:
@@ -495,7 +506,8 @@ def write_report(home: Path, topic: str, rows: list[Row], sums: list[dict], *, f
         elif p.suffix == ".xlsx":
             p.write_bytes(to_xlsx(rows, sums))
     md = next(p for p in paths if p.suffix == ".md")
-    md.write_text(summary_he(topic, rows, sums, cut=cut, dupes=dupes, model=model, files=[p.name for p in paths]),
+    md.write_text(summary_he(topic, rows, sums, cut=cut, dupes=dupes, model=model, files=[p.name for p in paths],
+                             truncated=truncated),
                   encoding="utf-8")
     return paths
 
@@ -511,10 +523,12 @@ class Result:
     cut: int
     model: dict
     by_reason: dict
+    truncated: list[str] = field(default_factory=list)
 
     def counts(self) -> dict:
         return {"rows": len(self.rows), "uncertain": sum(r.uncertain for r in self.rows), "candidates": self.candidates,
                 "duplicates_removed": self.dupes, "cut": self.cut, "by_reason": self.by_reason,
+                "retrieval_truncated": self.truncated,
                 "total_ils": round(sum(r.amount or 0.0 for r in self.rows), 2), **self.model}
 
 
@@ -523,7 +537,10 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
                   until: float | None = None, model: ModelFn | None = None, formats: Iterable[str] = FORMATS,
                   clean: Callable[[str], str] = str, now: float | None = None) -> Result:
     """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names` maps chat id -> display name."""
-    msgs = list(messages)[:MAX_CANDIDATES]
+    truncated = list(getattr(messages, "truncated", []))
+    msgs = list(messages)
+    if len(msgs) > MAX_CANDIDATES:
+        msgs, truncated = msgs[:MAX_CANDIDATES], truncated + ["candidates"]
     picked = select(msgs, terms=terms_for(topic), contacts=contacts, chat=chat, money=topic_key(topic) == "payment",
                     since=since, until=until)
     picked.sort(key=lambda p: float(p[0].get("ts") or 0), reverse=True)
@@ -535,13 +552,13 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
     rows, dupes = dedup(rows)
     sums = totals(rows)
     files = write_report(home, topic, rows, sums, formats=formats, cut=cut, dupes=dupes, model=model is not None,
-                         now=now)
+                         now=now, truncated=truncated)
     by_reason: dict[str, int] = {}
     for r in rows:
         by_reason[r.reason] = by_reason.get(r.reason, 0) + 1
     logs.info("whatsapp", "WA_COLLECTED", "WhatsApp messages collected into a report at the owner's request",
               count=len(rows), found=len(picked), dropped=dupes + mstats["dropped_off_topic"], files=len(files))
-    return Result(rows, sums, files, len(msgs), dupes, cut, mstats, by_reason)
+    return Result(rows, sums, files, len(msgs), dupes, cut, mstats, by_reason, truncated)
 
 
 def openai_model(model_id: str, budget, *, timeout_s: float = 30.0) -> ModelFn:
@@ -566,23 +583,58 @@ def row_dict(r: Row) -> dict:
     return d
 
 
+class Candidates(list):
+    """The gathered messages (each once) plus where reading stopped early: `truncated` names the sources."""
+    truncated: list[str]
+
+
+ARCHIVE_PAGE = 200                                          # the archive search returns at most 200 per call
+
+
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
-           since: float | None = None, cap_messages: int = 500) -> list[dict]:
+           since: float | None = None, cap_messages: int = 500) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
-    the archive (when on) by every topic word and contact word plus each contact chat in full, and the bridge's own
-    window by the same words plus each contact chat's latest messages. `readable` (the chat ids the bridge lists now)
-    is the live read gate: nothing outside it is returned."""
-    out: list[dict] = []
+    the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
+    bridge's own window by the same words plus each contact chat's latest messages. `readable` (the chat ids the
+    bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
+    BEFORE the MAX_CANDIDATES bound; any source that may hold more is named in `truncated`."""
+    out = Candidates()
+    out.truncated = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(ms: list[dict], source: str, full: bool) -> None:
+        for x in ms:
+            k = (str(x.get("chat", "")), str(x.get("id", "")))
+            if x.get("chat") not in readable or k in seen:
+                continue
+            if len(out) >= MAX_CANDIDATES:
+                if "candidates" not in out.truncated:
+                    out.truncated.append("candidates")
+                return
+            seen.add(k)
+            out.append(x)
+        if full and source not in out.truncated:
+            out.truncated.append(source)
+
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
     if archive is not None:
         for w in words:
-            out += archive.search(w, since=since, readable=readable, limit=200)
+            offset = 0
+            while len(out) < MAX_CANDIDATES:
+                page = archive.search(w, since=since, readable=readable, limit=ARCHIVE_PAGE, offset=offset)
+                add(page, "archive", False)
+                if len(page) < ARCHIVE_PAGE:
+                    break
+                offset += ARCHIVE_PAGE
         for cid in ids:
             if cid in readable:
-                out += archive.chat_messages(cid, since=since)
+                page = archive.chat_messages(cid, since=since, limit=MAX_CANDIDATES)
+                add(page, "archive", len(page) >= MAX_CANDIDATES)
     for w in words:
-        out += client.search(w, 200)
+        page = client.search(w, cap_messages)
+        add(page, "bridge", len(page) >= cap_messages)
     for cid in ids:
-        out += client.messages(cid, since, cap_messages).get("messages", [])
-    return [m for m in out if m.get("chat") in readable][:MAX_CANDIDATES]
+        page = client.messages(cid, since, cap_messages).get("messages", [])
+        add(page, "bridge", len(page) >= cap_messages)
+    return out

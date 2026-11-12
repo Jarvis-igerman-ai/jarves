@@ -1151,6 +1151,7 @@ class WhatsAppBridgeSkill(Skill):
             sums = "; ".join(f"{g['payee']}: {g['total_ils']:g} ₪" for g in res.totals[:5])
             msg = (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ ({sums})."
                    + (f" {c['uncertain']} מסומנות לבדיקה." if c["uncertain"] else "")
+                   + (" לא כל ההודעות נקראו, ייתכן שחסרות." if c["retrieval_truncated"] else "")
                    + f" הדוח נשמר בתיקיית reports: {res.files[0].stem}.")
             return ToolResult(True, msg, data, code="WA_COLLECTED")
 

@@ -248,3 +248,82 @@ def test_cli_collect_off_then_on(bridge, home, capsys):
                                     ("דנה כהן", ["דנה כהן"]), ([{"name": "אבי"}], ["אבי"])])
 def test_contacts_arg_is_tolerant(v, want):
     assert wab.CollectArgs(topic="תשלום", contacts=v).contacts == want
+
+
+# ---------------------------------------------------------------------- review round 2 (JAR-273)
+class _PagedArchive:
+    """Archive double: `search` honours limit/offset like the real one (at most 200 per page)."""
+    def __init__(self, msgs):
+        self.msgs = msgs
+
+    def search(self, q, *, since=None, readable=None, limit=10, offset=0):
+        hits = [x for x in self.msgs if q in x["text"]]
+        return hits[offset:offset + min(limit, 200)]
+
+    def chat_messages(self, cid, *, since=None, limit=2000):
+        return []
+
+
+class _Bridge:
+    def __init__(self, hits=()):
+        self.hits = list(hits)
+
+    def search(self, q, limit=20):
+        return [x for x in self.hits if q in x["text"]][:limit]
+
+    def messages(self, cid, since, limit):
+        return {"messages": []}
+
+
+def test_gather_pages_past_200_and_dedups_before_the_bound():
+    many = [m(f"שיפוץ חדר {i}", mid=f"s{i}", ts=T0 - i) for i in range(250)]   # invented
+    got = wcol.gather(_Bridge(many[:50]), _PagedArchive(many), terms=["שיפוצ", "שיפוץ"], contacts=[],
+                      readable={PLUMBER})
+    assert len(got) == 250 and not got.truncated                       # every match, each once
+    bridge_full = _Bridge([m(f"שיפוץ {i}", mid=f"b{i}") for i in range(600)])
+    got = wcol.gather(bridge_full, None, terms=["שיפוץ"], contacts=[], readable={PLUMBER})
+    assert got.truncated == ["bridge"]                                 # a full bridge page may hide more
+
+
+async def test_retrieval_truncation_reaches_the_report(tmp_path, monkeypatch):
+    monkeypatch.setattr(wcol, "MAX_CANDIDATES", 10)
+    msgs = [m(f"שיפוץ חדר {i}", mid=f"s{i}", ts=T0 - i) for i in range(30)]
+    got = wcol.gather(_Bridge(), _PagedArchive(msgs), terms=["שיפוץ"], contacts=[], readable={PLUMBER})
+    assert len(got) == 10 and got.truncated == ["candidates"]
+    res = await wcol.collect(tmp_path, "שיפוץ", got, names={}, contacts=[], now=T0)
+    assert res.counts()["retrieval_truncated"] == ["candidates"]
+    assert "לא כל ההודעות נקראו" in next(p for p in res.files if p.suffix == ".md").read_text(encoding="utf-8")
+
+
+def test_dedup_keeps_two_identical_payments_in_one_chat():
+    a = wcol.rule_row(m("שילמתי לגן 900 שקל החודש", chat=SPOUSE, mid="1", from_me=True), "chat", "גן", "אשתי")
+    b = wcol.rule_row(m("שילמתי לגן 900 שקל החודש", chat=SPOUSE, ts=T0 + 60, mid="2", from_me=True), "chat", "גן",
+                      "אשתי")
+    rows, dupes = wcol.dedup([a, b])
+    assert dupes == 0 and len(rows) == 2
+
+
+def test_model_amount_missing_from_the_text_stays_flagged():
+    r = wcol.rule_row(m("קבלה מצורפת על התיקון"), "chat", "אבי", "אבי")
+    assert wcol.apply_model(r, {"relevant": True, "payee": "אבי", "amount_ils": 999, "sure": True})
+    assert r.amount == 999 and r.uncertain and "amount not in text" in r.why_unsure
+
+
+def test_report_name_never_leaves_the_reports_folder(tmp_path):
+    for topic in ("../../../x", "..\\..\\x", "C:\\Windows\\x", "a/b:c", ".."):
+        paths = wcol.write_report(tmp_path, topic, [], [], formats=["md"], now=T0)
+        assert all(p.parent == tmp_path / "reports" and ".." not in p.name for p in paths)
+
+
+def test_real_archive_search_pages_with_offset(home):
+    a = arc.Archive(home, use_dpapi=False, clock=lambda: T0)
+    try:
+        a.add([m(f"שיפוץ חדר {i}", mid=f"s{i}", ts=T0 - i) for i in range(250)])
+        first = a.search("שיפוץ", limit=200)
+        second = a.search("שיפוץ", limit=200, offset=200)
+        assert len(first) == 200 and len(second) == 50
+        assert not {x["id"] for x in first} & {x["id"] for x in second}
+        got = wcol.gather(_Bridge(), a, terms=["שיפוץ"], contacts=[], readable={PLUMBER})
+        assert len(got) == 250 and not got.truncated
+    finally:
+        a.close()
