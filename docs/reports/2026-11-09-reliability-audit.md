@@ -30,4 +30,4 @@ Update path (`auto_update.py`) is Tier R: proposals only.
 Real microphone, phone and installed-update behaviour were not tested (hermetic tests only).
 
 ## Tests
-`core/tests/test_reliability_swallowed_errors.py` (3 hermetic tests for findings 2, 3, 4). Finding 5 is a debug-log-only change, untested.
+`core/tests/test_reliability_swallowed_errors.py` (4 hermetic tests for findings 2, 3, 4, 5).

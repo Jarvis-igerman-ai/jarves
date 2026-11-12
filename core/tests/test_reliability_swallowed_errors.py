@@ -45,3 +45,25 @@ async def test_wake_confirm_warm_failure_is_logged(monkeypatch):
     obj.confirm = Confirm().confirm
     await obj._warm()
     assert [c for _, c, _ in seen] == ["WAKE_CONFIRM_WARM_FAILED"]
+
+
+async def test_audio_close_failure_is_logged_and_session_still_ends(monkeypatch):
+    from jarves.voice.live import SessionLifecycle
+
+    class Audio:
+        def close(self):
+            raise OSError("device gone")
+
+    ended = []
+
+    async def on_end(reason):
+        ended.append(reason)
+
+    s = SessionLifecycle()
+    s._init_lifecycle(on_end, None, None)
+    s.audio_io = Audio()
+    seen = _capture(monkeypatch, "debug")
+    await s._finalize("user")                   # must not raise
+    assert [c for _, c, _ in seen] == ["VOICE_AUDIO_CLOSE_FAILED"]
+    assert seen[0][2]["error_type"] == "OSError"
+    assert ended == ["user"]
