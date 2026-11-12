@@ -1,6 +1,9 @@
 """JAR-232: the daily installed-beta check. Off by default (owner switch); a failing check becomes a local P1/P2 bug
 draft with redacted evidence and a short demo transcript; nothing is sent anywhere."""
 import json
+import types
+
+import pytest
 
 from jarves import qa_daily
 from jarves.config import Config
@@ -38,7 +41,7 @@ def test_failures_become_p1_p2_bug_drafts_with_local_redacted_evidence(home):
     assert [(b["priority"], b["check"]) for b in bugs] == [("P1", "doctor"), ("P2", "health")]
     text = json.dumps(bugs) + (home / "qa" / "daily" / "2026-11-12" / "demo.txt").read_text(encoding="utf-8")
     assert "someone@example.com" not in text and "igal" not in text and "abc123" not in text
-    assert all(b["evidence"].endswith("demo.txt") and b["local_only"] for b in bugs) and not res["ok"]
+    assert all(b["evidence"] == "qa/daily/2026-11-12/demo.txt" and b["local_only"] for b in bugs) and not res["ok"]
 
 
 def test_missing_report_is_a_p1_and_green_run_has_no_bugs(home):
@@ -46,7 +49,7 @@ def test_missing_report_is_a_p1_and_green_run_has_no_bugs(home):
     assert [b["priority"] for b in qa_daily.check(deps)["bugs"]] == ["P1"]
     ok = REPORT.replace("FAIL", "PASS")
     deps, _ = _deps(home, report=ok, fail=())
-    assert qa_daily.check(deps) == {"ok": True, "bugs": [], "dir": str(home / "qa" / "daily" / "2026-11-12")}
+    assert qa_daily.check(deps) == {"ok": True, "bugs": [], "dir": "qa/daily/2026-11-12"}
 
 
 def test_stale_pending_or_non_beta_report_is_never_a_pass(home):
@@ -60,3 +63,46 @@ def test_stale_pending_or_non_beta_report_is_never_a_pass(home):
         bugs = qa_daily.check(deps)["bugs"]
         assert [(b["priority"], b["check"]) for b in bugs] == [("P1", "install-latest")], want
         assert want in bugs[0]["detail"], want
+
+
+def test_no_user_name_from_the_home_path_in_drafts_or_output(tmp_path, capsys):
+    home = tmp_path / "Users" / "igal" / ".jarves"
+    deps, _ = _deps(home)
+    res = qa_daily.check(deps)
+    saved = (home / "qa" / "daily" / "2026-11-12" / "bugs.json").read_text(encoding="utf-8")
+    assert "igal" not in saved and "igal" not in json.dumps(res) and str(tmp_path) not in saved
+
+
+def _on(home):
+    f = Features(Config(), home)
+    f.set_beta(True, by="test")
+    f.set(qa_daily.FEATURE, True, by="test")
+
+
+def _args(action, dry_run=False):
+    return types.SimpleNamespace(action=action, dry_run=dry_run)
+
+
+@pytest.mark.parametrize("dry", [False, True])
+def test_install_forces_the_beta_channel_and_passes_dry_run(home, monkeypatch, dry):
+    from jarves import install_latest
+    seen = []
+    monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: seen.append(a) or 0)
+    assert qa_daily.cmd_qa_daily(_args("install", dry), Config(), home) == 2 and seen == []    # OFF: refused
+    _on(home)
+    assert qa_daily.cmd_qa_daily(_args("install", dry), Config(), home) == 0
+    assert (seen[0].channel, seen[0].dry_run, seen[0].report, seen[0].finish) == ("beta", dry, False, None)
+
+
+def test_check_and_status_commands_read_the_report_under_home(home, monkeypatch, capsys):
+    from jarves import install_latest
+    _on(home)
+    monkeypatch.setattr(install_latest, "_cli_subprocess", lambda argv: (0, "ok"))
+    monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-12")
+    (home / "updates").mkdir()
+    (home / "updates" / install_latest.REPORT_FILE).write_text(REPORT.replace("FAIL", "PASS"), encoding="utf-8")
+    assert qa_daily.cmd_qa_daily(_args("check"), Config(), home) == 0
+    assert "PASS  qa-daily" in capsys.readouterr().out
+    assert json.loads((home / "qa" / "daily" / "2026-11-12" / "bugs.json").read_text(encoding="utf-8")) == []
+    assert qa_daily.cmd_qa_daily(_args("status"), Config(), home) == 0
+    assert "2026-11-12: PASS" in capsys.readouterr().out
