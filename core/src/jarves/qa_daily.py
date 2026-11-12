@@ -1,5 +1,6 @@
 """`jarvis qa-daily install|check|status` (JAR-232): the installed-beta check the owner (or QA) runs once a day.
-Nothing schedules it: it is a manual routine, `install` first, then `check` once setup has finished.
+Daily: while the switch is on, the Core calls `tick` every hour (`start`); once per UTC day it starts `qa-daily install`
+in a hidden detached process (setup stops the Core), then runs `check` once today's report is final. `run` = one tick.
 
 install: `jarvis install-latest --channel beta` (backup first, signed silent setup, doctor + selftest + status, automatic
          rollback when a check fails; all of that stays in jarves.install_latest).
@@ -15,6 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+import sys
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -85,6 +90,71 @@ def check(deps: Deps) -> dict:
     return {"ok": not bugs, "bugs": bugs, "dir": rel}
 
 
+INSTALL_WAIT_S = 5400 + 600                                         # install_latest.PENDING_S + margin
+TICK_S = 3600.0
+
+
+def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time) -> str:
+    """One daily step: off | done | installing | waiting | checked. Install at most once and check at most once a day."""
+    if not enabled():
+        return "off"
+    out = Path(home) / "qa" / "daily" / day()
+    if (out / "bugs.json").is_file():
+        return "done"
+    marker = out / "install.started"
+    text = report() or ""
+    if text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]:
+        do_check()
+        return "checked"
+    if not marker.is_file():
+        out.mkdir(parents=True, exist_ok=True)
+        marker.write_text(str(clock()), encoding="utf-8")
+        spawn(["qa-daily", "install"])
+        return "installing"
+    if clock() - float(marker.read_text(encoding="utf-8") or 0) > INSTALL_WAIT_S:
+        do_check()                                                    # never reported: check writes the P1 draft
+        return "checked"
+    return "waiting"
+
+
+def _report_reader(home):
+    from .install_latest import REPORT_FILE
+    rp = Path(home) / "updates" / REPORT_FILE
+    return lambda: rp.read_text(encoding="utf-8-sig") if rp.is_file() else None
+
+
+def _spawn_hidden(argv: list[str]) -> None:
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+    subprocess.Popen([sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+
+
+def _tick_real(cfg, home) -> str:
+    from .install_latest import _cli_subprocess
+    return tick(home, enabled=lambda: _enabled(cfg, home), day=_today, report=_report_reader(home), spawn=_spawn_hidden,
+                do_check=lambda: check(Deps(home, _report_reader(home), _cli_subprocess, _today())))
+
+
+def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:
+    """A daemon thread in the Core, like auto_update.start; does nothing while the switch is off."""
+    stop = threading.Event()
+
+    def run() -> None:
+        wait = first_delay_s
+        while not stop.wait(wait):
+            wait = every_s
+            try:
+                r = _tick_real(core.cfg, core.home)
+                if r not in ("off", "done", "waiting"):
+                    logs.info("updates", "QA_DAILY_TICK", "daily installed-beta check step", step=r)
+            except Exception as e:                                    # never stops the Core
+                logs.warn("updates", "QA_DAILY_TICK_FAILED", "daily beta check step failed", error_type=type(e).__name__)
+    t = threading.Thread(target=run, name="jarves-qa-daily", daemon=True)
+    t.stop = stop                                                     # type: ignore[attr-defined]
+    t.start()
+    return t
+
+
 def _enabled(cfg, home) -> bool:
     from .features import Features
     return Features(cfg, home).enabled(FEATURE)
@@ -99,18 +169,19 @@ def cmd_qa_daily(a, cfg, home) -> int:
         from . import install_latest
         ns = argparse.Namespace(channel="beta", dry_run=bool(getattr(a, "dry_run", False)), report=False, finish=None)
         return install_latest.cmd_install_latest(ns, cfg, home)
+    if action == "run":
+        print(f"qa-daily run: {_tick_real(cfg, home)}")
+        return 0
     if action == "check":
-        from .install_latest import REPORT_FILE, _cli_subprocess
-        rp = Path(home) / "updates" / REPORT_FILE
-        res = check(Deps(home, lambda: rp.read_text(encoding="utf-8-sig") if rp.is_file() else None, _cli_subprocess,
-                         _today()))
+        from .install_latest import _cli_subprocess
+        res = check(Deps(home, _report_reader(home), _cli_subprocess, _today()))
         for b in res["bugs"]:
             print(f"  [{b['priority']}] {b['check']}: {b['detail'][:160]}")
         print(("PASS" if res["ok"] else "FAIL") + f"  qa-daily  demo + bug drafts (local only): <data folder>/{res['dir']}")
         return 0 if res["ok"] else 1
     days = sorted(p for p in (Path(home) / "qa" / "daily").glob("*/bugs.json"))
     if not days:
-        print("qa-daily is ON. No check yet: run jarvis qa-daily install, then jarvis qa-daily check.")
+        print("qa-daily is ON. No check yet: the Core runs it once a day (or now: jarvis qa-daily run).")
         return 0
     bugs = json.loads(days[-1].read_text(encoding="utf-8"))
     print(f"qa-daily is ON. Last check {days[-1].parent.name}: {'FAIL' if bugs else 'PASS'} ({len(bugs)} bug drafts)")
@@ -118,9 +189,9 @@ def cmd_qa_daily(a, cfg, home) -> int:
 
 
 def add_cli(sub) -> None:
-    p = sub.add_parser("qa-daily", help="installed-beta check, run by hand once a day: install the newest beta silently (backup + "
+    p = sub.add_parser("qa-daily", help="daily installed-beta check (the Core runs it once a day when on; `run` = one step): install the newest beta silently (backup + "
                                         "rollback), run checks and top scenarios, local demo + P1/P2 bug drafts")
-    p.add_argument("action", nargs="?", choices=["install", "check", "status"], default="status")
+    p.add_argument("action", nargs="?", choices=["install", "check", "run", "status"], default="status")
     p.add_argument("--dry-run", action="store_true", help="install: only print the plan, change nothing")
 
 
@@ -129,13 +200,13 @@ COMMANDS = {"qa-daily": cmd_qa_daily}
 # ---------------------------------------------------------------------- catalog row
 from . import features as feat, hebrew    # noqa: E402
 
-ABOUT = ("the installed-beta check the owner runs once a day by hand: installs the newest beta silently (backup + rollback), runs doctor, selftest "
+ABOUT = ("the installed-beta check the Core runs once a day while on: installs the newest beta silently (backup + rollback), runs doctor, selftest "
          "and top scenarios, writes a local demo transcript and P1/P2 bug drafts; nothing leaves the PC")
 EVIDENCE = "UNIT test_qa_daily.py (off by default, P1/P2 drafts, redaction, fakes only; no real install)"
 BLOCKER = "never run on the owner PC"
 PI = "the installer is Windows only"
 hebrew.TEXT.update({
-    ABOUT: "בדיקת הבטא המותקנת שהבעלים מריץ ידנית פעם ביום: מתקינה בשקט את הבטא החדשה (גיבוי וחזרה), מריצה doctor, selftest ותרחישים "
+    ABOUT: "בדיקת הבטא המותקנת שהליבה מריצה פעם ביום כשהיא מופעלת: מתקינה בשקט את הבטא החדשה (גיבוי וחזרה), מריצה doctor, selftest ותרחישים "
            "מרכזיים, כותבת תמליל הדגמה מקומי וטיוטות באגים P1/P2; שום דבר לא יוצא מהמחשב",
     EVIDENCE: "בדיקות יחידה test_qa_daily.py (כבוי כברירת מחדל, טיוטות P1/P2, הסתרת פרטים, דמה בלבד; בלי התקנה אמיתית)",
     BLOCKER: "מעולם לא הורץ במחשב של הבעלים",

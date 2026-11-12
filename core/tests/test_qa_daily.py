@@ -106,3 +106,30 @@ def test_check_and_status_commands_read_the_report_under_home(home, monkeypatch,
     assert json.loads((home / "qa" / "daily" / "2026-11-12" / "bugs.json").read_text(encoding="utf-8")) == []
     assert qa_daily.cmd_qa_daily(_args("status"), Config(), home) == 0
     assert "2026-11-12: PASS" in capsys.readouterr().out
+
+
+def test_daily_tick_installs_once_then_checks_once_a_day(home):
+    """JAR-232 review: the Core runs the routine itself once a day (install, then check), never twice, never when OFF."""
+    state = {"on": False, "report": None, "now": 1000.0}
+    spawned, checked = [], []
+    tick = lambda: qa_daily.tick(home, enabled=lambda: state["on"], day=lambda: "2026-11-12",  # noqa: E731
+                                 report=lambda: state["report"], spawn=spawned.append,
+                                 do_check=lambda: checked.append(1), clock=lambda: state["now"])
+    assert tick() == "off" and spawned == [] and checked == []
+    state["on"] = True
+    assert tick() == "installing" and spawned == [["qa-daily", "install"]]
+    assert tick() == "waiting" and len(spawned) == 1                      # setup still running: no second install
+    state["report"] = REPORT.replace("FAIL", "PASS")
+    assert tick() == "checked" and checked == [1]
+    (home / "qa" / "daily" / "2026-11-12" / "bugs.json").write_text("[]", encoding="utf-8")
+    assert tick() == "done" and len(spawned) == 1 and checked == [1]
+
+
+def test_daily_tick_checks_anyway_when_the_install_never_reports(home):
+    state = {"now": 1000.0}
+    checked = []
+    tick = lambda: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: None,  # noqa: E731
+                                 spawn=lambda argv: None, do_check=lambda: checked.append(1), clock=lambda: state["now"])
+    assert tick() == "installing" and tick() == "waiting"
+    state["now"] += qa_daily.INSTALL_WAIT_S + 1
+    assert tick() == "checked" and checked == [1]                          # the missing report becomes a P1 draft
