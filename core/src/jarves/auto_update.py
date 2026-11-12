@@ -45,6 +45,21 @@ TICK_S = 600                             # how often the Core looks (the update 
 
 CHOICES = ("now", "later", "off")
 
+_warned: set[tuple] = set()              # (code, where, error type) already logged: the Core looks every TICK_S
+_warned_lock = threading.Lock()
+
+
+def _first_time(code: str, e: BaseException, where: str = "") -> bool:
+    """True the first time this (code, where, error type) is seen in this process, so a read-only failure is
+    logged once instead of on every look (code + error type only, never the message)."""
+    key = (code, where, type(e).__name__)
+    with _warned_lock:
+        if key in _warned:
+            return False
+        _warned.add(key)
+        return True
+
+
 PLATFORMS = {
     "windows": {"status": "implemented_unverified",
                 "evidence": "core/tests/test_auto_update.py (fake signed release server, fake installer: on/off, quiet "
@@ -110,8 +125,9 @@ def is_enabled(cfg, home: Path) -> bool:
         f = features.Features(cfg, home)
         return f.enabled(FEATURE) and f.enabled("update_check")
     except Exception as e:                                  # reported as OFF, but say why (JAR-86)
-        logs.warn("updates", "AUTO_UPDATE_SWITCH_UNREADABLE", "auto-update switch unreadable; treated as off",
-                  error_type=type(e).__name__)
+        if _first_time("AUTO_UPDATE_SWITCH_UNREADABLE", e):
+            logs.warn("updates", "AUTO_UPDATE_SWITCH_UNREADABLE", "auto-update switch unreadable; treated as off",
+                      error_type=type(e).__name__)
         return False
 
 
@@ -214,8 +230,9 @@ class AutoUpdater:
             if FEATURE not in f._state["enabled"]:
                 return "beta" if f.enabled("beta_channel") else "stable"
         except Exception as e:
-            logs.warn("updates", "AUTO_UPDATE_DEFAULT_NOTE_FAILED", "could not tell the channel default",
-                      error_type=type(e).__name__)
+            if _first_time("AUTO_UPDATE_DEFAULT_NOTE_FAILED", e):
+                logs.warn("updates", "AUTO_UPDATE_DEFAULT_NOTE_FAILED", "could not tell the channel default",
+                          error_type=type(e).__name__)
         return None
 
     # ------------------------------------------------------------------ the owner's answer to the notice
@@ -258,8 +275,9 @@ class AutoUpdater:
                 _save(self.home, st)
                 return
         except Exception as e:
-            logs.warn("updates", "AUTO_UPDATE_CHANNEL_CHECK_FAILED", "could not read the channel choice",
-                      error_type=type(e).__name__)
+            if _first_time("AUTO_UPDATE_CHANNEL_CHECK_FAILED", e):
+                logs.warn("updates", "AUTO_UPDATE_CHANNEL_CHECK_FAILED", "could not read the channel choice",
+                          error_type=type(e).__name__)
         st["prompted"] = True
         self._emit(st, "choose", "", "")
         _save(self.home, st)
@@ -532,12 +550,16 @@ def core_busy(core) -> list[str]:
         if core.approvals.has_pending():
             out.append("pending_approval")
     except Exception as e:
-        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (approvals)", error_type=type(e).__name__)
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", e, "approvals"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="approvals")
     try:
         if getattr(core.chat, "turns", None):
             out.append("chat_turn")
     except Exception as e:
-        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (chat)", error_type=type(e).__name__)
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", e, "chat"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="chat")
     try:
         from .orchestrator.envelope import LIVE_STATES
         busy_states = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"} & set(LIVE_STATES)
@@ -546,13 +568,17 @@ def core_busy(core) -> list[str]:
         if db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True)):
             out.append("coding_agent")
     except Exception as e:
-        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (agents)", error_type=type(e).__name__)
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", e, "agents"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="agents")
     try:
         eng = core.ops.alerts
         if eng.quiet_now() or eng.paused():
             out.append("quiet_hours")
     except Exception as e:
-        logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed (quiet)", error_type=type(e).__name__)
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", e, "quiet"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="quiet")
     return out
 
 
