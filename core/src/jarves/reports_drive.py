@@ -23,7 +23,8 @@ MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".jso
 feat.register(FEATURE, "דוחות לגוגל דרייב", "Reports to Google Drive", False, stage="beta",
               about="copy each new report to your Google Drive folder, or upload it with the drive.file permission",
               targets={"windows": {"status": "implemented_unverified", "blocker": "tested with a fake Drive client only"},
-                       "linux_arm64_pi": {"status": "implemented_unverified", "blocker": "not run on a Pi"}},
+                       "linux_arm64_pi": {"status": "implemented_unverified", "blocker": "not run on a Pi",
+                                          "roadmap_issue": "https://github.com/Jarvis-igerman-ai/jarves/issues/3"}},
               permissions=["Drive: only files JARVES created (drive.file)"], settings="jarvis reports drive status")
 
 
