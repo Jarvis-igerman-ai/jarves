@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import threading
 from pathlib import Path
 
 from . import clilang
@@ -28,16 +29,21 @@ feat.register(FEATURE, "דוחות לגוגל דרייב", "Reports to Google Dr
               permissions=["Drive: only files JARVES created (drive.file)"], settings="jarvis reports drive status")
 
 
-def load(home: Path) -> dict:
+def _raw(home: Path) -> dict:
     try:
         d = json.loads((Path(home) / FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def load(home: Path) -> dict:
+    d = _raw(home)
     return {"folder": str(d.get("folder") or ""), "mode": d.get("mode") if d.get("mode") in ("folder", "api") else "folder"}
 
 
 def save(home: Path, **kw) -> dict:
-    d = {**load(home), **kw}
+    d = {**_raw(home), **load(home), **kw}
     (Path(home) / FILE).write_text(json.dumps(d), encoding="utf-8")
     return d
 
@@ -88,6 +94,30 @@ def after_report(home: Path, path: Path, *, active: bool, client=None) -> dict |
         return upload(home, path, client=client)
     except Exception as e:      # a report write must never fail because Drive is unavailable
         return {"error": str(e)}
+
+
+def sync(home: Path, *, client=None) -> list[dict]:
+    """Send every new or changed file in <home>/reports/ once (remembered by name and mtime in reports_drive.json)."""
+    sent = dict(_raw(home).get("sent") or {})
+    out = []
+    folder = Path(home) / "reports"
+    for f in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if f.is_file() and sent.get(f.name) != f.stat().st_mtime:
+            r = after_report(home, f, active=True, client=client)
+            out.append(r)
+            if r and "error" not in r:
+                sent[f.name] = f.stat().st_mtime
+    save(home, sent=sent)
+    return out
+
+
+def on_job_finished(features) -> None:
+    """Scheduler hook: with the switch on, sync the reports folder off the event loop. Never raises."""
+    try:
+        if features is not None and getattr(features, "home", None) and features.active(FEATURE):
+            threading.Thread(target=sync, args=(features.home,), daemon=True, name="reports-drive").start()
+    except Exception:
+        pass
 
 
 def cmd_drive(a, cfg, home) -> int:

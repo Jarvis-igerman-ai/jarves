@@ -66,3 +66,28 @@ def test_folder_must_exist_and_cli_status_folder_upload(home, capsys):
     rep.write_text("x", encoding="utf-8")
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 0
     assert (dest / "r.txt").exists()
+
+
+def test_sync_sends_each_new_report_once_and_the_scheduler_hook_respects_the_switch(tmp_path, monkeypatch):
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "a.md").write_bytes(b"1")
+    assert len(rd.sync(tmp_path)) == 1 and rd.sync(tmp_path) == []
+    assert (dest / "a.md").read_bytes() == b"1" and rd.load(tmp_path)["folder"] == str(dest)
+    calls = []
+
+    class Now:
+        def __init__(self, target, args, **kw):
+            self.run = lambda: calls.append(args)
+
+        def start(self):
+            self.run()
+    monkeypatch.setattr(rd.threading, "Thread", Now)
+    feats = type("F", (), {"home": tmp_path, "on": False, "active": lambda self, fid: self.on})()
+    rd.on_job_finished(feats)
+    assert calls == []
+    feats.on = True
+    rd.on_job_finished(feats)
+    assert calls == [(tmp_path,)]
