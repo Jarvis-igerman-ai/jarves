@@ -11,21 +11,30 @@ import (
 // FakeSent is one text the fake engine "sent".
 type FakeSent struct{ To, Text string }
 
+// FakeHistoryRequest is one on-demand history request the fake engine received.
+type FakeHistoryRequest struct {
+	Chat   string
+	Anchor HistoryAnchor
+	Count  int
+}
+
 // Fake is an in-memory engine for tests: no network, scripted by the test through Emit / CompleteLink.
 type Fake struct {
-	mu          sync.Mutex
-	handler     func(Event)
-	linked      bool
-	connected   bool
-	linking     bool
-	loggedOut   bool
-	Sent        []FakeSent
-	SendErr     error
-	Disconnects int
-	Connects    int
-	Logouts     int
-	seq         int
-	Now         func() time.Time
+	mu        sync.Mutex
+	handler   func(Event)
+	linked    bool
+	connected bool
+	linking   bool
+	loggedOut bool
+	Sent      []FakeSent
+	// HistoryRequests records RequestHistory calls; tests answer them with Emit(MessageEvent{History: true}).
+	HistoryRequests []FakeHistoryRequest
+	SendErr         error
+	Disconnects     int
+	Connects        int
+	Logouts         int
+	seq             int
+	Now             func() time.Time
 }
 
 // NewFake returns a fake engine; linked=true simulates an already linked device.
@@ -145,4 +154,14 @@ func (f *Fake) SendText(ctx context.Context, to, text string) (string, float64, 
 	f.seq++
 	f.Sent = append(f.Sent, FakeSent{To: to, Text: text})
 	return fmt.Sprintf("FAKE%06d", f.seq), float64(f.Now().UnixNano()) / 1e9, nil
+}
+
+func (f *Fake) RequestHistory(ctx context.Context, chat string, anchor HistoryAnchor, count int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.connected {
+		return ErrNotConnected
+	}
+	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{Chat: chat, Anchor: anchor, Count: count})
+	return nil
 }

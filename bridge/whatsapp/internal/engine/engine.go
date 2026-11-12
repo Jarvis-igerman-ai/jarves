@@ -112,4 +112,14 @@ type Engine interface {
 	StartLink(ctx context.Context, phone string) error
 	// SendText sends one text message to one person. Returns the message id and server timestamp.
 	SendText(ctx context.Context, to, text string) (id string, ts float64, err error)
+	// RequestHistory asks the phone for up to count messages of chat sent before anchor (on-demand history
+	// sync). Results arrive later as MessageEvent{History: true}; the API layer applies every rule to them.
+	RequestHistory(ctx context.Context, chat string, anchor HistoryAnchor, count int) error
+}
+
+// HistoryAnchor is the oldest message already known for a chat; on-demand history returns messages before it.
+type HistoryAnchor struct {
+	ID     string
+	FromMe bool
+	TS     float64
 }

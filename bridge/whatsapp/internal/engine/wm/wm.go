@@ -279,6 +279,33 @@ func (e *Engine) SendText(ctx context.Context, to, text string) (string, float64
 	return resp.ID, float64(resp.Timestamp.UnixNano()) / 1e9, nil
 }
 
+// RequestHistory sends one on-demand history request (whatsmeow BuildHistorySyncRequest) to the phone. The
+// answer comes back as an ON_DEMAND *events.HistorySync and flows through onHistory like any history sync.
+func (e *Engine) RequestHistory(ctx context.Context, chat string, anchor engine.HistoryAnchor, count int) error {
+	if !e.IsConnected() {
+		return engine.ErrNotConnected
+	}
+	m, err := historyRequest(chat, anchor, count)
+	if err != nil {
+		return err
+	}
+	_, err = e.client().SendPeerMessage(ctx, m)
+	return err
+}
+
+// historyRequest builds the peer message asking for count messages of chat older than anchor.
+func historyRequest(chat string, anchor engine.HistoryAnchor, count int) (*waE2E.Message, error) {
+	jid, err := types.ParseJID(chat)
+	direct := jid.Server == types.DefaultUserServer || jid.Server == types.HiddenUserServer
+	if err != nil || jid.User == "" || anchor.ID == "" || !(direct || jid.Server == types.GroupServer) {
+		return nil, errors.New("bad history request")
+	}
+	info := &types.MessageInfo{ID: anchor.ID, Timestamp: time.Unix(0, int64(anchor.TS*1e9)),
+		MessageSource: types.MessageSource{Chat: jid, IsFromMe: anchor.FromMe, IsGroup: jid.Server == types.GroupServer}}
+	// The builder only fills a proto message; it never touches the client, so no live connection is needed here.
+	return (*whatsmeow.Client)(nil).BuildHistorySyncRequest(info, count), nil
+}
+
 // handle converts whatsmeow events. It runs on whatsmeow's goroutines.
 func (e *Engine) handle(raw any) {
 	switch ev := raw.(type) {

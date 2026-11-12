@@ -180,3 +180,40 @@ func TestEventMapping(t *testing.T) {
 		t.Fatal("revoke")
 	}
 }
+
+func TestHistoryRequestAnchorsOnOldestKnownMessage(t *testing.T) {
+	m, err := historyRequest("972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", FromMe: true, TS: 1700000000.5}, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm := m.GetProtocolMessage()
+	r := pm.GetPeerDataOperationRequestMessage().GetHistorySyncOnDemandRequest()
+	if pm.GetType() != waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE ||
+		r.GetChatJID() != "972500000001@s.whatsapp.net" || r.GetOldestMsgID() != "ABC" || !r.GetOldestMsgFromMe() ||
+		r.GetOnDemandMsgCount() != 50 || r.GetOldestMsgTimestampMS() != 1700000000 {
+		t.Fatalf("request %v", r)
+	}
+	if _, err := historyRequest("not a jid@@", engine.HistoryAnchor{ID: "X"}, 50); err == nil {
+		t.Fatal("bad chat accepted")
+	}
+	if _, err := historyRequest("972500000001@s.whatsapp.net", engine.HistoryAnchor{}, 50); err == nil {
+		t.Fatal("missing anchor accepted")
+	}
+}
+
+func TestRequestHistoryOfflineIsNotConnected(t *testing.T) {
+	ctx := context.Background()
+	db, err := memdb.Open(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	e, err := New(ctx, db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var _ engine.Engine = e
+	if err := e.RequestHistory(ctx, "972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", TS: 1}, 50); err != engine.ErrNotConnected {
+		t.Fatalf("err %v", err)
+	}
+}
