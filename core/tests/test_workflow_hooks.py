@@ -118,23 +118,13 @@ class OneTransactionTests(unittest.TestCase):
                 self.assertTrue(calls)                                       # git was asked (in_project, base note)
                 self.assertFalse(any(any(c) for c in calls), calls)          # never inside the transaction
                 self.assertIn("additionalContext", out)
-# Each real commit is slowed to a Windows-like synced write (synchronous=FULL, antivirus), applied to every
-# write transaction the hook opens; Linux tmpfs commits are too fast to show the queue otherwise.
-SLOW_COMMIT = """
-import contextlib, sys, time
-from jarves.workflow import hooks, store
-real = store.Store._tx
-@contextlib.contextmanager
-def slow(self):
-    with real(self) as db:
-        yield db
-        time.sleep(0.1)
-store.Store._tx = slow
-sys.exit(hooks.main(sys.argv[1:]))
-"""
 
 
 class ConcurrentSubagentStartTests(unittest.TestCase):
+    """Smoke test with eight real hook processes and no injected delays or timing assumptions.
+
+    OneTransactionTests is the deterministic regression guard, since commits here are too fast to queue.
+    """
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name) / "wf"
@@ -149,7 +139,7 @@ class ConcurrentSubagentStartTests(unittest.TestCase):
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(CORE_SRC), os.environ.get("PYTHONPATH")]))}
         for key in ("JARVES_WORKFLOW_AGENT", "JARVES_WORKFLOW_HELPER"):
             env.pop(key, None)
-        cmd = [sys.executable, "-c", SLOW_COMMIT, "--home", str(self.home), "--repo-root", str(self.root)]
+        cmd = [sys.executable, "-m", "jarves.workflow.hooks", "--home", str(self.home), "--repo-root", str(self.root)]
         procs = []
         for n in range(8):
             payload = {"hook_event_name": "SubagentStart", "session_id": "s", "agent_id": f"child-{n}",
