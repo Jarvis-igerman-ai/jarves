@@ -109,6 +109,36 @@ class CloseDeadTests(unittest.TestCase):
                 self.assertFalse(result["sync_ok"], source)
                 store.close()
 
+    def test_malformed_open_pr_rows_make_the_sync_untrusted(self):
+        for rows in ([{"number": 7}, "junk"], [{"number": 7}, {"title": "x"}], [{"number": "abc"}],
+                     [{"number": True}], [{"number": 0}], "7"):
+            with tempfile.TemporaryDirectory() as tmp:
+                store, clock = make(tmp)
+                clock.now = 4000.0
+                dead_task(store, "gone", 5)
+                store.set_source({"open_prs": rows})
+                clock.now = 6000.0
+                result = store.dead_blocked(apply=True)
+                self.assertEqual((result["closed"], result["sync_ok"]), ([], False), rows)
+                self.assertEqual(store.snapshot()["tasks"][0]["state"], "blocked")  # snapshot does not crash
+                store.close()
+
+    def test_task_with_recorded_evidence_or_delivery_is_not_closed(self):
+        store, clock = self.build()
+        self._stamp(store, clock)
+        for ident, pr, field, value in (("validated", 30, "validation", "automated"), ("delivered", 31, "delivery", "beta"),
+                                        ("artifact", 32, "artifact_ref", "v1.zip"),
+                                        ("evidence", 33, "acceptance", [{"id": "C1", "label": "ok", "passed": True,
+                                                                         "evidence": "run 1"}])):
+            dead_task(store, ident, pr)
+            with store._tx() as db:
+                task = store._get(db, "task", ident)
+                task[field] = value
+                store._put(db, "task", task)
+        dead_task(store, "plain", 34)
+        clock.now = 6000.0
+        self.assertEqual(store.dead_blocked(apply=True)["closed"], ["plain"])
+
     def test_task_blocked_after_the_snapshot_is_not_closed(self):
         store, clock = self.build()
         clock.now = 5500.0
