@@ -37,9 +37,30 @@ def test_busy_probe_failures_are_logged_once_each(seen):
     assert len(seen) == 4
 
 
-def test_unreadable_switch_is_logged(seen, monkeypatch, tmp_path):
+class _Healthy:
+    """Every busy probe answers 'busy', so a single failing probe must not hide the others."""
+    approvals = SimpleNamespace(has_pending=lambda: True)
+    chat = SimpleNamespace(turns=[1])
+    orchestrator = SimpleNamespace(db=SimpleNamespace(sessions=lambda live_only: [{"state": "RUNNING"}]))
+    ops = SimpleNamespace(alerts=SimpleNamespace(quiet_now=lambda: True, paused=lambda: False))
+
+
+BUSY = {"approvals": "pending_approval", "chat": "chat_turn", "orchestrator": "coding_agent", "ops": "quiet_hours"}
+WHERE = {"approvals": "approvals", "chat": "chat", "orchestrator": "agents", "ops": "quiet"}
+
+
+@pytest.mark.parametrize("broken", list(BUSY))
+def test_each_busy_probe_failure_is_logged_alone(seen, broken):
+    core = _Healthy()
+    setattr(core, broken, Boom())
+    assert auto_update.core_busy(core) == [v for k, v in BUSY.items() if k != broken]
+    assert seen == [("AUTO_UPDATE_BUSY_PROBE_FAILED", {"error_type": "RuntimeError", "where": WHERE[broken]})]
+
+
+def test_unreadable_switch_is_logged_once(seen, monkeypatch, tmp_path):
     monkeypatch.setattr(features, "Features", _boom)
     assert auto_update.is_enabled(None, tmp_path) is False
+    assert auto_update.is_enabled(None, tmp_path) is False     # read on every look: logged once
     assert seen == [("AUTO_UPDATE_SWITCH_UNREADABLE", {"error_type": "OSError"})]
 
 
