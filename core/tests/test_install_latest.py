@@ -444,3 +444,15 @@ def test_core_still_on_the_old_version_after_install_rolls_back(tmp_path):
     rep = il.run(d)
     assert not rep.ok and rep.rolled_back and "start_core" not in f.calls
     assert ("Core restarted on the new version", False, "running 4.5.0") in rep.checks
+
+
+def test_core_that_cannot_be_started_after_install_names_the_error_and_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path, wait="timeout")
+    d = f.deps()
+    up = iter([True])
+    d.core_running = lambda: next(up, False)
+    d.start_core = lambda: (f.calls.append("start_core"), (_ for _ in ()).throw(OSError("no python")))
+    rep = il.run(d)
+    assert "start_core" in f.calls and not rep.ok and rep.rolled_back
+    detail = dict((c[0], c[2]) for c in rep.checks)["Core restarted on the new version"]
+    assert "jarvis start" in detail and "start failed: OSError" in detail

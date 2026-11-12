@@ -10,7 +10,8 @@ Two phases, because setup force-stops every process that runs from {app}\\python
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
     waits for the setup PROCESS to exit and starts phase two.
   finish (`install-latest --finish STATE`, started by the waiter from the NEW program, never while setup runs): waits for
-    the new Core when it ran, then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
+    the new Core when it ran (starts it once itself when setup did not bring it back, then checks that the running Core
+    reports the new version), then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
     when a check fails, writes the ONE short report to <home>/updates/install-latest-report.txt and prints it.
   `jarvis install-latest --report` prints the last report again (the first process is gone after setup stopped it).
 
@@ -262,6 +263,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         for step in ("backup now", f"download {rep.version} and verify signature, SHA256 and size",
                      "stop the Core if it runs; silent setup (/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
                      " /RESTARTJARVES=1 when the Core ran)", "wait for the setup process to exit",
+                     "start the Core again if it ran and setup did not; check it runs the new version",
                      "version + doctor + selftest + speedtest + status + features diff in the new program",
                      "roll back automatically if a check fails"):
             rep.add("would: " + step, True)
@@ -362,11 +364,12 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         _save_report(deps, rep)
         return rep
     end = deps.wait(core_up) if core_up else "done"
+    start_err = ""
     if core_up and end == "timeout" and not deps.core_running():   # setup ended but did not bring the Core back
         try:
             deps.start_core()                             # once, from the NEW program (finish runs there)
-        except Exception:                                 # noqa: BLE001  (judged by the check below)
-            pass
+        except Exception as e:                            # noqa: BLE001  (named in the check below)
+            start_err = f" (start failed: {type(e).__name__})"
         if _core_on(deps, shown)[0]:
             end = "done"
     install_ok = rep.add("silent install", end == "done" or (end == "timeout" and not core_up),
@@ -388,7 +391,8 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
                 detail = "" if good else f"exit {code}: {_first_line(out)}"
             ok = rep.add(name, good, detail) and ok
         if core_up:                                       # the Core ran before: it must run again, on the new version
-            ok = rep.add("Core restarted on the new version", *_core_on(deps, shown)) and ok
+            cok, cdetail = _core_on(deps, shown)
+            ok = rep.add("Core restarted on the new version", cok, cdetail + ("" if cok else start_err)) and ok
     if install_ok or end == "timeout":                    # informational: lost features are named, rollback stays check-driven
         try:
             fcode, fout = deps.run_cli(["features"])
