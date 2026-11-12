@@ -1,7 +1,7 @@
 name: pr-demo
 # JAR-251 (owner 12 Nov 2026: "I expect videos or images, something easy to understand"). For a PR that changes
 # something a user sees (dashboard pages, phone site, guides, CLI output) this job renders a visual demo with the same
-# hermetic DEMO dashboard the page audit uses (synthetic data, 127.0.0.1 only, network blocked, no secrets):
+# hermetic DEMO dashboard the page audit uses (synthetic data, 127.0.0.1 only, every other host aborted, no secrets):
 # before/after screenshots (main vs PR), a side-by-side image, a short walkthrough video and terminal images.
 # Uploaded as the artifact demo-<PR> with demo.json (title, one line "what changed for you", files, checks).
 # Informational: not part of the required checks and never blocks a merge. No secrets, read-only token, fork-safe
@@ -16,6 +16,7 @@ on:
       - core/src/jarves/cli.py
       - core/src/jarves/*_cli.py
       - core/src/jarves/clilang.py
+      - core/src/jarves/cli_parity.py
       - core/tools/pr_demo.py
       - .github/workflows/pr-demo.yml
 permissions:
@@ -28,13 +29,14 @@ jobs:
     name: Visual demo (before/after)
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: core
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha }}   # the PR head, not GitHub's synthetic merge commit
           fetch-depth: 0
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:

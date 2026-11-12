@@ -6,6 +6,7 @@ changes something a user sees (dashboard pages, guides, CLI output) CI produces:
 - ``<page>-before.png`` / ``<page>-after.png`` and ``<page>-compare.png`` (both side by side, labelled) for every
   affected dashboard page, rendered by the same hermetic DEMO dashboard the page audit uses (tools/all_pages_check.py:
   throw-away home, synthetic data, 127.0.0.1 only, network blocked, no secrets);
+- ``phone-before.png`` / ``phone-after.png`` (+ compare) when the phone site changed: a paired DEMO phone session;
 - ``walkthrough.webm``: a 10-20 s recording that opens each affected page of the PR head and scrolls through it;
 - ``cli-<n>-before.svg`` / ``-after.svg`` (+ ``.png``): rendered terminal output of the affected read-only CLI help;
 - ``demo.json``: title, a one-line "what changed for you", the files, the checks (JS errors on the PR side fail ``ok``).
@@ -45,6 +46,8 @@ DESKTOP = {"width": 1280, "height": 800}
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 SECRET = re.compile(r"(?i)((?:token|secret|password|passwd|api[_-]?key|authorization)\S*\s*[=:]\s*)\S+")
 STORY = re.compile(r"(?im)^\s*(?:\*\*)?(?:what changed for you|now you can)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$")
+CHILD_TIMEOUT = 420                                  # s per side; both sides + setup stay under the job's 30 min
+PHONE = {"width": 390, "height": 844}
 CLI_FILE = re.compile(r"^core/src/jarves/(?:([a-z0-9]+)_cli|cli|clilang|cli_parity)\.py$")
 
 
@@ -176,8 +179,47 @@ def _settle(p) -> None:
     p.wait_for_timeout(600)
 
 
-def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, lang: str) -> dict:
-    """Screenshots of each page from the DEMO dashboard of ``core``; optional walkthrough video."""
+def local_only(url: str) -> bool:
+    """Requests a demo page may make: this machine's DEMO dashboard and local files, never another host."""
+    from urllib.parse import urlsplit
+    u = urlsplit(url)
+    return u.scheme in ("file", "data", "blob", "about") or (u.scheme in ("http", "https", "ws", "wss")
+                                                             and u.hostname in ("127.0.0.1", "localhost", "::1"))
+
+
+def guard(ctx):
+    """Abort every browser request to another host (PR code may try to fetch anything from the runner)."""
+    ctx.route("**/*", lambda route: route.continue_() if local_only(route.request.url) else route.abort())
+    return ctx
+
+
+def phone_shot(b, d, label: str, out: Path) -> tuple[str, list[str]]:
+    """The phone site (/m/) as a phone sees it: pair a DEMO phone with a one-time code, screenshot the app view."""
+    errs: list[str] = []
+    d.mobile.enabled = True                              # the throw-away DEMO dashboard only; 127.0.0.1, test data
+    code = d.mobile.new_code(by="demo")["code"]
+    ctx = guard(b.new_context(viewport=PHONE, is_mobile=True, has_touch=True, locale="en-US", color_scheme="light"))
+    p = ctx.new_page()
+    p.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
+    try:
+        p.goto(d.url.split("/?")[0].rstrip("/") + f"/m/#c={code}")
+        p.wait_for_selector("#pairView:not([hidden])", timeout=20000)
+        p.fill("#name", "Demo phone")
+        p.tap("#pairForm button[type=submit]")
+        p.wait_for_selector("#appView:not([hidden])", timeout=20000)
+        _settle(p)
+        f = out / f"phone-{label}.png"
+        p.screenshot(path=str(f))
+        return f.name, errs
+    except Exception as e:
+        errs.append(f"{type(e).__name__}: {str(e).splitlines()[0][:200]}")
+        return "", errs
+    finally:
+        ctx.close()
+
+
+def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, lang: str, phone: bool = False) -> dict:
+    """Screenshots of each page (and the phone site) from the DEMO dashboard of ``core``; optional walkthrough video."""
     import all_pages_check as apc
     from playwright.sync_api import sync_playwright
     _assert_core(core)
@@ -191,7 +233,7 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
                 try:
                     targets = [(pg, d.url + "#/" + pg, DESKTOP) for pg in pages]
                     for name, url, vp in targets:
-                        ctx = b.new_context(viewport=vp, locale="en-US", color_scheme="light")
+                        ctx = guard(b.new_context(viewport=vp, locale="en-US", color_scheme="light"))
                         ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
                         p = ctx.new_page()
                         errs: list[str] = []
@@ -210,6 +252,11 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
                             errs.append(f"{type(e).__name__}: {str(e).splitlines()[0][:200]}")
                         res["errors"][name] = [scrub(x)[:300] for x in errs]
                         ctx.close()
+                    if phone:
+                        shot, errs = phone_shot(b, d, label, out)
+                        if shot:
+                            res["shots"]["phone"] = shot
+                        res["errors"]["phone"] = [scrub(x)[:300] for x in errs] or ([] if shot else ["no screenshot"])
                     if video and targets:
                         res["video"] = walkthrough(b, targets, out, lang)
                 finally:
@@ -222,7 +269,7 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
 def walkthrough(b, targets, out: Path, lang: str) -> str:
     """Open each page and scroll through it slowly; about 4 s per page, 20 s at most."""
     vdir = out / "_video"
-    ctx = b.new_context(viewport=DESKTOP, record_video_dir=str(vdir), record_video_size=DESKTOP)
+    ctx = guard(b.new_context(viewport=DESKTOP, record_video_dir=str(vdir), record_video_size=DESKTOP))
     ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
     p = ctx.new_page()
     per = max(2500, min(5000, 18000 // len(targets)))
@@ -243,7 +290,7 @@ def walkthrough(b, targets, out: Path, lang: str) -> str:
     vid = p.video
     ctx.close()                                          # the video file is complete only after the context closes
     dest = out / "walkthrough.webm"
-    if vid:
+    if vid and Path(vid.path()).exists():               # no ffmpeg: no file, the screenshots still count
         Path(vid.path()).replace(dest)
     for f in vdir.glob("*"):
         f.unlink()
@@ -338,8 +385,11 @@ def safe(name: str) -> str:
 # ---------------------------------------------------------------- ci: both sides + demo.json
 def _child(core: Path, args: list[str]) -> dict:
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(core / "src"), str(core / "tools")])}
-    r = subprocess.run([sys.executable, str(Path(__file__).resolve()), *args, "--core", str(core)], env=env,
-                       capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
+    try:
+        r = subprocess.run([sys.executable, str(Path(__file__).resolve()), *args, "--core", str(core)], env=env,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=CHILD_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return {"failed": True, "rc": -1, "log": f"timed out after {CHILD_TIMEOUT} s"}
     last = (r.stdout.strip().splitlines() or [""])[-1]
     try:
         return json.loads(last)
@@ -360,26 +410,32 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
     if len(sides) == 1:
         demo["notes"].append("No base checkout: only the 'after' side was rendered.")
     for label, core in sides:
-        if pl["pages"]:
-            args = ["capture", "--label", label, "--out", str(out), "--pages", ",".join(pl["pages"]), "--lang", lang]
-            r = _child(core, args + (["--video"] if label == "after" else []))
+        if pl["pages"] or pl["phone"]:
+            args = ["capture", "--label", label, "--out", str(out), "--pages=" + ",".join(pl["pages"]), "--lang", lang]
+            r = _child(core, args + (["--video"] if label == "after" and pl["pages"] else [])
+                       + (["--phone"] if pl["phone"] else []))
             if r.get("failed"):
                 demo["notes"].append(f"{label}: page capture failed: {r.get('log', '')}")
                 if label == "after":
                     demo["ok"] = False
+            if label == "after" and pl["pages"] and not r.get("failed") and not r.get("video"):
+                demo["notes"].append("after: no walkthrough video was recorded.")
             for name, errs in (r.get("errors") or {}).items():
                 if label == "after":
                     demo["checks"].append({"name": f"{name}: no browser errors", "ok": not errs, "detail": errs[:5]})
         if pl["cli"]:
-            r = _child(core, ["cli", "--label", label, "--out", str(out), "--cmds", "|".join(pl["cli"])])
+            r = _child(core, ["cli", "--label", label, "--out", str(out), "--cmds=" + "|".join(pl["cli"])])
             if r.get("failed"):
                 demo["notes"].append(f"{label}: CLI capture failed: {r.get('log', '')}")
             elif label == "after":
+                if not r.get("cli"):
+                    demo["checks"].append({"name": "terminal images rendered", "ok": False, "detail": []})
                 for c in r.get("cli", []):
                     demo["checks"].append({"name": f"jarvis {c['cmd']} exits 0", "ok": c["rc"] == 0, "detail": []})
-    if pl["pages"]:
+    shown = pl["pages"] + (["phone"] if pl["phone"] else [])
+    if shown:
         try:
-            for name in compare(out, pl["pages"]):
+            for name in compare(out, shown):
                 demo["notes"].append(f"{name}: looks the same before and after (the change is not visible here).")
         except Exception as e:
             demo["notes"].append(f"side-by-side images failed: {type(e).__name__}")
@@ -387,9 +443,6 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
         svg_to_png(out)
     except Exception as e:
         demo["notes"].append(f"terminal PNGs failed: {type(e).__name__}")
-    if pl["phone"]:
-        demo["notes"].append("Phone site changed: not rendered yet (it needs a paired phone session); "
-                             "QA records it on the test phone.")
     demo["ok"] = demo["ok"] and all(c["ok"] for c in demo["checks"])
     demo["files"] = sorted(f.name for f in out.iterdir() if f.is_file() and f.name != "demo.json")
     (out / "demo.json").write_text(json.dumps(demo, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -424,6 +477,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--core", required=True)
     s.add_argument("--pages", default="")
     s.add_argument("--video", action="store_true")
+    s.add_argument("--phone", action="store_true", help="also the phone site (/m/) in a paired DEMO phone session")
     s.add_argument("--label", required=True, choices=["before", "after"])
     s.add_argument("--out", required=True)
     s.add_argument("--lang", default="en", choices=["en", "he"])
@@ -454,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     here = Path(__file__).resolve().parent             # the script dir comes first on sys.path: use the side's own tools
     sys.path[:] = [str(core / "tools"), str(core / "src")] + [x for x in sys.path if x and Path(x).resolve() != here]
     if a.cmd == "capture":
-        r = capture(core, [x for x in a.pages.split(",") if x], a.label, Path(a.out), a.video, a.lang)
+        r = capture(core, [x for x in a.pages.split(",") if x], a.label, Path(a.out), a.video, a.lang, a.phone)
     else:
         r = cli_capture(core, [x.strip() for x in a.cmds.split("|") if x.strip()], a.label, Path(a.out))
     print(json.dumps(r, ensure_ascii=False))

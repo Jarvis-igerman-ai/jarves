@@ -1,6 +1,8 @@
 """JAR-251: the PR demo planner, terminal image and pr-demo workflow (pure parts; the browser run is CI's pr-demo job)."""
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -88,3 +90,102 @@ def test_pr_demo_workflow_is_read_only_pr_only_and_never_puts_pr_text_in_a_scrip
     up = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
     assert up["with"]["name"] == "demo-${{ github.event.pull_request.number }}"
     assert "secrets." not in text
+
+
+def test_workflow_renders_the_pr_head_and_watches_cli_parity():
+    doc = yaml.safe_load((ROOT.parent / ".github" / "workflows" / "pr-demo.yml").read_text(encoding="utf-8"))
+    on = doc.get("on", doc.get(True))
+    assert "core/src/jarves/cli_parity.py" in on["pull_request"]["paths"]
+    co = next(s for s in doc["jobs"]["demo"]["steps"] if str(s.get("uses", "")).startswith("actions/checkout"))
+    assert co["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"      # not the synthetic merge commit
+
+
+def test_browser_guard_aborts_every_host_but_this_machine():
+    calls = []
+
+    class Ctx:
+        def route(self, pattern, handler):
+            calls.append((pattern, handler))
+
+    class Route:
+        def __init__(self, url):
+            self.request, self.done = type("R", (), {"url": url})(), ""
+
+        def continue_(self):
+            self.done = "continue"
+
+        def abort(self):
+            self.done = "abort"
+
+    pr_demo.guard(Ctx())
+    assert [c[0] for c in calls] == ["**/*"]
+    for url, want in [("http://127.0.0.1:8123/#/home", "continue"), ("file:///tmp/x.png", "continue"),
+                      ("https://example.com/x.js", "abort"), ("http://169.254.169.254/latest", "abort"),
+                      ("http://127.0.0.1.evil.test/", "abort")]:
+        r = Route(url)
+        calls[0][1](r)
+        assert r.done == want, url
+
+
+def _ci(tmp_path, monkeypatch, results, files):
+    seen = []
+
+    def child(core, args):
+        seen.append(args)
+        return results[(args[args.index("--label") + 1], args[0])]
+    monkeypatch.setattr(pr_demo, "_child", child)
+    monkeypatch.setattr(pr_demo, "compare", lambda out, pages: [])
+    monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)
+    base = tmp_path / "base"
+    (base / "src").mkdir(parents=True)
+    out = tmp_path / "demo"
+    out.mkdir()
+    (out / "home-after.png").write_bytes(b"x")
+    demo = pr_demo.ci("main", base, "7", out, "JAR-9: bigger buttons", "", files)
+    assert json.loads((out / "demo.json").read_text(encoding="utf-8")) == demo
+    return demo, seen
+
+
+OKCAP = {"errors": {"home": [], "phone": []}}
+
+
+def test_ci_after_failure_fails_before_failure_only_notes_and_phone_is_captured(tmp_path, monkeypatch):
+    files = ["core/src/jarves/dashboard_static/style.css", "core/src/jarves/dashboard_static/mobile/app.js"]
+    demo, seen = _ci(tmp_path, monkeypatch, {("after", "capture"): OKCAP, ("before", "capture"): {"failed": True}}, files)
+    assert demo["ok"] and demo["files"] == ["home-after.png"]
+    assert any(n.startswith("before: page capture failed") for n in demo["notes"])
+    assert "--phone" in seen[0] and "--video" in seen[0] and "--video" not in seen[1]
+    assert {c["name"] for c in demo["checks"]} >= {"home: no browser errors", "phone: no browser errors"}
+    demo, _ = _ci(tmp_path / "2", monkeypatch, {("after", "capture"): {"failed": True, "log": "boom"},
+                                                ("before", "capture"): OKCAP}, files)
+    assert demo["ok"] is False and any(n.startswith("after: page capture failed: boom") for n in demo["notes"])
+
+
+def test_ci_phone_only_change_fails_truthfully_without_a_phone_image(tmp_path, monkeypatch):
+    bad = {"errors": {"phone": ["no screenshot"]}}
+    demo, seen = _ci(tmp_path, monkeypatch, {("after", "capture"): bad, ("before", "capture"): OKCAP},
+                     ["core/src/jarves/dashboard_static/mobile/app.js"])
+    assert "--phone" in seen[0] and "--video" not in seen[0] and demo["ok"] is False
+
+
+def test_ci_cli_exit_code_and_missing_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(pr_demo, "_child", lambda core, args: {"cli": [{"cmd": "--help", "rc": 2, "file": "c.svg"}]})
+    monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)
+    demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli.py"])
+    assert demo["ok"] is False and any("No base checkout" in n for n in demo["notes"])
+    assert demo["checks"] == [{"name": "jarvis --help exits 0", "ok": False, "detail": []}]
+
+
+def test_child_timeout_is_a_failed_side_not_a_crash(monkeypatch):
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired("x", 1)
+    monkeypatch.setattr(pr_demo.subprocess, "run", boom)
+    assert pr_demo._child(ROOT, ["cli"])["failed"] is True
+
+
+def test_cli_only_change_renders_terminal_images_through_the_real_child(tmp_path, monkeypatch):
+    monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)             # the PNG copy needs a browser
+    demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli_parity.py"])
+    assert demo["plan"]["cli"] == ["--help"]
+    assert "cli-1-after.svg" in demo["files"], demo["notes"]
+    assert demo["checks"] == [{"name": "jarvis --help exits 0", "ok": True, "detail": []}]
