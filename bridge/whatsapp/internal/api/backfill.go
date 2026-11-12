@@ -75,9 +75,10 @@ func msgSize(m msgstore.Message) int {
 	return n
 }
 
+// bfBufMax is never below one batch: a smaller bound would pause the backfill forever.
 func (s *Server) bfBufMax() int {
 	if s.cfg.BackfillBuffer > 0 {
-		return s.cfg.BackfillBuffer
+		return max(s.cfg.BackfillBuffer, BackfillBatch)
 	}
 	return backfillBufMax
 }
@@ -210,6 +211,12 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		return
 	}
 	b.waiting = false
+	if timeout && (s.eng == nil || !s.eng.IsConnected()) { // the phone could not answer: the chat is not finished
+		b.state, b.errorCode = "failed", "WA_NOT_CONNECTED"
+		s.mu.Unlock()
+		s.log.Warn("WA_BACKFILL", "History request unanswered while offline.", F{"state": "failed"})
+		return
+	}
 	switch {
 	case b.truncated && !timeout && b.retries < backfillRetries:
 		// part of the answer did not fit: ask again from the same anchor once Core has drained (no loss)
@@ -333,7 +340,7 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 	b := &s.bf
 	keep := make([]bfMsg, 0, len(b.buf))
 	for _, x := range b.buf {
-		if x.seq > cursor {
+		if x.seq > cursor && s.readableLocked(x.m.Chat) { // out of read scope: dropped from memory too
 			keep = append(keep, x)
 		} else {
 			b.bytes -= msgSize(x.m)

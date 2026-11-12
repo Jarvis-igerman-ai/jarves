@@ -467,6 +467,10 @@ func (s *Server) onEvent(e engine.Event) {
 	ctx := context.Background()
 	switch ev := e.(type) {
 	case engine.MessageEvent:
+		if ev.OnDemand { // backfill answers live in the memory buffer only: never the store, chats or snapshot
+			s.bfMessage(ev.Msg)
+			return
+		}
 		s.mu.Lock()
 		readable := s.readableLocked(ev.Msg.Chat)
 		keep := readable && !s.pol.KeepNothing && ev.Msg.TS >= s.retentionMinTSLocked()
@@ -488,9 +492,6 @@ func (s *Server) onEvent(e engine.Event) {
 			if last, ok := s.st.GetMeta(ctx, "phone_last_seen"); !ok || ev.Msg.TS > last {
 				_ = s.st.SetMeta(ctx, "phone_last_seen", ev.Msg.TS)
 			}
-		}
-		if ev.OnDemand {
-			s.bfMessage(ev.Msg)
 		}
 		if !ev.History && readable {
 			s.hub.broadcast(ev.Msg.Chat, map[string]any{"type": "message.new", "chat": ev.Msg.Chat, "id": ev.Msg.ID,

@@ -84,10 +84,10 @@ Read gate: a direct chat is readable when `read_scope.all_direct` or it is on th
 `POST /history/backfill` walks every readable chat (or only `chat`) that has a stored message. For each chat it asks
 the phone for 50 messages before the oldest one it knows (whatsmeow on-demand history sync), then asks again with
 the oldest answered message as the new anchor. A chat is finished when an answer brings nothing older, when the
-answer is older than `since` (a ts; default: no age limit), or when the phone sends no answer within 60 s. Refusals:
+answer is older than `since` (a ts; default: no age limit), or when the phone sends no answer within 60 s (if the bridge is offline then, the backfill ends `failed` with `WA_NOT_CONNECTED` and the chat is not counted done). Refusals:
 409 `WA_MODE_OFF`, 423 `WA_KILLED`, 409 `WA_KEEP_NOTHING`, 409 `WA_STORE_LOCKED`, 409 `WA_BACKFILL_RUNNING`, 503
 `WA_NOT_CONNECTED`, 404 `WA_CHAT_NOT_FOUND`. Answered messages of readable chats are kept ONLY in a bounded memory
-buffer (hard bounds: 2000 messages and 16 MiB; requests pause while it is full). Only the answer to the request that is out is kept; any other history is ignored. When an answer is larger than the room left, the overflow counts in `dropped` and the same request is asked again after Core drains (up to 3 times, so duplicates are possible; Core de-duplicates by id). Acknowledged messages are wiped from memory. A chat that leaves the read scope is never asked again. They are never written to the store or the sealed snapshot,
+buffer (hard bounds: 2000 messages and 16 MiB; requests pause while it is full). Only the answer to the request that is out is kept; any other history is ignored. When an answer is larger than the room left, the overflow counts in `dropped` and the same request is asked again after Core drains (up to 3 times, so duplicates are possible; Core de-duplicates by id). Acknowledged messages are wiped from memory. A chat that leaves the read scope is never asked again and its buffered messages are dropped on the next read. On-demand answers never create or update a stored chat. They are never written to the store or the sealed snapshot,
 and messages older than retention are not stored either. `GET` returns `{state: idle|running|done|stopped|failed,
 chats_total, chats_done, chats_skipped, received, buffered, dropped, error, batch, messages, next_cursor}`: it first drops every
 buffered message with a sequence number up to `cursor`, then returns the next readable messages. Pass `next_cursor`

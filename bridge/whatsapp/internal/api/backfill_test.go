@@ -270,3 +270,47 @@ func TestBackfillBufferIsAlsoBoundedInBytes(t *testing.T) {
 		t.Fatalf("dropped %s", got.raw)
 	}
 }
+
+func TestBackfillAnswerWithinRetentionNeverReachesTheStore(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 2*86400, "fresh") // inside the 14-day retention: still memory only
+	if stored, _ := e.st.Messages(e.s.ctx, dana, 0, 0, 500); len(stored) != 1 {
+		t.Fatalf("on-demand history must never reach the bridge store: %d", len(stored))
+	}
+	e.answer(stranger, 1, 2*86400, "uns") // unsolicited on-demand history is ignored entirely
+	if chats, _ := e.st.AllChats(e.s.ctx); len(chats) != 1 {
+		t.Fatalf("unsolicited on-demand history created a chat: %d", len(chats))
+	}
+}
+
+func TestBackfillTinyBufferBoundDoesNotStall(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBuffer = 10 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	if n := len(e.requests()); n != 1 {
+		t.Fatalf("a bound below one batch must still send the first request: %d", n)
+	}
+}
+
+func TestBackfillTimeoutWhileOfflineFailsInsteadOfFinishingTheChat(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillWait = 30 * time.Millisecond })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.fake.Disconnect()
+	if !waitFor(t, 2*time.Second, func() bool { return e.drain(0).body["state"] != "running" }) {
+		t.Fatal("still running")
+	}
+	if got := e.drain(0); got.body["state"] != "failed" || got.body["error"] != "WA_NOT_CONNECTED" || got.body["chats_done"] != 0.0 {
+		t.Fatalf("an unanswered request while offline is not a finished chat: %s", got.raw)
+	}
+}
+
+func TestBackfillDrainDropsChatsThatLeftTheScopeFromMemory(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 30*86400, "z")
+	e.mustOK(e.do("POST", "/read_scope", e.admin, map[string]any{"all_direct": false}))
+	e.drain(0)
+	if n := e.bufLen(); n != 0 {
+		t.Fatalf("messages of a chat that left the read scope stay in memory: %d", n)
+	}
+}
