@@ -34,7 +34,9 @@ def set_daily(ai, *, voice_minutes: int | None = None, requests: int | None = No
 
 def admit(budget, kind: str, language: str = "he") -> Decision:
     """May one more voice conversation (`voice_seconds`) or AI request (`ai_requests`) start today?
-    Voice needs at least the useful minimum left (a near-zero session would end at once and reconnect)."""
+    Voice needs at least the useful minimum left (a near-zero session would end at once and reconnect). Voice use
+    is only known afterwards (Budget.record), so this check is its gate; AI requests still go through
+    Budget.reserve, which stays the atomic gate (this answer is only advice for them)."""
     need = max(1.0, float(limits.SPECS[kind]["min_useful"]))
     if budget.remaining(kind) >= need:
         return Decision(True, kind)

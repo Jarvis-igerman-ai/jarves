@@ -109,3 +109,36 @@ def test_owner_sets_voice_limit_of_one_and_second_voice_request_is_refused(budge
     assert not refused.allowed and refused.code == "AI_DAILY_LIMIT" and "1/1 requests" in refused.text_en
     with pytest.raises(ValueError):
         daily_limits.set_daily(budget.ai, voice_minutes=-1)
+
+
+async def test_core_voice_start_goes_through_the_daily_limits_gate(home, cfg, monkeypatch):
+    """JAR-262 wiring: with a 1-minute voice limit used up, the Core's voice start asks daily_limits.admit, opens no
+    cloud session and shows the VOICE_DAILY_LIMIT refusal (removing the admit call from _start_live fails this)."""
+    from conftest import FakeSTT, FakeTTS, open_face
+    from jarves import daily_limits
+    from jarves.app import Core
+    from jarves.skills.music import FakePlayer
+    from jarves.voice.audio import SimAudio
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg.voice.mode, cfg.voice.activation = "live", "conversation"
+    daily_limits.set_daily(cfg.ai, voice_minutes=1)
+    calls, started = [], []
+    real = daily_limits.admit
+    monkeypatch.setattr(daily_limits, "admit", lambda *a, **k: calls.append(a[1]) or real(*a, **k))
+
+    class FakeLive:
+        def __init__(self, core, **kw):
+            started.append(1)
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=FakeLive)
+    await c.start()
+    try:
+        c.budget.record("voice_seconds", MIN)                  # the first conversation used the minute
+        f = await open_face(c)
+        started.clear()
+        await c._start_live()                                  # the second voice request
+        assert "voice_seconds" in calls and not started
+        err = await f.wait("error", lambda p: p["code"] == "VOICE_DAILY_LIMIT")
+        assert err["max"] == 1 and "daily_realtime_minutes" in err["setting"]
+    finally:
+        await c.stop()
