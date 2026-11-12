@@ -1,0 +1,1 @@
+- Added: reports to Google Drive (beta, off by default): copy each report to your Google Drive for desktop folder, or upload it with the drive.file permission after your own sign-in (CSV becomes a Google Sheet); `jarvis reports drive status|folder PATH|signin|upload FILE` (JAR-274).
