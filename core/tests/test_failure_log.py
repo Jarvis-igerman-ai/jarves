@@ -147,3 +147,14 @@ def test_a_failing_write_is_logged_and_self_diagnosis_still_runs(home, monkeypat
     hook = fl.attach(SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: True)))
     hook("x", SimpleNamespace(ok=False, code="E"), "text")
     assert seen == ["x"] and warned == ["FAILURE_LOG_WRITE_FAILED"]
+
+
+def test_concurrent_processes_never_lose_a_row(home):
+    import subprocess
+    import sys
+    code = ("import sys; from datetime import datetime; from jarves import failure_log as fl\n"
+            "for _ in range(20): fl.record(sys.argv[1], 'tool_error', tool='music', on=True, now=datetime(2026, 11, 11))")
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(home)]) for _ in range(4)]
+    assert all(p.wait(timeout=60) == 0 for p in procs)
+    assert fl.weekly(home, now=NOW) == ["80x tool_error: music"]
+    assert not list(home.glob("failure_log.jsonl.*.tmp"))       # every writer's own temp file was replaced
