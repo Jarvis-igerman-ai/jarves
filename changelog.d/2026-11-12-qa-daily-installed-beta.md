@@ -1,0 +1,1 @@
+- Added: daily installed-beta check `jarvis qa-daily install|check|status`: installs the newest beta silently (backup + rollback), runs doctor/selftest and top scenarios, writes a local demo transcript and P1/P2 bug drafts with redacted evidence; nothing leaves the PC. Beta, OFF by default (owner switch `qa_installs_enabled`). (JAR-232)

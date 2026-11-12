@@ -39,7 +39,9 @@ def _full_choices() -> list[str]:
 
 
 def test_every_command_is_routed():
+    from jarves import plugin_registry
     known = set(cli._INLINE_COMMANDS) | {c for r in ROWS for c in r[1]}
+    known |= {c for m in plugin_registry.modules("cli") for c in m.COMMANDS}    # plugins.d: routed by the full parser
     assert set(_full_choices()) <= known
     assert not set(cli._INLINE_COMMANDS) & {c for r in ROWS for c in r[1]}
 
