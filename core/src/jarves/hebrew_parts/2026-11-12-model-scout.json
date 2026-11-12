@@ -1,0 +1,5 @@
+{
+ "once a month, when you start it, checks official public pages for newer voice models and agent libraries than the recorded ones and writes idea cards; nothing personal is sent": "פעם בחודש, כשאתם מפעילים אותו, בודק בדפים רשמיים וציבוריים אם יש מודלי קול וספריות סוכנים חדשים מאלה שרשומים, וכותב כרטיסי רעיון; שום מידע אישי לא נשלח",
+ "tested with a fake fetch only": "נבדק רק עם דפים מדומים",
+ "not run on a Pi": "לא הורץ על Raspberry Pi"
+}

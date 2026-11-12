@@ -1,0 +1,1 @@
+- Added: beta switch `model_scout` (OFF by default): `jarvis scout run` checks official public pages for newer voice models and agent libraries than the recorded ones and writes monthly idea cards with the measured Model Lab reason (quality, speed, cost) when there is one; `jarvis scout status` says when a month has passed. Guide "Monthly best-in-class scout". (JAR-233)

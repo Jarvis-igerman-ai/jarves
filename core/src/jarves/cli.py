@@ -2069,6 +2069,7 @@ _EXT_LATE = (
     ("release_notes", ("release-notes",), "COMMANDS"),                # what changed per version, HTML page
     ("cli_parity", ("timers", "lists", "goals", "prefs", "proactive", "dev", "notes", "jobs", "reports"), "COMMANDS"),
     ("model_lab", ("modellab",), "COMMANDS"),                          # V7 M3: jarvis modellab status | run | report
+    ("model_scout", ("scout",), "COMMANDS"),                          # JAR-233: jarvis scout status | run | cards
     ("budget_cli", ("budget",), "COMMANDS"),                          # SW-V4 D (#14)
     ("privacy", ("privacy",), "COMMANDS"),                            # OD-12: jarvis privacy status | full-text on|off
     ("phone_cli", ("phone",), "COMMANDS"),                            # V5: jarvis phone status | approvals | ...

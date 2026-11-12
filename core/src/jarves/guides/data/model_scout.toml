@@ -1,0 +1,51 @@
+order = 32
+category = "system"
+features = ["model_scout"]
+aliases = ["סייר טכנולוגיה", "מודלים חדשים", "best-in-class scout", "newer models", "model scout"]
+error_codes = ["SCOUT_OFF"]
+title_he = "סייר הטכנולוגיה החודשי"
+title_en = "Monthly best-in-class scout"
+what_he = "פעם בחודש, כשאתם מפעילים אותו, הסייר בודק בדפים הרשמיים והציבוריים אם יש מודל קול או ספריית סוכנים חדשים מאלה שרשומים אצלכם, וכותב כרטיסי רעיון. כל כרטיס מראה מה רשום, מה חדש, מקור ותאריך בדיקה, ואת הסיבה למעבר (איכות, מהירות, עלות) רק אם היא נמדדה במעבדת המודלים."
+what_en = "Once a month, when you start it, the scout checks the official public pages for a newer voice model or agent library than the ones recorded, and writes idea cards. Each card shows what is recorded, what is newer, the source and the date checked, and the reason to switch (quality, speed, cost) only when the Model Lab measured it."
+say = [["תריץ את סייר הטכנולוגיה", "Run the best-in-class scout"]]
+expect_he = "כבוי כברירת מחדל (בטא). אין טיימר: הפקודה status רק אומרת שעבר חודש. כרטיס הוא רעיון בלבד; המעבר הוא תמיד החלטה שלכם."
+expect_en = "Off by default (beta). There is no timer: status only says a month has passed. A card is only an idea; switching is always your decision."
+test_he = "הבדיקות משתמשות בדפים מדומים, בלי רשת."
+test_en = "The tests use fake pages, with no network."
+cost_he = "חינם. אין קריאה למודל."
+cost_en = "Free. No model is called."
+privacy_he = "נקראים רק דפים ציבוריים קבועים, בבקשת קריאה פשוטה, בלי מפתח ובלי שום מידע אישי. הכרטיסים נשמרים רק במחשב, בתיקייה scout בתיקיית הנתונים."
+privacy_en = "Only fixed public pages are read, with a plain read request, no key and nothing personal. The cards stay on this PC, in the scout folder of the data folder."
+
+[parity.features]
+model_scout = "scout"
+
+[[steps]]
+he = "הפעילו יכולות בטא: jarvis features beta on. אחר כך: jarvis features on model_scout."
+en = "Turn on beta features: jarvis features beta on. Then: jarvis features on model_scout."
+action = "feature_on:model_scout"
+check = "active:model_scout"
+
+[[steps]]
+he = "האם הגיע הזמן: jarvis scout status. הרצה: jarvis scout run."
+en = "Is it time: jarvis scout status. Run it: jarvis scout run."
+
+[[steps]]
+he = "הכרטיסים האחרונים: jarvis scout cards. בכרטיס שלא נמדד, הריצו את הפקודה שבשדה next במעבדת המודלים."
+en = "The latest cards: jarvis scout cards. For a card that is not measured, run the command in its next field in the Model Lab."
+
+[[steps]]
+he = "כיבוי: jarvis features off model_scout."
+en = "Turn it off: jarvis features off model_scout."
+
+[[problems]]
+he = "כתוב SCOUT_OFF"
+en = "It says SCOUT_OFF"
+fix_he = "היכולת כבויה. הפעילו אותה בשלב הראשון."
+fix_en = "The feature is off. Turn it on in the first step."
+
+[[problems]]
+he = "יש שגיאה בשדה errors"
+en = "There is an entry under errors"
+fix_he = "הדף הרשמי לא נגיש עכשיו. שום כרטיס לא הומצא עבורו; נסו שוב מאוחר יותר."
+fix_en = "The official page could not be reached. No card was invented for it; try again later."
