@@ -83,15 +83,17 @@ OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your o
 
 
 def owner_only_guard(action: str) -> str:
-    """Owner questions are for the owner: refuse non-interactive callers (agents, pipes, scripts)."""
+    """Owner-only actions (answers, unlock, manager switch): refuse non-interactive callers (agents, pipes, scripts)."""
+    manager = action.startswith("manager")
+    head, tail = ("this runs only from the owner's own terminal", "") if manager else (OWNER_ONLY_MESSAGE, "; the question stays open")
     if os.environ.get("JARVES_WORKFLOW_AGENT"):
-        raise PermissionError(f"{OWNER_ONLY_MESSAGE} ('{action}' refused: agent environment); the question stays open")
+        raise PermissionError(f"{head} ('{action}' refused: agent environment){tail}")
     try:
         interactive = sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):
         interactive = False
     if not interactive:
-        raise PermissionError(f"{OWNER_ONLY_MESSAGE} ('{action}' refused: stdin and stdout must both be a terminal); the question stays open")
+        raise PermissionError(f"{head} ('{action}' refused: stdin and stdout must both be a terminal){tail}")
     return "terminal"
 
 

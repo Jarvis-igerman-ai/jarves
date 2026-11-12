@@ -85,11 +85,18 @@ def status(home: Path, alive=_alive) -> dict:
 def set_mode(home: Path, mode: str, alive=_alive, now=time.time) -> dict:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {', '.join(MODES)}")
-    owner = lock_owner(home, alive)
-    if owner and owner.get("mode") != mode:
+    def other_owner():
+        owner = lock_owner(home, alive)
+        return owner if owner and owner.get("mode") != mode else None      # a pending lock (mode None) also counts
+    owner, previous = other_owner(), get_mode(home)
+    if owner:
         raise ManagerConflict(f"the {owner.get('mode')} manager is still running; release it first", _public(owner))
     Path(home).mkdir(parents=True, exist_ok=True)
     _write(Path(home) / STATE_NAME, {"mode": mode, "changed_at": now()})
+    owner = other_owner()               # re-check after writing: acquire re-checks the mode after linking, so one side backs out
+    if owner:
+        _write(Path(home) / STATE_NAME, {"mode": previous, "changed_at": now()})
+        raise ManagerConflict(f"the {owner.get('mode')} manager started during the switch; mode kept", _public(owner))
     return status(home, alive)
 
 
@@ -97,9 +104,11 @@ def acquire(home: Path, mode: str, holder: str, pid: int, alive=_alive, now=time
     """Take the single scheduler lock for `mode`. `pid` must be the long-lived scheduler process (not the CLI) and
     alive. The lock is created atomically (temp file + os.link into an absent path, so it is never visible empty).
     Refused when the choice differs or a live holder exists (a restart never produces a second scheduler).
-    Returns the record including the secret `token` that only the holder can use to release."""
-    if mode != get_mode(home):
-        raise ManagerConflict(f"manager mode is {get_mode(home)}, not {mode}")
+    Returns the record including the secret `token` used to release. The token stops accidents; it is stored in plain
+    JSON under the user's profile, so it is not a security boundary against other processes of the same user."""
+    chosen = get_mode(home)
+    if mode != chosen:
+        raise ManagerConflict(f"manager mode is {chosen}, not {mode}")
     if not isinstance(pid, int) or pid <= 0 or not alive(pid):
         raise ManagerConflict("pid must be the live scheduler process that will hold the lock")
     path = Path(home) / LOCK_NAME
@@ -114,13 +123,20 @@ def acquire(home: Path, mode: str, holder: str, pid: int, alive=_alive, now=time
         for _ in range(2):
             try:
                 os.link(tmp, path)          # atomic: fails if any lock (even one being recovered) exists
-                return record
             except FileExistsError:
                 owner = lock_owner(home, alive, now)
                 if owner:
                     raise ManagerConflict("another scheduler already owns this profile", _public(owner))
                 _recover_stale(path, alive, now)
+                continue
+            switched = get_mode(home)
+            if switched != mode:            # the owner switched meanwhile (set_mode re-checks the lock after writing)
+                _remove_if(path, lambda rec: (rec or {}).get("token") == record["token"])
+                raise ManagerConflict(f"manager mode changed to {switched} while taking the lock")
+            return record
         raise ManagerConflict("could not take the scheduler lock", _public(lock_owner(home, alive, now)))
+    except OSError as exc:                  # e.g. no hard links (FAT, network share) or a file in use on Windows
+        raise ManagerConflict(f"the scheduler lock file could not be changed: {exc.__class__.__name__}") from exc
     finally:
         try:
             tmp.unlink()
@@ -145,20 +161,7 @@ def _recover_stale(path: Path, alive, now) -> None:
         judged = _read(path)
         if lock_owner(path.parent, alive, now):
             return
-        grave = path.with_name(f"{LOCK_NAME}.{uuid.uuid4().hex}.stale")
-        try:
-            os.replace(path, grave)
-        except FileNotFoundError:
-            return
-        if _read(grave) != judged:          # someone replaced it between judging and moving: restore it
-            try:
-                os.link(grave, path)
-            except OSError:
-                pass
-        try:
-            grave.unlink()
-        except OSError:
-            pass
+        _remove_if(path, lambda rec: rec == judged)   # replaced between judging and moving: restored, not deleted
     finally:
         try:
             guard.unlink()
@@ -166,17 +169,44 @@ def _recover_stale(path: Path, alive, now) -> None:
             pass
 
 
-def release(home: Path, holder: str, token: str = "", force: bool = False) -> dict:
-    """Release needs the holder's secret token. `force` (owner terminal only, enforced by the CLI) skips the token."""
-    path = Path(home) / LOCK_NAME
-    held = _read(path)
-    if held and not force:
-        if not token or held.get("token") != token or held.get("holder") != str(holder)[:80]:
-            raise ManagerConflict("the lock belongs to another holder (holder name and token must match)", _public(held))
+def _remove_if(path: Path, check) -> bool:
+    """Atomically take the lock aside, then delete it only if `check(record)` still holds; otherwise put it back.
+    A lock replaced after the caller validated it is never deleted. False when it was absent or not ours."""
+    grave = path.with_name(f"{LOCK_NAME}.{uuid.uuid4().hex}.stale")
     try:
-        path.unlink()
+        os.replace(path, grave)
     except FileNotFoundError:
-        pass
+        return False
+    try:
+        if check(_read(grave)):
+            return True
+        try:
+            os.link(grave, path)            # not ours: restore (fails only if a newer lock already took its place)
+        except FileExistsError:
+            pass
+        return False
+    finally:
+        try:
+            grave.unlink()
+        except OSError:
+            pass
+
+
+def release(home: Path, holder: str, token: str = "", force: bool = False) -> dict:
+    """Release needs the holder name and secret token. `force` (owner terminal only, enforced by the CLI) skips them.
+    A tokenless release of an unreadable lock is refused while it may still be being created (see lock_owner)."""
+    path = Path(home) / LOCK_NAME
+    holder = str(holder)[:80]
+    mine = lambda rec: force or (bool(token) and bool(rec) and rec.get("token") == token and rec.get("holder") == holder)  # noqa: E731
+    held = _read(path)
+    if not force and path.exists() and (held or _fresh(path)) and not mine(held):
+        raise ManagerConflict("the lock belongs to another holder (holder name and token must match)", _public(held))
+    stale_damaged = not held          # past the grace (checked above): acquire never makes an empty lock
+    try:
+        if not _remove_if(path, lambda rec: mine(rec) or (stale_damaged and not rec)) and path.exists() and not force:
+            raise ManagerConflict("the lock changed hands; it belongs to another holder now", _public(_read(path)))
+    except OSError as exc:
+        raise ManagerConflict(f"the scheduler lock file could not be changed: {exc.__class__.__name__}") from exc
     return {"released": True}
 
 
@@ -189,6 +219,8 @@ def command(home: Path, args: list[str], force: bool = False) -> dict:
     if sub == "set" and len(args) == 2:
         return set_mode(home, args[1])
     if sub == "acquire" and len(args) == 3 and args[2].isdigit():
+        if int(args[2]) != os.getppid():    # bind the lock to the scheduler that runs this CLI, not any live process
+            raise ManagerConflict("PID must be the scheduler process that runs this command (its parent process)")
         return acquire(home, get_mode(home), args[1], int(args[2]))
     if sub == "release" and (len(args) == 3 or (len(args) == 2 and force)):
         return release(home, args[1], args[2] if len(args) == 3 else "", force=force)
