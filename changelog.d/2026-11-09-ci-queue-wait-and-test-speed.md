@@ -1,1 +1,1 @@
-- Fixed: shortened the permission wait in one agent test (about 29 s to about 14 s), test-only; ci_health.py now reports job queue wait separately from work.
+- Fixed: shortened the permission wait in one agent test (about 29 s to about 14 s), test-only; ci_health.py now reports job queue wait separately from work, and a failed job read shows UNAVAILABLE or partial with the error instead of passing silently.

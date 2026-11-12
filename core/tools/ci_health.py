@@ -95,7 +95,7 @@ def _p90(xs: list[float]) -> str:
 
 
 def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quarantined: int,
-           jobs: list[dict] | None = None) -> str:
+           jobs: list[dict] | None = None, jobs_error: str | None = None) -> str:
     red, green, red_min = red_main(runs)
     rate = f"{100 * red / (red + green):.0f}% ({red}/{red + green})" if red + green else "-"
     rows = [("red-main rate", rate), ("red-main minutes", f"{red_min:.0f}"),
@@ -105,15 +105,19 @@ def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quar
             ("cancelled runner-minutes", f"{cancelled_minutes(runs):.0f}")]
     if jobs is not None:
         waits, work = queue_waits(jobs)
-        rows += [("job queue wait, median / p90 min", f"{_median(waits)} / {_p90(waits)} (n={len(waits)})"),
-                 ("job work, median / p90 min", f"{_median(work)} / {_p90(work)}")]
+        if jobs_error and not jobs:
+            rows += [("job queue wait, median / p90 min", f"UNAVAILABLE ({jobs_error})")]
+        else:
+            note = f"; partial: {jobs_error}" if jobs_error else ""
+            rows += [("job queue wait, median / p90 min", f"{_median(waits)} / {_p90(waits)} (n={len(waits)}{note})"),
+                     ("job work, median / p90 min", f"{_median(work)} / {_p90(work)}")]
     today = dt.datetime.now(dt.timezone.utc).date().isoformat()
     return (f"**CI health {today}** (jarves-checks, last {days} days; `core/tools/ci_health.py`)\n\n| Number | Value |\n"
             "|---|---|\n" + "\n".join(f"| {k} | {v} |" for k, v in rows) + "\n")
 
 
-def sample_jobs(repo: str, since: str, n: int) -> list[dict]:
-    """Jobs of the newest n completed jarves-checks runs; a failed read returns what was collected (queue wait is advisory)."""
+def sample_jobs(repo: str, since: str, n: int) -> tuple[list[dict], str | None]:
+    """(jobs, error) for the newest n completed jarves-checks runs; a failed read keeps what was collected and names the error."""
     jobs: list[dict] = []
     try:
         ids = gh("api", f"repos/{repo}/actions/workflows/jarves-checks.yml/runs?created=>={since}&status=completed&per_page={n}",
@@ -122,9 +126,12 @@ def sample_jobs(repo: str, since: str, n: int) -> list[dict]:
             raw = gh("api", "--paginate", f"repos/{repo}/actions/runs/{rid}/jobs?per_page=100",
                      "--jq", ".jobs[]|{created_at,started_at,completed_at,conclusion}")
             jobs += [json.loads(x) for x in raw.splitlines() if x.strip()]
-    except (subprocess.CalledProcessError, OSError, ValueError):
-        pass
-    return jobs
+    except (subprocess.CalledProcessError, OSError, ValueError) as exc:
+        first = (str(exc).splitlines() or [""])[0]
+        err = f"{type(exc).__name__}: {first}"[:120] if first else type(exc).__name__
+        print(f"ci_health: job read failed after {len(jobs)} jobs: {err}", file=sys.stderr)
+        return jobs, err
+    return jobs, None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -142,8 +149,9 @@ def main(argv: list[str] | None = None) -> int:
                         "--json", "headRefOid,mergedAt"))
     issues = json.loads(gh("issue", "list", "-R", a.repo, "--state", "open", "--search", "\"Flaky test:\" in:title",
                            "--json", "title"))
-    jobs = sample_jobs(a.repo, since, a.job_sample) if a.job_sample > 0 else None
-    text = render(a.days, runs, prs, sum(i["title"].startswith("Flaky test:") for i in issues), len(ledger_ids()), jobs)
+    jobs, jobs_error = sample_jobs(a.repo, since, a.job_sample) if a.job_sample > 0 else (None, None)
+    text = render(a.days, runs, prs, sum(i["title"].startswith("Flaky test:") for i in issues), len(ledger_ids()),
+                  jobs, jobs_error)
     print(text)
     if a.comment:
         gh("issue", "comment", str(a.comment), "-R", a.repo, "--body", text)

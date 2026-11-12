@@ -56,6 +56,31 @@ def test_queue_wait_is_separate_from_work():
     assert "job queue wait" not in ch.render(7, RUNS, [], 1, 1)
 
 
+def test_failed_job_read_is_reported_not_silent(monkeypatch):
+    def boom(*a):
+        raise ValueError("bad jq")
+    monkeypatch.setattr(ch, "gh", boom)
+    jobs, err = ch.sample_jobs("o/r", "2026-10-24", 3)
+    assert jobs == [] and "ValueError" in err and "bad jq" in err
+    text = ch.render(7, RUNS, [], 1, 1, jobs, err)
+    assert "job queue wait, median / p90 min | UNAVAILABLE (ValueError: bad jq)" in text
+
+
+def test_partial_job_read_is_marked_partial(monkeypatch):
+    calls = iter(["11 12", '{"created_at":"2026-10-24T09:00:00Z","started_at":"2026-10-24T09:05:00Z",'
+                  '"completed_at":"2026-10-24T09:15:00Z","conclusion":"success"}'])
+
+    def gh(*a):
+        try:
+            return next(calls)
+        except StopIteration:
+            raise OSError("network down") from None
+    monkeypatch.setattr(ch, "gh", gh)
+    jobs, err = ch.sample_jobs("o/r", "2026-10-24", 3)
+    assert len(jobs) == 1 and "OSError" in err
+    assert "(n=1; partial: OSError: network down)" in ch.render(7, RUNS, [], 1, 1, jobs, err)
+
+
 def test_nightly_posts_the_number_with_issue_write_only():
     job = yaml.safe_load(NIGHTLY.read_text(encoding="utf-8"))["jobs"]["flake-scan"]
     assert job["permissions"] == {"contents": "read", "actions": "read", "issues": "write"}
