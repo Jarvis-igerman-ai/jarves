@@ -262,7 +262,8 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
-                                "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)")
+                                "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
+                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)")   # #932: policy file, any tool
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 

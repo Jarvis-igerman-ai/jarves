@@ -33,9 +33,12 @@ def test_worker_actions_are_not_refused(argv, monkeypatch):
     assert wf.worker_refusal(argv) == ""
 
 
-def test_owner_session_without_agent_env_can_still_create(monkeypatch, tmp_path):
+def test_owner_session_without_agent_env_can_still_create(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("JARVES_WORKFLOW_AGENT", raising=False)
-    assert wf.main(["--home", str(tmp_path / "h"), "status"]) == 0
+    home = str(tmp_path / "h")
+    assert wf.worker_refusal(["--home", home, "create", "--title", "owner task"]) != ""   # guarded for agents...
+    assert wf.main(["--home", home, "create", "--title", "owner task"]) == 0              # ...but the owner runs it
+    assert "owner task" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("word", ["python", "py", "node", "sed", "cp", "mv", "cat", "head", "tail"])
@@ -46,5 +49,12 @@ def test_no_blanket_interpreter_or_file_writer_rule(word):
     assert "Bash(jarvis workflow:*)" not in WORKER_ALLOWED_TOOLS
 
 
-def test_policy_file_name_is_denied_in_any_command():
-    assert "Bash(*autopilot.json*)" in WORKER_DENY
+def test_policy_file_is_denied_to_bash_edit_and_write_in_the_worker_argv():
+    """#932: the deny rules reach `claude --disallowedTools` for every headless worker. Claude Code's own rule matcher
+    is not run here (UNVERIFIED in the changelog); this proves the rules are generated and passed."""
+    from jarves.orchestrator.claude import ManagedClaude
+    argv = ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None,
+                         allowed_tools=autopilot_allowed_tools("C:/py/python.exe"), permission_mode="acceptEdits").argv
+    denied = argv[argv.index("--disallowedTools") + 1:]
+    for rule in ("Bash(*autopilot.json*)", "Edit(**/autopilot.json)", "Write(**/autopilot.json)"):
+        assert rule in WORKER_DENY and rule in denied
