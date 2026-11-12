@@ -88,3 +88,24 @@ def test_both_caps_reset_on_the_next_local_day(budget, day):
     assert {v["kind"]: v["level"] for v in views}["voice_seconds"] == "ok"
     day.value = _dt.date(2026, 11, 10)                         # yesterday's usage was kept, not wiped
     assert budget.used("voice_seconds") == 30 * MIN and budget.used("ai_requests") == 3
+
+
+def test_owner_sets_voice_limit_of_one_and_second_voice_request_is_refused(budget):
+    """JAR-262: the owner sets a daily voice limit of 1 (minute); the first voice request runs, the second gets
+    a clear limit-reached refusal (which limit, used/max, how to raise it) instead of starting a pointless session."""
+    from jarves import daily_limits
+    daily_limits.set_daily(budget.ai, voice_minutes=1, requests=1)
+    assert budget.limit("voice_seconds") == MIN and budget.limit("ai_requests") == 1
+    first = daily_limits.admit(budget, "voice_seconds", language="en")
+    assert first.allowed and first.text_en == ""
+    budget.record("voice_seconds", MIN)                        # the first conversation used the minute
+    second = daily_limits.admit(budget, "voice_seconds", language="en")
+    assert not second.allowed and second.code == "VOICE_DAILY_LIMIT"
+    assert "voice limit reached (1/1 min today)" in second.text_en and "daily_realtime_minutes" in second.text_en
+    assert second.text_he and "The daily voice limit is used up" in second.spoken
+    assert daily_limits.admit(budget, "ai_requests").allowed   # the request cap is separate
+    budget.reserve("ai_requests").commit()
+    refused = daily_limits.admit(budget, "ai_requests")
+    assert not refused.allowed and refused.code == "AI_DAILY_LIMIT" and "1/1 requests" in refused.text_en
+    with pytest.raises(ValueError):
+        daily_limits.set_daily(budget.ai, voice_minutes=-1)

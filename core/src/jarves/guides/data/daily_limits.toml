@@ -62,6 +62,6 @@ fix_en = "Check jarvis status: a LIMIT REACHED line means the daily cap is used 
 
 [platform]
 windows = "implemented_unverified"
-windows_note_en = "core/tests/test_limits.py (fake budget, fake audio) and core/tests/test_daily_limits.py (voice cap, request cap, midnight reset on a real Budget with a fake day); no real limit hit on a real microphone yet"
+windows_note_en = "core/tests/test_limits.py (fake budget, fake audio) and core/tests/test_daily_limits.py (voice cap, request cap, midnight reset, and the daily_limits gate refusing the second voice request at a 1-minute limit, on a real Budget with a fake day); no real limit hit on a real microphone yet"
 pi = "implemented_unverified"
 pi_note_en = "pure Python; not run on a Pi yet"

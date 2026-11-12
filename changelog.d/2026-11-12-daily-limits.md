@@ -1,0 +1,1 @@
+- Added: daily_limits gate: the owner sets daily voice-minute and AI-request limits, and a voice conversation or request past the limit gets a clear limit-reached refusal saying which limit, used/max and how to raise it (JAR-262).
