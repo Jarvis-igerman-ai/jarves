@@ -1111,10 +1111,14 @@ def health_view(mob: MobileAccess) -> dict:
         for kind, d in hist.get("latest", {}).items():
             out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
                                   "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
+        mob._history_failed = False
     except ImportError:
         pass                                      # the feature is not installed
-    except Exception as e:                        # no history yet is normal; a corrupt one is not
-        logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read", error_type=type(e).__name__)
+    except Exception as e:                        # a missing file loads as {} upstream; this is a corrupt entry
+        if not getattr(mob, "_history_failed", False):       # the phone polls: one line per outage, not per poll
+            logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read",
+                      error_type=type(e).__name__)
+        mob._history_failed = True
     return out
 
 

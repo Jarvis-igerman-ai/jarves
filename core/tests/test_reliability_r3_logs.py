@@ -35,3 +35,14 @@ def test_replay_lookup_failure_logged(monkeypatch, tmp_path):
     assert b.replay("dev", "m1") is None
     assert seen and seen[0][0] == "MOBILE_REPLAY_LOOKUP_FAILED"
     assert "secret" not in str(seen)
+
+
+def test_test_history_missing_is_silent_corrupt_logged_once(monkeypatch, tmp_path):
+    seen = _capture(monkeypatch)
+    b = mobile.MobileAccess(tmp_path)
+    assert mobile.health_view(b)["tests"] == {}                  # no history file yet: normal, no log
+    assert not [c for c, _ in seen if c == "MOBILE_TEST_HISTORY_FAILED"]
+    (tmp_path / "selfspeed.json").write_text('{"latest": {"selftest": {"status": "ok"}}}', encoding="utf-8")
+    mobile.health_view(b)
+    mobile.health_view(b)                                        # polled again: still one line per outage
+    assert [c for c, _ in seen].count("MOBILE_TEST_HISTORY_FAILED") == 1
