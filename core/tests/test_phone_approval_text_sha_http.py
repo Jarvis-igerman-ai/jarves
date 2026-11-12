@@ -42,7 +42,7 @@ def test_a_malformed_text_sha_is_a_400_and_answers_nothing(phone, bad):
     srv, owner, tok = phone
     fut, r = ask(owner)
     st, out, _ = decide(srv, tok, r["id"], {"approved": True, "text_sha": bad})
-    assert st == 400 and "text_sha" in out["error"]
+    assert st == 400 and out["code"] == "BAD_TEXT_SHA" and out["error_he"]
     assert owner.svc.pending() and not fut.done()
 
 

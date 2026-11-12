@@ -5,6 +5,7 @@ import http.client
 import json
 import ssl
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -712,11 +713,54 @@ def test_phone_errors_are_actionable_in_en_and_he(srv):
     assert st == 403 and "try again" in body["error"] and "נסו שוב" in body["error_he"]
 
 
-def test_phone_error_hebrew_has_no_bare_english_runs():
+@pytest.mark.parametrize("key", sorted(mobile._MSG))
+def test_every_phone_error_has_actionable_en_and_he(key):
     import re
-    src = open(mobile.__file__, encoding="utf-8").read()
-    for he in re.findall(r'"error_he": "([^"]+)"', src):
-        assert not re.search(r"(?:[A-Za-z]+[ ,]+){2}[A-Za-z]+", he.replace("JARVES", "").replace("https", "")), he
+    en, he = mobile._MSG[key]
+    assert ": " in en and ": " in he                                             # what happened: what to do
+    assert re.search(r"[\u0590-\u05FF]", he)
+    for cmd in ("jarvis phone trust enable", "phone_trust", "JARVES", "https"):
+        he = he.replace(cmd, "")
+    assert not re.search(r"(?:[A-Za-z]+[ ,]+){2}[A-Za-z]+", he), he             # no bare English run in the Hebrew
+
+
+def test_phone_routes_build_every_error_from_the_table():
+    """Root cause of JAR-142: no inline English-only {"error": ...} literal is left in the phone request routes."""
+    import ast
+    import inspect
+    import textwrap
+    for fn in (mobile.serve, mobile._chat_routes, mobile._body, mobile._json_body):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        keys = [k.value for n in ast.walk(tree) if isinstance(n, ast.Dict) for k in n.keys if isinstance(k, ast.Constant)]
+        assert "error" not in keys, fn.__name__
+
+
+def _he(body, key, **fmt):
+    return body["error"] == mobile._MSG[key][0].format(**fmt) and body["error_he"] == mobile._MSG[key][1].format(**fmt)
+
+
+def test_phone_chat_and_voice_errors_reach_the_phone_in_en_and_he(home, fake):
+    def boom(text, dev):
+        raise RuntimeError("x")
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST,
+                            mobile_bridge=Bridge(chat=boom, voice=boom, status=lambda: {}, voice_available=lambda: True)).start()
+    try:
+        tok, _, _ = pair(d)
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi"})
+        assert st == 502 and _he(body, "CHAT_FAILED")
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi", "id": "!"})
+        assert st == 400 and _he(body, "BAD_ID")
+        st, body, _ = req(d, "POST", "/api/m/voice", token=tok, raw=b"RIFF", ctype="audio/wav")      # plain http
+        assert st == 409 and _he(body, "VOICE_NOT_READY")
+        st, body, _ = req(d, "GET", "/api/m/nowhere", token=tok)
+        assert st == 404 and _he(body, "NOT_FOUND")
+        d.mobile.bridge = None
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi"})
+        assert st == 503 and _he(body, "NOT_CONNECTED") and "not connected" in body["error"]
+        codes = [req(d, "POST", "/api/m/chat", token=tok, body={"text": "x"}) for _ in range(mobile.CHAT_RATE_PER_MIN + 1)]
+        assert codes[-1][0] == 429 and _he(codes[-1][1], "CHAT_RATE")
+    finally:
+        d.stop()
 
 
 def test_phone_auth_and_size_errors_are_actionable_in_en_and_he(srv):
@@ -728,3 +772,8 @@ def test_phone_auth_and_size_errors_are_actionable_in_en_and_he(srv):
     st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{}",
                       headers={"Content-Length": str(mobile.MAX_JSON_BYTES + 1)})
     assert st == 413 and body == mobile._TOO_BIG
+
+
+def test_phone_page_shows_the_hebrew_error_when_set_to_hebrew():
+    app = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "app.js").read_text(encoding="utf-8")
+    assert '(lang === "he" && d.error_he) || d.error' in app                    # api(): every failed call shows this text
