@@ -11,7 +11,7 @@ import shutil
 import threading
 from pathlib import Path
 
-from . import clilang
+from . import clilang, logs
 from . import features as feat
 
 FEATURE = "reports_drive"
@@ -19,6 +19,7 @@ FILE = "reports_drive.json"
 DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
 SHEET = "application/vnd.google-apps.spreadsheet"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+_SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
 feat.register(FEATURE, "דוחות לגוגל דרייב", "Reports to Google Drive", False, stage="beta",
@@ -98,6 +99,15 @@ def after_report(home: Path, path: Path, *, active: bool, client=None) -> dict |
 
 def sync(home: Path, *, client=None) -> list[dict]:
     """Send every new or changed file in <home>/reports/ once (remembered by name and mtime in reports_drive.json)."""
+    if not _SYNC_LOCK.acquire(blocking=False):
+        return []                               # a sync is already running; the next job run picks up the rest
+    try:
+        return _sync(home, client)
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _sync(home: Path, client) -> list[dict]:
     sent = dict(_raw(home).get("sent") or {})
     out = []
     folder = Path(home) / "reports"
@@ -107,6 +117,8 @@ def sync(home: Path, *, client=None) -> list[dict]:
             out.append(r)
             if r and "error" not in r:
                 sent[f.name] = f.stat().st_mtime
+            elif r:
+                logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
     save(home, sent=sent)
     return out
 
@@ -128,10 +140,14 @@ def cmd_drive(a, cfg, home) -> int:
             return 1
         save(home, folder=str(Path(a.path)), mode="folder")
     elif a.drive_action == "signin":
-        from .google_auth import GoogleAuth
+        from .google_auth import GoogleAuth, GoogleAuthError
         print(clilang.fmt("נפתח הדפדפן: אתם מתחברים ומאשרים רק גישה לקבצים ש-JARVES יוצר.",
                           "Opening your browser: you sign in and allow access only to files JARVES creates."))
-        asyncio.run(GoogleAuth(home).sign_in((DRIVE_FILE,)))
+        try:
+            asyncio.run(GoogleAuth(home).sign_in((DRIVE_FILE,)))
+        except GoogleAuthError as e:
+            print(e)
+            return 1
         save(home, mode="api")
     elif a.drive_action == "upload":
         try:

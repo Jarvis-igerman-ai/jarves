@@ -91,3 +91,20 @@ def test_sync_sends_each_new_report_once_and_the_scheduler_hook_respects_the_swi
     feats.on = True
     rd.on_job_finished(feats)
     assert calls == [(tmp_path,)]
+
+
+def test_overlapping_sync_is_skipped_and_failed_signin_is_a_plain_error(home, tmp_path, monkeypatch, capsys):
+    from jarves.google_auth import GoogleAuth, GoogleAuthError
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "a.md").write_bytes(b"1")
+    with rd._SYNC_LOCK:                      # another sync is running: this one sends nothing
+        assert rd.sync(tmp_path) == [] and not list(dest.iterdir())
+
+    async def refuse(self, scopes=(), timeout_s=300):
+        raise GoogleAuthError("no_client", "no Google client set up")
+    monkeypatch.setattr(GoogleAuth, "sign_in", refuse)
+    assert cli.main(["reports", "drive", "signin"]) == 1
+    assert "no Google client" in capsys.readouterr().out and rd.load(home)["mode"] == "folder"
