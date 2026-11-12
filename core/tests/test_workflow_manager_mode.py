@@ -76,23 +76,6 @@ class ManagerModeTests(unittest.TestCase):
         leftovers = [p.name for p in self.home.iterdir() if p.name.endswith((".stale", ".new", ".recover"))]
         self.assertEqual(leftovers, [])
 
-    def test_recover_restores_a_lock_replaced_between_judging_and_moving(self):
-        lock = self.home / mm.LOCK_NAME
-        mm.acquire(self.home, "native", "old", pid=111, alive=lambda p: True)
-        fresh = {"mode": "native", "holder": "new", "pid": 222, "since": 1, "token": "t"}
-        orig = mm._read
-        state = {"swapped": False}
-
-        def read_then_swap(path):                              # fake: a fresh holder appears after the judgment
-            data = orig(path)
-            if path == lock and not state["swapped"]:
-                state["swapped"] = True
-                lock.write_text(json.dumps(fresh), encoding="utf-8")
-            return data
-        with mock.patch.object(mm, "_read", read_then_swap):
-            mm._recover_stale(lock, lambda p: False, time.time)
-        self.assertEqual(orig(lock)["holder"], "new")
-
     def test_acquire_requires_live_explicit_pid(self):
         for bad in (0, -1, 999):
             with self.assertRaises(mm.ManagerConflict):
@@ -115,25 +98,58 @@ class ManagerModeTests(unittest.TestCase):
             self.assertEqual(main(["manager", "set", "jarves", "--home", str(self.home)]), 3)
         self.assertEqual(mm.get_mode(self.home), "native")
 
-    def test_release_never_deletes_a_lock_replaced_after_validation(self):
-        lock = self.home / mm.LOCK_NAME
+    def test_duplicate_release_then_reacquire_never_deletes_the_new_lock(self):
         rec = mm.acquire(self.home, "native", "A", pid=111, alive=alive)
-        fresh = {"mode": "native", "holder": "B", "pid": 222, "since": 1, "token": "tb"}
         orig = mm._read
-        state = {"swapped": False}
+        state = {"inner": None}
 
-        def read_then_swap(path):                              # fake: A dies, B recovers and acquires after A's check
-            data = orig(path)
-            if path == lock and not state["swapped"]:
-                state["swapped"] = True
-                lock.write_text(json.dumps(fresh), encoding="utf-8")
-            return data
-        with mock.patch.object(mm, "_read", read_then_swap), self.assertRaises(mm.ManagerConflict):
+        def read_then_race(path):                              # fake: a second release races while the first holds the guard
+            if state["inner"] is None:
+                state["inner"] = "busy"
+                try:
+                    mm.release(self.home, "A", token=rec["token"])
+                except mm.ManagerConflict:
+                    pass
+                else:
+                    state["inner"] = "ran"
+            return orig(path)
+        with mock.patch.object(mm, "GUARD_WAIT", 0), mock.patch.object(mm, "_read", read_then_race):
             mm.release(self.home, "A", token=rec["token"])
-        self.assertEqual(orig(lock)["holder"], "B")
-        with self.assertRaises(mm.ManagerConflict):            # a second release with the old token is refused too
+        self.assertEqual(state["inner"], "busy")               # serialised: the racing release could not run inside
+        rec_b = mm.acquire(self.home, "native", "B", pid=222, alive=alive)
+        with self.assertRaises(mm.ManagerConflict):            # the duplicate release with A's token after B acquired
             mm.release(self.home, "A", token=rec["token"])
-        self.assertEqual(orig(lock)["holder"], "B")
+        self.assertEqual(orig(self.home / mm.LOCK_NAME)["token"], rec_b["token"])
+
+    def test_set_mode_and_acquire_are_mutually_exclusive(self):
+        orig = mm._write
+        seen = []
+
+        def write_with_racing_acquire(path, data):             # fake: a native scheduler tries to acquire mid-switch
+            try:
+                mm.acquire(self.home, "native", "claude-1", pid=111, alive=alive)
+            except mm.ManagerConflict as exc:
+                seen.append(str(exc))
+            orig(path, data)
+        with mock.patch.object(mm, "GUARD_WAIT", 0), mock.patch.object(mm, "_write", write_with_racing_acquire):
+            mm.set_mode(self.home, "jarves", alive=alive)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(mm.get_mode(self.home), "jarves")
+        self.assertFalse((self.home / mm.LOCK_NAME).exists())
+        with self.assertRaises(mm.ManagerConflict):            # afterwards the old mode is refused outright
+            mm.acquire(self.home, "native", "claude-1", pid=111, alive=alive)
+
+    def test_cli_forced_release_refused_for_agent_and_allowed_for_owner(self):
+        from jarves.workflow import __main__ as cli
+        mm.acquire(self.home, "native", "claude-1", pid=111, alive=alive)
+        lock = self.home / mm.LOCK_NAME
+        with mock.patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": "fake-agent"}):   # fake agent environment
+            self.assertEqual(cli.main(["manager", "release", "x", "--force", "--home", str(self.home)]), 3)
+        self.assertTrue(lock.exists())
+        with mock.patch.dict(os.environ, {}, clear=False), mock.patch.object(cli, "owner_only_guard", return_value="terminal"):
+            os.environ.pop("JARVES_WORKFLOW_AGENT", None)
+            self.assertEqual(cli.main(["manager", "release", "x", "--force", "--home", str(self.home)]), 0)
+        self.assertFalse(lock.exists())
 
     def test_repeated_release_is_harmless(self):
         rec = mm.acquire(self.home, "native", "A", pid=111, alive=alive)
@@ -150,21 +166,12 @@ class ManagerModeTests(unittest.TestCase):
         mm.release(self.home, "x", force=True)
         self.assertFalse(lock.exists())
 
-    def test_set_mode_reverts_when_the_old_mode_acquires_concurrently(self):
-        orig = mm._write
-
-        def write_after_acquire(path, data):                   # fake: a native scheduler acquires mid-switch
-            mm.acquire(self.home, "native", "claude-1", pid=111, alive=alive)
-            mm._write = orig
-            orig(path, data)
-        with mock.patch.object(mm, "_write", write_after_acquire), self.assertRaises(mm.ManagerConflict):
-            mm.set_mode(self.home, "jarves", alive=alive)
-        self.assertEqual(mm.get_mode(self.home), "native")
-
-    def test_acquire_backs_out_when_the_mode_switches_concurrently(self):
-        with mock.patch.object(mm, "get_mode", side_effect=["native", "jarves"]), self.assertRaises(mm.ManagerConflict):
-            mm.acquire(self.home, "native", "claude-1", pid=111, alive=alive)
-        self.assertFalse((self.home / mm.LOCK_NAME).exists())
+    def test_damaged_lock_past_grace_is_released_without_token(self):
+        lock = self.home / mm.LOCK_NAME
+        lock.write_text("", encoding="utf-8")
+        later = lambda: lock.stat().st_mtime + mm.GRACE + 1    # noqa: E731  (fake clock)
+        mm.release(self.home, "x", now=later)
+        self.assertFalse(lock.exists())
 
     def test_cli_acquire_pid_must_be_the_calling_scheduler(self):
         with self.assertRaises(mm.ManagerConflict):            # alive, but not the CLI's parent process
@@ -172,10 +179,10 @@ class ManagerModeTests(unittest.TestCase):
         self.assertFalse((self.home / mm.LOCK_NAME).exists())
 
     def test_filesystem_errors_become_conflicts(self):
-        with mock.patch.object(mm.os, "link", side_effect=OSError("no hard links")), self.assertRaises(mm.ManagerConflict):
+        with mock.patch.object(mm.os, "replace", side_effect=OSError("no rename")), self.assertRaises(mm.ManagerConflict):
             mm.acquire(self.home, "native", "A", pid=111, alive=alive)
         rec = mm.acquire(self.home, "native", "A", pid=111, alive=alive)
-        with mock.patch.object(mm.os, "replace", side_effect=PermissionError("in use")), self.assertRaises(mm.ManagerConflict):
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("in use")), self.assertRaises(mm.ManagerConflict):
             mm.release(self.home, "A", token=rec["token"])
 
     def test_guard_text_for_manager_does_not_mention_questions(self):
