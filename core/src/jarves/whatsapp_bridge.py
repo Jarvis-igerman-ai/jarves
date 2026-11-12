@@ -1100,7 +1100,8 @@ class WhatsAppBridgeSkill(Skill):
             """JAR-273: every message on a topic to/from/mentioning the named contacts -> CSV/XLSX/Hebrew summary in
             <home>/reports. Same read gate as whatsapp_search; the answer carries counts and totals, not texts."""
             try:
-                chats = await self._chats()
+                raw = await self._call(self.client.chats, None, CAP_MESSAGES)   # the read gate: every listed chat
+                chats = merge_aliases(raw)
                 since = whatsapp_archive.parse_when(a.since, self.clock())
                 until = whatsapp_archive.parse_when(a.until, self.clock(), end=True)
             except BridgeError as e:
@@ -1127,10 +1128,14 @@ class WhatsAppBridgeSkill(Skill):
                 only = one["id"]
             names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
             names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
+            canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
             arch = self.archive() if self.archive is not None else None
             try:
                 msgs = await self._call(wcol.gather, self.client, arch, terms=wcol.terms_for(a.topic),
-                                        contacts=contacts, readable=set(names), since=since, cap_messages=CAP_MESSAGES)
+                                        contacts=contacts, readable=set(names), since=since, until=until,
+                                        cap_messages=CAP_MESSAGES)
+                if len(raw) >= CAP_MESSAGES:                     # more chats than one list holds: say so
+                    msgs.truncated.append("chats")
             except BridgeError as e:
                 return self._fail(e)
             except whatsapp_archive.StoreLocked:
@@ -1139,7 +1144,7 @@ class WhatsAppBridgeSkill(Skill):
             model = self.collect_model() if self.collect_model is not None else None
             res = await wcol.collect(self.home, a.topic, msgs, names=names, contacts=contacts, chat=only, since=since,
                                      until=until, model=model, formats=a.formats,
-                                     clean=lambda t: pol.clean_text(t or "")[0], now=self.clock())
+                                     clean=lambda t: pol.clean_text(t or "")[0], now=self.clock(), canon=canon)
             c = res.counts()
             data = {"counts": c, "untrusted_totals_per_payee": res.totals, "files": [str(p) for p in res.files],
                     "source": "archive+bridge" if arch is not None else "bridge (retention window only)",

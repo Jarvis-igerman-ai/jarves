@@ -321,9 +321,11 @@ def collect(home: Path, topic: str, *, contacts: list[str] | None = None, chat: 
     now = time.time()
     t0, t1 = arc.parse_when(since, now), arc.parse_when(until, now, end=True)
     user = BridgeClient(home)
-    chats = wab.merge_aliases(user.chats(None, 500))
+    raw = user.chats(None, wab.CAP_MESSAGES)
+    chats = wab.merge_aliases(raw)
     names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
     names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
+    canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
     book = wab.contacts_book(home)
     people, mention_only = [], []
     for who in contacts or []:
@@ -344,10 +346,13 @@ def collect(home: Path, topic: str, *, contacts: list[str] | None = None, chat: 
             raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
         only = hits[0]["id"]
     arch = arc.get(home) if archive_on else None
-    msgs = wcol.gather(user, arch, terms=wcol.terms_for(topic), contacts=people, readable=set(names), since=t0)
+    msgs = wcol.gather(user, arch, terms=wcol.terms_for(topic), contacts=people, readable=set(names), since=t0,
+                       until=t1, cap_messages=wab.CAP_MESSAGES)
+    if len(raw) >= wab.CAP_MESSAGES:
+        msgs.truncated.append("chats")
     res = asyncio.run(wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
                                    model=model, formats=formats or list(wcol.FORMATS),
-                                   clean=lambda t: pol.clean_text(t or "")[0], now=now))
+                                   clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon))
     return {"counts": res.counts(), "totals_per_payee": res.totals, "files": [str(p) for p in res.files],
             "archive": bool(archive_on), "mention_only": mention_only, "untrusted": True,
             "summary": (res.files[-1].read_text(encoding="utf-8") if res.files else "")}

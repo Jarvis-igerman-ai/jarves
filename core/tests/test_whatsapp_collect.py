@@ -256,7 +256,7 @@ class _PagedArchive:
     def __init__(self, msgs):
         self.msgs = msgs
 
-    def search(self, q, *, since=None, readable=None, limit=10, offset=0):
+    def search(self, q, *, since=None, until=None, readable=None, limit=10, offset=0):
         hits = [x for x in self.msgs if q in x["text"]]
         return hits[offset:offset + min(limit, 200)]
 
@@ -280,9 +280,6 @@ def test_gather_pages_past_200_and_dedups_before_the_bound():
     got = wcol.gather(_Bridge(many[:50]), _PagedArchive(many), terms=["שיפוצ", "שיפוץ"], contacts=[],
                       readable={PLUMBER})
     assert len(got) == 250 and not got.truncated                       # every match, each once
-    bridge_full = _Bridge([m(f"שיפוץ {i}", mid=f"b{i}") for i in range(600)])
-    got = wcol.gather(bridge_full, None, terms=["שיפוץ"], contacts=[], readable={PLUMBER})
-    assert got.truncated == ["bridge"]                                 # a full bridge page may hide more
 
 
 async def test_retrieval_truncation_reaches_the_report(tmp_path, monkeypatch):
@@ -327,3 +324,30 @@ def test_real_archive_search_pages_with_offset(home):
         assert len(got) == 250 and not got.truncated
     finally:
         a.close()
+
+
+# ---------------------------------------------------------------------- review round 3 (JAR-273)
+class _ChatBridge(_Bridge):
+    """Search caps at its limit (no paging, like the real /search); each chat reads in full under the cap."""
+    def messages(self, cid, since, limit):
+        return {"messages": [x for x in self.hits if x["chat"] == cid][:limit]}
+
+
+def test_a_full_bridge_search_page_falls_back_to_reading_every_chat():
+    hits = [m(f"שיפוץ {i}", mid=f"b{i}", chat=(PLUMBER, SPOUSE)[i % 2]) for i in range(600)]   # invented
+    got = wcol.gather(_ChatBridge(hits), None, terms=["שיפוץ"], contacts=[], readable={PLUMBER, SPOUSE},
+                      cap_messages=500)
+    assert len(got) == 600 and not got.truncated                       # every message, nothing silently left out
+    one = [m(f"שיפוץ {i}", mid=f"c{i}") for i in range(600)]          # one chat past the bridge cap: said, not hidden
+    assert wcol.gather(_ChatBridge(one), None, terms=["שיפוץ"], contacts=[], readable={PLUMBER},
+                       cap_messages=500).truncated == ["bridge"]
+
+
+async def test_alias_ids_are_one_chat_for_dedup_and_the_chat_filter(tmp_path):
+    old, new = "972501230000@s.whatsapp.net", "123456@lid"              # invented: one person, two ids
+    same = [m("שילמתי לגן 900 שקל החודש", chat=old, mid="1", from_me=True),
+            m("שילמתי לגן 900 שקל החודש", chat=new, ts=T0 + 60, mid="2", from_me=True),
+            m("שילמתי לגן 900 שקל החודש", chat=new, mid="1", from_me=True)]   # the archive copy under the other id
+    res = await wcol.collect(tmp_path, "תשלום", same, names={old: "גן", new: "גן"}, contacts=[], chat=new,
+                             canon={old: new, new: new}, now=T0)
+    assert len(res.rows) == 2                                          # two payments, the double read counted once

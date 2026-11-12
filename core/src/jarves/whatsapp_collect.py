@@ -535,10 +535,17 @@ class Result:
 async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: dict[str, str],
                   contacts: list[Contact], chat: str | None = None, since: float | None = None,
                   until: float | None = None, model: ModelFn | None = None, formats: Iterable[str] = FORMATS,
-                  clean: Callable[[str], str] = str, now: float | None = None) -> Result:
-    """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names` maps chat id -> display name."""
+                  clean: Callable[[str], str] = str, now: float | None = None,
+                  canon: dict[str, str] | None = None) -> Result:
+    """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names` maps chat id -> display name; `canon`
+    maps every alias id of one person (old phone chat + new LID chat) to ONE chat id, so the chat filter, the
+    same-message check and the forward check treat them as one chat."""
     truncated = list(getattr(messages, "truncated", []))
     msgs = list(messages)
+    if canon:
+        msgs = [dict(x, chat=canon.get(str(x.get("chat", "")), x.get("chat"))) for x in msgs]
+        chat = canon.get(chat, chat) if chat is not None else None
+        contacts = [Contact(c.label, c.ids | {canon[i] for i in c.ids if i in canon}, c.words) for c in contacts]
     if len(msgs) > MAX_CANDIDATES:
         msgs, truncated = msgs[:MAX_CANDIDATES], truncated + ["candidates"]
     picked = select(msgs, terms=terms_for(topic), contacts=contacts, chat=chat, money=topic_key(topic) == "payment",
@@ -592,10 +599,11 @@ ARCHIVE_PAGE = 200                                          # the archive search
 
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
-           since: float | None = None, cap_messages: int = 500) -> Candidates:
+           since: float | None = None, until: float | None = None, cap_messages: int = 500) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
     the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
-    bridge's own window by the same words plus each contact chat's latest messages. `readable` (the chat ids the
+    bridge's own window by the same words plus each contact chat's latest messages. The bridge /search has no paging:
+    when one word fills a page, every readable chat is read in full instead (the bridge keeps a short window). `readable` (the chat ids the
     bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
     BEFORE the MAX_CANDIDATES bound; any source that may hold more is named in `truncated`."""
     out = Candidates()
@@ -622,7 +630,8 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         for w in words:
             offset = 0
             while len(out) < MAX_CANDIDATES:
-                page = archive.search(w, since=since, readable=readable, limit=ARCHIVE_PAGE, offset=offset)
+                page = archive.search(w, since=since, until=until, readable=readable, limit=ARCHIVE_PAGE,
+                                      offset=offset)
                 add(page, "archive", False)
                 if len(page) < ARCHIVE_PAGE:
                     break
@@ -631,10 +640,12 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             if cid in readable:
                 page = archive.chat_messages(cid, since=since, limit=MAX_CANDIDATES)
                 add(page, "archive", len(page) >= MAX_CANDIDATES)
+    sweep = False
     for w in words:
         page = client.search(w, cap_messages)
-        add(page, "bridge", len(page) >= cap_messages)
-    for cid in ids:
+        add(page, "bridge", False)
+        sweep = sweep or len(page) >= cap_messages
+    for cid in (sorted(readable) if sweep else ids):
         page = client.messages(cid, since, cap_messages).get("messages", [])
         add(page, "bridge", len(page) >= cap_messages)
     return out
