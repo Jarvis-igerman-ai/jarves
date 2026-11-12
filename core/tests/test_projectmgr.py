@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -32,11 +33,12 @@ FAKE = textwrap.dedent('''
         print(json.dumps({"type": "result", "is_error": False, "result": out, "session_id": "plan"}))
         sys.exit(0)
     here = os.path.join(os.getcwd(), "..")
-    def bump(name):
+    def bump(name):                     # append-only (#1051): approximate under concurrency, never invalid
         f = os.path.join(here, name)
-        n = int(open(f).read()) + 1 if os.path.exists(f) else 1
-        open(f, "w").write(str(n))
-        return n
+        with open(f, "a") as fh:
+            fh.write("x")
+        with open(f) as fh:
+            return len(fh.read())
     def say(text):
         print(json.dumps({"type": "result", "is_error": False, "result": text, "session_id": "s-" + model}))
         sys.exit(0)
@@ -227,7 +229,9 @@ def test_parallel_tasks_merge_and_dependent_gets_handoff(env):
     assert [t["status"] for t in m.db.tasks(1)] == ["ready", "ready", "todo"]
     m.call("resume", project="demo")
     finish(m)
-    assert [t["status"] for t in m.db.tasks(1)] == ["done", "done", "done"]
+    ts = m.db.tasks(1)
+    shown = [(t["seq"], t["status"], t["reason"]) for t in ts]                  # JAR-189: a Windows run showed B blocked
+    assert [t["status"] for t in ts] == ["done", "done", "done"], shown
     integ = gitops.project_root(home, 1) / "integration"
     assert {f for f in os.listdir(integ / "src")} == {"a.py", "b.py", "c.py"}
     prompt_c = (gitops.project_root(home, 1) / "wt" / "last_prompt_3.txt")
@@ -237,6 +241,59 @@ def test_parallel_tasks_merge_and_dependent_gets_handoff(env):
     assert "pushed" not in sh(repo, "git", "log", "--all", "--format=%s")
     assert m.db.project(1)["status"] == "done"
     assert m.call("status", project="demo")["ok"]
+
+
+def test_fake_review_counter_survives_a_concurrent_reviewer(tmp_path):
+    """#1051: parallel reviews share the fake's counter file; a reader that lands while another process has just
+    truncated it (an empty file) must still give a verdict, or the task is blocked with "no reviewer gave a verdict"."""
+    fake = tmp_path / "fake_agent.py"
+    fake.write_text(FAKE)
+    wt = tmp_path / "wt" / "t2-a1"
+    wt.mkdir(parents=True)
+    (wt.parent / "reviews_default").write_text("")                             # the other reviewer is mid-write
+    p = subprocess.run([sys.executable, str(fake)], cwd=str(wt), input="Review this change", capture_output=True,
+                       text=True, timeout=60)
+    assert p.returncode == 0, p.stderr[-300:]
+    assert cards.parse_review(json.loads(p.stdout)["result"])["verdict"] == "approve"
+
+
+def test_merge_into_a_task_never_overlaps_another_tasks_worktree_cleanup(env, monkeypatch):
+    """JAR-189: task A's cleanup after its merge (worktree remove/prune, branch -D) ran while task B's check stage merged
+    the integration branch into B's worktree, unlocked; on Windows that merge then failed and B was blocked."""
+    m, repo, home = env
+    open_project(m, repo)
+    wt_a, br_a = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    wt_b, _ = gitops.new_task_worktree(home, str(repo), 1, 2, 1)
+    (wt_a / "a.py").write_text("1\n")
+    (wt_b / "b.py").write_text("2\n")
+    gitops.commit_all(wt_a, "a")
+    gitops.commit_all(wt_b, "b")
+    gitops.fast_forward(gitops.project_root(home, 1) / "integration", br_a)
+    real, active, overlaps, merging = gitops.git, set(), [], threading.Event()
+
+    def watched(cwd, *args, **kw):
+        op = args[0] if args else ""
+        shared = op in ("merge", "worktree", "branch")
+        if shared:
+            if active:
+                overlaps.append((op, sorted(active)))
+            active.add(op)
+            if op == "merge":
+                merging.set()
+                threading.Event().wait(0.5)                                     # hold the window open
+        try:
+            return real(cwd, *args, **kw)
+        finally:
+            active.discard(op)
+
+    monkeypatch.setattr(gitops, "git", watched)
+    th = threading.Thread(target=lambda: gitops.merge_in(wt_b, gitops.integration_branch(1)))
+    th.start()
+    assert merging.wait(10)
+    gitops.remove_worktree(str(repo), wt_a, br_a)
+    th.join(10)
+    assert not overlaps, overlaps
+    assert (wt_b / "a.py").exists()
 
 
 def test_overlapping_scopes_never_run_together(env):

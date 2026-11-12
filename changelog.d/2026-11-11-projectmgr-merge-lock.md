@@ -1,0 +1,1 @@
+- Fixed: Projects: a task's merge of the integration branch now takes the repository's git lock, so another task's worktree cleanup (remove, prune, branch delete) can no longer run during it and leave a parallel task blocked at random (JAR-189).
