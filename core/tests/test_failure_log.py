@@ -111,3 +111,39 @@ async def test_the_started_core_records_one_row_per_failed_tool(core, monkeypatc
     core.registry.register(_Probe())
     assert not (await core.registry.call("zz_probe_run", {})).ok
     assert fl.weekly(core.home, now=NOW) == ["1x tool_error: zz_probe_run (CAL_TIMEOUT)"]
+
+
+def test_concurrent_writers_never_lose_a_row(home, monkeypatch):
+    import threading
+    monkeypatch.setattr(fl, "_now", lambda: NOW)
+    go = threading.Barrier(8)
+
+    def writer():
+        go.wait()
+        for _ in range(25):
+            fl.record(home, "tool_error", tool="music", on=True)
+    threads = [threading.Thread(target=writer) for _ in range(8)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert fl.weekly(home, now=NOW) == ["200x tool_error: music"]
+
+
+def test_non_object_or_bad_rows_are_skipped(home):
+    fl.record(home, "tool_error", tool="music", on=True, now=NOW)
+    with fl.path(home).open("a", encoding="utf-8") as f:
+        f.write('5\n[]\n"x"\nnot json\n{"day": 3, "kind": "tool_error"}\n{"day": "2026-11-11", "kind": ["x"]}\n')
+    assert fl.weekly(home, now=NOW) == ["1x tool_error: music"]
+
+
+def test_a_failing_write_is_logged_and_self_diagnosis_still_runs(home, monkeypatch):
+    seen, warned = [], []
+    reg = SkillRegistry()
+    reg.on_failure = lambda tool, res, route: seen.append(tool)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(fl, "record", boom)
+    monkeypatch.setattr(fl.logs, "warn", lambda comp, code, msg, **f: warned.append(code))
+    hook = fl.attach(SimpleNamespace(home=home, registry=reg, features=SimpleNamespace(active=lambda fid: True)))
+    hook("x", SimpleNamespace(ok=False, code="E"), "text")
+    assert seen == ["x"] and warned == ["FAILURE_LOG_WRITE_FAILED"]
