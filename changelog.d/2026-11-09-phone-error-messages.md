@@ -1,1 +1,1 @@
-- Fixed: phone page and phone API errors now say what happened and what to do, in English and Hebrew (JAR-142).
+- Fixed: phone API errors for pairing, sign-in, chat, voice and unreadable or too-large requests now say what happened and what to do, in English and Hebrew; the phone page shows the Hebrew text when it is set to Hebrew (JAR-142).
