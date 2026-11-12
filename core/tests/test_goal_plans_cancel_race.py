@@ -66,12 +66,15 @@ async def test_cancel_on_a_stale_view_never_overwrites_a_finished_plan(env):
     assert env.store.get(p["id"])["state"] == "done"
 
 
-def test_cancel_on_a_stale_open_view_still_cancels_a_plan_that_moved_on(env):
+@pytest.mark.parametrize("seen,now", [("ready", "running"), ("paused", "ready"), ("paused", "blocked"),
+                                      ("running", "blocked"), ("running", "failed"), ("blocked", "paused")])
+def test_cancel_on_a_stale_open_view_still_cancels_a_plan_that_moved_on(env, seen, now):
     p = env.store.propose("m", steps(("fake_read", {"text": "a"})))
     env.store.approve(p["id"])
     real = env.store._plan
-    old = dict(real(p["id"]))                                     # the owner's view: 'ready'
-    env.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (p["id"],))   # the runner started meanwhile
+    env.db.x("UPDATE goal_plans SET state=? WHERE id=?", (seen, p["id"]))
+    old = dict(real(p["id"]))                                     # the owner's view
+    env.db.x("UPDATE goal_plans SET state=? WHERE id=?", (now, p["id"]))   # the plan moved on meanwhile
     env.store._plan = lambda pid: dict(old)
     try:
         env.store.cancel(p["id"])
