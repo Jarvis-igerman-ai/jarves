@@ -258,12 +258,20 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
                             res["shots"]["phone"] = shot
                         res["errors"]["phone"] = [scrub(x)[:300] for x in errs] or ([] if shot else ["no screenshot"])
                     if video and targets:
-                        res["video"] = walkthrough(b, targets, out, lang)
+                        record_video(res, b, targets, out, lang)
                 finally:
                     b.close()
         finally:
             d.stop()
     return res
+
+
+def record_video(res: dict, b, targets, out: Path, lang: str) -> None:
+    """The walkthrough is extra: no ffmpeg or a broken recording is reported, the screenshots and checks are kept."""
+    try:
+        res["video"] = walkthrough(b, targets, out, lang)
+    except Exception as e:
+        res["video_error"] = scrub(f"{type(e).__name__}: {(str(e).splitlines() or [''])[0]}")[:200]
 
 
 def walkthrough(b, targets, out: Path, lang: str) -> str:
@@ -419,7 +427,7 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
                 if label == "after":
                     demo["ok"] = False
             if label == "after" and pl["pages"] and not r.get("failed") and not r.get("video"):
-                demo["notes"].append("after: no walkthrough video was recorded.")
+                demo["notes"].append("after: no walkthrough video was recorded. " + r.get("video_error", ""))
             for name, errs in (r.get("errors") or {}).items():
                 if label == "after":
                     demo["checks"].append({"name": f"{name}: no browser errors", "ok": not errs, "detail": errs[:5]})

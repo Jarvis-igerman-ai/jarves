@@ -183,6 +183,15 @@ def test_child_timeout_is_a_failed_side_not_a_crash(monkeypatch):
     assert pr_demo._child(ROOT, ["cli"])["failed"] is True
 
 
+def test_a_failed_walkthrough_keeps_the_screenshots(tmp_path, monkeypatch):
+    def no_ffmpeg(*a):
+        raise RuntimeError("Video rendering requires ffmpeg binary")
+    monkeypatch.setattr(pr_demo, "walkthrough", no_ffmpeg)
+    res = {"video": ""}
+    pr_demo.record_video(res, None, [("home", "u", {})], tmp_path, "en")
+    assert res["video"] == "" and "ffmpeg" in res["video_error"]
+
+
 def test_cli_only_change_renders_terminal_images_through_the_real_child(tmp_path, monkeypatch):
     monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)             # the PNG copy needs a browser
     demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli_parity.py"])
