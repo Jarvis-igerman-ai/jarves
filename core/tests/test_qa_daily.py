@@ -6,7 +6,7 @@ from jarves import qa_daily
 from jarves.config import Config
 from jarves.features import CATALOG, Features, stage_of
 
-REPORT = ("FAIL  install-latest  2026-11-12T06:00:00Z\nversion: 4.5.0 -> 4.5.1-beta.3\n"
+REPORT = ("FAIL  install-latest  2026-11-12 06:00 UTC\nversion: 4.5.0 -> 4.5.1-beta.3\n"
           "  [PASS] version\n  [FAIL] doctor: mic missing, mail me at someone@example.com\n  [PASS] selftest")
 
 
@@ -47,3 +47,16 @@ def test_missing_report_is_a_p1_and_green_run_has_no_bugs(home):
     ok = REPORT.replace("FAIL", "PASS")
     deps, _ = _deps(home, report=ok, fail=())
     assert qa_daily.check(deps) == {"ok": True, "bugs": [], "dir": str(home / "qa" / "daily" / "2026-11-12")}
+
+
+def test_stale_pending_or_non_beta_report_is_never_a_pass(home):
+    ok = REPORT.replace("FAIL", "PASS")
+    cases = {"PENDING": ok.replace("PASS  install", "PENDING  install", 1),
+             "DRY RUN": ok.replace("PASS  install", "DRY RUN  install", 1),
+             "earlier day": ok.replace("2026-11-12", "2026-11-10", 1),
+             "not a beta": ok.replace("4.5.1-beta.3", "4.5.1")}
+    for want, report in cases.items():
+        deps, _ = _deps(home, report=report, fail=())
+        bugs = qa_daily.check(deps)["bugs"]
+        assert [(b["priority"], b["check"]) for b in bugs] == [("P1", "install-latest")], want
+        assert want in bugs[0]["detail"], want

@@ -14,7 +14,7 @@ import argparse
 import json
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -40,7 +40,7 @@ def _clean(text: str, limit: int = 400) -> str:
 
 
 def check(deps: Deps) -> dict:
-    out = Path(deps.home) / "qa" / "daily" / (deps.day or date.today().isoformat())
+    out = Path(deps.home) / "qa" / "daily" / (deps.day or datetime.now(timezone.utc).date().isoformat())   # report times are UTC
     out.mkdir(parents=True, exist_ok=True)
     demo, bugs = out / "demo.txt", []
     lines = ["JARVES daily installed-beta check (local only)"]
@@ -49,11 +49,19 @@ def check(deps: Deps) -> dict:
         bugs.append({"priority": prio, "check": name, "title": f"{prio}: daily beta check '{name}' failed",
                      "detail": _clean(detail), "evidence": str(demo), "local_only": True})
 
-    report = deps.report()
+    report, day = deps.report(), out.name
+    head = report.splitlines()[0] if report else ""
+    if report:
+        lines += ["$ jarvis install-latest --report", _clean(report, 2000)]
     if not report:
         bug("P1", "install-latest", "no install-latest report; run: jarvis qa-daily install")
+    elif not head.startswith(("PASS", "FAIL")):                    # PENDING or DRY RUN: nothing was judged yet
+        bug("P1", "install-latest", f"install not finished ({head.split('  ')[0]}): {head}")
+    elif day not in head:
+        bug("P1", "install-latest", f"report is from an earlier day, not {day}: {head}")
+    elif not re.search(r"^version: .*-> \S*-beta", report, re.M):
+        bug("P1", "install-latest", "installed version is not a beta; run: jarvis qa-daily install")
     else:
-        lines += ["$ jarvis install-latest --report", _clean(report, 2000)]
         for ln in report.splitlines():
             m = _CHECK.match(ln)
             if m and m.group(1) == "FAIL":
