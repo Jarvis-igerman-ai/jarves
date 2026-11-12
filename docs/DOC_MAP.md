@@ -97,6 +97,7 @@ Smart chat blocks and task triage design (26 Oct, #364 #365): [design](plans/SMA
 | [reviews/2026-11-09-diag-coverage](reviews/2026-11-09-diag-coverage.md) | Diagnostics coverage check: action receipts and ci_health against the support bundle (JAR-145) | general | report | itself |
 | [proposals/2026-11-09-dashboard-states](proposals/2026-11-09-dashboard-states.md) | Dashboard empty, loading and error states review with EN and HE copy; proposal only, no code changed | general | proposal | itself |
 | [proposals/2026-11-09-security-hygiene-audit](proposals/2026-11-09-security-hygiene-audit.md) | Security hygiene audit: file permissions and secret handling in core; proposal only, no code changed | security | proposal | itself |
+| [proposals/2026-11-10-ci-duration-cuts](proposals/2026-11-10-ci-duration-cuts.md) | jarves-checks per-job p50/p95 on main and three proposed CI speed cuts; proposal only, .github untouched | general | proposal | itself |
 | [MIGRATION_STATUS](archive/MIGRATION_STATUS.md), [MIGRATION_HANDOFF](archive/MIGRATION_HANDOFF.md) | Private-to-public repository migration ledger | general | current until the private repo is archived | MIGRATION_STATUS |
 
 ## 4. Product, plans, work packages
