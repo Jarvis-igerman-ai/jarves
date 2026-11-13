@@ -172,6 +172,8 @@ class MobileAccess:
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
+        self._history_failed = False               # health_view: one warn per unreadable-history outage, not per poll
+        self._replay_failed = False                # replay(): one warn per continuity-store outage, not per message
         self.tailnet: dict = {}                  # tailnet.detect() result of THIS run (empty = Tailscale not used)
         self.tls_source = "none"                 # tailscale | localca | selfsigned | none
         self.bind: str | None = None             # the address the server listens on
@@ -457,9 +459,15 @@ class MobileAccess:
             if hit and self.clock() - hit[0] <= REPLY_TTL_S:
                 return hit[1]
         try:
-            return self.cont.seen(device, mid, REPLY_TTL_S)          # survives a PC restart (the in-memory copy is gone then)
-        except Exception:
+            hit = self.cont.seen(device, mid, REPLY_TTL_S)           # survives a PC restart (the in-memory copy is gone then)
+        except Exception as e:                    # the message may now run a second time: say so once per outage
+            if not self._replay_failed:
+                logs.warn("mobile", "MOBILE_REPLAY_LOOKUP_FAILED",
+                          "idempotent reply lookup failed; message not de-duplicated", error_type=type(e).__name__)
+            self._replay_failed = True
             return None
+        self._replay_failed = False
+        return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
         now = self.clock()
@@ -544,12 +552,20 @@ def core_bridge(core, loop) -> Bridge:
     def goals():
         return getattr(getattr(core, "ops", None), "goals", None)
 
+    presence_failed = [False]                    # one warn per presence outage, not per phone request
+
     def desktop_present() -> bool:
         from .calm import owner_at_pc
         try:
-            return bool(owner_at_pc(core))
-        except Exception:
+            present = bool(owner_at_pc(core))
+        except Exception as e:                    # unknown presence is reported as "away", but visibly
+            if not presence_failed[0]:
+                logs.warn("mobile", "MOBILE_PRESENCE_UNKNOWN", "owner presence could not be read",
+                          error_type=type(e).__name__)
+            presence_failed[0] = True
             return False
+        presence_failed[0] = False
+        return present
     def audio() -> dict:
         from . import mobile_audio
         from .runtime.privacy_state import derive
@@ -1150,12 +1166,26 @@ def health_view(mob: MobileAccess) -> dict:
     out = {**st, "tls": mob.scheme == "https", "tests": {}}
     try:
         from . import selfspeed
-        hist = selfspeed.History(mob.home).view()
-        for kind, d in hist.get("latest", {}).items():
+    except ImportError:
+        return out                                # the self-test feature is not installed
+    # load() already answers a missing or unparseable file with an empty history, so "no tests yet" never
+    # raises; only the "latest" entries are read (view() also runs perf_advisor, whose faults are not ours).
+    bad = None
+    try:
+        latest = selfspeed.History(mob.home).load()["latest"]
+        items = list(latest.items())
+    except Exception as e:                        # valid JSON of the wrong shape (e.g. a list)
+        bad, items = e, []
+    for kind, d in items:
+        try:
             out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
                                   "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
-    except Exception:
-        pass                                      # no test history yet, or the feature is not installed
+        except Exception as e:                    # one malformed entry hides only itself, not the others
+            bad = e
+    if bad is not None and not mob._history_failed:   # the phone polls: one line per outage, not per poll
+        logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read",
+                  error_type=type(bad).__name__)
+    mob._history_failed = bad is not None
     return out
 
 
