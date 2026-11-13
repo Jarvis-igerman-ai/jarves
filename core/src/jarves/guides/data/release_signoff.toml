@@ -17,8 +17,8 @@ privacy_he = "הגיליון נשמר בקובץ בפרויקט ולא מכיל 
 privacy_en = "The sheet is a file in the project and holds no personal data."
 
 [[steps]]
-he = "בדקו מה מוכן: jarvis release status. הפקודה מריצה כל בדיקה אוטומטית (main ירוק, לילה ירוק, אפס P0/P1 פתוחים) ואומרת מה נשאר לכם. הוסיפו --report לכתיבת דוח ראיות."
-en = "See what is ready: jarvis release status. It runs every automatic check (main green, nightly green, zero open P0/P1) and says what remains for you. Add --report to write an evidence report."
+he = "בדקו מה מוכן: jarvis release status. הפקודה מריצה כל בדיקה אוטומטית (main ירוק, לילה ירוק, אין P0/P1 חוסמים) ואומרת מה נשאר לכם. הוסיפו --report לכתיבת דוח ראיות."
+en = "See what is ready: jarvis release status. It runs every automatic check (main green, nightly green, no blocking P0/P1) and says what remains for you. Add --report to write an evidence report."
 action = "command:jarvis release status"
 
 [[steps]]

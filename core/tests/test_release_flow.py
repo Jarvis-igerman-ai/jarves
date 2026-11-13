@@ -35,7 +35,49 @@ def test_issues_use_live_labels_only():
     c = rf.check_issues([later, pr])                                                       # P2 does not block, is carried
     assert c.ok and "carried into this release" in c.detail
     assert rf.check_issues([pr]).ok
-    assert rf.check_issues([p1, later]).name == "zero open P0/P1"
+    assert rf.check_issues([p1, later]).name == rf.ISSUES_CHECK == "no blocking P0/P1"
+
+
+def test_flaky_and_dev_tool_p1_do_not_block_but_p0_does():
+    flaky = {"number": 21, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}]}
+    tool = {"number": 22, "state": "open", "labels": [{"name": "P1"}, {"name": "dev-tool"}]}
+    p0 = {"number": 23, "state": "open", "labels": [{"name": "P0"}, {"name": "flaky-test"}]}
+    plain = {"number": 24, "state": "open", "labels": [{"name": "P1"}]}
+    assert rf.check_issues([flaky, tool]).ok
+    assert [n for n, _, _ in rf.carried_issues([flaky, tool])] == [21, 22]
+    assert not rf.check_issues([p0]).ok and not rf.check_issues([plain]).ok
+
+
+def test_security_or_showstopper_p1_blocks_even_when_flaky_or_dev_tool():
+    for extra in ("security", " Showstopper "):
+        for exempt in ("flaky-test", "dev-tool"):
+            i = {"number": 31, "state": "open", "labels": [{"name": "P1"}, {"name": exempt}, {"name": extra}]}
+            assert not rf.check_issues([i]).ok, (exempt, extra)
+            assert rf.carried_issues([i]) == []
+
+
+def test_security_p1_blocks_even_with_known_issue_label():
+    for extra in ((), ("flaky-test",), ("dev-tool",)):
+        labels = ["P1", "known-issue-4.5", " Security ", *extra]
+        i = {"number": 32, "state": "open", "labels": [{"name": n} for n in labels]}
+        blockers, accepted = rf.classify_issues([i])
+        assert [b[0] for b in blockers] == [32] and accepted == [], extra
+        assert not rf.check_issues([i]).ok and rf.carried_issues([i]) == []
+
+
+def test_showstopper_exempt_p1_blocks_even_with_known_issue_label():
+    for exempt in ("flaky-test", "dev-tool"):
+        labels = ["P1", "known-issue-4.5", exempt, " Showstopper "]
+        i = {"number": 33, "state": "open", "labels": [{"name": n} for n in labels]}
+        blockers, accepted = rf.classify_issues([i])
+        assert [b[0] for b in blockers] == [33] and accepted == [], exempt
+        assert not rf.check_issues([i]).ok and rf.carried_issues([i]) == []
+
+
+def test_exempt_p1_is_reported_truthfully():
+    flaky = {"number": 41, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}]}
+    c = rf.check_issues([flaky])
+    assert c.ok and "no blocking P0/P1" in c.detail and "1 open flaky-test/dev-tool P1" in c.detail
 
 
 def test_p3_carried_and_highest_severity_wins():
@@ -79,7 +121,7 @@ def test_write_sheet_refuses_to_clobber_results(tmp_path):
 def test_status_lists_what_remains_then_ready(tmp_path):
     checks = rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)
     todo = rf.remaining(checks)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
+    assert [c.name for c in checks if c.ok] == ["main green", "no blocking P0/P1"]
     assert any("owner sheet" in t and t.startswith("[you]") for t in todo)
     assert "## What remains" in rf.report("4.1.0", checks, today="2026-10-26")
     rf.write_sheet(tmp_path, "4.1.0")
@@ -168,4 +210,4 @@ def test_status_ignores_legacy_bug_tables_and_checklists(tmp_path):
     (rev / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
     (rev / "RELEASE_CHECKLIST_4.5.0.md").write_text("| 3 | thing | open |\n")
     checks = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
+    assert [c.name for c in checks if c.ok] == ["main green", "no blocking P0/P1"]
