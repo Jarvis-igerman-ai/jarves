@@ -414,6 +414,8 @@ func (s *Server) hSend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
+	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
+	defer s.bfGate.Unlock()
 	var b struct {
 		Mode          string `json:"mode"`
 		OverrideWatch bool   `json:"override_watch"`
@@ -457,6 +459,8 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
+	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
+	defer s.bfGate.Unlock()
 	var b struct {
 		List string `json:"list"`
 		Op   string `json:"op"`
@@ -498,6 +502,8 @@ func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
+	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
+	defer s.bfGate.Unlock()
 	var b struct {
 		AllDirect *bool `json:"all_direct"`
 		Groups    *bool `json:"groups"`
@@ -619,10 +625,12 @@ func (s *Server) unlink(ctx context.Context) {
 		}
 	}
 	_ = s.st.Wipe(ctx)
+	s.bfGate.Lock()
 	s.mu.Lock()
 	s.bfClearLocked("stopped")
 	s.link = linkState{State: engine.LinkIdle}
 	s.mu.Unlock()
+	s.bfGate.Unlock()
 	s.seal(true)
 	s.log.Warn("WA_UNLINKED", "Device unlinked and store wiped.", nil)
 }
@@ -633,6 +641,8 @@ func (s *Server) hUnlink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
+	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
+	defer s.bfGate.Unlock()
 	var b struct {
 		Days        *int `json:"days"`
 		KeepNothing bool `json:"keep_nothing"`

@@ -443,3 +443,44 @@ func TestBackfillRetryAfterTruncationNeitherDuplicatesNorLoses(t *testing.T) {
 		t.Fatalf("after the full answer the anchor moves on: %+v", reqs)
 	}
 }
+
+func TestBackfillRevocationCannotCompleteWhileARequestIsBeingDispatched(t *testing.T) {
+	e := readyBackfill(t)
+	var raced []bool
+	done := make(chan struct{})
+	e.fake.OnRequest = func() {
+		free := e.s.bfGate.TryLock() // a policy write or stop would complete here
+		if free {
+			e.s.bfGate.Unlock()
+		}
+		raced = append(raced, free)
+		if len(raced) == 1 { // revoke the chat between its selection and the dispatch of its request
+			go func() {
+				e.mustOK(e.do("POST", "/read_scope", e.admin, map[string]any{"all_direct": false}))
+				close(done)
+			}()
+		}
+	}
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	<-done
+	e.answer(dana, 2, 30*86400, "rv")
+	if len(raced) != 1 || raced[0] || len(e.requests()) != 1 {
+		t.Fatalf("revocation completed during a dispatch or a revoked chat was asked again: %v, %d requests", raced, len(e.requests()))
+	}
+}
+
+func TestBackfillDelayedAnswerOfARetriedRequestDoesNotFinishTheChat(t *testing.T) {
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	tm.fire()                        // request A unanswered: B is the same request again
+	e.answer(dana, 3, 30*86400, "a") // A's late answer: counts for B, the next request C anchors on a2
+	e.answer(dana, 3, 30*86400, "a") // B's late answer: nothing in it is older than C's anchor
+	if got := e.drain(0); got.body["state"] != "running" || len(e.requests()) != 3 {
+		t.Fatalf("a delayed answer completed a later request: %d requests, state %v", len(e.requests()), got.body["state"])
+	}
+	e.answer(dana, 0, 0, "end") // C's own answer: nothing older
+	if got := e.drain(3); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("end: state %v, incomplete %v", got.body["state"], got.body["chats_incomplete"])
+	}
+}

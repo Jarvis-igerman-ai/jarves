@@ -8,6 +8,7 @@ package api
 // Stop, kill, mode off, keep-nothing and unlink clear the buffer. Logs carry counts only.
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -22,6 +23,7 @@ const (
 	backfillBufMax = 2000     // default buffer bound in messages; requests pause until Core drains
 	backfillBytes  = 16 << 20 // default buffer bound in bytes (texts can be long)
 	backfillWait   = 60 * time.Second
+	backfillSend   = 15 * time.Second
 	// backfillRetries: a truncated answer that buffered nothing new is asked again this many times; then the chat
 	// moves on and its overflow is reported as lost (progress "lost", "chats_incomplete"), never silently.
 	backfillRetries = 3
@@ -52,9 +54,10 @@ type backfill struct {
 	seen      map[string]bool      // IDs buffered from the current anchor: a retried answer adds only the missing ones
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
+	orphans   int                  // timed-out requests whose answer may still arrive (they carry no request id)
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	lost      int                  // overflow given up after backfillRetries answers without progress
-	partial   int                  // chats that moved on with lost messages
+	partial   int                  // chats that moved on incomplete: lost messages, unanswered, or left the read scope
 	total     int
 	done      int
 	skipped   int // readable chats without a stored message to anchor on
@@ -122,6 +125,8 @@ func (s *Server) bfPruneLocked() {
 }
 
 func (s *Server) bfStop() {
+	s.bfGate.Lock() // waits for a dispatch in progress: after a stop returns no request goes out
+	defer s.bfGate.Unlock()
 	s.mu.Lock()
 	running := s.bf.state == "running"
 	s.bfClearLocked("stopped")
@@ -138,8 +143,11 @@ func wipe(l []bfMsg) {
 	}
 }
 
-// bfNext sends the request for the current chat when nothing is out and the buffer has room. Called without s.mu.
+// bfNext sends the request for the current chat when nothing is out and the buffer has room. Called without s.mu
+// and without bfGate; the gate's read lock is held from the scope check through the send.
 func (s *Server) bfNext() {
+	s.bfGate.RLock()
+	defer s.bfGate.RUnlock()
 	s.mu.Lock()
 	b := &s.bf
 	if b.state != "running" || b.waiting || b.needDrain || len(b.buf)+BackfillBatch > s.bfBufMax() || b.bytes >= s.bfBytesMax() {
@@ -147,8 +155,9 @@ func (s *Server) bfNext() {
 		return
 	}
 	for len(b.queue) > 0 && !s.readableLocked(b.queue[0].chat) { // left the read scope: never ask for it again
-		b.queue, b.retries = b.queue[1:], 0
+		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
 		b.done++
+		b.partial++ // its history was not collected: reported incomplete, not as a normal finish
 	}
 	if len(b.queue) == 0 {
 		b.state = "done"
@@ -162,7 +171,9 @@ func (s *Server) bfNext() {
 	b.gen++
 	gen := b.gen
 	s.mu.Unlock()
-	err := s.eng.RequestHistory(s.ctx, c.chat, c.anchor, BackfillBatch)
+	ctx, cancel := context.WithTimeout(s.ctx, backfillSend) // bounds how long the gate holds policy writes
+	err := s.eng.RequestHistory(ctx, c.chat, c.anchor, BackfillBatch)
+	cancel()
 	s.mu.Lock()
 	if gen != b.gen {
 		s.mu.Unlock()
@@ -224,12 +235,20 @@ func (s *Server) bfMessage(m msgstore.Message) {
 // bfAnswer handles the end of one on-demand answer.
 func (s *Server) bfAnswer(chats []string) {
 	s.mu.Lock()
-	gen, ok := s.bf.gen, s.bf.waiting && len(s.bf.queue) > 0
+	b := &s.bf
+	gen, ok := b.gen, b.waiting && len(b.queue) > 0
 	if ok && len(chats) > 0 {
 		ok = false
 		for _, c := range chats {
-			ok = ok || c == s.bf.queue[0].chat
+			ok = ok || c == b.queue[0].chat
 		}
+	}
+	// An answer that brought nothing usable while an earlier request is still unanswered is attributed to that
+	// earlier request (a late answer): it must not finish the request that is out. Worst case, the real answer
+	// was this one and the request times out and is asked again; history is never silently given up.
+	if ok && b.orphans > 0 && b.accepted == 0 && !b.older && !b.truncated {
+		b.orphans--
+		ok = false
 	}
 	s.mu.Unlock()
 	if ok {
@@ -253,6 +272,9 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		return
 	}
 	var lost F
+	if timeout {
+		b.orphans++ // its answer may still arrive later
+	}
 	if timeout || (b.truncated && b.accepted == 0) {
 		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}

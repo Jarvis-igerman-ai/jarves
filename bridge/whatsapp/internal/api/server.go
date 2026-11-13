@@ -41,7 +41,8 @@ type Config struct {
 	SealEvery     time.Duration // default 5 s
 	RetentionTick time.Duration // default 1 h
 	// BackfillBuffer bounds the in-memory history backfill buffer (default 2000 messages); BackfillWait is how long
-	// one on-demand request may stay unanswered before its chat counts as finished (default 60 s).
+	// one on-demand request may stay unanswered before it is asked again (default 60 s); after 3 more unanswered
+	// requests the chat moves on and is reported in chats_incomplete.
 	BackfillBuffer int
 	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
 	BackfillWait   time.Duration
@@ -73,6 +74,10 @@ type Server struct {
 	bf         backfill // on-demand history backfill (backfill.go); memory only
 
 	sendMu sync.Mutex // serializes /send so rate and nonce checks are atomic
+	// bfGate serializes backfill dispatch (read lock, held across the scope check and RequestHistory) with read
+	// policy writes and backfill stops (write lock, taken before s.mu): once one of those returns, no request
+	// it forbids can still go out.
+	bfGate sync.RWMutex
 
 	hub        *hub
 	lastSealed int64
@@ -520,6 +525,7 @@ func (s *Server) onEvent(e engine.Event) {
 		s.hub.broadcast("", map[string]any{"type": "connection.state", "state": ev.State})
 	case engine.AccountWarningEvent:
 		now := s.nowTS()
+		s.bfGate.Lock()
 		s.mu.Lock()
 		s.pol.WarningsTotal++
 		s.pol.WarningsSinceRead++
@@ -527,6 +533,7 @@ func (s *Server) onEvent(e engine.Event) {
 		s.pol.ReadSince = nil // PROTOCOL section 5: any warning resets read_since to null
 		s.savePolicyLocked()
 		s.mu.Unlock()
+		s.bfGate.Unlock()
 		s.log.Warn("WA_ACCOUNT_WARNING", "WhatsApp account warning; the bridge killed itself.", F{"code": ev.Code})
 		s.hub.broadcast("", map[string]any{"type": "account.warning", "code": ev.Code})
 		s.selfKill("account_warning:" + ev.Code)

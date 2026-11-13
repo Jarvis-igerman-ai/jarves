@@ -29,6 +29,7 @@ type Fake struct {
 	Sent      []FakeSent
 	// HistoryRequests records RequestHistory calls; tests answer them with Emit(MessageEvent{History: true}).
 	HistoryRequests []FakeHistoryRequest
+	OnRequest       func() // called during RequestHistory (outside the fake's lock): tests act inside a dispatch
 	SendErr         error
 	Disconnects     int
 	Connects        int
@@ -157,6 +158,12 @@ func (f *Fake) SendText(ctx context.Context, to, text string) (string, float64, 
 }
 
 func (f *Fake) RequestHistory(ctx context.Context, chat string, anchor HistoryAnchor, count int) error {
+	f.mu.Lock()
+	hook := f.OnRequest
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if !f.connected {
