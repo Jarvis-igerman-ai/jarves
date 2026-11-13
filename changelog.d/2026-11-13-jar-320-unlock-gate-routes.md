@@ -1,0 +1,1 @@
+- Added: regression test proving the workflow transition, owner, tasks and dispatch web routes stay locked when the unlock has expired or belongs to another session (JAR-320).
