@@ -266,8 +266,15 @@ func TestBackfillBufferIsAlsoBoundedInBytes(t *testing.T) {
 	if n := e.bufLen(); n != 2 {
 		t.Fatalf("byte bound: %d messages buffered", n)
 	}
+	if n := len(e.requests()); n != 1 { // 8 KB of 10 KB used: the retry must wait for a drain, not burn a retry
+		t.Fatalf("truncated answer asked again before Core drained: %d requests", n)
+	}
 	if got := e.drain(0); got.body["dropped"] != 3.0 {
 		t.Fatalf("dropped %s", got.raw)
+	}
+	e.drain(2)
+	if reqs := e.requests(); len(reqs) != 2 || reqs[1].Anchor.ID != "d1" {
+		t.Fatalf("after the drain the truncated answer must be asked again: %+v", reqs)
 	}
 }
 

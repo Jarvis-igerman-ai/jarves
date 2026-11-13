@@ -48,6 +48,7 @@ type backfill struct {
 	reqAnchor engine.HistoryAnchor // the anchor of the request that is out
 	truncated bool                 // the current answer did not fit the buffer
 	retries   int                  // truncated answers of the current chat asked again
+	needDrain bool                 // a truncated answer waits for Core to free buffer space before it is asked again
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	total     int
 	done      int
@@ -117,7 +118,7 @@ func wipe(l []bfMsg) {
 func (s *Server) bfNext() {
 	s.mu.Lock()
 	b := &s.bf
-	if b.state != "running" || b.waiting || len(b.buf)+BackfillBatch > s.bfBufMax() || b.bytes >= s.bfBytesMax() {
+	if b.state != "running" || b.waiting || b.needDrain || len(b.buf)+BackfillBatch > s.bfBufMax() || b.bytes >= s.bfBytesMax() {
 		s.mu.Unlock()
 		return
 	}
@@ -222,6 +223,7 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		// part of the answer did not fit: ask again from the same anchor once Core has drained (no loss)
 		b.queue[0].anchor = b.reqAnchor
 		b.retries++
+		b.needDrain = true
 	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
 		b.queue, b.retries = b.queue[1:], 0
 		b.done++
@@ -345,6 +347,9 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 		} else {
 			b.bytes -= msgSize(x.m)
 		}
+	}
+	if len(keep) < len(b.buf) {
+		b.needDrain = false
 	}
 	wipe(b.buf) // acknowledged text must not linger in the old backing array
 	b.buf = keep
