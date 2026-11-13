@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo
 
 from . import logs
 from .whatsapp_archive import fold, stems
@@ -37,6 +38,7 @@ MODEL_BATCH = 25                # messages per model request
 QUOTE_CHARS = 120
 FIELD_CHARS = 60
 FORMATS = ("csv", "xlsx", "md")
+TZ = ZoneInfo("Asia/Jerusalem")  # row dates, the forward check and file stamps never depend on the machine's zone
 
 # Topic -> search words (folded forms are what count). Short words (3 letters or fewer) match whole words only, so
 # "ביט" (Bit) never matches "ביטוח" (insurance) or "ביטול" (cancel). Longer words also match as a word start.
@@ -147,11 +149,31 @@ def on_topic(m: dict, terms: list[str], money: bool = False) -> bool:
     return any(_term_hit(t, _tokens(text)) for t in terms) or (money and bool(amounts(text)))
 
 
+def scope(m: dict, *, terms: list[str], contacts: list[Contact], chat: str | None = None, money: bool = False,
+          since: float | None = None, until: float | None = None,
+          canon: dict[str, str] | None = None) -> tuple[str, str] | None:
+    """(reason, contact label) when the message is in the owner's request (dates, chat, topic, contacts), else None.
+    With contacts: in their chat, or in another chat that mentions them. `canon` maps alias chat ids to one id."""
+    ts = float(m.get("ts") or 0)
+    if (since is not None and ts < since) or (until is not None and ts >= until):
+        return None
+    cid = (canon or {}).get(str(m.get("chat", "")), m.get("chat"))
+    if (chat is not None and cid != chat) or not on_topic(m, terms, money):
+        return None
+    if not contacts:
+        return "topic", ""
+    own = next((c for c in contacts if cid in c.ids or m.get("chat") in c.ids), None)
+    if own is not None:
+        return "chat", own.label
+    toks = _tokens(_text_of(m))
+    named = next((c for c in contacts if _mentions(c, toks)), None)
+    return ("mention", named.label) if named is not None else None
+
+
 def select(messages: Iterable[dict], *, terms: list[str], contacts: list[Contact], chat: str | None = None,
            money: bool = False, since: float | None = None, until: float | None = None) -> list[tuple[dict, str, str]]:
-    """(message, reason, contact label) for the messages on the topic. With contacts: in their chat, or in another
-    chat that mentions them. `money` (payment topic): an amount in shekels also counts as on topic. Deleted messages
-    and the same message seen twice (archive + bridge) are skipped."""
+    """(message, reason, contact label) for the messages in the request (`scope`). Deleted messages and the same
+    message seen twice (archive + bridge) are skipped."""
     seen: set[tuple[str, str]] = set()
     out: list[tuple[dict, str, str]] = []
     for m in messages:
@@ -159,24 +181,9 @@ def select(messages: Iterable[dict], *, terms: list[str], contacts: list[Contact
         if key in seen or m.get("deleted"):
             continue
         seen.add(key)
-        ts = float(m.get("ts") or 0)
-        if (since is not None and ts < since) or (until is not None and ts >= until):
-            continue
-        if chat is not None and m.get("chat") != chat:
-            continue
-        if not on_topic(m, terms, money):
-            continue
-        toks = _tokens(_text_of(m))
-        if not contacts:
-            out.append((m, "topic", ""))
-            continue
-        own = next((c for c in contacts if m.get("chat") in c.ids), None)
-        if own is not None:
-            out.append((m, "chat", own.label))
-            continue
-        named = next((c for c in contacts if _mentions(c, toks)), None)
-        if named is not None:
-            out.append((m, "mention", named.label))
+        hit = scope(m, terms=terms, contacts=contacts, chat=chat, money=money, since=since, until=until)
+        if hit is not None:
+            out.append((m, *hit))
     return out
 
 
@@ -217,7 +224,7 @@ def rule_row(m: dict, reason: str, label: str, chat_name: str, *, clean: Callabl
     toks = _tokens(text)
     ts = float(m.get("ts") or 0)
     sender = "me" if m.get("from_me") else _clip(clean(m.get("sender_name") or "") or chat_name, 40)
-    r = Row(ts=ts, date=datetime.fromtimestamp(ts).strftime("%Y-%m-%d"), chat=_clip(chat_name, 40), sender=sender,
+    r = Row(ts=ts, date=datetime.fromtimestamp(ts, TZ).strftime("%Y-%m-%d"), chat=_clip(chat_name, 40), sender=sender,
             method=_method(toks), quote=_clip(text, QUOTE_CHARS), reason=reason,
             _key=f"{m.get('chat', '')}|{m.get('id', '')}")
     found = amounts(text)
@@ -454,7 +461,9 @@ def to_xlsx(rows: list[Row], sums: list[dict]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, body in files.items():
-            z.writestr(zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0)), body)
+            zi = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(zi, body)
     return buf.getvalue()
 
 
@@ -505,18 +514,18 @@ def write_report(home: Path, topic: str, rows: list[Row], sums: list[dict], *, f
         fmts.append("md")
     out_dir = Path(home) / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.fromtimestamp(now if now is not None else time.time()).strftime("%Y%m%d-%H%M%S")
-    base = out_dir / f"whatsapp-collect-{slug(topic)}-{stamp}"
-    paths = [base.with_suffix("." + f) for f in fmts]
+    stamp = datetime.fromtimestamp(now if now is not None else time.time(), TZ).strftime("%Y%m%d-%H%M%S")
+    for n in range(1, 1000):                                # a second run in the same second never overwrites
+        base = out_dir / (f"whatsapp-collect-{slug(topic)}-{stamp}" + (f"-{n}" if n > 1 else ""))
+        paths = [base.with_suffix("." + f) for f in fmts]
+        if not any(p.exists() for p in paths):
+            break
+    bodies = {".csv": lambda: to_csv(rows), ".xlsx": lambda: to_xlsx(rows, sums),
+              ".md": lambda: summary_he(topic, rows, sums, cut=cut, dupes=dupes, model=model,
+                                        files=[p.name for p in paths], truncated=truncated).encode("utf-8")}
     for p in paths:
-        if p.suffix == ".csv":
-            p.write_bytes(to_csv(rows))
-        elif p.suffix == ".xlsx":
-            p.write_bytes(to_xlsx(rows, sums))
-    md = next(p for p in paths if p.suffix == ".md")
-    md.write_text(summary_he(topic, rows, sums, cut=cut, dupes=dupes, model=model, files=[p.name for p in paths],
-                             truncated=truncated),
-                  encoding="utf-8")
+        with open(p, "xb") as f:                            # exclusive create: fails rather than overwrite
+            f.write(bodies[p.suffix]())
     return paths
 
 
@@ -580,6 +589,17 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
     return Result(rows, sums, files, len(msgs), dupes, cut, mstats, by_reason, truncated)
 
 
+def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
+    """The short Hebrew chat answer: counts and totals only; a cut read is said even when nothing was found."""
+    cut = " לא כל ההודעות נקראו, ייתכן שחסרות." if c.get("retrieval_truncated") else ""
+    if not c.get("rows"):
+        return "לא מצאתי הודעות על הנושא הזה." + cut
+    sums = "; ".join(f"{g['payee']}: {g['total_ils']:g} ₪" for g in totals_[:5])
+    return (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ ({sums})."
+            + (f" {c['uncertain']} מסומנות לבדיקה." if c.get("uncertain") else "") + cut
+            + (f" הדוח נשמר בתיקיית reports: {files[0].stem}." if files else ""))
+
+
 def openai_model(model_id: str, budget, *, timeout_s: float = 30.0) -> ModelFn:
     """One Responses request per batch, reserved from the shared Budget first (raises BudgetExceeded)."""
     async def run(items: list[dict], topic: str) -> list[dict]:
@@ -612,7 +632,7 @@ ARCHIVE_PAGE = 200                                          # the archive search
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
            since: float | None = None, until: float | None = None, cap_messages: int = 500,
-           money: bool = False) -> Candidates:
+           money: bool = False, chat: str | None = None, canon: dict[str, str] | None = None) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
     the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
     bridge's own window by the same words plus each contact chat's latest messages. For the payment topic (`money`)
@@ -620,8 +640,9 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     word finds it. The bridge /search has no paging: when one word fills a page, every readable chat is read in full
     instead (the bridge keeps a short window). `readable` (the chat ids the
     bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
-    BEFORE the MAX_CANDIDATES bound, and only on-topic messages (`on_topic`) count toward it, so full chat reads
-    can never crowd out matches; any source that may hold more is named in `truncated`."""
+    BEFORE the MAX_CANDIDATES bound, and only messages inside the request (`scope`: dates, chat, topic, contacts)
+    count toward it, so full chat reads and unrelated matches can never crowd out the requested ones; any source that
+    may hold more is named in `truncated`."""
     out = Candidates()
     out.truncated = []
     seen: set[tuple[str, str]] = set()
@@ -630,7 +651,9 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     def add(ms: list[dict], source: str, full: bool) -> None:
         for x in ms:
             k = (str(x.get("chat", "")), str(x.get("id", "")))
-            if x.get("chat") not in readable or k in seen or x.get("deleted") or not on_topic(x, folded, money):
+            if x.get("chat") not in readable or k in seen or x.get("deleted") or scope(
+                    x, terms=folded, contacts=contacts, chat=chat, money=money, since=since, until=until,
+                    canon=canon) is None:
                 continue
             if len(out) >= MAX_CANDIDATES:
                 if "candidates" not in out.truncated:
@@ -649,6 +672,8 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
     full_read = sorted(readable) if money else ids          # chats read in full (not only by search words)
+    if chat is not None:                                    # one chat asked for: read only its ids
+        full_read = [i for i in sorted(readable) if (canon or {}).get(i, i) == chat]
     if archive is not None:
         for w in words:
             offset = 0
@@ -674,7 +699,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         page = client.search(w, cap_messages)
         add(page, "bridge", False)
         sweep = sweep or len(page) >= cap_messages
-    for cid in (sorted(readable) if sweep else full_read):
+    for cid in (sorted(readable) if sweep and chat is None else full_read):
         if bound():
             break
         page = client.messages(cid, since, cap_messages).get("messages", [])

@@ -315,45 +315,11 @@ def search(home: Path, query: str, *, who: str = "", since: str = "", until: str
 
 def collect(home: Path, topic: str, *, contacts: list[str] | None = None, chat: str = "", since: str = "",
             until: str = "", formats: list[str] | None = None, archive_on: bool = False, model=None) -> dict:
-    """`jarvis whatsapp collect` (JAR-273): the same pipeline as the whatsapp_collect tool, at the PC. A named person
-    who is not a chat is still found where other chats mention them. Returns counts, totals and the file paths."""
-    from . import whatsapp_collect as wcol
-    now = time.time()
-    t0, t1 = arc.parse_when(since, now), arc.parse_when(until, now, end=True)
-    user = BridgeClient(home)
-    raw = user.chats(None, wab.CAP_MESSAGES)
-    chats = wab.merge_aliases(raw)
-    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
-    names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
-    canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
-    book = wab.contacts_book(home)
-    people, mention_only = [], []
-    for who in contacts or []:
-        hits = wab.resolve(chats, who, book)
-        if len(hits) > 1:
-            raise BridgeError("WA_AMBIGUOUS", "", 409)
-        if not hits:
-            mention_only.append(who)
-            people.append(wcol.Contact(who, set(), wcol.mention_words(who)))
-            continue
-        name = names.get(hits[0]["id"], "")
-        people.append(wcol.Contact(name or who, set(hits[0].get("alias_ids") or [hits[0]["id"]]),
-                                   wcol.mention_words(who, name)))
-    only = None
-    if chat.strip():
-        hits = wab.resolve(chats, chat, book)
-        if len(hits) != 1:
-            raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
-        only = hits[0]["id"]
-    arch = arc.get(home) if archive_on else None
-    msgs = wcol.gather(user, arch, terms=wcol.terms_for(topic), contacts=people, readable=set(names), since=t0,
-                       until=t1, cap_messages=wab.CAP_MESSAGES,
-                       money=wcol.topic_key(topic) == "payment")
-    if len(raw) >= wab.CAP_MESSAGES:
-        msgs.truncated.append("chats")
-    res = asyncio.run(wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
-                                   model=model, formats=formats or list(wcol.FORMATS),
-                                   clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon))
+    """`jarvis whatsapp collect` (JAR-273): the tool's own pipeline (wab.run_collect) at the PC. Raises BridgeError
+    (cmd_whatsapp prints its code) or arc.DateError. Returns counts, totals and the file paths."""
+    res, mention_only = asyncio.run(wab.run_collect(
+        home, BridgeClient(home), topic=topic, contacts=contacts or [], chat=chat, since=since, until=until,
+        formats=formats, archive=arc.get(home) if archive_on else None, model=model, now=time.time()))
     return {"counts": res.counts(), "totals_per_payee": res.totals, "files": [str(p) for p in res.files],
             "archive": bool(archive_on), "mention_only": mention_only, "untrusted": True,
             "summary": (res.files[-1].read_text(encoding="utf-8") if res.files else "")}

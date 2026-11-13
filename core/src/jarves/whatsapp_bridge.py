@@ -815,7 +815,64 @@ class CollectArgs(_Tolerant):
             return [(_name_of(x) if isinstance(x, dict) else str(x)).strip()[:60] for x in v if x][:5]
         return v
 
+
 CAP_MESSAGES = 500                                    # the bridge's own limit cap (PROTOCOL: limit up to 500)
+
+
+def _collect_resolve(chats: list[dict], who: str, book: dict) -> dict | None:
+    """One chat for a name, None when no chat has it; several -> WA_AMBIGUOUS (the owner chooses, never a guess)."""
+    try:
+        hits = resolve(chats, who, book, fuzzy=True, patterns=True)
+    except ns.QueryError as e:
+        raise BridgeError("WA_BAD_PATTERN", e.en, 400) from None
+    if len(hits) > 1:
+        raise BridgeError("WA_AMBIGUOUS", "", 409, untrusted_candidates=[
+            {"name": pol.clean_text(c.get("name", ""))[0][:40], "number_end": (c.get("number") or "")[-4:]}
+            for c in hits[:5]], rule="Ask the owner which one; never pick for them.")
+    return hits[0] if hits else None
+
+
+async def run_collect(home: Path, client, *, topic: str, contacts: list[str], chat: str = "", since: str = "",
+                      until: str = "", formats=None, archive=None, model=None, now: float) -> tuple:
+    """The ONE whatsapp_collect pipeline (JAR-273), for the tool and `jarvis whatsapp collect`: list chats (the read
+    gate), merge alias ids, resolve the people (a name that is no chat is still found where others mention it) and
+    --chat, gather, then wcol.collect. Raises BridgeError (a locked archive is WA_STORE_LOCKED) or DateError.
+    Returns (Result, mention_only)."""
+    t0, t1 = whatsapp_archive.parse_when(since, now), whatsapp_archive.parse_when(until, now, end=True)
+    raw = await asyncio.to_thread(client.chats, None, CAP_MESSAGES)
+    chats = merge_aliases(raw)
+    book = contacts_book(home)
+    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
+    canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
+    people, mention_only = [], []
+    for who in contacts:
+        one = _collect_resolve(chats, who, book)
+        if one is None:
+            mention_only.append(who)
+            people.append(wcol.Contact(who, set(), wcol.mention_words(who)))
+            continue
+        name = names.get(one["id"], "")
+        people.append(wcol.Contact(name or who, set(one.get("alias_ids") or [one["id"]]),
+                                   wcol.mention_words(who, name)))
+    only = None
+    if chat.strip():
+        one = _collect_resolve(chats, chat, book)
+        if one is None:
+            raise BridgeError("WA_UNKNOWN_CONTACT", "", 404)
+        only = one["id"]
+    try:
+        msgs = await asyncio.to_thread(wcol.gather, client, archive, terms=wcol.terms_for(topic), contacts=people,
+                                       readable=set(names), since=t0, until=t1, cap_messages=CAP_MESSAGES,
+                                       money=wcol.topic_key(topic) == "payment", chat=only, canon=canon)
+    except whatsapp_archive.StoreLocked:
+        raise BridgeError("WA_STORE_LOCKED", "", 423) from None
+    if len(raw) >= CAP_MESSAGES:                              # more chats than one list holds: say so
+        msgs.truncated.append("chats")
+    res = await wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
+                             model=model, formats=formats or list(wcol.FORMATS),
+                             clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon)
+    return res, mention_only
 
 
 class WhatsAppBridgeSkill(Skill):
@@ -1098,66 +1155,27 @@ class WhatsAppBridgeSkill(Skill):
         async def collect(a: CollectArgs) -> ToolResult:
             """JAR-273: every message on a topic to/from/mentioning the named contacts -> CSV/XLSX/Hebrew summary in
             <home>/reports. Same read gate as whatsapp_search; the answer carries counts and totals, not texts."""
+            arch = self.archive() if self.archive is not None else None
             try:
-                raw = await self._call(self.client.chats, None, CAP_MESSAGES)   # the read gate: every listed chat
-                chats = merge_aliases(raw)
-                since = whatsapp_archive.parse_when(a.since, self.clock())
-                until = whatsapp_archive.parse_when(a.until, self.clock(), end=True)
+                res, mention_only = await run_collect(
+                    self.home, self.client, topic=a.topic, contacts=a.contacts, chat=a.chat, since=a.since,
+                    until=a.until, formats=a.formats, archive=arch, now=self.clock(),
+                    model=self.collect_model() if self.collect_model is not None else None)
             except BridgeError as e:
+                if e.code == "WA_AMBIGUOUS":
+                    self._tainted()                              # names are third-party text too
                 return self._fail(e)
             except whatsapp_archive.DateError:
                 return ToolResult(False, HE["WA_BAD_DATE"], code="WA_BAD_DATE")
-            contacts, mention_only = [], []
-            for who in a.contacts:
-                one, err = await self._resolve_one(who)
-                if err is not None and err.code != "WA_UNKNOWN_CONTACT":
-                    return err
-                if one is None:                                  # not a chat: still found where others mention them
-                    mention_only.append(who)
-                    contacts.append(wcol.Contact(who, set(), wcol.mention_words(who)))
-                    continue
-                name = pol.clean_text(one.get("name") or "")[0][:40]
-                contacts.append(wcol.Contact(name or who, set(one.get("alias_ids") or [one["id"]]),
-                                             wcol.mention_words(who, name)))
-            only = None
-            if a.chat.strip():
-                one, err = await self._resolve_one(a.chat)
-                if err is not None:
-                    return err
-                only = one["id"]
-            names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
-            names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
-            canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
-            arch = self.archive() if self.archive is not None else None
-            try:
-                msgs = await self._call(wcol.gather, self.client, arch, terms=wcol.terms_for(a.topic),
-                                        contacts=contacts, readable=set(names), since=since, until=until,
-                                        cap_messages=CAP_MESSAGES, money=wcol.topic_key(a.topic) == "payment")
-                if len(raw) >= CAP_MESSAGES:                     # more chats than one list holds: say so
-                    msgs.truncated.append("chats")
-            except BridgeError as e:
-                return self._fail(e)
-            except whatsapp_archive.StoreLocked:
-                return ToolResult(False, HE["WA_STORE_LOCKED"], code="WA_STORE_LOCKED")
             self._tainted()
-            model = self.collect_model() if self.collect_model is not None else None
-            res = await wcol.collect(self.home, a.topic, msgs, names=names, contacts=contacts, chat=only, since=since,
-                                     until=until, model=model, formats=a.formats,
-                                     clean=lambda t: pol.clean_text(t or "")[0], now=self.clock(), canon=canon)
             c = res.counts()
             data = {"counts": c, "untrusted_totals_per_payee": res.totals, "files": [str(p) for p in res.files],
                     "source": "archive+bridge" if arch is not None else "bridge (retention window only)",
                     "mention_only": mention_only,
                     "rule": UNTRUSTED_RULE + " Payee names come from messages. Tell the owner the count, the total "
                             "per payee and how many rows need a check, and where the files are; do not read rows."}
-            if not res.rows:
-                return ToolResult(True, "לא מצאתי הודעות על הנושא הזה.", data, code="WA_COLLECT_NONE")
-            sums = "; ".join(f"{g['payee']}: {g['total_ils']:g} ₪" for g in res.totals[:5])
-            msg = (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ ({sums})."
-                   + (f" {c['uncertain']} מסומנות לבדיקה." if c["uncertain"] else "")
-                   + (" לא כל ההודעות נקראו, ייתכן שחסרות." if c["retrieval_truncated"] else "")
-                   + f" הדוח נשמר בתיקיית reports: {res.files[0].stem}.")
-            return ToolResult(True, msg, data, code="WA_COLLECTED")
+            return ToolResult(True, wcol.answer_he(c, res.totals, res.files), data,
+                              code="WA_COLLECTED" if res.rows else "WA_COLLECT_NONE")
 
         async def show(_a) -> ToolResult:
             if self.opener is None:

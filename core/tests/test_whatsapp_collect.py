@@ -394,3 +394,55 @@ def test_currency_only_payments_are_found_in_every_chat_without_contacts(home, m
         assert len(got) == 5 and not got.truncated
     finally:
         a.close()
+
+
+# ---------------------------------------------------------------------- review round 5 (JAR-273)
+def test_out_of_scope_matches_never_use_up_the_bound(monkeypatch):
+    monkeypatch.setattr(wcol, "MAX_CANDIDATES", 5)
+    other = [m(f"שילמתי {i} שקל", mid=f"o{i}", chat=SPOUSE, ts=T0 - i) for i in range(20)]       # invented
+    old = [m(f"שילמתי {i} שקל", mid=f"x{i}", ts=T0 - 400 * DAY - i) for i in range(20)]          # before --since
+    want = [m(f"העברתי {i} שקל", mid=f"w{i}", ts=T0 - 50 - i) for i in range(3)]
+    avi = wcol.Contact("אבי", {PLUMBER}, ["אבי"])
+    kw = dict(terms=wcol.terms_for("תשלום"), readable={PLUMBER, SPOUSE}, money=True, since=T0 - 30 * DAY)
+    got = wcol.gather(_ChatBridge(other + old + want), None, contacts=[avi], **kw)
+    assert {x["id"] for x in got} == {"w0", "w1", "w2"} and "candidates" not in got.truncated
+    got = wcol.gather(_ChatBridge(other + old + want), None, contacts=[], chat=PLUMBER, **kw)
+    assert {x["id"] for x in got} == {"w0", "w1", "w2"} and "candidates" not in got.truncated
+
+
+def test_an_empty_report_still_says_reading_was_cut():
+    c = {"rows": 0, "uncertain": 0, "total_ils": 0.0, "retrieval_truncated": ["chats"]}
+    assert "ייתכן שחסרות" in wcol.answer_he(c, [], [])
+    assert "ייתכן שחסרות" not in wcol.answer_he(dict(c, retrieval_truncated=[]), [], [])
+
+
+def test_cli_collect_errors_are_clean_codes(bridge, home, capsys, monkeypatch):
+    from jarves import cli
+    from jarves.config import Config
+    from jarves.features import Features
+    _seed(bridge)
+    Features(Config(), home).set(wcol.FEATURE, True, by="test")
+    assert cli.main(["whatsapp", "collect", "תשלום", "--from", "דנה", "--no-ai"]) == 1
+    assert "WA_AMBIGUOUS" in capsys.readouterr().out                                  # two Danas: ask, no guess
+
+    def locked(*a, **kw):
+        raise arc.StoreLocked()
+    monkeypatch.setattr(wcol, "gather", locked)
+    assert cli.main(["whatsapp", "collect", "תשלום", "--no-ai"]) == 1
+    assert "WA_STORE_LOCKED" in capsys.readouterr().out
+    bridge.policy["mode"] = "off"
+    bridge._save_policy()
+    assert cli.main(["whatsapp", "collect", "תשלום", "--no-ai"]) == 1
+    assert "WA_MODE_OFF" in capsys.readouterr().out
+
+
+def test_same_second_reports_never_overwrite_and_the_workbook_is_compressed(tmp_path):
+    a = wcol.write_report(tmp_path, "תשלום", [], [], formats=["xlsx"], now=T0)
+    b = wcol.write_report(tmp_path, "תשלום", [], [], formats=["xlsx"], now=T0)
+    assert not set(a) & set(b) and all(p.exists() for p in a + b)
+    assert all(i.compress_type == zipfile.ZIP_DEFLATED for i in zipfile.ZipFile(a[0]).infolist())
+
+
+def test_row_dates_use_israel_time_not_the_machine_zone():
+    late = 1789938000.0                                                   # 2026-09-20 21:00 UTC = 21 Sep 00:00 Israel
+    assert wcol.rule_row(m("שילמתי 5 שקל", ts=late), "topic", "", "").date == "2026-09-21"
