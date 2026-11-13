@@ -45,6 +45,7 @@ type Config struct {
 	// requests the chat moves on and is reported in chats_incomplete.
 	BackfillBuffer int
 	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
+	BackfillDedup  int // bound on remembered message IDs per chat for deduplication (default 10000)
 	BackfillWait   time.Duration
 	// AfterFunc schedules the unanswered-request timeout (default time.AfterFunc); tests inject a manual timer.
 	AfterFunc func(time.Duration, func())

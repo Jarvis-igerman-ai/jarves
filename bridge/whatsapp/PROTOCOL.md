@@ -104,6 +104,9 @@ Bounds:
 - Overflow counts in `dropped`, and the same request is asked again after Core drains. Messages already buffered
   from that anchor are skipped, so the retry adds exactly the missing ones. After 3 answers that add nothing (a
   message that can never fit), the chat moves on and the overflow is reported in `lost` and `chats_incomplete`.
+- Deduplication remembers at most 10000 message IDs per chat (the current window plus messages at the anchor's
+  timestamp from earlier windows). An answer that needs more ends the chat: the rest counts in `lost` and the chat in
+  `chats_incomplete`.
 
 Matching (normative):
 - Only the answer to the request that is out is kept: its chat, older than its anchor, readable at that moment. Any

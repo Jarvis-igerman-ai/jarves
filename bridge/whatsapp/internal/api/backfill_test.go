@@ -578,3 +578,41 @@ func TestBackfillBatchesSharingTheAnchorTimestampDoNotEndTheWalk(t *testing.T) {
 		t.Fatalf("ties: %d messages, %d unique, %d requests, state %v", len(msgs), len(seen), len(e.requests()), got.body["state"])
 	}
 }
+
+func (e *env) dedupLen() int {
+	e.s.mu.Lock()
+	defer e.s.mu.Unlock()
+	return len(e.s.bf.seen) + len(e.s.bf.ties)
+}
+
+func TestBackfillDedupBookkeepingStaysBounded(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillDedup = 120 })
+	tie := float64(e.clk.Now().Unix()) - 30*86400
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	for w := 0; w < 4 && len(e.requests()) == w+1; w++ { // same-timestamp windows, each drained
+		ids := []string{}
+		for i := 0; i < 50; i++ {
+			ids = append(ids, fmt.Sprintf("t%d", w*50+i))
+		}
+		e.answerTS(ids, tie)
+		e.drain(1 << 30) // acknowledge everything buffered
+		if n := e.dedupLen(); n > 120 {
+			t.Fatalf("ties window %d: %d remembered IDs over the budget of 120", w, n)
+		}
+	}
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || got.body["lost"] != 30.0 {
+		t.Fatalf("over the budget the chat must end reported incomplete: %s", got.raw)
+	}
+	// truncated retries from one anchor: seen must not outgrow the budget either
+	e = readyBackfill(t, func(c *Config) { c.BackfillBuffer, c.BackfillDedup = 60, 70 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 80, 30*86400, "r") // 60 fit, 20 asked again after the drain
+	e.drain(60)
+	e.answer(dana, 80, 30*86400, "r") // the retry: 10 more fit the budget, 10 do not
+	if n := e.dedupLen(); n > 70 {
+		t.Fatalf("truncated retries: %d remembered IDs over the budget of 70", n)
+	}
+	if got := e.drain(70); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || got.body["lost"] != 10.0 {
+		t.Fatalf("retry over the budget: %s", got.raw)
+	}
+}

@@ -22,6 +22,7 @@ const (
 	BackfillBatch  = 50       // messages per on-demand request (whatsmeow's recommendation)
 	backfillBufMax = 2000     // default buffer bound in messages; requests pause until Core drains
 	backfillBytes  = 16 << 20 // default buffer bound in bytes (texts can be long)
+	backfillDedup  = 10000    // default bound on message IDs remembered per chat (seen + ties) for deduplication
 	backfillWait   = 60 * time.Second
 	backfillSend   = 15 * time.Second
 	// backfillRetries: a truncated answer that buffered nothing new is asked again this many times; then the chat
@@ -54,6 +55,7 @@ type backfill struct {
 	needDrain bool                 // a truncated answer waits for Core to free buffer space before it is asked again
 	seen      map[string]float64   // ID -> TS buffered from the current anchor: a retried answer adds only the missing ones
 	ties      map[string]bool      // IDs at the anchor's timestamp collected by earlier windows: never buffered again
+	overDedup bool                 // the answer that is out needed more remembered IDs than bfDedupMax: chat incomplete
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
 	orphans   int                  // timed-out requests whose answer may still arrive (fallback for answers without an id)
@@ -87,6 +89,14 @@ func msgSize(m msgstore.Message) int {
 }
 
 // bfBufMax is never below one batch: a smaller bound would pause the backfill forever.
+// bfDedupMax bounds seen + ties: at least one batch, so a normal window always fits.
+func (s *Server) bfDedupMax() int {
+	if s.cfg.BackfillDedup > 0 {
+		return max(s.cfg.BackfillDedup, BackfillBatch)
+	}
+	return backfillDedup
+}
+
 func (s *Server) bfBufMax() int {
 	if s.cfg.BackfillBuffer > 0 {
 		return max(s.cfg.BackfillBuffer, BackfillBatch)
@@ -174,6 +184,7 @@ func (s *Server) bfNext() {
 	}
 	c := b.queue[0]
 	b.waiting, b.older, b.truncated, b.reqAnchor, b.accepted, b.reqDrop = true, false, false, c.anchor, 0, 0
+	b.overDedup = false
 	b.reqID = id
 	b.gen++
 	gen := b.gen
@@ -226,6 +237,11 @@ func (s *Server) bfMessage(m msgstore.Message, reqID string) {
 		b.older = true
 	}
 	if _, ok := b.seen[m.ID]; ok { // buffered by an earlier, truncated answer from this anchor
+		return
+	}
+	if len(b.seen)+len(b.ties) >= s.bfDedupMax() { // no room to remember it: the chat ends reported incomplete
+		b.overDedup = true
+		b.reqDrop++
 		return
 	}
 	size := msgSize(m)
@@ -300,12 +316,12 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
 		b.done++
 		b.partial++
-	case (timeout || b.truncated) && b.retries <= backfillRetries:
+	case !b.overDedup && (timeout || b.truncated) && b.retries <= backfillRetries:
 		// unanswered, or part of the answer did not fit: ask again from the same anchor (after Core has drained
 		// when truncated); `seen` skips what is already buffered, so the retry adds exactly the missing messages
 		b.queue[0].anchor = b.reqAnchor
 		b.needDrain = b.truncated && len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall
-	case timeout || b.truncated: // explicit, reported loss: the chat is incomplete, never silently "finished"
+	case timeout || b.truncated || b.overDedup: // explicit, reported loss: the chat is incomplete, never silently "finished"
 		b.lost += b.reqDrop
 		b.partial++
 		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
@@ -331,7 +347,7 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	}
 	s.mu.Unlock()
 	if lost != nil {
-		s.log.Warn("WA_BACKFILL", "History chat incomplete (unanswered or did not fit the buffer).", lost)
+		s.log.Warn("WA_BACKFILL", "History chat incomplete (unanswered, or did not fit the buffer or the dedup budget).", lost)
 	}
 	s.bfNext()
 }
