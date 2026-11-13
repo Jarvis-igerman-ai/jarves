@@ -102,15 +102,15 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time) -> str
     if (out / "bugs.json").is_file():
         return "done"
     marker = out / "install.started"
-    text = report() or ""
-    if text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]:
-        do_check()
-        return "checked"
-    if not marker.is_file():
+    if not marker.is_file():                                          # an earlier (e.g. stable) report today is not ours
         out.mkdir(parents=True, exist_ok=True)
         marker.write_text(str(clock()), encoding="utf-8")
         spawn(["qa-daily", "install"])
         return "installing"
+    text = report() or ""
+    if text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]:
+        do_check()
+        return "checked"
     if clock() - float(marker.read_text(encoding="utf-8") or 0) > INSTALL_WAIT_S:
         do_check()                                                    # never reported: check writes the P1 draft
         return "checked"

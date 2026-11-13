@@ -133,3 +133,11 @@ def test_daily_tick_checks_anyway_when_the_install_never_reports(home):
     assert tick() == "installing" and tick() == "waiting"
     state["now"] += qa_daily.INSTALL_WAIT_S + 1
     assert tick() == "checked" and checked == [1]                          # the missing report becomes a P1 draft
+
+
+def test_daily_tick_installs_the_beta_even_after_an_earlier_install_today(home):
+    """JAR-232 review: a stable install-latest finished earlier today must not skip the beta install (false P1)."""
+    spawned, checked = [], []
+    assert qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: REPORT,
+                         spawn=spawned.append, do_check=lambda: checked.append(1), clock=lambda: 1000.0) == "installing"
+    assert spawned == [["qa-daily", "install"]] and checked == []
