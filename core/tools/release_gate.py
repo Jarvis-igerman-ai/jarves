@@ -144,7 +144,7 @@ def bug_table_open(text: str, name: str = "") -> list[str]:
     return out
 
 
-ISSUES_PASSED = "no blocking P0/P1"  # exempt P1s may be open: printed below as accepted/carried
+ISSUES_PASSED = rf.ISSUES_CHECK  # exempt P1s may be open: printed below as accepted/carried
 ACCEPTED_LABEL = rf.ACCEPTED_LABEL   # OWNER-ONLY label: the owner accepts an open P1 as a known issue for the 4.5 stable
 
 

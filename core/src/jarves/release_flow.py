@@ -73,6 +73,8 @@ def _severity(issue: dict) -> str | None:
 # Owner-only labels, like ACCEPTED_LABEL. A P1 that also carries one of NEVER_EXEMPT_LABELS still blocks.
 NON_BLOCKING_P1_LABELS = ("flaky-test", "dev-tool")
 NEVER_EXEMPT_LABELS = ("security", "showstopper")
+# Check name: exempt P1s (accepted/carried) may be open, so "zero open P0/P1" would be untruthful.
+ISSUES_CHECK = "no blocking P0/P1"
 
 
 def _classify(issues: list[dict]):
@@ -131,7 +133,7 @@ def check_issues(issues: list[dict]) -> Check:
         note += f"; known issues carried into this release: {len(carried) - p1} open P2/P3"
         note += f", {p1} open flaky-test/dev-tool P1" if p1 else ""
     detail = ("no blocking P0/P1" if not bad else "open: " + ", ".join(f"#{n} {s}" for n, s, _ in bad)) + note
-    return Check("zero open P0/P1", not bad, detail)
+    return Check(ISSUES_CHECK, not bad, detail)
 
 
 def check_sheet(root: Path, version: str) -> Check:
@@ -152,7 +154,7 @@ def collect(root: Path, version: str, fetch=None, head: str | None = None, now: 
     fetch = fetch or github_fetch
     out: list[Check] = []
     for name, fn in (("main green", lambda: check_main(fetch("checks"), head)),
-                     ("zero open P0/P1", lambda: check_issues(fetch("issues")))):
+                     (ISSUES_CHECK, lambda: check_issues(fetch("issues")))):
         try:
             out.append(fn())
         except Exception as e:                                    # network or API trouble is a TODO, never a pass

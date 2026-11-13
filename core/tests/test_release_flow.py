@@ -35,7 +35,7 @@ def test_issues_use_live_labels_only():
     c = rf.check_issues([later, pr])                                                       # P2 does not block, is carried
     assert c.ok and "carried into this release" in c.detail
     assert rf.check_issues([pr]).ok
-    assert rf.check_issues([p1, later]).name == "zero open P0/P1"
+    assert rf.check_issues([p1, later]).name == rf.ISSUES_CHECK == "no blocking P0/P1"
 
 
 def test_flaky_and_dev_tool_p1_do_not_block_but_p0_does():
@@ -112,7 +112,7 @@ def test_write_sheet_refuses_to_clobber_results(tmp_path):
 def test_status_lists_what_remains_then_ready(tmp_path):
     checks = rf.collect(tmp_path, "4.1.0", fetch=fetcher(), head=SHA, now=NOW)
     todo = rf.remaining(checks)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
+    assert [c.name for c in checks if c.ok] == ["main green", "no blocking P0/P1"]
     assert any("owner sheet" in t and t.startswith("[you]") for t in todo)
     assert "## What remains" in rf.report("4.1.0", checks, today="2026-10-26")
     rf.write_sheet(tmp_path, "4.1.0")
@@ -201,4 +201,4 @@ def test_status_ignores_legacy_bug_tables_and_checklists(tmp_path):
     (rev / "X_BUG_TABLE.md").write_text("| id | sev | status |\n|---|---|---|\n| B2 | P1 | open |\n")
     (rev / "RELEASE_CHECKLIST_4.5.0.md").write_text("| 3 | thing | open |\n")
     checks = rf.collect(tmp_path, "4.5.0", fetch=fetcher(), head=SHA, now=NOW)
-    assert [c.name for c in checks if c.ok] == ["main green", "zero open P0/P1"]
+    assert [c.name for c in checks if c.ok] == ["main green", "no blocking P0/P1"]
