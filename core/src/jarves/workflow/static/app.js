@@ -5,7 +5,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-  const stateNames = {queued: "בתור", running: "בעבודה", waiting_owner: "ממתין לך", blocked: "חסום", review: "בבדיקה", verified: "מאומת", done: "הושלם", idle: "פנוי", offline: "מנותק", stale: "אין עדכון", pending: "ממתין", deferred: "נשמר להמשך", answered: "נענה"};
+  const stateNames = {queued: "בתור", running: "בעבודה", waiting_owner: "ממתין לך", blocked: "חסום", review: "בבדיקה", verified: "מאומת", done: "הושלם", cancelled: "בוטל", idle: "פנוי", offline: "מנותק", stale: "אין עדכון", pending: "ממתין", deferred: "נשמר להמשך", answered: "נענה"};
   const laneNames = {bugs: "תיקון באגים", release: "בדיקות ושחרור", features: "פיצ'רים", ops: "תשתית ותהליך", security: "אבטחה", manager: "ניהול"};
   const implNames = {planned: "טרם התחיל", in_progress: "בפיתוח", merged: "מוזג"};
   const validationNames = {not_run: "טרם נבדק", automated: "אוטומטי", app: "תרחיש במוצר", device: "מכשיר אמיתי"};
