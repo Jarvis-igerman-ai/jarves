@@ -105,7 +105,8 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     if not enabled():
         return "off"
     out = Path(home) / "qa" / "daily" / day()
-    if (out / "bugs.json").is_file():
+    done = out / "tick.checked"                                       # ours: a manual `check` does not end the day
+    if done.is_file():
         return "done"
     marker = out / "install.started"
     if not marker.is_file():                                          # an earlier (e.g. stable) report today is not ours
@@ -116,13 +117,12 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         spawn(["qa-daily", "install"])
         return "installing"
     text = report() or ""
-    if text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]:
-        do_check()
-        return "checked"
-    if clock() - float(marker.read_text(encoding="utf-8") or 0) > INSTALL_WAIT_S:
-        do_check()                                                    # never reported: check writes the P1 draft
-        return "checked"
-    return "waiting"
+    final = text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]
+    if not final and clock() - float(marker.read_text(encoding="utf-8") or 0) <= INSTALL_WAIT_S:
+        return "waiting"
+    do_check()                                                        # never reported: check writes the P1 draft
+    done.write_text(str(clock()), encoding="utf-8")
+    return "checked"
 
 
 INSTALL_FILE = "install.txt"                                         # begin() ended without setup: no report file

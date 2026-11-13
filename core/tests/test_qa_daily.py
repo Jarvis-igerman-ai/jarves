@@ -121,7 +121,6 @@ def test_daily_tick_installs_once_then_checks_once_a_day(home):
     assert tick() == "waiting" and len(spawned) == 1                      # setup still running: no second install
     state["report"] = REPORT.replace("FAIL", "PASS")
     assert tick() == "checked" and checked == [1]
-    (home / "qa" / "daily" / "2026-11-12" / "bugs.json").write_text("[]", encoding="utf-8")
     assert tick() == "done" and len(spawned) == 1 and checked == [1]
 
 
@@ -168,3 +167,18 @@ def test_daily_tick_waits_for_a_quiet_moment_before_the_silent_install(home):
     r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: None, spawn=spawned.append,
                       do_check=lambda: None, clock=lambda: 1000.0, busy=lambda: ["voice_session"])
     assert r == "busy" and spawned == [] and not (home / "qa" / "daily" / "2026-11-12" / "install.started").exists()
+
+
+def test_a_manual_check_does_not_cancel_the_daily_beta_install(home):
+    """JAR-232 self-review: `qa-daily check` by hand before the Core's tick wrote bugs.json, and the tick then
+    returned 'done' and skipped that day's beta install and its check."""
+    day = home / "qa" / "daily" / "2026-11-12"
+    day.mkdir(parents=True)
+    (day / "bugs.json").write_text("[]", encoding="utf-8")
+    spawned, checked = [], []
+    tick = lambda rep: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12",  # noqa: E731
+                                     report=lambda: rep, spawn=spawned.append,
+                                     do_check=lambda: checked.append(1), clock=lambda: 1000.0)
+    assert tick(None) == "installing" and spawned == [["qa-daily", "install"]]
+    assert tick(REPORT) == "checked" and checked == [1]
+    assert tick(REPORT) == "done" and checked == [1] and len(spawned) == 1
