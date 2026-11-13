@@ -38,3 +38,9 @@ id = "test_web_chat.py::test_quiet_hours_make_the_chat_silent"
 issue = 1052
 since = "2026-11-11"
 reason = "merge_group run 42909649255 failed in the PR 1042 queue, passes on PR runs"
+
+[[test]]
+id = "test_workflow_autopilot_e2e.py::test_one_bug_two_features_across_versions"
+issue = 1047
+since = "2026-11-14"
+reason = "started f-v5 instead of f-451: ubuntu shard 2/3 (#1047) and windows shard 3/4 of run 43523515602 on PR 1080, passes locally 5/5"

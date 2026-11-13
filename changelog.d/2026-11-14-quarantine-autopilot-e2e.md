@@ -1,0 +1,1 @@
+- Fixed: the flaky autopilot test `test_one_bug_two_features_across_versions` is quarantined under showstopper #1047 so it no longer turns unrelated PRs red (it still runs in the non-blocking quarantine step).
