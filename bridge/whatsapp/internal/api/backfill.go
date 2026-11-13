@@ -223,7 +223,7 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		// part of the answer did not fit: ask again from the same anchor once Core has drained (no loss)
 		b.queue[0].anchor = b.reqAnchor
 		b.retries++
-		b.needDrain = true
+		b.needDrain = len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall forever
 	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
 		b.queue, b.retries = b.queue[1:], 0
 		b.done++
@@ -313,6 +313,7 @@ func (s *Server) hBackfillStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nb.gen = s.bf.gen + 1
+	wipe(s.bf.buf) // undrained text of an earlier backfill must not linger
 	s.bf = nb
 	s.mu.Unlock()
 	s.log.Info("WA_BACKFILL", "History backfill started.", F{"chats": nb.total, "skipped": nb.skipped})

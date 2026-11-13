@@ -321,3 +321,33 @@ func TestBackfillDrainDropsChatsThatLeftTheScopeFromMemory(t *testing.T) {
 		t.Fatalf("messages of a chat that left the read scope stay in memory: %d", n)
 	}
 }
+
+func TestBackfillMessageLargerThanTheByteBoundDoesNotStall(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBytes = 100 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	for i := 0; i <= backfillRetries; i++ { // one message can never fit: an empty buffer must not wait for a drain
+		if n := len(e.requests()); n != i+1 {
+			t.Fatalf("answer %d: stalled after %d requests", i, n)
+		}
+		e.answer(dana, 1, 90*86400, strings.Repeat("y", 200))
+	}
+	if got := e.drain(0); got.body["state"] != "done" || len(e.requests()) != 1+backfillRetries {
+		t.Fatalf("stalled on an empty buffer: %d requests, %s", len(e.requests()), got.raw)
+	}
+}
+
+func TestBackfillRestartWipesTheEarlierBuffer(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 30*86400, "w")
+	e.answer(dana, 0, 0, "none")
+	e.s.mu.Lock()
+	old := e.s.bf.buf
+	e.s.mu.Unlock()
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	for _, x := range old {
+		if x.m.Text != "" {
+			t.Fatal("a new start left the earlier buffered text in memory")
+		}
+	}
+}
