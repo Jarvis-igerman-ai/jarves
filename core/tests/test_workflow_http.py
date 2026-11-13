@@ -86,6 +86,32 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertNotEqual(snap["tasks"][0]["state"], "blocked")
         self.assertEqual(snap["owner"]["effective_mode"], "away")
 
+    def test_state_changing_routes_relock_after_expiry_and_ignore_other_sessions(self):
+        # JAR-320: an expired unlock, or one held by a different session, must not open these routes.
+        import time
+        store = self.server.store
+        store.create_task({"id": "t1", "title": "t1", "lane": "bugs"})
+        self.login()
+        sid = self.cookie.split("=", 1)[1]
+        routes = (("/api/tasks/t1/transition", {"state": "blocked"}), ("/api/owner", {"mode": "present"}),
+                  ("/api/tasks", {"id": "t2", "title": "t2"}), ("/api/dispatch", {}))
+        for label, unlocked in (("expired", {sid: time.time() - 1}), ("other session", {"someone-else": 4e9})):
+            self.server.unlocked.clear()
+            self.server.unlocked.update(unlocked)
+            with patch("jarves.workflow.control.dispatch", return_value=[]) as dispatched:
+                for path, body in routes:
+                    with self.subTest(case=label, path=path):
+                        status, _, data = self.request(path, body)
+                        self.assertEqual(status, 403)
+                        self.assertTrue(data.get("locked"))
+                dispatched.assert_not_called()
+        snap = store.snapshot()
+        self.assertEqual([t["id"] for t in snap["tasks"]], ["t1"])
+        self.assertNotEqual(snap["tasks"][0]["state"], "blocked")
+        self.assertEqual(snap["owner"]["effective_mode"], "away")
+        self.server.unlocked[sid] = 4e9                               # a live unlock on this session opens them
+        self.assertEqual(self.request("/api/tasks/t1/transition", {"state": "blocked"})[0], 200)
+
     def test_static_csp_and_no_path_traversal(self):
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)

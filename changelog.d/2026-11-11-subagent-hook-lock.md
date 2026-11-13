@@ -1,0 +1,1 @@
+- Fixed: starting several subagents at once no longer loses their workflow registration to a locked ledger database; each SubagentStart/SessionStart hook now writes in one transaction instead of four (JAR-214, #786).

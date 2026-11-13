@@ -5,6 +5,7 @@ import http.client
 import json
 import ssl
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -697,3 +698,120 @@ def test_phone_cli_empty_scope_list_stays_empty(home, capsys, monkeypatch):
     assert f"{did}  empty-phone: (none)" in out
     assert mobile.DEFAULT_SCOPES[0] not in out                                  # not turned back into the defaults
     assert mobile.MobileAccess(home).devices()[0]["scopes"] == []
+
+
+# ---------------------------------------------------------------- JAR-142: error text says what happened and what to do
+def test_phone_errors_are_actionable_in_en_and_he(srv):
+    token, _, _ = pair(srv)
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, body={"text": "  "})
+    assert st == 400
+    assert body["error"] == "the message is empty: type something and send again"
+    assert body["error_he"] == "ההודעה ריקה: כתבו משהו ושלחו שוב"
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{nope")
+    assert st == 400 and "reload the page" in body["error"] and "רעננו" in body["error_he"]
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, body={"text": "hi"}, headers={"X-Jarves": "0"})
+    assert st == 403 and "try again" in body["error"] and "נסו שוב" in body["error_he"]
+
+
+@pytest.mark.parametrize("key", sorted(mobile._MSG))
+def test_every_phone_error_has_actionable_en_and_he(key):
+    import re
+    en, he = mobile._MSG[key]
+    assert ": " in en and ": " in he                                             # what happened: what to do
+    assert re.search(r"[\u0590-\u05FF]", he)
+    for cmd in ("jarvis phone trust enable", "phone_trust", "JARVES", "https"):
+        he = he.replace(cmd, "")
+    assert not re.search(r"(?:[A-Za-z]+[ ,]+){2}[A-Za-z]+", he), he             # no bare English run in the Hebrew
+
+
+def test_phone_routes_build_every_error_from_the_table():
+    """Root cause of JAR-142: no inline English-only {"error": ...} literal is left in the phone request routes."""
+    import ast
+    import inspect
+    import textwrap
+    for fn in (mobile.serve, mobile._chat_routes, mobile._body, mobile._json_body):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+        keys = [k.value for n in ast.walk(tree) if isinstance(n, ast.Dict) for k in n.keys if isinstance(k, ast.Constant)]
+        assert "error" not in keys, fn.__name__
+
+
+def _he(body, key, **fmt):
+    return body["error"] == mobile._MSG[key][0].format(**fmt) and body["error_he"] == mobile._MSG[key][1].format(**fmt)
+
+
+def test_phone_chat_and_voice_errors_reach_the_phone_in_en_and_he(home, fake):
+    def boom(text, dev):
+        raise RuntimeError("x")
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST,
+                            mobile_bridge=Bridge(chat=boom, voice=boom, status=lambda: {}, voice_available=lambda: True)).start()
+    try:
+        tok, _, _ = pair(d)
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi"})
+        assert st == 502 and _he(body, "CHAT_FAILED")
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi", "id": "!"})
+        assert st == 400 and _he(body, "BAD_ID")
+        st, body, _ = req(d, "POST", "/api/m/voice", token=tok, raw=b"RIFF", ctype="audio/wav")      # plain http
+        assert st == 409 and _he(body, "VOICE_NOT_READY")
+        st, body, _ = req(d, "GET", "/api/m/nowhere", token=tok)
+        assert st == 404 and _he(body, "NOT_FOUND")
+        d.mobile.bridge = None
+        st, body, _ = req(d, "POST", "/api/m/chat", token=tok, body={"text": "hi"})
+        assert st == 503 and _he(body, "NOT_CONNECTED") and "not connected" in body["error"]
+        codes = [req(d, "POST", "/api/m/chat", token=tok, body={"text": "x"}) for _ in range(mobile.CHAT_RATE_PER_MIN + 1)]
+        assert codes[-1][0] == 429 and _he(codes[-1][1], "CHAT_RATE")
+    finally:
+        d.stop()
+
+
+def test_phone_auth_and_size_errors_are_actionable_in_en_and_he(srv):
+    st, body, _ = req(srv, "POST", "/api/m/chat", token="nope", body={"text": "hi"})
+    assert st == 401 and "pair again" in body["error"] and body["error_he"]
+    token, _, _ = pair(srv)
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{}", headers={"Content-Length": "x"})
+    assert st == 400 and body["error"] == mobile._UNREADABLE["error"] and body["error_he"] == mobile._UNREADABLE["error_he"]
+    st, body, _ = req(srv, "POST", "/api/m/chat", token=token, raw="{}",
+                      headers={"Content-Length": str(mobile.MAX_JSON_BYTES + 1)})
+    assert st == 413 and body == mobile._TOO_BIG
+
+
+def test_phone_page_shows_the_hebrew_error_when_set_to_hebrew():
+    app = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "app.js").read_text(encoding="utf-8")
+    assert '(lang === "he" && d.error_he) || d.error' in app                    # api(): every failed call shows this text
+
+
+def test_phone_voice_busy_rate_and_lockout_errors_are_in_en_and_he(home):
+    def boom(wav, dev):
+        raise RuntimeError("x")
+    cert, key = mobile.make_selfsigned(home, HOST)
+    now = [7000.0]
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, tls=(cert, key),
+                            mobile_bridge=Bridge(chat=boom, voice=boom, status=lambda: {})).start()
+    d.mobile.clock = lambda: now[0]
+    try:
+        st, code = admin_tls(d)
+        got = req(d, "POST", "/api/m/pair", body={"code": code["code"]}, tls=True)[1]
+        tok, dev = got["token"], got["device"]
+        wav = b"RIFF" + struct.pack("<I", 36) + b"WAVE" + b"\0" * 64
+
+        def voice(raw=wav):
+            return req(d, "POST", "/api/m/voice", token=tok, raw=raw, ctype="audio/wav", tls=True)
+        st, body, _ = voice(b"not a wav")
+        assert st == 415 and _he(body, "BAD_AUDIO")
+        st, body, _ = voice()
+        assert st == 502 and _he(body, "VOICE_FAILED")
+        assert d.mobile.begin(dev)                                   # a turn is still running on this phone
+        st, body, _ = voice()
+        assert st == 409 and body["code"] == "BUSY" and _he(body, "BUSY")
+        d.mobile.end(dev)
+        last = [voice() for _ in range(mobile.VOICE_RATE_PER_MIN)][-1]
+        assert last[0] == 429 and _he(last[1], "VOICE_RATE")
+        now[0] += 61
+        for _ in range(mobile.AUTH_FAILS_PER_MIN):
+            req(d, "GET", "/api/m/status", token="a.b", tls=True)
+        st, body, _ = req(d, "GET", "/api/m/status", token="a.b", tls=True)
+        assert st == 429 and _he(body, "BAD_TOKENS")
+        now[0] += 61
+        last = [req(d, "GET", "/api/m/status", token=tok, tls=True) for _ in range(mobile.IP_RATE_PER_MIN + 1)][-1]
+        assert last[0] == 429 and _he(last[1], "RATE")
+    finally:
+        d.stop()
