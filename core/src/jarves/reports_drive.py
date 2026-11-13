@@ -60,17 +60,19 @@ class DriveApi:
         import httpx
         from .google_auth import GoogleAuth
         token = asyncio.run(GoogleAuth(self.home).access_token((DRIVE_FILE,)))
-        meta = {"name": name, **({"mimeType": target_mime} if target_mime and not file_id else {})}
         b = "jarves-report-part"
-        body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps(meta)}\r\n"
-                f"--{b}\r\nContent-Type: {mime}\r\n\r\n").encode() + data + f"\r\n--{b}--".encode()
+
+        def body(meta: dict) -> bytes:
+            return (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps(meta)}\r\n"
+                    f"--{b}\r\nContent-Type: {mime}\r\n\r\n").encode() + data + f"\r\n--{b}--".encode()
         headers = {"Authorization": f"Bearer {token}", "Content-Type": f"multipart/related; boundary={b}"}
         if file_id:                             # a changed report replaces its own Drive file (drive.file allows it)
-            r = httpx.patch(UPDATE_URL.format(file_id), content=body, timeout=60, headers=headers)
+            r = httpx.patch(UPDATE_URL.format(file_id), content=body({"name": name}), timeout=60, headers=headers)
             if r.status_code != 404:            # the owner deleted it in Drive: create a new one below
                 r.raise_for_status()
                 return r.json()
-        r = httpx.post(UPLOAD_URL, content=body, timeout=60, headers=headers)
+        new = {"name": name, **({"mimeType": target_mime} if target_mime else {})}   # a CSV is created as a Sheet
+        r = httpx.post(UPLOAD_URL, content=body(new), timeout=60, headers=headers)
         r.raise_for_status()
         return r.json()
 

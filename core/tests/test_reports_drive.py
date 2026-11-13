@@ -137,3 +137,27 @@ def test_changed_report_updates_the_same_drive_file_not_a_duplicate(tmp_path):
     rep.write_bytes(b"a\nb\n")
     rd.upload(tmp_path, rep, client=fake)
     assert fake.sent == [("wa", b"a\n", None), ("wa", b"a\nb\n", "f1")]
+
+
+def test_csv_whose_sheet_was_deleted_in_drive_comes_back_as_a_sheet(tmp_path, monkeypatch):
+    import httpx
+
+    from jarves import google_auth
+
+    async def token(self, need=()):
+        return "t"
+
+    calls = []
+
+    def call(method):
+        def f(url, content, timeout, headers):
+            calls.append((method, content))
+            return httpx.Response(404 if method == "patch" else 200, json={"id": "new"}, request=httpx.Request(method, url))
+        return f
+
+    monkeypatch.setattr(google_auth.GoogleAuth, "access_token", token)
+    monkeypatch.setattr(httpx, "patch", call("patch"))
+    monkeypatch.setattr(httpx, "post", call("post"))
+    assert rd.DriveApi(tmp_path).upload("wa", b"a,b\n", "text/csv", rd.SHEET, file_id="gone") == {"id": "new"}
+    assert [m for m, _ in calls] == ["patch", "post"]
+    assert rd.SHEET.encode() in calls[1][1]       # re-created as a Google Sheet, not a plain CSV
