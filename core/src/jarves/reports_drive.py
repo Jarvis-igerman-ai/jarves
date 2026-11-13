@@ -19,6 +19,7 @@ FILE = "reports_drive.json"
 DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
 SHEET = "application/vnd.google-apps.spreadsheet"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=multipart"
 _SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
@@ -55,16 +56,21 @@ class DriveApi:
     def __init__(self, home: Path) -> None:
         self.home = home
 
-    def upload(self, name: str, data: bytes, mime: str, target_mime: str | None = None) -> dict:
+    def upload(self, name: str, data: bytes, mime: str, target_mime: str | None = None, file_id: str | None = None) -> dict:
         import httpx
         from .google_auth import GoogleAuth
         token = asyncio.run(GoogleAuth(self.home).access_token((DRIVE_FILE,)))
-        meta = {"name": name, **({"mimeType": target_mime} if target_mime else {})}
+        meta = {"name": name, **({"mimeType": target_mime} if target_mime and not file_id else {})}
         b = "jarves-report-part"
         body = (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps(meta)}\r\n"
                 f"--{b}\r\nContent-Type: {mime}\r\n\r\n").encode() + data + f"\r\n--{b}--".encode()
-        r = httpx.post(UPLOAD_URL, content=body, timeout=60, headers={
-            "Authorization": f"Bearer {token}", "Content-Type": f"multipart/related; boundary={b}"})
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": f"multipart/related; boundary={b}"}
+        if file_id:                             # a changed report replaces its own Drive file (drive.file allows it)
+            r = httpx.patch(UPDATE_URL.format(file_id), content=body, timeout=60, headers=headers)
+            if r.status_code != 404:            # the owner deleted it in Drive: create a new one below
+                r.raise_for_status()
+                return r.json()
+        r = httpx.post(UPLOAD_URL, content=body, timeout=60, headers=headers)
         r.raise_for_status()
         return r.json()
 
@@ -77,8 +83,11 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
     if st["mode"] == "api":
         mime = MIMES.get(path.suffix.lower(), "application/octet-stream")
         csv = path.suffix.lower() == ".csv"
+        ids = dict(_raw(home).get("ids") or {})          # report name -> its Drive file id: update, not duplicate
         r = (client or DriveApi(home)).upload(path.stem if csv else path.name, path.read_bytes(), mime,
-                                             SHEET if csv else None)
+                                             SHEET if csv else None, file_id=ids.get(path.name))
+        if r.get("id"):
+            save(home, ids={**ids, path.name: r["id"]})
         return {"mode": "api", "id": r.get("id", "")}
     dest = Path(st["folder"])
     if not st["folder"] or not dest.is_dir():

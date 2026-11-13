@@ -11,7 +11,7 @@ class FakeDrive:
     def __init__(self):
         self.sent = []
 
-    def upload(self, name, data, mime, target_mime=None):
+    def upload(self, name, data, mime, target_mime=None, file_id=None):
         self.sent.append((name, data, mime, target_mime))
         return {"id": "f1", "name": name}
 
@@ -121,3 +121,19 @@ def test_api_upload_before_signin_is_a_plain_error(home, monkeypatch, capsys):
     rep.write_text("a,b\n", encoding="utf-8")
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 1
     assert "sign in first" in capsys.readouterr().out
+
+
+def test_changed_report_updates_the_same_drive_file_not_a_duplicate(tmp_path):
+    class Keep(FakeDrive):
+        def upload(self, name, data, mime, target_mime=None, file_id=None):
+            self.sent.append((name, data, file_id))
+            return {"id": file_id or "f1"}
+    rd.save(tmp_path, mode="api")
+    rep = tmp_path / "reports" / "wa.csv"
+    rep.parent.mkdir()
+    rep.write_bytes(b"a\n")
+    fake = Keep()
+    rd.upload(tmp_path, rep, client=fake)
+    rep.write_bytes(b"a\nb\n")
+    rd.upload(tmp_path, rep, client=fake)
+    assert fake.sent == [("wa", b"a\n", None), ("wa", b"a\nb\n", "f1")]

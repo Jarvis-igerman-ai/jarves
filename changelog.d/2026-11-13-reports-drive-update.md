@@ -1,0 +1,1 @@
+- Fixed: in Drive API mode a changed report now updates its own Drive file (the same Google Sheet for a CSV) instead of creating a duplicate on every change (JAR-274).
