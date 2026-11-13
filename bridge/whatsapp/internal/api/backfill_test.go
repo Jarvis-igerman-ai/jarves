@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,6 +31,28 @@ func (e *env) answer(chat string, n int, ageS0 float64, tag string) {
 			History: true, OnDemand: true})
 	}
 	e.fake.Emit(engine.HistoryAnswerEvent{Chats: []string{chat}})
+}
+
+// timers replaces the wall clock for unanswered requests: tests fire them explicitly (hermetic, clock-free).
+type timers struct {
+	mu sync.Mutex
+	fs []func()
+}
+
+func (tm *timers) after(_ time.Duration, f func()) {
+	tm.mu.Lock()
+	tm.fs = append(tm.fs, f)
+	tm.mu.Unlock()
+}
+
+func (tm *timers) fire() {
+	tm.mu.Lock()
+	fs := tm.fs
+	tm.fs = nil
+	tm.mu.Unlock()
+	for _, f := range fs {
+		f()
+	}
 }
 
 func (e *env) requests() []engine.FakeHistoryRequest {
@@ -156,7 +179,8 @@ func TestBackfillBoundedBufferWaitsForDrain(t *testing.T) {
 }
 
 func TestBackfillSinceAndUnansweredRequest(t *testing.T) {
-	e := readyBackfill(t, func(c *Config) { c.BackfillWait = 30 * time.Millisecond })
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
 	since := float64(e.clk.Now().Unix()) - 50*86400
 	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{"since": since}))
 	e.answer(dana, 1, 40*86400, "in")
@@ -167,8 +191,9 @@ func TestBackfillSinceAndUnansweredRequest(t *testing.T) {
 		t.Fatalf("since %s", got.raw)
 	}
 	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
-	if !waitFor(t, 2*time.Second, func() bool { return e.drain(0).body["state"] == "done" }) {
-		t.Fatal("a request WhatsApp never answers must not hang the backfill")
+	tm.fire() // WhatsApp never answers
+	if got := e.drain(0); got.body["state"] != "done" {
+		t.Fatalf("a request WhatsApp never answers must not hang the backfill: %s", got.raw)
 	}
 }
 
@@ -237,7 +262,7 @@ func TestBackfillAckWipesMessagesAndSkipsChatsThatLeftTheScope(t *testing.T) {
 }
 
 func TestBackfillConcurrentStartsRunOnce(t *testing.T) {
-	e := readyBackfill(t, func(c *Config) { c.BackfillWait = time.Minute })
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = (&timers{}).after })
 	codes := make(chan int, 8)
 	for i := 0; i < 8; i++ {
 		go func() { codes <- e.do("POST", "/history/backfill", e.admin, map[string]any{}).code }()
@@ -300,12 +325,11 @@ func TestBackfillTinyBufferBoundDoesNotStall(t *testing.T) {
 }
 
 func TestBackfillTimeoutWhileOfflineFailsInsteadOfFinishingTheChat(t *testing.T) {
-	e := readyBackfill(t, func(c *Config) { c.BackfillWait = 30 * time.Millisecond })
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
 	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
 	e.fake.Disconnect()
-	if !waitFor(t, 2*time.Second, func() bool { return e.drain(0).body["state"] != "running" }) {
-		t.Fatal("still running")
-	}
+	tm.fire()
 	if got := e.drain(0); got.body["state"] != "failed" || got.body["error"] != "WA_NOT_CONNECTED" || got.body["chats_done"] != 0.0 {
 		t.Fatalf("an unanswered request while offline is not a finished chat: %s", got.raw)
 	}
@@ -331,7 +355,8 @@ func TestBackfillMessageLargerThanTheByteBoundDoesNotStall(t *testing.T) {
 		}
 		e.answer(dana, 1, 90*86400, strings.Repeat("y", 200))
 	}
-	if got := e.drain(0); got.body["state"] != "done" || len(e.requests()) != 1+backfillRetries {
+	if got := e.drain(0); got.body["state"] != "done" || len(e.requests()) != 1+backfillRetries ||
+		got.body["lost"] != 1.0 || got.body["chats_incomplete"] != 1.0 {
 		t.Fatalf("stalled on an empty buffer: %d requests, %s", len(e.requests()), got.raw)
 	}
 }
@@ -349,5 +374,44 @@ func TestBackfillRestartWipesTheEarlierBuffer(t *testing.T) {
 		if x.m.Text != "" {
 			t.Fatal("a new start left the earlier buffered text in memory")
 		}
+	}
+}
+
+func TestBackfillRevokedQueuedChatIsNotRequestedWhenDrainResumes(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBuffer = 60 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 50, 30*86400, "p") // 50 of 60 used: the next request waits for a drain
+	if n := len(e.requests()); n != 1 {
+		t.Fatalf("paused buffer still requested: %d", n)
+	}
+	e.mustOK(e.do("POST", "/read_scope", e.admin, map[string]any{"all_direct": false})) // dana leaves the scope
+	if got := e.drain(50); len(e.requests()) != 1 || got.body["state"] != "done" {
+		t.Fatalf("a revoked chat was asked again after the drain: %d requests, %s", len(e.requests()), got.raw)
+	}
+}
+
+func TestBackfillAcceptsOnlyMessagesOlderThanTheRequestAnchor(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 0, "late") // newer than the anchor d1: not an answer to this request
+	if n := e.bufLen(); n != 0 {
+		t.Fatalf("a delayed or unrelated answer was buffered: %d", n)
+	}
+}
+
+func TestBackfillRetryAfterTruncationNeitherDuplicatesNorLoses(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.BackfillBuffer = 60 })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 80, 30*86400, "big") // 60 fit, 20 dropped
+	e.drain(60)
+	e.answer(dana, 80, 30*86400, "big") // the same answer again: only the 20 missing are new
+	got := e.drain(60)
+	msgs, _ := got.body["messages"].([]any)
+	if len(msgs) != 20 || got.body["received"] != 80.0 || msgs[0].(map[string]any)["id"] != "big60" {
+		t.Fatalf("retry must add exactly the missing messages: %d, %s", len(msgs), got.raw)
+	}
+	e.drain(80) // acknowledge: room for the next window
+	if reqs := e.requests(); len(reqs) != 3 || reqs[2].Anchor.ID != "big79" {
+		t.Fatalf("after the full answer the anchor moves on: %+v", reqs)
 	}
 }

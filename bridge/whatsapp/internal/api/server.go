@@ -45,6 +45,8 @@ type Config struct {
 	BackfillBuffer int
 	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
 	BackfillWait   time.Duration
+	// AfterFunc schedules the unanswered-request timeout (default time.AfterFunc); tests inject a manual timer.
+	AfterFunc func(time.Duration, func())
 }
 
 // Server is the bridge.
@@ -102,6 +104,9 @@ func (s *Server) path(name string) string {
 func New(cfg Config) (*Server, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.AfterFunc == nil {
+		cfg.AfterFunc = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
 	}
 	if cfg.LocalHour == nil {
 		cfg.LocalHour = func(t time.Time) int { return t.Local().Hour() }

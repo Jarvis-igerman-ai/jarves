@@ -22,8 +22,8 @@ const (
 	backfillBufMax = 2000     // default buffer bound in messages; requests pause until Core drains
 	backfillBytes  = 16 << 20 // default buffer bound in bytes (texts can be long)
 	backfillWait   = 60 * time.Second
-	// backfillRetries: a truncated answer is asked again from the same anchor (after Core drains) this many times
-	// before the chat moves on and the overflow counts as dropped.
+	// backfillRetries: a truncated answer that buffered nothing new is asked again this many times; then the chat
+	// moves on and its overflow is reported as lost (progress "lost", "chats_incomplete"), never silently.
 	backfillRetries = 3
 )
 
@@ -47,9 +47,14 @@ type backfill struct {
 	older     bool                 // the current answer brought a message older than the anchor
 	reqAnchor engine.HistoryAnchor // the anchor of the request that is out
 	truncated bool                 // the current answer did not fit the buffer
-	retries   int                  // truncated answers of the current chat asked again
+	retries   int                  // truncated answers of the current chat that buffered nothing new
 	needDrain bool                 // a truncated answer waits for Core to free buffer space before it is asked again
+	seen      map[string]bool      // IDs buffered from the current anchor: a retried answer adds only the missing ones
+	accepted  int                  // new messages buffered from the answer that is out
+	reqDrop   int                  // messages of the answer that is out that did not fit
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
+	lost      int                  // overflow given up after backfillRetries answers without progress
+	partial   int                  // chats that moved on with lost messages
 	total     int
 	done      int
 	skipped   int // readable chats without a stored message to anchor on
@@ -90,7 +95,7 @@ func (s *Server) bfClearLocked(state string) {
 		return
 	}
 	wipe(s.bf.buf)
-	s.bf.buf, s.bf.queue, s.bf.waiting, s.bf.bytes = nil, nil, false, 0
+	s.bf.buf, s.bf.queue, s.bf.waiting, s.bf.bytes, s.bf.seen = nil, nil, false, 0, nil
 	s.bf.gen++
 	if s.bf.state == "running" || state != "stopped" {
 		s.bf.state = state
@@ -134,7 +139,7 @@ func (s *Server) bfNext() {
 		return
 	}
 	c := b.queue[0]
-	b.waiting, b.older, b.truncated, b.reqAnchor = true, false, false, c.anchor
+	b.waiting, b.older, b.truncated, b.reqAnchor, b.accepted, b.reqDrop = true, false, false, c.anchor, 0, 0
 	b.gen++
 	gen := b.gen
 	s.mu.Unlock()
@@ -158,7 +163,7 @@ func (s *Server) bfNext() {
 		wait = backfillWait
 	}
 	s.mu.Unlock()
-	time.AfterFunc(wait, func() { s.bfAnswered(gen, true) }) // the phone may never answer
+	s.cfg.AfterFunc(wait, func() { s.bfAnswered(gen, true) }) // the phone may never answer
 }
 
 // bfMessage buffers one on-demand history message (onEvent, without s.mu).
@@ -166,21 +171,31 @@ func (s *Server) bfMessage(m msgstore.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b := &s.bf
-	// only the answer to the request that is out, for a readable chat; nothing unsolicited
+	// only the answer to the request that is out: its chat, older than its anchor, readable now; nothing unsolicited
 	if b.state != "running" || !b.waiting || len(b.queue) == 0 || b.queue[0].chat != m.Chat ||
+		m.TS > b.reqAnchor.TS || m.ID == b.reqAnchor.ID ||
 		!s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
-		return
-	}
-	size := msgSize(m)
-	if len(b.buf) >= s.bfBufMax() || b.bytes+size > s.bfBytesMax() { // hard bounds, whatever the phone sends
-		b.truncated = true
-		b.dropped++
 		return
 	}
 	if m.TS < b.queue[0].anchor.TS {
 		b.queue[0].anchor = engine.HistoryAnchor{ID: m.ID, FromMe: m.FromMe, TS: m.TS}
 		b.older = true
 	}
+	if b.seen[m.ID] { // buffered by an earlier, truncated answer from this anchor
+		return
+	}
+	size := msgSize(m)
+	if len(b.buf) >= s.bfBufMax() || b.bytes+size > s.bfBytesMax() { // hard bounds, whatever the phone sends
+		b.truncated = true
+		b.dropped++
+		b.reqDrop++
+		return
+	}
+	if b.seen == nil {
+		b.seen = map[string]bool{}
+	}
+	b.seen[m.ID] = true
+	b.accepted++
 	b.seq++
 	b.received++
 	b.bytes += size
@@ -218,17 +233,32 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		s.log.Warn("WA_BACKFILL", "History request unanswered while offline.", F{"state": "failed"})
 		return
 	}
+	var lost F
+	if b.truncated && !timeout && b.accepted == 0 {
+		b.retries++ // no progress: a message that can never fit must not loop forever
+	}
 	switch {
-	case b.truncated && !timeout && b.retries < backfillRetries:
-		// part of the answer did not fit: ask again from the same anchor once Core has drained (no loss)
+	case b.truncated && !timeout && b.retries <= backfillRetries:
+		// part of the answer did not fit: ask again from the same anchor once Core has drained; `seen` skips
+		// what is already buffered, so the retry adds exactly the missing messages
 		b.queue[0].anchor = b.reqAnchor
-		b.retries++
 		b.needDrain = len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall forever
-	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
-		b.queue, b.retries = b.queue[1:], 0
+	case b.truncated && !timeout: // explicit, reported loss
+		b.lost += b.reqDrop
+		b.partial++
+		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
 		b.done++
+		lost = F{"lost": b.reqDrop}
+	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
+		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+		b.done++
+	default: // the anchor moved older: the next window shares no message with this one
+		b.retries, b.seen = 0, nil
 	}
 	s.mu.Unlock()
+	if lost != nil {
+		s.log.Warn("WA_BACKFILL", "History messages did not fit the buffer.", lost)
+	}
 	s.bfNext()
 }
 
@@ -243,7 +273,7 @@ func (s *Server) bfProgressLocked() map[string]any {
 		ec = b.errorCode
 	}
 	return map[string]any{"state": st, "chats_total": b.total, "chats_done": b.done, "chats_skipped": b.skipped,
-		"received": b.received, "buffered": len(b.buf), "dropped": b.dropped, "error": ec, "batch": BackfillBatch}
+		"received": b.received, "buffered": len(b.buf), "dropped": b.dropped, "lost": b.lost, "chats_incomplete": b.partial, "error": ec, "batch": BackfillBatch}
 }
 
 // hBackfillStart: POST /history/backfill {"chat"?, "since"?} (ADMIN).
@@ -307,9 +337,22 @@ func (s *Server) hBackfillStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	if s.bf.state == "running" { // a concurrent start won the race
+	// re-checked under the lock that commits the start: a kill, keep-nothing, mode off or concurrent start that
+	// happened during the chat scan above wins
+	code, status := "", 0
+	switch {
+	case s.killed:
+		code, status = "WA_KILLED", 423
+	case s.pol.KeepNothing:
+		code, status = "WA_KEEP_NOTHING", 409
+	case s.pol.Mode == "off":
+		code, status = "WA_MODE_OFF", 409
+	case s.bf.state == "running":
+		code, status = "WA_BACKFILL_RUNNING", 409
+	}
+	if code != "" {
 		s.mu.Unlock()
-		writeErr(w, 409, "WA_BACKFILL_RUNNING", nil)
+		writeErr(w, status, code, nil)
 		return
 	}
 	nb.gen = s.bf.gen + 1
