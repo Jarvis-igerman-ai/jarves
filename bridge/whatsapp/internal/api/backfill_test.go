@@ -142,7 +142,7 @@ func TestBackfillRefusals(t *testing.T) {
 }
 
 func TestBackfillBufferClearedOnStopKillKeepNothingAndScope(t *testing.T) {
-	for _, stop := range []string{"stop", "kill", "keep_nothing", "mode_off"} {
+	for _, stop := range []string{"stop", "kill", "keep_nothing", "mode_off", "unlink"} {
 		e := readyBackfill(t)
 		e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{"chat": danaNum}))
 		e.answer(dana, 2, 100*86400, "x")
@@ -155,6 +155,8 @@ func TestBackfillBufferClearedOnStopKillKeepNothingAndScope(t *testing.T) {
 			e.mustOK(e.do("POST", "/retention", e.admin, map[string]any{"days": 14, "keep_nothing": true}))
 		case "mode_off":
 			e.mode("off", false)
+		case "unlink": // takes bfGate then mu: must return (no deadlock) and wipe the buffer
+			e.mustOK(e.do("POST", "/unlink", e.admin, nil))
 		}
 		e.s.mu.Lock()
 		n, st := len(e.s.bf.buf), e.s.bf.state
@@ -537,5 +539,42 @@ func TestBackfillCursorOfAnEarlierRunCannotDropANewRunsMessages(t *testing.T) {
 	e.answer(dana, 2, 60*86400, "b")
 	if got := e.drain(stale); len(got.body["messages"].([]any)) != 2 {
 		t.Fatalf("a stale cursor dropped the new run's messages unread: %s", got.raw)
+	}
+}
+
+// answerTS emits one answer to the latest request: the given IDs, all at timestamp ts (newest first, as WhatsApp sends).
+func (e *env) answerTS(ids []string, ts float64) {
+	reqs := e.requests()
+	id := reqs[len(reqs)-1].ID
+	for _, mid := range ids {
+		e.fake.Emit(engine.MessageEvent{Msg: msgstore.Message{ID: mid, Chat: dana, TS: ts, Kind: "text", Text: secretText},
+			Chat: msgstore.ChatInfo{ID: dana}, History: true, OnDemand: true, RequestID: id})
+	}
+	e.fake.Emit(engine.HistoryAnswerEvent{Chats: []string{dana}, RequestID: id})
+}
+
+func TestBackfillBatchesSharingTheAnchorTimestampDoNotEndTheWalk(t *testing.T) {
+	e := readyBackfill(t)
+	tie := float64(e.clk.Now().Unix()) - 30*86400
+	ids := func(tag string, from, n int) []string {
+		l := []string{}
+		for i := from; i < from+n; i++ {
+			l = append(l, fmt.Sprintf("%s%d", tag, i))
+		}
+		return l
+	}
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answerTS(ids("t", 0, 50), tie)                              // older than d1: all 50 share one timestamp
+	e.answerTS(append(ids("t", 49, 1), ids("t", 50, 50)...), tie) // the next 50 share it too (t49 repeated)
+	e.answerTS(ids("o", 0, 5), tie-10)                            // then genuinely older messages
+	e.answerTS(nil, 0)                                            // nothing older
+	got := e.drain(0)
+	msgs, _ := got.body["messages"].([]any)
+	seen := map[string]bool{}
+	for _, m := range msgs {
+		seen[m.(map[string]any)["id"].(string)] = true
+	}
+	if len(msgs) != 105 || len(seen) != 105 || got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("ties: %d messages, %d unique, %d requests, state %v", len(msgs), len(seen), len(e.requests()), got.body["state"])
 	}
 }

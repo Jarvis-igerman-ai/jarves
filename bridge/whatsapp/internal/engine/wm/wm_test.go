@@ -189,6 +189,8 @@ func TestHistoryRequestAnchorsOnOldestKnownMessage(t *testing.T) {
 	}
 	pm := m.GetProtocolMessage()
 	r := pm.GetPeerDataOperationRequestMessage().GetHistorySyncOnDemandRequest()
+	// OldestMsgTimestampMS holds seconds on purpose: that is what whatsmeow's BuildHistorySyncRequest sends despite
+	// the field name. Whether a real phone expects that is UNVERIFIED.
 	if pm.GetType() != waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE ||
 		r.GetChatJID() != "972500000001@s.whatsapp.net" || r.GetOldestMsgID() != "ABC" || !r.GetOldestMsgFromMe() ||
 		r.GetOnDemandMsgCount() != 50 || r.GetOldestMsgTimestampMS() != 1700000000 {

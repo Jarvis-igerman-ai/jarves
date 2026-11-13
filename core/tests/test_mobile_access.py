@@ -3,7 +3,6 @@ revocation, scopes, rate limits, audit without content, chat / voice / status / 
 import asyncio
 import http.client
 import json
-import re
 import ssl
 import struct
 
@@ -552,8 +551,7 @@ def test_sr6_audit_never_holds_content_or_credentials(srv, fake, home):
     secret_msg = "my bank PIN is 4921 sk-ABCDEF1234567890"
     assert req(srv, "POST", "/api/m/chat", token=tok, body={"text": secret_msg})[0] == 200
     req(srv, "POST", "/api/m/pair", body={"code": "12345678", "name": "x"})
-    # timestamps are wall-clock digits and may contain "4921" by chance; check every other field
-    raw = re.sub(r'"ts": [0-9.]+', '"ts": 0', (home / mobile.AUDIT_FILE).read_text(encoding="utf-8"))
+    raw = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
     assert secret_msg not in raw and "4921" not in raw and tok not in raw and tok.split(".")[1] not in raw
     assert code["code"] not in raw and "12345678" not in raw
 

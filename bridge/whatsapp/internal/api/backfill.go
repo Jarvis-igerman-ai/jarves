@@ -52,7 +52,8 @@ type backfill struct {
 	truncated bool                 // the current answer did not fit the buffer
 	retries   int                  // truncated answers of the current chat that buffered nothing new
 	needDrain bool                 // a truncated answer waits for Core to free buffer space before it is asked again
-	seen      map[string]bool      // IDs buffered from the current anchor: a retried answer adds only the missing ones
+	seen      map[string]float64   // ID -> TS buffered from the current anchor: a retried answer adds only the missing ones
+	ties      map[string]bool      // IDs at the anchor's timestamp collected by earlier windows: never buffered again
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
 	orphans   int                  // timed-out requests whose answer may still arrive (fallback for answers without an id)
@@ -160,7 +161,7 @@ func (s *Server) bfNext() {
 		return
 	}
 	for len(b.queue) > 0 && !s.readableLocked(b.queue[0].chat) { // left the read scope: never ask for it again
-		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
 		b.done++
 		b.partial++ // its history was not collected: reported incomplete, not as a normal finish
 	}
@@ -215,11 +216,16 @@ func (s *Server) bfMessage(m msgstore.Message, reqID string) {
 		!s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
 		return
 	}
-	if m.TS < b.queue[0].anchor.TS {
+	if b.ties[m.ID] { // collected by an earlier window that ended on this timestamp
+		return
+	}
+	// older, or the same timestamp but later in the answer (WhatsApp sends newest first): the anchor moves on, so
+	// a batch boundary inside messages that share one timestamp does not end the walk
+	if a := b.queue[0].anchor; m.TS < a.TS || (m.TS == a.TS && m.ID != a.ID) {
 		b.queue[0].anchor = engine.HistoryAnchor{ID: m.ID, FromMe: m.FromMe, TS: m.TS}
 		b.older = true
 	}
-	if b.seen[m.ID] { // buffered by an earlier, truncated answer from this anchor
+	if _, ok := b.seen[m.ID]; ok { // buffered by an earlier, truncated answer from this anchor
 		return
 	}
 	size := msgSize(m)
@@ -230,9 +236,9 @@ func (s *Server) bfMessage(m msgstore.Message, reqID string) {
 		return
 	}
 	if b.seen == nil {
-		b.seen = map[string]bool{}
+		b.seen = map[string]float64{}
 	}
-	b.seen[m.ID] = true
+	b.seen[m.ID] = m.TS
 	b.accepted++
 	b.seq++
 	b.received++
@@ -291,7 +297,7 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	}
 	switch {
 	case !s.readableLocked(b.queue[0].chat): // left the read scope while asked: not collected, not "finished"
-		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
 		b.done++
 		b.partial++
 	case (timeout || b.truncated) && b.retries <= backfillRetries:
@@ -302,14 +308,26 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	case timeout || b.truncated: // explicit, reported loss: the chat is incomplete, never silently "finished"
 		b.lost += b.reqDrop
 		b.partial++
-		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
 		b.done++
 		lost = F{"lost": b.reqDrop, "unanswered": timeout}
-	case !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
-		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+	case !b.older: // nothing new and older (with `since`, finishing costs this one extra request: accepted)
+		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
 		b.done++
-	default: // the anchor moved older: the next window shares no message with this one
-		b.retries, b.seen = 0, nil
+	default: // the anchor moved: only messages at the new anchor's timestamp can come again
+		ties, at := map[string]bool{}, b.queue[0].anchor.TS
+		if at == b.reqAnchor.TS {
+			ties = b.ties
+		}
+		for id, ts := range b.seen {
+			if ts == at {
+				if ties == nil {
+					ties = map[string]bool{}
+				}
+				ties[id] = true
+			}
+		}
+		b.retries, b.seen, b.ties = 0, nil, ties
 	}
 	s.mu.Unlock()
 	if lost != nil {
