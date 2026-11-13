@@ -1,0 +1,1 @@
+- Fixed: manual, pre-migration and pre-restore backups now keep at most `backup.max_install` archives together (default 8, `jarvis backup settings --max-install N`, 0 = no cap, otherwise at least 3), so repeated beta installs no longer fill the disk; the newest of each of those kinds always stays and the daily/weekly automatic backups are unchanged (#1016, JAR-218).

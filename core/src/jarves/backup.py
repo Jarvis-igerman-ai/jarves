@@ -15,7 +15,10 @@ restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt 
 
 Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule. On top of that,
+`backup.max_install` (default 8, 0 = no cap, else at least 3) is a hard cap on manual + pre-migration + pre-restore
+backups together, newest first, so each beta install (a manual + a pre-migration backup) cannot fill the disk (#1016).
+The newest backup of each of those kinds is one of the kept ones; automatic backups are not counted or touched.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,7 +62,8 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+INSTALL_KINDS = ("manual", "pre-migration", "pre-restore")
+DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "max_install": 8, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -93,13 +97,15 @@ def get_settings(home: Path) -> dict:
 def set_settings(home: Path, changes: dict) -> dict:
     clean = {}
     for k, v in (changes or {}).items():
-        if k in ("daily", "weekly", "manual", "checkpoints"):
+        if k in ("daily", "weekly", "manual", "checkpoints", "max_install"):
             try:
                 n = int(v)
             except (TypeError, ValueError):
                 raise ValueError(f"{k} must be a whole number")
             if not 0 <= n <= 365 or (k == "daily" and n < 1):
                 raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
+            if k == "max_install" and 0 < n < len(INSTALL_KINDS):     # room for the newest of each install kind
+                raise ValueError(f"max_install must be 0 (no cap) or at least {len(INSTALL_KINDS)}")
             clean[k] = n
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
@@ -378,8 +384,13 @@ def prune(home: Path) -> list[str]:
     keep |= set(list(days.values())[:s["daily"]]) | set(list(weeks.values())[:s["weekly"]])
     for kind, n in (("manual", s["manual"]), ("pre-migration", s["checkpoints"]), ("pre-restore", s["checkpoints"])):
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
-    if autos:
-        keep.add(autos[0]["name"])
+    newest = {next(b["name"] for b in items if b["kind"] == k) for k in {b["kind"] for b in items}}
+    keep |= newest                                            # never the newest of a kind
+    if s["max_install"] > 0:                       # #1016 hard cap on install backups: newest per kind, then newest
+        inst = [b["name"] for b in items if b["kind"] in INSTALL_KINDS and b["name"] in keep]
+        floor = [n for n in inst if n in newest]
+        rest = [n for n in inst if n not in newest][:s["max_install"] - len(floor)]
+        keep -= set(inst) - set(floor) - set(rest)
     gone = []
     for b in items:
         if b["name"] not in keep:
@@ -693,6 +704,7 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--max-install", type=int, help="most manual + checkpoint backups kept together (0 = no cap)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +751,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly),
+                                                 ("max_install", a.max_install)) if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
