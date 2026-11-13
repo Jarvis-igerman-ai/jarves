@@ -406,11 +406,16 @@ def run(deps: Deps, channel: str | None = None, dry_run: bool = False) -> Report
 
 
 # ---------------------------------------------------------------------- real wiring
+def cli_argv(argv: list[str]) -> list[str]:
+    """How a fresh `jarvis ...` process of the installed program is started (shared with qa_daily)."""
+    return [sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv]
+
+
 def _cli_subprocess(argv: list[str]) -> tuple[int, str]:
     """The installed program, started fresh (new code, not this old process). Silent: no window, no console flash."""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
-        r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv], capture_output=True, text=True,
+        r = subprocess.run(cli_argv(argv), capture_output=True, text=True,
                            timeout=300, creationflags=flags, errors="replace")
     except subprocess.TimeoutExpired:
         return 124, "timeout after 300 s"

@@ -21,7 +21,6 @@ import io
 import json
 import re
 import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -54,10 +53,11 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()            # install-latest report times are UTC
 
 
-def _fresh(text: str | None, since: float) -> bool:
-    """The report/record belongs to the install begun at `since` (its head time is minute-precise UTC)."""
-    m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC", (text or "").split("\n", 1)[0])
-    return bool(m) and datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp() + 60 > since
+def _beta_installed(deps: Deps, lines: list[str]) -> bool:
+    """Nothing newer on the beta channel says nothing about what is installed: ask `update status`."""
+    code, out = deps.run_cli(["update", "status"])
+    lines += [f"$ jarvis update status  (exit {code})", _clean(out, 300)]
+    return code == 0 and bool(re.search(r"\d+\.\d+\.\d+-beta\.\d+", out))
 
 
 def check(deps: Deps) -> dict:
@@ -82,7 +82,7 @@ def check(deps: Deps) -> dict:
     elif day not in head:
         bug("P1", "install-latest", f"report is from an earlier day, not {day}: {head}")
     elif not re.search(r"^version: .*-> \S*-beta", report, re.M) and not report.startswith("FAIL") \
-            and not re.search(r"^\s*\[PASS\] up to date", report, re.M):              # nothing newer: the beta stays
+            and not (re.search(r"^\s*\[PASS\] up to date", report, re.M) and _beta_installed(deps, lines)):
         bug("P1", "install-latest", "installed version is not a beta; run: jarvis qa-daily install")
     else:
         for ln in report.splitlines():
@@ -130,11 +130,16 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
                 f.write(str(clock()))
         except FileExistsError:
             return "waiting"
-        spawn(["qa-daily", "install"])
+        try:
+            spawn(["qa-daily", "install"])
+        except Exception as e:                                        # the day's draft carries the real cause
+            (out / INSTALL_FILE).write_text(f"FAIL  install-latest  {d} (not started)\n"
+                                            f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
+            return "spawn_failed"
         return "installing"
     since = float(marker.read_text(encoding="utf-8") or 0)
-    text = report(d) or ""
-    final = text.startswith(("PASS", "FAIL")) and _fresh(text, since)  # an earlier install's report is not ours
+    text = report(d, since) or ""                                     # only what was written after this attempt began
+    final = text.startswith(("PASS", "FAIL")) and d in text.splitlines()[0]
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
     do_check(d)                                                       # never reported: check writes the P1 draft
@@ -146,12 +151,16 @@ INSTALL_FILE = "install.txt"                                         # begin() e
 
 
 def _report_reader(home, day: str, since: float = 0.0):
-    """Our own install record for the day wins (up to date / stopped early); else install-latest's report file.
-    With `since`, only a record or report from the install begun then counts."""
+    """The newest (by file time) of our own install record for the day (up to date / stopped early) and
+    install-latest's report file; with `since`, only one written after that install attempt began."""
     from .install_latest import REPORT_FILE
-    own, rp = Path(home) / "qa" / "daily" / day / INSTALL_FILE, Path(home) / "updates" / REPORT_FILE
-    texts = lambda: (p.read_text(encoding="utf-8-sig") for p in (own, rp) if p.is_file())  # noqa: E731
-    return lambda: next((t for t in texts() if not since or _fresh(t, since)), None)
+    paths = (Path(home) / "qa" / "daily" / day / INSTALL_FILE, Path(home) / "updates" / REPORT_FILE)
+
+    def read() -> str | None:
+        fresh = [(p.stat().st_mtime, -i, str(p)) for i, p in enumerate(paths)       # a tie: our own record
+                 if p.is_file() and p.stat().st_mtime >= since]
+        return Path(max(fresh)[2]).read_text(encoding="utf-8-sig") if fresh else None
+    return read
 
 
 def _since(home, day: str) -> float:
@@ -160,15 +169,16 @@ def _since(home, day: str) -> float:
 
 
 def _spawn_hidden(argv: list[str]) -> None:
+    from .install_latest import cli_argv
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
-    subprocess.Popen([sys.executable, "-I", "-X", "utf8", "-m", "jarves", *argv], stdin=subprocess.DEVNULL,
+    subprocess.Popen(cli_argv(argv), stdin=subprocess.DEVNULL,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
 
 
 def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
-    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d: _report_reader(home, d)(),
+    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d, since: _report_reader(home, d, since)(),
                 spawn=_spawn_hidden, busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
 
 
