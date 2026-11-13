@@ -150,9 +150,11 @@ def cmd_drive(a, cfg, home) -> int:
             return 1
         save(home, mode="api")
     elif a.drive_action == "upload":
+        import httpx
+        from .google_auth import GoogleAuthError
         try:
             print(json.dumps(upload(home, Path(a.file))))
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, GoogleAuthError, httpx.HTTPError) as e:   # not signed in, offline, Drive refused
             print(e)
             return 1
         return 0

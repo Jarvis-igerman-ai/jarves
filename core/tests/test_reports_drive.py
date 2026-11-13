@@ -108,3 +108,16 @@ def test_overlapping_sync_is_skipped_and_failed_signin_is_a_plain_error(home, tm
     monkeypatch.setattr(GoogleAuth, "sign_in", refuse)
     assert cli.main(["reports", "drive", "signin"]) == 1
     assert "no Google client" in capsys.readouterr().out and rd.load(home)["mode"] == "folder"
+
+
+def test_api_upload_before_signin_is_a_plain_error(home, monkeypatch, capsys):
+    from jarves.google_auth import GoogleAuth, GoogleAuthError
+
+    async def no_token(self, need=(), *, force_refresh=False):
+        raise GoogleAuthError("not_signed_in", "sign in first: jarvis reports drive signin")
+    monkeypatch.setattr(GoogleAuth, "access_token", no_token)
+    rd.save(home, mode="api")
+    rep = home / "r.csv"
+    rep.write_text("a,b\n", encoding="utf-8")
+    assert cli.main(["reports", "drive", "upload", str(rep)]) == 1
+    assert "sign in first" in capsys.readouterr().out
