@@ -26,6 +26,8 @@ try:            # eagerly, before anything loads WinRT (voice/stt.py: faster-whi
 except ImportError:              # voice extra not installed: the confirm stage reports unavailable
     _fw = None
 
+from .. import logs  # after faster_whisper: keep the WinRT-safe import order
+
 SR = 16000
 FRAME_SAMPLES = 1280
 
@@ -242,8 +244,9 @@ class ConfirmingDetector:
         import asyncio
         try:
             await asyncio.to_thread(self.confirm, np.zeros(SR, np.float32))
-        except Exception:
-            pass
+        except Exception as e:
+            logs.warn("voice", "WAKE_CONFIRM_WARM_FAILED", "wake confirmer warm-up failed; the first check may be slow",
+                      error_type=type(e).__name__)
 
     def check(self) -> tuple[bool, str]:
         ok, msg = self.base.check() if hasattr(self.base, "check") else (True, "")
