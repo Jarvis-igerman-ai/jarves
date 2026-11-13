@@ -73,7 +73,7 @@ class Fake:
             record_was_running=rec("record"), stop_core=rec("stop"),
             launch=launch,
             wait=lambda c: self.wait_end, run_cli=run_cli, rollback=rec("rollback", {}),
-            now=lambda: NOW)
+            core_status=lambda: {"uptime_s": 0}, sleep=lambda s: self.calls.append("sleep"), now=lambda: NOW)
 
 
 def test_happy_path_order_and_report(tmp_path):
@@ -423,3 +423,87 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
     f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks
+
+
+
+def _down_after_setup(f, d, answers):
+    """Running before the install, stopped after setup; after start_core the status call gives `answers` in turn."""
+    up = iter([True])
+    d.core_running = lambda: next(up, "start_core" in f.calls)
+    it = iter(answers)
+
+    def status():
+        a = next(it, answers[-1]) if "start_core" in f.calls else None
+        if isinstance(a, Exception):
+            raise a
+        return a
+    d.core_status = status
+
+
+def test_silent_install_restarts_the_core_on_the_new_version(tmp_path):
+    f = Fake(tmp=tmp_path, wait="timeout")                 # setup ended, but it did not bring the Core back
+    d = f.deps()
+    _down_after_setup(f, d, [None, OSError("refused"), {"uptime_s": 1}])   # the Core answers only on the third poll
+    rep = il.run(d)
+    assert f.calls.index("wait_installer") < f.calls.index("start_core") < f.calls.index("cli:update status")
+    assert f.calls.count("sleep") == 2 and rep.ok and not rep.rolled_back
+    assert ("Core restarted on the new version", True, "running for 1 s") in rep.checks
+    assert ("installed version", True, "4.5.1") in rep.checks          # the new version: the installed program
+
+
+def test_core_that_cannot_be_started_after_install_names_the_error_and_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path, wait="timeout")
+    d = f.deps()
+    _down_after_setup(f, d, [None])
+    d.start_core = lambda: (f.calls.append("start_core"), (_ for _ in ()).throw(OSError("no python")))
+    rep = il.run(d)
+    assert not rep.ok and rep.rolled_back and f.calls.count("sleep") == il.CORE_POLLS - 1   # bounded
+    detail = dict((c[0], c[2]) for c in rep.checks)["Core restarted on the new version"]
+    assert "jarvis start" in detail and "start failed: OSError: no python" in detail
+
+
+def test_core_that_never_answers_after_a_healthy_wait_fails_and_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.core_status = lambda: None
+    rep = il.run(d)
+    assert not rep.ok and rep.rolled_back and "start_core" not in f.calls
+    assert f.calls.count("sleep") == il.CORE_POLLS - 1
+
+
+def test_old_core_process_still_running_is_not_a_restart(tmp_path):
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.core_status = lambda: {"uptime_s": 86400}            # started a day ago: setup did not replace it
+    rep = il.run(d)
+    assert not rep.ok and rep.rolled_back
+    assert ("Core restarted on the new version", False, "the Core was not restarted (running 86400 s, from before the "
+            "install)") in rep.checks
+
+
+def test_no_uptime_or_no_start_time_is_unverified_not_a_rollback(tmp_path):
+    f = Fake(tmp=tmp_path, spawn=True)
+    il.begin(f.deps())
+    state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
+    for st, status in (({**state, "t0": None}, {"uptime_s": 3}), (state, {"version": "4.0.1"})):  # older state / reply
+        g = Fake(tmp=tmp_path)
+        d = g.deps()
+        d.core_status = lambda status=status: status
+        rep = il.finish(d, st)
+        assert rep.ok and not rep.rolled_back and "sleep" not in g.calls
+        assert dict((c[0], c[2]) for c in rep.checks)["Core restarted on the new version"].startswith("UNVERIFIED")
+
+
+def test_real_wiring_reads_the_status_reply_and_start_waits(tmp_path, monkeypatch):
+    from jarves import cli
+    from jarves.config import Config
+    from jarves.health import Health
+    seen = {}
+    monkeypatch.setattr(cli, "_ws_call", lambda home, port, msg, expect, **k: seen.setdefault("msg", (msg, expect))
+                        and {"uptime_s": 2})
+    monkeypatch.setattr(cli, "cmd_start", lambda a, cfg, home: seen.setdefault("wait", a.wait))
+    d = il.real_deps(argparse.Namespace(), Config(), tmp_path)
+    assert d.core_status() == {"uptime_s": 2} and seen["msg"] == ({"type": "status.request", "payload": {}}, "status")
+    d.start_core()
+    assert seen["wait"] > 0                                # cmd_start polls until the Core answers
+    assert isinstance(Health(tmp_path).snapshot(tmp_path)["uptime_s"], int)   # the field the Core's status carries

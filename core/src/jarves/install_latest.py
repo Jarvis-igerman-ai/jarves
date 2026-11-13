@@ -10,7 +10,8 @@ Two phases, because setup force-stops every process that runs from {app}\\python
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
     waits for the setup PROCESS to exit and starts phase two.
   finish (`install-latest --finish STATE`, started by the waiter from the NEW program, never while setup runs): waits for
-    the new Core when it ran, then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
+    the new Core when it ran (starts it once itself when setup did not bring it back, then checks that a Core started after
+    the install runs), then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
     when a check fails, writes the ONE short report to <home>/updates/install-latest-report.txt and prints it.
   `jarvis install-latest --report` prints the last report again (the first process is gone after setup stopped it).
 
@@ -42,6 +43,7 @@ PID_FILE = "install-latest.pid"                   # setup process id written by 
 SETUP_WAIT_S = 1200
 SETUP_SEEN_S = 300                                # how long the waiter looks for the setup process before it judges nothing
 PENDING_S = 5400                    # a state file younger than this, without a newer report, is a run in progress
+CORE_POLLS, CORE_POLL_S = 45, 2.0   # after setup: ask the running Core for up to ~90 s before judging the restart
 
 
 @dataclass
@@ -65,6 +67,8 @@ class Deps:
     rollback: Callable[[], dict]
     spawn_finisher: Callable[[Path], None] | None = None      # (state file) start the waiter; None: finish in this process
     publish_pid: Callable[[int | None], None] = lambda pid: None   # tell the waiter the setup pid (None = cancelled)
+    core_status: Callable[[], dict | None] = lambda: None      # the RUNNING Core's status reply (None: no answer)
+    sleep: Callable[[float], None] = time.sleep
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     clock: Callable[[], float] = time.time                    # file ages (pending-run guard)
 
@@ -261,6 +265,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         for step in ("backup now", f"download {rep.version} and verify signature, SHA256 and size",
                      "stop the Core if it runs; silent setup (/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
                      " /RESTARTJARVES=1 when the Core ran)", "wait for the setup process to exit",
+                     "start the Core again if it ran and setup did not; check a new Core process runs",
                      "version + doctor + selftest + speedtest + status + features diff in the new program",
                      "roll back automatically if a check fails"):
             rep.add("would: " + step, True)
@@ -300,7 +305,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
             (up / name).unlink(missing_ok=True)
         except OSError:
             pass
-    state = {"report": {**rep.to_dict(), "changed": True}, "shown": shown, "core_up": core_up,
+    state = {"report": {**rep.to_dict(), "changed": True}, "shown": shown, "core_up": core_up, "t0": deps.clock(),
              "installer": str(prep["installer"]), "features_before": before}
     spawned = False
     if deps.spawn_finisher is not None:                   # the waiter exists BEFORE setup can stop this process
@@ -340,6 +345,32 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     return finish(deps, state)
 
 
+def _core_restarted(deps: Deps, t0) -> tuple[bool, str]:
+    """(ok, detail): a Core answers and its process started after this run began, so it runs the installed program
+    (whose version `update status` checks). The status reply's `version` is the package string, not the build, so it
+    is not compared. Polled (bounded); a failing status call is retried. No uptime or no start time: UNVERIFIED pass."""
+    st = None
+    for i in range(CORE_POLLS):
+        try:
+            st = deps.core_status()
+        except Exception:                                 # noqa: BLE001  (transient: ask again)
+            st = None
+        up = st.get("uptime_s") if isinstance(st, dict) else None
+        if st is not None and (not isinstance(up, (int, float)) or not isinstance(t0, (int, float))
+                               or up <= deps.clock() - t0 + 5):
+            break
+        if i < CORE_POLLS - 1:
+            deps.sleep(CORE_POLL_S)
+    if st is None:
+        return False, "the Core is not running; start it with: jarvis start"
+    up = st.get("uptime_s")
+    if not isinstance(up, (int, float)) or not isinstance(t0, (int, float)):
+        return True, "UNVERIFIED: the Core runs, its start time was not reported"
+    if up > deps.clock() - t0 + 5:
+        return False, f"the Core was not restarted (running {int(up)} s, from before the install)"
+    return True, f"running for {int(up)} s"
+
+
 def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
     """Phase two. Never judges or rolls back while the setup process is still running."""
     from .updates import UpdateError
@@ -353,6 +384,16 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         _save_report(deps, rep)
         return rep
     end = deps.wait(core_up) if core_up else "done"
+    start_err, restart = "", None
+    if core_up and end == "timeout" and not deps.core_running():   # setup ended but did not bring the Core back
+        try:
+            deps.start_core()                             # once, from the NEW program (finish runs there)
+        except Exception as e:                            # noqa: BLE001  (named in the check below)
+            start_err = f" (start failed: {type(e).__name__}: {_first_line(str(e))})"
+            logs.warn("updates", "INSTALL_LATEST_START", "Core start after install failed", error=type(e).__name__)
+        restart = _core_restarted(deps, state.get("t0"))
+        if restart[0]:
+            end = "done"
     install_ok = rep.add("silent install", end == "done" or (end == "timeout" and not core_up),
                          {"done": "setup finished" + (" and the new Core is healthy" if core_up else ""),
                           "failed": "setup or health check failed",
@@ -371,6 +412,9 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
             else:
                 detail = "" if good else f"exit {code}: {_first_line(out)}"
             ok = rep.add(name, good, detail) and ok
+        if core_up:                                       # the Core ran before: it must run again, on the new version
+            cok, cdetail = restart or _core_restarted(deps, state.get("t0"))
+            ok = rep.add("Core restarted on the new version", cok, cdetail + ("" if cok else start_err)) and ok
     if install_ok or end == "timeout":                    # informational: lost features are named, rollback stays check-driven
         try:
             fcode, fout = deps.run_cli(["features"])
@@ -524,8 +568,11 @@ def real_deps(a, cfg, home: Path) -> Deps:
         if pid is not None:
             proc.pop("p", None)                           # the waiter owns the wait from here on
 
+    def core_status() -> dict | None:
+        return cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+
     def start_core() -> None:
-        cli.cmd_start(argparse.Namespace(show=False), cfg, home)
+        cli.cmd_start(argparse.Namespace(show=False, wait=60.0), cfg, home)   # waits until the Core answers
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
@@ -539,7 +586,8 @@ def real_deps(a, cfg, home: Path) -> Deps:
                 wait=lambda core_ran: up.watch(home, lambda _l: None, timeout_s=420.0),
                 run_cli=_cli_subprocess,
                 rollback=lambda: rollback(home, approved=True, restore_data=True, silent=True, port=cfg.link.port),
-                spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid)
+                spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid,
+                core_status=core_status)
 
 
 def wait_report(home: Path, since: float, *, timeout_s: float = 1500.0, sleep=time.sleep, clock=time.time) -> str | None:
