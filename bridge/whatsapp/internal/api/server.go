@@ -479,7 +479,7 @@ func (s *Server) onEvent(e engine.Event) {
 	switch ev := e.(type) {
 	case engine.MessageEvent:
 		if ev.OnDemand { // backfill answers live in the memory buffer only: never the store, chats or snapshot
-			s.bfMessage(ev.Msg)
+			s.bfMessage(ev.Msg, ev.RequestID)
 			return
 		}
 		s.mu.Lock()
@@ -509,7 +509,7 @@ func (s *Server) onEvent(e engine.Event) {
 				"ts": ev.Msg.TS, "from_me": ev.Msg.FromMe, "kind": ev.Msg.Kind})
 		}
 	case engine.HistoryAnswerEvent:
-		s.bfAnswer(ev.Chats)
+		s.bfAnswer(ev.Chats, ev.RequestID)
 	case engine.EditEvent:
 		_ = s.st.EditMessage(ctx, ev.Chat, ev.ID, ev.Text)
 	case engine.RevokeEvent:

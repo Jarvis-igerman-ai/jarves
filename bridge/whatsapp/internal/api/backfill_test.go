@@ -22,15 +22,25 @@ func readyBackfill(t *testing.T, mutate ...func(*Config)) *env {
 	return e
 }
 
-// answer emits one on-demand history answer for chat with n messages older than ageS0 (oldest last).
+// answer emits one on-demand history answer for chat with n messages older than ageS0 (oldest last), tagged with
+// the ID of the latest request (as WhatsApp echoes it).
 func (e *env) answer(chat string, n int, ageS0 float64, tag string) {
+	id := ""
+	if reqs := e.requests(); len(reqs) > 0 {
+		id = reqs[len(reqs)-1].ID
+	}
+	e.answerFor(id, chat, n, ageS0, tag)
+}
+
+// answerFor emits an answer naming request id ("" = a transport that does not say which request it answers).
+func (e *env) answerFor(id, chat string, n int, ageS0 float64, tag string) {
 	now := float64(e.clk.Now().Unix())
 	for i := 0; i < n; i++ {
 		e.fake.Emit(engine.MessageEvent{Msg: msgstore.Message{ID: fmt.Sprintf("%s%d", tag, i), Chat: chat,
 			TS: now - ageS0 - float64(i), Kind: "text", Text: secretText}, Chat: msgstore.ChatInfo{ID: chat},
-			History: true, OnDemand: true})
+			History: true, OnDemand: true, RequestID: id})
 	}
-	e.fake.Emit(engine.HistoryAnswerEvent{Chats: []string{chat}})
+	e.fake.Emit(engine.HistoryAnswerEvent{Chats: []string{chat}, RequestID: id})
 }
 
 // timers replaces the wall clock for unanswered requests: tests fire them explicitly (hermetic, clock-free).
@@ -467,20 +477,51 @@ func TestBackfillRevocationCannotCompleteWhileARequestIsBeingDispatched(t *testi
 	if len(raced) != 1 || raced[0] || len(e.requests()) != 1 {
 		t.Fatalf("revocation completed during a dispatch or a revoked chat was asked again: %v, %d requests", raced, len(e.requests()))
 	}
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || e.bufLen() != 0 {
+		t.Fatalf("a chat revoked while asked must end incomplete with nothing kept: %s", got.raw)
+	}
 }
 
+// Fallback for a transport whose answers name no request: the orphan heuristic.
 func TestBackfillDelayedAnswerOfARetriedRequestDoesNotFinishTheChat(t *testing.T) {
 	tm := &timers{}
 	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
 	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
-	tm.fire()                        // request A unanswered: B is the same request again
-	e.answer(dana, 3, 30*86400, "a") // A's late answer: counts for B, the next request C anchors on a2
-	e.answer(dana, 3, 30*86400, "a") // B's late answer: nothing in it is older than C's anchor
+	tm.fire()                               // request A unanswered: B is the same request again
+	e.answerFor("", dana, 3, 30*86400, "a") // A's late answer: counts for B, the next request C anchors on a2
+	e.answerFor("", dana, 3, 30*86400, "a") // B's late answer: nothing in it is older than C's anchor
 	if got := e.drain(0); got.body["state"] != "running" || len(e.requests()) != 3 {
 		t.Fatalf("a delayed answer completed a later request: %d requests, state %v", len(e.requests()), got.body["state"])
 	}
-	e.answer(dana, 0, 0, "end") // C's own answer: nothing older
+	e.answerFor("", dana, 0, 0, "end") // C's own answer: nothing older
 	if got := e.drain(3); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
 		t.Fatalf("end: state %v, incomplete %v", got.body["state"], got.body["chats_incomplete"])
+	}
+}
+
+func TestBackfillDelayedAnswerCannotCompleteALaterRequest(t *testing.T) {
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	tm.fire() // request A unanswered: B asks again from the same anchor
+	reqs := e.requests()
+	if len(reqs) != 2 || reqs[0].ID == reqs[1].ID {
+		t.Fatalf("each request needs its own id: %+v", reqs)
+	}
+	e.answerFor(reqs[0].ID, dana, 1, 30*86400, "a") // A's answer arrives late: neither kept nor a completion
+	if n, r := e.bufLen(), len(e.requests()); n != 0 || r != 2 {
+		t.Fatalf("a delayed answer was taken for the outstanding request: %d buffered, %d requests", n, r)
+	}
+	e.answerFor(reqs[0].ID, dana, 0, 0, "a") // an empty late answer must not finish the chat either
+	if got := e.drain(0); got.body["state"] != "running" || got.body["chats_done"] != 0.0 {
+		t.Fatalf("an empty delayed answer completed the outstanding request: %s", got.raw)
+	}
+	e.answer(dana, 1, 30*86400, "b") // B's own answer is kept and moves on to C
+	if n, r := e.bufLen(), len(e.requests()); n != 1 || r != 3 {
+		t.Fatalf("the outstanding request's answer: %d buffered, %d requests", n, r)
+	}
+	e.answer(dana, 0, 0, "end") // C: nothing older, even though A's orphan is still counted
+	if got := e.drain(1); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("end %s", got.raw)
 	}
 }

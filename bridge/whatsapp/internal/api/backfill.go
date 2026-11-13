@@ -48,13 +48,14 @@ type backfill struct {
 	gen       int                  // invalidates the timer of an earlier request
 	older     bool                 // the current answer brought a message older than the anchor
 	reqAnchor engine.HistoryAnchor // the anchor of the request that is out
+	reqID     string               // the message id of the request that is out (answers echo it)
 	truncated bool                 // the current answer did not fit the buffer
 	retries   int                  // truncated answers of the current chat that buffered nothing new
 	needDrain bool                 // a truncated answer waits for Core to free buffer space before it is asked again
 	seen      map[string]bool      // IDs buffered from the current anchor: a retried answer adds only the missing ones
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
-	orphans   int                  // timed-out requests whose answer may still arrive (they carry no request id)
+	orphans   int                  // timed-out requests whose answer may still arrive (fallback for answers without an id)
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	lost      int                  // overflow given up after backfillRetries answers without progress
 	partial   int                  // chats that moved on incomplete: lost messages, unanswered, or left the read scope
@@ -146,6 +147,10 @@ func wipe(l []bfMsg) {
 // bfNext sends the request for the current chat when nothing is out and the buffer has room. Called without s.mu
 // and without bfGate; the gate's read lock is held from the scope check through the send.
 func (s *Server) bfNext() {
+	if s.eng == nil {
+		return
+	}
+	id := s.eng.NewRequestID() // outside mu: the engine is never called under it
 	s.bfGate.RLock()
 	defer s.bfGate.RUnlock()
 	s.mu.Lock()
@@ -168,11 +173,12 @@ func (s *Server) bfNext() {
 	}
 	c := b.queue[0]
 	b.waiting, b.older, b.truncated, b.reqAnchor, b.accepted, b.reqDrop = true, false, false, c.anchor, 0, 0
+	b.reqID = id
 	b.gen++
 	gen := b.gen
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(s.ctx, backfillSend) // bounds how long the gate holds policy writes
-	err := s.eng.RequestHistory(ctx, c.chat, c.anchor, BackfillBatch)
+	err := s.eng.RequestHistory(ctx, id, c.chat, c.anchor, BackfillBatch)
 	cancel()
 	s.mu.Lock()
 	if gen != b.gen {
@@ -197,12 +203,14 @@ func (s *Server) bfNext() {
 }
 
 // bfMessage buffers one on-demand history message (onEvent, without s.mu).
-func (s *Server) bfMessage(m msgstore.Message) {
+// reqID is the request the transport says it answers ("" if it did not say).
+func (s *Server) bfMessage(m msgstore.Message, reqID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b := &s.bf
 	// only the answer to the request that is out: its chat, older than its anchor, readable now; nothing unsolicited
 	if b.state != "running" || !b.waiting || len(b.queue) == 0 || b.queue[0].chat != m.Chat ||
+		(reqID != "" && reqID != b.reqID) || // the answer to an earlier request (e.g. one that timed out)
 		m.TS > b.reqAnchor.TS || m.ID == b.reqAnchor.ID ||
 		!s.readableLocked(m.Chat) || s.pol.KeepNothing || (b.since > 0 && m.TS < b.since) {
 		return
@@ -233,11 +241,14 @@ func (s *Server) bfMessage(m msgstore.Message) {
 }
 
 // bfAnswer handles the end of one on-demand answer.
-func (s *Server) bfAnswer(chats []string) {
+// With a request id the answer must name the request that is out; without one the chat must match.
+func (s *Server) bfAnswer(chats []string, reqID string) {
 	s.mu.Lock()
 	b := &s.bf
 	gen, ok := b.gen, b.waiting && len(b.queue) > 0
-	if ok && len(chats) > 0 {
+	if reqID != "" {
+		ok = ok && reqID == b.reqID
+	} else if ok && len(chats) > 0 {
 		ok = false
 		for _, c := range chats {
 			ok = ok || c == b.queue[0].chat
@@ -246,7 +257,7 @@ func (s *Server) bfAnswer(chats []string) {
 	// An answer that brought nothing usable while an earlier request is still unanswered is attributed to that
 	// earlier request (a late answer): it must not finish the request that is out. Worst case, the real answer
 	// was this one and the request times out and is asked again; history is never silently given up.
-	if ok && b.orphans > 0 && b.accepted == 0 && !b.older && !b.truncated {
+	if ok && reqID == "" && b.orphans > 0 && b.accepted == 0 && !b.older && !b.truncated {
 		b.orphans--
 		ok = false
 	}
@@ -279,6 +290,10 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}
 	switch {
+	case !s.readableLocked(b.queue[0].chat): // left the read scope while asked: not collected, not "finished"
+		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
+		b.done++
+		b.partial++
 	case (timeout || b.truncated) && b.retries <= backfillRetries:
 		// unanswered, or part of the answer did not fit: ask again from the same anchor (after Core has drained
 		// when truncated); `seen` skips what is already buffered, so the retry adds exactly the missing messages

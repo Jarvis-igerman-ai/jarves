@@ -13,6 +13,7 @@ type FakeSent struct{ To, Text string }
 
 // FakeHistoryRequest is one on-demand history request the fake engine received.
 type FakeHistoryRequest struct {
+	ID     string
 	Chat   string
 	Anchor HistoryAnchor
 	Count  int
@@ -35,6 +36,7 @@ type Fake struct {
 	Connects        int
 	Logouts         int
 	seq             int
+	reqSeq          int
 	Now             func() time.Time
 }
 
@@ -157,7 +159,7 @@ func (f *Fake) SendText(ctx context.Context, to, text string) (string, float64, 
 	return fmt.Sprintf("FAKE%06d", f.seq), float64(f.Now().UnixNano()) / 1e9, nil
 }
 
-func (f *Fake) RequestHistory(ctx context.Context, chat string, anchor HistoryAnchor, count int) error {
+func (f *Fake) RequestHistory(ctx context.Context, id, chat string, anchor HistoryAnchor, count int) error {
 	f.mu.Lock()
 	hook := f.OnRequest
 	f.mu.Unlock()
@@ -169,7 +171,7 @@ func (f *Fake) RequestHistory(ctx context.Context, chat string, anchor HistoryAn
 	if !f.connected {
 		return ErrNotConnected
 	}
-	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{Chat: chat, Anchor: anchor, Count: count})
+	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{ID: id, Chat: chat, Anchor: anchor, Count: count})
 	return nil
 }
 
@@ -178,4 +180,12 @@ func (f *Fake) Requests() []FakeHistoryRequest {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]FakeHistoryRequest(nil), f.HistoryRequests...)
+}
+
+// NewRequestID returns hist1, hist2, ...
+func (f *Fake) NewRequestID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqSeq++
+	return fmt.Sprintf("hist%d", f.reqSeq)
 }

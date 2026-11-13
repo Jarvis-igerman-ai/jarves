@@ -282,7 +282,9 @@ func (e *Engine) SendText(ctx context.Context, to, text string) (string, float64
 
 // RequestHistory sends one on-demand history request (whatsmeow BuildHistorySyncRequest) to the phone. The
 // answer comes back as an ON_DEMAND *events.HistorySync and flows through onHistory like any history sync.
-func (e *Engine) RequestHistory(ctx context.Context, chat string, anchor engine.HistoryAnchor, count int) error {
+// The request goes out with message id id; the phone names it in HistorySyncNotification.PeerDataRequestSessionID
+// (real-phone echo UNVERIFIED), which onHistory copies to the events so the API can match the answer.
+func (e *Engine) RequestHistory(ctx context.Context, id, chat string, anchor engine.HistoryAnchor, count int) error {
 	if !e.IsConnected() {
 		return engine.ErrNotConnected
 	}
@@ -290,8 +292,18 @@ func (e *Engine) RequestHistory(ctx context.Context, chat string, anchor engine.
 	if err != nil {
 		return err
 	}
-	_, err = e.client().SendPeerMessage(ctx, m)
+	cli := e.client()
+	own := cli.Store.GetJID().ToNonAD()
+	if own.IsEmpty() {
+		return engine.ErrNotConnected
+	}
+	_, err = cli.SendMessage(ctx, own, m, whatsmeow.SendRequestExtra{Peer: true, ID: types.MessageID(id)})
 	return err
+}
+
+// NewRequestID returns a WhatsApp message id for the next on-demand history request.
+func (e *Engine) NewRequestID() string {
+	return string(e.client().GenerateMessageID()) // nil-safe in whatsmeow
 }
 
 // historyRequest builds the peer message asking for count messages of chat older than anchor.
@@ -347,7 +359,7 @@ func (e *Engine) handle(raw any) {
 			e.emit(engine.AccountWarningEvent{Code: engine.WarnAccountRestricted})
 		}
 	case *events.Message:
-		e.onMessage(ev, false, false)
+		e.onMessage(ev, false, false, "")
 	case *events.HistorySync:
 		e.onHistory(ev)
 	case *events.Receipt:
@@ -454,7 +466,7 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-func (e *Engine) onMessage(ev *events.Message, history, onDemand bool) {
+func (e *Engine) onMessage(ev *events.Message, history, onDemand bool, reqID string) {
 	ctx := context.Background()
 	chat := ev.Info.Chat.ToNonAD()
 	if chat.Server != types.DefaultUserServer && chat.Server != types.HiddenUserServer && chat.Server != types.GroupServer {
@@ -488,9 +500,10 @@ func (e *Engine) onMessage(ev *events.Message, history, onDemand bool) {
 	e.emit(engine.MessageEvent{
 		Msg: msgstore.Message{ID: ev.Info.ID, Chat: chat.String(), FromMe: ev.Info.IsFromMe, SenderName: sender,
 			TS: float64(ev.Info.Timestamp.UnixNano()) / 1e9, Kind: kind, Text: text, Media: media, Edited: ev.IsEdit},
-		Chat:     e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
-		History:  history,
-		OnDemand: onDemand,
+		Chat:      e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
+		History:   history,
+		OnDemand:  onDemand,
+		RequestID: reqID,
 	})
 }
 
@@ -545,6 +558,10 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 	cli := e.client()
 	data := ev.Data
 	onDemand := data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND
+	reqID := ""
+	if onDemand {
+		reqID = ev.Notification.GetPeerDataRequestSessionID()
+	}
 	chats := []string{}
 	for _, p := range data.GetPushnames() {
 		if p.GetPushname() != "" {
@@ -575,10 +592,10 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			e.onMessage(msg, true, onDemand)
+			e.onMessage(msg, true, onDemand, reqID)
 		}
 	}
 	if onDemand {
-		e.emit(engine.HistoryAnswerEvent{Chats: chats})
+		e.emit(engine.HistoryAnswerEvent{Chats: chats, RequestID: reqID})
 	}
 }
