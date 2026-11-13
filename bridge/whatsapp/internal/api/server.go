@@ -40,6 +40,11 @@ type Config struct {
 	KillPoll      time.Duration // default 250 ms
 	SealEvery     time.Duration // default 5 s
 	RetentionTick time.Duration // default 1 h
+	// BackfillBuffer bounds the in-memory history backfill buffer (default 2000 messages); BackfillWait is how long
+	// one on-demand request may stay unanswered before its chat counts as finished (default 60 s).
+	BackfillBuffer int
+	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
+	BackfillWait   time.Duration
 }
 
 // Server is the bridge.
@@ -63,6 +68,7 @@ type Server struct {
 	link       linkState
 	port       int
 	connecting bool
+	bf         backfill // on-demand history backfill (backfill.go); memory only
 
 	sendMu sync.Mutex // serializes /send so rate and nonce checks are atomic
 
@@ -381,6 +387,9 @@ func (s *Server) applyKill(on bool, reason string) {
 	if on && s.eng != nil {
 		s.eng.Disconnect() // within 2 s of the KILL file appearing (poll <= 250 ms)
 	}
+	if on {
+		s.bfStop()
+	}
 	if on != was {
 		var r any = reason
 		if !on {
@@ -458,6 +467,10 @@ func (s *Server) onEvent(e engine.Event) {
 	ctx := context.Background()
 	switch ev := e.(type) {
 	case engine.MessageEvent:
+		if ev.OnDemand { // backfill answers live in the memory buffer only: never the store, chats or snapshot
+			s.bfMessage(ev.Msg)
+			return
+		}
 		s.mu.Lock()
 		readable := s.readableLocked(ev.Msg.Chat)
 		keep := readable && !s.pol.KeepNothing && ev.Msg.TS >= s.retentionMinTSLocked()
@@ -484,6 +497,8 @@ func (s *Server) onEvent(e engine.Event) {
 			s.hub.broadcast(ev.Msg.Chat, map[string]any{"type": "message.new", "chat": ev.Msg.Chat, "id": ev.Msg.ID,
 				"ts": ev.Msg.TS, "from_me": ev.Msg.FromMe, "kind": ev.Msg.Kind})
 		}
+	case engine.HistoryAnswerEvent:
+		s.bfAnswer(ev.Chats)
 	case engine.EditEvent:
 		_ = s.st.EditMessage(ctx, ev.Chat, ev.ID, ev.Text)
 	case engine.RevokeEvent:

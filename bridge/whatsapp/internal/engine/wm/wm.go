@@ -23,6 +23,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -279,6 +280,33 @@ func (e *Engine) SendText(ctx context.Context, to, text string) (string, float64
 	return resp.ID, float64(resp.Timestamp.UnixNano()) / 1e9, nil
 }
 
+// RequestHistory sends one on-demand history request (whatsmeow BuildHistorySyncRequest) to the phone. The
+// answer comes back as an ON_DEMAND *events.HistorySync and flows through onHistory like any history sync.
+func (e *Engine) RequestHistory(ctx context.Context, chat string, anchor engine.HistoryAnchor, count int) error {
+	if !e.IsConnected() {
+		return engine.ErrNotConnected
+	}
+	m, err := historyRequest(chat, anchor, count)
+	if err != nil {
+		return err
+	}
+	_, err = e.client().SendPeerMessage(ctx, m)
+	return err
+}
+
+// historyRequest builds the peer message asking for count messages of chat older than anchor.
+func historyRequest(chat string, anchor engine.HistoryAnchor, count int) (*waE2E.Message, error) {
+	jid, err := types.ParseJID(chat)
+	direct := jid.Server == types.DefaultUserServer || jid.Server == types.HiddenUserServer
+	if err != nil || jid.User == "" || anchor.ID == "" || !(direct || jid.Server == types.GroupServer) {
+		return nil, errors.New("bad history request")
+	}
+	info := &types.MessageInfo{ID: anchor.ID, Timestamp: time.Unix(0, int64(anchor.TS*1e9)),
+		MessageSource: types.MessageSource{Chat: jid, IsFromMe: anchor.FromMe, IsGroup: jid.Server == types.GroupServer}}
+	// The builder only fills a proto message; it never touches the client, so no live connection is needed here.
+	return (*whatsmeow.Client)(nil).BuildHistorySyncRequest(info, count), nil
+}
+
 // handle converts whatsmeow events. It runs on whatsmeow's goroutines.
 func (e *Engine) handle(raw any) {
 	switch ev := raw.(type) {
@@ -319,7 +347,7 @@ func (e *Engine) handle(raw any) {
 			e.emit(engine.AccountWarningEvent{Code: engine.WarnAccountRestricted})
 		}
 	case *events.Message:
-		e.onMessage(ev, false)
+		e.onMessage(ev, false, false)
 	case *events.HistorySync:
 		e.onHistory(ev)
 	case *events.Receipt:
@@ -426,7 +454,7 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-func (e *Engine) onMessage(ev *events.Message, history bool) {
+func (e *Engine) onMessage(ev *events.Message, history, onDemand bool) {
 	ctx := context.Background()
 	chat := ev.Info.Chat.ToNonAD()
 	if chat.Server != types.DefaultUserServer && chat.Server != types.HiddenUserServer && chat.Server != types.GroupServer {
@@ -460,8 +488,9 @@ func (e *Engine) onMessage(ev *events.Message, history bool) {
 	e.emit(engine.MessageEvent{
 		Msg: msgstore.Message{ID: ev.Info.ID, Chat: chat.String(), FromMe: ev.Info.IsFromMe, SenderName: sender,
 			TS: float64(ev.Info.Timestamp.UnixNano()) / 1e9, Kind: kind, Text: text, Media: media, Edited: ev.IsEdit},
-		Chat:    e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
-		History: history,
+		Chat:     e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
+		History:  history,
+		OnDemand: onDemand,
 	})
 }
 
@@ -515,6 +544,8 @@ func onlySKD(m *waE2E.Message) bool {
 func (e *Engine) onHistory(ev *events.HistorySync) {
 	cli := e.client()
 	data := ev.Data
+	onDemand := data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND
+	chats := []string{}
 	for _, p := range data.GetPushnames() {
 		if p.GetPushname() != "" {
 			if jid, err := types.ParseJID(p.GetID()); err == nil {
@@ -527,6 +558,7 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 		if err != nil {
 			continue
 		}
+		chats = append(chats, jid.ToNonAD().String())
 		if jid.Server == types.GroupServer {
 			if n := firstNonEmpty(conv.GetName(), conv.GetDisplayName()); n != "" {
 				e.mu.Lock()
@@ -543,7 +575,10 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			e.onMessage(msg, true)
+			e.onMessage(msg, true, onDemand)
 		}
+	}
+	if onDemand {
+		e.emit(engine.HistoryAnswerEvent{Chats: chats})
 	}
 }

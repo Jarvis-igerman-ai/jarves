@@ -70,6 +70,8 @@ var messages = map[string]string{
 	"WA_NO_ENGINE":         "No WhatsApp engine is available.",
 	"WA_LINK_FAILED":       "Linking could not start.",
 	"WA_INTERNAL":          "Internal bridge error.",
+	"WA_KEEP_NOTHING":      "Keep-nothing is on: history is not collected.",
+	"WA_BACKFILL_RUNNING":  "A history backfill is already running.",
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -91,25 +93,28 @@ func writeErr(w http.ResponseWriter, status int, code string, extra map[string]a
 // Handler returns the HTTP handler (Host check, auth, routing).
 func (s *Server) Handler() http.Handler {
 	routes := map[string]route{
-		"GET /status":      {false, s.hStatus},
-		"GET /chats":       {false, s.hChats},
-		"GET /messages":    {false, s.hMessages},
-		"GET /search":      {false, s.hSearch},
-		"POST /seen":       {false, s.hSeen},
-		"POST /send":       {false, s.hSend},
-		"GET /events":      {false, s.handleEvents},
-		"POST /mode":       {true, s.hMode},
-		"POST /allow":      {true, s.hAllow},
-		"POST /read_scope": {true, s.hReadScope},
-		"POST /kill":       {true, s.hKill},
-		"POST /link":       {true, s.hLinkStart},
-		"GET /link":        {true, s.hLinkGet},
-		"POST /unlink":     {true, s.hUnlink},
-		"POST /retention":  {true, s.hRetention},
-		"POST /purge":      {true, s.hPurge},
-		"GET /audit":       {true, s.hAudit},
-		"GET /policy":      {true, s.hPolicy},
-		"POST /shutdown":   {true, s.hShutdown},
+		"GET /status":              {false, s.hStatus},
+		"GET /chats":               {false, s.hChats},
+		"GET /messages":            {false, s.hMessages},
+		"GET /search":              {false, s.hSearch},
+		"POST /seen":               {false, s.hSeen},
+		"POST /send":               {false, s.hSend},
+		"GET /events":              {false, s.handleEvents},
+		"POST /mode":               {true, s.hMode},
+		"POST /allow":              {true, s.hAllow},
+		"POST /read_scope":         {true, s.hReadScope},
+		"POST /kill":               {true, s.hKill},
+		"POST /link":               {true, s.hLinkStart},
+		"GET /link":                {true, s.hLinkGet},
+		"POST /unlink":             {true, s.hUnlink},
+		"POST /retention":          {true, s.hRetention},
+		"POST /purge":              {true, s.hPurge},
+		"GET /audit":               {true, s.hAudit},
+		"GET /policy":              {true, s.hPolicy},
+		"POST /shutdown":           {true, s.hShutdown},
+		"POST /history/backfill":   {true, s.hBackfillStart},
+		"GET /history/backfill":    {true, s.hBackfillGet},
+		"DELETE /history/backfill": {true, s.hBackfillStop},
 	}
 	paths := map[string]bool{}
 	for k := range routes {
@@ -431,6 +436,9 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.pol.Mode = b.Mode
+	if b.Mode == "off" {
+		s.bfClearLocked("stopped")
+	}
 	switch {
 	case b.Mode == "off":
 		s.pol.ReadSince = nil
@@ -612,6 +620,7 @@ func (s *Server) unlink(ctx context.Context) {
 	}
 	_ = s.st.Wipe(ctx)
 	s.mu.Lock()
+	s.bfClearLocked("stopped")
 	s.link = linkState{State: engine.LinkIdle}
 	s.mu.Unlock()
 	s.seal(true)
@@ -637,6 +646,9 @@ func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.pol.RetentionDays, s.pol.KeepNothing = *b.Days, b.KeepNothing
+	if b.KeepNothing {
+		s.bfClearLocked("stopped")
+	}
 	s.savePolicyLocked()
 	s.mu.Unlock()
 	s.purgeRetention()

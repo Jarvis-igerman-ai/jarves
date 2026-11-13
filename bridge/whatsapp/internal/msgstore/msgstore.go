@@ -232,6 +232,20 @@ WHERE chat = ? AND ts > ? AND ts >= ? ORDER BY ts DESC, id DESC LIMIT ?) ORDER B
 	return scanMessages(rows)
 }
 
+// Oldest returns the oldest stored message of chat (the anchor for an on-demand history request).
+func (s *Store) Oldest(ctx context.Context, chat string) (Message, bool) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+msgCols+` FROM jarves_messages WHERE chat = ? ORDER BY ts ASC, id ASC
+LIMIT 1`, chat)
+	if err != nil {
+		return Message{}, false
+	}
+	out, err := scanMessages(rows)
+	if err != nil || len(out) == 0 {
+		return Message{}, false
+	}
+	return out[0], true
+}
+
 // Search returns up to limit messages (newest first) whose text or media caption contains q case-insensitively
 // (Unicode simple folding), restricted to chats for which readable returns true and ts >= minTS.
 func (s *Store) Search(ctx context.Context, q string, readable func(string) bool, minTS float64, limit int) ([]Message, error) {
