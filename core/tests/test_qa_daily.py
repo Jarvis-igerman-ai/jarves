@@ -113,8 +113,8 @@ def test_daily_tick_installs_once_then_checks_once_a_day(home):
     state = {"on": False, "report": None, "now": 1000.0}
     spawned, checked = [], []
     tick = lambda: qa_daily.tick(home, enabled=lambda: state["on"], day=lambda: "2026-11-12",  # noqa: E731
-                                 report=lambda: state["report"], spawn=spawned.append,
-                                 do_check=lambda: checked.append(1), clock=lambda: state["now"])
+                                 report=lambda _d: state["report"], spawn=spawned.append,
+                                 do_check=lambda _d: checked.append(1), clock=lambda: state["now"])
     assert tick() == "off" and spawned == [] and checked == []
     state["on"] = True
     assert tick() == "installing" and spawned == [["qa-daily", "install"]]
@@ -127,8 +127,8 @@ def test_daily_tick_installs_once_then_checks_once_a_day(home):
 def test_daily_tick_checks_anyway_when_the_install_never_reports(home):
     state = {"now": 1000.0}
     checked = []
-    tick = lambda: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: None,  # noqa: E731
-                                 spawn=lambda argv: None, do_check=lambda: checked.append(1), clock=lambda: state["now"])
+    tick = lambda: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda _d: None,  # noqa: E731
+                                 spawn=lambda argv: None, do_check=lambda _d: checked.append(1), clock=lambda: state["now"])
     assert tick() == "installing" and tick() == "waiting"
     state["now"] += qa_daily.INSTALL_WAIT_S + 1
     assert tick() == "checked" and checked == [1]                          # the missing report becomes a P1 draft
@@ -137,8 +137,8 @@ def test_daily_tick_checks_anyway_when_the_install_never_reports(home):
 def test_daily_tick_installs_the_beta_even_after_an_earlier_install_today(home):
     """JAR-232 review: a stable install-latest finished earlier today must not skip the beta install (false P1)."""
     spawned, checked = [], []
-    assert qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: REPORT,
-                         spawn=spawned.append, do_check=lambda: checked.append(1), clock=lambda: 1000.0) == "installing"
+    assert qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda _d: REPORT,
+                         spawn=spawned.append, do_check=lambda _d: checked.append(1), clock=lambda: 1000.0) == "installing"
     assert spawned == [["qa-daily", "install"]] and checked == []
 
 
@@ -164,8 +164,8 @@ def test_up_to_date_or_early_stop_is_recorded_and_judged_not_lost(home, monkeypa
 
 def test_daily_tick_waits_for_a_quiet_moment_before_the_silent_install(home):
     spawned = []
-    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: None, spawn=spawned.append,
-                      do_check=lambda: None, clock=lambda: 1000.0, busy=lambda: ["voice_session"])
+    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda _d: None, spawn=spawned.append,
+                      do_check=lambda _d: None, clock=lambda: 1000.0, busy=lambda: ["voice_session"])
     assert r == "busy" and spawned == [] and not (home / "qa" / "daily" / "2026-11-12" / "install.started").exists()
 
 
@@ -177,8 +177,24 @@ def test_a_manual_check_does_not_cancel_the_daily_beta_install(home):
     (day / "bugs.json").write_text("[]", encoding="utf-8")
     spawned, checked = [], []
     tick = lambda rep: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12",  # noqa: E731
-                                     report=lambda: rep, spawn=spawned.append,
-                                     do_check=lambda: checked.append(1), clock=lambda: 1000.0)
+                                     report=lambda _d: rep, spawn=spawned.append,
+                                     do_check=lambda _d: checked.append(1), clock=lambda: 1000.0)
     assert tick(None) == "installing" and spawned == [["qa-daily", "install"]]
     assert tick(REPORT) == "checked" and checked == [1]
     assert tick(REPORT) == "done" and checked == [1] and len(spawned) == 1
+
+
+def test_an_install_started_before_utc_midnight_is_checked_before_the_next_day_starts(home):
+    """JAR-232 self-review: an install begun at 23:30 UTC was never checked, and the 00:30 tick started a second
+    install while the first was still running (a false 'no other install-latest running' P1 for the new day)."""
+    state = {"day": "2026-11-12", "report": None}
+    spawned, checked = [], []
+    tick = lambda: qa_daily.tick(home, enabled=lambda: True, day=lambda: state["day"],  # noqa: E731
+                                 report=lambda d: state["report"] if d == "2026-11-12" else None,
+                                 spawn=spawned.append, do_check=checked.append, clock=lambda: 1000.0)
+    assert tick() == "installing"
+    state["day"] = "2026-11-13"                                           # midnight passes while setup runs
+    assert tick() == "waiting" and len(spawned) == 1
+    state["report"] = REPORT.replace("FAIL", "PASS")
+    assert tick() == "checked" and checked == ["2026-11-12"]
+    assert tick() == "installing" and len(spawned) == 2                   # only now the new day's install

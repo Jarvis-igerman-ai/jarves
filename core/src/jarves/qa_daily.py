@@ -104,7 +104,11 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
     if not enabled():
         return "off"
-    out = Path(home) / "qa" / "daily" / day()
+    root, d = Path(home) / "qa" / "daily", day()
+    open_days = sorted(m.parent.name for m in root.glob("*/install.started")   # begun before UTC midnight: finish it
+                       if m.parent.name < d and not (m.parent / "tick.checked").is_file())
+    d = open_days[-1] if open_days else d
+    out = root / d
     done = out / "tick.checked"                                       # ours: a manual `check` does not end the day
     if done.is_file():
         return "done"
@@ -116,11 +120,11 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         marker.write_text(str(clock()), encoding="utf-8")
         spawn(["qa-daily", "install"])
         return "installing"
-    text = report() or ""
-    final = text.startswith(("PASS", "FAIL")) and day() in text.splitlines()[0]
+    text = report(d) or ""
+    final = text.startswith(("PASS", "FAIL")) and d in text.splitlines()[0]
     if not final and clock() - float(marker.read_text(encoding="utf-8") or 0) <= INSTALL_WAIT_S:
         return "waiting"
-    do_check()                                                        # never reported: check writes the P1 draft
+    do_check(d)                                                       # never reported: check writes the P1 draft
     done.write_text(str(clock()), encoding="utf-8")
     return "checked"
 
@@ -144,8 +148,8 @@ def _spawn_hidden(argv: list[str]) -> None:
 def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
-    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=_report_reader(home, day),
-                spawn=_spawn_hidden, busy=busy, do_check=lambda: check(Deps(home, _report_reader(home, day), _cli_subprocess, day)))
+    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d: _report_reader(home, d)(),
+                spawn=_spawn_hidden, busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d), _cli_subprocess, d)))
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:
