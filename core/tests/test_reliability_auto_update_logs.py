@@ -10,9 +10,9 @@ from jarves import auto_update, features, logs
 def seen(monkeypatch):
     out = []
     monkeypatch.setattr(logs, "warn", lambda comp, code, msg, **f: out.append((code, f)))
-    auto_update._warned.clear()
+    auto_update._failing.clear()
     yield out
-    auto_update._warned.clear()
+    auto_update._failing.clear()
 
 
 class Boom:
@@ -82,3 +82,26 @@ def test_channel_check_failure_is_logged_and_owner_still_asked(seen, monkeypatch
     au._first_run_prompt()
     assert seen == [("AUTO_UPDATE_CHANNEL_CHECK_FAILED", {"error_type": "OSError"})]
     assert au.state()["prompted"] is True   # behaviour unchanged: the owner is still asked
+
+
+def test_busy_probe_logs_once_per_outage(seen):
+    """fail, fail (another error type), ok, fail: one line per outage, and the second outage is not silent."""
+    core = _Healthy()
+    core.approvals = Boom()
+    auto_update.core_busy(core)
+    core.approvals = SimpleNamespace(has_pending=_boom)       # still down, different error type: same outage
+    auto_update.core_busy(core)
+    assert [f["error_type"] for _, f in seen] == ["RuntimeError"]
+    core.approvals = _Healthy.approvals                       # recovered
+    assert "pending_approval" in auto_update.core_busy(core)
+    core.approvals = Boom()                                   # second outage logs again
+    auto_update.core_busy(core)
+    assert [(c, f["where"]) for c, f in seen] == [("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")] * 2
+
+
+def test_unreadable_switch_logs_again_after_recovery(seen, monkeypatch, tmp_path):
+    real = features.Features
+    for f in (_boom, real, _boom):                            # fail, a good read ends the outage, fail again
+        monkeypatch.setattr(features, "Features", f)
+        auto_update.is_enabled(None, tmp_path)
+    assert [c for c, _ in seen] == ["AUTO_UPDATE_SWITCH_UNREADABLE"] * 2

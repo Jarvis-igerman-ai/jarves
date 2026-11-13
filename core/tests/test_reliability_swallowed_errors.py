@@ -18,25 +18,6 @@ def _ai():
     return types.SimpleNamespace(delegation_mode="client")
 
 
-def test_state_save_failure_is_logged_not_swallowed(tmp_path, monkeypatch):
-    st = dc.DelegationState(tmp_path, _ai())
-    seen = _capture(monkeypatch, "warn")
-    monkeypatch.setattr(type(tmp_path), "replace", lambda self, t: (_ for _ in ()).throw(PermissionError("x")))
-    st.save()                                   # must not raise
-    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_STATE_SAVE_FAILED")]
-    assert seen[0][2]["error_type"] == "PermissionError"
-
-
-def test_health_callback_failure_is_logged(tmp_path, monkeypatch):
-    def boom(*a):
-        raise RuntimeError("cb")
-    st = dc.DelegationState(tmp_path, _ai(), health=boom)
-    seen = _capture(monkeypatch, "warn")
-    st._health("ok", "d", "")                   # must not raise
-    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_HEALTH_CB_FAILED")]
-    assert seen[0][2]["error_type"] == "RuntimeError"
-
-
 async def test_wake_confirm_warm_failure_is_logged(monkeypatch):
     class Confirm:
         def confirm(self, audio):
@@ -86,9 +67,10 @@ def test_state_save_failure_is_logged_once_per_outage(tmp_path, monkeypatch):
             raise PermissionError("x")
         return real(self, t)
     monkeypatch.setattr(type(tmp_path), "replace", replace)
+    st.save()                                   # must not raise
     st.save()
-    st.save()
-    assert [c for _, c, _ in seen] == ["DELEG_STATE_SAVE_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_STATE_SAVE_FAILED")]
+    assert seen[0][2] == {"error_type": "PermissionError"}
     state["broken"] = False
     st.save()                                   # recovered: the next outage is logged again
     state["broken"] = True
@@ -104,9 +86,10 @@ def test_health_callback_failure_is_logged_once_per_outage(tmp_path, monkeypatch
             raise RuntimeError("cb")
     st = dc.DelegationState(tmp_path, _ai(), health=cb)
     seen = _capture(monkeypatch, "warn")
+    st._health("ok", "d", "")                   # must not raise
     st._health("ok", "d", "")
-    st._health("ok", "d", "")
-    assert [c for _, c, _ in seen] == ["DELEG_HEALTH_CB_FAILED"]
+    assert [(a, c) for a, c, _ in seen] == [("delegation", "DELEG_HEALTH_CB_FAILED")]
+    assert seen[0][2] == {"error_type": "RuntimeError"}
     state["broken"] = False
     st._health("ok", "d", "")
     state["broken"] = True

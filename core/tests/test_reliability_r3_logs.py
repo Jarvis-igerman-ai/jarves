@@ -24,19 +24,6 @@ def test_health_save_failure_logged_once_per_outage(monkeypatch, tmp_path):
     assert [c for c, _ in seen].count("HEALTH_SNAPSHOT_WRITE_FAILED") == 2
 
 
-def test_replay_lookup_failure_logged(monkeypatch, tmp_path):
-    seen = _capture(monkeypatch)
-    b = mobile.MobileAccess(tmp_path)
-
-    class Boom:
-        def seen(self, *a, **k):
-            raise RuntimeError("secret detail")
-    b._cont = Boom()
-    assert b.replay("dev", "m1") is None
-    assert seen and seen[0][0] == "MOBILE_REPLAY_LOOKUP_FAILED"
-    assert "secret" not in str(seen)
-
-
 def test_test_history_missing_is_silent_corrupt_logged_once(monkeypatch, tmp_path):
     seen = _capture(monkeypatch)
     b = mobile.MobileAccess(tmp_path)
@@ -91,6 +78,7 @@ def test_replay_lookup_failure_logged_once_per_outage(monkeypatch, tmp_path):
     for i in range(3):
         assert b.replay("dev", f"m{i}") is None
     assert [c for c, _ in seen] == ["MOBILE_REPLAY_LOOKUP_FAILED"]
+    assert "secret" not in str(seen)
     state["broken"] = False
     assert b.replay("dev", "m9") is None                          # recovered: the flag resets
     state["broken"] = True
