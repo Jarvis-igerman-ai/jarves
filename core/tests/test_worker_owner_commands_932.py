@@ -58,3 +58,30 @@ def test_policy_file_is_denied_to_bash_edit_and_write_in_the_worker_argv():
     denied = argv[argv.index("--disallowedTools") + 1:]
     for rule in ("Bash(*autopilot.json*)", "Edit(**/autopilot.json)", "Write(**/autopilot.json)"):
         assert rule in WORKER_DENY and rule in denied
+
+
+@pytest.mark.parametrize("argv", [["--home", "H", "autopilot"], ["--home", "H", "autopilot", "grant", "--hours", "1"],
+                                  ["--home", "H", "autopilot", "revoke"], ["--home", "H", "autopilot", "grant-status"]])
+def test_bare_autopilot_and_grant_routes_refused_for_an_agent(monkeypatch, capsys, argv):
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    assert wf.main(argv) == 2 and "refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["answer", "--id", "Q1", "--answer", "yes"], ["confirm", "--id", "Q1"],
+                                  ["reopen", "--id", "Q1"], ["ask-more", "--id", "Q1", "--note", "n"], ["unlock"]])
+def test_owner_answer_actions_refused_for_an_agent_without_a_store_write(monkeypatch, capsys, tmp_path, argv):
+    monkeypatch.setenv("JARVES_WORKFLOW_AGENT", "ap-x")
+    home = tmp_path / "h"
+    assert wf.main(["--home", str(home), *argv]) != 0
+    assert "agent environment" in capsys.readouterr().err
+    assert not (home / "unlock.json").exists()
+    if (home / "workflow.db").exists():   # the guard runs before any ledger write
+        import sqlite3
+        assert sqlite3.connect(home / "workflow.db").execute("select count(*) from workflow_events").fetchone()[0] == 0
+
+
+def test_every_console_subcommand_the_worker_is_allowed_is_not_refused():
+    """The Claude allow rules and the console guard must not drift, or every headless worker stalls on exit 2."""
+    from jarves.orchestrator.claude import WORKER_CONSOLE_SUBCOMMANDS
+    for sub in WORKER_CONSOLE_SUBCOMMANDS:
+        assert wf.worker_refusal(["--home", "H", sub]) == "", sub

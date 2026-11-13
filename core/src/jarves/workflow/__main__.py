@@ -161,7 +161,7 @@ def worker_refusal(av) -> str:
     action = ns.action or ""
     if action in OWNER_GUARDED_ACTIONS:
         return ""
-    sub = (list(ns.rest or []) or ["status"])[0]
+    sub = (list(ns.rest or []) or [""])[0]   # a bare `autopilot` is refused too: a worker names `autopilot status`
     if (action not in WORKER_ALLOWED_ACTIONS or (action == "autopilot" and sub != "status")
             or (action == "release" and ns.force) or (action == "trace" and ns.capture)):
         return f"refused: '{action}' is an owner/manager command (agent environment)"
