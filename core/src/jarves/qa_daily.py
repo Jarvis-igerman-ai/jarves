@@ -54,6 +54,12 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()            # install-latest report times are UTC
 
 
+def _fresh(text: str | None, since: float) -> bool:
+    """The report/record belongs to the install begun at `since` (its head time is minute-precise UTC)."""
+    m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) UTC", (text or "").split("\n", 1)[0])
+    return bool(m) and datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp() + 60 > since
+
+
 def check(deps: Deps) -> dict:
     rel = f"qa/daily/{deps.day or _today()}"                          # home-relative: no user name in drafts
     out = Path(deps.home) / rel
@@ -85,11 +91,13 @@ def check(deps: Deps) -> dict:
                 bug("P1", m.group(2), m.group(3) or "")
         if report.startswith("FAIL") and not bugs:
             bug("P1", "install-latest", report.splitlines()[0])
-    for name, argv in SCENARIOS:
+    own = [(n, [n], "P1") for n in ("doctor", "selftest")             # no setup ran (up to date, early stop)
+           if not re.search(rf"^\s*\[(?:PASS|FAIL)\] {n}\b", report or "", re.M)]
+    for name, argv, prio in own + [(n, a, "P2") for n, a in SCENARIOS]:
         code, text = deps.run_cli(argv)
         lines += [f"$ jarvis {' '.join(argv)}  (exit {code})", _clean(text, 600)]
         if code != 0:
-            bug("P2", name, f"exit {code}: {text}")
+            bug(prio, name, f"exit {code}: {text}")
     demo.write_text("\n".join(lines) + "\n", encoding="utf-8")
     (out / "bugs.json").write_text(json.dumps(bugs, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"ok": not bugs, "bugs": bugs, "dir": rel}
@@ -117,12 +125,17 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         if busy():
             return "busy"
         out.mkdir(parents=True, exist_ok=True)
-        marker.write_text(str(clock()), encoding="utf-8")
+        try:                                                          # exclusive: a manual `run` cannot spawn twice
+            with open(marker, "x", encoding="utf-8") as f:
+                f.write(str(clock()))
+        except FileExistsError:
+            return "waiting"
         spawn(["qa-daily", "install"])
         return "installing"
+    since = float(marker.read_text(encoding="utf-8") or 0)
     text = report(d) or ""
-    final = text.startswith(("PASS", "FAIL")) and d in text.splitlines()[0]
-    if not final and clock() - float(marker.read_text(encoding="utf-8") or 0) <= INSTALL_WAIT_S:
+    final = text.startswith(("PASS", "FAIL")) and _fresh(text, since)  # an earlier install's report is not ours
+    if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
     do_check(d)                                                       # never reported: check writes the P1 draft
     done.write_text(str(clock()), encoding="utf-8")
@@ -132,11 +145,18 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
 INSTALL_FILE = "install.txt"                                         # begin() ended without setup: no report file
 
 
-def _report_reader(home, day: str):
-    """Our own install record for the day wins (up to date / stopped early); else install-latest's report file."""
+def _report_reader(home, day: str, since: float = 0.0):
+    """Our own install record for the day wins (up to date / stopped early); else install-latest's report file.
+    With `since`, only a record or report from the install begun then counts."""
     from .install_latest import REPORT_FILE
     own, rp = Path(home) / "qa" / "daily" / day / INSTALL_FILE, Path(home) / "updates" / REPORT_FILE
-    return lambda: next((p.read_text(encoding="utf-8-sig") for p in (own, rp) if p.is_file()), None)
+    texts = lambda: (p.read_text(encoding="utf-8-sig") for p in (own, rp) if p.is_file())  # noqa: E731
+    return lambda: next((t for t in texts() if not since or _fresh(t, since)), None)
+
+
+def _since(home, day: str) -> float:
+    m = Path(home) / "qa" / "daily" / day / "install.started"
+    return float(m.read_text(encoding="utf-8") or 0) if m.is_file() else 0.0
 
 
 def _spawn_hidden(argv: list[str]) -> None:
@@ -149,7 +169,7 @@ def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
     return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d: _report_reader(home, d)(),
-                spawn=_spawn_hidden, busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d), _cli_subprocess, d)))
+                spawn=_spawn_hidden, busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:

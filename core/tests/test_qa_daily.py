@@ -2,6 +2,7 @@
 draft with redacted evidence and a short demo transcript; nothing is sent anywhere."""
 import json
 import types
+from datetime import datetime, timezone
 
 import pytest
 
@@ -198,3 +199,32 @@ def test_an_install_started_before_utc_midnight_is_checked_before_the_next_day_s
     state["report"] = REPORT.replace("FAIL", "PASS")
     assert tick() == "checked" and checked == ["2026-11-12"]
     assert tick() == "installing" and len(spawned) == 2                   # only now the new day's install
+
+
+def test_an_earlier_report_today_never_ends_the_day_while_the_new_install_runs(home):
+    """JAR-232 review: a PASS from an earlier install today was taken as the new install's result, and an old
+    install.txt hid the newer report."""
+    t0 = datetime(2026, 11, 12, 8, 0, tzinfo=timezone.utc).timestamp()
+    state = {"report": REPORT.replace("FAIL", "PASS"), "now": t0}         # 06:00 PASS, before our install
+    checked = []
+    tick = lambda: qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12",  # noqa: E731
+                                 report=lambda d: state["report"], spawn=lambda argv: None,
+                                 do_check=checked.append, clock=lambda: state["now"])
+    assert tick() == "installing" and tick() == "waiting" and checked == []
+    state["report"] = REPORT.replace("06:00", "09:00")                     # the new install ends and fails
+    assert tick() == "checked" and checked == ["2026-11-12"]
+    day = home / "qa" / "daily" / "2026-11-12"
+    (day / qa_daily.INSTALL_FILE).write_text("PASS  install-latest  2026-11-12 06:00 UTC\n", encoding="utf-8")
+    (home / "updates").mkdir(parents=True, exist_ok=True)
+    from jarves.install_latest import REPORT_FILE
+    (home / "updates" / REPORT_FILE).write_text(state["report"], encoding="utf-8")
+    assert qa_daily._report_reader(home, "2026-11-12", t0)() == state["report"]
+
+
+def test_up_to_date_still_runs_doctor_and_selftest_and_files_p1(home):
+    """JAR-232 review: with nothing newer, setup ran no doctor/selftest, so the day passed without them."""
+    up = "PASS  install-latest  2026-11-12 06:00 UTC\n  [PASS] find newest beta installer\n  [PASS] up to date: nothing newer"
+    deps, calls = _deps(home, report=up, fail=("doctor",))
+    res = qa_daily.check(deps)
+    assert ["doctor"] in calls and ["selftest"] in calls
+    assert [(b["priority"], b["check"]) for b in res["bugs"]] == [("P1", "doctor")]
