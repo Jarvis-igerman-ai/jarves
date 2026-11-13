@@ -777,3 +777,41 @@ def test_phone_auth_and_size_errors_are_actionable_in_en_and_he(srv):
 def test_phone_page_shows_the_hebrew_error_when_set_to_hebrew():
     app = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / "app.js").read_text(encoding="utf-8")
     assert '(lang === "he" && d.error_he) || d.error' in app                    # api(): every failed call shows this text
+
+
+def test_phone_voice_busy_rate_and_lockout_errors_are_in_en_and_he(home):
+    def boom(wav, dev):
+        raise RuntimeError("x")
+    cert, key = mobile.make_selfsigned(home, HOST)
+    now = [7000.0]
+    d = dashboard.Dashboard(home, Config(), free_port(), mobile_on=True, lan_host=HOST, tls=(cert, key),
+                            mobile_bridge=Bridge(chat=boom, voice=boom, status=lambda: {})).start()
+    d.mobile.clock = lambda: now[0]
+    try:
+        st, code = admin_tls(d)
+        got = req(d, "POST", "/api/m/pair", body={"code": code["code"]}, tls=True)[1]
+        tok, dev = got["token"], got["device"]
+        wav = b"RIFF" + struct.pack("<I", 36) + b"WAVE" + b"\0" * 64
+
+        def voice(raw=wav):
+            return req(d, "POST", "/api/m/voice", token=tok, raw=raw, ctype="audio/wav", tls=True)
+        st, body, _ = voice(b"not a wav")
+        assert st == 415 and _he(body, "BAD_AUDIO")
+        st, body, _ = voice()
+        assert st == 502 and _he(body, "VOICE_FAILED")
+        assert d.mobile.begin(dev)                                   # a turn is still running on this phone
+        st, body, _ = voice()
+        assert st == 409 and body["code"] == "BUSY" and _he(body, "BUSY")
+        d.mobile.end(dev)
+        last = [voice() for _ in range(mobile.VOICE_RATE_PER_MIN)][-1]
+        assert last[0] == 429 and _he(last[1], "VOICE_RATE")
+        now[0] += 61
+        for _ in range(mobile.AUTH_FAILS_PER_MIN):
+            req(d, "GET", "/api/m/status", token="a.b", tls=True)
+        st, body, _ = req(d, "GET", "/api/m/status", token="a.b", tls=True)
+        assert st == 429 and _he(body, "BAD_TOKENS")
+        now[0] += 61
+        last = [req(d, "GET", "/api/m/status", token=tok, tls=True) for _ in range(mobile.IP_RATE_PER_MIN + 1)][-1]
+        assert last[0] == 429 and _he(last[1], "RATE")
+    finally:
+        d.stop()
