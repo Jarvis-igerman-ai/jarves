@@ -48,6 +48,20 @@ def test_flaky_and_dev_tool_p1_do_not_block_but_p0_does():
     assert not rf.check_issues([p0]).ok and not rf.check_issues([plain]).ok
 
 
+def test_security_or_showstopper_p1_blocks_even_when_flaky_or_dev_tool():
+    for extra in ("security", " Showstopper "):
+        for exempt in ("flaky-test", "dev-tool"):
+            i = {"number": 31, "state": "open", "labels": [{"name": "P1"}, {"name": exempt}, {"name": extra}]}
+            assert not rf.check_issues([i]).ok, (exempt, extra)
+            assert rf.carried_issues([i]) == []
+
+
+def test_exempt_p1_is_reported_truthfully():
+    flaky = {"number": 41, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}]}
+    c = rf.check_issues([flaky])
+    assert c.ok and "no blocking P0/P1" in c.detail and "1 open flaky-test/dev-tool P1" in c.detail
+
+
 def test_p3_carried_and_highest_severity_wins():
     p3 = {"number": 3, "state": "open", "labels": [{"name": "P3"}]}
     both = {"number": 4, "state": "open", "labels": [{"name": "P2"}, {"name": "P1"}]}
