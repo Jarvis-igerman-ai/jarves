@@ -412,7 +412,8 @@ func (s *Server) hBackfillStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nb.gen = s.bf.gen + 1
-	wipe(s.bf.buf) // undrained text of an earlier backfill must not linger
+	nb.seq = s.bf.seq // cursors only grow: a cursor Core kept from an earlier run never acknowledges this run's messages
+	wipe(s.bf.buf)    // undrained text of an earlier backfill must not linger
 	s.bf = nb
 	s.mu.Unlock()
 	s.log.Info("WA_BACKFILL", "History backfill started.", F{"chats": nb.total, "skipped": nb.skipped})

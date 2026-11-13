@@ -91,7 +91,8 @@ buffer (hard bounds: 2000 messages and 16 MiB; requests pause while it is full).
 and messages older than retention are not stored either. `GET` returns `{state: idle|running|done|stopped|failed,
 chats_total, chats_done, chats_skipped, received, buffered, dropped, lost, chats_incomplete, error, batch, messages, next_cursor}`: it first drops every
 buffered message with a sequence number up to `cursor`, then returns the next readable messages. Pass `next_cursor`
-on the following read to acknowledge them. Stop, kill, mode `off`, keep-nothing and unlink clear the buffer. Logs carry
+on the following read to acknowledge them. Sequence numbers keep growing across backfill runs (until the bridge
+restarts), so a cursor kept from an earlier run never drops a new run's messages unread. Stop, kill, mode `off`, keep-nothing and unlink clear the buffer. Logs carry
 counts only. WhatsApp may limit how much history the phone sends on demand.
 
 ## 4. Sending: the policy (normative order; first failing rule wins)

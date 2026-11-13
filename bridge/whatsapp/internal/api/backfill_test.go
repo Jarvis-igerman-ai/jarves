@@ -525,3 +525,17 @@ func TestBackfillDelayedAnswerCannotCompleteALaterRequest(t *testing.T) {
 		t.Fatalf("end %s", got.raw)
 	}
 }
+
+func TestBackfillCursorOfAnEarlierRunCannotDropANewRunsMessages(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 3, 30*86400, "a")
+	e.answer(dana, 0, 0, "none")
+	stale := int(e.drain(0).body["next_cursor"].(float64)) // Core keeps this cursor across a stop and a new start
+	e.mustOK(e.do("DELETE", "/history/backfill", e.admin, nil))
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 60*86400, "b")
+	if got := e.drain(stale); len(got.body["messages"].([]any)) != 2 {
+		t.Fatalf("a stale cursor dropped the new run's messages unread: %s", got.raw)
+	}
+}
