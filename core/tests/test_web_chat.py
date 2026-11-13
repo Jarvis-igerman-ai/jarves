@@ -415,7 +415,9 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     assert r.chat.silent_state() == {"on": True, "setting": True, "quiet_hours": False}
     r.chat.submit("quiet please", client="owner", speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t2")
-    assert len(spoken) == 1 and next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")["spoken"] is False
+    t2 = next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")
+    assert t2["spoken"] is False
+    assert t2["text"] not in spoken, spoken                                  # #722: the silent reply itself was never spoken
     # a silent turn that asks for approval reaches channels with CHAT_TURN.silent set (face / voice channels refuse it)
     r.chat.submit("send the report", client="owner")
     asked = _wait_pending(r)
@@ -431,7 +433,8 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     r.chat.set_silent(False)
     code, out = r.chat.submit("phone says hi", client="dev", device=True, speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t4")
-    assert len(spoken) == 1 and next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")["spoken"] is False
+    t4 = next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")
+    assert t4["spoken"] is False and t4["text"] not in spoken, spoken
     assert chat_engine.COMMANDS and r.chat.state(device=True)["can_speak"] is False
 
 
@@ -468,9 +471,24 @@ def test_quiet_hours_make_the_chat_silent(rig, home):
         db.set_setting("alerts.quiet_end", "23:59")
     finally:
         db.close()
+    # #1052 / JAR-216: pin the clock. A real clock flaked at 23:59 local, outside the [00:00, 23:59) window.
+    r.chat.clock = lambda: _local_epoch(home, 12, 0)
     r.chat._quiet = (0.0, False)
     s = r.chat.silent_state()
     assert s["on"] and s["quiet_hours"] and not s["setting"]
+
+
+def _local_epoch(home, hour, minute, second=0):
+    """A fixed epoch at hour:minute:second today in the chat's quiet-hours zone (scheduler.timezone)."""
+    from datetime import datetime
+    from jarves.scheduler import zone
+    from jarves.userdata import open_db
+    db = open_db(home)
+    try:
+        tz = zone(db.setting("scheduler.timezone"))
+    finally:
+        db.close()
+    return datetime(2026, 11, 11, hour, minute, second, tzinfo=tz).timestamp()
 
 
 def test_popup_window_is_told_to_stay_silent(home, monkeypatch):

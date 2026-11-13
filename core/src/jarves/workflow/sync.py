@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -13,6 +14,9 @@ PLAN = Path(__file__).with_name("version_plan.json")
 MAX_PAGES = 10
 MAX_OPEN_ROWS = 150
 BUG_LABELS = ("bug", "P0", "P1", "P2", "P3", "showstopper")
+ISSUE_TASK_CAP = 10
+ISSUE_TASK_ENV = "JARVES_WORKFLOW_ISSUE_TASKS"  # opt-in: set to 1 to queue gh-N tasks from issues (always unauthorised)
+DEFECT_LABELS = {"bug", "p0", "p1", "p2", "p3", "showstopper"}
 VERSION_LABELS = ("4.5.1", "5", "5.0", "6", "6.0", "7", "7.0")
 
 
@@ -195,7 +199,77 @@ def with_label_scope(plan: dict, snapshot: dict) -> dict:
     return {**plan, "versions": versions}
 
 
-def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS) -> dict:
+# Labels that mean the defect needs a real device (microphone, wake word, voice, phone, car, hardware): app-level
+# evidence is not enough, so the task requires device validation (OPERATING_MODEL: ear/device checks stay unknown).
+DEVICE_LABELS = frozenset({"device", "mic", "microphone", "wake", "wake-word", "voice", "audio", "phone", "android",
+                           "car", "hardware", "ear", "pi5", "raspberry-pi"})
+
+
+def _norm_label(x) -> str:
+    return str(x).strip().lower().replace("_", "-").replace(" ", "-")
+
+
+def issue_validation(labels) -> str:
+    """`device` for device-type labels (or a `device:*`/`device-*` label), else `app`."""
+    norm = {_norm_label(x) for x in labels}
+    return "device" if norm & DEVICE_LABELS or any(x.startswith(("device-", "device:")) for x in norm) else "app"
+
+
+def owner_wait_label(labels) -> bool:
+    """Owner-gated, owner-accepted known issues and anything waiting for the owner are never queued for a worker."""
+    return any(x.startswith(("owner-gated", "known-issue", "needs-owner", "owner-wait", "waiting-owner", "needs-info"))
+               for x in (_norm_label(y) for y in labels))
+
+
+def issue_tasks_enabled(environ=None) -> bool:
+    """Opt-in (beta): off unless JARVES_WORKFLOW_ISSUE_TASKS is 1/on/true/yes."""
+    value = str((environ if environ is not None else os.environ).get(ISSUE_TASK_ENV, "0")).strip().lower()
+    return value in {"1", "on", "true", "yes", "enabled"}
+
+
+def create_issue_tasks(store, snapshot: dict, cap: int = ISSUE_TASK_CAP, environ=None) -> list[str]:
+    """Queue gh-N tasks for open agent-doable defects so ready work is not empty while issues are open.
+
+    Metadata only: it never approves, runs a worker or changes an issue. Existing tasks are never
+    touched, so a closed issue or an archived/finished gh-N task is never recreated. Imported scope
+    (execution_allowed=false) is covered too; created tasks are unauthorised, only the autopilot grant authorises.
+    """
+    if not issue_tasks_enabled(environ):
+        return []
+    tasks = store.snapshot()["tasks"]
+    taken = {t["id"] for t in tasks}
+    covered: set[int] = set()
+    for t in tasks:  # any task linked to the issue covers it, whatever its state or authorisation
+        covered.update(int(n) for n in t.get("issue_numbers", []) if str(n).isdigit())
+        covered.update(int(i["number"]) for i in t.get("source_issues", [])
+                       if isinstance(i, dict) and str(i.get("number", "")).isdigit())
+    created = []
+    for row in sorted(snapshot.get("issues", []), key=lambda x: int(x["number"])):
+        if len(created) >= cap:
+            break
+        number = int(row["number"])
+        labels = {str(x).strip().lower() for x in row.get("labels", [])}
+        if row.get("state") != "open" or f"gh-{number}" in taken or number in covered:
+            continue
+        if owner_wait_label(labels):
+            continue
+        defect = bool(labels & DEFECT_LABELS)
+        if not defect and "agent-doable" not in labels:
+            continue
+        priority = next((i for i in range(4) if f"p{i}" in labels), 2)
+        version = next((v for label, v in LABEL_VERSIONS if label in labels), "V4.5.1")
+        store.create_task({
+            "id": f"gh-{number}", "title": f"#{number} {str(row.get('title', ''))[:200]}".strip(),
+            "lane": "bugs" if defect else "features", "priority": priority, "version": version,
+            "required_validation": issue_validation(labels), "execution_allowed": False,  # autopilot.step authorises under the owner grant
+            "acceptance": [{"id": "C1", "label": "Fix merged with a regression test and evidence recorded"}],
+            "issue_numbers": [number], "source_url": row.get("url", ""),
+            "scope_note": "Created by GitHub issue sync; issue state is not verification."})
+        created.append(f"gh-{number}")
+    return created
+
+
+def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=BUG_LABELS, issue_tasks=False) -> dict:
     plan = plan or json.loads(PLAN.read_text(encoding="utf-8"))
     plan = with_label_scope(plan, snapshot)
     store.seed_plan(plan)
@@ -232,6 +306,8 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
               "ci_green": bool(snapshot.get("ci_green")), "ci_state": snapshot.get("ci_state", "unknown"),
               "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
+    if issue_tasks:
+        create_issue_tasks(store, snapshot)
     store.set_source(source)
     return source
 
@@ -239,7 +315,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
 def sync(store, get=public_get) -> dict:
     """On failure retain the last snapshot and prominently mark its freshness/error."""
     try:
-        source = apply_snapshot(store, collect(get))
+        source = apply_snapshot(store, collect(get), issue_tasks=True)
         try:  # #764: owned PRs with a red check, conflict or review comment -> ledger message (public reads, no hook)
             from .pr_routing import route
             route(store, source.get("open_prs", []), get)

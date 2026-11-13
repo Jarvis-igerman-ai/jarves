@@ -1,0 +1,1 @@
+- Added: security hygiene audit proposal (docs/proposals/2026-11-09-security-hygiene-audit.md), documentation only, Tier R fixes proposed not applied.

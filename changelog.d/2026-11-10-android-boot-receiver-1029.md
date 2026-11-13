@@ -1,0 +1,1 @@
+- Fixed: the Android app no longer registers a boot receiver or the exact-alarm and boot permissions for the unwired offline reminders (#1029); reminders that came due while the phone was off are now shown instead of dropped when the receiver is wired later.

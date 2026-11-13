@@ -1,0 +1,1 @@
+- Fixed: docs mark the legacy workflow integration (status-line HUD, hooks, observer task) as deprecated

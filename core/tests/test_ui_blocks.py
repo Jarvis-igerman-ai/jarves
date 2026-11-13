@@ -100,6 +100,83 @@ def test_ui_show_is_offered_only_when_the_words_ask_for_a_list():
     assert reg.tools() == []
 
 
+# ---------------------------------------------------------------- #365: the assistant picks the format (beta, OFF)
+def _gated(on: bool) -> SkillRegistry:
+    """A registry whose feature gate is the real Features.gate rule for smart_format (switch state given)."""
+    from jarves import features as feat
+    reg = SkillRegistry()
+    reg.register(ub.UiBlocksSkill())
+    reg.gate = lambda skill, tool: None if feat.Features.owner(None, skill, tool) != ub.FORMAT_FEATURE or on else "off"
+    return reg
+
+
+def test_smart_format_is_a_beta_feature_off_by_default_that_owns_only_ui_format():
+    from jarves import features as feat
+    f = feat.CATALOG[ub.FORMAT_FEATURE]
+    assert f.default_enabled is False and feat.stage_of(ub.FORMAT_FEATURE) == "beta"
+    assert f.tools == ["ui_format"] and f.skills == []         # ui_show stays as it is (no switch)
+
+
+@pytest.mark.parametrize("words", ["compare the two plans", "what are the pros and cons of renting", "Python vs Go?",
+                                   "which one is better for a Pi", "step by step how do I pair the phone",
+                                   "תשווה בין שתי התוכניות", "מה עדיף, רכבת או אוטובוס", "מה השלבים להתקנה"])
+def test_ui_format_opens_on_the_shape_of_the_question_only_when_switched_on(words):
+    off, on = _gated(False), _gated(True)
+    for reg in (off, on):
+        reg.open_lazy(words)
+    assert [t.name for t in off.tools()] == []
+    assert [t.name for t in on.tools()] == ["ui_format"]
+
+
+@pytest.mark.parametrize("words", ["what is the weather", "good morning", "play some music", "תזכיר לי מחר", "vsync is off",
+                                   "", "a\nb"])
+def test_ui_format_stays_closed_on_ordinary_words(words):
+    reg = _gated(True)
+    reg.open_lazy(words)
+    assert reg.tools() == []
+
+
+@pytest.mark.parametrize("words", ["compare them in a table", "show me a checklist of steps to pack", "תשווה בטבלה"])
+def test_one_block_tool_per_turn_when_the_words_also_ask_for_a_list(words):
+    reg = _gated(True)
+    reg.open_lazy(words)
+    assert [t.name for t in reg.tools()] == ["ui_show"]
+
+
+async def test_real_core_offers_ui_format_only_after_the_switch(core, monkeypatch):
+    monkeypatch.setenv("JARVES_BETA_FEATURES", "1")
+    reg = core.registry
+    reg.open_lazy("compare the two plans")
+    assert "ui_format" not in [t.name for t in reg.tools()]                    # OFF by default
+    core.features.set(ub.FORMAT_FEATURE, True)
+    reg.open_lazy("compare the two plans")
+    names = [t.name for t in reg.tools()]
+    assert "ui_format" in names and "ui_show" not in names
+    reg.open_lazy("what time is it")
+    assert "ui_format" not in [t.name for t in reg.tools()]
+
+
+async def test_ui_format_is_the_same_validated_read_only_sink_as_ui_show():
+    reg = _gated(True)
+    t = reg._tools["ui_format"][1]
+    assert t.permission == "read" and t.args is reg._tools["ui_show"][1].args and len(t.description) <= 330
+    got = []
+
+    class Sink:
+        def __call__(self, name, ok, code):
+            pass
+
+        def ui_block(self, block):
+            got.append(block)
+    TOOL_SINK.set(Sink())
+    res = await reg.call("ui_format", {"blocks": [{"kind": "table", "columns": [{"label": "Plan"}, {"label": "Cost"}],
+                                                   "rows": [{"cells": ["Basic", "tenshekel"]}]}, {"kind": "bogus"}]})
+    assert res.ok and [b["kind"] for b in got] == ["table"]
+    assert "tenshekel" not in res.to_model() and json.loads(res.to_model())["shown_to_owner"] is True
+    cards = await reg.call("ui_format", {"blocks": [{"kind": "cards", "cards": [{"title": "x"}], "on": "anydo_create_tasks"}]})
+    assert not cards.ok and cards.code == "UI_BLOCK_INVALID" and len(got) == 1     # cards stay app-made only
+
+
 # ---------------------------------------------------------------- S4: table and choices
 def test_table_gets_server_ids_pads_rows_and_cleans():
     b = ub.validate_block({"v": 1, "kind": "table", "title": "Plan", "columns": [{"label": "Day"}, {"label": "Task‮"}],

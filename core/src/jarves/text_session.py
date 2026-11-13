@@ -65,6 +65,8 @@ def build(cfg, home: Path, confirm, *, agent_factory=None, transport=None, note:
     registry.confirm = confirm
     from . import drive_mode                     # V6 #216: off by default; never approves, only defers
     drive_mode.attach(registry, features, home, memory)
+    from . import action_receipts                # V7-X1 #420: off by default; observes, never decides
+    action_receipts.attach(registry, features, home)
     registry.register(ClockSkill())
     registry.register(UiBlocksSkill())
     registry.register(MemorySkill(memory))

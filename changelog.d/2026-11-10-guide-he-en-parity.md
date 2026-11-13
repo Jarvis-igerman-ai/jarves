@@ -1,0 +1,1 @@
+- Added: test that fails when a guide toml has an HE key without its EN pair (or the reverse) (JAR-162)

@@ -65,6 +65,27 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/api/owner", {"mode": "present"}, {"X-Workflow-Request": ""})[0], 403)
         self.assertEqual(self.server.store.snapshot()["owner"]["effective_mode"], "away")
 
+    def test_state_changing_routes_refuse_while_unlock_gate_locked(self):
+        # #903 / JAR-259: a private session alone (no terminal unlock code) must not change state or launch work.
+        store = self.server.store
+        store.create_task({"id": "t1", "title": "t1", "lane": "bugs"})
+        self.login()
+        self.server.unlocked.clear()
+        with patch("jarves.workflow.control.dispatch", return_value=[]) as dispatched:
+            for path, body in (("/api/tasks/t1/transition", {"state": "blocked"}),
+                               ("/api/owner", {"mode": "present"}),
+                               ("/api/tasks", {"id": "t2", "title": "t2"}),
+                               ("/api/dispatch", {})):
+                with self.subTest(path=path):
+                    status, _, data = self.request(path, body)
+                    self.assertEqual(status, 403)
+                    self.assertTrue(data.get("locked"))
+            dispatched.assert_not_called()
+        snap = store.snapshot()
+        self.assertEqual([t["id"] for t in snap["tasks"]], ["t1"])
+        self.assertNotEqual(snap["tasks"][0]["state"], "blocked")
+        self.assertEqual(snap["owner"]["effective_mode"], "away")
+
     def test_static_csp_and_no_path_traversal(self):
         status, headers, body = self.request("/")
         self.assertEqual(status, 200)
@@ -182,7 +203,10 @@ class WorkflowHTTPTests(unittest.TestCase):
     def test_console_side_scripts_report_session_ended_static_contract(self):
         # #741 follow-up: health/overview/timeline used raw fetch; a 401/403 must reach the one session-ended notice.
         static = Path(__import__("jarves.workflow.server", fromlist=["x"]).STATIC)
-        self.assertIn("window.workflowSessionEnded = () => sessionEnded();", (static / "app.js").read_text(encoding="utf-8"))
+        app = (static / "app.js").read_text(encoding="utf-8")
+        # #789: an early 401 while the one-time #token is being exchanged must not end the new session.
+        self.assertIn("window.workflowSessionEnded = () => { if (sessionReady) sessionEnded(); };", app)
+        self.assertLess(app.index('await api("/api/session", {token})'), app.index("    sessionReady = true;"))
         guard = "response.status === 401 || response.status === 403"
         for name, minimum in (("health.js", 1), ("timeline.js", 1), ("overview.js", 3)):
             text = (static / name).read_text(encoding="utf-8")

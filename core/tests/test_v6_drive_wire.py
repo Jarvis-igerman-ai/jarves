@@ -121,20 +121,36 @@ async def test_drive_off_is_byte_identical(tmp_path, name, args, origin, route, 
     assert out[0] == out[1]
 
 
-@pytest.mark.parametrize("module", ["test_registry_results.py", "test_swv3_p01.py", "test_whatsapp_injection.py",
-                                    "test_helper_approvals.py", "test_review_c.py", "test_security.py"])
-def test_existing_registry_tests_pass_with_drive_off_gate(module, tmp_path):
+_OFF_GATE_MODULES = ["test_registry_results.py", "test_swv3_p01.py", "test_whatsapp_injection.py",
+                     "test_helper_approvals.py", "test_review_c.py", "test_security.py"]
+
+
+def _run_off_gate(module, cwd):
     env = dict(os.environ)
     import jarves
     src = str(Path(jarves.__file__).resolve().parents[1])          # the jarves this run imports (worktree or CI)
     env["PYTHONPATH"] = os.pathsep.join([str(HERE), src, str(HERE.parent), env.get("PYTHONPATH", "")])
-    r = subprocess.run([sys.executable, "-m", "pytest", str(HERE / module), "-q", "-p", "_drive_off_plugin",
-                        "-p", "no:cacheprovider"], cwd=str(tmp_path), env=env, capture_output=True, text=True,
-                       timeout=600)
+    return subprocess.run([sys.executable, "-m", "pytest", str(HERE / module), "-q", "-p", "_drive_off_plugin",
+                           "-p", "no:cacheprovider"], cwd=str(cwd), env=env, capture_output=True, text=True, timeout=600)
+
+
+@pytest.fixture(scope="module")
+def off_gate_runs(tmp_path_factory):
+    """The six independent sub-runs start together (JAR-95: wall time = the slowest one, not the sum)."""
+    from concurrent.futures import ThreadPoolExecutor
+    cwds = {m: tmp_path_factory.mktemp(m.replace(".py", "")) for m in _OFF_GATE_MODULES}
+    with ThreadPoolExecutor(max_workers=len(cwds)) as ex:
+        futs = {m: ex.submit(_run_off_gate, m, c) for m, c in cwds.items()}
+        return {m: (f.result(), cwds[m]) for m, f in futs.items()}
+
+
+@pytest.mark.parametrize("module", _OFF_GATE_MODULES)
+def test_existing_registry_tests_pass_with_drive_off_gate(module, off_gate_runs):
+    r, cwd = off_gate_runs[module]
     assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
     calls = int(r.stdout.rsplit("DRIVE_OFF_GATE_CALLS=", 1)[1].split()[0])
     assert calls > 0                              # the off gate really sat in the call path
-    assert not (tmp_path / "unused.json").exists()
+    assert not (cwd / "unused.json").exists()
 
 
 # ------------------------------------------------------------------ on

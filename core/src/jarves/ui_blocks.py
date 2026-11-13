@@ -18,7 +18,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from . import logs
+from . import calm, features as feat, logs
 from .skills import Skill, Tool, ToolResult
 
 SCHEMA_VERSION = 1
@@ -32,6 +32,13 @@ ACTION_RATE = 12                              # S2: clicks per minute per chat
 _ID = re.compile(r"i\d{1,2}")
 # offered to the model only when the owner's words ask for a list (keeps the always-on prompt small, like lazy_tools)
 LAZY = r"check-?list|tick|to-?do list|list of|table|choose|options|רשימ|סמן|סימון|תיבות|טבלה|לבחור"
+# #365 (beta feature smart_format, OFF by default): the assistant picks the format itself when the request has the SHAPE of
+# a table, choices or steps, without naming a list. Offered only on those words, and only when LAZY did not already open
+# ui_show (one block tool per turn, so the model never sees two copies).
+AUTO = (r"compar|\bvs\.?(?!\w)|versus|differences? between|pros and cons|which (?:one|is better|should)|step[- ]by[- ]step|"
+        r"steps to|השווא|להשוות|תשווה|לעומת|ההבדל|יתרונות|חסרונות|מה עדיף|שלב אחר שלב|שלבים|צעדים")
+AUTO_ONLY = rf"^(?![\s\S]*(?:{LAZY}))[\s\S]*(?:{AUTO})"
+FORMAT_FEATURE = "smart_format"
 # control characters and bidi overrides (U+202A-202E, U+2066-2069); zero-width joiners stay for Hebrew
 _BAD = re.compile("[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f-\\x9f\\u202a-\\u202e\\u2066-\\u2069\\u200b-\\u200f\\u2060\\u061c\\ufeff]")
 
@@ -206,7 +213,19 @@ class UiBlocksSkill(Skill):
             return ToolResult(True, "Shown to the owner. Wait for the owner's reply.", {"shown_to_owner": True},
                               ui_blocks=good)
         return [Tool("ui_show", "Show a checklist in chat: 'show a checklist', 'תציג רשימה לסימון'.", ui_show, UiShowArgs,
-                     permission="read", lazy=LAZY)]
+                     permission="read", lazy=LAZY),
+                Tool("ui_format", "Pick the clearest chat format yourself, after a short text answer: a table to compare things on "
+                     "the same points, choices when the owner picks one of 2-6 answers, a checklist for steps to tick. Plain text "
+                     "if none fits: 'compare them side by side', 'תשווה ביניהם'.", ui_show, UiShowArgs,
+                     permission="read", lazy=AUTO_ONLY)]
+
+
+feat.register(FORMAT_FEATURE, "העוזר בוחר את הצורה", "The assistant picks the format", False, risk="low", tools=["ui_format"],
+              about="in the browser chat, when a question asks to compare things, choose between answers or follow steps, the "
+                    "assistant may show a small table, choice buttons or a checklist on its own (read-only; nothing is written "
+                    "without your approval)",
+              targets=calm.targets("test_ui_blocks.py", "test_chat_markdown_browser.py"), permissions=["read"],
+              settings="jarvis features on smart_format")
 
 
 # ---------------------------------------------------------------------- S2: the owner's click (ui_action)

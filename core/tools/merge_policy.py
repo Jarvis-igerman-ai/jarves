@@ -123,6 +123,12 @@ def simulate(scenario: list, history: list | None = None) -> list:
     return log
 
 
+def view(history: list) -> dict:
+    """Chosen threshold, reason and per-mode numbers, for the Health tab (#777)."""
+    t, why = threshold(history)
+    return {"threshold": t, "reason": why, "cycles": len(history), "stats": stats(history)}
+
+
 if __name__ == "__main__":  # merge_policy.py N [history.json] -> decision JSON
     import sys
     n = int(sys.argv[1])

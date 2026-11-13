@@ -126,7 +126,10 @@ class Continuity:
     @staticmethod
     def stale(age_s) -> bool:
         try:
-            return age_s is not None and float(age_s) > REPLAY_WINDOW_S
+            if age_s is None:
+                return False
+            age = float(age_s)
+            return age != age or age > REPLAY_WINDOW_S      # NaN is refused like an over-age command
         except (TypeError, ValueError):
             return False
 

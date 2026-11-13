@@ -1,0 +1,1 @@
+- Added: UX proposal for the dashboard Home and Settings pages, ranked with cost and benefit, based on fresh English and Hebrew renders (docs only).

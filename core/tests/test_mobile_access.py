@@ -678,3 +678,22 @@ def test_selfsigned_certificate_carries_local_name_and_is_never_replaced(home, m
     monkeypatch.setattr("socket.gethostname", lambda: "New-PC")
     mobile.ensure_selfsigned(home, HOST)
     assert cert_p.read_bytes() == first and "new-pc.local" not in dns()         # existing cert kept (phones pin it)
+
+
+def test_phone_cli_empty_scope_list_stays_empty(home, capsys, monkeypatch):
+    """F7 #206 / #1030: [] means no scopes (not the defaults) and the CLI prints "(none)" for it."""
+    from types import SimpleNamespace
+    from jarves import phone_cli
+    from jarves.config import Config
+    m = mobile.MobileAccess(home)
+    dev = m.pair(m.new_code()["code"], "empty-phone", "10.0.0.5")
+    did = m.devices()[0]["id"]
+    ns = lambda **k: SimpleNamespace(json=False, device=None, grant=None, revoke=None, **k)
+    assert phone_cli.cmd_phone(ns(action="scopes"), Config(), home) == 0
+    assert ", ".join(mobile.DEFAULT_SCOPES) in capsys.readouterr().out          # untouched phone: the defaults
+    assert m.set_scopes(did, [], by="test")
+    assert phone_cli.cmd_phone(ns(action="scopes"), Config(), home) == 0
+    out = capsys.readouterr().out
+    assert f"{did}  empty-phone: (none)" in out
+    assert mobile.DEFAULT_SCOPES[0] not in out                                  # not turned back into the defaults
+    assert mobile.MobileAccess(home).devices()[0]["scopes"] == []

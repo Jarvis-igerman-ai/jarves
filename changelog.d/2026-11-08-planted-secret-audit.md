@@ -1,0 +1,1 @@
+- Added: planted-secret audit test (logs in both privacy modes, diag bundle, tracked files) that fails if a fake token/key survives redaction (T20).

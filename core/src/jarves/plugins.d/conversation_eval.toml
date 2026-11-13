@@ -1,0 +1,4 @@
+# dashboard: imported by the dashboard process so the conversation_eval switch exists there (no routes)
+dashboard = ["jarves.conversation_eval"]
+addons = ["jarves.conversation_eval"]
+cli = ["jarves.conversation_eval"]

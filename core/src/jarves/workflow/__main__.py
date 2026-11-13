@@ -79,6 +79,7 @@ def utf8_streams() -> None:
             pass
 
 
+AGENT_REFUSED = ("autopilot", "authorize", "bootstrap")
 OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your own terminal"
 
 
@@ -128,9 +129,52 @@ def agent_messages(store, a) -> int:
     return 0
 
 
+def _action_of(av) -> str:
+    """The action argparse itself will run (option values never count); "" when the line does not parse."""
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            return parser().parse_known_args(list(av))[0].action or ""
+    except SystemExit:
+        return ""
+
+
+def _home_count(av) -> int:
+    """How many times the real parser sees --home (also --home=X and abbreviations such as --hom X)."""
+    import argparse
+    import contextlib
+    import io
+    p = parser()
+    seen = []
+
+    class Count(argparse.Action):
+        def __call__(self, ap, ns, values, option_string=None):
+            seen.append(values)
+
+    for act in p._actions:
+        if act.dest == "home":
+            act.__class__ = Count
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            p.parse_known_args(list(av))
+    except SystemExit:
+        return 2        # does not parse: treat as repeated so the agent never reaches the filesystem code
+    return len(seen)
+
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
+    if os.environ.get("JARVES_WORKFLOW_AGENT") and _home_count(_av) > 1:
+        # #784: a later --home wins in argparse and would run on a path the allow rule never saw
+        print(json.dumps({"error": "refused: --home may appear only once in an agent environment"}), file=sys.stderr)
+        return 2
+    if os.environ.get("JARVES_WORKFLOW_AGENT") and _action_of(_av) in AGENT_REFUSED:
+        # #784 defense in depth: a worker never starts autopilot, grants authority or rewrites hooks, even if allowed
+        print(json.dumps({"error": "refused: autopilot, authorize and bootstrap are owner/manager commands (agent environment)"}),
+              file=sys.stderr)
+        return 2
     if _av[:1] == ["autopilot"] and _av[1:2] in (["grant"], ["revoke"], ["grant-status"]):
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])

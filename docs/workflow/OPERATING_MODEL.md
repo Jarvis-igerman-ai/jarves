@@ -1,3 +1,13 @@
+> **DEPRECATED (owner decision, 8 Nov 2026).** The legacy JARVES workflow integration
+> (status-line HUD `WORKING / unclaimed / Q x of y`, native hooks via `workflow_hook.py`,
+> the `JARVES Workflow Observer` scheduled task, supervisor and autopilot) is being replaced
+> by the new autonomous software factory. On the owner PC it is unregistered from Claude Code
+> (project `statusLine` and `hooks` removed) and its scheduled task is disabled. The ledger
+> data and code stay in the repo for history and rollback; nothing here was deleted.
+> Native Claude Code Auto Mode is not part of this workflow and is unaffected.
+> Rollback: re-enable the task and restore the `.claude/settings.local.json` backup.
+> The rest of this document describes the legacy design and is no longer the active process.
+
 # One manager, transparent progress
 
 Owner direction, 30 October 2026. This replaces task/presence/handoff rules in

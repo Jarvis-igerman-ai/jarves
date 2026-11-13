@@ -146,6 +146,14 @@ def retro_bundle(store, **filters):
             "skill_source_commit": "a496f5513d4a4cf889bc48e189e579f4b0bdf6aa", "dependencies": ["writing-for-agents"]}
 
 
+def _ended_without_checkpoint(ledger, task_id):
+    """#784: an autopilot worker turn ended while its task is still running with no recorded evidence: say so
+    (worker_ended_without_checkpoint) instead of letting the heartbeat expire into a misleading worker_offline."""
+    task = next((t for t in ledger.snapshot()["tasks"] if t["id"] == task_id), None)
+    if task and task["state"] == "running" and not ledger.has_recorded_evidence(task):
+        ledger.quarantine(task_id, "worker_ended_without_checkpoint")
+
+
 def provider_event(profile_home, session, event, summary, payload=None):
     """Reuse existing provider timeline metadata when the profile enabled this console.
 
@@ -156,7 +164,7 @@ def provider_event(profile_home, session, event, summary, payload=None):
     path = Path(profile_home) / "workflow" / "workflow.db"
     if not path.is_file() or not session:
         return
-    ledger = Store(path, timeout_s=0.05)
+    ledger = Store(path, timeout_s=0.5)   # #784: 0.05 s lost mirror writes to 'database is locked'; 0.5 s bounds the Core event thread
     try:
         sid = session["id"]
         ident = "external-" + hashlib.sha256(sid.encode()).hexdigest()[:20]
@@ -178,6 +186,8 @@ def provider_event(profile_home, session, event, summary, payload=None):
         status = "running" if state == "RUNNING" else "idle" if state == "IDLE" else (
             "blocked" if state in {"WAITING_INPUT", "WAITING_APPROVAL"} else "offline")
         actor = ledger.observe_agent(ident, status, "Existing Orchestrator event: " + str(event)[:100])
+        if event == "completed" and ident.startswith("ap-") and actor.get("task_id"):
+            _ended_without_checkpoint(ledger, actor["task_id"])
         record(ledger, actor, "orchestrator:" + str(event)[:80], status=status,
                details={"summary": summary, "source": "existing normalized provider timeline; coverage may be partial"})
     finally:

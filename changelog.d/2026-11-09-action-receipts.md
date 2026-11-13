@@ -1,0 +1,1 @@
+- Added: action receipts for all tool calls (V7-X1 #420): `jarvis features on action_receipts` writes tool name, result code, origin and time (never arguments or results) to `receipts/tool_receipts.jsonl`; `jarvis receipts status|list|clear`. Off by default, observation only, approvals unchanged (beta).
