@@ -5,7 +5,7 @@ changes something a user sees (dashboard pages, guides, CLI output) CI produces:
 
 - ``<page>-before.png`` / ``<page>-after.png`` and ``<page>-compare.png`` (both side by side, labelled) for every
   affected dashboard page, rendered by the same hermetic DEMO dashboard the page audit uses (tools/all_pages_check.py:
-  throw-away home, synthetic data, 127.0.0.1 only, network blocked, no secrets);
+  throw-away home, synthetic data, 127.0.0.1 only: other hosts aborted, their WebSockets never connected, service workers off, no secrets);
 - ``phone-before.png`` / ``phone-after.png`` (+ compare) when the phone site changed: a paired DEMO phone session;
 - ``walkthrough.webm``: a 10-20 s recording that opens each affected page of the PR head and scrolls through it;
 - ``cli-<n>-before.svg`` / ``-after.svg`` (+ ``.png``): rendered terminal output of the affected read-only CLI help;
@@ -187,10 +187,22 @@ def local_only(url: str) -> bool:
                                                              and u.hostname in ("127.0.0.1", "localhost", "::1"))
 
 
+def _ws(ws) -> None:
+    """Only a local WebSocket reaches a server. Any other stays a mock with no connection (sync close() deadlocks)."""
+    if local_only(ws.url):
+        ws.connect_to_server()
+
+
 def guard(ctx):
-    """Abort every browser request to another host (PR code may try to fetch anything from the runner)."""
+    """Abort every request and close every WebSocket to another host (PR code may try anything from the runner)."""
     ctx.route("**/*", lambda route: route.continue_() if local_only(route.request.url) else route.abort())
+    ctx.route_web_socket(lambda url: True, _ws)
     return ctx
+
+
+def new_ctx(b, **kw):
+    """A guarded browser context; service workers are blocked because their requests bypass routing."""
+    return guard(b.new_context(service_workers="block", **kw))
 
 
 def phone_shot(b, d, label: str, out: Path) -> tuple[str, list[str]]:
@@ -198,7 +210,7 @@ def phone_shot(b, d, label: str, out: Path) -> tuple[str, list[str]]:
     errs: list[str] = []
     d.mobile.enabled = True                              # the throw-away DEMO dashboard only; 127.0.0.1, test data
     code = d.mobile.new_code(by="demo")["code"]
-    ctx = guard(b.new_context(viewport=PHONE, is_mobile=True, has_touch=True, locale="en-US", color_scheme="light"))
+    ctx = new_ctx(b, viewport=PHONE, is_mobile=True, has_touch=True, locale="en-US", color_scheme="light")
     p = ctx.new_page()
     p.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
     try:
@@ -233,7 +245,7 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
                 try:
                     targets = [(pg, d.url + "#/" + pg, DESKTOP) for pg in pages]
                     for name, url, vp in targets:
-                        ctx = guard(b.new_context(viewport=vp, locale="en-US", color_scheme="light"))
+                        ctx = new_ctx(b, viewport=vp, locale="en-US", color_scheme="light")
                         ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
                         p = ctx.new_page()
                         errs: list[str] = []
@@ -277,7 +289,7 @@ def record_video(res: dict, b, targets, out: Path, lang: str) -> None:
 def walkthrough(b, targets, out: Path, lang: str) -> str:
     """Open each page and scroll through it slowly; about 4 s per page, 20 s at most."""
     vdir = out / "_video"
-    ctx = guard(b.new_context(viewport=DESKTOP, record_video_dir=str(vdir), record_video_size=DESKTOP))
+    ctx = new_ctx(b, viewport=DESKTOP, record_video_dir=str(vdir), record_video_size=DESKTOP)
     ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
     p = ctx.new_page()
     per = max(2500, min(5000, 18000 // len(targets)))
@@ -435,6 +447,8 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
             r = _child(core, ["cli", "--label", label, "--out", str(out), "--cmds=" + "|".join(pl["cli"])])
             if r.get("failed"):
                 demo["notes"].append(f"{label}: CLI capture failed: {r.get('log', '')}")
+                if label == "after":
+                    demo["checks"].append({"name": "terminal images rendered", "ok": False, "detail": []})
             elif label == "after":
                 if not r.get("cli"):
                     demo["checks"].append({"name": "terminal images rendered", "ok": False, "detail": []})

@@ -107,6 +107,9 @@ def test_browser_guard_aborts_every_host_but_this_machine():
         def route(self, pattern, handler):
             calls.append((pattern, handler))
 
+        def route_web_socket(self, pattern, handler):
+            calls.append(("ws", handler))
+
     class Route:
         def __init__(self, url):
             self.request, self.done = type("R", (), {"url": url})(), ""
@@ -118,13 +121,45 @@ def test_browser_guard_aborts_every_host_but_this_machine():
             self.done = "abort"
 
     pr_demo.guard(Ctx())
-    assert [c[0] for c in calls] == ["**/*"]
+    assert [c[0] for c in calls] == ["**/*", "ws"]
     for url, want in [("http://127.0.0.1:8123/#/home", "continue"), ("file:///tmp/x.png", "continue"),
                       ("https://example.com/x.js", "abort"), ("http://169.254.169.254/latest", "abort"),
                       ("http://127.0.0.1.evil.test/", "abort")]:
         r = Route(url)
         calls[0][1](r)
         assert r.done == want, url
+
+
+def test_websockets_to_other_hosts_are_closed_and_service_workers_blocked():
+    class Ws:
+        def __init__(self, url):
+            self.url, self.done = url, ""
+
+        def connect_to_server(self):
+            self.done = "connect"
+
+    for url, want in [("ws://127.0.0.1:8123/api/ws", "connect"), ("wss://evil.test/x", ""),
+                      ("ws://169.254.169.254/", "")]:
+        w = Ws(url)
+        pr_demo._ws(w)
+        assert w.done == want, url
+    seen = {}
+
+    class Ctx:
+        def route(self, *a):
+            seen["route"] = True
+
+        def route_web_socket(self, *a):
+            seen["ws"] = True
+
+    class B:
+        def new_context(self, **kw):
+            seen.update(kw)
+            return Ctx()
+    pr_demo.new_ctx(B(), viewport=pr_demo.PHONE)
+    assert seen["service_workers"] == "block" and seen["route"] and seen["ws"]
+    src = (ROOT / "tools" / "pr_demo.py").read_text(encoding="utf-8")
+    assert src.count("b.new_context(") == 1                          # every capture context goes through new_ctx
 
 
 def _ci(tmp_path, monkeypatch, results, files):
@@ -198,3 +233,11 @@ def test_cli_only_change_renders_terminal_images_through_the_real_child(tmp_path
     assert demo["plan"]["cli"] == ["--help"]
     assert "cli-1-after.svg" in demo["files"], demo["notes"]
     assert demo["checks"] == [{"name": "jarvis --help exits 0", "ok": True, "detail": []}]
+
+
+def test_ci_cli_only_failed_after_child_is_not_ok(tmp_path, monkeypatch):
+    monkeypatch.setattr(pr_demo, "_child", lambda core, args: {"failed": True, "rc": 1, "log": "boom"})
+    monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)
+    demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli.py"])
+    assert demo["ok"] is False and any(n.startswith("after: CLI capture failed: boom") for n in demo["notes"])
+    assert demo["checks"] == [{"name": "terminal images rendered", "ok": False, "detail": []}]
