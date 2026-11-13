@@ -38,6 +38,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}   # the PR head, not GitHub's synthetic merge commit
           fetch-depth: 0
+          persist-credentials: false                       # PR code runs below: no token left in .git/config
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
           enable-cache: true
@@ -67,6 +68,7 @@ jobs:
           uv run python tools/pr_demo.py ci --base "$BASE" --base-core "$RUNNER_TEMP/demo-base/core" --pr "$PR" \
             --out "$RUNNER_TEMP/demo" --summary "$GITHUB_STEP_SUMMARY"
       - name: Upload the demo
+        if: always()                                       # keep partial images and demo.json after a crash/timeout
         uses: actions/upload-artifact@v7
         with:
           name: demo-${{ github.event.pull_request.number }}

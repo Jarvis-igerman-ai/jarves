@@ -48,7 +48,7 @@ SECRET = re.compile(r"(?i)((?:token|secret|password|passwd|api[_-]?key|authoriza
 STORY = re.compile(r"(?im)^\s*(?:\*\*)?(?:what changed for you|now you can)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$")
 CHILD_TIMEOUT = 300                                  # s per child; at most 4 children (20 min) + setup stay under the job's 30 min
 PHONE = {"width": 390, "height": 844}
-CLI_FILE = re.compile(r"^core/src/jarves/(?:([a-z0-9]+)_cli|cli|clilang|cli_parity)\.py$")
+CLI_FILE = re.compile(r"^core/src/jarves/(?:([a-z0-9_]+?)_cli|cli|clilang|cli_parity)\.py$")
 
 
 # ---------------------------------------------------------------- plan (pure: paths -> what to show)
@@ -59,8 +59,9 @@ def registered_pages(js_text: str) -> list[str]:
 
 
 def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8", errors="replace"),
-         known_pages: list[str] | None = None) -> dict:
-    """Which user-visible surfaces a set of changed repo paths touches. ``read`` reads a repo path of the PR head."""
+         known_pages: list[str] | None = None, read_base=None) -> dict:
+    """Which user-visible surfaces a set of changed repo paths touches. ``read`` reads a repo path of the PR head,
+    ``read_base`` the same path on the base side (a file the PR deletes); both raise OSError for a missing file."""
     pages: list[str] = []
     cli: list[str] = []
     phone = False
@@ -72,6 +73,14 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
                 pages.append(p)
         reasons.append(why)
 
+    def text(f):
+        try:
+            return read(f)
+        except OSError:                                  # deleted in the PR: what it was on the base side
+            if read_base is None:
+                raise
+            return read_base(f)
+
     for f in files:
         f = f.replace("\\", "/")
         if f.startswith(STATIC + "mobile/"):
@@ -81,8 +90,8 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
             add(OVERVIEW, f"{f}: shared dashboard shell")
         elif f.startswith(STATIC) and f.endswith(".js"):
             try:
-                ids = registered_pages(read(f))
-            except OSError:                              # deleted in the PR
+                ids = registered_pages(text(f))
+            except OSError:
                 ids = []
             add(ids or OVERVIEW, f"{f}: page script")
         elif f.startswith(STATIC) and f.endswith((".css", ".html")):
@@ -90,15 +99,17 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
             add([stem] if known_pages and stem in known_pages else OVERVIEW, f"{f}: page style")
         elif f.startswith(PKG + "pages.d/") and f.endswith(".toml"):
             try:
-                m = re.search(r'(?m)^page\s*=\s*"([a-z0-9_-]+)"', read(f))
+                m = re.search(r'(?m)^page\s*=\s*"([a-z0-9_-]+)"', text(f))
             except OSError:
                 m = None
-            add([m.group(1)] if m else [], f"{f}: page module", force=True)
+            add([m.group(1)] if m else OVERVIEW, f"{f}: page module", force=True)
         elif f.startswith(PKG + "guides/data/") and f.endswith(".toml"):
             add(["guide/" + Path(f).stem], f"{f}: guide")
+        elif f.startswith(STATIC):                       # icons, images, fonts: shown where the shell uses them
+            add(OVERVIEW, f"{f}: dashboard asset")
         elif CLI_FILE.match(f):
             m = CLI_FILE.match(f)
-            cmd = f"{m.group(1)} --help" if m.group(1) else "--help"
+            cmd = f"{m.group(1).replace('_', '-')} --help" if m.group(1) else "--help"
             if cmd not in cli:
                 cli.append(cmd)
             reasons.append(f"{f}: command line")
@@ -115,15 +126,27 @@ def changed_files(base: str) -> list[str]:
     return [x for x in out.stdout.splitlines() if x.strip()]
 
 
+def git_reader(rev: str):
+    """Reads a repo path as it is at ``rev`` (OSError when it does not exist there)."""
+    def read(p: str) -> str:
+        r = subprocess.run(["git", "show", f"{rev}:{p}"], cwd=REPO, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        if r.returncode:
+            raise FileNotFoundError(p)
+        return r.stdout
+    return read
+
+
 def known_pages_of(core: Path) -> list[str]:
-    sys.path.insert(0, str(core / "tools"))
+    """Dashboard nav pages of a checkout; loads its page audit without touching sys.path or sys.modules."""
+    import importlib.util
     try:
-        import all_pages_check as apc
+        spec = importlib.util.spec_from_file_location("_pr_demo_apc", core / "tools" / "all_pages_check.py")
+        apc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(apc)
         return apc.nav_pages()
     except Exception:                                    # an old checkout: no filter
         return []
-    finally:
-        sys.path.pop(0)
 
 
 def what_changed(title: str, body: str) -> str:
@@ -420,7 +443,7 @@ def _child(core: Path, args: list[str]) -> dict:
 def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: str, files: list[str] | None,
        lang: str = "en") -> dict:
     files = changed_files(base) if files is None else files
-    pl = plan(files, known_pages=known_pages_of(ROOT) or None)
+    pl = plan(files, known_pages=known_pages_of(ROOT) or None, read_base=git_reader(base))
     out.mkdir(parents=True, exist_ok=True)
     demo = {"pr": pr, "title": scrub(title)[:200], "what_changed": what_changed(title, body), "plan": pl,
             "files": [], "checks": [], "notes": [], "ok": True, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -514,8 +537,9 @@ def main(argv: list[str] | None = None) -> int:
         return Path(a.files_from).read_text(encoding="utf-8").split() if a.files_from else None
 
     if a.cmd == "plan":
-        files = files_arg() if a.files_from else changed_files(a.base or "origin/main")
-        print(json.dumps(plan(files, known_pages=known_pages_of(ROOT) or None), indent=1))
+        base = a.base or "origin/main"
+        files = files_arg() if a.files_from else changed_files(base)
+        print(json.dumps(plan(files, known_pages=known_pages_of(ROOT) or None, read_base=git_reader(base)), indent=1))
         return 0
     if a.cmd == "ci":
         demo = ci(a.base, Path(a.base_core) if a.base_core else None, a.pr, Path(a.out),

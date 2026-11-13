@@ -1,6 +1,7 @@
 """JAR-251: the PR demo planner, terminal image and pr-demo workflow (pure parts; the browser run is CI's pr-demo job)."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -9,8 +10,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
-import pr_demo  # noqa: E402
+_SPEC = importlib.util.spec_from_file_location("pr_demo", ROOT / "tools" / "pr_demo.py")   # no global sys.path change
+pr_demo = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(pr_demo)
 
 FAKE = {
     "core/src/jarves/dashboard_static/agents.js": "PAGES.agents = function(){}; PAGES.agent = x;",
@@ -46,6 +48,31 @@ def test_deleted_page_script_falls_back_to_the_overview_and_pages_are_capped():
     many = [f"core/src/jarves/guides/data/g{i}.toml" for i in range(7)]
     pl = pr_demo.plan(many, read, KNOWN)
     assert len(pl["pages"]) == pr_demo.MAX_PAGES and len(pl["more_pages"]) == 3
+
+
+def test_asset_only_change_is_shown_on_the_overview():
+    pl = pr_demo.plan(["core/src/jarves/dashboard_static/icons/mic.svg",
+                       "core/src/jarves/dashboard_static/fonts/a.woff2"], read, KNOWN)
+    assert pl["user_facing"] and pl["pages"] == ["home", "settings"]
+
+
+def test_deleted_module_is_resolved_from_the_base_side_else_the_overview():
+    base = {"core/src/jarves/pages.d/radio.toml": 'page = "radio"\n'}
+    pl = pr_demo.plan(["core/src/jarves/pages.d/radio.toml"], read, KNOWN, read_base=lambda p: base[p])
+    assert pl["user_facing"] and pl["pages"] == ["radio"]           # before shows it, after shows it gone
+    assert pr_demo.plan(["core/src/jarves/pages.d/x.toml"], read, KNOWN)["pages"] == ["home", "settings"]
+
+
+def test_cli_files_with_underscores_map_to_their_subcommand():
+    assert pr_demo.plan(["core/src/jarves/smart_home_cli.py"], read, KNOWN)["cli"] == ["smart-home --help", "--help"]
+
+
+def test_known_pages_of_leaves_sys_path_and_modules_alone(tmp_path):
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "all_pages_check.py").write_text("def nav_pages():\n    return ['home']\n")
+    before = list(sys.path)
+    assert pr_demo.known_pages_of(tmp_path) == ["home"]
+    assert sys.path == before and "all_pages_check" not in sys.modules
 
 
 def test_tests_docs_and_backend_are_not_user_facing():
@@ -98,6 +125,9 @@ def test_workflow_renders_the_pr_head_and_watches_cli_parity():
     assert "core/src/jarves/cli_parity.py" in on["pull_request"]["paths"]
     co = next(s for s in doc["jobs"]["demo"]["steps"] if str(s.get("uses", "")).startswith("actions/checkout"))
     assert co["with"]["ref"] == "${{ github.event.pull_request.head.sha }}"      # not the synthetic merge commit
+    assert co["with"]["persist-credentials"] is False                            # PR code never sees the token
+    up = next(s for s in doc["jobs"]["demo"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
+    assert up["if"] == "always()"                                                # a crash still keeps partial files
 
 
 def test_browser_guard_aborts_every_host_but_this_machine():
