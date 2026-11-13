@@ -91,12 +91,13 @@ def _classify(issues: list[dict]):
         if sev == "P0":
             blockers.append(row)                       # P0 always blocks, even with the accepted label
         elif sev == "P1":
-            if any(l.lower() == "security" for l in _label_names(i)):
-                blockers.append(row)                   # a security P1 always blocks, whatever other label it carries
-            elif any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
+            labels = {l.lower() for l in _label_names(i)}
+            exempt = bool(labels & set(NON_BLOCKING_P1_LABELS))
+            if "security" in labels or (exempt and labels & set(NEVER_EXEMPT_LABELS)):
+                blockers.append(row)                   # blocking labels first: no acceptance label can override them
+            elif ACCEPTED_LABEL in labels:
                 accepted.append(row)
-            elif (any(l.lower() in NON_BLOCKING_P1_LABELS for l in _label_names(i))
-                  and not any(l.lower() in NEVER_EXEMPT_LABELS for l in _label_names(i))):
+            elif exempt:
                 carried.append(row)                    # flaky-test / dev-tool P1: printed as known issue, not blocking
             else:
                 blockers.append(row)
@@ -111,7 +112,8 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
     Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs).
     Blockers: every open P0, every open P1 labelled security, and every other open P1 without the owner-only label
     `known-issue-4.5` (exact), except a P1
-    labelled flaky-test/dev-tool and neither security nor showstopper (carried). Accepted: open P1 carrying
+    labelled flaky-test/dev-tool and neither security nor showstopper (carried). A flaky-test/dev-tool P1 that also
+    carries showstopper blocks, even with `known-issue-4.5`. Accepted: open P1 carrying
     `known-issue-4.5` (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
     b, a, _ = _classify(issues)
     return b, a
