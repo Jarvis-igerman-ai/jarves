@@ -1,0 +1,2 @@
+addons = ["jarves.qa_daily"]
+cli = ["jarves.qa_daily"]

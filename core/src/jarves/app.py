@@ -336,6 +336,8 @@ class Core:
         self._backup_auto = backup.start_auto(self.home, self.health)
         from . import auto_update                        # issue #17: installs a signed update at a quiet moment (switch)
         self._auto_update = auto_update.start(self)
+        from . import qa_daily                           # JAR-232: daily installed-beta check (switch, OFF by default)
+        self._qa_daily = qa_daily.start(self)
         if c.music.provider != "none" or self.features.enabled("music") or self._player is not None:
             player = self._player or PearDesktopPlayer(c.music.pear_url, self.home / "pear_client_id", c.music.timeout_s)
             self.music = MusicSkill(player, c.music.max_volume, trim_queue=c.music.trim_queue,
@@ -645,6 +647,8 @@ class Core:
         self.stopped_evt.set()                      # OS logoff / shutdown handlers may let Windows go now
         if getattr(self, "_auto_update", None) is not None:
             self._auto_update.stop.set()
+        if getattr(self, "_qa_daily", None) is not None:
+            self._qa_daily.stop.set()
         if getattr(self, "_backup_auto", None) is not None:
             self._backup_auto.stop.set()                # M5 automatic backup thread
         store.detach(getattr(self, "history", None))

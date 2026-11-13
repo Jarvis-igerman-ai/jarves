@@ -1,0 +1,48 @@
+order = 65
+category = "system"
+pages = ["updates"]
+features = ["qa_installs_enabled"]
+suggest = false
+aliases = ["בדיקה יומית של הבטא", "בדיקת בטא יומית", "qa daily", "qa-daily", "daily beta check", "installed beta check"]
+links = ["install_latest", "beta_channel", "backup"]
+title_he = "בדיקה יומית של הבטא המותקנת"
+title_en = "Daily installed-beta check"
+what_he = "כשהמתג מופעל, הליבה מריצה את הבדיקה פעם ביום בעצמה: קודם התקנה ואחרי שההתקנה מסתיימת בדיקה. ההתקנה מתקינה בשקט את הבטא החדשה במחשב (עם גיבוי וחזרה אוטומטית), והבדיקה מריצה doctor, selftest ותרחישים מרכזיים, ושומרת תמליל הדגמה קצר. כל כישלון נרשם כטיוטת באג P1 או P2 עם ראיות, במחשב בלבד. אפשר גם ידנית: jarvis qa-daily run (צעד אחד), או install ואז check. כבוי כברירת מחדל."
+what_en = "While the switch is on, the Core runs the check once a day by itself: first the install, then the check once setup has finished. The install puts the newest beta on the PC silently (with a backup and automatic rollback); the check runs doctor, selftest and the top scenarios and saves a short demo transcript. Every failure becomes a P1 or P2 bug draft with evidence, on the PC only. By hand: jarvis qa-daily run (one step), or install and then check. Off by default."
+say = [["איך מריצים את הבדיקה היומית של הבטא?", "How do I run the daily beta check?"]]
+expect_he = "jarvis qa-daily check מדפיס PASS או FAIL ושורה לכל באג ([P1] או [P2]). בתיקייה qa/daily/<תאריך> בתיקיית הנתונים יש demo.txt ו-bugs.json."
+expect_en = "jarvis qa-daily check prints PASS or FAIL and one line per bug ([P1] or [P2]). The folder qa/daily/<date> in the data folder holds demo.txt and bugs.json."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "שום דבר אישי לא יוצא מהמחשב: אין העלאה ואין פתיחת באג ב-GitHub. סודות, שם המשתמש בנתיבים (הטיוטות שומרות נתיב יחסי לתיקיית הנתונים), כתובות דוא\"ל ומספרי טלפון מוסתרים בתמליל ובטיוטות."
+privacy_en = "Nothing personal leaves the PC: no upload and no GitHub filing. Secrets, the user name in paths (drafts store a path relative to the data folder), e-mails and phone numbers are hidden in the transcript and the drafts."
+
+[parity.features]
+qa_installs_enabled = "qa-daily"
+
+[[steps]]
+he = "הבעלים מפעיל: jarvis features beta on ואז jarvis features on qa_installs_enabled."
+en = "The owner turns it on: jarvis features beta on, then jarvis features on qa_installs_enabled."
+action = "command:jarvis features on qa_installs_enabled"
+
+[[steps]]
+he = "מכאן הליבה עושה את זה פעם ביום. ידנית: jarvis qa-daily install (קודם אפשר jarvis qa-daily install --dry-run). זה מריץ את jarvis install-latest --channel beta: גיבוי, התקנה שקטה, בדיקות וחזרה אם בדיקה נכשלת."
+en = "From now on the Core does it once a day. By hand: jarvis qa-daily install (try jarvis qa-daily install --dry-run first). It runs jarvis install-latest --channel beta: backup, silent setup, checks and rollback when a check fails."
+action = "command:jarvis qa-daily install --dry-run"
+
+[[steps]]
+he = "אחרי ההתקנה: jarvis qa-daily check. הוא קורא את דוח ההתקנה, מריץ את התרחישים וכותב תמליל וטיוטות באגים. כיבוי: jarvis features off qa_installs_enabled."
+en = "After the install: jarvis qa-daily check. It reads the install report, runs the scenarios and writes the transcript and bug drafts. Turn off: jarvis features off qa_installs_enabled."
+action = "command:jarvis qa-daily check"
+
+[[problems]]
+he = "כתוב שהבדיקה כבויה"
+en = "It says the check is OFF"
+fix_he = "זו ברירת המחדל. הפעילו את jarvis features beta on ואז jarvis features on qa_installs_enabled."
+fix_en = "That is the default. Run jarvis features beta on, then jarvis features on qa_installs_enabled."
+
+[[problems]]
+he = "יש באג P1 בשם install-latest"
+en = "There is a P1 bug named install-latest"
+fix_he = "אין עדיין דוח התקנה. הריצו jarvis qa-daily install, חכו לסיום ההתקנה השקטה ואז jarvis qa-daily check."
+fix_en = "There is no install report yet. Run jarvis qa-daily install, wait for the silent setup to finish, then jarvis qa-daily check."
