@@ -157,7 +157,7 @@ def test_up_to_date_or_early_stop_is_recorded_and_judged_not_lost(home, monkeypa
     monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(up) or 0)
     assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 0
     deps = qa_daily.Deps(home, qa_daily._report_reader(home, "2026-11-12"),
-                         lambda argv: (0, "4.5.1-beta.3" if argv[0] == "update" else "ok"), "2026-11-12")
+                         lambda argv: (0, "JARVES 4.5.1-beta.3 (BETA)" if argv[0] == "update" else "ok"), "2026-11-12")
     assert qa_daily.check(deps)["bugs"] == []
     stop = "FAIL  install-latest  2026-11-12 07:00 UTC\n  [FAIL] backup now: BACKUP_DISK_FULL"
     monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(stop) or 1)
@@ -240,7 +240,10 @@ def test_manual_check_judges_the_newest_record_not_an_older_up_to_date_one(home)
 def test_hidden_spawn_reuses_the_cli_launcher_and_a_failed_start_leaves_evidence(home, monkeypatch):
     from jarves import install_latest
     seen = {}
-    monkeypatch.setattr(qa_daily.subprocess, "Popen", lambda argv, **kw: seen.update(argv=argv, **kw))
+    class Running:
+        def wait(self, timeout):
+            raise qa_daily.subprocess.TimeoutExpired("x", timeout)
+    monkeypatch.setattr(qa_daily.subprocess, "Popen", lambda argv, **kw: seen.update(argv=argv, **kw) or Running())
     qa_daily._spawn_hidden(["qa-daily", "install"])
     flags = getattr(qa_daily.subprocess, "CREATE_NO_WINDOW", 0) | getattr(qa_daily.subprocess, "DETACHED_PROCESS", 0)
     assert seen["argv"] == install_latest.cli_argv(["qa-daily", "install"]) and seen["creationflags"] == flags
@@ -260,7 +263,8 @@ def test_hidden_spawn_reuses_the_cli_launcher_and_a_failed_start_leaves_evidence
 def test_up_to_date_counts_only_when_a_beta_is_installed(home):
     """JAR-232 review: '[PASS] up to date' skipped the beta check, so a stable install passed the beta check."""
     up = "PASS  install-latest  2026-11-12 06:00 UTC\n  [PASS] up to date: nothing newer"
-    for status, want in (("installed: 4.5.1", ["install-latest"]), ("installed: 4.5.1-beta.3", [])):
+    for status, want in (("JARVES 4.5.1 (channel stable)\nNew version 4.6.0-beta.2 ()", ["install-latest"]),
+                         ("JARVES 4.5.1-beta.3 (channel beta, BETA)\nUp to date", [])):
         deps, _ = _deps(home, report=up, fail=())
         deps.run_cli = lambda argv, s=status: (0, s if argv == ["update", "status"] else "ok")
         assert [b["check"] for b in qa_daily.check(deps)["bugs"]] == want
@@ -271,7 +275,38 @@ def test_up_to_date_still_runs_doctor_and_selftest_and_files_p1(home):
     up = "PASS  install-latest  2026-11-12 06:00 UTC\n  [PASS] find newest beta installer\n  [PASS] up to date: nothing newer"
     deps, calls = _deps(home, report=up, fail=("doctor",))
     run = deps.run_cli
-    deps.run_cli = lambda argv: (0, "4.5.1-beta.3") if argv == ["update", "status"] else run(argv)
+    deps.run_cli = lambda argv: (0, "JARVES 4.5.1-beta.3 (BETA)") if argv == ["update", "status"] else run(argv)
     res = qa_daily.check(deps)
     assert ["doctor"] in calls and ["selftest"] in calls
     assert [(b["priority"], b["check"]) for b in res["bugs"]] == [("P1", "doctor")]
+
+
+def test_a_child_that_dies_at_start_is_a_start_failure_with_its_output(home, monkeypatch):
+    """JAR-232 review: Popen succeeding is not a started install; a child that cannot import jarves lost its output."""
+    import sys
+    from jarves import install_latest
+    die = [sys.executable, "-c", "import sys; print('ModuleNotFoundError: jarves'); sys.exit(3)"]
+    monkeypatch.setattr(install_latest, "cli_argv", lambda argv: die)
+    log = home / "spawn.log"
+    with pytest.raises(RuntimeError, match="exited 3.*ModuleNotFoundError"):
+        qa_daily._spawn_hidden(["qa-daily", "install"], log, wait_s=60)
+    monkeypatch.setattr(install_latest, "cli_argv", lambda argv: [sys.executable, "-c", "import time; time.sleep(2)"])
+    qa_daily._spawn_hidden(["qa-daily", "install"], log, wait_s=0.2)    # still running: no error
+    rec = home / "qa" / "daily" / "2026-11-12"
+    rec.mkdir(parents=True)
+    (rec / qa_daily.SPAWN_LOG).write_text("Traceback: boom later", encoding="utf-8")
+    deps, _ = _deps(home, report=None, fail=())
+    deps.report = lambda: None
+    detail = [b["detail"] for b in qa_daily.check(deps)["bugs"] if b["check"] == "install-latest"]
+    assert detail and "boom later" in detail[0]
+
+
+def test_an_empty_start_marker_does_not_accept_an_older_report(home):
+    """JAR-232 review: a crash before the clock was written made `since` 0, so any same-day report counted."""
+    rec = home / "qa" / "daily" / "2026-11-12"
+    rec.mkdir(parents=True)
+    (rec / "install.started").write_text("", encoding="utf-8")
+    seen = []
+    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", spawn=lambda a: None,
+                      report=lambda d, s: seen.append(s), do_check=lambda d: None, clock=lambda: 5000.0)
+    assert r == "waiting" and seen == [5000.0] and (rec / "install.started").read_text() == "5000.0"

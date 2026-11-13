@@ -57,7 +57,8 @@ def _beta_installed(deps: Deps, lines: list[str]) -> bool:
     """Nothing newer on the beta channel says nothing about what is installed: ask `update status`."""
     code, out = deps.run_cli(["update", "status"])
     lines += [f"$ jarvis update status  (exit {code})", _clean(out, 300)]
-    return code == 0 and bool(re.search(r"\d+\.\d+\.\d+-beta\.\d+", out))
+    first = (out or "").lstrip().splitlines()[0] if (out or "").strip() else ""   # "JARVES <installed> (...)"; a
+    return code == 0 and bool(re.match(r"JARVES \d+\.\d+\.\d+-beta\.\d+\b", first))  # "New version" line is not it
 
 
 def check(deps: Deps) -> dict:
@@ -76,7 +77,9 @@ def check(deps: Deps) -> dict:
     if report:
         lines += ["$ jarvis install-latest --report", _clean(report, 2000)]
     if not report:
-        bug("P1", "install-latest", "no install-latest report; run: jarvis qa-daily install")
+        log = _tail(out / SPAWN_LOG)                                   # the detached child's own output, if any
+        bug("P1", "install-latest", "no install-latest report; run: jarvis qa-daily install"
+            + (f"; qa-daily install output: {log}" if log else ""))
     elif not head.startswith(("PASS", "FAIL")):                    # PENDING or DRY RUN: nothing was judged yet
         bug("P1", "install-latest", f"install not finished ({head.split('  ')[0]}): {head}")
     elif day not in head:
@@ -137,7 +140,11 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
                                             f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
             return "spawn_failed"
         return "installing"
-    since = float(marker.read_text(encoding="utf-8") or 0)
+    raw = marker.read_text(encoding="utf-8").strip()
+    if not raw:                                                       # crashed before the clock was written
+        raw = str(clock())
+        marker.write_text(raw, encoding="utf-8")
+    since = float(raw)
     text = report(d, since) or ""                                     # only what was written after this attempt began
     final = text.startswith(("PASS", "FAIL")) and d in text.splitlines()[0]
     if not final and clock() - since <= INSTALL_WAIT_S:
@@ -168,18 +175,44 @@ def _since(home, day: str) -> float:
     return float(m.read_text(encoding="utf-8") or 0) if m.is_file() else 0.0
 
 
-def _spawn_hidden(argv: list[str]) -> None:
+SPAWN_LOG = "spawn.log"                                               # the detached child's stdout + stderr
+START_WAIT_S = 5.0
+
+
+def _tail(path: Path, limit: int = 4000) -> str:
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, f.seek(0, 2) - limit))
+            return _clean(f.read().decode("utf-8", "replace"))
+    except OSError:
+        return ""
+
+
+def _spawn_hidden(argv: list[str], log: Path | None = None, wait_s: float = START_WAIT_S) -> None:
+    """Start detached and hidden; its output goes to `log`. A child that exits non-zero at once (e.g. Python
+    cannot import jarves) raises with that output, so tick records a start failure, not a missing report."""
     from .install_latest import cli_argv
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
-    subprocess.Popen(cli_argv(argv), stdin=subprocess.DEVNULL,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+    sink = open(log, "wb") if log else subprocess.DEVNULL
+    try:
+        proc = subprocess.Popen(cli_argv(argv), stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
+                                creationflags=flags, close_fds=True)
+    finally:
+        if log:
+            sink.close()                                              # the child keeps its own handle
+    try:
+        code = proc.wait(timeout=wait_s)
+    except subprocess.TimeoutExpired:
+        return                                                        # still running: the install is under way
+    if code != 0:
+        raise RuntimeError(f"child exited {code} at start: {_tail(log) if log else 'no output kept'}")
 
 
 def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
     return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d, since: _report_reader(home, d, since)(),
-                spawn=_spawn_hidden, busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
+                spawn=lambda argv: _spawn_hidden(argv, Path(home) / "qa" / "daily" / day / SPAWN_LOG), busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:
