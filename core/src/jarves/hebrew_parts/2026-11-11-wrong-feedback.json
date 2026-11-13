@@ -1,0 +1,6 @@
+{
+ "saves the last exchange, redacted, as a local feedback item for the weekly report; nothing leaves this PC": "שומר את השיחה האחרונה, בלי פרטים אישיים, כפריט משוב מקומי לדוח השבועי; שום דבר לא יוצא מהמחשב",
+ "UNIT test_wrong_feedback.py": "בדיקות יחידה test_wrong_feedback.py",
+ "pure Python; never run on a Raspberry Pi": "Python בלבד; לא הורץ על Raspberry Pi",
+ "writes feedback.jsonl in the data folder; no network": "כותב את feedback.jsonl בתיקיית הנתונים; בלי רשת"
+}

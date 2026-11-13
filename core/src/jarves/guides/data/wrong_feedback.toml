@@ -1,0 +1,56 @@
+order = 41
+category = "system"
+pages = ["feedback"]
+features = ["wrong_feedback"]
+aliases = ["זה היה לא נכון", "טעית", "משוב", "that was wrong", "you were wrong", "feedback"]
+title_he = "משוב 'זה היה לא נכון'"
+title_en = "'That was wrong' feedback"
+what_he = "כשג'ארביס טועה, אומרים 'ג'ארביס, זה היה לא נכון', לוחצים על כפתור אחד או מריצים פקודה אחת. השאלה האחרונה והתשובה נשמרות כפריט משוב, בלי טלפונים, כתובות מייל וסיסמאות, ונספרות בדוח השבועי. כבוי כברירת מחדל (בטא)."
+what_en = "When JARVES gets something wrong, say 'Jarvis, that was wrong', press one button or run one command. The last question and answer are saved as a feedback item, without phone numbers, e-mail addresses or passwords, and counted in the weekly report. Off by default (beta)."
+say = [["ג'ארביס, זה היה לא נכון", "Jarvis, that was wrong"]]
+expect_he = "ג'ארביס עונה 'רשמתי שזה היה לא נכון. תודה.' והפריט מופיע בעמוד 'משוב'."
+expect_en = "JARVES answers that he noted it, and the item shows on the Feedback page."
+test = "feature"
+test_he = "אחרי שיחה קצרה הריצו jarvis feedback wrong ואז jarvis feedback list."
+test_en = "After a short conversation run jarvis feedback wrong, then jarvis feedback list."
+cost_he = "חינם. בלי רשת."
+cost_en = "Free. No network."
+privacy_he = "הפריט נשמר רק בקובץ feedback.jsonl בתיקיית הנתונים. טלפונים, מיילים ומפתחות מוסתרים והטקסט מקוצר. שום דבר לא נשלח. במצב פרטיות השיחה לא נשמרת ולכן גם לא הטקסט."
+privacy_en = "The item is kept only in feedback.jsonl in the data folder. Phone numbers, e-mails and keys are hidden and the text is shortened. Nothing is sent. In privacy mode the conversation is not stored, so neither is its text."
+
+[parity.features]
+wrong_feedback = "feedback"
+
+[[steps]]
+he = "הפעילו את המשוב: jarvis features on wrong_feedback."
+en = "Turn the feedback on: jarvis features on wrong_feedback."
+action = "feature_on:wrong_feedback"
+check = "enabled:wrong_feedback"
+
+[[steps]]
+he = "בעמוד 'משוב' לחצו 'זה היה לא נכון'. אפשר להוסיף הערה קצרה. הרשימה מציגה את 7 הימים האחרונים."
+en = "On the Feedback page press That was wrong. You can add a short note. The list shows the last 7 days."
+action = "open:#/feedback"
+
+[[steps]]
+he = "מהטרמינל: jarvis feedback wrong --note 'הערה' שומר, jarvis feedback list --json מציג את השבוע."
+en = "From the terminal: jarvis feedback wrong --note 'note' saves, jarvis feedback list --json shows the week."
+action = "command:jarvis feedback list"
+
+[[problems]]
+he = "כתוב 'אין שיחה אחרונה לשמור'"
+en = "It says there is no exchange to save"
+fix_he = "עוד לא הייתה תשובה של ג'ארביס בהיסטוריה. דברו איתו קודם ונסו שוב."
+fix_en = "There is no JARVES reply in the history yet. Talk to him first and try again."
+
+[[problems]]
+he = "בפריט כתוב '(not recorded: privacy mode)'"
+en = "The item says '(not recorded: privacy mode)'"
+fix_he = "מצב פרטיות פועל ולכן השיחה לא נשמרה. הפריט עדיין נספר."
+fix_en = "Privacy mode is on, so the conversation text was not stored. The item still counts."
+
+[[problems]]
+he = "כבוי או לא מופיע"
+en = "It is off or missing"
+fix_he = "זו יכולת בטא: הפעילו את יכולות הבטא ואז jarvis features on wrong_feedback."
+fix_en = "It is a beta feature: turn on beta features, then jarvis features on wrong_feedback."

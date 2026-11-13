@@ -1,0 +1,1 @@
+- Added: 'Jarvis, that was wrong' feedback (beta, off by default): a voice phrase, a dashboard button or `jarvis feedback wrong` saves the last exchange, redacted and local only, for the weekly report (JAR-230).
