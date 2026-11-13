@@ -347,7 +347,8 @@ def collect(home: Path, topic: str, *, contacts: list[str] | None = None, chat: 
         only = hits[0]["id"]
     arch = arc.get(home) if archive_on else None
     msgs = wcol.gather(user, arch, terms=wcol.terms_for(topic), contacts=people, readable=set(names), since=t0,
-                       until=t1, cap_messages=wab.CAP_MESSAGES)
+                       until=t1, cap_messages=wab.CAP_MESSAGES,
+                       money=wcol.topic_key(topic) == "payment")
     if len(raw) >= wab.CAP_MESSAGES:
         msgs.truncated.append("chats")
     res = asyncio.run(wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
@@ -776,7 +777,7 @@ def cmd_whatsapp(a, cfg, home) -> int:
             return 0
         if a.action == "search":
             from .cli import _cli_features
-            if not args:
+            if not args or len(a.from_who) > 1:                 # search takes one --from (collect takes several)
                 print("usage: jarvis whatsapp search \"<words>\" [--from <contact>] [--since <date>] [--until <date>]",
                       file=sys.stderr)
                 return 2

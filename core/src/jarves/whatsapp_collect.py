@@ -32,7 +32,7 @@ from .whatsapp_archive import fold, stems
 
 FEATURE = "whatsapp_collect"
 MAX_CANDIDATES = 5000           # messages read per run (archive + bridge), before the topic filter
-MAX_ROWS = 400                  # rows in one report (the newest beyond this are reported as cut)
+MAX_ROWS = 400                  # rows in one report (the newest are kept; older ones are reported as cut)
 MODEL_BATCH = 25                # messages per model request
 QUOTE_CHARS = 120
 FIELD_CHARS = 60
@@ -141,6 +141,12 @@ def _text_of(m: dict) -> str:
     return t
 
 
+def on_topic(m: dict, terms: list[str], money: bool = False) -> bool:
+    """A topic word in the text, or (payment topic) any shekel amount."""
+    text = _text_of(m)
+    return any(_term_hit(t, _tokens(text)) for t in terms) or (money and bool(amounts(text)))
+
+
 def select(messages: Iterable[dict], *, terms: list[str], contacts: list[Contact], chat: str | None = None,
            money: bool = False, since: float | None = None, until: float | None = None) -> list[tuple[dict, str, str]]:
     """(message, reason, contact label) for the messages on the topic. With contacts: in their chat, or in another
@@ -158,10 +164,9 @@ def select(messages: Iterable[dict], *, terms: list[str], contacts: list[Contact
             continue
         if chat is not None and m.get("chat") != chat:
             continue
-        text = _text_of(m)
-        toks = _tokens(text)
-        if not (any(_term_hit(t, toks) for t in terms) or (money and amounts(text))):
+        if not on_topic(m, terms, money):
             continue
+        toks = _tokens(_text_of(m))
         if not contacts:
             out.append((m, "topic", ""))
             continue
@@ -255,9 +260,12 @@ def _num(v) -> float | None:
 
 
 def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bool:
-    """Merge one validated model answer into a rule row. Returns False when the model says it is off topic."""
+    """Merge one validated model answer into a rule row. Returns False when the model says it is off topic. The model
+    reads untrusted text, so it can never hide a row whose text states an amount: that row stays, flagged."""
     if got.get("relevant") is False:
-        return False
+        if row.amount is None:
+            return False
+        row.flag("model says off topic")
     amt = _num(got.get("amount_ils"))
     local = row.amount
     row.why_unsure = [w for w in row.why_unsure if w not in ("payee guessed", "no amount")]
@@ -546,6 +554,10 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
         msgs = [dict(x, chat=canon.get(str(x.get("chat", "")), x.get("chat"))) for x in msgs]
         chat = canon.get(chat, chat) if chat is not None else None
         contacts = [Contact(c.label, c.ids | {canon[i] for i in c.ids if i in canon}, c.words) for c in contacts]
+    once: dict[tuple[str, str], dict] = {}                  # each message once BEFORE the bound (alias ids merged)
+    for x in msgs:
+        once.setdefault((str(x.get("chat", "")), str(x.get("id", ""))), x)
+    msgs = list(once.values())
     if len(msgs) > MAX_CANDIDATES:
         msgs, truncated = msgs[:MAX_CANDIDATES], truncated + ["candidates"]
     picked = select(msgs, terms=terms_for(topic), contacts=contacts, chat=chat, money=topic_key(topic) == "payment",
@@ -599,21 +611,24 @@ ARCHIVE_PAGE = 200                                          # the archive search
 
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
-           since: float | None = None, until: float | None = None, cap_messages: int = 500) -> Candidates:
+           since: float | None = None, until: float | None = None, cap_messages: int = 500,
+           money: bool = False) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
     the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
     bridge's own window by the same words plus each contact chat's latest messages. The bridge /search has no paging:
     when one word fills a page, every readable chat is read in full instead (the bridge keeps a short window). `readable` (the chat ids the
     bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
-    BEFORE the MAX_CANDIDATES bound; any source that may hold more is named in `truncated`."""
+    BEFORE the MAX_CANDIDATES bound, and only on-topic messages (`on_topic`) count toward it, so full chat reads
+    can never crowd out matches; any source that may hold more is named in `truncated`."""
     out = Candidates()
     out.truncated = []
     seen: set[tuple[str, str]] = set()
+    folded = [f for f in (fold(t).strip() for t in terms) if f]
 
     def add(ms: list[dict], source: str, full: bool) -> None:
         for x in ms:
             k = (str(x.get("chat", "")), str(x.get("id", "")))
-            if x.get("chat") not in readable or k in seen:
+            if x.get("chat") not in readable or k in seen or x.get("deleted") or not on_topic(x, folded, money):
                 continue
             if len(out) >= MAX_CANDIDATES:
                 if "candidates" not in out.truncated:
@@ -624,12 +639,17 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         if full and source not in out.truncated:
             out.truncated.append(source)
 
+    def bound() -> bool:                                    # more reads would be cut: say so and stop reading
+        if len(out) >= MAX_CANDIDATES and "candidates" not in out.truncated:
+            out.truncated.append("candidates")
+        return len(out) >= MAX_CANDIDATES
+
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
     if archive is not None:
         for w in words:
             offset = 0
-            while len(out) < MAX_CANDIDATES:
+            while not bound():
                 page = archive.search(w, since=since, until=until, readable=readable, limit=ARCHIVE_PAGE,
                                       offset=offset)
                 add(page, "archive", False)
@@ -637,15 +657,19 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
                     break
                 offset += ARCHIVE_PAGE
         for cid in ids:
-            if cid in readable:
-                page = archive.chat_messages(cid, since=since, limit=MAX_CANDIDATES)
+            if cid in readable and not bound():
+                page = archive.chat_messages(cid, since=since, until=until, limit=MAX_CANDIDATES)
                 add(page, "archive", len(page) >= MAX_CANDIDATES)
     sweep = False
     for w in words:
+        if bound():
+            return out
         page = client.search(w, cap_messages)
         add(page, "bridge", False)
         sweep = sweep or len(page) >= cap_messages
     for cid in (sorted(readable) if sweep else ids):
+        if bound():
+            break
         page = client.messages(cid, since, cap_messages).get("messages", [])
         add(page, "bridge", len(page) >= cap_messages)
     return out

@@ -1133,7 +1133,7 @@ class WhatsAppBridgeSkill(Skill):
             try:
                 msgs = await self._call(wcol.gather, self.client, arch, terms=wcol.terms_for(a.topic),
                                         contacts=contacts, readable=set(names), since=since, until=until,
-                                        cap_messages=CAP_MESSAGES)
+                                        cap_messages=CAP_MESSAGES, money=wcol.topic_key(a.topic) == "payment")
                 if len(raw) >= CAP_MESSAGES:                     # more chats than one list holds: say so
                     msgs.truncated.append("chats")
             except BridgeError as e:

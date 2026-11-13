@@ -351,3 +351,27 @@ async def test_alias_ids_are_one_chat_for_dedup_and_the_chat_filter(tmp_path):
     res = await wcol.collect(tmp_path, "תשלום", same, names={old: "גן", new: "גן"}, contacts=[], chat=new,
                              canon={old: new, new: new}, now=T0)
     assert len(res.rows) == 2                                          # two payments, the double read counted once
+
+
+# ---------------------------------------------------------------------- doctor round (JAR-273)
+def test_off_topic_chat_reads_never_crowd_out_matches(monkeypatch):
+    monkeypatch.setattr(wcol, "MAX_CANDIDATES", 20)
+    chatter = [m(f"נתראה מחר {i}", mid=f"n{i}", chat=SPOUSE, ts=T0 - i) for i in range(100)]   # invented
+    paid = [m(f"שילמתי {i} שקל", mid=f"p{i}", chat=PLUMBER, ts=T0 - 500 - i) for i in range(5)]
+    got = wcol.gather(_ChatBridge(chatter + paid), None, terms=wcol.terms_for("תשלום"), contacts=[],
+                      readable={PLUMBER, SPOUSE}, cap_messages=10, money=True)
+    assert {x["id"] for x in got} == {f"p{i}" for i in range(5)} and not got.truncated
+
+
+async def test_repeated_hits_are_merged_before_the_candidate_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(wcol, "MAX_CANDIDATES", 6)
+    dup = [m("שילמתי 50 שקל", mid="d", ts=T0)] * 10                      # one message read ten times
+    res = await wcol.collect(tmp_path, "תשלום", dup + [m("שילמתי 70 שקל", mid="e", ts=T0 - 1)], names={},
+                             contacts=[], now=T0)
+    assert res.candidates == 2 and len(res.rows) == 2 and "candidates" not in res.truncated
+
+
+def test_the_model_cannot_hide_a_row_that_states_an_amount():
+    r = wcol.rule_row(m("שילמתי 300 שקל"), "chat", "אבי", "אבי")
+    assert wcol.apply_model(r, {"relevant": False}) and r.uncertain and "model says off topic" in r.why_unsure
+    assert not wcol.apply_model(wcol.rule_row(m("קבלה מצורפת"), "chat", "אבי", "אבי"), {"relevant": False})
