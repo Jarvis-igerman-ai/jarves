@@ -184,3 +184,62 @@ async def test_core_request_at_the_daily_request_limit_sends_nothing_and_says_so
         assert err["max"] == 1 and "ai.daily_request_limit" in err["setting"]
     finally:
         await c.stop()
+
+
+# ---------------------------------------------------------------- JAR-321: see and test the daily limits
+def test_selftest_proves_both_limits_without_touching_the_owner_counters(home, cfg, caplog):
+    from jarves import daily_limits
+    cfg.ai.daily_realtime_minutes, cfg.ai.daily_request_limit = 30, 200
+    with caplog.at_level("WARNING"):
+        r = daily_limits.selftest(cfg.ai, voice_minutes=2, requests=5)
+    assert r["ok"]
+    v, q = r["checks"]
+    assert v["kind"] == "voice_seconds" and v["limit"] == 2 and v["first_allowed"] and v["refused_at_limit"]
+    assert q["limit"] == 5 and q["passed"] == 5 and q["refused_at_limit"] and q["announced"]
+    assert "2 of 2 min" in v["notice_en"] and "5 of 5 requests" in q["notice_en"] and "נגמרה" in q["notice_he"]
+    assert cfg.ai.daily_realtime_minutes == 30 and cfg.ai.daily_request_limit == 200    # the config is not changed
+    assert not (home / "memory.db").exists()                                             # nor the owner's database
+    assert "budget limit reached" not in caplog.text                                     # test refusals are not logged
+
+
+def test_selftest_with_zero_limits_refuses_at_once(cfg):
+    from jarves import daily_limits
+    r = daily_limits.selftest(cfg.ai, voice_minutes=0, requests=0)
+    assert r["ok"] and not r["checks"][0]["first_allowed"] and r["checks"][1]["passed"] == 0
+
+
+def test_cli_limits_shows_used_and_left_and_test_limits_passes(home, cfg, capsys, monkeypatch):
+    import argparse
+    import json
+    from jarves import budget_cli
+    monkeypatch.setenv("JARVES_CLI_LANG", "en")
+    cfg.ai.daily_realtime_minutes, cfg.ai.daily_request_limit = 30, 10
+    m = MemoryStore(home / "memory.db")
+    b = Budget(m, cfg.ai, alive=lambda pid: True)
+    b.record("voice_seconds", 25 * MIN)
+    b.reserve("ai_requests").commit()
+    b.close()
+    m.close()
+    assert budget_cli.cmd_budget(argparse.Namespace(action="limits", json=False), cfg, home) == 0
+    out = capsys.readouterr().out
+    assert "voice minutes today: 25 of 30 min, 5 left (warn)" in out
+    assert "AI requests today: 1 of 10 requests, 9 left (ok)" in out and "jarvis budget test-limits" in out
+    assert budget_cli.cmd_budget(argparse.Namespace(action="limits", json=True), cfg, home) == 0
+    assert [x["code"] for x in json.loads(capsys.readouterr().out)] == ["VOICE_DAILY_LIMIT", "AI_DAILY_LIMIT"]
+    ns = argparse.Namespace(action="test-limits", json=False, voice_minutes=None, requests=None)
+    assert budget_cli.cmd_budget(ns, cfg, home) == 0
+    out = capsys.readouterr().out
+    assert out.count("-> PASS") == 2 and "voice limit (30 min)" in out and "request limit (10)" in out
+    m = MemoryStore(home / "memory.db")                       # the real counters are unchanged by the test
+    assert m.usage_today("voice_seconds") == 25 * MIN and m.usage_today("ai_requests") == 1
+    m.close()
+
+
+def test_budget_parser_has_limits_and_test_limits():
+    import argparse
+    from jarves import budget_cli
+    p = argparse.ArgumentParser()
+    budget_cli.add_cli(p.add_subparsers(dest="cmd"))
+    a = p.parse_args(["budget", "test-limits", "--voice-minutes", "1", "--requests", "3", "--json"])
+    assert (a.action, a.voice_minutes, a.requests, a.json) == ("test-limits", 1, 3, True)
+    assert p.parse_args(["budget", "limits"]).action == "limits"
