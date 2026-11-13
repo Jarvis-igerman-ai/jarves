@@ -1,0 +1,1 @@
+- Fixed: reports to Google Drive: upload and sign-in refuse while the switch is off, a refused or expired Google sign-in says to run `jarvis reports drive signin`, and the API upload uses a random multipart boundary (JAR-274).

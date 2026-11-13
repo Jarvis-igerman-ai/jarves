@@ -1,0 +1,50 @@
+order = 61
+category = "everyday"
+features = ["reports_drive"]
+suggest = false
+aliases = ["דוחות לדרייב", "גוגל דרייב", "google drive", "reports to drive", "drive upload"]
+title_he = "דוחות לגוגל דרייב"
+title_en = "Reports to Google Drive"
+what_he = "כל דוח חדש בתיקיית הדוחות (למשל איסוף וואטסאפ) נשלח לגוגל דרייב. ברירת מחדל: העתקה לתיקיית גוגל דרייב במחשב, בלי התחברות. אפשרות שנייה: העלאה עם הרשאה צרה לקבצים ש-JARVES יוצר, וקובץ CSV הופך לגיליון. כבוי כברירת מחדל (בטא)."
+what_en = "Each new report in the reports folder (for example the WhatsApp collection) goes to Google Drive. Default: a copy into your Google Drive for desktop folder, no sign-in. Second option: an upload with a narrow permission for files JARVES creates, and a CSV becomes a Google Sheet. Off by default (beta)."
+expect_he = "כשהמצב דלוק, אחרי כל ריצה של משימה מתוזמנת כל דוח חדש או מעודכן בתיקיית הדוחות מועתק או מועלה. אם הדרייב לא זמין, הדוח עדיין נשמר במחשב."
+expect_en = "While it is on, after every scheduled job run each new or changed file in the reports folder is copied or uploaded. If Drive is unavailable, the report is still saved on the PC."
+test_he = "הריצו  jarvis reports drive status  ובדקו את התיקייה והמצב."
+test_en = "Run  jarvis reports drive status  and check the folder and the mode."
+cost_he = "חינם."
+cost_en = "Free."
+privacy_he = "בהעתקה לתיקייה אין התחברות. בהעלאה JARVES רואה רק קבצים שהוא יצר (drive.file). רק אתם מתחברים, בדפדפן שלכם."
+privacy_en = "The folder copy needs no sign-in. The upload sees only files JARVES created (drive.file). Only you sign in, in your own browser."
+
+[parity.features]
+reports_drive = "reports"
+
+[[steps]]
+he = "הפעילו יכולות בטא: jarvis features beta on. אחר כך: jarvis features on reports_drive."
+en = "Turn on beta features: jarvis features beta on. Then: jarvis features on reports_drive."
+action = "feature_on:reports_drive"
+check = "active:reports_drive"
+
+[[steps]]
+he = "אפשרות א (מומלצת): jarvis reports drive folder ונתיב התיקייה של גוגל דרייב במחשב."
+en = "Option A (recommended): jarvis reports drive folder and the path of your Google Drive folder on the PC."
+
+[[steps]]
+he = "אפשרות ב: jarvis reports drive signin. הדפדפן נפתח, אתם מתחברים ומאשרים. לכיבוי: jarvis features off reports_drive."
+en = "Option B: jarvis reports drive signin. Your browser opens, you sign in and allow. To turn off: jarvis features off reports_drive."
+
+[[steps]]
+he = "לשליחה ידנית של דוח אחד: jarvis reports drive upload ושם הקובץ."
+en = "To send one report by hand: jarvis reports drive upload and the file name."
+
+[[problems]]
+he = "כתוב שאין תיקיית גוגל דרייב"
+en = "It says no Google Drive folder is set"
+fix_he = "הריצו jarvis reports drive folder עם נתיב של תיקייה קיימת, או jarvis reports drive signin."
+fix_en = "Run jarvis reports drive folder with the path of an existing folder, or jarvis reports drive signin."
+
+[[problems]]
+he = "ההעלאה אומרת שצריך לחבר מחדש את גוגל"
+en = "The upload says Google needs to be reconnected"
+fix_he = "הריצו שוב jarvis reports drive signin ואשרו את ההרשאה."
+fix_en = "Run jarvis reports drive signin again and allow the permission."

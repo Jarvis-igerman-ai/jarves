@@ -137,6 +137,7 @@ SAFE_OFF = frozenset({
     "mobile_access",
     "model_lab",
     "phone_trust",
+    "reports_drive",
     "provider_openrouter",
     "self_diagnosis_handoff",
     "skills_manifest2",
@@ -214,6 +215,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("automation", "אוטומציה", "Automation", (
         "scheduler",
         "reports",
+        "reports_drive",
         "timers",
         "lists",
         "notes",
@@ -1452,6 +1454,7 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "assisted_dialing": [_mod("jarves.dialing"), _win(_mod("winreg")), _data("jarves", "dashboard_static/dialing.js"),
                          _data("jarves.guides", "data/assisted_dialing.toml")],
     "drive_mode": [_mod("jarves.drive_mode"), _data("jarves.guides", "data/drive_mode.toml")],
+    "reports_drive": [_mod("jarves.reports_drive"), _data("jarves.guides", "data/reports_drive.toml")],
     "morning_briefing": [_mod("jarves.briefing"), _mod("httpx"), _data("jarves.guides", "data/morning_briefing.toml")],
     "skills_manifest2": [_mod("jarves.skills.manifest2"), _mod("jarves.skills.generated"), _data("jarves.guides", "data/skills_manifest2.toml")],
     "drive_briefing": [_mod("jarves.drive_briefing"), _mod("jarves.briefing"), _data("jarves.guides", "data/drive_briefing.toml")],

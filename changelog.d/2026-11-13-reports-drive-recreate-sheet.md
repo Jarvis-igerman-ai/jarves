@@ -1,0 +1,1 @@
+- Fixed: reports to Google Drive: a CSV report whose Google Sheet was deleted in Drive is created again as a Sheet, not as a plain CSV file (JAR-274).
