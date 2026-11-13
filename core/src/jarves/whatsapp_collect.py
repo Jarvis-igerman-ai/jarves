@@ -615,8 +615,10 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
            money: bool = False) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
     the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
-    bridge's own window by the same words plus each contact chat's latest messages. The bridge /search has no paging:
-    when one word fills a page, every readable chat is read in full instead (the bridge keeps a short window). `readable` (the chat ids the
+    bridge's own window by the same words plus each contact chat's latest messages. For the payment topic (`money`)
+    every readable chat is read in full in both sources, because an amount alone ('₪200') is on topic but no search
+    word finds it. The bridge /search has no paging: when one word fills a page, every readable chat is read in full
+    instead (the bridge keeps a short window). `readable` (the chat ids the
     bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
     BEFORE the MAX_CANDIDATES bound, and only on-topic messages (`on_topic`) count toward it, so full chat reads
     can never crowd out matches; any source that may hold more is named in `truncated`."""
@@ -646,6 +648,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
 
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
+    full_read = sorted(readable) if money else ids          # chats read in full (not only by search words)
     if archive is not None:
         for w in words:
             offset = 0
@@ -656,18 +659,22 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
                 if len(page) < ARCHIVE_PAGE:
                     break
                 offset += ARCHIVE_PAGE
-        for cid in ids:
-            if cid in readable and not bound():
-                page = archive.chat_messages(cid, since=since, until=until, limit=MAX_CANDIDATES)
-                add(page, "archive", len(page) >= MAX_CANDIDATES)
-    sweep = False
+        for cid in full_read:
+            offset = 0
+            while cid in readable and not bound():
+                page = archive.chat_messages(cid, since=since, until=until, limit=ARCHIVE_PAGE, offset=offset)
+                add(page, "archive", False)
+                if len(page) < ARCHIVE_PAGE:
+                    break
+                offset += ARCHIVE_PAGE
+    sweep = money
     for w in words:
         if bound():
             return out
         page = client.search(w, cap_messages)
         add(page, "bridge", False)
         sweep = sweep or len(page) >= cap_messages
-    for cid in (sorted(readable) if sweep else ids):
+    for cid in (sorted(readable) if sweep else full_read):
         if bound():
             break
         page = client.messages(cid, since, cap_messages).get("messages", [])

@@ -260,8 +260,8 @@ class _PagedArchive:
         hits = [x for x in self.msgs if q in x["text"]]
         return hits[offset:offset + min(limit, 200)]
 
-    def chat_messages(self, cid, *, since=None, limit=2000):
-        return []
+    def chat_messages(self, cid, *, since=None, until=None, limit=2000, offset=0):
+        return [x for x in self.msgs if x["chat"] == cid][offset:offset + limit]
 
 
 class _Bridge:
@@ -360,7 +360,7 @@ def test_off_topic_chat_reads_never_crowd_out_matches(monkeypatch):
     paid = [m(f"שילמתי {i} שקל", mid=f"p{i}", chat=PLUMBER, ts=T0 - 500 - i) for i in range(5)]
     got = wcol.gather(_ChatBridge(chatter + paid), None, terms=wcol.terms_for("תשלום"), contacts=[],
                       readable={PLUMBER, SPOUSE}, cap_messages=10, money=True)
-    assert {x["id"] for x in got} == {f"p{i}" for i in range(5)} and not got.truncated
+    assert {x["id"] for x in got} == {f"p{i}" for i in range(5)} and "candidates" not in got.truncated
 
 
 async def test_repeated_hits_are_merged_before_the_candidate_bound(tmp_path, monkeypatch):
@@ -375,3 +375,22 @@ def test_the_model_cannot_hide_a_row_that_states_an_amount():
     r = wcol.rule_row(m("שילמתי 300 שקל"), "chat", "אבי", "אבי")
     assert wcol.apply_model(r, {"relevant": False}) and r.uncertain and "model says off topic" in r.why_unsure
     assert not wcol.apply_model(wcol.rule_row(m("קבלה מצורפת"), "chat", "אבי", "אבי"), {"relevant": False})
+
+
+def test_currency_only_payments_are_found_in_every_chat_without_contacts(home, monkeypatch):
+    msgs = [m("₪200", mid="c1", chat=SPOUSE), m("נתראה מחר", mid="c2", chat=SPOUSE)]      # invented, under every cap
+    got = wcol.gather(_ChatBridge(msgs), None, terms=wcol.terms_for("תשלום"), contacts=[],
+                      readable={PLUMBER, SPOUSE}, money=True)
+    assert [x["id"] for x in got] == ["c1"] and not got.truncated                     # bridge window
+    old = [m("₪350", mid=f"a{i}", chat=PLUMBER, ts=T0 - i) for i in range(3)]          # archive only
+    got = wcol.gather(_Bridge(), _PagedArchive(old), terms=wcol.terms_for("תשלום"), contacts=[],
+                      readable={PLUMBER}, money=True)
+    assert len(got) == 3 and not got.truncated
+    a = arc.Archive(home, use_dpapi=False, clock=lambda: T0)
+    try:
+        a.add([m("₪120", mid=f"r{i}", ts=T0 - i) for i in range(5)])
+        monkeypatch.setattr(wcol, "ARCHIVE_PAGE", 2)                                   # pages a long chat
+        got = wcol.gather(_Bridge(), a, terms=wcol.terms_for("תשלום"), contacts=[], readable={PLUMBER}, money=True)
+        assert len(got) == 5 and not got.truncated
+    finally:
+        a.close()

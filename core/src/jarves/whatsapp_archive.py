@@ -420,8 +420,9 @@ class Archive:
             return [self._row(r) for r in rows]
 
     def chat_messages(self, chat: str, *, since: float | None = None, until: float | None = None,
-                      limit: int = 2000) -> list[dict]:
-        """Every archived message of ONE chat (newest first), for whatsapp_collect: amounts without a topic word."""
+                      limit: int = 2000, offset: int = 0) -> list[dict]:
+        """Every archived message of ONE chat (newest first, paged), for whatsapp_collect: amounts without a topic
+        word."""
         with self.lock:
             if not self._has():
                 return []
@@ -433,8 +434,8 @@ class Archive:
             if until is not None:
                 extra += " AND ts < ?"
                 args.append(until)
-            rows = self._open().execute("SELECT * FROM msg WHERE chat = ?" + extra + " ORDER BY ts DESC LIMIT ?",
-                                        [*args, max(1, min(int(limit), 5000))]).fetchall()
+            rows = self._open().execute("SELECT * FROM msg WHERE chat = ?" + extra + " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                                        [*args, max(1, min(int(limit), 5000)), max(0, int(offset))]).fetchall()
             return [self._row(r) for r in rows]
 
     @staticmethod

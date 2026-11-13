@@ -790,7 +790,6 @@ def owner_display(ms: list[dict], *, skip: int = 0, newest_first: bool = False) 
     return "\n".join(lines), rest
 
 
-
 class CollectArgs(_Tolerant):
     ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
         "topic": ("query", "subject", "about", "q", "keywords"),
