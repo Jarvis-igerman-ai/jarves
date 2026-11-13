@@ -105,3 +105,15 @@ def test_unreadable_switch_logs_again_after_recovery(seen, monkeypatch, tmp_path
         monkeypatch.setattr(features, "Features", f)
         auto_update.is_enabled(None, tmp_path)
     assert [c for c, _ in seen] == ["AUTO_UPDATE_SWITCH_UNREADABLE"] * 2
+
+
+@pytest.mark.parametrize("code,read", [
+    ("AUTO_UPDATE_DEFAULT_NOTE_FAILED", lambda au: au._default_note()),
+    ("AUTO_UPDATE_CHANNEL_CHECK_FAILED", lambda au: au._first_run_prompt()),
+])
+def test_channel_reads_log_again_after_recovery(seen, monkeypatch, tmp_path, code, read):
+    real = features.Features
+    for i, f in enumerate((_boom, _boom, real, _boom)):       # one outage, a good read, a second outage
+        monkeypatch.setattr(features, "Features", f)
+        read(_updater(tmp_path / str(i)))                     # fresh home: the channel prompt is asked once per home
+    assert [c for c, _ in seen] == [code] * 2
