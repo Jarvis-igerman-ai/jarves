@@ -1,10 +1,15 @@
 """JAR-274: reports to Google Drive. Folder copy (no sign-in) and the drive.file API upload with a fake client."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 from jarves import cli, reports_drive as rd
 from jarves.features import CATALOG
+
+
+def switch_on():
+    assert cli.main(["features", "beta", "on"]) == 0 and cli.main(["features", "on", rd.FEATURE]) == 0
 
 
 class FakeDrive:
@@ -64,6 +69,9 @@ def test_folder_must_exist_and_cli_status_folder_upload(home, capsys):
     assert st["folder"] == str(dest) and st["mode"] == "folder" and st["enabled"] is False
     rep = tmp_path / "r.txt"
     rep.write_text("x", encoding="utf-8")
+    assert cli.main(["reports", "drive", "upload", str(rep)]) == 1      # the switch is off: nothing is sent
+    assert "jarvis features on reports_drive" in capsys.readouterr().out and not (dest / "r.txt").exists()
+    switch_on()
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 0
     assert (dest / "r.txt").exists()
 
@@ -106,6 +114,7 @@ def test_overlapping_sync_is_skipped_and_failed_signin_is_a_plain_error(home, tm
     async def refuse(self, scopes=(), timeout_s=300):
         raise GoogleAuthError("no_client", "no Google client set up")
     monkeypatch.setattr(GoogleAuth, "sign_in", refuse)
+    switch_on()
     assert cli.main(["reports", "drive", "signin"]) == 1
     assert "no Google client" in capsys.readouterr().out and rd.load(home)["mode"] == "folder"
 
@@ -114,13 +123,94 @@ def test_api_upload_before_signin_is_a_plain_error(home, monkeypatch, capsys):
     from jarves.google_auth import GoogleAuth, GoogleAuthError
 
     async def no_token(self, need=(), *, force_refresh=False):
-        raise GoogleAuthError("not_signed_in", "sign in first: jarvis reports drive signin")
+        raise GoogleAuthError("GOOGLE_NOT_CONNECTED", "Google is not connected")
     monkeypatch.setattr(GoogleAuth, "access_token", no_token)
+    switch_on()
     rd.save(home, mode="api")
     rep = home / "r.csv"
     rep.write_text("a,b\n", encoding="utf-8")
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 1
-    assert "sign in first" in capsys.readouterr().out
+    assert "run jarvis reports drive signin" in capsys.readouterr().out
+
+
+def test_drive_refusing_the_token_says_reconnect_and_keeps_the_report(home, capsys):
+    import httpx
+
+    class Refused:
+        def upload(self, *a, **kw):
+            req = httpx.Request("POST", rd.UPLOAD_URL)
+            raise httpx.HTTPStatusError("401", request=req, response=httpx.Response(401, request=req))
+    rd.save(home, mode="api")
+    rep = home / "r.csv"
+    rep.write_text("a,b\n", encoding="utf-8")
+    out = rd.after_report(home, rep, active=True, client=Refused())
+    assert "run jarvis reports drive signin" in out["error"] and rep.read_text(encoding="utf-8") == "a,b\n"
+
+
+def test_real_upload_asks_only_drive_file_and_sends_a_well_formed_multipart(tmp_path, monkeypatch):
+    import httpx
+
+    from jarves import google_auth
+    scopes, sent = [], []
+
+    async def token(self, need=()):
+        scopes.append(tuple(need))
+        return "tok"
+
+    def post(url, content, timeout, headers):
+        sent.append((url, content, headers))
+        return httpx.Response(200, json={"id": "x"}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(google_auth.GoogleAuth, "access_token", token)
+    monkeypatch.setattr(httpx, "post", post)
+    data = b"a,b\n--jarves-report-part\n"           # a report line that looks like a fixed boundary
+    assert rd.DriveApi(tmp_path).upload("wa", data, "text/csv", rd.SHEET) == {"id": "x"}
+    url, body, headers = sent[0]
+    b = headers["Content-Type"].split("boundary=")[1]
+    assert scopes == [(rd.DRIVE_FILE,)] and headers["Authorization"] == "Bearer tok" and url == rd.UPLOAD_URL
+    assert f"--{b}".encode() not in data and body.endswith(f"--{b}--".encode())
+    meta, part = body.split(f"--{b}".encode())[1:3]
+    assert json.loads(meta.split(b"\r\n\r\n")[1]) == {"name": "wa", "mimeType": rd.SHEET}
+    assert part == b"\r\nContent-Type: text/csv\r\n\r\n" + data + b"\r\n"
+
+
+async def test_a_finished_scheduler_job_sends_new_reports_only_while_on_and_keeps_them_on_failure(home, monkeypatch):
+    from jarves import scheduler as S
+    from jarves.userdata import UserDB
+    monkeypatch.setattr(rd.threading, "Thread", lambda target, args, **kw: type("T", (), {"start": lambda s: target(*args)})())
+    dest = home / "gdrive"
+    dest.mkdir()
+    rd.save(home, folder=str(dest))
+    (home / "reports").mkdir()
+    (home / "reports" / "wa.csv").write_bytes(b"a,b\n")       # what whatsapp_collect leaves behind
+
+    class Feats:
+        def __init__(self, on):
+            self.home, self.on = home, on
+
+        def active(self, fid):
+            return fid != rd.FEATURE or self.on
+
+    async def run(on):
+        db = UserDB(home / f"m{on}.db")
+        t = [1_800_000_000.0]
+
+        async def research(task, budget):
+            from jarves.tasks import LookupResult
+            return LookupResult("ok", queries=[])
+        s = S.Scheduler(db, research=research, clock=lambda: t[0], sleep=lambda s: asyncio.sleep(0), features=Feats(on))
+        s.approve(s.preview("כל בוקר ב-8", "חדשות")["id"], by="voice")
+        t[0] += 2 * 86400
+        await s.tick()
+        await asyncio.gather(*[x for v in s._running.values() for x in v], return_exceptions=True)
+        db.close()
+    await run(False)
+    assert not list(dest.iterdir())                          # switch off: nothing leaves the PC
+    await run(True)
+    assert (dest / "wa.csv").read_bytes() == b"a,b\n"
+    (home / "reports" / "b.md").write_bytes(b"x")
+    rd.save(home, folder=str(home / "gone"))                 # Drive folder unavailable
+    await run(True)
+    assert (home / "reports" / "b.md").read_bytes() == b"x" and not (dest / "b.md").exists()
 
 
 def test_changed_report_updates_the_same_drive_file_not_a_duplicate(tmp_path):

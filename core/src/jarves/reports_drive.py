@@ -9,6 +9,7 @@ import asyncio
 import json
 import shutil
 import threading
+import uuid
 from pathlib import Path
 
 from . import clilang, logs
@@ -60,7 +61,7 @@ class DriveApi:
         import httpx
         from .google_auth import GoogleAuth
         token = asyncio.run(GoogleAuth(self.home).access_token((DRIVE_FILE,)))
-        b = "jarves-report-part"
+        b = f"jarves-{uuid.uuid4().hex}"        # random: a report line can never close a part early
 
         def body(meta: dict) -> bytes:
             return (f"--{b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json.dumps(meta)}\r\n"
@@ -98,6 +99,18 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
     return {"mode": "folder", "copied": str(dest / path.name)}
 
 
+RECONNECT = ("GOOGLE_AUTH_EXPIRED", "GOOGLE_NOT_CONNECTED", "GOOGLE_SCOPE_MISSING", "GOOGLE_NO_REFRESH_TOKEN")
+
+
+def reason(e: Exception) -> str:
+    """One plain sentence for the owner: a missing or refused sign-in says how to reconnect."""
+    status = getattr(getattr(e, "response", None), "status_code", None)
+    if status in (401, 403) or getattr(e, "code", None) in RECONNECT:
+        return clilang.fmt("צריך לחבר מחדש את גוגל: הריצו jarvis reports drive signin",
+                           "Google needs to be reconnected: run jarvis reports drive signin")
+    return str(e) or type(e).__name__
+
+
 def after_report(home: Path, path: Path, *, active: bool, client=None) -> dict | None:
     """Hook for report writers (whatsapp_collect and others): send only when the switch is on; never raises."""
     if not active:
@@ -105,7 +118,7 @@ def after_report(home: Path, path: Path, *, active: bool, client=None) -> dict |
     try:
         return upload(home, path, client=client)
     except Exception as e:      # a report write must never fail because Drive is unavailable
-        return {"error": str(e)}
+        return {"error": reason(e)}
 
 
 def sync(home: Path, *, client=None) -> list[dict]:
@@ -145,6 +158,11 @@ def on_job_finished(features) -> None:
 
 def cmd_drive(a, cfg, home) -> int:
     from .cli import _cli_features
+    on = _cli_features(cfg, home).active(FEATURE)
+    if a.drive_action in ("signin", "upload") and not on:        # the switch is the gate for anything leaving the PC
+        print(clilang.fmt("הדוחות לדרייב כבויים: jarvis features on reports_drive",
+                          "Reports to Drive is off: jarvis features on reports_drive"))
+        return 1
     if a.drive_action == "folder":
         if not Path(a.path).is_dir():
             print(clilang.fmt("התיקייה לא קיימת", "that folder does not exist"))
@@ -166,8 +184,8 @@ def cmd_drive(a, cfg, home) -> int:
         try:
             print(json.dumps(upload(home, Path(a.file))))
         except (OSError, ValueError, GoogleAuthError, httpx.HTTPError) as e:   # not signed in, offline, Drive refused
-            print(e)
+            print(reason(e))
             return 1
         return 0
-    print(json.dumps({**load(home), "enabled": _cli_features(cfg, home).active(FEATURE)}))
+    print(json.dumps({**load(home), "enabled": on}))
     return 0
