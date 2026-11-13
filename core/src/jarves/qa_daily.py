@@ -1,6 +1,8 @@
 """`jarvis qa-daily install|check|status` (JAR-232): the installed-beta check the owner (or QA) runs once a day.
 Daily: while the switch is on, the Core calls `tick` every hour (`start`); once per UTC day it starts `qa-daily install`
-in a hidden detached process (setup stops the Core), then runs `check` once today's report is final. `run` = one tick.
+in a hidden detached process at a quiet moment (auto_update.core_busy; setup stops the Core), then runs `check`
+once today's report is final. When install-latest ends without setup (nothing newer, or it stopped early) it writes no
+report file, so `install` keeps that outcome in qa/daily/<day>/install.txt. `run` = one tick.
 
 install: `jarvis install-latest --channel beta` (backup first, signed silent setup, doctor + selftest + status, automatic
          rollback when a check fails; all of that stays in jarves.install_latest).
@@ -14,6 +16,8 @@ The demo is a text transcript; a screen recording is not made (UNVERIFIED on the
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import re
 import subprocess
@@ -31,7 +35,7 @@ FEATURE = "qa_installs_enabled"
 SCENARIOS = (("status", ["status"]), ("features", ["features"]), ("about", ["about"]), ("health", ["health"]))
 OFF_MSG = ("The daily installed-beta check is OFF. The owner turns it on with: "
            "jarvis features on qa_installs_enabled (beta: jarvis features beta on first).")
-_CHECK = re.compile(r"^\s*\[(PASS|FAIL)\]\s+([\w-]+)(?::\s*(.*))?$")
+_CHECK = re.compile(r"^\s*\[(PASS|FAIL)\]\s+([^:]+?)(?::\s*(.*))?$")
 
 
 @dataclass
@@ -71,7 +75,8 @@ def check(deps: Deps) -> dict:
         bug("P1", "install-latest", f"install not finished ({head.split('  ')[0]}): {head}")
     elif day not in head:
         bug("P1", "install-latest", f"report is from an earlier day, not {day}: {head}")
-    elif not re.search(r"^version: .*-> \S*-beta", report, re.M):
+    elif not re.search(r"^version: .*-> \S*-beta", report, re.M) and not report.startswith("FAIL") \
+            and not re.search(r"^\s*\[PASS\] up to date", report, re.M):              # nothing newer: the beta stays
         bug("P1", "install-latest", "installed version is not a beta; run: jarvis qa-daily install")
     else:
         for ln in report.splitlines():
@@ -94,8 +99,9 @@ INSTALL_WAIT_S = 5400 + 600                                         # install_la
 TICK_S = 3600.0
 
 
-def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time) -> str:
-    """One daily step: off | done | installing | waiting | checked. Install at most once and check at most once a day."""
+def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=lambda: []) -> str:
+    """One daily step: off | done | busy | installing | waiting | checked. Install and check at most once a day;
+    the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
     if not enabled():
         return "off"
     out = Path(home) / "qa" / "daily" / day()
@@ -103,6 +109,8 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time) -> str
         return "done"
     marker = out / "install.started"
     if not marker.is_file():                                          # an earlier (e.g. stable) report today is not ours
+        if busy():
+            return "busy"
         out.mkdir(parents=True, exist_ok=True)
         marker.write_text(str(clock()), encoding="utf-8")
         spawn(["qa-daily", "install"])
@@ -117,10 +125,14 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time) -> str
     return "waiting"
 
 
-def _report_reader(home):
+INSTALL_FILE = "install.txt"                                         # begin() ended without setup: no report file
+
+
+def _report_reader(home, day: str):
+    """Our own install record for the day wins (up to date / stopped early); else install-latest's report file."""
     from .install_latest import REPORT_FILE
-    rp = Path(home) / "updates" / REPORT_FILE
-    return lambda: rp.read_text(encoding="utf-8-sig") if rp.is_file() else None
+    own, rp = Path(home) / "qa" / "daily" / day / INSTALL_FILE, Path(home) / "updates" / REPORT_FILE
+    return lambda: next((p.read_text(encoding="utf-8-sig") for p in (own, rp) if p.is_file()), None)
 
 
 def _spawn_hidden(argv: list[str]) -> None:
@@ -129,10 +141,11 @@ def _spawn_hidden(argv: list[str]) -> None:
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
 
 
-def _tick_real(cfg, home) -> str:
+def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
-    return tick(home, enabled=lambda: _enabled(cfg, home), day=_today, report=_report_reader(home), spawn=_spawn_hidden,
-                do_check=lambda: check(Deps(home, _report_reader(home), _cli_subprocess, _today())))
+    day = _today()
+    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=_report_reader(home, day),
+                spawn=_spawn_hidden, busy=busy, do_check=lambda: check(Deps(home, _report_reader(home, day), _cli_subprocess, day)))
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:
@@ -144,7 +157,8 @@ def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> thr
         while not stop.wait(wait):
             wait = every_s
             try:
-                r = _tick_real(core.cfg, core.home)
+                from .auto_update import core_busy
+                r = _tick_real(core.cfg, core.home, busy=lambda: core_busy(core))
                 if r not in ("off", "done", "waiting"):
                     logs.info("updates", "QA_DAILY_TICK", "daily installed-beta check step", step=r)
             except Exception as e:                                    # never stops the Core
@@ -167,14 +181,24 @@ def cmd_qa_daily(a, cfg, home) -> int:
     action = getattr(a, "action", "status")
     if action == "install":
         from . import install_latest
-        ns = argparse.Namespace(channel="beta", dry_run=bool(getattr(a, "dry_run", False)), report=False, finish=None)
-        return install_latest.cmd_install_latest(ns, cfg, home)
+        dry = bool(getattr(a, "dry_run", False))
+        ns = argparse.Namespace(channel="beta", dry_run=dry, report=False, finish=None)
+        buf, day = io.StringIO(), _today()
+        with contextlib.redirect_stdout(buf):
+            code = install_latest.cmd_install_latest(ns, cfg, home)
+        text = buf.getvalue()
+        print(text, end="")
+        if not dry and text.startswith(("PASS", "FAIL")):                # no setup ran, so no report file is written
+            (Path(home) / "qa" / "daily" / day).mkdir(parents=True, exist_ok=True)
+            (Path(home) / "qa" / "daily" / day / INSTALL_FILE).write_text(text, encoding="utf-8")
+        return code
     if action == "run":
         print(f"qa-daily run: {_tick_real(cfg, home)}")
         return 0
     if action == "check":
         from .install_latest import _cli_subprocess
-        res = check(Deps(home, _report_reader(home), _cli_subprocess, _today()))
+        day = _today()
+        res = check(Deps(home, _report_reader(home, day), _cli_subprocess, day))
         for b in res["bugs"]:
             print(f"  [{b['priority']}] {b['check']}: {b['detail'][:160]}")
         print(("PASS" if res["ok"] else "FAIL") + f"  qa-daily  demo + bug drafts (local only): <data folder>/{res['dir']}")

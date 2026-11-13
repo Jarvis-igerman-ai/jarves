@@ -141,3 +141,30 @@ def test_daily_tick_installs_the_beta_even_after_an_earlier_install_today(home):
     assert qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: REPORT,
                          spawn=spawned.append, do_check=lambda: checked.append(1), clock=lambda: 1000.0) == "installing"
     assert spawned == [["qa-daily", "install"]] and checked == []
+
+
+def test_up_to_date_or_early_stop_is_recorded_and_judged_not_lost(home, monkeypatch, capsys):
+    """JAR-232 doctor: install-latest writes no report file when nothing newer exists or it stops early, so the
+    qa install keeps its own record; an older (stable) report from today must not be judged instead."""
+    from jarves import install_latest
+    _on(home)
+    monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-12")
+    (home / "updates").mkdir()
+    (home / "updates" / install_latest.REPORT_FILE).write_text(
+        "PASS  install-latest  2026-11-12 01:00 UTC\nversion: 4.5.0 -> 4.5.1\n", encoding="utf-8")
+    up = "PASS  install-latest  2026-11-12 06:00 UTC\n  [PASS] find newest beta installer\n  [PASS] up to date: nothing newer"
+    monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(up) or 0)
+    assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 0
+    deps = qa_daily.Deps(home, qa_daily._report_reader(home, "2026-11-12"), lambda argv: (0, "ok"), "2026-11-12")
+    assert qa_daily.check(deps)["bugs"] == []
+    stop = "FAIL  install-latest  2026-11-12 07:00 UTC\n  [FAIL] backup now: BACKUP_DISK_FULL"
+    monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(stop) or 1)
+    assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 1
+    assert [b["check"] for b in qa_daily.check(deps)["bugs"]] == ["backup now"]
+
+
+def test_daily_tick_waits_for_a_quiet_moment_before_the_silent_install(home):
+    spawned = []
+    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda: None, spawn=spawned.append,
+                      do_check=lambda: None, clock=lambda: 1000.0, busy=lambda: ["voice_session"])
+    assert r == "busy" and spawned == [] and not (home / "qa" / "daily" / "2026-11-12" / "install.started").exists()
