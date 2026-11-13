@@ -86,7 +86,8 @@ func newEnv(t *testing.T, linked bool, mutate ...func(*Config)) *env {
 	dir := filepath.Join(t.TempDir(), "whatsapp_bridge")
 	cfg := Config{Dir: dir, Version: "test", Engine: fake, Store: st, Changes: db.Changes,
 		Seal: func(context.Context) error { seals.Add(1); return nil }, Log: NewLogger(&syncBuf{b: logs}), Now: clk.Now,
-		LocalHour: func(time.Time) int { return int(hour.Load()) }, SealEvery: 50 * time.Millisecond}
+		LocalHour: func(time.Time) int { return int(hour.Load()) }, SealEvery: 50 * time.Millisecond,
+		AfterFunc: (&timers{}).after} // no wall-clock timers: tests that need one inject and fire their own
 	for _, m := range mutate {
 		m(&cfg)
 	}

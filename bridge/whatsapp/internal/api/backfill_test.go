@@ -191,9 +191,37 @@ func TestBackfillSinceAndUnansweredRequest(t *testing.T) {
 		t.Fatalf("since %s", got.raw)
 	}
 	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
-	tm.fire() // WhatsApp never answers
-	if got := e.drain(0); got.body["state"] != "done" {
-		t.Fatalf("a request WhatsApp never answers must not hang the backfill: %s", got.raw)
+	tm.fire() // the phone did not answer in time: asked again from the same anchor, not counted as finished
+	if reqs := e.requests(); len(reqs) != 4 || reqs[3].Anchor != reqs[2].Anchor {
+		t.Fatalf("an unanswered request must be asked again: %+v", reqs)
+	}
+	e.answer(dana, 1, 70*86400, "late") // the answer to the repeated request is kept
+	if n := e.bufLen(); n != 1 {
+		t.Fatalf("answer after a timeout lost: %d buffered", n)
+	}
+	for i := 0; i <= backfillRetries; i++ { // WhatsApp never answers again
+		tm.fire()
+	}
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 {
+		t.Fatalf("a request WhatsApp never answers must end as a reported incomplete chat, not hang: %s", got.raw)
+	}
+}
+
+func TestBackfillScopeRevokeWipesBufferedTextAtOnce(t *testing.T) {
+	e := readyBackfill(t)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answer(dana, 2, 30*86400, "r")
+	e.s.mu.Lock()
+	old := e.s.bf.buf
+	e.s.mu.Unlock()
+	e.mustOK(e.do("POST", "/read_scope", e.admin, map[string]any{"all_direct": false})) // no read by Core follows
+	if n := e.bufLen(); n != 0 {
+		t.Fatalf("revoked chat still buffered: %d", n)
+	}
+	for _, x := range old {
+		if x.m.Text != "" {
+			t.Fatal("text of a revoked chat stays in memory")
+		}
 	}
 }
 

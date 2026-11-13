@@ -102,6 +102,25 @@ func (s *Server) bfClearLocked(state string) {
 	}
 }
 
+// bfPruneLocked applies a read-policy change at once: buffered messages of chats that left the read scope are
+// wiped from memory and such chats are never asked again (savePolicyLocked calls it on every policy write).
+func (s *Server) bfPruneLocked() {
+	b := &s.bf
+	keep := make([]bfMsg, 0, len(b.buf))
+	for _, x := range b.buf {
+		if s.readableLocked(x.m.Chat) {
+			keep = append(keep, x)
+		} else {
+			b.bytes -= msgSize(x.m)
+		}
+	}
+	if len(keep) < len(b.buf) {
+		b.needDrain = false
+	}
+	wipe(b.buf)
+	b.buf = keep
+}
+
 func (s *Server) bfStop() {
 	s.mu.Lock()
 	running := s.bf.state == "running"
@@ -234,22 +253,22 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		return
 	}
 	var lost F
-	if b.truncated && !timeout && b.accepted == 0 {
-		b.retries++ // no progress: a message that can never fit must not loop forever
+	if timeout || (b.truncated && b.accepted == 0) {
+		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}
 	switch {
-	case b.truncated && !timeout && b.retries <= backfillRetries:
-		// part of the answer did not fit: ask again from the same anchor once Core has drained; `seen` skips
-		// what is already buffered, so the retry adds exactly the missing messages
+	case (timeout || b.truncated) && b.retries <= backfillRetries:
+		// unanswered, or part of the answer did not fit: ask again from the same anchor (after Core has drained
+		// when truncated); `seen` skips what is already buffered, so the retry adds exactly the missing messages
 		b.queue[0].anchor = b.reqAnchor
-		b.needDrain = len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall forever
-	case b.truncated && !timeout: // explicit, reported loss
+		b.needDrain = b.truncated && len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall
+	case timeout || b.truncated: // explicit, reported loss: the chat is incomplete, never silently "finished"
 		b.lost += b.reqDrop
 		b.partial++
 		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
 		b.done++
-		lost = F{"lost": b.reqDrop}
-	case timeout || !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
+		lost = F{"lost": b.reqDrop, "unanswered": timeout}
+	case !b.older || (b.since > 0 && b.queue[0].anchor.TS < b.since):
 		b.queue, b.retries, b.seen = b.queue[1:], 0, nil
 		b.done++
 	default: // the anchor moved older: the next window shares no message with this one
@@ -257,7 +276,7 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	}
 	s.mu.Unlock()
 	if lost != nil {
-		s.log.Warn("WA_BACKFILL", "History messages did not fit the buffer.", lost)
+		s.log.Warn("WA_BACKFILL", "History chat incomplete (unanswered or did not fit the buffer).", lost)
 	}
 	s.bfNext()
 }
@@ -386,7 +405,7 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 	b := &s.bf
 	keep := make([]bfMsg, 0, len(b.buf))
 	for _, x := range b.buf {
-		if x.seq > cursor && s.readableLocked(x.m.Chat) { // out of read scope: dropped from memory too
+		if x.seq > cursor {
 			keep = append(keep, x)
 		} else {
 			b.bytes -= msgSize(x.m)
@@ -397,6 +416,7 @@ func (s *Server) hBackfillGet(w http.ResponseWriter, r *http.Request) {
 	}
 	wipe(b.buf) // acknowledged text must not linger in the old backing array
 	b.buf = keep
+	s.bfPruneLocked() // out of read scope: dropped from memory too
 	s.mu.Unlock()
 	s.bfNext() // room again: resume a paused backfill
 	s.mu.Lock()

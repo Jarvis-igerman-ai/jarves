@@ -413,6 +413,7 @@ func (s *Server) selfKill(reason string) {
 }
 
 func (s *Server) savePolicyLocked() {
+	s.bfPruneLocked()
 	if err := savePolicy(s.path(FilePolicy), s.pol); err != nil {
 		s.log.Error("WA_POLICY_WRITE_FAILED", "Writing policy.json failed.", nil)
 	}
