@@ -89,7 +89,9 @@ def _classify(issues: list[dict]):
         if sev == "P0":
             blockers.append(row)                       # P0 always blocks, even with the accepted label
         elif sev == "P1":
-            if any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
+            if any(l.lower() == "security" for l in _label_names(i)):
+                blockers.append(row)                   # a security P1 always blocks, whatever other label it carries
+            elif any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
                 accepted.append(row)
             elif (any(l.lower() in NON_BLOCKING_P1_LABELS for l in _label_names(i))
                   and not any(l.lower() in NEVER_EXEMPT_LABELS for l in _label_names(i))):
@@ -105,7 +107,8 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
     """THE one release-gate issue rule, shared by `jarvis release status` and core/tools/release_gate.py (#535).
 
     Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs).
-    Blockers: every open P0, and every open P1 without the owner-only label `known-issue-4.5` (exact), except a P1
+    Blockers: every open P0, every open P1 labelled security, and every other open P1 without the owner-only label
+    `known-issue-4.5` (exact), except a P1
     labelled flaky-test/dev-tool and neither security nor showstopper (carried). Accepted: open P1 carrying
     `known-issue-4.5` (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
     b, a, _ = _classify(issues)

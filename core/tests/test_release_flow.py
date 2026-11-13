@@ -56,6 +56,15 @@ def test_security_or_showstopper_p1_blocks_even_when_flaky_or_dev_tool():
             assert rf.carried_issues([i]) == []
 
 
+def test_security_p1_blocks_even_with_known_issue_label():
+    for extra in ((), ("flaky-test",), ("dev-tool",)):
+        labels = ["P1", "known-issue-4.5", " Security ", *extra]
+        i = {"number": 32, "state": "open", "labels": [{"name": n} for n in labels]}
+        blockers, accepted = rf.classify_issues([i])
+        assert [b[0] for b in blockers] == [32] and accepted == [], extra
+        assert not rf.check_issues([i]).ok and rf.carried_issues([i]) == []
+
+
 def test_exempt_p1_is_reported_truthfully():
     flaky = {"number": 41, "state": "open", "labels": [{"name": "P1"}, {"name": "flaky-test"}]}
     c = rf.check_issues([flaky])
