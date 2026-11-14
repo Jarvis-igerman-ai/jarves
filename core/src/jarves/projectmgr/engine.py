@@ -11,6 +11,8 @@ text for the next card), repro {files, cmd}, kept (branch of work done without a
 """
 from __future__ import annotations
 
+import os
+import subprocess
 import threading
 from pathlib import Path
 
@@ -19,6 +21,32 @@ from ..orchestrator.envelope import clean, summary
 from . import cards, debate as debatemod, gitops, pipeline as pl
 
 STAGE_RUNS_PER_STAGE = 3                  # a task may run at most 3 x (active stages) stages in total (no ping-pong)
+
+
+def proc_token(pid: int) -> str:
+    """Identity of a live process: its start time (#1098). '' when it is gone or cannot be read; a stored pid is killed
+    only when this still matches, so a pid the OS reused for another program is never touched."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            h = k.OpenProcess(0x1000, False, int(pid))             # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return ""
+            try:
+                ft = [wintypes.FILETIME() for _ in range(4)]
+                ok = k.GetProcessTimes(h, *[ctypes.byref(f) for f in ft])
+                return f"{ft[0].dwHighDateTime}:{ft[0].dwLowDateTime}" if ok else ""
+            finally:
+                k.CloseHandle(h)
+        stat = Path(f"/proc/{int(pid)}/stat")
+        if stat.exists():
+            return stat.read_text().rsplit(")", 1)[1].split()[19]   # field 22: start time since boot
+        r = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True, text=True, timeout=5)
+        return " ".join(r.stdout.split())
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError, AttributeError):
+        return ""
 
 
 class StageEngine:
@@ -267,6 +295,7 @@ class StageEngine:
     def _run_agent(self, p, t, r, card, wt, model, team, cancel, read_only=False):
         def on_start(pid_: int) -> None:
             self.db.update_task(t["id"], pid=pid_)
+            self._set_job(t, pid_token=proc_token(pid_))
         res = r.run(card, str(wt), model=model, check_argv=p["check_cmd"], on_start=on_start, cancel=cancel,
                     timeout=min(14400, self.cfg.task_timeout_s * (3 if team else 1)), team=team, read_only=read_only)
         self._cost(res)

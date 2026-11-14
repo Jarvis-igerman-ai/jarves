@@ -16,7 +16,17 @@ from pathlib import Path
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
 # files an agent may never change: they would widen the permissions of every later task or run code on its own
-PROTECTED = (".claude/", ".codex/", ".opencode/", ".git/", ".githooks/", "opencode.json", ".mcp.json", ".gitmodules")
+PROTECTED = (".claude/", ".codex/", ".opencode/", ".git/", ".githooks/", ".github/", "opencode.json", ".mcp.json",
+             ".gitmodules")
+_PROTECTED_NAMES = ("opencode.json", ".mcp.json")
+
+
+def is_protected(path: str) -> bool:
+    """Case-insensitive (Windows and macOS file systems are, #1097) and separator-neutral; `./` prefixes ignored."""
+    p = path.replace("\\", "/").casefold()
+    while p.startswith("./"):
+        p = p[2:]
+    return p.startswith(PROTECTED) or p.rsplit("/", 1)[-1] in _PROTECTED_NAMES
 ENV_KEEP = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
             "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "TERM", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
             "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "HOMEDRIVE",
@@ -173,7 +183,7 @@ def in_scope(path: str, scope: list[str]) -> bool:
 
 def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]]:
     """(protected files touched, files outside the declared scope)."""
-    prot = [f for f in files if f.startswith(PROTECTED) or f.split("/")[-1] in ("opencode.json", ".mcp.json")]
+    prot = [f for f in files if is_protected(f)]
     out = [f for f in files if f not in prot and not in_scope(f, scope)]
     return prot, out
 

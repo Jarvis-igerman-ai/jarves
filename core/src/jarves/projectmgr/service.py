@@ -100,7 +100,7 @@ class Manager(StageEngine):
         for p in self.db.projects():
             for t in self.db.tasks(p["id"], ("running", "review")):
                 if t["pid"]:
-                    _kill_pid(t["pid"])
+                    _kill_pid(t["pid"], self._job(t).get("pid_token", ""))
                 stages = self._stages(p, t)
                 kind = stages[t["stage"]]["kind"] if t["stage"] < len(stages) else "work"
                 job = self._job(t)
@@ -1004,7 +1004,7 @@ class Manager(StageEngine):
             if ev is not None:
                 ev.set()
             elif t["pid"]:
-                _kill_pid(t["pid"])
+                _kill_pid(t["pid"], self._job(t).get("pid_token", ""))
             self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED} (retry {t['seq']} to continue)", pid=0)
             self.db.event(t["id"], "owner", "stopped", "stopped by the owner")
             done.append(f"#{t['seq']}")
@@ -1296,7 +1296,12 @@ def _read_brief(root: Path) -> str:
     return ""
 
 
-def _kill_pid(pid: int) -> None:
+def _kill_pid(pid: int, token: str) -> None:
+    """Kill a stored child pid only when it is still the same process (#1098): no recorded identity, a process that is
+    gone or a pid reused by another program is left alone."""
+    from .engine import proc_token
+    if not token or proc_token(pid) != token:
+        return
     try:
         import os
         import signal
