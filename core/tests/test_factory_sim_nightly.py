@@ -64,7 +64,8 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert "FAILED core/tests/t.py::x" in body
 
 
-def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
+def test_schedule_command_is_0300_daily_and_installs_nothing(capsys, monkeypatch):
+    monkeypatch.setattr(factory_sim, "__file__", "/repo/core/tools/factory_sim.py")   # also when run from a worktree
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out
     assert "/ST 03:00" in out and "--nightly" in out and "DAILY" in out
@@ -97,3 +98,20 @@ def test_deep_nesting_and_string_ok(tmp_path):
     assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
     f.write_text('{"at": 1.0, "ok": "false"}')
     assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
+
+
+def test_schedule_command_refuses_an_ephemeral_worktree_path():
+    """#897: printed from .claude/worktrees/... it would point the nightly task at a checkout that goes away."""
+    tmp = Path("C:/work/jarves-main/.claude/worktrees/agent-1/core/tools/factory_sim.py")
+    assert factory_sim.schedule_command(tmp).startswith("refused:")
+    assert factory_sim.schedule_command(Path("C:/work/jarves-main/core/tools/factory_sim.py")).startswith("schtasks ")
+
+
+def test_auto_issue_has_an_area_label_and_redacts_ghr_and_posix_paths(monkeypatch):
+    """#897: the auto-issue carries an area label; ghr_ tokens and POSIX/UNC paths never reach the public body."""
+    import subprocess
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "[]", ""))
+    factory_sim.file_issue(["x"], "FAILED /home/bob/t.py::x \\\\srv\\share\\a.py ghr_ABCDEFGHIJKL - boom")
+    body = calls[1][calls[1].index("--body") + 1]
+    assert "testing" in calls[1] and "/home/bob" not in body and "\\\\srv" not in body and "ghr_ABC" not in body
