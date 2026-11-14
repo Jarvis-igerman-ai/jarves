@@ -124,6 +124,25 @@ class VerdictTests(Base):
         self.store.observe_agent("w2", "idle")               # an idle unclaimed agent is not a running worker
         self.assertEqual(self.kind()[1]["detail"]["active"], 1)
 
+    def test_running_tasks_count_while_their_worker_heartbeat_is_quiet(self):
+        """#796 item 4: 2 running native tasks + 169 queued read as working with 2 running, even when the workers'
+        own heartbeat is older than the freshness window but their tasks just recorded progress."""
+        self.alive()
+        for i in range(171):
+            self.store.create_task({"id": f"t{i}", "title": f"Task {i}", "lane": "bugs", "acceptance": [{"label": "works"}]})
+        claimed = []
+        for w in ("w1", "w2"):
+            self.store.register_agent({"id": w, "label": w, "lane": "bugs", "provider": "claude-native"})
+            self.store.observe_agent(w, "running")
+            claimed.append(self.store.claim(w)["id"])
+        self.advance(obs.ACTIVE_FRESH_S + 60)
+        self.alive()
+        for tid in claimed:                                  # the workers report evidence: the tasks progress
+            self.store.record_check(tid, "C1", "test passed")
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"], v["detail"]["running_by_lane"], v["detail"]["ready"]),
+                         ("working", 2, {"bugs": 2}, 169))
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()

@@ -647,9 +647,15 @@ def verdict(store, now: float | None = None) -> dict:
     live = [a for a in agents if a.get("status") != "offline"
             and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S
             and (a.get("task_id") in running or a.get("status") == "running")]
-    active = len(live)
+    # A running task that recorded progress recently counts too, while its worker's own heartbeat is quiet (#796 item 2);
+    # an offline worker's task does not (that is a stall, not work).
+    offline = {a["id"] for a in agents if a.get("status") == "offline"}
+    held = {a.get("task_id") for a in live}
+    quiet = [{"task_id": t["id"]} for t in tasks if t["state"] == "running" and t["id"] not in held
+             and t.get("agent_id") not in offline and t.get("updated_at", 0) > now - ACTIVE_FRESH_S]
+    active = len(live) + len(quiet)
     running_by_lane: dict[str, int] = {}
-    for a in live:
+    for a in live + quiet:
         lane = {"features": "feat"}.get(lane_of.get(a.get("task_id"), "unclaimed"), lane_of.get(a.get("task_id"), "unclaimed"))
         running_by_lane[lane] = running_by_lane.get(lane, 0) + 1
     decision = _meta(store, DECISION_KEY, {})
