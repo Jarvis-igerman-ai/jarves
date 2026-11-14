@@ -656,3 +656,27 @@ func TestBackfillLeftoverOrphanCostsTheNextChatOneTimeout(t *testing.T) {
 		t.Fatalf("end %s", got.raw)
 	}
 }
+
+// Inherited orphans never exhaust a responsive chat's retries: four unanswered requests leave four orphans, and
+// the next chat, whose every request gets a genuine id-less empty answer, still finishes complete.
+func TestBackfillManyInheritedOrphansDoNotExhaustAResponsiveChat(t *testing.T) {
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
+	e.msg(stranger, "s1", 500, "other chat", false)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	first := e.requests()[0].Chat
+	for i := 0; i <= backfillRetries; i++ {
+		tm.fire() // never answered: the first chat ends incomplete with four orphans
+	}
+	second := e.requests()[len(e.requests())-1].Chat
+	if second == first {
+		t.Fatalf("the first chat did not move on: %d requests", len(e.requests()))
+	}
+	for i := 0; i < 10 && e.drain(0).body["state"] == "running"; i++ {
+		e.answerFor("", second, 0, 0, fmt.Sprintf("x%d", i)) // genuine empty answer (may be taken for a late one)
+		tm.fire()
+	}
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 {
+		t.Fatalf("only the unanswered chat may be incomplete: %s", got.raw)
+	}
+}

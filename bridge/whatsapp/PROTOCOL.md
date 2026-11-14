@@ -116,7 +116,12 @@ Matching (normative):
 
 Matching (fallback heuristic, only for an answer that names no request):
 - An answer that brings nothing usable while an earlier request is still unanswered is taken as that late answer and
-  does not finish the chat. If it was the real answer, the request times out and is asked again.
+  does not finish the chat. If it was the real answer, the request times out and is asked again; that timeout does
+  not count as a retry and adds no new late answer to expect, so earlier unanswered requests cost a responsive chat
+  time, never its completion.
+- Residual risk (UNVERIFIED, two late answers in a row): if a swallowed late answer is followed by this request's
+  own answer also arriving late, that empty answer can finish a later request, possibly of the next chat when it
+  names no chat. Transports that echo the request id are not affected.
 
 Read scope and wipe triggers:
 - Read scope is checked again before every request. A chat that leaves it is never asked again (it counts in

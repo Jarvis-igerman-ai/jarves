@@ -317,10 +317,13 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	var lost F
 	// its answer may still arrive later, unless an answer during this request was already taken for a late one:
 	// then the answer did arrive, and counting it again would swallow every later genuine completion of the chat
+	// A timeout during which an answer was swallowed is not a retry either: the phone answered and one orphan was
+	// paid off. Orphans only grow on counted timeouts, so these free retries stay bounded by the orphan count and
+	// inherited orphans can never exhaust a responsive chat's retry budget.
 	if timeout && !b.swallowed {
 		b.orphans++
 	}
-	if timeout || (b.truncated && b.accepted == 0) {
+	if (timeout && !b.swallowed) || (b.truncated && b.accepted == 0) {
 		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}
 	switch {
