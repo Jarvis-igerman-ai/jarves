@@ -567,7 +567,7 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
     for x in msgs:
         once.setdefault((str(x.get("chat", "")), str(x.get("id", ""))), x)
     msgs = list(once.values())
-    if len(msgs) > MAX_CANDIDATES:
+    if len(msgs) > MAX_CANDIDATES:                          # backstop for direct callers; gather() already bounds
         msgs, truncated = msgs[:MAX_CANDIDATES], truncated + ["candidates"]
     picked = select(msgs, terms=terms_for(topic), contacts=contacts, chat=chat, money=topic_key(topic) == "payment",
                     since=since, until=until)
@@ -590,13 +590,15 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
 
 
 def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
-    """The short Hebrew chat answer: counts and totals only; a cut read is said even when nothing was found."""
+    """The short Hebrew chat answer: counts and totals only; rows cut by MAX_ROWS and a cut read are always said."""
     cut = " לא כל ההודעות נקראו, ייתכן שחסרות." if c.get("retrieval_truncated") else ""
     if not c.get("rows"):
         return "לא מצאתי הודעות על הנושא הזה." + cut
     sums = "; ".join(f"{g['payee']}: {g['total_ils']:g} ₪" for g in totals_[:5])
     return (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ ({sums})."
-            + (f" {c['uncertain']} מסומנות לבדיקה." if c.get("uncertain") else "") + cut
+            + (f" {c['uncertain']} מסומנות לבדיקה." if c.get("uncertain") else "")
+            + (f" הדוח נחתך: {c['cut']} הודעות ישנות לא נכנסו. צמצמו עם --since או --from." if c.get("cut") else "")
+            + cut
             + (f" הדוח נשמר בתיקיית reports: {files[0].stem}." if files else ""))
 
 
@@ -645,6 +647,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     may hold more is named in `truncated`."""
     out = Candidates()
     out.truncated = []
+    started, reads = time.monotonic(), {"archive": 0, "bridge": 0}
     seen: set[tuple[str, str]] = set()
     folded = [f for f in (fold(t).strip() for t in terms) if f]
 
@@ -688,6 +691,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             offset = 0
             while cid in readable and not bound():
                 page = archive.chat_messages(cid, since=since, until=until, limit=ARCHIVE_PAGE, offset=offset)
+                reads["archive"] += 1
                 add(page, "archive", False)
                 if len(page) < ARCHIVE_PAGE:
                     break
@@ -695,13 +699,18 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     sweep = money
     for w in words:
         if bound():
-            return out
+            break
         page = client.search(w, cap_messages)
         add(page, "bridge", False)
         sweep = sweep or len(page) >= cap_messages
-    for cid in (sorted(readable) if sweep and chat is None else full_read):
-        if bound():
-            break
-        page = client.messages(cid, since, cap_messages).get("messages", [])
-        add(page, "bridge", len(page) >= cap_messages)
+    else:
+        for cid in (sorted(readable) if sweep and chat is None else full_read):
+            if bound():
+                break
+            page = client.messages(cid, since, cap_messages).get("messages", [])
+            reads["bridge"] += 1
+            add(page, "bridge", len(page) >= cap_messages)
+    logs.info("whatsapp", "WA_COLLECT_READ", "WhatsApp collect read pass (counts only)", found=len(out),
+              pages=reads["archive"], count=reads["bridge"],             # archive chat pages, bridge chat reads
+              took_ms=round((time.monotonic() - started) * 1000))
     return out

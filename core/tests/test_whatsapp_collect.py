@@ -176,7 +176,8 @@ async def test_tool_collects_contact_chat_and_mentions_into_files(bridge, home, 
     assert "שילמתי" not in json.dumps(r.data, ensure_ascii=False)          # counts and totals, never texts
     assert "1950" in r.message
     logged = json.dumps(seen_logs, ensure_ascii=False, default=str)
-    assert "WA_COLLECTED" in logged and "שילמתי" not in logged and "אבי" not in logged    # counts only
+    assert "WA_COLLECTED" in logged and "WA_COLLECT_READ" in logged and "took_ms" in logged
+    assert "שילמתי" not in logged and "אבי" not in logged                                  # counts only
 
 
 async def test_tool_with_a_model_unknown_person_and_gates(bridge, home, clock):
@@ -214,6 +215,15 @@ async def test_tool_reads_old_messages_from_the_archive(bridge, home, clock):
         assert r.ok and r.data["counts"]["rows"] == 2 and r.data["source"].startswith("archive")
     finally:
         a.close()
+
+
+async def test_tool_answer_says_older_rows_were_cut(bridge, home, clock, monkeypatch):
+    monkeypatch.setattr(wcol, "MAX_ROWS", 2)                                 # 4 matching rows, 2 fit
+    _seed(bridge, clock())
+    r = await make_reg(home, clock).call("whatsapp_collect", {"topic": "תשלומים", "contacts": ["אבי"]})
+    assert r.ok and r.data["counts"]["rows"] == 2 and r.data["counts"]["cut"] == 2
+    assert "2 הודעות ישנות לא נכנסו" in r.message, r.message
+    assert "לא נכנסו" not in wcol.answer_he({"rows": 1, "uncertain": 0, "total_ils": 1.0, "cut": 0}, [], [])
 
 
 def test_tool_is_untrusted_action_and_feature_is_beta_off(home):
