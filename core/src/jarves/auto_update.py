@@ -45,6 +45,25 @@ TICK_S = 600                             # how often the Core looks (the update 
 
 CHOICES = ("now", "later", "off")
 
+_failing: set[tuple[str, str]] = set()   # (code, where) currently failing: the Core looks every TICK_S
+_failing_lock = threading.Lock()
+
+
+def _first_time(code: str, where: str = "") -> bool:
+    """True when this read-only (code, where) starts failing, so it is logged once per outage, not on every look.
+    The outage ends when that same read succeeds again (_ok), so a later outage is logged again."""
+    with _failing_lock:
+        if (code, where) in _failing:
+            return False
+        _failing.add((code, where))
+        return True
+
+
+def _ok(code: str, where: str = "") -> None:
+    with _failing_lock:
+        _failing.discard((code, where))
+
+
 PLATFORMS = {
     "windows": {"status": "implemented_unverified",
                 "evidence": "core/tests/test_auto_update.py (fake signed release server, fake installer: on/off, quiet "
@@ -108,9 +127,14 @@ def is_enabled(cfg, home: Path) -> bool:
     from . import features
     try:
         f = features.Features(cfg, home)
-        return f.enabled(FEATURE) and f.enabled("update_check")
-    except Exception:
+        on = f.enabled(FEATURE) and f.enabled("update_check")
+    except Exception as e:                                  # reported as OFF, but say why (JAR-86)
+        if _first_time("AUTO_UPDATE_SWITCH_UNREADABLE"):
+            logs.warn("updates", "AUTO_UPDATE_SWITCH_UNREADABLE", "auto-update switch unreadable; treated as off",
+                      error_type=type(e).__name__)
         return False
+    _ok("AUTO_UPDATE_SWITCH_UNREADABLE")
+    return on
 
 
 class AutoUpdater:
@@ -209,11 +233,14 @@ class AutoUpdater:
             from .config import Config
             f = features.Features(self.cfg if self.cfg is not None else Config(), self.home)
             f.enabled(FEATURE)
-            if FEATURE not in f._state["enabled"]:
-                return "beta" if f.enabled("beta_channel") else "stable"
-        except Exception:
-            pass
-        return None
+            note = ("beta" if f.enabled("beta_channel") else "stable") if FEATURE not in f._state["enabled"] else None
+        except Exception as e:
+            if _first_time("AUTO_UPDATE_DEFAULT_NOTE_FAILED"):
+                logs.warn("updates", "AUTO_UPDATE_DEFAULT_NOTE_FAILED", "could not tell the channel default",
+                          error_type=type(e).__name__)
+            return None
+        _ok("AUTO_UPDATE_DEFAULT_NOTE_FAILED")
+        return note
 
     # ------------------------------------------------------------------ the owner's answer to the notice
     def answer(self, choice: str, set_switch: Callable[[bool], None] | None = None) -> dict:
@@ -250,12 +277,15 @@ class AutoUpdater:
             from .config import Config
             f = features.Features(self.cfg if self.cfg is not None else Config(), self.home)
             f.enabled("beta_channel")
+            _ok("AUTO_UPDATE_CHANNEL_CHECK_FAILED")
             if "beta_channel" in f._state["enabled"]:
                 st["channel_chosen"] = True
                 _save(self.home, st)
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            if _first_time("AUTO_UPDATE_CHANNEL_CHECK_FAILED"):
+                logs.warn("updates", "AUTO_UPDATE_CHANNEL_CHECK_FAILED", "could not read the channel choice",
+                          error_type=type(e).__name__)
         st["prompted"] = True
         self._emit(st, "choose", "", "")
         _save(self.home, st)
@@ -527,13 +557,19 @@ def core_busy(core) -> list[str]:
     try:
         if core.approvals.has_pending():
             out.append("pending_approval")
-    except Exception:
-        pass
+        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
+    except Exception as e:
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="approvals")
     try:
         if getattr(core.chat, "turns", None):
             out.append("chat_turn")
-    except Exception:
-        pass
+        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat")
+    except Exception as e:
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="chat")
     try:
         from .orchestrator.envelope import LIVE_STATES
         busy_states = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"} & set(LIVE_STATES)
@@ -541,14 +577,20 @@ def core_busy(core) -> list[str]:
         db = getattr(o, "db", None)
         if db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True)):
             out.append("coding_agent")
-    except Exception:
-        pass
+        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents")
+    except Exception as e:
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="agents")
     try:
         eng = core.ops.alerts
         if eng.quiet_now() or eng.paused():
             out.append("quiet_hours")
-    except Exception:
-        pass
+        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet")
+    except Exception as e:
+        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet"):
+            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                      error_type=type(e).__name__, where="quiet")
     return out
 
 

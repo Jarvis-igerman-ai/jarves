@@ -1,0 +1,1 @@
+- Fixed: a cancelled goal plan stays cancelled: restart recovery and the runner's step start no longer overwrite a racing cancel, the step is not run, and a cancel on a stale view no longer turns a finished plan into cancelled (#813, JAR-235).

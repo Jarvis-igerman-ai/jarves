@@ -1,0 +1,1 @@
+- Added: regression test that the workflow state page (GET /api/state) still opens with a warning when the nightly simulation result file is malformed or missing (JAR-261, #897).

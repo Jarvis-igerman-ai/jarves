@@ -2,7 +2,7 @@ order = 53
 category = "costs"
 probe = "limits"
 optional = true
-aliases = ["מגבלה יומית", "הגעתי למגבלה", "מגבלת קול", "daily limit", "voice limit", "limit reached", "daily_realtime_minutes", "daily_request_limit"]
+aliases = ["מגבלה יומית", "בדיקת מגבלות", "test limits", "budget limits", "הגעתי למגבלה", "מגבלת קול", "daily limit", "voice limit", "limit reached", "daily_realtime_minutes", "daily_request_limit"]
 links = ["usage", "api_budget", "voice_ai"]
 title_he = "מגבלות יומיות (קול ובקשות)"
 title_en = "Daily limits (voice and requests)"
@@ -17,10 +17,15 @@ privacy_he = "אין."
 privacy_en = "None."
 
 [[steps]]
-he = "בדקו מה נוצל: jarvis status (השורה הראשונה), jarvis doctor, או עמוד הבית בלוח."
-en = "See what is used: jarvis status (first lines), jarvis doctor, or the dashboard Home page."
-action = "command:jarvis status"
+he = "לראות כמה נוצל וכמה נשאר היום: jarvis budget limits (דקות קול ובקשות AI, תמיד). אזהרות מופיעות גם ב-jarvis status, jarvis doctor ובעמוד הבית בלוח."
+en = "See what is used and left today: jarvis budget limits (voice minutes and AI requests, always shown). Warnings also show in jarvis status, jarvis doctor and the dashboard Home page."
+action = "command:jarvis budget limits"
 check = "probe:limits"
+
+[[steps]]
+he = "לבדוק שהמגבלות עובדות, בחינם: jarvis budget test-limits (מסד נתונים זמני, בלי מיקרופון, בלי רשת, המונים שלכם לא משתנים). אפשר לבדוק ערך אחר: --voice-minutes 1 --requests 3. מראה גם את ההודעה שתשמעו."
+en = "Test that the limits work, for free: jarvis budget test-limits (a throw-away database, no microphone, no network; your counters do not change). Try other values with --voice-minutes 1 --requests 3. It also shows the notice you would hear."
+action = "command:jarvis budget test-limits"
 
 [[steps]]
 he = "להעלות את דקות הקול ליום: jarvis budget set --voice-minutes 60 (או בקובץ config.toml: [ai] daily_realtime_minutes = 60)."
@@ -62,6 +67,6 @@ fix_en = "Check jarvis status: a LIMIT REACHED line means the daily cap is used 
 
 [platform]
 windows = "implemented_unverified"
-windows_note_en = "core/tests/test_limits.py (fake budget, fake audio) and core/tests/test_daily_limits.py (voice cap, request cap, midnight reset on a real Budget with a fake day); no real limit hit on a real microphone yet"
+windows_note_en = "jarvis budget limits / test-limits (JAR-321: real Budget on a throw-away database, PASS/FAIL per limit, tested in core/tests/test_daily_limits.py); core/tests/test_limits.py (fake budget, fake audio) and core/tests/test_daily_limits.py (limits set with jarvis budget set; voice cap, request cap, midnight reset on a real Budget with a fake day; a second voice request at a 1-minute limit is refused by the Core voice gate with a fake live session; a request at a used-up request limit sends no model call and says the limit was reached, with a fake model); no real limit hit on a real microphone yet"
 pi = "implemented_unverified"
 pi_note_en = "pure Python; not run on a Pi yet"

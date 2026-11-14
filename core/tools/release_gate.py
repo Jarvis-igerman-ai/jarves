@@ -144,6 +144,7 @@ def bug_table_open(text: str, name: str = "") -> list[str]:
     return out
 
 
+ISSUES_PASSED = rf.ISSUES_CHECK  # exempt P1s may be open: printed below as accepted/carried
 ACCEPTED_LABEL = rf.ACCEPTED_LABEL   # OWNER-ONLY label: the owner accepts an open P1 as a known issue for the 4.5 stable
 
 
@@ -158,7 +159,7 @@ def accepted_issues(issues: list[dict]) -> list[str]:
 
 
 def carried_list(issues: list[dict]) -> list[str]:
-    """Open P2/P3 issues carried into this release; printed, never blocking."""
+    """Open P2/P3 and flaky-test/dev-tool P1 issues carried into this release; printed, never blocking."""
     return [f"#{n} ({sev}): {title}" for n, sev, title in rf.carried_issues(issues)]
 
 
@@ -282,7 +283,7 @@ def _print_accepted(accepted: list[str]) -> None:
 
 def _print_carried(carried: list[str]) -> None:
     if carried:
-        print(f"known issues carried into this release ({len(carried)}, open P2/P3, not blocking):")
+        print(f"known issues carried into this release ({len(carried)}, open P2/P3 or flaky-test/dev-tool P1, not blocking):")
         for c in carried:
             print(f"  - {c}")
 
@@ -353,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_legacy(legacy)
         return 1
     print(f"RELEASE GATE PASSED for {a.tag} at {a.sha[:12]}: SHA verified, "
-          "no open P0/P1, manual sign-off complete and signed")
+          f"{ISSUES_PASSED}, manual sign-off complete and signed")
     _print_accepted(accepted)
     _print_carried(carried)
     _print_legacy(legacy)

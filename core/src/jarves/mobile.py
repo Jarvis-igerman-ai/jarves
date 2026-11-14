@@ -172,6 +172,8 @@ class MobileAccess:
         self.scheme = "http"
         self.host: str | None = None
         self.port = 0
+        self._history_failed = False               # health_view: one warn per unreadable-history outage, not per poll
+        self._replay_failed = False                # replay(): one warn per continuity-store outage, not per message
         self.tailnet: dict = {}                  # tailnet.detect() result of THIS run (empty = Tailscale not used)
         self.tls_source = "none"                 # tailscale | localca | selfsigned | none
         self.bind: str | None = None             # the address the server listens on
@@ -457,9 +459,15 @@ class MobileAccess:
             if hit and self.clock() - hit[0] <= REPLY_TTL_S:
                 return hit[1]
         try:
-            return self.cont.seen(device, mid, REPLY_TTL_S)          # survives a PC restart (the in-memory copy is gone then)
-        except Exception:
+            hit = self.cont.seen(device, mid, REPLY_TTL_S)           # survives a PC restart (the in-memory copy is gone then)
+        except Exception as e:                    # the message may now run a second time: say so once per outage
+            if not self._replay_failed:
+                logs.warn("mobile", "MOBILE_REPLAY_LOOKUP_FAILED",
+                          "idempotent reply lookup failed; message not de-duplicated", error_type=type(e).__name__)
+            self._replay_failed = True
             return None
+        self._replay_failed = False
+        return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
         now = self.clock()
@@ -544,12 +552,20 @@ def core_bridge(core, loop) -> Bridge:
     def goals():
         return getattr(getattr(core, "ops", None), "goals", None)
 
+    presence_failed = [False]                    # one warn per presence outage, not per phone request
+
     def desktop_present() -> bool:
         from .calm import owner_at_pc
         try:
-            return bool(owner_at_pc(core))
-        except Exception:
+            present = bool(owner_at_pc(core))
+        except Exception as e:                    # unknown presence is reported as "away", but visibly
+            if not presence_failed[0]:
+                logs.warn("mobile", "MOBILE_PRESENCE_UNKNOWN", "owner presence could not be read",
+                          error_type=type(e).__name__)
+            presence_failed[0] = True
             return False
+        presence_failed[0] = False
+        return present
     def audio() -> dict:
         from . import mobile_audio
         from .runtime.privacy_state import derive
@@ -597,13 +613,59 @@ def core_bridge(core, loop) -> Bridge:
 STATIC_DIR = Path(__file__).parent / "dashboard_static" / "mobile"
 
 
+# Phone API errors (JAR-142): what happened, then what to do, in English and Hebrew. The phone page shows error_he in Hebrew.
+_MSG = {
+    "UNREADABLE": ("the request was not readable: reload the page and try again", "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"),
+    "TOO_BIG": ("that is too big to send: try something smaller", "זה גדול מדי לשליחה: נסו משהו קטן יותר"),
+    "NOT_FOUND": ("this phone address does not exist: go back to the phone home page", "הכתובת הזו לא קיימת: חזרו לדף הבית בטלפון"),
+    "RATE": ("too many requests: wait a minute and try again", "יותר מדי בקשות: חכו דקה ונסו שוב"),
+    "BLOCKED": ("this request was blocked for safety: open the phone page from the address on the computer and try again",
+                "הבקשה נחסמה מטעמי בטיחות: פתחו את דף הטלפון מהכתובת שמוצגת במחשב ונסו שוב"),
+    "BAD_CODE": ("wrong or expired code: make a new one on the computer", "הקוד שגוי או שפג תוקפו: צרו קוד חדש במחשב"),
+    "BAD_TOKENS": ("too many failed sign-ins: wait a minute, then pair again on the computer",
+                   "יותר מדי ניסיונות כניסה שנכשלו: חכו דקה ואז חברו שוב במחשב"),
+    "UNPAIRED": ("not paired or revoked: pair again on the computer", "הטלפון לא מחובר או שהחיבור בוטל: חברו אותו שוב במחשב"),
+    "NO_SCOPE": ("this phone may not use {scope}: allow it on the computer", "לטלפון הזה אין הרשאה ל-{scope}: אשרו זאת במחשב"),
+    "NO_PAGE": ("this phone was not given the {page} page: ask on the computer", "הטלפון הזה לא קיבל את הדף {page}: בקשו זאת במחשב"),
+    "PC_ONLY": ("this can only be done on the computer itself: do it there", "את זה אפשר לעשות רק במחשב עצמו: עשו זאת שם"),
+    "NO_SUCH_PAGE": ("this page does not exist: go back to the phone home page", "הדף הזה לא קיים: חזרו לדף הבית בטלפון"),
+    "NO_CA": ("there is no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable",
+              "אין תעודת חיבור מהימן: הפעילו את phone_trust והריצו במחשב jarvis phone trust enable"),
+    "BAD_ID": ("the request was not readable: reload the page and try again", "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"),
+    "STALE": ("this message waited too long while offline: send it again", "ההודעה חיכתה יותר מדי זמן בלי חיבור: שלחו אותה שוב"),
+    "CHAT_RATE": ("too many messages: wait half a minute and send again", "יותר מדי הודעות: חכו חצי דקה ושלחו שוב"),
+    "EMPTY": ("the message is empty: type something and send again", "ההודעה ריקה: כתבו משהו ושלחו שוב"),
+    "NOT_CONNECTED": ("JARVES on the computer is not connected yet: check it is fully started and try again",
+                      "JARVES במחשב עדיין לא מחובר: ודאו שהוא עלה עד הסוף ונסו שוב"),
+    "BUSY": ("the previous request is still being answered: wait for the answer, then try again",
+             "הבקשה הקודמת עדיין בטיפול: חכו לתשובה ונסו שוב"),
+    "CHAT_FAILED": ("JARVES could not answer: try again in a moment", "JARVES לא הצליח לענות: נסו שוב בעוד רגע"),
+    "VOICE_NOT_READY": ("voice is not ready: open the secure (https) phone address and make sure voice is on at the computer",
+                        "הקול לא מוכן: פתחו את כתובת הטלפון המאובטחת (https) והפעילו קול במחשב"),
+    "VOICE_RATE": ("too many voice requests: wait half a minute and try again", "יותר מדי בקשות קול: חכו חצי דקה ונסו שוב"),
+    "BAD_AUDIO": ("the recording format was not accepted: record again from the phone page", "פורמט ההקלטה לא התקבל: הקליטו שוב מדף הטלפון"),
+    "VOICE_FAILED": ("JARVES could not understand the recording: try again and speak closer to the phone",
+                     "JARVES לא הצליח להבין את ההקלטה: נסו שוב ודברו קרוב יותר לטלפון"),
+    "UNAVAILABLE": ("{what} could not be read right now: try again in a moment", "{what_he} לא זמין כרגע: נסו שוב בעוד רגע"),
+    "METHOD": ("this action is not available here: go back and use the buttons on the page", "הפעולה הזו לא זמינה כאן: חזרו והשתמשו בכפתורים בדף"),
+}
+
+
+def _err(key: str, **fmt) -> dict:
+    en, he = _MSG[key]
+    return {"error": en.format(**fmt), "error_he": he.format(**fmt)}
+
+
+_UNREADABLE, _TOO_BIG = _err("UNREADABLE"), _err("TOO_BIG")
+
+
 def _body(h, limit: int) -> bytes | None:
     try:
         n = int(h.headers.get("Content-Length") or 0)
     except ValueError:
         n = -1
     if n < 0 or n > limit:
-        h._json(413 if n > limit else 400, {"error": "too large" if n > limit else "bad Content-Length"})
+        h._json(413, _TOO_BIG) if n > limit else h._json(400, _UNREADABLE)
         return None
     return h.rfile.read(n) if n else b""
 
@@ -615,10 +677,10 @@ def _json_body(h) -> dict | None:
     try:
         d = json.loads(raw or b"{}")
     except ValueError:
-        h._json(400, {"error": "invalid JSON"})
+        h._json(400, _UNREADABLE)
         return None
     if not isinstance(d, dict):
-        h._json(400, {"error": "JSON object expected"})
+        h._json(400, _UNREADABLE)
         return None
     return d
 
@@ -653,7 +715,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     url = urlsplit(h.path)
     path, method = url.path, h.command
     if not mob.enabled:
-        return h._json(404, {"error": "not found"})
+        return h._json(404, _err("NOT_FOUND"))
     # ---- the PWA files: public app code, no secrets
     if path == "/m":
         return h._send(302, b"", "text/plain", {"Location": "/m/"})
@@ -676,39 +738,39 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if not mob.rate_ok(("ipev:" if events else "ip:") + ip, EVENTS_PER_MIN if events else IP_RATE_PER_MIN):
         mob.audit_noisy("rate_limited", ip, path=path, scope="address")
         logs.warn("mobile", "MOBILE_RATE_LIMITED", "phone API rate limit hit", path=path)
-        return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
+        return h._json_extra(429, _err("RATE"), {"Retry-After": "60"})
     if method != "GET" and (h.headers.get("X-Jarves") != "1" or not _origin_ok(h)):
         mob.audit_noisy("refused_cross_origin", ip, path=path)
-        return h._json(403, {"error": "cross-origin or missing X-Jarves header"})
+        return h._json(403, _err("BLOCKED"))
     if path == "/api/m/pair" and method == "POST":
         d = _json_body(h)
         if d is None:
             return
         got = mob.pair(str(d.get("code", "")), str(d.get("name", "")), ip)
         if got is None:
-            return h._json(403, {"error": "wrong or expired code: make a new one on the computer"})
+            return h._json(403, _err("BAD_CODE"))
         # not h._json: the dashboard's output cleaner masks credential-named keys, and this body IS the credential
         return h._send(200, json.dumps({"ok": True, **got}).encode("utf-8"), "application/json; charset=utf-8")
     # ---- everything below needs a device token
     if not mob.auth_failures_ok(ip):
         mob.audit_noisy("rate_limited", ip, path=path, scope="bad tokens")
-        return h._json_extra(429, {"error": "too many bad tokens"}, {"Retry-After": "60"})
+        return h._json_extra(429, _err("BAD_TOKENS"), {"Retry-After": "60"})
     auth = h.headers.get("Authorization") or ""
     dev = mob.authenticate(auth[7:].strip()) if auth[:7].lower() == "bearer " else None
     if dev is None:
         mob.note_auth_failure(ip)
         mob.audit_noisy("auth_refused", ip, path=path)
         logs.warn("mobile", "MOBILE_AUTH_FAILED", "phone API request without a valid token", path=path)
-        return h._json(401, {"error": "not paired or revoked: pair again on the computer"})
+        return h._json(401, _err("UNPAIRED"))
     if not mob.rate_ok(("devev:" if events else "dev:") + dev["id"], EVENTS_PER_MIN if events else DEVICE_RATE_PER_MIN):
         mob.audit("rate_limited", device=dev["id"], path=path, scope="device")
-        return h._json_extra(429, {"error": "too many requests"}, {"Retry-After": "60"})
+        return h._json_extra(429, _err("RATE"), {"Retry-After": "60"})
 
     def need(scope: str) -> bool:
         if scope in dev["scopes"]:
             return True
         mob.audit("refused_scope", device=dev["id"], path=path, reason=scope)
-        h._json(403, {"error": f"this device may not use {scope}"})
+        h._json(403, _err("NO_SCOPE", scope=scope))
         return False
 
     def done(status: int, obj, **extra) -> None:
@@ -720,7 +782,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if page in dev["pages"]:
             return True
         mob.audit("refused_page", device=dev["id"], path=path, reason=page)
-        h._json(403, {"error": f"this device was not given the {page} page: ask on the computer",
+        h._json(403, {**_err("NO_PAGE", page=page),
                       "code": "PAGE_NOT_ALLOWED", "page": page})
         return False
 
@@ -728,15 +790,15 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if seg in PC_ONLY_SEGMENTS:                   # settings, secrets, files, devices...: never from a phone or a remote PC
         mob.audit("refused_pc_only", device=dev["id"], path=path, reason=seg)
         logs.warn("mobile", "MOBILE_PC_ONLY_REFUSED", "a device asked for a computer-only page", path=path)
-        return h._json(403, {"error": "this can only be done on the computer itself", "code": "PAGE_PC_ONLY", "page": seg})
+        return h._json(403, {**_err("PC_ONLY"), "code": "PAGE_PC_ONLY", "page": seg})
     m = re.fullmatch(r"/api/m/pages/([a-z_]{1,20})", path)
     if m and method == "GET":
         name = m.group(1)
         if name in PC_ONLY_PAGES:
             mob.audit("refused_pc_only", device=dev["id"], path=path, reason=name)
-            return h._json(403, {"error": "this can only be done on the computer itself", "code": "PAGE_PC_ONLY", "page": name})
+            return h._json(403, {**_err("PC_ONLY"), "code": "PAGE_PC_ONLY", "page": name})
         if name not in PAGES:
-            return h._json(404, {"error": "no such page", "code": "PAGE_UNKNOWN"})
+            return h._json(404, {**_err("NO_SUCH_PAGE"), "code": "PAGE_UNKNOWN"})
         if not need_page(name):
             return
         return h._json(200, {"page": name, "allowed": True})
@@ -768,7 +830,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
     if path == phone_trust.CA_ROUTE and method == "GET":      # #513: GET /api/m/trust/ca = the PUBLIC CA certificate, only to a paired phone
         pem = phone_trust.ca_certificate_pem(mob.home) if phone_trust.trust_on(mob.home) else None
         if pem is None:
-            return h._json(404, {"error": "no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable"})
+            return h._json(404, _err("NO_CA"))
         mob.audit("trust_ca_downloaded", device=dev["id"])
         return h._send(200, pem, "application/x-x509-ca-cert",
                        {"Content-Disposition": 'attachment; filename="jarves-local-ca.crt"',
@@ -793,27 +855,27 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         mid = d.get("id")
         if mid is not None and not (isinstance(mid, str) and MSG_ID_RE.match(mid)):
-            return h._json(400, {"error": "message id must be 8-64 letters, digits or _ . : -"})
+            return h._json(400, _err("BAD_ID"))
         if mid:
             again = mob.replay(dev["id"], mid)
             if again is not None:                                # a resend: answer from memory, no second run
                 return done(200, {**again, "replay": True}, replay="yes")
             if mob.cont.stale(d.get("age_s")):                   # queued while offline for too long: never run it late
-                return done(410, {"error": "this message waited too long while offline: send it again", "code": "STALE"})
+                return done(410, {**_err("STALE"), "code": "STALE"})
         if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
-            return h._json_extra(429, {"error": "too many messages, slow down"}, {"Retry-After": "30"})
+            return h._json_extra(429, _err("CHAT_RATE"), {"Retry-After": "30"})
         text = str(d.get("text", "")).strip()[:MAX_CHAT_CHARS]
         if not text:
-            return h._json(400, {"error": "text is empty"})
+            return h._json(400, _err("EMPTY"))
         if mob.bridge is None:
-            return done(503, {"error": "the Core is not connected"}, chars=len(text))
+            return done(503, _err("NOT_CONNECTED"), chars=len(text))
         if not mob.begin(dev["id"]):
-            return h._json(409, {"error": "the previous message is still being answered", "code": "BUSY"})
+            return h._json(409, {**_err("BUSY"), "code": "BUSY"})
         try:
             r = mob.bridge.chat(text, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_CHAT_FAILED", "a phone message could not be answered", error_type=type(e).__name__)
-            return done(502, {"error": "JARVES could not answer right now"}, chars=len(text))
+            return done(502, _err("CHAT_FAILED"), chars=len(text))
         finally:
             mob.end(dev["id"])
         out = {"reply": str(r.get("reply", "")), "ok": bool(r.get("ok", True))}
@@ -830,21 +892,21 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if not need("voice") or not need_page("chat"):
             return
         if mob.scheme != "https" or mob.bridge is None or not mob.bridge.voice_available():
-            return h._json(409, {"error": "voice needs TLS (https) and the voice pipeline"})
+            return h._json(409, _err("VOICE_NOT_READY"))
         if not mob.rate_ok("voice:" + dev["id"], VOICE_RATE_PER_MIN):
-            return h._json_extra(429, {"error": "too many voice requests"}, {"Retry-After": "30"})
+            return h._json_extra(429, _err("VOICE_RATE"), {"Retry-After": "30"})
         raw = _body(h, MAX_AUDIO_BYTES)
         if raw is None:
             return
         if raw[:4] != b"RIFF":
-            return h._json(415, {"error": "send a 16-bit PCM WAV"})
+            return h._json(415, _err("BAD_AUDIO"))
         if not mob.begin(dev["id"]):
-            return h._json(409, {"error": "the previous request is still being answered", "code": "BUSY"})
+            return h._json(409, {**_err("BUSY"), "code": "BUSY"})
         try:
             r = mob.bridge.voice(raw, dev["id"])
         except Exception as e:
             logs.warn("mobile", "MOBILE_VOICE_FAILED", "a phone voice request failed", error_type=type(e).__name__)
-            return done(502, {"error": "JARVES could not understand the audio"}, bytes=len(raw))
+            return done(502, _err("VOICE_FAILED"), bytes=len(raw))
         finally:
             mob.end(dev["id"])
         return done(200, {"transcript": str(r.get("transcript", "")), "reply": str(r.get("reply", "")),
@@ -880,7 +942,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         cid = d.get("id")
         if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
-            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+            return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
@@ -897,7 +959,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(200, mobile_plans.view(mob))
         except Exception as e:
             logs.warn("mobile", "MOBILE_PLANS_FAILED", "plans could not be read", error_type=type(e).__name__)
-            return h._json(503, {"error": "plans are not available right now"})
+            return h._json(503, _err("UNAVAILABLE", what="plans", what_he="מצב התוכניות"))
     if path == "/api/m/plans/op" and method == "POST":
         if not need("tasks"):
             return
@@ -907,7 +969,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         cid = d.get("id")
         if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
-            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+            return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
@@ -920,7 +982,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if method == "GET" and op is None:
             return h._json(200, mobile_browser.status(mob))
         if not ((method == "POST" and path in mobile_browser.ROUTES) or (method == "GET" and op is None)):
-            return h._json(405, {"error": "method not allowed"})
+            return h._json(405, _err("METHOD"))
         if method == "POST" and path in mobile_browser.ROUTES:
             d = _json_body(h)
             if d is None:
@@ -938,7 +1000,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(200, mobile_prefs.view(mob))
         except Exception as e:
             logs.warn("mobile", "MOBILE_PREFS_FAILED", "preferences could not be read", error_type=type(e).__name__)
-            return h._json(503, {"error": "preferences are not available right now"})
+            return h._json(503, _err("UNAVAILABLE", what="preferences", what_he="מצב ההעדפות"))
     if path == "/api/m/prefs/op" and method == "POST":
         if not need("prefs"):
             return
@@ -948,7 +1010,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         cid = d.get("id")
         if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
-            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+            return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
@@ -960,7 +1022,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(200, mobile_drive.view(mob))
         except Exception as e:
             logs.warn("mobile", "MOBILE_DRIVE_FAILED", "drive state could not be read", error_type=type(e).__name__)
-            return h._json(503, {"error": "drive state is not available right now"})
+            return h._json(503, _err("UNAVAILABLE", what="drive state", what_he="מצב הנהיגה"))
     if path == "/api/m/drive/briefing" and method == "GET":       # the phone ANSWERS the passenger question; nothing is stored
         if not need("drive"):
             return
@@ -1044,9 +1106,9 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if raw is None:
             return
         if raw[:4] != b"RIFF":
-            return h._json(415, {"error": "send a 16-bit PCM WAV"})
+            return h._json(415, _err("BAD_AUDIO"))
         if not mob.begin(dev["id"]):
-            return h._json(409, {"error": "the previous request is still being answered", "code": "BUSY"})
+            return h._json(409, {**_err("BUSY"), "code": "BUSY"})
         try:
             from urllib.parse import parse_qs
             barge = (parse_qs(url.query).get("barge") or [""])[0] == "1"     # spoken over the answer: only stop / end count
@@ -1062,7 +1124,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return
         cid = d.get("id")
         if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
-            return h._json(400, {"error": "command id (8-64 letters, digits or _ . : -) is required"})
+            return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "signals", lambda: signals_action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
@@ -1078,20 +1140,20 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if d is None:
             return
         if not isinstance(d.get("approved"), bool):
-            return h._json(400, {"error": "body needs {\"approved\": true|false}"})
+            return h._json(400, _err("UNREADABLE"))
         cid = d.get("id")
         if cid is not None and not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
-            return h._json(400, {"error": "command id must be 8-64 letters, digits or _ . : -"})
+            return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
         seen = d.get("text_sha")
         if seen is not None and not (isinstance(seen, str) and re.fullmatch(r"[0-9a-f]{16}", seen)):
-            return h._json(400, {"error": "text_sha must be the 16 lower-case hex characters the list gave"})
+            return h._json(400, {**_err("UNREADABLE"), "code": "BAD_TEXT_SHA"})
         extra = {} if seen is None else {"text_sha": seen}
         status, obj, again = mob.cont.execute(
             dev["id"], cid, "approval", lambda: answer_approval(mob, m.group(1), d["approved"], dev["id"], **extra),
             age_s=d.get("age_s"))
         return done(status, {**obj, "replay": True} if again else obj, decision="approve" if d["approved"] else "deny")
-    return h._json(404, {"error": "not found"})
+    return h._json(404, _err("NOT_FOUND"))
 
 
 def health_view(mob: MobileAccess) -> dict:
@@ -1104,12 +1166,26 @@ def health_view(mob: MobileAccess) -> dict:
     out = {**st, "tls": mob.scheme == "https", "tests": {}}
     try:
         from . import selfspeed
-        hist = selfspeed.History(mob.home).view()
-        for kind, d in hist.get("latest", {}).items():
+    except ImportError:
+        return out                                # the self-test feature is not installed
+    # load() already answers a missing or unparseable file with an empty history, so "no tests yet" never
+    # raises; only the "latest" entries are read (view() also runs perf_advisor, whose faults are not ours).
+    bad = None
+    try:
+        latest = selfspeed.History(mob.home).load()["latest"]
+        items = list(latest.items())
+    except Exception as e:                        # valid JSON of the wrong shape (e.g. a list)
+        bad, items = e, []
+    for kind, d in items:
+        try:
             out["tests"][kind] = {"status": d.get("status"), "ts": d.get("ts"),
                                   "en": selfspeed._summary(kind, d, "en"), "he": selfspeed._summary(kind, d, "he")}
-    except Exception:
-        pass                                      # no test history yet, or the feature is not installed
+        except Exception as e:                    # one malformed entry hides only itself, not the others
+            bad = e
+    if bad is not None and not mob._history_failed:   # the phone polls: one line per outage, not per poll
+        logs.warn("mobile", "MOBILE_TEST_HISTORY_FAILED", "self-test history could not be read",
+                  error_type=type(bad).__name__)
+    mob._history_failed = bad is not None
     return out
 
 
@@ -1132,11 +1208,11 @@ def _chat_routes(h, mob, dev, path, method, done, need, need_page) -> None:
         if d is None:
             return
         if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):
-            return h._json_extra(429, {"error": "too many messages, slow down", "code": "RATE_LIMITED"}, {"Retry-After": "30"})
+            return h._json_extra(429, {**_err("CHAT_RATE"), "code": "RATE_LIMITED"}, {"Retry-After": "30"})
         text = str(d.get("text", ""))
         st, obj = chat_engine.handle_send(mob.chat, {**d, "text": text}, client=dev["id"], device=True)
         return done(st, obj, chars=len(text))
-    return h._json(404, {"error": "not found"})
+    return h._json(404, _err("NOT_FOUND"))
 
 
 def _goal_brief(g: dict) -> dict:

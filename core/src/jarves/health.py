@@ -31,6 +31,7 @@ class Health:
         self._path = snapshot_path
         self._listeners: list = []
         self._saved_at = float("-inf")
+        self._save_failed = False                 # one warn per write outage, not per save
 
     def on_change(self, fn) -> None:
         self._listeners.append(fn)
@@ -84,8 +85,12 @@ class Health:
             self._saved_at = time.monotonic()
             try:
                 self._path.write_text(json.dumps(self.snapshot(self._path.parent), separators=(",", ":")), encoding="utf-8")
-            except OSError:
-                pass
+                self._save_failed = False
+            except OSError as e:                  # readers will call a stale file "off": leave the reason, once per outage
+                if not self._save_failed:
+                    logs.warn("health", "HEALTH_SNAPSHOT_WRITE_FAILED", "health snapshot could not be written",
+                              error_type=type(e).__name__)
+                self._save_failed = True
 
 
 def _clean(d: dict | None) -> dict | None:

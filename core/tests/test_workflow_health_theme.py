@@ -10,7 +10,8 @@ from pathlib import Path
 
 CSS = Path(__file__).resolve().parents[1] / "src" / "jarves" / "workflow" / "static" / "style.css"
 HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-OURS = re.compile(r"\.(?:hl|tl)-|@keyframes\s+(?:hl|tl)-")
+# .demo-notice is the "demo data" banner drawn at the top of the Health and Timeline views (JAR-236).
+OURS = re.compile(r"\.(?:hl|tl)-|\.demo-notice\b|@keyframes\s+(?:hl|tl)-")
 
 
 def _rules(text: str, outer: str = ""):
@@ -42,7 +43,7 @@ def _theme_rules():
 
 def test_health_and_timeline_rules_exist():
     selectors = " ".join(sel for sel, _ in _theme_rules())
-    for name in (".hl-banner", ".hl-name", ".hl-note", ".hl-status", ".hl-age", ".hl-row", ".tl-legend"):
+    for name in (".hl-banner", ".hl-name", ".hl-note", ".hl-status", ".hl-age", ".hl-row", ".tl-legend", ".demo-notice"):
         assert name in selectors, name
 
 
@@ -83,7 +84,7 @@ def test_named_text_rules_take_a_colour_token():
     for sel, body in _theme_rules():
         for part in sel.split(","):
             bodies.setdefault(part.strip(), []).append(body)
-    for name in (".hl-banner", ".hl-name", ".hl-note", ".hl-status", ".hl-age", ".tl-legend"):
+    for name in (".hl-banner", ".hl-name", ".hl-note", ".hl-status", ".hl-age", ".tl-legend", ".demo-notice"):
         joined = ";".join(bodies.get(name, []))
         assert re.search(r"(?<![-\w])color:\s*var\(--", joined), name
     assert re.search(r"border-top:[^;]*var\(--line", ";".join(bodies[".hl-row+.hl-row"]))
