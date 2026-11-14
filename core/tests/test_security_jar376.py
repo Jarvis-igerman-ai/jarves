@@ -59,3 +59,26 @@ def test_1098_recovery_kills_only_the_same_process(tmp_path):
         if p.poll() is None:
             os.killpg(p.pid, 9)
             p.wait(5)
+
+
+def test_206_f13_privacy_keeps_no_reply_words_at_rest(tmp_path, monkeypatch):
+    import sqlite3
+    from jarves import logs
+    from jarves.continuity import Continuity
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    c = Continuity(tmp_path)
+    c.store("phone1", "c1", "chat", 200, {"ok": True, "reply": "your bank PIN reminder"})
+    rows = [r for f in tmp_path.rglob("*") if f.is_file() and f.suffix in (".db", ".sqlite", ".sqlite3")
+            for r in sqlite3.connect(f).execute("SELECT body FROM ledger").fetchall()]
+    assert rows and all("bank" not in r[0] for r in rows) and '"ok": true' in rows[0][0]
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    c.store("phone1", "c2", "chat", 200, {"ok": True, "reply": "jazz at seven"})
+    assert c.seen("phone1", "c2")["reply"] == "jazz at seven"                      # privacy off: kept for a resend
+
+
+def test_206_h3_h4_guides_state_the_exposure():
+    from pathlib import Path
+    import jarves
+    data = Path(jarves.__file__).parent / "guides" / "data"
+    assert "status permission sees this strip" in (data / "mobile_access.toml").read_text(encoding="utf-8")
+    assert "not in a sandbox" in (data / "project_manager.toml").read_text(encoding="utf-8")

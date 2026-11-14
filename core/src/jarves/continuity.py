@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
 """
 
 
+def _at_rest(body: dict) -> str:
+    """The ledger copy of an answer. Privacy on (#206 F13): the words of a reply are not kept at rest, only the outcome."""
+    if logs.privacy() and isinstance(body, dict):
+        body = {k: ("" if k in ("reply", "text") and isinstance(v, str) else v) for k, v in body.items()}
+    return json.dumps(body)
+
+
 class Continuity:
     def __init__(self, home: Path, *, clock: Callable[[], float] = time.time,
                  quiet: Callable[[float], bool] | None = None) -> None:
@@ -114,14 +121,14 @@ class Continuity:
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), _at_rest(body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+                (device, cid, kind, int(status), _at_rest(body), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:
