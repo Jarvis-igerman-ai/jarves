@@ -11,10 +11,8 @@ from __future__ import annotations
 import difflib
 import hashlib
 import json
-import os
 import re
 import secrets
-import tempfile
 import threading
 import time
 import unicodedata
