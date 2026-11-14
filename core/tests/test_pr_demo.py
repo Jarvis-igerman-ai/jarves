@@ -70,9 +70,9 @@ def test_cli_files_with_underscores_map_to_their_subcommand():
 def test_known_pages_of_leaves_sys_path_and_modules_alone(tmp_path):
     (tmp_path / "tools").mkdir()
     (tmp_path / "tools" / "all_pages_check.py").write_text("def nav_pages():\n    return ['home']\n")
-    before = list(sys.path)
+    before, mod = list(sys.path), sys.modules.get("all_pages_check")   # other tests may have imported the real one
     assert pr_demo.known_pages_of(tmp_path) == ["home"]
-    assert sys.path == before and "all_pages_check" not in sys.modules
+    assert sys.path == before and sys.modules.get("all_pages_check") is mod
 
 
 def test_tests_docs_and_backend_are_not_user_facing():
