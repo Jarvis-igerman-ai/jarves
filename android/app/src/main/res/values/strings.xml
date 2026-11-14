@@ -102,4 +102,21 @@
     <string name="share_not_allowed">The computer does not allow this phone to send text.</string>
     <string name="share_revoked">This phone was unpaired on the computer. Pair again.</string>
     <string name="share_unreachable">The computer did not answer. The text may not have arrived.</string>
+    <!-- A4: tasks (read-only) -->
+    <string name="task_title">Tasks on the computer</string>
+    <string name="task_loading">Reading the tasks…</string>
+    <string name="task_none">No tasks right now.</string>
+    <string name="task_unreachable">Could not read the tasks. They refresh on their own.</string>
+    <string name="task_line">%1$s · %2$d of %3$d steps done · %4$d%%</string>
+    <string name="task_needs_pc">Needs you on the computer.</string>
+    <string name="task_pc_only">Approving, skipping or deleting a step is done on the computer.</string>
+    <string name="task_state_draft">Waiting for approval</string>
+    <string name="task_state_ready">Ready</string>
+    <string name="task_state_running">Running</string>
+    <string name="task_state_paused">Paused</string>
+    <string name="task_state_blocked">Blocked</string>
+    <string name="task_state_failed">Failed</string>
+    <string name="task_state_done">Done</string>
+    <string name="task_state_cancelled">Cancelled</string>
+    <string name="task_state_other">Unknown state</string>
 </resources>

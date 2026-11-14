@@ -57,3 +57,9 @@ he = "ההתראות או הסנכרון בטלפון נעצרים כשהמסך 
 en = "Updates stop when the screen is off"
 fix_he = "כרגע האפליקציה שואלת את המחשב רק כשהיא על המסך. בהמשך, ביצרנים עם חיסכון אגרסיבי בסוללה (שיאומי, סמסונג, אופפו) תצטרכו לבחור באפליקציה \"ללא הגבלה\" בהגדרות הסוללה; המדידות בטבלה במסמך הקבלה עדיין לא בוצעו."
 fix_en = "Today the app asks the computer only while it is on screen. Later, on makers with aggressive battery saving (Xiaomi, Samsung, Oppo) you will need to set the app to Unrestricted in the battery settings; the measurements in the acceptance document's table have not been done yet."
+
+[[problems]]
+he = "כרטיס המשימות לא מופיע באפליקציה"
+en = "The Tasks card does not show in the app"
+fix_he = "כרטיס המשימות (לקריאה בלבד) מופיע רק כשלטלפון יש הרשאת \"tasks\", שכבויה כברירת מחדל. אשרו אותה לטלפון בעמוד הטלפון במחשב. אישור, דילוג ומחיקה של צעדים נעשים רק במחשב."
+fix_en = "The read-only Tasks card shows only when the phone has the \"tasks\" permission, which is off by default. Allow it for the phone on the Phone page on the computer. Approving, skipping and deleting steps are done on the computer only."

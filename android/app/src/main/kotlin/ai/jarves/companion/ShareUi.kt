@@ -140,7 +140,7 @@ private val Tall = Modifier.heightIn(min = 48.dp)
 
 /** The paired screen: a pending share replaces the status until it is sent or cancelled; otherwise status plus approvals. */
 @Composable
-fun PairedScreen(x: Screen.Status, share: ShareModel, approvals: ApprovalsModel, onUnpair: () -> Unit, extra: @Composable () -> Unit = {}) {
+fun PairedScreen(x: Screen.Status, share: ShareModel, approvals: ApprovalsModel, onUnpair: () -> Unit, tasks: TasksModel? = null, extra: @Composable () -> Unit = {}) {
     val sh by share.state.collectAsStateWithLifecycle()
     if (sh != ShareState.None) {
         ShareScreen(x.session, sh, share)
@@ -148,7 +148,10 @@ fun PairedScreen(x: Screen.Status, share: ShareModel, approvals: ApprovalsModel,
         StatusScreen(x, onUnpair)
         extra()
         val link = x.link
-        if (link is Link.Online) ApprovalsCard(x.session, link, approvals)
+        if (link is Link.Online) {
+            ApprovalsCard(x.session, link, approvals)
+            tasks?.let { TasksCard(x.session, link, it) }
+        }
     }
 }
 

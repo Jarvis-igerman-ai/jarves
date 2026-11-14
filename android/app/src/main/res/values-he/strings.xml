@@ -102,4 +102,21 @@
     <string name="share_not_allowed">המחשב לא מרשה לטלפון הזה לשלוח טקסט.</string>
     <string name="share_revoked">הטלפון הזה נותק במחשב. מחברים שוב.</string>
     <string name="share_unreachable">המחשב לא ענה. ייתכן שהטקסט לא הגיע.</string>
+    <!-- A4: tasks (read-only) -->
+    <string name="task_title">משימות במחשב</string>
+    <string name="task_loading">קוראים את המשימות…</string>
+    <string name="task_none">אין משימות כרגע.</string>
+    <string name="task_unreachable">לא הצלחנו לקרוא את המשימות. הן מתרעננות לבד.</string>
+    <string name="task_line">%1$s · %2$d מתוך %3$d צעדים הושלמו · %4$d%%</string>
+    <string name="task_needs_pc">צריך אתכם במחשב.</string>
+    <string name="task_pc_only">אישור, דילוג או מחיקה של צעד נעשים במחשב.</string>
+    <string name="task_state_draft">ממתינה לאישור</string>
+    <string name="task_state_ready">מוכנה</string>
+    <string name="task_state_running">רצה</string>
+    <string name="task_state_paused">מושהית</string>
+    <string name="task_state_blocked">חסומה</string>
+    <string name="task_state_failed">נכשלה</string>
+    <string name="task_state_done">הושלמה</string>
+    <string name="task_state_cancelled">בוטלה</string>
+    <string name="task_state_other">מצב לא ידוע</string>
 </resources>

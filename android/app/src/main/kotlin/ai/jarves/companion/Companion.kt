@@ -207,6 +207,23 @@ class CompanionClient(private val base: String, private val transport: Transport
         }
     }
 
+    /** The PC's goal plans (scope `tasks`), read-only: nothing is changed on the PC by this call. */
+    fun plans(token: String): Plans {
+        val r = try {
+            transport.send("GET", url("/api/m/plans"), mapOf("Authorization" to "Bearer $token", API_HEADER to API_SUPPORTED.toString()), null)
+        } catch (e: IOException) {
+            return Plans.Unreachable
+        } catch (e: RuntimeException) {
+            return Plans.Unreachable
+        }
+        return when (r.status) {
+            200 -> parsePlans(r.body) ?: Plans.Unreachable
+            401 -> Plans.Revoked
+            403 -> Plans.NotAllowed
+            else -> Plans.Unreachable
+        }
+    }
+
     /** Share-to-JARVES: one chat turn with the text the owner confirmed. */
     fun share(token: String, text: String, commandId: String = newCommandId()): Shared {
         val t = cleanShared(text)

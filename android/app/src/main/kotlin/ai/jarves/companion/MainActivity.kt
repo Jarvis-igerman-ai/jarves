@@ -69,6 +69,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     val notifyOn: StateFlow<Boolean> = _notify
     val approvals = ApprovalsModel(viewModelScope)
     val share = ShareModel(viewModelScope)
+    val tasks = TasksModel(viewModelScope)
 
     init {
         if (notifyPrefs.enabled && NotifyWork.permissionGranted(app)) NotifyWork.start(app)     // the switch says ON: make sure the check is really scheduled
@@ -247,7 +248,7 @@ class MainActivity : ComponentActivity() {
                         when (val x = s) {
                             is Screen.Pair -> PairScreen(x, model::check)
                             is Screen.Confirm -> ConfirmScreen(x, { model.pair(x) }, model::cancel)
-                            is Screen.Status -> PairedScreen(x, model.share, model.approvals, model::unpair) {
+                            is Screen.Status -> PairedScreen(x, model.share, model.approvals, model::unpair, tasks = model.tasks) {
                                 val on by model.notifyOn.collectAsStateWithLifecycle()
                                 NotifyCard(on) { want ->
                                     if (!want) model.setNotify(false)
