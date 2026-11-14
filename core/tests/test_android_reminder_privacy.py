@@ -24,7 +24,7 @@ def test_1029_no_boot_receiver_or_alarm_permissions_until_part_two():
 def test_1029_missed_reminders_are_shown_after_boot_not_dropped():
     src = ALARMS.read_text(encoding="utf-8")
     boot = src[src.index("Intent.ACTION_BOOT_COMPLETED"):]
-    boot = boot[:boot.index("}")]
+    boot = boot[:boot.index("\n            }")]                   # the whole `when` branch, not the first lambda brace
     assert re.search(r"for \(item in store\.rescheduleAll\(\)\) fireReminder\(", boot), "boot handler drops missed reminders"
 
 
@@ -35,3 +35,4 @@ def test_1029_reminder_text_is_hidden_on_the_lock_screen():
     public = re.search(r"\.setPublicVersion\((.*?)\.build\(\)\s*,?\s*\)", show, flags=re.S)
     assert public, "a private reminder needs a public version for the lock screen"
     assert "item.text" not in public.group(1) and "setContentText" not in public.group(1), "the lock-screen version leaks the text"
+    assert "setContentTitle(context.getString(R.string.app_name))" in public.group(1), "the lock-screen version must say JARVES"
