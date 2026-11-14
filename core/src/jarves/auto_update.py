@@ -554,43 +554,32 @@ def core_busy(core) -> list[str]:
         out.append("listening")
     if getattr(core, "stopping", False):
         out.append("stopping")
-    try:
-        if core.approvals.has_pending():
-            out.append("pending_approval")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="approvals")
-    try:
-        if getattr(core.chat, "turns", None):
-            out.append("chat_turn")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="chat")
-    try:
+    failed = False
+
+    def probe(where: str, reason: str, check: Callable[[], bool]) -> None:
+        nonlocal failed
+        try:
+            if check():
+                out.append(reason)
+            _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", where)
+        except Exception as e:      # #1100: an unreadable probe fails CLOSED (busy), never "quiet"
+            failed = True
+            if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", where):
+                logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                          error_type=type(e).__name__, where=where)
+
+    def agents() -> bool:
         from .orchestrator.envelope import LIVE_STATES
         busy_states = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"} & set(LIVE_STATES)
-        o = getattr(core, "orchestrator", None)
-        db = getattr(o, "db", None)
-        if db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True)):
-            out.append("coding_agent")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="agents")
-    try:
-        eng = core.ops.alerts
-        if eng.quiet_now() or eng.paused():
-            out.append("quiet_hours")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="quiet")
+        db = getattr(getattr(core, "orchestrator", None), "db", None)
+        return db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True))
+
+    probe("approvals", "pending_approval", lambda: core.approvals.has_pending())
+    probe("chat", "chat_turn", lambda: bool(getattr(core.chat, "turns", None)))
+    probe("agents", "coding_agent", agents)
+    probe("quiet", "quiet_hours", lambda: core.ops.alerts.quiet_now() or core.ops.alerts.paused())
+    if failed:
+        out.append("probe_error")
     return out
 
 
