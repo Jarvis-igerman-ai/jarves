@@ -164,6 +164,31 @@ def test_read_tolerates_corrupt_file(tmp_path):
     d = tmp_path / "receipts"
     d.mkdir()
     (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n\xff\xfe\n')
-    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}] or ar.read(tmp_path) == []
+    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}]       # #1107: one bad byte drops one line, not all
     (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n')
     assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}]
+
+
+def test_one_bad_byte_hides_only_its_line_in_list_and_status(tmp_path, capsys):   # #1107
+    d = tmp_path / "receipts"
+    d.mkdir()
+    (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock", "ok": true}\n{"seq": 2, "tool": "\xff"}\n'
+                                            b'{"seq": 3, "tool": "weather", "ok": true}\n')
+    assert [r["seq"] for r in ar.read(tmp_path)] == [1, 3]
+    assert [r["seq"] for r in ar.read(tmp_path, 1)] == [3]               # the limit counts readable receipts
+    ns = types.SimpleNamespace(limit=20, json=True, action="list")
+    assert ar.cmd_receipts(ns, None, tmp_path) == 0
+    assert [r["tool"] for r in json.loads(capsys.readouterr().out)] == ["clock", "weather"]
+
+
+def test_seq_continues_across_processes_and_restarts(tmp_path):     # #1107
+    core, _ = mk(tmp_path)
+    core.record("clock", True, "OK")
+    core.record("clock", True, "OK")
+    text_session, _ = mk(tmp_path)                                   # a second process writing the same file
+    text_session.record("weather", True, "OK")
+    core.record("clock", True, "OK")                                 # the first process sees the other one's receipt
+    assert [r["seq"] for r in lines(tmp_path)] == [1, 2, 3, 4]
+    (tmp_path / ar.RECEIPT_FILE).replace((tmp_path / ar.RECEIPT_FILE).with_suffix(".1.jsonl"))   # just rotated
+    restarted, _ = mk(tmp_path)
+    assert restarted.record("clock", True, "OK")["seq"] == 5

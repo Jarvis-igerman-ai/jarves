@@ -40,7 +40,7 @@ class ReceiptLog:
             if not self.enabled():
                 return None
             with self._lock:
-                self.seq += 1
+                self.seq = max(self.seq, _last_seq(self.home)) + 1   # continue the file: Core and text session share it (#1107)
                 rec = {"seq": self.seq, "ts": self.wall(),
                        "tool": tool if _SAFE_NAME.match(str(tool)) else "other",   # a model-chosen name never reaches the file
                        "ok": bool(ok), "code": code if _SAFE_CODE.match(str(code or "")) else "",
@@ -61,20 +61,41 @@ def attach(registry, features, home) -> ReceiptLog:
     return log
 
 
-def read(home: Path, limit: int = 20) -> list[dict]:
-    try:
-        lines = (Path(home) / RECEIPT_FILE).read_text(encoding="utf-8").splitlines()[-max(1, int(limit)):]
-    except (OSError, UnicodeDecodeError):
-        return []
+def _rows(raw: bytes) -> list[dict]:
+    """Decode line by line: an undecodable or broken line drops only itself (#1107)."""
     out = []
-    for line in lines:
+    for line in raw.splitlines():
         try:
-            row = json.loads(line)
-        except ValueError:
+            row = json.loads(line.decode("utf-8"))
+        except ValueError:                                 # UnicodeDecodeError and JSONDecodeError are ValueErrors
             continue
         if isinstance(row, dict):
             out.append(row)
     return out
+
+
+def _last_seq(home: Path) -> int:
+    """Highest seq at the end of the live file, or of the rotated one right after a rotation; 0 if none."""
+    path = Path(home) / RECEIPT_FILE
+    for f in (path, path.with_suffix(".1.jsonl")):
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(max(0, fh.seek(0, 2) - 4096))
+                tail = fh.read()
+        except OSError:
+            continue
+        seqs = [r["seq"] for r in _rows(tail) if isinstance(r.get("seq"), int)]
+        if seqs:
+            return max(seqs)
+    return 0
+
+
+def read(home: Path, limit: int = 20) -> list[dict]:
+    try:
+        raw = (Path(home) / RECEIPT_FILE).read_bytes()
+    except OSError:
+        return []
+    return _rows(raw)[-max(1, int(limit)):]
 
 
 # ---------------------------------------------------------------------- CLI: jarvis receipts status|list|clear
