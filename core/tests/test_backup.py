@@ -364,3 +364,23 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+def test_install_then_core_start_makes_one_backup_not_two(profile, monkeypatch):
+    """#1016: the installer's verified checkpoint is reused at the next Core start instead of a second backup."""
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    assert backup.startup_checkpoint(profile) == installer
+    assert len(backup.list_backups(profile)) == 1 and backup.read_state(profile)["version"] == "9.9.9"
+    backup.create(profile, "manual", now=time.time() + 2)             # the Core ran and backed up since
+    monkeypatch.setattr(backup, "__version__", "9.9.10")
+    assert backup.startup_checkpoint(profile) != installer and len(backup.list_backups(profile)) == 3
+
+
+def test_cli_sets_manual_and_checkpoint_retention(profile, capsys):
+    """#1016: manual and pre-migration retention are settable from the CLI, not only daily/weekly."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--manual", "3", "--checkpoints", "2"]), None, profile) == 0
+    assert (backup.get_settings(profile)["manual"], backup.get_settings(profile)["checkpoints"]) == (3, 2)
