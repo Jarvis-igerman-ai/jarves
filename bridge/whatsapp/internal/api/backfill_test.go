@@ -616,3 +616,43 @@ func TestBackfillDedupBookkeepingStaysBounded(t *testing.T) {
 		t.Fatalf("retry over the budget: %s", got.raw)
 	}
 }
+
+// A lost answer (never arrives) must not make every later genuine empty answer look late: id-less transport.
+func TestBackfillLostAnswerDoesNotSwallowEveryLaterCompletion(t *testing.T) {
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
+	e.msg(stranger, "s1", 500, "other chat", false)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	first := e.requests()[0].Chat
+	tm.fire()                         // A: its answer never arrives
+	e.answerFor("", first, 0, 0, "b") // B's genuine empty answer: taken for A's late one
+	tm.fire()                         // B times out: its answer already came, so no new orphan
+	e.answerFor("", first, 0, 0, "c") // C's empty answer finishes the chat
+	second := e.requests()[len(e.requests())-1].Chat
+	if second == first {
+		t.Fatalf("the first chat did not finish: %d requests", len(e.requests()))
+	}
+	e.answerFor("", second, 0, 0, "d")
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("end %s", got.raw)
+	}
+}
+
+// A leftover orphan costs the next chat one timeout, never its completion: an empty answer names no chat, so the
+// orphan is kept (a late empty answer of the earlier chat must not finish this one).
+func TestBackfillLeftoverOrphanCostsTheNextChatOneTimeout(t *testing.T) {
+	tm := &timers{}
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = tm.after })
+	e.msg(stranger, "s1", 500, "other chat", false)
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	first := e.requests()[0].Chat
+	tm.fire()                  // A lost: one orphan
+	e.answer(first, 0, 0, "b") // B answers with its id: the chat is done, the orphan is left over
+	second := e.requests()[len(e.requests())-1].Chat
+	e.answerFor("", second, 0, 0, "c") // taken for A's late answer
+	tm.fire()                          // the request times out: no new orphan
+	e.answerFor("", second, 0, 0, "d") // the retry's empty answer finishes the chat
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("end %s", got.raw)
+	}
+}

@@ -58,7 +58,8 @@ type backfill struct {
 	overDedup bool                 // the answer that is out needed more remembered IDs than bfDedupMax: chat incomplete
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
-	orphans   int                  // timed-out requests whose answer may still arrive (fallback for answers without an id)
+	orphans   int                  // timed-out requests whose answer may still arrive (answers without an id)
+	swallowed bool                 // an answer during the request that is out was taken for an orphan's late answer
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	lost      int                  // overflow given up after backfillRetries answers without progress
 	partial   int                  // chats that moved on incomplete: lost messages, unanswered, or left the read scope
@@ -117,6 +118,15 @@ func (s *Server) bfClearLocked(state string) {
 	}
 }
 
+// bfNextChatLocked moves on to the next chat. Orphans are kept: an empty answer names neither its chat nor its
+// request, so a late empty answer of an earlier chat could otherwise finish the next chat unasked (silent loss).
+// They stay bounded: a timeout adds one only when no answer came during that request (see `swallowed`).
+func (s *Server) bfNextChatLocked() {
+	b := &s.bf
+	b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
+	b.done++
+}
+
 // bfPruneLocked applies a read-policy change at once: buffered messages of chats that left the read scope are
 // wiped from memory and such chats are never asked again (savePolicyLocked calls it on every policy write).
 func (s *Server) bfPruneLocked() {
@@ -171,8 +181,7 @@ func (s *Server) bfNext() {
 		return
 	}
 	for len(b.queue) > 0 && !s.readableLocked(b.queue[0].chat) { // left the read scope: never ask for it again
-		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
-		b.done++
+		s.bfNextChatLocked()
 		b.partial++ // its history was not collected: reported incomplete, not as a normal finish
 	}
 	if len(b.queue) == 0 {
@@ -184,7 +193,7 @@ func (s *Server) bfNext() {
 	}
 	c := b.queue[0]
 	b.waiting, b.older, b.truncated, b.reqAnchor, b.accepted, b.reqDrop = true, false, false, c.anchor, 0, 0
-	b.overDedup = false
+	b.overDedup, b.swallowed = false, false
 	b.reqID = id
 	b.gen++
 	gen := b.gen
@@ -281,6 +290,7 @@ func (s *Server) bfAnswer(chats []string, reqID string) {
 	// was this one and the request times out and is asked again; history is never silently given up.
 	if ok && reqID == "" && b.orphans > 0 && b.accepted == 0 && !b.older && !b.truncated {
 		b.orphans--
+		b.swallowed = true
 		ok = false
 	}
 	s.mu.Unlock()
@@ -305,16 +315,17 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		return
 	}
 	var lost F
-	if timeout {
-		b.orphans++ // its answer may still arrive later
+	// its answer may still arrive later, unless an answer during this request was already taken for a late one:
+	// then the answer did arrive, and counting it again would swallow every later genuine completion of the chat
+	if timeout && !b.swallowed {
+		b.orphans++
 	}
 	if timeout || (b.truncated && b.accepted == 0) {
 		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}
 	switch {
 	case !s.readableLocked(b.queue[0].chat): // left the read scope while asked: not collected, not "finished"
-		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
-		b.done++
+		s.bfNextChatLocked()
 		b.partial++
 	case !b.overDedup && (timeout || b.truncated) && b.retries <= backfillRetries:
 		// unanswered, or part of the answer did not fit: ask again from the same anchor (after Core has drained
@@ -324,12 +335,10 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	case timeout || b.truncated || b.overDedup: // explicit, reported loss: the chat is incomplete, never silently "finished"
 		b.lost += b.reqDrop
 		b.partial++
-		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
-		b.done++
+		s.bfNextChatLocked()
 		lost = F{"lost": b.reqDrop, "unanswered": timeout}
 	case !b.older: // nothing new and older (with `since`, finishing costs this one extra request: accepted)
-		b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
-		b.done++
+		s.bfNextChatLocked()
 	default: // the anchor moved: only messages at the new anchor's timestamp can come again
 		ties, at := map[string]bool{}, b.queue[0].anchor.TS
 		if at == b.reqAnchor.TS {

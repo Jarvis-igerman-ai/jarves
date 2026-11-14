@@ -223,9 +223,15 @@ func TestRequestHistoryOfflineIsNotConnected(t *testing.T) {
 
 func TestOnDemandHistoryEndsWithAnswerEvent(t *testing.T) {
 	ctx := context.Background()
-	db, _ := memdb.Open(ctx, nil)
+	db, err := memdb.Open(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
-	e, _ := New(ctx, db.DB)
+	e, err := New(ctx, db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got []engine.Event
 	e.SetHandler(func(ev engine.Event) { got = append(got, ev) })
 	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
