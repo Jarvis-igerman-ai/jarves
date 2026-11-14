@@ -8,9 +8,3 @@
 # issue  = the showstopper issue number
 # since  = date quarantined (UTC)
 # reason = one line: what flakes and where
-
-[[test]]
-id = "test_web_chat.py::test_quiet_hours_make_the_chat_silent"
-issue = 1052
-since = "2026-11-11"
-reason = "merge_group run 42909649255 failed in the PR 1042 queue, passes on PR runs"
