@@ -45,7 +45,7 @@ Anything risky asks first. A compact popup shows one line ("Run a command?"), a 
 
 Voice runs on GPT-Live. In **client mode** JARVES, not the cloud voice model, runs the heavy "thinking" request itself, so every backend request is counted against your budget before it is sent and the conversation ends at the limit.
 
-- Set limits: `jarvis budget set --daily-usd 1 --turn-usd 0.05`. Check the cap: `jarvis budget test-cap`. See costs: `jarvis cost` and the Costs page. Numbers are estimates; your OpenAI bill is the truth.
+- Set limits: `jarvis budget set --daily-usd 1 --turn-usd 0.05`. Check the cap: `jarvis budget test-cap`. Daily voice minutes and AI requests: see them with `jarvis budget limits`, test them for free with `jarvis budget test-limits`. See costs: `jarvis cost` and the Costs page. Numbers are estimates; your OpenAI bill is the truth.
 - Measured with 10 live questions: the added wait of client mode was not worse than the default (p95 7.7 s against 11.3 s, backend time dominates).
 - Guide: `jarvis help client_delegation`. Report: [SWV4_D_DELEGATION](reviews/SWV4_D_DELEGATION.md).
 

@@ -173,6 +173,7 @@ class DelegationState:
 
     def __init__(self, home: Path | None, ai, *, health: Callable[[str, str, str], Any] | None = None) -> None:
         self.home, self.ai, self.health = home, ai, health
+        self._failing: set[str] = set()           # log codes already warned in the current outage (one line each)
         self.step = "client"
         self.reason = ""
         self.changed = 0.0
@@ -238,8 +239,18 @@ class DelegationState:
         if self.health is not None:
             try:
                 self.health(status, detail, action)
-            except Exception:
-                pass
+                self._failing.discard("DELEG_HEALTH_CB_FAILED")
+            except Exception as e:
+                if self._first_failure("DELEG_HEALTH_CB_FAILED"):
+                    logs.warn("delegation", "DELEG_HEALTH_CB_FAILED", "the health callback raised",
+                              error_type=type(e).__name__)
+
+    def _first_failure(self, code: str) -> bool:
+        """True once per outage: repeated failures stay quiet until a success clears the code."""
+        if code in self._failing:
+            return False
+        self._failing.add(code)
+        return True
 
     def count(self, key: str, n: int = 1) -> None:
         self.counters[key] = self.counters.get(key, 0) + n
@@ -275,8 +286,11 @@ class DelegationState:
                                        "in_flight": list(self.jobs.values()), "saved": time.time()},
                                       ensure_ascii=False), encoding="utf-8")
             tmp.replace(p)
-        except OSError:
-            pass
+            self._failing.discard("DELEG_STATE_SAVE_FAILED")
+        except OSError as e:
+            if self._first_failure("DELEG_STATE_SAVE_FAILED"):
+                logs.warn("delegation", "DELEG_STATE_SAVE_FAILED", "could not save the delegation state",
+                          error_type=type(e).__name__)
 
 
 def read_state(home: Path) -> dict:

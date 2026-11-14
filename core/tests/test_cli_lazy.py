@@ -35,7 +35,7 @@ def _full_choices() -> list[str]:
     with contextlib.redirect_stdout(buf), pytest.raises(SystemExit):
         cli.main(["--help"])
     line = next(x for x in buf.getvalue().splitlines() if x.strip().startswith("{"))
-    return line.strip().strip("{}").split(",")
+    return line.strip().split("}")[0].strip("{").split(",")     # a wrapped usage line ends "...} ..."
 
 
 def test_every_command_is_routed():

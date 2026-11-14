@@ -69,6 +69,14 @@ def _severity(issue: dict) -> str | None:
     return f"P{min(sevs)}" if sevs else None
 
 
+# P1s that never block a stable (owner rule 3 Nov 2026): test flakes and developer tooling, not a user scenario.
+# Owner-only labels, like ACCEPTED_LABEL. A P1 that also carries one of NEVER_EXEMPT_LABELS still blocks.
+NON_BLOCKING_P1_LABELS = ("flaky-test", "dev-tool")
+NEVER_EXEMPT_LABELS = ("security", "showstopper")
+# Check name: exempt P1s (accepted/carried) may be open, so "zero open P0/P1" would be untruthful.
+ISSUES_CHECK = "no blocking P0/P1"
+
+
 def _classify(issues: list[dict]):
     blockers: list[tuple[int | None, str, str]] = []
     accepted: list[tuple[int | None, str, str]] = []
@@ -83,8 +91,14 @@ def _classify(issues: list[dict]):
         if sev == "P0":
             blockers.append(row)                       # P0 always blocks, even with the accepted label
         elif sev == "P1":
-            if any(l.lower() == ACCEPTED_LABEL for l in _label_names(i)):
+            labels = {l.lower() for l in _label_names(i)}
+            exempt = bool(labels & set(NON_BLOCKING_P1_LABELS))
+            if "security" in labels or (exempt and labels & set(NEVER_EXEMPT_LABELS)):
+                blockers.append(row)                   # blocking labels first: no acceptance label can override them
+            elif ACCEPTED_LABEL in labels:
                 accepted.append(row)
+            elif exempt:
+                carried.append(row)                    # flaky-test / dev-tool P1: printed as known issue, not blocking
             else:
                 blockers.append(row)
         else:
@@ -96,14 +110,17 @@ def classify_issues(issues: list[dict]) -> tuple[list[tuple[int | None, str, str
     """THE one release-gate issue rule, shared by `jarvis release status` and core/tools/release_gate.py (#535).
 
     Returns (blockers, accepted), each a list of (number, severity, title) for open issues (not PRs).
-    Blockers: every open P0, and every open P1 without the owner-only label `known-issue-4.5` (exact).
-    Accepted: open P1 carrying that label (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
+    Blockers: every open P0, every open P1 labelled security, and every other open P1 without the owner-only label
+    `known-issue-4.5` (exact), except a P1
+    labelled flaky-test/dev-tool and neither security nor showstopper (carried). A flaky-test/dev-tool P1 that also
+    carries showstopper blocks, even with `known-issue-4.5`. Accepted: open P1 carrying
+    `known-issue-4.5` (printed, not a blocker). Open P2/P3 never block: see carried_issues."""
     b, a, _ = _classify(issues)
     return b, a
 
 
 def carried_issues(issues: list[dict]) -> list[tuple[int | None, str, str]]:
-    """Open P2/P3 issues: printed as 'known issues carried into this release', never blocking."""
+    """Open P2/P3 and exempt flaky-test/dev-tool P1 issues: printed as 'known issues carried', never blocking."""
     return _classify(issues)[2]
 
 
@@ -114,9 +131,11 @@ def check_issues(issues: list[dict]) -> Check:
         note = f"; accepted known issues ({ACCEPTED_LABEL}): " + ", ".join(f"#{n} {s}" for n, s, _ in accepted)
     carried = carried_issues(issues)
     if carried:
-        note += f"; known issues carried into this release: {len(carried)} open P2/P3"
-    detail = ("none open" if not bad else "open: " + ", ".join(f"#{n} {s}" for n, s, _ in bad)) + note
-    return Check("zero open P0/P1", not bad, detail)
+        p1 = sum(1 for _, sev, _ in carried if sev == "P1")
+        note += f"; known issues carried into this release: {len(carried) - p1} open P2/P3"
+        note += f", {p1} open flaky-test/dev-tool P1" if p1 else ""
+    detail = ("no blocking P0/P1" if not bad else "open: " + ", ".join(f"#{n} {s}" for n, s, _ in bad)) + note
+    return Check(ISSUES_CHECK, not bad, detail)
 
 
 def check_sheet(root: Path, version: str) -> Check:
@@ -137,7 +156,7 @@ def collect(root: Path, version: str, fetch=None, head: str | None = None, now: 
     fetch = fetch or github_fetch
     out: list[Check] = []
     for name, fn in (("main green", lambda: check_main(fetch("checks"), head)),
-                     ("zero open P0/P1", lambda: check_issues(fetch("issues")))):
+                     (ISSUES_CHECK, lambda: check_issues(fetch("issues")))):
         try:
             out.append(fn())
         except Exception as e:                                    # network or API trouble is a TODO, never a pass

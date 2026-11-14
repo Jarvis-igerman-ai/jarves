@@ -13,6 +13,7 @@ import sqlite3
 import time
 import subprocess
 import sys
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from .messages import notice_line, unread_count
@@ -33,7 +34,20 @@ def console_command(root: Path, home: Path, python: str | None = None) -> str:
 
 
 def in_project(cwd: str, root: Path) -> bool:
-    """Include real git worktrees of this repo; ignore hooks from other projects."""
+    """Include real git worktrees of this repo; ignore hooks from other projects.
+
+    Cached per hook process, so main() can answer it before a registration hook takes the write lock.
+    """
+    key = (str(cwd), str(root))
+    if key not in _IN_PROJECT_CACHE:
+        _IN_PROJECT_CACHE[key] = _in_project(cwd, root)
+    return _IN_PROJECT_CACHE[key]
+
+
+_IN_PROJECT_CACHE: dict = {}
+
+
+def _in_project(cwd: str, root: Path) -> bool:
     current = Path(cwd).resolve()
     root = root.resolve()
     if current == root or root in current.parents:
@@ -291,6 +305,27 @@ def _log_error(home: Path, exc: BaseException) -> None:
         pass
 
 
+@contextmanager
+def _one_transaction(store: Store):
+    """JAR-214 (#786): a registration hook takes the write lock once, not once per store call.
+
+    Each store call opened its own IMMEDIATE transaction (about four per SubagentStart, each a synced commit),
+    so eight workers starting together queued past the busy timeout and lost their registration. Inside this
+    block the store's nested transactions join the single outer one; any error rolls the whole event back.
+    This holds because Store._tx is the only place that issues BEGIN/COMMIT (store.py), and the write helpers
+    in store.py, messages.py and trace.py run on the connection it yields. If a write ever committed on its
+    own, the transaction would already be closed here, and that raises instead of committing half an event.
+    """
+    with store._tx() as db:
+        store._tx = lambda: nullcontext(db)
+        try:
+            yield
+            if not db.in_transaction:
+                raise RuntimeError("a store write committed outside the hook's single transaction")
+        finally:
+            del store._tx   # the class method is back for the retry and for every later caller
+
+
 def main(argv=None) -> int:
     import argparse
     from .__main__ import utf8_streams
@@ -318,13 +353,24 @@ def main(argv=None) -> int:
         is_stop = payload.get("hook_event_name") in {"Stop", "SubagentStart", "SessionStart"}
         store = Store(args.home / "workflow.db", timeout_s=1.2 if is_stop else 1.5)
         agent_env = os.environ.get("JARVES_WORKFLOW_AGENT") or None
+        event = payload.get("hook_event_name")
+        if event in {"SubagentStart", "SessionStart"}:
+            # Both are cached, so observe() runs no git subprocess while it holds the write lock.
+            in_project(str(payload.get("cwd", "")), args.repo_root)
+            if event == "SubagentStart":
+                git_base_note(payload.get("cwd") or str(args.repo_root))
+            once = _one_transaction
+        else:
+            once = lambda _store: nullcontext()   # noqa: E731  other events keep one transaction per store call
         try:
-            result = observe(store, payload, args.repo_root, agent_env)
+            with once(store):
+                result = observe(store, payload, args.repo_root, agent_env)
         except sqlite3.OperationalError:
             if not is_stop:
                 raise
             time.sleep(0.3)
-            result = observe(store, payload, args.repo_root, agent_env)
+            with once(store):
+                result = observe(store, payload, args.repo_root, agent_env)
         if result:
             print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001  hooks fail open: never exit non-zero (incl. RecursionError)

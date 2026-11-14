@@ -188,3 +188,9 @@ def test_sheet_rows_hash_catches_an_edit_after_signing(repo):
     s = so.load(r, "4.5.0")
     s.set_result("C1", "fail")
     assert s.problems()
+
+
+def test_gate_pass_and_carried_wording_is_truthful(capsys):
+    assert gate.ISSUES_PASSED == "no blocking P0/P1"
+    gate._print_carried(["#41 (P1): flake"])
+    assert "open P2/P3 or flaky-test/dev-tool P1" in capsys.readouterr().out
