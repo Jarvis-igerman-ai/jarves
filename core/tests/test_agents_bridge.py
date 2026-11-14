@@ -111,24 +111,11 @@ def test_two_profiles_have_separate_pipes_and_tokens(tmp_path):
         sb.stop()
 
 
-def _start_after_stop(home, tries: int = 50):
-    """Restart on the same address. On a loaded Windows runner the old pipe instance is released a moment after
-    stop() returns, and CreateNamedPipe(FIRST_PIPE_INSTANCE) fails with PermissionError [WinError 5] (#992).
-    The test is about token rotation, not release timing, so retry the start for up to ~5 s."""
-    for i in range(tries):
-        try:
-            return bridge.BridgeServer(home, echo).start()
-        except PermissionError:
-            if i == tries - 1:
-                raise
-            time.sleep(0.1)
-
-
 def test_restart_rotates_the_token(tmp_path):
     s = bridge.BridgeServer(tmp_path, echo).start()
     old = bridge.read_token(tmp_path)
     s.stop()
-    s2 = _start_after_stop(tmp_path)
+    s2 = bridge.BridgeServer(tmp_path, echo).start()     # no retry: stop() released every pipe instance (#992)
     try:
         assert bridge.read_token(tmp_path) != old
         with pytest.raises(bridge.BridgeError):
@@ -194,6 +181,36 @@ def test_token_rewrite_gives_up_after_the_bounded_retry(tmp_path, monkeypatch):
     assert len(calls) == len(clock.sleeps) + 1 and len(calls) > 2
     assert bridge.read_token(tmp_path) == old                         # the old token is untouched
     assert not list(bridge.token_path(tmp_path).parent.glob("*.tmp"))  # no stray copy of the new token
+
+
+@pytest.mark.windows_only
+def test_stop_while_accept_is_creating_its_next_instance_leaks_no_pipe(tmp_path, monkeypatch):
+    """#992 root cause: stop() right after start() on a loaded runner. The accept thread had passed its stop check
+    but not yet created its next pipe instance; stop() closed the listener first, accept() then created an
+    instance nobody closed, and the next start() failed with WinError 5 (FIRST_PIPE_INSTANCE). A gate holds the
+    thread in exactly that window, so the order is certain, not timed."""
+    real_new, inside, go = bridge._LocalPipeListener._new_handle, threading.Event(), threading.Event()
+
+    def gated_new(self, first=False):
+        if not first:
+            inside.set()
+            go.wait(10)
+        return real_new(self, first)
+    monkeypatch.setattr(bridge._LocalPipeListener, "_new_handle", gated_new)
+    s = bridge.BridgeServer(tmp_path, echo).start()
+    assert inside.wait(10)                                     # accept() is inside the window
+    stopper = threading.Thread(target=s.stop)
+    stopper.start()
+    stopper.join(0.3)                                          # old code: the listener is closed by now
+    go.set()
+    stopper.join(10)
+    assert not stopper.is_alive() and not s.thread.is_alive()
+    monkeypatch.setattr(bridge._LocalPipeListener, "_new_handle", real_new)
+    s2 = bridge.BridgeServer(tmp_path, echo).start()           # the address is free again, no retry
+    try:
+        assert bridge.try_request(tmp_path, "echo", x=2)["x"] == 2
+    finally:
+        s2.stop()
 
 
 @pytest.mark.windows_only

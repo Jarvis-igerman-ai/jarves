@@ -1,7 +1,9 @@
-"""`jarvis budget status | test-cap | set | reset-ladder` (SW-V4 D, #14): the delegation budget from the command line.
+"""`jarvis budget status | limits | test-limits | test-cap | set | reset-ladder` (SW-V4 D, #14): budgets from the CLI.
 
 status       today's delegated API spend (used / held by live reservations of ALL processes / limit), the request
              counter, the live reservations, the delegation mode and the fallback-ladder step of the running Core.
+limits       today's daily voice minutes and AI requests: used / limit / left and state, always shown (JAR-321).
+test-limits  a FREE offline proof that those two daily limits refuse at the limit (throw-away database, JAR-321).
 test-cap     a FREE offline proof that the strict cap holds: a real LiveVoice + delegation engine + Budget on a temp
              database run random overlapping delegated turns against a local fake Responses API.
 set          the caps and the fallback (config.toml through config_edit: validated, backed up) and the mode switch
@@ -84,6 +86,48 @@ def cmd_budget(a, cfg, home) -> int:
         if not v["reservations"]:
             print(clilang.fmt("  (אין הזמנות פתוחות)", "  (no open reservations)"))
         return 0
+    if a.action == "limits":
+        from . import daily_limits
+        from . import limits as _limits
+        rows = daily_limits.today_lines(_limits.views_from_home(home, cfg.ai))
+        if a.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return 0
+        state_he = {"ok": "תקין", "warn": "כמעט נוצל", "exhausted": "נגמר"}
+        for v in rows:
+            s_en, s_he = _limits.SPECS[v["kind"]]["unit_en"], _limits.SPECS[v["kind"]]["unit_he"]
+            name_en = "voice minutes" if v["kind"] == "voice_seconds" else "AI requests"
+            name_he = "דקות קול חי" if v["kind"] == "voice_seconds" else "בקשות AI"
+            print(clilang.fmt(f"{name_he} היום: {v['used']:g} מתוך {v['max']:g} {s_he}, נשארו {v['left']:g} "
+                              f"({state_he[v['level']]})",
+                              f"{name_en} today: {v['used']:g} of {v['max']:g} {s_en}, {v['left']:g} left ({v['level']})"))
+            if v["level"] != "ok":
+                print(clilang.fmt(f"  {v['action_he']}", f"  {v['action_en']}"))
+        print(clilang.fmt("לשנות: jarvis budget set --voice-minutes N --requests N; לבדוק בחינם: jarvis budget test-limits",
+                          "change: jarvis budget set --voice-minutes N --requests N; test for free: "
+                          "jarvis budget test-limits"))
+        return 0
+    if a.action == "test-limits":
+        from . import daily_limits
+        r = daily_limits.selftest(cfg.ai, a.voice_minutes, a.requests)
+        if a.json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+            return 0 if r["ok"] else 1
+        for c in r["checks"]:
+            res_en, res_he = ("PASS", "עבר") if c["ok"] else ("FAIL", "נכשל")
+            if c["kind"] == "voice_seconds":
+                print(clilang.fmt(f"מגבלת קול ({c['limit']} דקות): שיחה חדשה נחסמת כשהדקות נגמרו -> {res_he}",
+                                  f"voice limit ({c['limit']} min): a new conversation is refused once the minutes "
+                                  f"are used -> {res_en}"))
+            else:
+                print(clilang.fmt(f"מגבלת בקשות ({c['limit']}): {c['passed']} עברו, הבאה נחסמה לפני שליחה "
+                                  f"והוכרזה -> {res_he}",
+                                  f"request limit ({c['limit']}): {c['passed']} passed, the next was refused before "
+                                  f"sending and announced -> {res_en}"))
+            print(clilang.fmt(f"  ההודעה שתישמע: {c['notice_he']}", f"  notice you would hear: {c['notice_en']}"))
+        print(clilang.fmt("(חינם ומקומי: מסד נתונים זמני, המונים שלך לא השתנו)",
+                          "(free and offline: a throw-away database, your counters were not changed)"))
+        return 0 if r["ok"] else 1
     if a.action == "test-cap":
         from .voice.delegation_selftest import run_cap_test
         r = asyncio.run(run_cap_test(cap_usd=a.cap, turn_usd=min(a.turn_usd, a.cap), turns=a.turns, seed=a.seed,
@@ -132,11 +176,18 @@ def cmd_budget(a, cfg, home) -> int:
 
 
 def add_cli(sub) -> None:
-    b = sub.add_parser("budget", help="delegation budget: status / test-cap / set / reset-ladder (strict cap for "
-                                      "spoken lookups)")
+    b = sub.add_parser("budget", help="budgets: status / limits / test-limits / test-cap / set / reset-ladder "
+                                      "(daily voice and request limits, strict cap for spoken lookups)")
     bs = b.add_subparsers(dest="action", required=True)
     st = bs.add_parser("status", help="today's delegated spend, live reservations, mode and fallback step")
     st.add_argument("--json", action="store_true")
+    li = bs.add_parser("limits", help="today's voice minutes and AI requests: used / limit / left")
+    li.add_argument("--json", action="store_true")
+    tl = bs.add_parser("test-limits", help="free offline proof that the daily voice and request limits refuse at "
+                                           "the limit (your counters are not touched)")
+    tl.add_argument("--voice-minutes", type=int, help="test this voice limit instead of the configured one")
+    tl.add_argument("--requests", type=int, help="test this request limit instead of the configured one")
+    tl.add_argument("--json", action="store_true")
     tc = bs.add_parser("test-cap", help="free offline proof that the strict cap holds under overlapping questions")
     tc.add_argument("--cap", type=float, default=0.10, help="daily cap for the test in USD (default 0.10)")
     tc.add_argument("--turn-usd", type=float, default=0.03, help="per-question cap for the test (default 0.03)")

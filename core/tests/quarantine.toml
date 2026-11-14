@@ -10,18 +10,6 @@
 # reason = one line: what flakes and where
 
 [[test]]
-id = "test_agents_bridge.py::test_restart_rotates_the_token"
-issue = 992
-since = "2026-11-09"
-reason = "Windows: CreateNamedPipe WinError 5 when a bridge restarts right after stop() on the same pipe address (seen on PR 987, unrelated to its diff)"
-
-[[test]]
-id = "test_mobile_browser_e2e.py::test_browser_tab_fits_390_and_360_px_in_english_and_hebrew"
-issue = 1049
-since = "2026-11-11"
-reason = "Windows shard: #bvType not visible while state is HUMAN (line 264); seen on queue runs of docs-only PR 1042 and PR 1001, passes on PR runs"
-
-[[test]]
 id = "test_web_chat.py::test_quiet_hours_make_the_chat_silent"
 issue = 1052
 since = "2026-11-11"
