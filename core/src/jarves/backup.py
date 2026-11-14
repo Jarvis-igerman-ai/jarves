@@ -549,6 +549,11 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if not any(home.glob("*.db")):                  # first run: nothing to protect yet
         _save_state(home, {"version": __version__})
         return None
+    p = _unchanged_since_backup(home)
+    if p is not None:                               # #1016: the installer's checkpoint already holds this data
+        logs.info("backup", "BACKUP_REUSED", "pre-migration checkpoint reused", backup=p.name)
+        _save_state(home, {"version": __version__})
+        return p
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
     except BackupError as e:
@@ -558,6 +563,21 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
         return None
     _save_state(home, {"version": __version__})
     return p
+
+
+def _unchanged_since_backup(home: Path, max_age_s: float = 6 * 3600) -> Path | None:
+    """The installer's verified pre-migration checkpoint, when it is the newest backup and recent: the Core was stopped
+    from that checkpoint until this first start, so a second pre-migration backup would only repeat it (#1016)."""
+    items = list_backups(home)
+    newest = max(items, key=lambda b: b["ts"]) if items else None
+    if not newest or newest["kind"] != "pre-migration" or not 0 <= time.time() - newest["ts"] <= max_age_s:
+        return None
+    path = backup_dir(home) / newest["name"]
+    try:
+        note = str(read_manifest(path).get("note", ""))
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+    return path if note.endswith("installer upgrade") else None
 
 
 def due(home: Path, now: float | None = None) -> bool:
@@ -693,6 +713,8 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="how many manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="how many pre-migration / pre-restore backups to keep")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +761,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly),
+                                                   ("manual", a.manual), ("checkpoints", a.checkpoints)) if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
