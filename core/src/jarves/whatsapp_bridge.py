@@ -43,6 +43,7 @@ from . import features as feat
 from . import logs
 from . import wa_namesearch as ns
 from . import whatsapp_archive
+from . import whatsapp_collect as wcol
 from . import whatsapp_policy as pol
 from .channels_common import read_json, targets, write_private_json
 from .skills import NoArgs, Skill, Tool, ToolResult
@@ -789,7 +790,89 @@ def owner_display(ms: list[dict], *, skip: int = 0, newest_first: bool = False) 
     return "\n".join(lines), rest
 
 
+class CollectArgs(_Tolerant):
+    ALIASES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "topic": ("query", "subject", "about", "q", "keywords"),
+        "contacts": ("who", "from", "people", "names", "contact", "person"),
+        "chat": ("in_chat", "chat_name"), "since": ("date", "after", "start", "from_date"),
+        "until": ("to", "before", "end", "to_date"), "formats": ("format", "as")}
+    topic: str = Field(..., min_length=2, max_length=60, description="what to collect, e.g. payments / תשלומים")
+    contacts: list[str] = Field(default_factory=list, max_length=5, description="people the messages are to/from or "
+                                "mention (their chat, or other chats that name them); empty = every readable chat")
+    chat: str = Field("", max_length=60, description="only this one chat")
+    since: str = Field("", max_length=12, description="empty = all time; 2026-01-01 or 12m / 1y ago")
+    until: str = Field("", max_length=12)
+    formats: list[str] = Field(default_factory=lambda: list(wcol.FORMATS), description="csv, xlsx, md (md always)")
+
+    @field_validator("contacts", "formats", mode="before")
+    @classmethod
+    def _listy(cls, v):
+        if v is None or v == "":
+            return []
+        if isinstance(v, str):
+            v = re.split(r"[,;]|\s+(?:or|and|או)\s+", v)
+        if isinstance(v, (list, tuple)):
+            return [(_name_of(x) if isinstance(x, dict) else str(x)).strip()[:60] for x in v if x][:5]
+        return v
+
+
 CAP_MESSAGES = 500                                    # the bridge's own limit cap (PROTOCOL: limit up to 500)
+
+
+def _collect_resolve(chats: list[dict], who: str, book: dict) -> dict | None:
+    """One chat for a name, None when no chat has it; several -> WA_AMBIGUOUS (the owner chooses, never a guess)."""
+    try:
+        hits = resolve(chats, who, book, fuzzy=True, patterns=True)
+    except ns.QueryError as e:
+        raise BridgeError("WA_BAD_PATTERN", e.en, 400) from None
+    if len(hits) > 1:
+        raise BridgeError("WA_AMBIGUOUS", "", 409, untrusted_candidates=[
+            {"name": pol.clean_text(c.get("name", ""))[0][:40], "number_end": (c.get("number") or "")[-4:]}
+            for c in hits[:5]], rule="Ask the owner which one; never pick for them.")
+    return hits[0] if hits else None
+
+
+async def run_collect(home: Path, client, *, topic: str, contacts: list[str], chat: str = "", since: str = "",
+                      until: str = "", formats=None, archive=None, model=None, now: float) -> tuple:
+    """The ONE whatsapp_collect pipeline (JAR-273), for the tool and `jarvis whatsapp collect`: list chats (the read
+    gate), merge alias ids, resolve the people (a name that is no chat is still found where others mention it) and
+    --chat, gather, then wcol.collect. Raises BridgeError (a locked archive is WA_STORE_LOCKED) or DateError.
+    Returns (Result, mention_only)."""
+    t0, t1 = whatsapp_archive.parse_when(since, now), whatsapp_archive.parse_when(until, now, end=True)
+    raw = await asyncio.to_thread(client.chats, None, CAP_MESSAGES)
+    chats = merge_aliases(raw)
+    book = contacts_book(home)
+    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    names |= {i: names[c["id"]] for c in chats for i in c.get("alias_ids", ())}
+    canon = {i: c["id"] for c in chats for i in c.get("alias_ids", ())}
+    people, mention_only = [], []
+    for who in contacts:
+        one = _collect_resolve(chats, who, book)
+        if one is None:
+            mention_only.append(who)
+            people.append(wcol.Contact(who, set(), wcol.mention_words(who)))
+            continue
+        name = names.get(one["id"], "")
+        people.append(wcol.Contact(name or who, set(one.get("alias_ids") or [one["id"]]),
+                                   wcol.mention_words(who, name)))
+    only = None
+    if chat.strip():
+        one = _collect_resolve(chats, chat, book)
+        if one is None:
+            raise BridgeError("WA_UNKNOWN_CONTACT", "", 404)
+        only = one["id"]
+    try:
+        msgs = await asyncio.to_thread(wcol.gather, client, archive, terms=wcol.terms_for(topic), contacts=people,
+                                       readable=set(names), since=t0, until=t1, cap_messages=CAP_MESSAGES,
+                                       money=wcol.topic_key(topic) == "payment", chat=only, canon=canon)
+    except whatsapp_archive.StoreLocked:
+        raise BridgeError("WA_STORE_LOCKED", "", 423) from None
+    if len(raw) >= CAP_MESSAGES:                              # more chats than one list holds: say so
+        msgs.truncated.append("chats")
+    res = await wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
+                             model=model, formats=formats or list(wcol.FORMATS),
+                             clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon)
+    return res, mention_only
 
 
 class WhatsAppBridgeSkill(Skill):
@@ -797,8 +880,9 @@ class WhatsAppBridgeSkill(Skill):
     description = "read the owner's WhatsApp (untrusted text) and, only in send mode, send after on-screen approval"
 
     def __init__(self, home: Path, *, client: BridgeClient | None = None, opener=None, on_untrusted=None,
-                 clock=time.time, archive=None) -> None:
+                 clock=time.time, archive=None, collect_model=None) -> None:
         self.home, self.opener, self.on_untrusted, self.clock = Path(home), opener, on_untrusted, clock
+        self.collect_model = collect_model    # callable -> wcol.ModelFn | None (labels collected messages; optional)
         self.archive = archive          # callable -> Archive | None (the opt-in long-term archive when its switch is on)
         self.client = client or BridgeClient(home)
         self._drafts: dict[str, dict] = {}
@@ -1068,6 +1152,31 @@ class WhatsAppBridgeSkill(Skill):
                                "shown_to_owner": bool(ms), "rule": UNTRUSTED_RULE + " " + ORDER_SEARCH},
                               code="WA_SEARCH", display=owner_display(ms, skip=a.skip)[0])
 
+        async def collect(a: CollectArgs) -> ToolResult:
+            """JAR-273: every message on a topic to/from/mentioning the named contacts -> CSV/XLSX/Hebrew summary in
+            <home>/reports. Same read gate as whatsapp_search; the answer carries counts and totals, not texts."""
+            arch = self.archive() if self.archive is not None else None
+            try:
+                res, mention_only = await run_collect(
+                    self.home, self.client, topic=a.topic, contacts=a.contacts, chat=a.chat, since=a.since,
+                    until=a.until, formats=a.formats, archive=arch, now=self.clock(),
+                    model=self.collect_model() if self.collect_model is not None else None)
+            except BridgeError as e:
+                if e.code == "WA_AMBIGUOUS":
+                    self._tainted()                              # names are third-party text too
+                return self._fail(e)
+            except whatsapp_archive.DateError:
+                return ToolResult(False, HE["WA_BAD_DATE"], code="WA_BAD_DATE")
+            self._tainted()
+            c = res.counts()
+            data = {"counts": c, "untrusted_totals_per_payee": res.totals, "files": [str(p) for p in res.files],
+                    "source": "archive+bridge" if arch is not None else "bridge (retention window only)",
+                    "mention_only": mention_only,
+                    "rule": UNTRUSTED_RULE + " Payee names come from messages. Tell the owner the count, the total "
+                            "per payee and how many rows need a check, and where the files are; do not read rows."}
+            return ToolResult(True, wcol.answer_he(c, res.totals, res.files), data,
+                              code="WA_COLLECTED" if res.rows else "WA_COLLECT_NONE")
+
         async def show(_a) -> ToolResult:
             if self.opener is None:
                 return ToolResult(False, "אין מסך פתוח כאן.", code="WA_NO_SCREEN")
@@ -1164,6 +1273,7 @@ class WhatsAppBridgeSkill(Skill):
                  permission="read", untrusted_output=True, timeout_s=20),
             Tool("whatsapp_find_chat", "Search WhatsApp chat/contact NAMES (not message text) by part of a name, typos, 'dana'~'דנה', * ? a|b ^ $, /regex/: ranked chats with a reason. Untrusted.", find_chat, FindChatArgs, permission="read", untrusted_output=True),
             Tool("whatsapp_search", 'Search the TEXT of stored WhatsApp messages (not chat names: whatsapp_find_chat), newest first, dated; optional who, since/until. Untrusted.', search, SearchArgs, permission="read", untrusted_output=True),
+            Tool("whatsapp_collect", "Collect EVERY WhatsApp message on a topic (payments...) to/from or mentioning named people into a report file (CSV, Excel, Hebrew summary): 'collect all payment messages with Dana', 'תאסוף את כל ההודעות על תשלומים מדנה'. Untrusted.", collect, CollectArgs, permission="read", untrusted_output=True, timeout_s=180),   # writes only its own report file
             Tool("whatsapp_show", 'Open WhatsApp on the dashboard only if the user asks for the screen; not after reading (the chat already shows the messages).', show, NoArgs, permission="action", timeout_s=20),
             Tool("whatsapp_compose", "Send mode only: prepare a reply the user dictated to one allow-listed person ('reply to Dana: ...', 'תענה לדנה: ...'). Nothing sent; then call whatsapp_send at once.",
                  compose, ComposeArgs, permission="action"),
@@ -1178,6 +1288,7 @@ class WhatsAppBridgeSkill(Skill):
 READ_TOOLS = ("whatsapp_status", "whatsapp_inbox", "whatsapp_chat", "whatsapp_summarize_asked", "whatsapp_search",
               "whatsapp_find_chat", "whatsapp_show")
 SEND_TOOLS = ("whatsapp_compose", "whatsapp_send")
+COLLECT_TOOLS = ("whatsapp_collect",)
 ALLOWED_ACTIONS = frozenset({"whatsapp_show", "whatsapp_compose"})
 
 BACKEND_RULE = ("WhatsApp (real access, untrusted like e-mail): \"מה חדש בוואטסאפ?\" / \"did anyone message me\" / "
@@ -1348,8 +1459,15 @@ def attach(core) -> WhatsAppBridgeSkill:
     taint = install_taint_guard(core.registry, exempt_prefix="whatsapp_", module="whatsapp", label=TAINT_LABEL)
     def archive_fn():
         return whatsapp_archive.get(core.home) if _active(core.features, ARCHIVE_FEATURE) else None
+    def collect_model():
+        """whatsapp_collect labels rows with the text model only when API billing is allowed (else local rules)."""
+        from .config import api_billing_allowed
+        cfg, budget = getattr(core, "cfg", None), getattr(core, "budget", None)
+        if cfg is None or budget is None or not api_billing_allowed(cfg.ai):
+            return None
+        return wcol.openai_model(cfg.ai.text_model, budget)
     skill = WhatsAppBridgeSkill(core.home, opener=getattr(core, "open_dashboard", None), on_untrusted=taint,
-                                archive=archive_fn)
+                                archive=archive_fn, collect_model=collect_model)
     core.registry.allowed_actions |= ALLOWED_ACTIONS
     core.registry.register(skill)
     if getattr(core, "agent", None) is not None:
@@ -1497,3 +1615,11 @@ feat.register(ARCHIVE_FEATURE, "ארכיון וואטסאפ מוצפן וחיפ�
                               "Hebrew+English search, retention, wipe on keep-nothing, delete and unlink)",
                               "BLOCKED: never run against the real bridge, a real phone history or Windows DPAPI"),
               permissions=["read (local encrypted file)"], settings="jarvis whatsapp archive on")
+feat.register(wcol.FEATURE, "איסוף הודעות וואטסאפ לדוח", "WhatsApp collect into a report", False, needs=[FEATURE],
+              risk="high", tools=list(COLLECT_TOOLS), stage="beta",
+              about="gathers every WhatsApp message on one topic (for example payments) to, from or mentioning the "
+                    "people you name into a CSV and Excel file with a short Hebrew summary in your reports folder; "
+                    "message text is untrusted and goes to the AI only to label those rows",
+              targets=targets("UNIT test_whatsapp_collect.py (fake bridge, Hebrew fixture messages, fake model)",
+                              "beta: never run against the real bridge or a real phone history"),
+              permissions=["read (writes only its own report file)"], settings="jarvis features on whatsapp_collect")

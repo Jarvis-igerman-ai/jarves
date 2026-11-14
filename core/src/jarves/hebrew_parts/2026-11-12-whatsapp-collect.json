@@ -1,0 +1,6 @@
+{
+ "gathers every WhatsApp message on one topic (for example payments) to, from or mentioning the people you name into a CSV and Excel file with a short Hebrew summary in your reports folder; message text is untrusted and goes to the AI only to label those rows": "אוסף את כל הודעות הוואטסאפ על נושא אחד (למשל תשלומים) אל האנשים שציינתם, מהם או הודעות שמזכירות אותם, לקובץ CSV ולקובץ אקסל עם סיכום קצר בעברית בתיקיית הדוחות; הטקסט של ההודעות לא אמין ועובר למודל רק כדי למלא את השורות",
+ "UNIT test_whatsapp_collect.py (fake bridge, Hebrew fixture messages, fake model)": "בדיקות יחידה test_whatsapp_collect.py (גשר מדומה, הודעות בדיקה בעברית, מודל מדומה)",
+ "beta: never run against the real bridge or a real phone history": "בטא: מעולם לא הורץ מול הגשר האמיתי או היסטוריה אמיתית של טלפון",
+ "read (writes only its own report file)": "קריאה (כותב רק את קובץ הדוח שלו)"
+}

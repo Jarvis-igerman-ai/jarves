@@ -1,0 +1,1 @@
+- Added: WhatsApp collect (beta, off by default): `jarvis whatsapp collect <topic> --from <person>` and the `whatsapp_collect` tool gather every message on a topic (payments: Hebrew synonyms and shekel amounts) to, from or mentioning the named people into CSV + Excel + a Hebrew summary in the reports folder, with totals per payee and rows to check (JAR-273).

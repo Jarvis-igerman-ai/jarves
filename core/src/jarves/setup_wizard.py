@@ -144,6 +144,7 @@ SAFE_OFF = frozenset({
     "telegram",
     "whatsapp_archive",
     "whatsapp_bridge",
+    "whatsapp_collect",
     "whatsapp_send",
     "whats_new_card",
 })
@@ -242,6 +243,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "whatsapp_bridge",
         "whatsapp_send",
         "whatsapp_archive",
+        "whatsapp_collect",
         "home_assistant",
         "anydo",
         "anydo_update",
@@ -509,6 +511,10 @@ def hint(fid: str, ok: bool, why: str) -> dict:
     if fid == "whatsapp_archive":
         return {"command": "jarvis whatsapp archive on", "he": "ארכיון מוצפן להודעות לטווח ארוך:  jarvis whatsapp archive on",
                 "en": "Encrypted long-term message archive:  jarvis whatsapp archive on"}
+    if fid == "whatsapp_collect":
+        return {"command": "jarvis features on whatsapp_collect", "he": "איסוף הודעות על נושא לדוח (בטא):  "
+                "jarvis features on whatsapp_collect", "en": "Collect messages on a topic into a report (beta):  "
+                "jarvis features on whatsapp_collect"}
     if fid == "whatsapp_send":
         return {"command": "jarvis whatsapp mode send", "he": "שליחה רק אחרי 14 ימי קריאה שקטים ואישור שלך:  "
                 "jarvis whatsapp mode send", "en": "Send only after 14 quiet read-only days and your go:  "
@@ -1449,6 +1455,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "whatsapp_archive": [_mod("jarves.whatsapp_archive"), _mod("jarves.whatsapp_store"),
                          _mod("cryptography.hazmat.primitives.ciphers.aead"),
                          _data("jarves.guides", "data/whatsapp_archive.toml")],
+    "whatsapp_collect": [_mod("jarves.whatsapp_collect"), _mod("jarves.whatsapp_bridge"),
+                         _data("jarves.guides", "data/whatsapp_collect.toml")],
     "assisted_dialing": [_mod("jarves.dialing"), _win(_mod("winreg")), _data("jarves", "dashboard_static/dialing.js"),
                          _data("jarves.guides", "data/assisted_dialing.toml")],
     "drive_mode": [_mod("jarves.drive_mode"), _data("jarves.guides", "data/drive_mode.toml")],

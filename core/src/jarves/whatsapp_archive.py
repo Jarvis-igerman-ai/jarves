@@ -373,7 +373,7 @@ class Archive:
             return out
 
     def search(self, query: str, *, chat: str | None = None, since: float | None = None, until: float | None = None,
-               readable: set[str] | None = None, limit: int = 10) -> list[dict]:
+               readable: set[str] | None = None, limit: int = 10, offset: int = 0) -> list[dict]:
         """Messages matching all the words, newest first, as bridge-shaped message dicts. `readable` (the chats the
         bridge lists now) is a hard filter: an unreadable chat never appears."""
         expr = match_expr(query)
@@ -399,17 +399,43 @@ class Archive:
                 where.append("m.ts < ?")
                 args.append(until)
             extra = (" AND " + " AND ".join(where)) if where else ""
-            lim = max(1, min(int(limit), 200))
+            lim, off = max(1, min(int(limit), 200)), max(0, int(offset))
             try:
                 rows = conn.execute("SELECT m.* FROM fts JOIN msg m ON m.id = fts.rowid WHERE fts MATCH ?" + extra
-                                    + " ORDER BY m.ts DESC LIMIT ?", [expr, *args, lim]).fetchall()
+                                    + " ORDER BY m.ts DESC LIMIT ? OFFSET ?", [expr, *args, lim, off]).fetchall()
             except sqlite3.OperationalError:
                 rows = []
-            if not rows:                                # fuzzy fallback: the words as a substring of the folded text
+            if not rows and off:                        # a later page: fall back only if the word query has no hits
+                try:
+                    fts_hit = conn.execute("SELECT 1 FROM fts JOIN msg m ON m.id = fts.rowid WHERE fts MATCH ?" + extra
+                                           + " LIMIT 1", [expr, *args]).fetchone()
+                except sqlite3.OperationalError:
+                    fts_hit = None
+            if not rows and not (off and fts_hit):      # fuzzy fallback: the words as a substring of the folded text
                 needle = fold(query).strip()
                 if needle:
                     rows = conn.execute("SELECT m.* FROM fts JOIN msg m ON m.id = fts.rowid WHERE instr(fts.body, ?) > 0"
-                                        + extra + " ORDER BY m.ts DESC LIMIT ?", [needle, *args, lim]).fetchall()
+                                        + extra + " ORDER BY m.ts DESC LIMIT ? OFFSET ?", [needle, *args, lim, off]
+                                        ).fetchall()
+            return [self._row(r) for r in rows]
+
+    def chat_messages(self, chat: str, *, since: float | None = None, until: float | None = None,
+                      limit: int = 2000, offset: int = 0) -> list[dict]:
+        """Every archived message of ONE chat (newest first, paged), for whatsapp_collect: amounts without a topic
+        word."""
+        with self.lock:
+            if not self._has():
+                return []
+            args: list = [chat]
+            extra = ""
+            if since is not None:
+                extra = " AND ts >= ?"
+                args.append(since)
+            if until is not None:
+                extra += " AND ts < ?"
+                args.append(until)
+            rows = self._open().execute("SELECT * FROM msg WHERE chat = ?" + extra + " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                                        [*args, max(1, min(int(limit), 5000)), max(0, int(offset))]).fetchall()
             return [self._row(r) for r in rows]
 
     @staticmethod
