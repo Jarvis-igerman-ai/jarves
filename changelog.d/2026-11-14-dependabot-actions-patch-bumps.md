@@ -1,0 +1,1 @@
+- Fixed: CI action pins bumped in one combined change: gradle/actions/wrapper-validation 6.4.0 to 6.4.1 and astral-sh/setup-uv 10.3.2 to 10.3.3, same pinned commit SHAs as Dependabot #935 and #936, which never got a merge path (JAR-295).
