@@ -1,6 +1,6 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09. Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
+Date: 2026-11-09 (line references re-checked against `origin/main` on 2026-11-14). Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text, at base
 `origin/main`. Nothing was exercised at runtime: every finding is **UNVERIFIED by test** unless it says otherwise.
 Not read in full: `projectmgr/{engine,pipeline,surfaces,cards,debate,plan}.py`, route/auth layers that call these modules.
@@ -33,7 +33,7 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 2. **P2: case-sensitive protection** (`gitops.py:176`). `f.startswith(PROTECTED)` is case-sensitive; on Windows/macOS
    a change to `.CLAUDE/settings.json` addresses the same directory but is not flagged. Proposal: compare
    `f.lower()` and also match nested `**/.claude/`. **Tier R (gate): proposed only.**
-3. **P2: stale PID kill** (`service.py:100-103, 1299`). On startup every `running/review` task's stored `pid` gets
+3. **P2: stale PID kill** (`service.py:100-103`, `_kill_pid` at `service.py:1298-1307`). On startup every `running/review` task's stored `pid` gets
    `taskkill /F /T` (or `killpg`). After a reboot or long gap the PID can belong to an unrelated process, and `/T`
    kills its tree. Fix: store process start time with the PID and verify it (or only kill PIDs started by this
    process). `if t["pid"]` correctly avoids pid 0.
@@ -68,7 +68,7 @@ check command.
    (title and `why` are), so a secret pasted as an argument is stored in plain text in the DB. Execution still goes through the tool gate.
 
 ## preferences
-4. **P2: `looks_sensitive`** (`preferences.py:42-45`) matches words (password, pin, salary...) and 6+ digit runs, but
+4. **P2: `looks_sensitive`** (`preferences.py:41-48`) matches words (password, pin, salary...) and 6+ digit runs, but
    not key/token shapes (`sk-...`, `ghp_...`, `api key`, `token`, `secret`, long base64/hex strings). It also guards
    goals, devmanager drafts and plans, and confirmed preferences are injected into the model instructions. A pasted
    API key would be stored and later sent to the model. Fix: add a keyword list plus a high-entropy-string rule, with tests.
@@ -80,4 +80,5 @@ One issue per defect (AGENTS.md rule 8):
 - P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Tier R (gate, `no-automerge`): **proposed only**, same reason.
 - P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
 - P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
+- Fix status (2026-11-14): #1096-#1099 are addressed by open PR [#1108](https://github.com/Jarvis-igerman-ai/jarves/pull/1108) (JAR-376, Tier R, not merged); the issues stay open until it merges with evidence.
 - P3 #5-#10: hardening notes, no issue each; track in `docs/reviews/FINDINGS_LEDGER.md` when picked up.
