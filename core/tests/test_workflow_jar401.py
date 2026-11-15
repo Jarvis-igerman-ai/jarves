@@ -19,11 +19,12 @@ from jarves.workflow.store import Store
 
 def test_824_failed_icacls_is_logged_not_silent(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(server.os, "name", "nt")
-    monkeypatch.setattr(server, "_ACL_WARNED", set())  # first failure in this process warns
+    monkeypatch.setattr(server, "_acl_failing", False)  # first failure of an outage warns
     monkeypatch.setattr(server.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 5, b"", b"denied"))
     with caplog.at_level(logging.WARNING, logger=server.__name__):
         assert server.owner_only_file(tmp_path / "access.token") is False
     assert "owner-only ACL" in caplog.text
+    assert "exit 5: denied" in caplog.text  # the reason is logged, not dropped
 
 
 def test_824_secrets_are_locked_down_before_they_are_written(monkeypatch, tmp_path):

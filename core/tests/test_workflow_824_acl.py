@@ -35,6 +35,7 @@ def test_acl_argv_owner_only(monkeypatch, tmp_path):
 
 def test_fail_safe_never_raises(monkeypatch, tmp_path):
     monkeypatch.setattr(server.os, "name", "nt")
+    monkeypatch.setattr(server, "_acl_failing", False)
 
     def boom(*a, **k):
         raise FileNotFoundError("powershell.exe")
@@ -42,16 +43,38 @@ def test_fail_safe_never_raises(monkeypatch, tmp_path):
     assert server.owner_only_file(tmp_path / "x") is False
 
 
-def test_nonzero_exit_fails_and_warns_once(monkeypatch, tmp_path, caplog):
+def _rc_sequence(codes):
+    def fake(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, codes.pop(0), b"", b"Access denied\r\n")
+    return fake
+
+
+def test_nonzero_exit_fails_and_warns_once_per_outage(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(server.os, "name", "nt")
-    monkeypatch.setattr(server, "_ACL_WARNED", set())
-    monkeypatch.setattr(server.subprocess, "run", _run_recorder([], rc=1))
+    monkeypatch.setattr(server, "_acl_failing", False)
+    monkeypatch.setattr(server.subprocess, "run", _rc_sequence([1, 1, 0, 1]))
     with caplog.at_level(logging.DEBUG, logger=server.__name__):
         assert server.owner_only_file(tmp_path / "sessions.a") is False
-        assert server.owner_only_file(tmp_path / "sessions.b") is False
-    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
-    assert [r.getMessage() for r in warnings] == ["could not set an owner-only ACL on sessions.a"]
-    assert any(r.levelno == logging.DEBUG for r in caplog.records)  # later failures still recorded
+        assert server.owner_only_file(tmp_path / "sessions.b") is False  # same outage: DEBUG only
+        assert server.owner_only_file(tmp_path / "sessions.c") is True  # recovered: re-arms
+        assert server.owner_only_file(tmp_path / "sessions.d") is False  # new outage warns again
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert warnings == ["could not set an owner-only ACL on sessions.a (exit 1: Access denied)",
+                        "could not set an owner-only ACL on sessions.d (exit 1: Access denied)"]
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert debug == ["could not set an owner-only ACL on sessions.b (exit 1: Access denied)"]
+
+
+def test_spawn_error_reason_logged(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(server.os, "name", "nt")
+    monkeypatch.setattr(server, "_acl_failing", False)
+
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired("powershell.exe", 15)
+    monkeypatch.setattr(server.subprocess, "run", boom)
+    with caplog.at_level(logging.WARNING, logger=server.__name__):
+        assert server.owner_only_file(tmp_path / "access.token") is False
+    assert "(TimeoutExpired: " in caplog.text
 
 
 def test_noop_off_windows(monkeypatch, tmp_path):

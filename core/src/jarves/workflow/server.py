@@ -62,16 +62,29 @@ def owner_only_file(path: Path) -> bool:
         r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                            env=env, capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
         ok = r.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        ok = False
-    if not ok:  # never silent (#824), but warn once per process: save_sessions calls this per save
-        level = logging.DEBUG if _ACL_WARNED else logging.WARNING
-        _ACL_WARNED.add(True)
-        logging.getLogger(__name__).log(level, "could not set an owner-only ACL on %s", path.name)
+        reason = f"exit {r.returncode}: " + (r.stderr or b"").decode("utf-8", "replace").strip()[:200]
+    except (OSError, subprocess.SubprocessError) as exc:
+        ok, reason = False, f"{type(exc).__name__}: {str(exc)[:200]}"
+    _report_acl(path, ok, reason)
     return ok
 
 
-_ACL_WARNED: set[bool] = set()
+_ACL_LOCK = threading.Lock()
+_acl_failing = False
+
+
+def _report_acl(path: Path, ok: bool, reason: str) -> None:
+    """Never silent (#824), but bounded: save_sessions calls this per save, so warn once per
+    outage (first failure after a success or process start); repeats go to DEBUG."""
+    global _acl_failing
+    with _ACL_LOCK:  # server threads save sessions concurrently
+        first = not ok and not _acl_failing
+        _acl_failing = not ok
+    if not ok:
+        logging.getLogger(__name__).log(logging.WARNING if first else logging.DEBUG,
+                                        "could not set an owner-only ACL on %s (%s)", path.name, reason)
+
+
 _TIGHTENED: set[str] = set()
 
 
