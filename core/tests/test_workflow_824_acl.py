@@ -61,4 +61,4 @@ def test_token_and_sessions_call_acl(monkeypatch, tmp_path):
     server.save_sessions(tmp_path, {})
     names = [p.name for p in seen]
     assert names.count("access.token") == 2  # created, then existing file tightened once
-    assert "sessions.json" in names
+    assert any(n.startswith("sessions.") for n in names)  # the temp file, locked before it is written
