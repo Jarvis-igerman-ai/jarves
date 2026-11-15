@@ -516,14 +516,18 @@ def test_gate_cli_checks_the_tag_signature_when_owner_signers_are_set(tmp_path, 
 
 
 @pytest.mark.skipif(not __import__("shutil").which("ssh-keygen"), reason="needs ssh-keygen for a real SSH tag signature")
+@pytest.mark.skipif(sys.platform == "win32", reason="the release gate runs on ubuntu-24.04 (release.yml); Windows OpenSSH "
+                                                    "signing differs and the fake-runner test covers the decision logic")
 def test_gate_real_ssh_tag_signature_owner_key_only(tmp_path):
     """#605 (review R1): git verify-tag exits 0 for a GOOD signature by a key NOT in allowed_signers ("No principal
     matched", trust undefined); the gate must accept only the owner's listed key."""
     import subprocess
 
     def sh(*cmd, cwd=tmp_path):
-        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True,
-                       env={"PATH": __import__("os").environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1"})
+        env = {**__import__("os").environ, "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
+               "GIT_CONFIG_GLOBAL": str(tmp_path / "gitconfig")}            # no runner/user git config leaks in
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=env)
+        assert r.returncode == 0, f"{cmd[:2]} failed: {r.stderr[-500:]}"
     for who in ("owner", "stranger"):
         sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(tmp_path / who))
     repo = tmp_path / "repo"
@@ -532,7 +536,7 @@ def test_gate_real_ssh_tag_signature_owner_key_only(tmp_path):
     sh("git", "-c", "user.name=o", "-c", "user.email=o@x", "commit", "-q", "--allow-empty", "-m", "c", cwd=repo)
     for who, tag in (("owner", "v4.1.0"), ("stranger", "v4.1.1")):
         sh("git", "-c", "user.name=o", "-c", "user.email=o@x", "-c", "gpg.format=ssh",
-           "-c", f"user.signingkey={tmp_path / who}", "tag", "-s", tag, "-m", "Rows hash: " + "a" * 64, cwd=repo)
+           "-c", "gpg.ssh.program=ssh-keygen", "-c", f"user.signingkey={tmp_path / who}", "tag", "-s", tag, "-m", "Rows hash: " + "a" * 64, cwd=repo)
     signers = tmp_path / "allowed_signers"
     signers.write_text('owner namespaces="git" ' + (tmp_path / "owner.pub").read_text(encoding="utf-8"), encoding="utf-8")
     assert gate.tag_signature_problems(repo, "v4.1.0", signers) == []
