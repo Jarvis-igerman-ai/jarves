@@ -33,6 +33,8 @@ from .whatsapp_archive import fold, stems
 
 FEATURE = "whatsapp_collect"
 MAX_CANDIDATES = 5000           # messages read per run (archive + bridge), before the topic filter
+MAX_READS = 400                 # archive pages + bridge chat reads per run (each reads up to 200/500 messages)
+READ_DEADLINE_S = 120.0         # reading stops after this; below the tool's 180 s timeout, so a report is still written
 MAX_ROWS = 400                  # rows in one report (the newest are kept; older ones are reported as cut)
 MODEL_BATCH = 25                # messages per model request
 QUOTE_CHARS = 120
@@ -203,6 +205,7 @@ class Row:
     uncertain: bool = False
     why_unsure: list[str] = field(default_factory=list)
     _key: str = ""
+    _full: str = ""                                         # the whole folded text (the forward check), never shown
 
     def flag(self, why: str) -> None:
         self.uncertain = True
@@ -226,7 +229,7 @@ def rule_row(m: dict, reason: str, label: str, chat_name: str, *, clean: Callabl
     sender = "me" if m.get("from_me") else _clip(clean(m.get("sender_name") or "") or chat_name, 40)
     r = Row(ts=ts, date=datetime.fromtimestamp(ts, TZ).strftime("%Y-%m-%d"), chat=_clip(chat_name, 40), sender=sender,
             method=_method(toks), quote=_clip(text, QUOTE_CHARS), reason=reason,
-            _key=f"{m.get('chat', '')}|{m.get('id', '')}")
+            _key=f"{m.get('chat', '')}|{m.get('id', '')}", _full=" ".join(fold(text).split()))
     found = amounts(text)
     if found:
         r.amount = found[0]
@@ -266,10 +269,25 @@ def _num(v) -> float | None:
     return f if 0 < f < 10_000_000 else None
 
 
+def valid_answer(got: dict) -> bool:
+    """The strict shape of one model row: relevant and sure are real booleans, text fields are strings (or absent),
+    amount_ils is a number, a numeric string or null. Anything else is not merged."""
+    if not isinstance(got.get("relevant"), bool) or not isinstance(got.get("sure"), bool):
+        return False
+    if any(got.get(k) is not None and not isinstance(got[k], str) for k in ("payee", "method", "what_for")):
+        return False
+    amt = got.get("amount_ils")
+    return amt is None or (isinstance(amt, (int, float, str)) and not isinstance(amt, bool))
+
+
 def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bool:
     """Merge one validated model answer into a rule row. Returns False when the model says it is off topic. The model
-    reads untrusted text, so it can never hide a row whose text states an amount: that row stays, flagged."""
-    if got.get("relevant") is False:
+    reads untrusted text, so it can never hide a row whose text states an amount: that row stays, flagged. An answer
+    that fails `valid_answer` changes nothing: the local row stays, flagged."""
+    if not valid_answer(got):
+        row.flag("model answer invalid")
+        return True
+    if got["relevant"] is False:
         if row.amount is None:
             return False
         row.flag("model says off topic")
@@ -293,7 +311,7 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
     if method:
         row.method = method
     row.what_for = _clip(clean(str(got.get("what_for") or "")), FIELD_CHARS)
-    if got.get("sure") is False:
+    if got["sure"] is False:
         row.flag("model unsure")
     row.uncertain = bool(row.why_unsure)
     return True
@@ -338,14 +356,15 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
 
 
 def dedup(rows: list[Row]) -> tuple[list[Row], int]:
-    """One row per message; the same text on the same day in ANOTHER chat (a forward) counts once. Two identical
-    messages in one chat are two payments and both stay."""
+    """One row per message; the same WHOLE text with the same amount and payee on the same day in ANOTHER chat (a
+    forward) counts once. Two identical messages in one chat are two payments and both stay; texts that only share
+    their start (the shown quote) are different messages and both stay."""
     out: list[Row] = []
     seen: set[str] = set()
-    content: dict[str, str] = {}                            # same day + text + amount -> the chat id it was first in
+    content: dict[str, str] = {}                            # day + full text + amount + payee -> first chat id
     for r in sorted(rows, key=lambda r: (r.ts, r._key)):
-        f = " ".join(fold(r.quote).split())
-        ck = f"{r.date}|{f}|{r.amount}" if len(f) >= 15 else ""
+        f = r._full or " ".join(fold(r.quote).split())
+        ck = f"{r.date}|{f}|{r.amount}|{' '.join(fold(r.payee).split())}" if len(f) >= 15 else ""
         cid = r._key.split("|", 1)[0]
         if r._key in seen or (ck and content.get(ck, cid) != cid):
             continue
@@ -621,6 +640,7 @@ def openai_model(model_id: str, budget, *, timeout_s: float = 30.0) -> ModelFn:
 def row_dict(r: Row) -> dict:
     d = asdict(r)
     d.pop("_key", None)
+    d.pop("_full", None)
     return d
 
 
@@ -634,7 +654,9 @@ ARCHIVE_PAGE = 200                                          # the archive search
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
            since: float | None = None, until: float | None = None, cap_messages: int = 500,
-           money: bool = False, chat: str | None = None, canon: dict[str, str] | None = None) -> Candidates:
+           money: bool = False, chat: str | None = None, canon: dict[str, str] | None = None,
+           clock: Callable[[], float] = time.monotonic, max_reads: int | None = None,
+           deadline_s: float | None = None) -> Candidates:
     """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
     the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
     bridge's own window by the same words plus each contact chat's latest messages. For the payment topic (`money`)
@@ -644,10 +666,13 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
     BEFORE the MAX_CANDIDATES bound, and only messages inside the request (`scope`: dates, chat, topic, contacts)
     count toward it, so full chat reads and unrelated matches can never crowd out the requested ones; any source that
-    may hold more is named in `truncated`."""
+    may hold more is named in `truncated`. Reading also stops after MAX_READS reads or READ_DEADLINE_S seconds
+    ("reads" / "time" in `truncated`), so the caller still writes a report inside its own timeout."""
     out = Candidates()
     out.truncated = []
-    started, reads = time.monotonic(), {"archive": 0, "bridge": 0}
+    started, reads = clock(), {"archive": 0, "bridge": 0}
+    limit_reads = MAX_READS if max_reads is None else max_reads
+    limit_s = READ_DEADLINE_S if deadline_s is None else deadline_s
     seen: set[tuple[str, str]] = set()
     folded = [f for f in (fold(t).strip() for t in terms) if f]
 
@@ -668,9 +693,14 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             out.truncated.append(source)
 
     def bound() -> bool:                                    # more reads would be cut: say so and stop reading
-        if len(out) >= MAX_CANDIDATES and "candidates" not in out.truncated:
-            out.truncated.append("candidates")
-        return len(out) >= MAX_CANDIDATES
+        for why, hit in (("candidates", len(out) >= MAX_CANDIDATES),
+                         ("reads", reads["archive"] + reads["bridge"] >= limit_reads),
+                         ("time", clock() - started >= limit_s)):
+            if hit:
+                if why not in out.truncated:
+                    out.truncated.append(why)
+                return True
+        return False
 
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
@@ -683,6 +713,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             while not bound():
                 page = archive.search(w, since=since, until=until, readable=readable, limit=ARCHIVE_PAGE,
                                       offset=offset)
+                reads["archive"] += 1
                 add(page, "archive", False)
                 if len(page) < ARCHIVE_PAGE:
                     break
@@ -701,6 +732,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         if bound():
             break
         page = client.search(w, cap_messages)
+        reads["bridge"] += 1
         add(page, "bridge", False)
         sweep = sweep or len(page) >= cap_messages
     else:
@@ -711,6 +743,6 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             reads["bridge"] += 1
             add(page, "bridge", len(page) >= cap_messages)
     logs.info("whatsapp", "WA_COLLECT_READ", "WhatsApp collect read pass (counts only)", found=len(out),
-              pages=reads["archive"], count=reads["bridge"],             # archive chat pages, bridge chat reads
-              took_ms=round((time.monotonic() - started) * 1000))
+              pages=reads["archive"], count=reads["bridge"],             # archive pages, bridge reads
+              took_ms=round((clock() - started) * 1000))
     return out

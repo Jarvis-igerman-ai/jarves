@@ -104,7 +104,7 @@ async def test_model_labels_are_validated_and_never_acted_on():
         assert all(set(x) == {"i", "date", "chat", "sender", "text"} for x in items)
         return [{"i": 0, "relevant": True, "payee": "אבי", "amount_ils": "450", "method": "Bit", "what_for": "תיקון",
                  "sure": True},
-                {"i": 1, "relevant": False},                                         # off topic: dropped
+                {"i": 1, "relevant": False, "sure": True},                           # off topic: dropped
                 {"i": 2, "relevant": True, "payee": "=HYPERLINK(1)", "amount_ils": "lots", "sure": False},
                 {"i": "3", "relevant": True}]                                        # bad index: row kept, flagged
     kept, st = await wcol.model_pass(rows, [r.quote for r in rows], "תשלום", fake_model)
@@ -155,9 +155,21 @@ def test_report_files_csv_xlsx_and_hebrew_summary(tmp_path):
 
 # ---------------------------------------------------------------------- the tool (fake bridge)
 def make_reg(home, clock, *, model=None, archive=None, tainted=None):
+    """The owner approves every collect on the screen, and each call is a new owner turn."""
     reg = SkillRegistry()
     reg.register(wab.WhatsAppBridgeSkill(home, clock=clock, archive=archive, collect_model=(lambda: model),
                                          on_untrusted=(lambda: tainted.append(1)) if tainted is not None else None))
+    reg.allowed_actions |= wab.ALLOWED_ACTIONS
+
+    async def approve(prompt):
+        return True
+    reg.confirm = approve
+    inner = reg.call
+
+    async def call(name, raw=None, **kw):
+        reg._untrusted.clear()                               # a later owner turn (past the grace time)
+        return await inner(name, raw, **kw)
+    reg.call = call
     return reg
 
 
@@ -228,7 +240,8 @@ async def test_tool_answer_says_older_rows_were_cut(bridge, home, clock, monkeyp
 
 def test_tool_is_untrusted_action_and_feature_is_beta_off(home):
     t = next(t for t in wab.WhatsAppBridgeSkill(home).tools() if t.name == "whatsapp_collect")
-    assert t.untrusted_output and t.permission == "read"      # only writes its own report file; usable after find_chat
+    assert t.untrusted_output and t.permission == "action" and t.confirm      # plain file + paid AI: owner approves
+    assert "whatsapp_collect" in wab.ALLOWED_ACTIONS
     f = feat.CATALOG[wcol.FEATURE]
     assert f.default_enabled is False and f.stage == "beta" and f.needs == [wab.FEATURE]
     assert f.tools == ["whatsapp_collect"]
@@ -383,8 +396,9 @@ async def test_repeated_hits_are_merged_before_the_candidate_bound(tmp_path, mon
 
 def test_the_model_cannot_hide_a_row_that_states_an_amount():
     r = wcol.rule_row(m("שילמתי 300 שקל"), "chat", "אבי", "אבי")
-    assert wcol.apply_model(r, {"relevant": False}) and r.uncertain and "model says off topic" in r.why_unsure
-    assert not wcol.apply_model(wcol.rule_row(m("קבלה מצורפת"), "chat", "אבי", "אבי"), {"relevant": False})
+    assert wcol.apply_model(r, {"relevant": False, "sure": True}) and "model says off topic" in r.why_unsure
+    assert not wcol.apply_model(wcol.rule_row(m("קבלה מצורפת"), "chat", "אבי", "אבי"),
+                                {"relevant": False, "sure": True})
 
 
 def test_currency_only_payments_are_found_in_every_chat_without_contacts(home, monkeypatch):
@@ -456,3 +470,63 @@ def test_same_second_reports_never_overwrite_and_the_workbook_is_compressed(tmp_
 def test_row_dates_use_israel_time_not_the_machine_zone():
     late = 1789938000.0                                                   # 2026-09-20 21:00 UTC = 21 Sep 00:00 Israel
     assert wcol.rule_row(m("שילמתי 5 שקל", ts=late), "topic", "", "").date == "2026-09-21"
+
+
+# ---------------------------------------------------------------------- late fix round 1 (JAR-273)
+class _Tick:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        self.t += 10.0                                       # every look at the clock is 10 s later
+        return self.t
+
+
+def test_reading_stops_at_the_deadline_or_the_read_cap_and_says_so(monkeypatch):
+    msgs = [m(f"₪{i}", mid=f"d{i}", chat=f"c{i}@s.whatsapp.net") for i in range(40)]      # invented
+    readable = {x["chat"] for x in msgs}
+    kw = dict(terms=wcol.terms_for("תשלום"), contacts=[], readable=readable, money=True)
+    got = wcol.gather(_ChatBridge(msgs), None, max_reads=5, **kw)
+    assert "reads" in got.truncated and len(got) < 40
+    got = wcol.gather(_ChatBridge(msgs), None, clock=_Tick(), deadline_s=100, **kw)
+    assert "time" in got.truncated and len(got) < 40
+    assert "ייתכן שחסרות" in wcol.answer_he({"rows": len(got), "uncertain": 0, "total_ils": 1.0,
+                                             "retrieval_truncated": got.truncated}, [], [])
+
+
+async def test_collect_needs_owner_approval_and_never_runs_in_a_tainted_turn(bridge, home, clock):
+    _seed(bridge, clock())
+    asks = []
+    reg = SkillRegistry()
+    reg.register(wab.WhatsAppBridgeSkill(home, clock=clock))
+    reg.allowed_actions |= wab.ALLOWED_ACTIONS
+
+    async def deny(prompt):
+        asks.append(prompt)
+        return False
+    reg.confirm = deny
+    r = await reg.call("whatsapp_collect", {"topic": "תשלום"})
+    assert not r.ok and asks and "reports" in asks[0] and not (home / "reports").exists()
+    assert (await reg.call("whatsapp_search", {"query": "שילמתי"})).ok                  # untrusted text read
+    r = await reg.call("whatsapp_collect", {"topic": "תשלום"})
+    assert r.code == "TOOL_UNTRUSTED_TURN" and len(asks) == 1 and not (home / "reports").exists()
+
+
+def test_forward_check_compares_whole_texts_not_the_quote():
+    start = "שילמתי לאבי 300 שקל " + "א" * 120                                          # invented, > QUOTE_CHARS
+    a = wcol.rule_row(m(start + " על הצנרת", mid="1", from_me=True), "mention", "אבי", "אשתי")
+    b = wcol.rule_row(m(start + " על החשמל", chat=SPOUSE, mid="2", ts=T0 + 60, from_me=True), "mention", "אבי",
+                      "אשתי")
+    assert a.quote == b.quote and wcol.dedup([a, b])[1] == 0
+    c = wcol.rule_row(m(start + " על הצנרת", chat=SPOUSE, mid="3", ts=T0 + 60, from_me=True), "mention", "אבי",
+                      "אשתי")
+    assert wcol.dedup([a, c])[1] == 1                                                    # a real forward
+
+
+@pytest.mark.parametrize("bad", [{"relevant": True, "payee": "אבי"}, {"relevant": True, "payee": "אבי", "sure": "false"},
+                                 {"payee": "אבי", "sure": True}, {"relevant": "yes", "sure": True},
+                                 {"relevant": True, "sure": True, "payee": ["x"]}])
+def test_a_malformed_model_answer_keeps_the_local_row_flagged(bad):
+    r = wcol.rule_row(m("שילמתי 300 שקל"), "chat", "אבי", "אבי")
+    assert wcol.apply_model(r, bad) and r.uncertain and "model answer invalid" in r.why_unsure
+    assert "payee guessed" in r.why_unsure and r.what_for == ""

@@ -1273,7 +1273,8 @@ class WhatsAppBridgeSkill(Skill):
                  permission="read", untrusted_output=True, timeout_s=20),
             Tool("whatsapp_find_chat", "Search WhatsApp chat/contact NAMES (not message text) by part of a name, typos, 'dana'~'דנה', * ? a|b ^ $, /regex/: ranked chats with a reason. Untrusted.", find_chat, FindChatArgs, permission="read", untrusted_output=True),
             Tool("whatsapp_search", 'Search the TEXT of stored WhatsApp messages (not chat names: whatsapp_find_chat), newest first, dated; optional who, since/until. Untrusted.', search, SearchArgs, permission="read", untrusted_output=True),
-            Tool("whatsapp_collect", "Collect EVERY WhatsApp message on a topic (payments...) to/from or mentioning named people into a report file (CSV, Excel, Hebrew summary): 'collect all payment messages with Dana', 'תאסוף את כל ההודעות על תשלומים מדנה'. Untrusted.", collect, CollectArgs, permission="read", untrusted_output=True, timeout_s=180),   # writes only its own report file
+            Tool("whatsapp_collect", "Collect EVERY WhatsApp message on a topic (payments...) to/from or mentioning named people into a report file (CSV, Excel, Hebrew summary): 'collect all payment messages with Dana', 'תאסוף את כל ההודעות על תשלומים מדנה'. Untrusted.", collect, CollectArgs, permission="action", untrusted_output=True, timeout_s=180,
+                 confirm=COLLECT_CONFIRM),   # writes a plain copy to reports and may send texts to the AI: owner approves
             Tool("whatsapp_show", 'Open WhatsApp on the dashboard only if the user asks for the screen; not after reading (the chat already shows the messages).', show, NoArgs, permission="action", timeout_s=20),
             Tool("whatsapp_compose", "Send mode only: prepare a reply the user dictated to one allow-listed person ('reply to Dana: ...', 'תענה לדנה: ...'). Nothing sent; then call whatsapp_send at once.",
                  compose, ComposeArgs, permission="action"),
@@ -1289,7 +1290,10 @@ READ_TOOLS = ("whatsapp_status", "whatsapp_inbox", "whatsapp_chat", "whatsapp_su
               "whatsapp_find_chat", "whatsapp_show")
 SEND_TOOLS = ("whatsapp_compose", "whatsapp_send")
 COLLECT_TOOLS = ("whatsapp_collect",)
-ALLOWED_ACTIONS = frozenset({"whatsapp_show", "whatsapp_compose"})
+ALLOWED_ACTIONS = frozenset({"whatsapp_show", "whatsapp_compose", "whatsapp_collect"})
+COLLECT_CONFIRM = ("לאסוף הודעות וואטסאפ לדוח? עותק לא מוצפן יישמר בתיקיית reports, וטקסט ההודעות עשוי להישלח "
+                   "למודל ה-AI לתיוג (בתשלום). / Collect WhatsApp messages into a report? A plain (unencrypted) copy "
+                   "is saved in your reports folder and the message text may go to the paid AI model for labelling.")
 
 BACKEND_RULE = ("WhatsApp (real access, untrusted like e-mail): \"מה חדש בוואטסאפ?\" / \"did anyone message me\" / "
                 "\"any new WhatsApp messages\" -> whatsapp_inbox (say names and counts only; whatsapp_status is only "
@@ -1622,4 +1626,4 @@ feat.register(wcol.FEATURE, "איסוף הודעות וואטסאפ לדוח", "
                     "message text is untrusted and goes to the AI only to label those rows",
               targets=targets("UNIT test_whatsapp_collect.py (fake bridge, Hebrew fixture messages, fake model)",
                               "beta: never run against the real bridge or a real phone history"),
-              permissions=["read (writes only its own report file)"], settings="jarvis features on whatsapp_collect")
+              permissions=["action: owner approves on screen (writes a plain report file, may use the paid AI)"], settings="jarvis features on whatsapp_collect")

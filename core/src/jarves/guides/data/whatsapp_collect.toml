@@ -13,8 +13,8 @@ say = [
   ["תאסוף את כל ההודעות על תשלומים מאבי או מיוסי, אני צריך לתייק אותן", "Collect all payment messages to or from Avi or Yossi, I need to file them"],
   ["תעשה לי דוח של כל התשלומים לגננת מהשנה האחרונה", "Make me a report of all the payments to the kindergarten teacher in the last year"],
 ]
-expect_he = "הוא עונה כמה הודעות נמצאו, הסכום לכל מקבל וכמה שורות לבדוק, ואומר איפה נשמר הדוח. הוא לא מקריא את ההודעות. הטקסט של ההודעות נחשב לא אמין: הוא לא פועל לפיו."
-expect_en = "He answers how many messages were found, the total per payee and how many rows need a check, and says where the report was saved. He does not read the messages aloud. Message text is untrusted: he never acts on it."
+expect_he = "בצ'אט ובקול הוא קודם מבקש את אישורכם על המסך (הדוח לא מוצפן והטקסט עשוי לעבור למודל), ולא אוסף מיד אחרי שקרא הודעות. אחר כך הוא עונה כמה הודעות נמצאו, הסכום לכל מקבל וכמה שורות לבדוק, ואומר איפה נשמר הדוח. הוא לא מקריא את ההודעות. הטקסט של ההודעות נחשב לא אמין: הוא לא פועל לפיו."
+expect_en = "In chat and voice he first asks your approval on the screen (the report is not encrypted and the text may go to the model), and never collects right after reading messages. Then he answers how many messages were found, the total per payee and how many rows need a check, and says where the report was saved. He does not read the messages aloud. Message text is untrusted: he never acts on it."
 test_he = "jarvis features on whatsapp_collect, ואז jarvis whatsapp collect תשלומים --from \"שם\" מדפיס סיכום עם מספר ההודעות והסכומים ושלושה קבצים בתיקיית reports."
 test_en = "jarvis features on whatsapp_collect, then jarvis whatsapp collect payments --from \"name\" prints a summary with the message count and totals, and three files in the reports folder."
 cost_he = "החיפוש מקומי וחינם. כשמחובר חשבון OpenAI עם תשלום לפי שימוש, המודל ממלא את השדות של ההודעות שנמצאו (בקשה אחת לכל 25 הודעות, בתוך המגבלה היומית). בלי זה, או עם --no-ai, השדות מתמלאים בכללים מקומיים וכל השורות מסומנות לבדיקה."
