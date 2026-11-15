@@ -19,7 +19,7 @@ from jarves.workflow.store import Store
 
 def test_824_failed_icacls_is_logged_not_silent(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(server.os, "name", "nt")
-    monkeypatch.setenv("USERNAME", "alice")
+    monkeypatch.setattr(server, "_ACL_WARNED", set())  # first failure in this process warns
     monkeypatch.setattr(server.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 5, b"", b"denied"))
     with caplog.at_level(logging.WARNING, logger=server.__name__):
         assert server.owner_only_file(tmp_path / "access.token") is False

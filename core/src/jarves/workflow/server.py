@@ -57,17 +57,21 @@ def owner_only_file(path: Path) -> bool:
         "[System.IO.File]::SetAccessControl($env:JARVES_SECRET_ACL_PATH,$a)"
     )
     env = {**os.environ, "JARVES_SECRET_ACL_PATH": str(path)}
+    env.pop("PSModulePath", None)  # PowerShell 7 modules break Windows PowerShell 5.1
     try:
         r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
                            env=env, capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
         ok = r.returncode == 0
     except (OSError, subprocess.SubprocessError):
         ok = False
-    if not ok:  # never silent (#824): the file may still carry the inherited folder ACL
-        logging.getLogger(__name__).warning("could not set an owner-only ACL on %s", path.name)
+    if not ok:  # never silent (#824), but warn once per process: save_sessions calls this per save
+        level = logging.DEBUG if _ACL_WARNED else logging.WARNING
+        _ACL_WARNED.add(True)
+        logging.getLogger(__name__).log(level, "could not set an owner-only ACL on %s", path.name)
     return ok
 
 
+_ACL_WARNED: set[bool] = set()
 _TIGHTENED: set[str] = set()
 
 
