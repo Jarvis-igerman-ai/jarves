@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -79,10 +80,17 @@ class TasksModel(
 ) {
     private val _state = MutableStateFlow<Plans?>(null)
     val state: StateFlow<Plans?> = _state
+    private var token: String? = null
+    private var load: Job? = null
 
-    /** Read once per visible-screen status tick; a read never changes anything on the PC. */
+    /** Read once per visible-screen status tick; a read never changes anything on the PC. A newer read replaces an older one; a new pairing starts empty. */
     fun refresh(s: Session) {
-        scope.launch {
+        if (token != s.token) {
+            token = s.token
+            _state.value = null
+        }
+        load?.cancel()
+        load = scope.launch {
             _state.value = try {
                 withContext(io) { clientFor(s).plans(s.token) }
             } catch (e: Exception) {
@@ -95,7 +103,7 @@ class TasksModel(
 
 // ---------- Compose ----------
 
-/** The PC's tasks, read-only. Approving, skipping and deleting a step stay on the computer. Hidden when the phone lacks the tasks scope. */
+/** The PC's tasks, read-only. Approving, skipping and deleting a step stay on the computer. Shown only when the PC lists the tasks scope for this phone. */
 @Composable
 fun TasksCard(session: Session, link: Link, model: TasksModel) {
     LaunchedEffect(session.token, link) { model.refresh(session) }
@@ -105,7 +113,7 @@ fun TasksCard(session: Session, link: Link, model: TasksModel) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(R.string.task_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             when (val l = st) {
-                is Plans.Listed -> if (l.plans.isEmpty()) Text(stringResource(R.string.task_none)) else l.plans.forEach { p ->
+                is Plans.Listed -> if (!l.enabled) Text(stringResource(R.string.task_off)) else if (l.plans.isEmpty()) Text(stringResource(R.string.task_none)) else l.plans.forEach { p ->
                     Text(p.title.ifBlank { "…" }, style = MaterialTheme.typography.bodyLarge)
                     Text(
                         stringResource(R.string.task_line, stringResource(taskStateText(p.state)), p.stepsDone, p.steps, p.progress),

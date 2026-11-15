@@ -105,6 +105,7 @@
     <!-- A4: tasks (read-only) -->
     <string name="task_title">משימות במחשב</string>
     <string name="task_loading">קוראים את המשימות…</string>
+    <string name="task_off">המשימות כבויות במחשב.</string>
     <string name="task_none">אין משימות כרגע.</string>
     <string name="task_unreachable">לא הצלחנו לקרוא את המשימות. הן מתרעננות לבד.</string>
     <string name="task_line">%1$s · %2$d מתוך %3$d צעדים הושלמו · %4$d%%</string>

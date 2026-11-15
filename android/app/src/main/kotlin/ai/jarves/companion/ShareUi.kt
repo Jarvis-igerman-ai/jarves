@@ -150,7 +150,7 @@ fun PairedScreen(x: Screen.Status, share: ShareModel, approvals: ApprovalsModel,
         val link = x.link
         if (link is Link.Online) {
             ApprovalsCard(x.session, link, approvals)
-            tasks?.let { TasksCard(x.session, link, it) }
+            if (tasks != null && "tasks" in link.info.scopes) TasksCard(x.session, link, tasks)
         }
     }
 }

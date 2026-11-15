@@ -41,6 +41,12 @@ class TasksTest {
     }
 
     @Test
+    fun plansSwitchedOffOnThePcAreReportedNotHidden() {
+        val r = CompanionClient("pc:1", PlansRec(body = """{"enabled":false,"plans":[]}""")).plans("t") as Plans.Listed
+        assertEquals(false, r.enabled)
+    }
+
+    @Test
     fun planFailuresHavePlainStates() {
         assertEquals(Plans.Revoked, CompanionClient("pc:1", PlansRec(401)).plans("t"))
         assertEquals(Plans.NotAllowed, CompanionClient("pc:1", PlansRec(403)).plans("t"))

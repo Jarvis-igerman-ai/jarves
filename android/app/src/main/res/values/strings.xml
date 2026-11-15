@@ -105,6 +105,7 @@
     <!-- A4: tasks (read-only) -->
     <string name="task_title">Tasks on the computer</string>
     <string name="task_loading">Reading the tasks…</string>
+    <string name="task_off">Tasks are switched off on the computer.</string>
     <string name="task_none">No tasks right now.</string>
     <string name="task_unreachable">Could not read the tasks. They refresh on their own.</string>
     <string name="task_line">%1$s · %2$d of %3$d steps done · %4$d%%</string>
