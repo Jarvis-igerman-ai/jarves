@@ -3,6 +3,7 @@ sleeping. Covers dedupe, timezone / DST, offline, failure / retry, quiet hours a
 synthetic finding creates exactly ONE non-sensitive issue."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -168,10 +169,31 @@ def test_issue_480_a_403_names_the_owner_action_and_stays_incomplete(home):
     scan(None, gh)
     body = gh.issues[0]["body"]
     assert "INCOMPLETE" in body and "never read as zero" in body
-    assert "Owner action" in body and "Dependabot alerts: read" in body and "Secret scanning alerts: read" in body
-    assert "JARVES_GITHUB_TOKEN" in body
+    assert "Owner action: the scan token cannot read Code scanning alerts, Dependabot alerts, Secret scanning alerts" in body
+    assert "dependabot, secret_scanning" not in body.split("Owner action")[1]      # display labels, not raw keys
+    assert f"as {ss.TOKEN_ENV} " in body
     clean = ss.tracker_body([], {"dependabot": "complete", "secret_scanning": "incomplete:http_500"}, 0, "s", "light")
     assert "Owner action" not in clean                                     # only an access refusal asks the owner
+    b401 = ss.tracker_body([], {"code_scanning": "incomplete:http_401", "dependabot": "complete"}, 0, "s", "light")
+    assert "cannot read Code scanning alerts (HTTP 401/403)" in b401 and "Dependabot alerts" not in b401
+
+
+def test_issue_480_the_token_name_in_the_owner_line_is_the_one_the_scanner_reads(monkeypatch):
+    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv(ss.TOKEN_ENV, "t-480")
+    monkeypatch.setenv("GH_TOKEN", "actions-token")
+    assert ss.find_token(env_only=True) == "t-480"                         # the named variable wins over GH_TOKEN
+
+
+def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once():
+    """The live #480 body carries a sig from the old wording; same findings must still get the owner line."""
+    gh = FakeGitHub(access=False)
+    old_sig = hashlib.sha256(b"i|").hexdigest()[:16]                       # pre-#480 signature: no format version
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL,
+                  "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated" and "Owner action" in gh.issues[0]["body"]
+    assert scan(None, gh)["issue"]["status"] == "unchanged"                # and only once
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

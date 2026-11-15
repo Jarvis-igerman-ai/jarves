@@ -46,6 +46,7 @@ CONFIG_FILE = "security_scans.json"
 STATE_FILE = "security_scans_state.json"
 REPO = "Jarvis-igerman-ai/jarves"
 LABEL = "from-diagnostics"
+TOKEN_ENV = "JARVES_GITHUB_TOKEN"     # read first by find_token(); the tracker owner line names it (#480)
 API_BASE = "https://api.github.com"                     # tests inject a fake client instead
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
 TRACKER_TITLE = "[Security] JARVES recurring scan summary"
@@ -298,7 +299,7 @@ def status(home: Path, now: datetime | None = None) -> dict:
 
 # ---------------------------------------------------------------------- GitHub (read-mostly)
 def find_token(env_only: bool = False) -> str:
-    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+    for k in (TOKEN_ENV, "GH_TOKEN", "GITHUB_TOKEN"):
         v = (os.environ.get(k) or "").strip()
         if v:
             return v
@@ -520,8 +521,12 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
+BODY_FORMAT = "2"                                         # #480: bump when tracker_body() wording changes, so the
+                                                         # live tracker is rewritten once even with the same findings
+
+
 def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+    return hashlib.sha256((BODY_FORMAT + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
 
 
 def _complete(coverage: dict) -> bool:
@@ -529,8 +534,8 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
-_ACCESS = {"code_scanning": "Code scanning alerts: read", "dependabot": "Dependabot alerts: read",
-           "secret_scanning": "Secret scanning alerts: read"}
+_ACCESS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot alerts",
+           "secret_scanning": "Secret scanning alerts"}
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -556,9 +561,10 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
         lines.append("Incomplete coverage is never read as zero findings.")
     denied = sorted(k for k, v in coverage.items() if k in _ACCESS and v in ("incomplete:http_401", "incomplete:http_403"))
     if denied:                                           # #480: say what the owner can do, not only the HTTP code
-        lines.append("Owner action: the scan token cannot read " + ", ".join(denied) + ". Give the scan a token with "
-                     + ", ".join(_ACCESS[k] for k in denied) + " as JARVES_GITHUB_TOKEN (the hosted workflow must "
-                     "also pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
+        names = ", ".join(_ACCESS[k] for k in denied)
+        lines.append(f"Owner action: the scan token cannot read {names} (HTTP 401/403). Give the scan a token with read "
+                     f"access to {names} as {TOKEN_ENV} (the hosted workflow must also pass it, a reviewed workflow "
+                     "change); the coverage stays INCOMPLETE until then.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
