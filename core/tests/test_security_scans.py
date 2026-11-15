@@ -161,6 +161,19 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     assert "never read as zero" in gh.issues[0]["body"]
 
 
+def test_issue_480_a_403_names_the_owner_action_and_stays_incomplete(home):
+    """#480: the tracker showed only 'dependabot (incomplete:http_403)' with no way to fix it."""
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
+    scan(None, gh)
+    body = gh.issues[0]["body"]
+    assert "INCOMPLETE" in body and "never read as zero" in body
+    assert "Owner action" in body and "Dependabot alerts: read" in body and "Secret scanning alerts: read" in body
+    assert "JARVES_GITHUB_TOKEN" in body
+    clean = ss.tracker_body([], {"dependabot": "complete", "secret_scanning": "incomplete:http_500"}, 0, "s", "light")
+    assert "Owner action" not in clean                                     # only an access refusal asks the owner
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)

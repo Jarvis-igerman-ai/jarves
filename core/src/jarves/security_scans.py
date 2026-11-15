@@ -529,6 +529,10 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
+_ACCESS = {"code_scanning": "Code scanning alerts: read", "dependabot": "Dependabot alerts: read",
+           "secret_scanning": "Secret scanning alerts: read"}
+
+
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
@@ -550,6 +554,11 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+    denied = sorted(k for k, v in coverage.items() if k in _ACCESS and v in ("incomplete:http_401", "incomplete:http_403"))
+    if denied:                                           # #480: say what the owner can do, not only the HTTP code
+        lines.append("Owner action: the scan token cannot read " + ", ".join(denied) + ". Give the scan a token with "
+                     + ", ".join(_ACCESS[k] for k in denied) + " as JARVES_GITHUB_TOKEN (the hosted workflow must "
+                     "also pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
