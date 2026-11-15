@@ -1,7 +1,6 @@
 """Regression tests for #1096 #1097 #1098 #1099 (JAR-376)."""
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
@@ -35,13 +34,12 @@ def test_1099_key_and_token_shaped_text_is_sensitive(text):
     assert looks_sensitive(text)
 
 
-@pytest.mark.parametrize("text", ["I like jazz in the morning", "call me Igal", "prefer short answers",
+@pytest.mark.parametrize("text", ["secret-ish title", "plan a secret party", "I like jazz in the morning", "call me Igal", "prefer short answers",
                                   "wake me at seven on weekdays", "internationalization matters"])
 def test_1099_ordinary_preferences_are_not_sensitive(text):
     assert not looks_sensitive(text)
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="uses /proc and process groups")
 def test_1098_recovery_kills_only_the_same_process(tmp_path):
     from jarves.projectmgr import engine
     from jarves.projectmgr.service import _kill_pid
@@ -57,7 +55,7 @@ def test_1098_recovery_kills_only_the_same_process(tmp_path):
         assert p.wait(5) is not None
     finally:
         if p.poll() is None:
-            os.killpg(p.pid, 9)
+            p.kill()
             p.wait(5)
 
 

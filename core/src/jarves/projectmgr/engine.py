@@ -31,6 +31,8 @@ def proc_token(pid: int) -> str:
             import ctypes
             from ctypes import wintypes
             k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.OpenProcess.restype = wintypes.HANDLE
+            k.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
             h = k.OpenProcess(0x1000, False, int(pid))             # PROCESS_QUERY_LIMITED_INFORMATION
             if not h:
                 return ""

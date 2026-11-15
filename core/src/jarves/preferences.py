@@ -43,7 +43,8 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
-    r"api[\s_-]*key|secret|\btoken|bearer|private\s*key|access\s*key|מפתח|טוקן", re.I)
+    r"api[\s_-]*key|\bsecret\s*(?:key|is\b|[:=])|client[\s_-]*secret|\btoken|bearer|private\s*key|access\s*key|"
+    r"מפתח|טוקן", re.I)
 # Key/token-shaped text (#1099): a long unbroken run of key characters that mixes letters and digits (sk-..., ghp_...,
 # AKIA..., JWTs, random secrets). Ordinary words have no digits; long numbers are already covered above.
 _KEYISH = re.compile(r"[A-Za-z0-9_+/=.-]{20,}")
