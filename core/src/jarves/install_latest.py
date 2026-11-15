@@ -349,12 +349,14 @@ def _core_restarted(deps: Deps, t0) -> tuple[bool, str]:
     """(ok, detail): a Core answers and its process started after this run began, so it runs the installed program
     (whose version `update status` checks). The status reply's `version` is the package string, not the build, so it
     is not compared. Polled (bounded); a failing status call is retried. No uptime or no start time: UNVERIFIED pass."""
-    st = None
+    st, why = None, ""
     for i in range(CORE_POLLS):
         try:
             st = deps.core_status()
-        except Exception:                                 # noqa: BLE001  (transient: ask again)
-            st = None
+        except Exception as e:                            # noqa: BLE001  (transient: ask again; named if it persists)
+            st, why = None, type(e).__name__
+        if st is not None and not isinstance(st, dict):  # a reply that is not an object is no answer
+            st, why = None, "malformed status reply"
         up = st.get("uptime_s") if isinstance(st, dict) else None
         if st is not None and (not isinstance(up, (int, float)) or not isinstance(t0, (int, float))
                                or up <= deps.clock() - t0 + 5):
@@ -362,7 +364,7 @@ def _core_restarted(deps: Deps, t0) -> tuple[bool, str]:
         if i < CORE_POLLS - 1:
             deps.sleep(CORE_POLL_S)
     if st is None:
-        return False, "the Core is not running; start it with: jarvis start"
+        return False, "the Core is not running" + (f" ({why})" if why else "") + "; start it with: jarvis start"
     up = st.get("uptime_s")
     if not isinstance(up, (int, float)) or not isinstance(t0, (int, float)):
         return True, "UNVERIFIED: the Core runs, its start time was not reported"

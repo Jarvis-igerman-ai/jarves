@@ -507,3 +507,18 @@ def test_real_wiring_reads_the_status_reply_and_start_waits(tmp_path, monkeypatc
     d.start_core()
     assert seen["wait"] > 0                                # cmd_start polls until the Core answers
     assert isinstance(Health(tmp_path).snapshot(tmp_path)["uptime_s"], int)   # the field the Core's status carries
+
+
+def test_malformed_or_failing_status_reply_fails_named_and_rolls_back(tmp_path):
+    for reply, named in ((["not", "a", "dict"], "malformed status reply"), (ValueError("bad json"), "ValueError")):
+        f = Fake(tmp=tmp_path)
+        d = f.deps()
+
+        def status(reply=reply):
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+        d.core_status = status
+        rep = il.run(d)
+        assert not rep.ok and rep.rolled_back and f.calls.count("sleep") == il.CORE_POLLS - 1
+        assert named in dict((c[0], c[2]) for c in rep.checks)["Core restarted on the new version"]
