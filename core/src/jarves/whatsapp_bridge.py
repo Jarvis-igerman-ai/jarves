@@ -1626,4 +1626,4 @@ feat.register(wcol.FEATURE, "איסוף הודעות וואטסאפ לדוח", "
                     "message text is untrusted and goes to the AI only to label those rows",
               targets=targets("UNIT test_whatsapp_collect.py (fake bridge, Hebrew fixture messages, fake model)",
                               "beta: never run against the real bridge or a real phone history"),
-              permissions=["action: owner approves on screen (writes a plain report file, may use the paid AI)"], settings="jarvis features on whatsapp_collect")
+              permissions=["action (owner approves on screen; writes a plain report file, may use the paid AI)"], settings="jarvis features on whatsapp_collect")

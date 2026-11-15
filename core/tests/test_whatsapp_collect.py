@@ -247,6 +247,16 @@ def test_tool_is_untrusted_action_and_feature_is_beta_off(home):
     assert f.tools == ["whatsapp_collect"]
 
 
+def test_feature_permission_renders_in_hebrew():
+    import re
+    from jarves import capabilities, locale_parts
+    he = locale_parts.catalog("he")["dict"]
+    for p in capabilities.view(wcol.FEATURE)["permissions"]:        # same split as perm() on the Features page (m4.js)
+        m = re.match(r"^(read|action|destructive)(?=$|[ ,(])(.*)$", p)
+        assert m, f"permission kind not recognised: {p!r}"
+        assert not m[2].strip() or m[2].strip() in he
+
+
 # ---------------------------------------------------------------------- CLI
 def test_cli_collect_off_then_on(bridge, home, capsys):
     from jarves import cli
