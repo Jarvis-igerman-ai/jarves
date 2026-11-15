@@ -1,0 +1,1 @@
+- Fixed: CI actions patch bumps (JAR-295, combines Dependabot #935 and #936): SHA-pinned gradle/actions/wrapper-validation 6.4.0 -> 6.4.1 and astral-sh/setup-uv 10.3.2 -> 10.3.3.
