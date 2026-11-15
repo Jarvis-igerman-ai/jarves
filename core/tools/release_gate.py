@@ -206,6 +206,9 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
+
+
 def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.run) -> list[str]:
     """#605: the 'Rows hash' line of the annotated tag is authentic only when the tag is signed by the owner's key. The
     allowed-signers list comes from outside the repo (repository variable RELEASE_ALLOWED_SIGNERS, owner-only), so a
@@ -219,12 +222,15 @@ def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.ru
         return [f"sign-off: the owner allowed-signers file {p.name} is missing or empty; cannot verify the tag signature"]
     if not TAG_RE.match(tag):
         return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
-    cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={p}", "verify-tag", f"refs/tags/{tag}"]
+    # review R1: require FULL trust (a listed principal) and the "Good ... signature for <principal>" line, so a good
+    # signature by an unlisted key never passes on any git version; the verifier is pinned (no runner config redirect).
+    cmd = ["git", "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen", "-c", "gpg.minTrustLevel=fully",
+           "-c", f"gpg.ssh.allowedSignersFile={p}", "verify-tag", f"refs/tags/{tag}"]
     try:
         r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError) as e:
         return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
-    if r.returncode != 0:
+    if r.returncode != 0 or not GOOD_SIG_RE.search(r.stderr or ""):
         why = " ".join((r.stderr or "").split())[:300]
         return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag failed: {why}); "
                 "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]

@@ -483,10 +483,16 @@ def test_gate_tag_signature_by_owner_key(tmp_path):
     signers = tmp_path / "allowed_signers"
     assert any("missing or empty" in p for p in gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=_Run()))
     signers.write_text("owner ssh-ed25519 AAAA\n", encoding="utf-8")
-    ok = _Run()
+    good = 'Good "git" signature for owner with ED25519 key SHA256:x\n'
+    ok = _Run(0, good)
     assert gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=ok) == []
     cmd = ok.calls[0][0]
     assert cmd[:1] == ["git"] and f"gpg.ssh.allowedSignersFile={signers}" in cmd and cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"]
+    assert "gpg.minTrustLevel=fully" in cmd and "gpg.ssh.program=ssh-keygen" in cmd        # review R1 + pinned verifier
+    # review R1: exit 0 with a good signature by an UNLISTED key ("No principal matched") must still refuse
+    stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'
+    assert any("not signed by the owner" in p for p in gate.tag_signature_problems(tmp_path, "v4.1.0", signers,
+                                                                                   run=_Run(0, stranger)))
     bad = gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=_Run(1, "error: no signature found\n" + "x" * 900))
     assert len(bad) == 1 and "not signed by the owner" in bad[0] and "no signature found" in bad[0] and len(bad[0]) < 600
     assert any("not a stable tag" in p for p in gate.tag_signature_problems(tmp_path, "main;rm", signers, run=ok))
@@ -507,3 +513,28 @@ def test_gate_cli_checks_the_tag_signature_when_owner_signers_are_set(tmp_path, 
     wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "vars.RELEASE_ALLOWED_SIGNERS" in wf and "JARVES_ALLOWED_SIGNERS_FILE=" in wf
     assert wf.index("JARVES_ALLOWED_SIGNERS_FILE=") > wf.index('if [ "$REF_TYPE" = "tag" ]')
+
+
+@pytest.mark.skipif(not __import__("shutil").which("ssh-keygen"), reason="needs ssh-keygen for a real SSH tag signature")
+def test_gate_real_ssh_tag_signature_owner_key_only(tmp_path):
+    """#605 (review R1): git verify-tag exits 0 for a GOOD signature by a key NOT in allowed_signers ("No principal
+    matched", trust undefined); the gate must accept only the owner's listed key."""
+    import subprocess
+
+    def sh(*cmd, cwd=tmp_path):
+        subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True,
+                       env={"PATH": __import__("os").environ["PATH"], "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1"})
+    for who in ("owner", "stranger"):
+        sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(tmp_path / who))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sh("git", "init", "-q", cwd=repo)
+    sh("git", "-c", "user.name=o", "-c", "user.email=o@x", "commit", "-q", "--allow-empty", "-m", "c", cwd=repo)
+    for who, tag in (("owner", "v4.1.0"), ("stranger", "v4.1.1")):
+        sh("git", "-c", "user.name=o", "-c", "user.email=o@x", "-c", "gpg.format=ssh",
+           "-c", f"user.signingkey={tmp_path / who}", "tag", "-s", tag, "-m", "Rows hash: " + "a" * 64, cwd=repo)
+    signers = tmp_path / "allowed_signers"
+    signers.write_text('owner namespaces="git" ' + (tmp_path / "owner.pub").read_text(encoding="utf-8"), encoding="utf-8")
+    assert gate.tag_signature_problems(repo, "v4.1.0", signers) == []
+    bad = gate.tag_signature_problems(repo, "v4.1.1", signers)
+    assert len(bad) == 1 and "not signed by the owner" in bad[0]

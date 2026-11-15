@@ -183,11 +183,14 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
    repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
-   A real publish in Actions also refuses outside a tag ref (`packaging/release.py public-publish`, #544).
+   Defence in depth only: a real publish in Actions also refuses outside a tag ref (`packaging/release.py public-publish`,
+   #544), but a branch push can edit that script too; the real control is this environment with environment-scoped secrets.
 5. **Owner-signed tags (optional, #605).** Settings, Secrets and variables, Actions, Variables: add `RELEASE_ALLOWED_SIGNERS`
    with your SSH `allowed_signers` line (`you@example namespaces="git" ssh-ed25519 AAAA...`). From then on the gate requires
-   the stable tag to be SSH-signed by that key (`git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`), so the out-of-band rows hash
-   is authentic. Sign-off sheets and `docs/release/` are never "docs only" for automerge (`core/tools/risk_class.py`, #543).
+   the stable tag to be SSH-signed by a listed key (`git verify-tag` with full trust), so the out-of-band rows hash is
+   authentic. Set git up once to sign with SSH: `git config --global gpg.format ssh` and
+   `git config --global user.signingkey ~/.ssh/id_ed25519.pub`; then `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. While the
+   variable is unset the check is off (opt-in). Sign-off sheets and `docs/release/` are never "docs only" for automerge (`core/tools/risk_class.py`, #543).
 6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
 
