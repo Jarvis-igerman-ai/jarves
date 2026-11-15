@@ -183,7 +183,12 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
    repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
-5. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
+   A real publish in Actions also refuses outside a tag ref (`packaging/release.py public-publish`, #544).
+5. **Owner-signed tags (optional, #605).** Settings, Secrets and variables, Actions, Variables: add `RELEASE_ALLOWED_SIGNERS`
+   with your SSH `allowed_signers` line (`you@example namespaces="git" ssh-ed25519 AAAA...`). From then on the gate requires
+   the stable tag to be SSH-signed by that key (`git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`), so the out-of-band rows hash
+   is authentic. Sign-off sheets and `docs/release/` are never "docs only" for automerge (`core/tools/risk_class.py`, #543).
+6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
 
 Safe default while these are not done: the coordinator does not create or accept a stable tag, and docs-only PRs that touch

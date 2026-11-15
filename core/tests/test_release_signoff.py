@@ -465,3 +465,45 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
     assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
+
+
+class _Run:
+    def __init__(self, code=0, err=""):
+        self.code, self.err, self.calls = code, err, []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append((cmd, kw))
+        import subprocess
+        return subprocess.CompletedProcess(cmd, self.code, "", self.err)
+
+
+def test_gate_tag_signature_by_owner_key(tmp_path):
+    """#605: the tag annotation hash is only authentic when the tag is signed by the owner's key (allowed signers kept
+    outside the repo, repository variable). A missing/empty signers file or a failed git verify-tag refuses."""
+    signers = tmp_path / "allowed_signers"
+    assert any("missing or empty" in p for p in gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=_Run()))
+    signers.write_text("owner ssh-ed25519 AAAA\n", encoding="utf-8")
+    ok = _Run()
+    assert gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=ok) == []
+    cmd = ok.calls[0][0]
+    assert cmd[:1] == ["git"] and f"gpg.ssh.allowedSignersFile={signers}" in cmd and cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"]
+    bad = gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=_Run(1, "error: no signature found\n" + "x" * 900))
+    assert len(bad) == 1 and "not signed by the owner" in bad[0] and "no signature found" in bad[0] and len(bad[0]) < 600
+    assert any("not a stable tag" in p for p in gate.tag_signature_problems(tmp_path, "main;rm", signers, run=ok))
+
+    def boom(cmd, **kw):
+        raise FileNotFoundError("git")
+    assert any("cannot verify" in p for p in gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=boom))
+
+
+def test_gate_cli_checks_the_tag_signature_when_owner_signers_are_set(tmp_path, monkeypatch, capsys):
+    """#605: the release workflow passes the owner's allowed signers via JARVES_ALLOWED_SIGNERS_FILE; the CLI refuses on
+    a missing list, and the workflow exports the repository variable only on a tag ref."""
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS_FILE", str(tmp_path / "absent"))
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    assert rc == 1 and "allowed-signers file absent is missing or empty" in capsys.readouterr().out
+    wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "vars.RELEASE_ALLOWED_SIGNERS" in wf and "JARVES_ALLOWED_SIGNERS_FILE=" in wf
+    assert wf.index("JARVES_ALLOWED_SIGNERS_FILE=") > wf.index('if [ "$REF_TYPE" = "tag" ]')

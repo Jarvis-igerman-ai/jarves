@@ -536,3 +536,14 @@ def test_new_series_publishes_over_old_series_and_old_never_replaces_new(tmp_pat
     _publish(gh, _dist(tmp_path, "0.1.0.83"), pem)                      # a late old-series build is refused
     assert gh.latest()["tag_name"] == "win-v3.0.0.5"
     assert updates.is_newer(m["version"], "0.1.0.82") and not updates.is_newer("0.1.0.83", m["version"])
+
+
+def test_real_publish_refuses_outside_a_tag_ref_in_ci(tmp_path, capsys):
+    """#544: a real publish in GitHub Actions runs only from a tag ref; a branch run (an edited workflow, a dispatch on a
+    branch) is refused before any secret is used, even when the secrets are present."""
+    env = {"RELEASES_TOKEN": "github_pat_SECRETVALUE", "JARVES_UPDATE_SIGNING_KEY": "k", "GITHUB_ACTIONS": "true"}
+    for ref_type in ("branch", "", None):
+        e = {**env, **({} if ref_type is None else {"GITHUB_REF_TYPE": ref_type})}
+        with pytest.raises(SystemExit, match="only from a tag ref"):
+            release.public_publish(tmp_path, env=e)
+    assert "SECRETVALUE" not in capsys.readouterr().out

@@ -206,6 +206,31 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.run) -> list[str]:
+    """#605: the 'Rows hash' line of the annotated tag is authentic only when the tag is signed by the owner's key. The
+    allowed-signers list comes from outside the repo (repository variable RELEASE_ALLOWED_SIGNERS, owner-only), so a
+    docs-only commit cannot add a key. Missing list, bad tag, failed git or a bad signature refuse (never pass blind)."""
+    p = Path(signers_file)
+    try:
+        listed = p.is_file() and bool(p.read_text(encoding="utf-8").strip())
+    except (OSError, UnicodeDecodeError):
+        listed = False
+    if not listed:
+        return [f"sign-off: the owner allowed-signers file {p.name} is missing or empty; cannot verify the tag signature"]
+    if not TAG_RE.match(tag):
+        return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
+    cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.allowedSignersFile={p}", "verify-tag", f"refs/tags/{tag}"]
+    try:
+        r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
+    if r.returncode != 0:
+        why = " ".join((r.stderr or "").split())[:300]
+        return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag failed: {why}); "
+                "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]
+    return []
+
+
 # ---------------------------------------------------------------------- git + GitHub (not used by the tests)
 def git_is_ancestor(root: Path):
     def f(a: str, b: str) -> bool:
@@ -311,6 +336,8 @@ def main(argv: list[str] | None = None) -> int:
                          "refuse when it differs from the sheet (#605)")
     ap.add_argument("--require-rows-hash", action="store_true", default=os.environ.get("JARVES_REQUIRE_ROWS_HASH") == "1",
                     help="refuse when no out-of-band rows hash is given (a real publish; the release workflow sets it)")
+    ap.add_argument("--allowed-signers", type=Path, default=os.environ.get("JARVES_ALLOWED_SIGNERS_FILE") or None,
+                    help="owner allowed-signers file: the tag must be SSH-signed by a listed key (#605)")
     a = ap.parse_args(argv)
     verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
@@ -338,6 +365,8 @@ def main(argv: list[str] | None = None) -> int:
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
+    if a.allowed_signers is not None:
+        problems += tag_signature_problems(root, a.tag, a.allowed_signers)
     if a.expect_rows_hash is None and a.require_rows_hash:
         problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
                         "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
