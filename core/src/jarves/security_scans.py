@@ -535,7 +535,8 @@ def _complete(coverage: dict) -> bool:
 
 # ---------------------------------------------------------------------- the ONE issue
 _ACCESS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot alerts",
-           "secret_scanning": "Secret scanning alerts"}
+           "secret_scanning": "Secret scanning alerts", "main_ci": "Actions workflow runs",
+           "nightly": "Actions workflow runs", "codeql_run": "Actions workflow runs"}
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -561,7 +562,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
         lines.append("Incomplete coverage is never read as zero findings.")
     denied = sorted(k for k, v in coverage.items() if k in _ACCESS and v in ("incomplete:http_401", "incomplete:http_403"))
     if denied:                                           # #480: say what the owner can do, not only the HTTP code
-        names = ", ".join(_ACCESS[k] for k in denied)
+        names = ", ".join(dict.fromkeys(_ACCESS[k] for k in denied))   # one label per access kind
         lines.append(f"Owner action: the scan token cannot read {names} (HTTP 401/403). Give the scan a token with read "
                      f"access to {names} as {TOKEN_ENV} (the hosted workflow must also pass it, a reviewed workflow "
                      "change); the coverage stays INCOMPLETE until then.")
