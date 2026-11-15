@@ -83,7 +83,7 @@ def check(deps: Deps) -> dict:
     elif not head.startswith(("PASS", "FAIL")):                    # PENDING or DRY RUN: nothing was judged yet
         bug("P1", "install-latest", f"install not finished ({head.split('  ')[0]}): {head}")
     elif not _of_day(head, day):
-        bug("P1", "install-latest", f"report is from an earlier day, not {day}: {head}")
+        bug("P1", "install-latest", f"report is not from {day} (or the next UTC morning): {head}")   # earlier or later
     elif not re.search(r"^version: .*-> \S*-beta", report, re.M) and not report.startswith("FAIL") \
             and not (re.search(r"^\s*\[PASS\] up to date", report, re.M) and _beta_installed(deps, lines)):
         bug("P1", "install-latest", "installed version is not a beta; run: jarvis qa-daily install")

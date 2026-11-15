@@ -56,11 +56,12 @@ def test_missing_report_is_a_p1_and_green_run_has_no_bugs(home):
 
 def test_stale_pending_or_non_beta_report_is_never_a_pass(home):
     ok = REPORT.replace("FAIL", "PASS")
-    cases = {"PENDING": ok.replace("PASS  install", "PENDING  install", 1),
-             "DRY RUN": ok.replace("PASS  install", "DRY RUN  install", 1),
-             "earlier day": ok.replace("2026-11-12", "2026-11-10", 1),
-             "not a beta": ok.replace("4.5.1-beta.3", "4.5.1")}
-    for want, report in cases.items():
+    cases = [("PENDING", ok.replace("PASS  install", "PENDING  install", 1)),
+             ("DRY RUN", ok.replace("PASS  install", "DRY RUN  install", 1)),
+             ("not from 2026-11-12", ok.replace("2026-11-12", "2026-11-10", 1)),
+             ("not from 2026-11-12", ok.replace("2026-11-12", "2026-11-20", 1)),   # a stale attempt, a later report
+             ("not a beta", ok.replace("4.5.1-beta.3", "4.5.1"))]
+    for want, report in cases:
         deps, _ = _deps(home, report=report, fail=())
         bugs = qa_daily.check(deps)["bugs"]
         assert [(b["priority"], b["check"]) for b in bugs] == [("P1", "install-latest")], want
