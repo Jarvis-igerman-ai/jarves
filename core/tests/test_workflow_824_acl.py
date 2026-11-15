@@ -23,7 +23,8 @@ def test_icacls_argv_owner_only(monkeypatch, tmp_path):
     f = tmp_path / "access.token"
     assert server.owner_only_file(f) is True
     cmd, kw = calls[0]
-    assert cmd == ["icacls", str(f), "/inheritance:r", "/grant:r", "PC\\alice:(F)"]
+    assert cmd == ["icacls", str(f), "/inheritance:r", "/grant:r", "PC\\alice:(F)",
+                   "/remove:g", "*S-1-3-4", "*S-1-5-18", "*S-1-5-32-544"]
     assert not kw.get("shell")
 
 

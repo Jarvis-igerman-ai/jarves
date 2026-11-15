@@ -1,1 +1,1 @@
-- Added: a Windows-only test reads the real ACL of the workflow access.token and sessions.json after creation and requires no inherited entries and no principal other than the current user (JAR-260, #824).
+- Fixed: the workflow access.token and sessions.json on Windows now also drop explicit OWNER RIGHTS, SYSTEM and Administrators grants, so only the current user can read them; a Windows-only test reads the real ACL after creation (JAR-260, #824).
