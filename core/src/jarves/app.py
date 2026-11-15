@@ -2061,8 +2061,15 @@ class Core:
                 self._spawn(self._chime("wake"))
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
-                # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
-                await self._start_live(ack=True, greeting=self.wake_greeting())
+                await self._open_wake_live()
+
+    async def _open_wake_live(self) -> None:
+        """#179: every wake session opens with a short spoken cue (the greeting was once per Core start only).
+        #520: the start-greeting is used up only when the session really opened (not on budget/mute/connect failure)."""
+        greeting = self.wake_greeting()
+        await self._start_live(ack=True, greeting=greeting)
+        if greeting and self.live is not None:
+            self._greeted = True          # the wake session greeted: no second start-greeting when the face connects later
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""
@@ -2074,7 +2081,6 @@ class Core:
                 return None                # drive mode: no spoken cue (and no start-greeting claim) on a wake
         except Exception:
             pass
-        self._greeted = True              # the wake session greets: no second start-greeting when the face connects later
         return "אני מקשיב." if self.cfg.voice.language == "he" else "I'm listening."
 
     # ------------------------------------------------------------------ feature switches (features.py)
