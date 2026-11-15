@@ -24,7 +24,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -82,7 +82,7 @@ def check(deps: Deps) -> dict:
             + (f"; qa-daily install output: {log}" if log else ""))
     elif not head.startswith(("PASS", "FAIL")):                    # PENDING or DRY RUN: nothing was judged yet
         bug("P1", "install-latest", f"install not finished ({head.split('  ')[0]}): {head}")
-    elif day not in head:
+    elif not _of_day(head, day):
         bug("P1", "install-latest", f"report is from an earlier day, not {day}: {head}")
     elif not re.search(r"^version: .*-> \S*-beta", report, re.M) and not report.startswith("FAIL") \
             and not (re.search(r"^\s*\[PASS\] up to date", report, re.M) and _beta_installed(deps, lines)):
@@ -106,6 +106,20 @@ def check(deps: Deps) -> dict:
     return {"ok": not bugs, "bugs": bugs, "dir": rel}
 
 
+def _of_day(head: str, d: str) -> bool:
+    """install-latest stamps its own start, seconds after our marker: an install begun just before UTC midnight
+    carries the next day's date, so a header of day d or d+1 belongs to the attempt of day d."""
+    nxt = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+    return d in head or nxt in head
+
+
+def _open_day(root: Path, today: str) -> str:
+    """The day of the newest install attempt not yet checked (it may have begun before UTC midnight), else today."""
+    days = sorted(m.parent.name for m in root.glob("*/install.started")
+                  if m.parent.name <= today and not (m.parent / "tick.checked").is_file())
+    return days[-1] if days else today
+
+
 INSTALL_WAIT_S = 5400 + 600                                         # install_latest.PENDING_S + margin
 TICK_S = 3600.0
 
@@ -115,10 +129,8 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
     if not enabled():
         return "off"
-    root, d = Path(home) / "qa" / "daily", day()
-    open_days = sorted(m.parent.name for m in root.glob("*/install.started")   # begun before UTC midnight: finish it
-                       if m.parent.name < d and not (m.parent / "tick.checked").is_file())
-    d = open_days[-1] if open_days else d
+    root = Path(home) / "qa" / "daily"
+    d = _open_day(root, day())                                        # begun before UTC midnight: finish it first
     out = root / d
     done = out / "tick.checked"                                       # ours: a manual `check` does not end the day
     if done.is_file():
@@ -146,7 +158,7 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         marker.write_text(raw, encoding="utf-8")
     since = float(raw)
     text = report(d, since) or ""                                     # only what was written after this attempt began
-    final = text.startswith(("PASS", "FAIL")) and d in text.splitlines()[0]
+    final = text.startswith(("PASS", "FAIL")) and _of_day(text.splitlines()[0], d)
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
     do_check(d)                                                       # never reported: check writes the P1 draft
@@ -226,7 +238,7 @@ def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> thr
             try:
                 from .auto_update import core_busy
                 r = _tick_real(core.cfg, core.home, busy=lambda: core_busy(core))
-                if r not in ("off", "done", "waiting"):
+                if r not in ("off", "done", "waiting", "busy"):
                     logs.info("updates", "QA_DAILY_TICK", "daily installed-beta check step", step=r)
             except Exception as e:                                    # never stops the Core
                 logs.warn("updates", "QA_DAILY_TICK_FAILED", "daily beta check step failed", error_type=type(e).__name__)
@@ -250,7 +262,7 @@ def cmd_qa_daily(a, cfg, home) -> int:
         from . import install_latest
         dry = bool(getattr(a, "dry_run", False))
         ns = argparse.Namespace(channel="beta", dry_run=dry, report=False, finish=None)
-        buf, day = io.StringIO(), _today()
+        buf, day = io.StringIO(), _open_day(Path(home) / "qa" / "daily", _today())
         with contextlib.redirect_stdout(buf):
             code = install_latest.cmd_install_latest(ns, cfg, home)
         text = buf.getvalue()
@@ -259,9 +271,10 @@ def cmd_qa_daily(a, cfg, home) -> int:
             (Path(home) / "qa" / "daily" / day).mkdir(parents=True, exist_ok=True)
             (Path(home) / "qa" / "daily" / day / INSTALL_FILE).write_text(text, encoding="utf-8")
         return code
-    if action == "run":
-        print(f"qa-daily run: {_tick_real(cfg, home)}")
-        return 0
+    if action == "run":                                               # by hand: the owner chose the moment, so no
+        step = _tick_real(cfg, home)                                  # quiet-moment check (the Core's tick has one)
+        print(f"qa-daily run: {step}")
+        return 1 if step == "spawn_failed" else 0
     if action == "check":
         from .install_latest import _cli_subprocess
         day = _today()

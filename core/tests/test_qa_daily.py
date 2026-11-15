@@ -282,16 +282,25 @@ def test_up_to_date_still_runs_doctor_and_selftest_and_files_p1(home):
 
 
 def test_a_child_that_dies_at_start_is_a_start_failure_with_its_output(home, monkeypatch):
-    """JAR-232 review: Popen succeeding is not a started install; a child that cannot import jarves lost its output."""
-    import sys
-    from jarves import install_latest
-    die = [sys.executable, "-c", "import sys; print('ModuleNotFoundError: jarves'); sys.exit(3)"]
-    monkeypatch.setattr(install_latest, "cli_argv", lambda argv: die)
+    """JAR-232 review: Popen succeeding is not a started install; a child that cannot import jarves lost its output.
+    Fakes only (no real process, no real time)."""
+    class Dead:
+        def __init__(self, out):
+            self.out = out
+        def wait(self, timeout):
+            self.out.write(b"ModuleNotFoundError: jarves")
+            self.out.flush()
+            return 3
+    class Running:
+        def wait(self, timeout):
+            raise qa_daily.subprocess.TimeoutExpired("x", timeout)
     log = home / "spawn.log"
-    with pytest.raises(RuntimeError, match="exited 3.*ModuleNotFoundError"):
-        qa_daily._spawn_hidden(["qa-daily", "install"], log, wait_s=60)
-    monkeypatch.setattr(install_latest, "cli_argv", lambda argv: [sys.executable, "-c", "import time; time.sleep(2)"])
-    qa_daily._spawn_hidden(["qa-daily", "install"], log, wait_s=0.2)    # still running: no error
+    with open(log, "ab") as out:                                          # what the child would write to its log
+        monkeypatch.setattr(qa_daily.subprocess, "Popen", lambda argv, **kw: Dead(out))
+        with pytest.raises(RuntimeError, match="exited 3.*ModuleNotFoundError"):
+            qa_daily._spawn_hidden(["qa-daily", "install"], log)
+    monkeypatch.setattr(qa_daily.subprocess, "Popen", lambda argv, **kw: Running())
+    qa_daily._spawn_hidden(["qa-daily", "install"], log)                  # still running: no error
     rec = home / "qa" / "daily" / "2026-11-12"
     rec.mkdir(parents=True)
     (rec / qa_daily.SPAWN_LOG).write_text("Traceback: boom later", encoding="utf-8")
@@ -299,6 +308,34 @@ def test_a_child_that_dies_at_start_is_a_start_failure_with_its_output(home, mon
     deps.report = lambda: None
     detail = [b["detail"] for b in qa_daily.check(deps)["bugs"] if b["check"] == "install-latest"]
     assert detail and "boom later" in detail[0]
+
+
+def test_an_install_begun_before_midnight_with_a_report_dated_after_it_passes(home, monkeypatch):
+    """JAR-232 review: install-latest stamps its own start (seconds after the marker), so a header dated the next
+    day was not final: the tick waited the whole timeout and check filed a false 'earlier day' P1. The child's
+    own record (up to date / early stop) also went to the new day's folder."""
+    from jarves import install_latest
+    _on(home)
+    rec = home / "qa" / "daily" / "2026-11-12"
+    rec.mkdir(parents=True)
+    (rec / "install.started").write_text("1000.0", encoding="utf-8")
+    monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-13")
+    up = "PASS  install-latest  2026-11-13 00:00 UTC\n  [PASS] up to date: nothing newer"
+    monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(up) or 0)
+    assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 0
+    assert (rec / qa_daily.INSTALL_FILE).read_text(encoding="utf-8") == up + "\n"
+    report = REPORT.replace("FAIL", "PASS").replace("2026-11-12 06:00", "2026-11-13 00:00")
+    checked = []
+    assert qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-13", report=lambda d, s: report,
+                         spawn=lambda a: None, do_check=checked.append, clock=lambda: 1001.0) == "checked"
+    deps, _ = _deps(home, report=report, fail=())
+    assert checked == ["2026-11-12"] and qa_daily.check(deps)["bugs"] == []
+
+
+def test_manual_run_reports_a_failed_start(home, monkeypatch, capsys):
+    _on(home)
+    monkeypatch.setattr(qa_daily, "_tick_real", lambda cfg, h: "spawn_failed")
+    assert qa_daily.cmd_qa_daily(_args("run"), Config(), home) == 1
 
 
 def test_an_empty_start_marker_does_not_accept_an_older_report(home):
