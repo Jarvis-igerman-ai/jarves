@@ -38,21 +38,27 @@ def private_directory(path: Path) -> None:
 
 
 def owner_only_file(path: Path) -> bool:
-    """Windows: drop inherited ACEs on a secret file and grant only the current user (#824).
+    """Windows: replace all file ACEs with a grant to the current user (#824, JAR-406).
 
     chmod is a no-op on NTFS, so access.token / sessions.json inherited the folder ACL (for example
     CodexSandboxUsers Modify). The folder itself is left alone so authorised workers keep database
     access. Fails safe: returns False and never raises, so startup is never blocked."""
     if os.name != "nt":
         return True
-    user = os.environ.get("USERNAME")
-    if not user:
-        return False
-    domain = os.environ.get("USERDOMAIN")
-    account = f"{domain}\\{user}" if domain else user
+    # A fresh DACL also removes explicit grants; icacls /grant:r only replaces
+    # grants for the named user. The path is environment data, never script.
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "$u=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; "
+        "$a=[System.Security.AccessControl.FileSecurity]::new(); "
+        "$a.SetAccessRuleProtection($true,$false); "
+        "$a.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($u,'FullControl','Allow')); "
+        "[System.IO.File]::SetAccessControl($env:JARVES_SECRET_ACL_PATH,$a)"
+    )
+    env = {**os.environ, "JARVES_SECRET_ACL_PATH": str(path)}
     try:
-        r = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:(F)"],
-                           capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
+        r = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                           env=env, capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
         return r.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False

@@ -1,4 +1,4 @@
-"""#824: access.token / sessions.json get an owner-only ACL on Windows (icacls mocked; no real ACL changes)."""
+"""#824: secret-file ACL command contract (real ACL coverage in JAR-406 regression)."""
 from __future__ import annotations
 
 import subprocess
@@ -14,7 +14,7 @@ def _run_recorder(calls, rc=0):
     return fake
 
 
-def test_icacls_argv_owner_only(monkeypatch, tmp_path):
+def test_acl_argv_owner_only(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(server.os, "name", "nt")
     monkeypatch.setenv("USERNAME", "alice")
@@ -23,7 +23,12 @@ def test_icacls_argv_owner_only(monkeypatch, tmp_path):
     f = tmp_path / "access.token"
     assert server.owner_only_file(f) is True
     cmd, kw = calls[0]
-    assert cmd == ["icacls", str(f), "/inheritance:r", "/grant:r", "PC\\alice:(F)"]
+    assert cmd[:4] == ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
+    assert "FileSecurity]::new()" in cmd[4]
+    assert "SetAccessRuleProtection($true,$false)" in cmd[4]
+    assert "WindowsIdentity]::GetCurrent().User" in cmd[4]
+    assert kw["env"]["JARVES_SECRET_ACL_PATH"] == str(f)
+    assert str(f) not in cmd[4]
     assert not kw.get("shell")
 
 
@@ -32,7 +37,7 @@ def test_fail_safe_never_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("USERNAME", "alice")
 
     def boom(*a, **k):
-        raise FileNotFoundError("icacls")
+        raise FileNotFoundError("powershell.exe")
     monkeypatch.setattr(server.subprocess, "run", boom)
     assert server.owner_only_file(tmp_path / "x") is False
     monkeypatch.delenv("USERNAME")
