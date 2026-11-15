@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import threading
 import urllib.error
@@ -60,17 +61,23 @@ def test_858_monitor_notes_do_not_spend_the_ready_work_budget(tmp_path):
 
 
 def test_879_failed_unlock_does_not_escape_the_lock(monkeypatch, tmp_path):
-    fcntl = pytest.importorskip("fcntl")  # the msvcrt branch shares the same guarded release
-    real = fcntl.flock
+    # The platform's own lock module: msvcrt on Windows, fcntl elsewhere (no skips on either).
+    if os.name == "nt":
+        import msvcrt as mod
+        name, unlock_op = "locking", mod.LK_UNLCK   # locking(fd, mode, nbytes)
+    else:
+        import fcntl as mod
+        name, unlock_op = "flock", mod.LOCK_UN      # flock(fd, op)
+    real = getattr(mod, name)
 
-    def flock(fd, op):
-        if op == fcntl.LOCK_UN:
+    def fake(*args):
+        if args[1] == unlock_op:
             raise PermissionError(13, "Permission denied")
-        return real(fd, op)
-    monkeypatch.setattr(fcntl, "flock", flock)
+        return real(*args)
+    monkeypatch.setattr(mod, name, fake)
     with exclusive(tmp_path / "supervisor.lock"):
         pass  # closing the handle releases the kernel lock anyway; the supervisor must still stop cleanly
-    monkeypatch.setattr(fcntl, "flock", real)
+    monkeypatch.setattr(mod, name, real)
     with exclusive(tmp_path / "supervisor.lock"):
         pass
 
@@ -96,7 +103,7 @@ def test_903_trace_detail_opt_in_needs_the_unlock(web):
             response = error
         with response:
             return response.code, response.headers
-    status, headers = post("/api/session", {"token": web.token})
+    _, headers = post("/api/session", {"token": web.token})
     cookie = headers["Set-Cookie"].split(";", 1)[0]
     assert post("/api/trace/settings", {"mode": "details"}, cookie)[0] == 403
     assert post("/api/unlock", {"code": unlock.issue(web.home)}, cookie)[0] == 200
