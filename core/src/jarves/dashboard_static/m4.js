@@ -149,7 +149,7 @@
         await api("/api/identity/voice", { method: "POST", body: JSON.stringify({ voice: v.id, approve_cost: approve === true }) });
         vMsg.textContent = `Voice set to ${v.voice}: heard from the next conversation.`; route(true);
       } catch (e) {
-        if (!approve && /approv|switching/i.test(e.message) && confirm(`${e.message}\n\nApprove this change?`)) return choose(v, true);
+        if (!approve && /approv|switching/i.test(e.en || e.message) && confirm(`${e.message}\n\nApprove this change?`)) return choose(v, true);
         vMsg.textContent = "Not changed: " + e.message;
       }
     };

@@ -6,6 +6,7 @@ node against a stubbed fetch and DOM (no server, no browser, no clock; skipped w
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -47,12 +48,13 @@ def test_top_error_says_what_to_do_in_both_languages(en):
     assert HE_ACTION.search(he), f"Hebrew has no next step: {he!r}"
 
 
-# Runs i18n.js (Hebrew chosen) plus the real api() and fail() bodies cut out of app.js, with stubbed fetch/DOM.
+# Runs i18n.js (Hebrew chosen) plus the real api() and fail() bodies cut out of app.js, with stubbed fetch/DOM,
+# and the real chatview.js WORDS with its word() helper and failed-reply fallback line.
 NODE_HARNESS = r"""
 const fs = require("fs"), vm = require("vm");
-const [he, i18n, app] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n"));   // Windows CRLF checkout
-const cut = (re) => { const m = re.exec(app); if (!m) throw new Error("not found: " + re); return m[0]; };
-const api = cut(/async function api\([\s\S]*?\n}\n/), fail = cut(/function fail\(e\)[^\n]*\n[^\n]*\n/);
+const [he, i18n, app, chat] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n"));   // Windows CRLF checkout
+const cut = (re, src = app) => { const m = re.exec(src); if (!m) throw new Error("not found: " + re); return m[0]; };
+const api = cut(/async function api\([\s\S]*?\n}\n/), fail = cut(/const tc = [^\n]*\nfunction fail\(e\)[^\n]*\n[^\n]*\n/);
 const noop = () => {};
 const doc = { readyState: "loading", addEventListener: noop, documentElement: {}, querySelectorAll: () => [] };
 const ctx = { console, URLSearchParams, location: { hash: "" }, document: doc,
@@ -62,35 +64,67 @@ const ctx = { console, URLSearchParams, location: { hash: "" }, document: doc,
     json: async () => ({ error: "only the computer itself can do this: do it in the dashboard on that computer",
                          code: "UI_ACTION_FORBIDDEN", next: "n" }) }) };
 ctx.window = ctx; vm.createContext(ctx);
-vm.runInContext(he + "\n" + i18n + "\n" + api + "\n" + fail, ctx);
+vm.runInContext(he + "\n" + i18n + "\n" + api + "\n" + fail + "\n" + chat, ctx);
+const word = cut(/const word = [^\n]*;/, chat), reply = cut(/const text = e\.text \|\| [^\n]*;/, chat);
+const said = (e) => vm.runInContext(`(() => { const WORDS = JarvesChat.WORDS; ${word} ${reply} return text; })()`,
+  Object.assign(ctx, { e }));
 (async () => {
   let err = null;
   try { await vm.runInContext("api('/api/x', { method: 'POST' })", ctx); } catch (e) { err = e; }
   vm.runInContext("fail", ctx)(err);
   const flat = (n) => typeof n === "string" ? n : (n.kids || []).map(flat).join("|");
+  const page = flat(ctx.out), JL = ctx.JL;
+  ctx.JL = undefined; vm.runInContext("fail", ctx)(new Error("x")); const bare = flat(ctx.out); ctx.JL = JL;   // i18n.js missing
   process.stdout.write(JSON.stringify({ message: err.message, en: err.en, code: err.code, next: err.next,
-                                        page: flat(ctx.out) }));
+                                        page, bare, stopping: said({ ok: false, code: "CHAT_STOPPING" }),
+                                        other: said({ ok: false, code: "NOT_A_CODE" }) }));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
 
 
-@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
-def test_dashboard_api_error_is_hebrew_with_english_kept_and_fail_shows_the_catalog_text(tmp_path):
-    """api() translates data.error once through the catalog, keeps the English on err.en and passes code/next;
-    fail() renders that message plus the catalog's next step (the one source the TOP10 test checks)."""
+def _run_node(tmp_path):
+    if not shutil.which("node"):
+        if os.environ.get("CI"):
+            pytest.fail("node is required in CI: the dashboard error tests must run there")
+        pytest.skip("node is not installed")
     he_js = tmp_path / "he.js"
     he_js.write_bytes(locale_parts.render_js("he"))      # the served catalog: base plus parts
     harness = tmp_path / "harness.js"
     harness.write_text(NODE_HARNESS, encoding="utf-8")
-    r = subprocess.run(["node", str(harness), str(he_js), str(STATIC / "i18n.js"), str(STATIC / "app.js")],
-                       capture_output=True, text=True, timeout=60)
+    r = subprocess.run(["node", str(harness), str(he_js)] + [str(STATIC / f) for f in ("i18n.js", "app.js", "chatview.js")],
+                       capture_output=True, encoding="utf-8", timeout=60)      # utf-8: Windows would decode as cp1252
     assert r.returncode == 0, r.stderr
-    got = json.loads(r.stdout)
+    return json.loads(r.stdout)
+
+
+def test_dashboard_api_error_is_hebrew_with_english_kept_and_fail_shows_the_catalog_text(tmp_path):
+    """api() translates data.error once through the catalog, keeps the English on err.en and passes code/next;
+    fail() renders that message plus the catalog's next step (the one source the TOP10 test checks)."""
+    got = _run_node(tmp_path)
     cat = locale_parts.catalog("he")["dict"]
     en = "only the computer itself can do this: do it in the dashboard on that computer"
     assert got["en"] == en and got["message"] == cat[en] != en
     assert got["code"] == "UI_ACTION_FORBIDDEN" and got["next"] == "n"
     assert got["page"] == "לא נטען: " + cat[en] + "|" + cat["Check that JARVES is running (jarvis status), then refresh the page."]
+    assert got["bare"] == "Could not load: x|Check that JARVES is running (jarvis status), then refresh the page."
+
+
+def test_chat_failed_reply_shows_hebrew_words_for_stopping_and_the_fallback(tmp_path):
+    """A failed chat turn goes through chatview's real word(): CHAT_STOPPING gets its words, an unknown code the fallback."""
+    got = _run_node(tmp_path)
+    assert got["stopping"] == "ג'רביס נעצר או מופעל מחדש. המתינו כמה שניות ושלחו שוב."
+    assert got["other"] == "משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs."
+
+
+# matching on e.message breaks in Hebrew mode (api() translates it): callers match the English source e.en instead
+MESSAGE_LOGIC = re.compile(r"\.message\s*(===|!==|==|!=|\.(test|match|includes|indexOf|startsWith|endsWith|search)\b)"
+                           r"|switch\s*\([^)]*\.message|\.(test|match|exec|includes|indexOf|startsWith)\((?![^)]*\.en\b)[^)]*\.message")
+
+
+def test_no_dashboard_caller_matches_on_the_translated_error_message():
+    hits = [f"{f.name}:{n}" for f in sorted(STATIC.glob("*.js")) if f.name != "i18n.js"
+            for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1) if MESSAGE_LOGIC.search(line)]
+    assert not hits, f"match on e.en (English) or e.code, not e.message: {hits}"
 
 
 def test_chat_too_long_texts_match_the_server_limit():

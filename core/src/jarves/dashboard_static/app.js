@@ -44,8 +44,10 @@ const header = (title, sub, ...right) => el("div", { class: "row" },
   el("div", {}, el("h1", {}, title), sub ? el("div", { class: "sub" }, sub) : null), el("div", { class: "spacer" }), ...right);
 function render(...nodes) { $main.replaceChildren(...nodes.flat(2).filter((n) => n !== null && n !== undefined && n !== false)); }
 // what happened + what to do (JAR-128): most load failures are a stopped or restarting JARVES
-function fail(e) { render(el("div", { class: "card empty", role: "alert" }, tx("לא נטען: ", "Could not load: ") + e.message,
-  el("div", { class: "small" }, JL.t("Check that JARVES is running (jarvis status), then refresh the page.")))); }   // one source: the catalog
+// the catalog is the one source; guarded like api(): if i18n.js failed to load, the English still renders
+const tc = (en) => (window.JL ? JL.t(en) : en);
+function fail(e) { render(el("div", { class: "card empty", role: "alert" }, tc("Could not load: ") + e.message,
+  el("div", { class: "small" }, tc("Check that JARVES is running (jarvis status), then refresh the page.")))); }
 
 const tip = document.getElementById("tip");
 function hoverTip(node, lines) {
