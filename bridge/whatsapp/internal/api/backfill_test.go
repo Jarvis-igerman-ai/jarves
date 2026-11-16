@@ -15,7 +15,8 @@ import (
 
 // readyBackfill: read mode, connected, one stored recent message of dana (the anchor).
 func readyBackfill(t *testing.T, mutate ...func(*Config)) *env {
-	e := newEnv(t, true, mutate...)
+	sync := func(c *Config) { c.Dispatch = func(f func()) { f() } } // deterministic; a test may override it
+	e := newEnv(t, true, append([]func(*Config){sync}, mutate...)...)
 	e.mode("read", false)
 	e.msg(dana, "d1", 1000, "recent", false)
 	if !waitFor(t, 2*time.Second, e.fake.IsConnected) {
@@ -735,5 +736,55 @@ func TestBackfillGateIsNotHeldWhilePolicyBodyIsRead(t *testing.T) {
 		}
 		close(body.release)
 		<-done
+	}
+}
+
+// gateDispatch makes the fake engine block inside RequestHistory (from the next request on) until released.
+func gateDispatch(e *env) (entered, release chan struct{}) {
+	entered, release = make(chan struct{}, 8), make(chan struct{})
+	e.fake.OnRequest = func() { entered <- struct{}{}; <-release }
+	return entered, release
+}
+
+func returnsSoon(t *testing.T, f func()) bool {
+	done := make(chan struct{})
+	go func() { f(); close(done) }()
+	return waitFor(t, 2*time.Second, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+// The next request is never sent on the goroutine that delivered the answer (whatsmeow's event goroutine).
+func TestBackfillNextRequestDoesNotStallTheEventGoroutine(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.Dispatch = nil }) // production default
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	entered, release := gateDispatch(e)
+	defer close(release)
+	if !returnsSoon(t, func() { e.answer(dana, 3, 30*86400, "a") }) {
+		t.Fatal("delivering an answer waited for the next request to be sent")
+	}
+	<-entered // the next request is still sent, from its own goroutine
+}
+
+// A kill never waits for a request that is being sent: Disconnect makes it fail and its result is discarded.
+func TestBackfillKillDoesNotWaitForAStalledDispatch(t *testing.T) {
+	e := readyBackfill(t)
+	entered, release := gateDispatch(e)
+	defer close(release)
+	go e.do("POST", "/history/backfill", e.admin, map[string]any{})
+	<-entered
+	if !returnsSoon(t, func() { e.s.applyKill(true, "test") }) {
+		t.Fatal("kill waited for the stalled dispatch")
+	}
+	e.s.mu.Lock()
+	st := e.s.bf.state
+	e.s.mu.Unlock()
+	if st != "stopped" {
+		t.Fatalf("state %q after kill", st)
 	}
 }

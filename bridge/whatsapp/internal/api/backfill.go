@@ -369,7 +369,7 @@ func (s *Server) bfAnswered(gen int, timeout, idless bool) {
 	if lost != nil {
 		s.log.Warn("WA_BACKFILL", "History chat incomplete (unanswered, or did not fit the buffer or the dedup budget).", lost)
 	}
-	s.bfNext()
+	s.cfg.Dispatch(s.bfNext) // never on the engine's event goroutine: the send may take up to 15 s
 }
 
 func (s *Server) bfProgressLocked() map[string]any {
@@ -535,4 +535,16 @@ func (s *Server) hBackfillStop(w http.ResponseWriter, r *http.Request) {
 	p := s.bfProgressLocked()
 	s.mu.Unlock()
 	writeJSON(w, 200, p)
+}
+
+// bfKillClear ends the backfill on a kill without waiting for the dispatch gate: the engine is already disconnected,
+// so a request being sent fails, and bfNext discards its result because bfClearLocked bumped gen.
+func (s *Server) bfKillClear() {
+	s.mu.Lock()
+	running := s.bf.state == "running"
+	s.bfClearLocked("stopped")
+	s.mu.Unlock()
+	if running {
+		s.log.Info("WA_BACKFILL", "History backfill stopped.", F{"state": "stopped"})
+	}
 }

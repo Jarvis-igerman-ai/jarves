@@ -49,6 +49,9 @@ type Config struct {
 	BackfillWait   time.Duration
 	// AfterFunc schedules the unanswered-request timeout (default time.AfterFunc); tests inject a manual timer.
 	AfterFunc func(time.Duration, func())
+	// Dispatch runs the next backfill request after an answer or timeout (default: its own goroutine, so the engine's
+	// event goroutine never waits up to 15 s for a send); tests run it inline.
+	Dispatch func(func())
 }
 
 // Server is the bridge.
@@ -113,6 +116,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	if cfg.AfterFunc == nil {
 		cfg.AfterFunc = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+	}
+	if cfg.Dispatch == nil {
+		cfg.Dispatch = func(f func()) { go f() }
 	}
 	if cfg.LocalHour == nil {
 		cfg.LocalHour = func(t time.Time) int { return t.Local().Hour() }
@@ -399,7 +405,7 @@ func (s *Server) applyKill(on bool, reason string) {
 		s.eng.Disconnect() // within 2 s of the KILL file appearing (poll <= 250 ms)
 	}
 	if on {
-		s.bfStop()
+		s.bfKillClear()
 	}
 	if on != was {
 		var r any = reason
