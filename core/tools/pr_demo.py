@@ -5,7 +5,9 @@ changes something a user sees (dashboard pages, guides, CLI output) CI produces:
 
 - ``<page>-before.png`` / ``<page>-after.png`` and ``<page>-compare.png`` (both side by side, labelled) for every
   affected dashboard page, rendered by the same hermetic DEMO dashboard the page audit uses (tools/all_pages_check.py:
-  throw-away home, synthetic data, 127.0.0.1 only: other hosts aborted, their WebSockets never connected, service workers off, no secrets);
+  throw-away home, synthetic data, no secrets; the browser only loads 127.0.0.1 pages: other hosts aborted, their
+  WebSockets never connected, service workers off. The runner itself (uv sync, the dashboard, CLI children) is not
+  network-isolated, and WebRTC/DNS prefetch are not routed);
 - ``phone-before.png`` / ``phone-after.png`` (+ compare) when the phone site changed: a paired DEMO phone session;
 - ``walkthrough.webm``: a 10-20 s recording that opens each affected page of the PR head and scrolls through it;
 - ``cli-<n>-before.svg`` / ``-after.svg`` (+ ``.png``): rendered terminal output of the affected read-only CLI help;
@@ -134,6 +136,21 @@ def git_reader(rev: str):
         if r.returncode:
             raise FileNotFoundError(p)
         return r.stdout
+    return read
+
+
+def base_reader(base: str):
+    """Reads a path at the merge base of ``base`` and HEAD (the revision the "before" side renders), not at the
+    base tip; the merge base is looked up on the first read. FileNotFoundError when it cannot be found."""
+    rev: list[str] = []
+
+    def read(p: str) -> str:
+        if not rev:
+            mb = subprocess.run(["git", "merge-base", base, "HEAD"], cwd=REPO, capture_output=True, text=True)
+            if mb.returncode:
+                raise FileNotFoundError(f"{p}: no merge base for {base}")
+            rev.append(mb.stdout.strip())
+        return git_reader(rev[0])(p)
     return read
 
 
@@ -378,10 +395,11 @@ def svg_to_png(out: Path) -> None:
         b = _launch(pw)
         try:
             for s in svgs:
-                p = b.new_page()
+                ctx = new_ctx(b)
+                p = ctx.new_page()
                 p.goto(s.resolve().as_uri())
                 p.locator("svg").screenshot(path=str(s.with_suffix(".png")))
-                p.close()
+                ctx.close()
         finally:
             b.close()
 
@@ -409,12 +427,13 @@ def compare(out: Path, pages: list[str]) -> list[str]:
                        f'<div class=col><p>After (this change){" - no visible difference" if name in same else ""}</p><img src="{z.resolve().as_uri()}"></div></div>')
                 h = out / f"_{safe(name)}.html"
                 h.write_text(doc, encoding="utf-8")
-                p = b.new_page(viewport={"width": 1600, "height": 300})
+                ctx = new_ctx(b, viewport={"width": 1600, "height": 300})
+                p = ctx.new_page()
                 p.goto(h.resolve().as_uri())
                 p.wait_for_load_state("load")
                 f = out / f"{safe(name)}-compare.png"
                 p.screenshot(path=str(f), full_page=True)
-                p.close()
+                ctx.close()
                 h.unlink()
         finally:
             b.close()
@@ -443,7 +462,7 @@ def _child(core: Path, args: list[str]) -> dict:
 def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: str, files: list[str] | None,
        lang: str = "en") -> dict:
     files = changed_files(base) if files is None else files
-    pl = plan(files, known_pages=known_pages_of(ROOT) or None, read_base=git_reader(base))
+    pl = plan(files, known_pages=known_pages_of(ROOT) or None, read_base=base_reader(base))
     out.mkdir(parents=True, exist_ok=True)
     demo = {"pr": pr, "title": scrub(title)[:200], "what_changed": what_changed(title, body), "plan": pl,
             "files": [], "checks": [], "notes": [], "ok": True, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -539,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "plan":
         base = a.base or "origin/main"
         files = files_arg() if a.files_from else changed_files(base)
-        print(json.dumps(plan(files, known_pages=known_pages_of(ROOT) or None, read_base=git_reader(base)), indent=1))
+        print(json.dumps(plan(files, known_pages=known_pages_of(ROOT) or None, read_base=base_reader(base)), indent=1))
         return 0
     if a.cmd == "ci":
         demo = ci(a.base, Path(a.base_core) if a.base_core else None, a.pr, Path(a.out),

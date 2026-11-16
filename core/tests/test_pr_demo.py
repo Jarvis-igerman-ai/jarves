@@ -188,8 +188,85 @@ def test_websockets_to_other_hosts_are_closed_and_service_workers_blocked():
             return Ctx()
     pr_demo.new_ctx(B(), viewport=pr_demo.PHONE)
     assert seen["service_workers"] == "block" and seen["route"] and seen["ws"]
-    src = (ROOT / "tools" / "pr_demo.py").read_text(encoding="utf-8")
-    assert src.count("b.new_context(") == 1                          # every capture context goes through new_ctx
+
+
+def test_svg_and_compare_pages_open_only_in_guarded_contexts(tmp_path, monkeypatch):
+    calls = []
+
+    class Page:
+        def __getattr__(self, name):
+            return lambda *a, **k: self
+
+    class Ctx:
+        def __init__(self, kw):
+            self.kw, self.routed, self.closed = kw, False, False
+
+        def route(self, *a):
+            self.routed = True
+
+        def route_web_socket(self, *a):
+            pass
+
+        def new_page(self, **kw):
+            calls.append(("page", self))
+            return Page()
+
+        def close(self):
+            self.closed = True
+
+    class B:
+        def new_page(self, **kw):                    # an implicit, unguarded context
+            calls.append(("unguarded", None))
+            return Page()
+
+        def new_context(self, **kw):
+            return Ctx(kw)
+
+        def close(self):
+            pass
+
+    class PW:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    fake = type(sys)("playwright.sync_api")
+    fake.sync_playwright = PW
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    monkeypatch.setattr(pr_demo, "_launch", lambda pw: B())
+    (tmp_path / "cli-1-after.svg").write_text("<svg/>", encoding="utf-8")
+    (tmp_path / "home-before.png").write_bytes(b"a")
+    (tmp_path / "home-after.png").write_bytes(b"b")
+    pr_demo.svg_to_png(tmp_path)
+    pr_demo.compare(tmp_path, ["home"])
+    assert len(calls) == 2 and all(kind == "page" for kind, _ in calls), calls
+    assert all(c.kw.get("service_workers") == "block" and c.routed and c.closed for _, c in calls)
+
+
+def test_base_side_of_a_deleted_file_is_read_at_the_merge_base(tmp_path, monkeypatch):
+    def git(*a):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *a],
+                       cwd=tmp_path, check=True, capture_output=True)
+    f = tmp_path / "m.toml"
+    git("init", "-q", "-b", "main")
+    f.write_text('page = "old"\n')
+    git("add", "m.toml")
+    git("commit", "-qm", "a")
+    git("checkout", "-qb", "pr")
+    git("rm", "-q", "m.toml")
+    git("commit", "-qm", "pr deletes it")
+    git("checkout", "-q", "main")
+    f.write_text('page = "new"\n')
+    git("commit", "-qam", "main moved on")
+    git("checkout", "-q", "pr")
+    monkeypatch.setattr(pr_demo, "REPO", tmp_path)
+    assert pr_demo.base_reader("main")("m.toml") == 'page = "old"\n'
+    try:
+        pr_demo.base_reader("no-such-ref")("m.toml")
+        raise AssertionError("expected FileNotFoundError")
+    except FileNotFoundError:
+        pass
 
 
 def _ci(tmp_path, monkeypatch, results, files):

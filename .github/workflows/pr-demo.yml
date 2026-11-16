@@ -1,11 +1,14 @@
 name: pr-demo
 # JAR-251 (owner 12 Nov 2026: "I expect videos or images, something easy to understand"). For a PR that changes
 # something a user sees (dashboard pages, phone site, guides, CLI output) this job renders a visual demo with the same
-# hermetic DEMO dashboard the page audit uses (synthetic data, 127.0.0.1 only: other hosts aborted, their WebSockets never connected, service workers off, no secrets):
+# hermetic DEMO dashboard the page audit uses (synthetic data, no secrets; the browser only loads 127.0.0.1 pages: other
+# hosts aborted, their WebSockets never connected, service workers off; the runner itself is not network-isolated):
 # before/after screenshots (main vs PR), a side-by-side image, a short walkthrough video and terminal images.
 # Uploaded as the artifact demo-<PR> with demo.json (title, one line "what changed for you", files, checks).
 # Informational: not part of the required checks and never blocks a merge. No secrets, read-only token, fork-safe
 # (pull_request, never pull_request_target). Tool: core/tools/pr_demo.py.
+# The artifact is PR-controlled (fork PRs too): any consumer must treat demo.json and the images as untrusted input
+# (escape text, no HTML/markdown injection, never execute or unpack it with a write token).
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
