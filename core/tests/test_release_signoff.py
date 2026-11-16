@@ -507,13 +507,17 @@ def test_gate_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, caps
     monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
     monkeypatch.delenv("JARVES_ALLOWED_SIGNERS_FILE", raising=False)
     rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--require-rows-hash"])
-    assert rc == 1 and "RELEASE_ALLOWED_SIGNERS" in capsys.readouterr().out
+    assert rc == 1 and "sign-off: no owner allowed-signers list" in capsys.readouterr().out
+    gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])           # dry run: a note, not silence
+    out = capsys.readouterr().out
+    assert "tag signature not checked" in out and "sign-off: no owner allowed-signers" not in out
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS_FILE", str(tmp_path / "absent"))
     rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
     assert rc == 1 and "allowed-signers file absent is missing or empty" in capsys.readouterr().out
     wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "vars.RELEASE_ALLOWED_SIGNERS" in wf and "JARVES_ALLOWED_SIGNERS_FILE=" in wf
     assert wf.index("JARVES_ALLOWED_SIGNERS_FILE=") > wf.index('if [ "$REF_TYPE" = "tag" ]')
+    assert wf.index('if [ -n "$ALLOWED_SIGNERS" ]') < wf.index("JARVES_ALLOWED_SIGNERS_FILE=")   # no empty file exported
 
 
 @pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); deselected elsewhere

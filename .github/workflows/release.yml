@@ -91,8 +91,11 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
-            printf '%s\n' "$ALLOWED_SIGNERS" > "$RUNNER_TEMP/allowed_signers"     # empty when unset: the gate refuses
-            echo "JARVES_ALLOWED_SIGNERS_FILE=$RUNNER_TEMP/allowed_signers" >> "$GITHUB_ENV"
+            # unset variable: no file; a real release is then refused by the gate (--require-rows-hash), a dry run notes it
+            if [ -n "$ALLOWED_SIGNERS" ]; then
+              printf '%s\n' "$ALLOWED_SIGNERS" > "$RUNNER_TEMP/allowed_signers"
+              echo "JARVES_ALLOWED_SIGNERS_FILE=$RUNNER_TEMP/allowed_signers" >> "$GITHUB_ENV"
+            fi
             if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
               h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
               [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"

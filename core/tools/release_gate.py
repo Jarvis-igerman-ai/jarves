@@ -376,6 +376,9 @@ def main(argv: list[str] | None = None) -> int:
     elif a.require_rows_hash:              # a real publish: the out-of-band hash must be authentic (fail closed, #605)
         problems.append("sign-off: no owner allowed-signers list (repository variable RELEASE_ALLOWED_SIGNERS), so the "
                         "tag signature cannot be verified; set it up: docs/RELEASING.md")
+    else:
+        print("note: no owner allowed-signers list (RELEASE_ALLOWED_SIGNERS), tag signature not checked; a real publish "
+              "refuses without it (#605)")
     if a.expect_rows_hash is None and a.require_rows_hash:
         problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
                         "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
