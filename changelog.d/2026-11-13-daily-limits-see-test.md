@@ -1,0 +1,1 @@
+- Added: `jarvis budget limits` shows today's voice minutes and AI requests (used, limit, left, state) at any time, and `jarvis budget test-limits` is a free offline check that both daily limits refuse at the limit (throw-away database, your counters and log untouched; `--voice-minutes` / `--requests` to try other values; prints the notice you would hear) (JAR-321).

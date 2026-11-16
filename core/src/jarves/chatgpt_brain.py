@@ -15,7 +15,8 @@ import random
 import httpx
 
 from . import logs, usage
-from .brain import INSTRUCTIONS, render_instructions, BackendTrace, BrainUnavailable, billing_summary
+from .brain import (INSTRUCTIONS, render_instructions, BackendTrace, BrainUnavailable, billing_summary, cited_urls,
+                    with_sources)
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
@@ -252,7 +253,8 @@ class ChatGPTBrain:
             self.history.pop(0)
 
     async def reply(self, text: str, on_delta=None) -> str:
-        """on_delta is accepted for the terminal chat; this route returns the finished text (not streamed)."""
+        """on_delta is accepted for the terminal chat but never called: this route returns the finished text (not
+        streamed), so callers show the returned text, including the JAR-322 "Sources:" line."""
         ok, code, action = self.available()
         if not ok:
             raise BrainUnavailable(code, action, action)
@@ -270,12 +272,13 @@ class ChatGPTBrain:
     async def _turns(self, text: str) -> str:
         model = await self._pick_model()
         turn: list[dict] = [{"role": "user", "content": text}]
-        calls = 0
+        calls, cited = 0, []
         for _ in range(self.cfg.max_turns):
             body = {"model": model, "instructions": self.instructions(), "input": self.history + turn,
                     "tools": self._tools(), "store": False, "stream": True}
             resp = await self._request(body)          # each attempt reserved + counted inside _stream
             calls += 1
+            cited += cited_urls(resp)
             used = self.budget.used("ai_requests")
             outputs = [o for o in resp.get("output", []) if o.get("type") in ("message", "function_call")]
             fcalls = [o for o in outputs if o["type"] == "function_call"]
@@ -285,7 +288,7 @@ class ChatGPTBrain:
                 while self.history and self.history[0].get("role") != "user":
                     self.history.pop(0)       # keep the window starting at a user message
                 logs.info("ai", "AI_REPLY", "ChatGPT plan replied", model_calls=calls, used_today=used)
-                return self._text(outputs)
+                return with_sources(self._text(outputs), cited)          # JAR-322: same helper as the API route
             for fc in fcalls:
                 res = await self.registry.call(plain_tool_name(fc), fc.get("arguments") or "{}")
                 turn.append({"type": "function_call_output", "call_id": fc["call_id"], "output": res.to_model()})

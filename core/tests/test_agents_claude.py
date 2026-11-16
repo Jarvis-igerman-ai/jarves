@@ -172,6 +172,8 @@ def test_agent_initiated_status_report_and_owner_signal(agent_env):
 ])
 def test_permission_request_goes_to_the_owner(world, policy, command, expect):
     world["owner"].policy = policy
+    if expect is None:
+        world["o"].acfg.permission_wait_s = 5                           # the refused answer waits out the timeout: keep it short
     o, h = world["o"], world["host"]()
     h.expect("session_start")
     sid = f"claude:{h.session_id}"

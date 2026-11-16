@@ -1701,7 +1701,7 @@
   "The Core rings them aloud, even when the window is closed.": "הליבה מצלצלת בקול, גם כשהחלון סגור.",
   "The first full check, topic by topic. Every topic can be skipped.": "בדיקה ראשונה של הכול, נושא אחרי נושא. אפשר לדלג על כל נושא.",
   "the folder is a link/junction": "התיקייה היא קישור (link/junction)",
-  "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway.": "המתקין עדיין לא חתום דיגיטלית. ייתכן ש-Windows SmartScreen יציג \"Windows protected your PC\": בחר More info ואז Run anyway.",
+  "The installer is not code-signed yet. Windows SmartScreen may say Windows protected your PC: choose More info, then Run anyway.": "המתקין עדיין לא חתום דיגיטלית. ייתכן ש-Windows SmartScreen יציג \"Windows הגן על המחשב שלך\": בחר \"מידע נוסף\" ואז \"הפעל בכל מקרה\".",
   "The JARVES Core (the background process)": "הליבה של JARVES (התהליך שרץ ברקע)",
   "The long archive is off.": "הארכיון הארוך כבוי.",
   "The message is too long.": "ההודעה ארוכה מדי.",

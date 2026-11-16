@@ -207,27 +207,37 @@ class BridgeServer:
         if self._stop.is_set():
             return
         self._stop.set()
-        try:                                              # wake the blocking accept()
-            c = mpc.Client(self.addr, self.family)
-            c.close()
-        except OSError:
-            pass
+        self._wake()
         with self._lock:
             conns = list(self.conns)
         for c in conns:
             c.close()
+        # Close the listener only after the accept thread is gone (#992): an accept() already past its stop check
+        # creates one more pipe instance; closed before that, the instance leaked, kept the pipe name alive and the
+        # next start() failed with WinError 5 (FIRST_PIPE_INSTANCE). Wake again while it still waits.
+        deadline = time.monotonic() + 5
+        while self.thread is not None and self.thread.is_alive() and time.monotonic() < deadline:
+            self.thread.join(0.5)
+            if self.thread.is_alive():
+                self._wake()
         try:
             self._listener.close()
         except Exception:
             pass
-        if self.thread is not None:
-            self.thread.join(5)
         if self.family == "AF_UNIX":
             try:
                 os.unlink(self.addr)
             except OSError:
                 pass
         logs.info("agents", "AGENTS_BRIDGE_STOPPED", "agent bridge stopped")
+
+    def _wake(self) -> None:
+        """Connect once so a blocking accept() returns (the loop then sees the stop flag)."""
+        try:
+            c = mpc.Client(self.addr, self.family)
+            c.close()
+        except OSError:
+            pass
 
     def _accept_loop(self) -> None:
         while not self._stop.is_set():

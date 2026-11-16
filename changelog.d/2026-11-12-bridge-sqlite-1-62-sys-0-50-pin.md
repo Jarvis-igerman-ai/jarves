@@ -1,0 +1,1 @@
+- Fixed: WhatsApp bridge: combine the Dependabot bumps modernc.org/sqlite 1.61.1 -> 1.62.0 and golang.org/x/sys 0.49.0 -> 0.50.0 (modernc.org/libc 1.79.0 -> 1.80.1 follows) and update the pinned bridge SHA256 in packaging/bridge_pin.json (JAR-275).

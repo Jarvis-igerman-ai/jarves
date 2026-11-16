@@ -1,0 +1,1 @@
+- Added: proposal for smoke checks on the update, rollback and hotfix paths (docs/proposals/2026-11-16-update-hotfix-smoke-checks.md, JAR-129); docs only, no code changed.

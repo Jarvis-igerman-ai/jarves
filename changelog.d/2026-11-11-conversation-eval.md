@@ -1,0 +1,1 @@
+- Added: conversation eval suite plumbing (beta, off by default): 32 scripted Hebrew and English scenarios (reminders, search, chat, device control), an injected judge and a score-drop gate with a local bug draft. Demo only: `jarvis evalsuite run --fake` does not evaluate a beta yet. (JAR-231)

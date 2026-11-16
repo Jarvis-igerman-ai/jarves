@@ -497,6 +497,11 @@ class AgentBrain:
     async def reply(self, text: str, on_delta=None) -> str:
         ok, code, action = self.available()
         if not ok:
+            if code == "AI_BUDGET":         # JAR-262: no silent limit - check() tells the owner (Budget.on_exceeded)
+                try:
+                    self.budget.check("ai_requests")
+                except BudgetExceeded:
+                    pass
             raise BrainUnavailable(code, action, action)
         import openai
         from agents import Runner
@@ -536,9 +541,7 @@ class AgentBrain:
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
                   duration_s=round(time.monotonic() - t0, 2), model=self.cfg.text_model, web_searches=searches,
                   **usage_fields(tokens))
-        answer = str(res.final_output or "").strip()
-        line = sources_line(cited, hebrew_label=bool(_HEBREW.search(answer)))
-        return f"{answer}\n\n{line}" if answer and line else answer
+        return with_sources(str(res.final_output or "").strip(), cited)
 
 
 def cited_urls(resp: Any) -> list[str]:
@@ -550,6 +553,12 @@ def cited_urls(resp: Any) -> list[str]:
 
 
 _HEBREW = re.compile("[\u0590-\u05ff]")
+
+
+def with_sources(answer: str, urls: list[str]) -> str:
+    """The answer plus a "Sources:" line (Hebrew label for a Hebrew answer); both AI routes use this (JAR-322)."""
+    line = sources_line(urls, hebrew_label=bool(_HEBREW.search(answer)))
+    return f"{answer}\n\n{line}" if answer and line else answer
 
 
 def sources_line(urls: list[str], limit: int = 3, *, hebrew_label: bool = False) -> str:
@@ -674,6 +683,7 @@ TRANSIENT_REPLY = {
     "CHATGPT_UNAVAILABLE": "השירות של ChatGPT לא זמין כרגע. נסה שוב מאוחר יותר.",
     "AI_ERROR": "משהו השתבש מול שירות הבינה המלאכותית, והבקשה לא הושלמה. אפשר לנסות שוב.",
     "AI_MAX_TURNS": "הבקשה דרשה יותר מדי שלבים ולא הושלמה. נסה לבקש בצורה פשוטה יותר.",
+    "AI_BUDGET": "הגעתי למגבלת הבקשות היומית, אז לא שלחתי את הבקשה. אפשר להעלות אותה ב-ai.daily_request_limit.",
 }
 
 

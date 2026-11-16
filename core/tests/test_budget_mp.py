@@ -14,8 +14,9 @@ CHILD = textwrap.dedent("""
     from jarves.budget import Budget, BudgetExceeded
     from jarves.config import AIConfig
     from jarves.memory import MemoryStore
-    db, go, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+    db, go, mode, ready = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
     b = Budget(MemoryStore(db), AIConfig(daily_request_limit=3))
+    open(ready, "w").close()               # imported and at the barrier
     while not os.path.exists(go):          # barrier: every process races for the units at the same moment
         time.sleep(0.005)
     try:
@@ -33,9 +34,13 @@ CHILD = textwrap.dedent("""
 def run_children(tmp_path, n, mode="ok"):
     db, go = tmp_path / "m.db", tmp_path / "go"
     MemoryStore(db).close()
-    procs = [subprocess.Popen([sys.executable, "-c", CHILD, str(db), str(go), mode], stdout=subprocess.PIPE,
-                              text=True) for _ in range(n)]
-    time.sleep(1.5)                         # let every child import and reach the barrier
+    ready = [tmp_path / f"ready{i}" for i in range(n)]
+    procs = [subprocess.Popen([sys.executable, "-c", CHILD, str(db), str(go), mode, str(ready[i])],
+                              stdout=subprocess.PIPE, text=True) for i in range(n)]
+    deadline = time.monotonic() + 60       # wait for every child to report ready, not a guessed fixed sleep
+    while not all(r.exists() for r in ready) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert all(r.exists() for r in ready), "a child never reached the barrier"
     go.write_text("go")
     return [p.communicate(timeout=60)[0].strip() for p in procs], db
 
