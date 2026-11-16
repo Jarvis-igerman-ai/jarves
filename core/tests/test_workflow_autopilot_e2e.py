@@ -39,6 +39,7 @@ class Fake:
         self.home, self.ask_on = home, set(ask_on)
         self.started, self.stopped, self.threads, self.errors = [], [], [], []
         self.lock = threading.Lock()
+        self.release = threading.Event()          # workers hold until join(): no wall-clock race (#1047)
 
     def start(self, profile_home, **req):
         agent = req["env"]["JARVES_WORKFLOW_AGENT"]
@@ -57,7 +58,7 @@ class Fake:
     def work(self, agent, req):
         try:
             task = json.loads(req["task"].split("\n", 1)[1])["id"]
-            time.sleep(0.2)                       # let the autopilot link the session first
+            assert self.release.wait(10), "worker never released"  # step() has linked the session
             code, _ = run_cli(self.home, "report", "--agent", agent, "--progress", "--note", "working")
             assert code == 0
             if task in self.ask_on:
@@ -70,8 +71,10 @@ class Fake:
             self.errors.append(repr(exc))
 
     def join(self):
+        self.release.set()
         for t in self.threads:
             t.join(10)
+        self.release.clear()                      # hold workers started by later steps too
         self.assertNoErrors()
 
     def assertNoErrors(self):
@@ -119,6 +122,17 @@ class AutopilotLoopTests(unittest.TestCase):
         self.assertLess(order.index("f-451"), order.index("f-v5"))
         self.assertTrue(all(t["state"] == "review" for t in self.tasks().values()))
         self.assertTrue(all(r["model"] == "claude-sonnet-5-5" and r["provider"] == "claude" for r in fake.started))
+
+    def test_running_worker_stays_running_until_released(self):
+        # #1047: a slow runner let fake workers finish before the next step(), so a lane freed early
+        self.task("f-1", "features", "V4.5.1")
+        fake = Fake(self.home)
+        self.step(fake)
+        time.sleep(0.5)
+        self.assertEqual(self.tasks()["f-1"]["state"], "running")
+        self.assertEqual(self.step(fake), [])
+        fake.join()
+        self.assertEqual(self.tasks()["f-1"]["state"], "review")
 
     def test_unauthorized_version_does_not_start(self):
         self.task("f-v6", "features", "V6")

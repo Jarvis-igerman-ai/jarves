@@ -31,7 +31,9 @@ DENY = ("Bash(git * --output*)", "Bash(git * -o *)", "Bash(git -c:*)", "Bash(git
         "Bash(rm:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "WebFetch",
         # agent and sub-agent definitions/settings: an agent must not widen its own (or its sub-agents') permissions
         "Edit(.claude/**)", "Write(.claude/**)", "Edit(.codex/**)", "Write(.codex/**)", "Edit(.opencode/**)",
-        "Write(.opencode/**)", "Edit(opencode.json)", "Write(opencode.json)", "Edit(.mcp.json)", "Write(.mcp.json)")
+        "Write(.opencode/**)", "Edit(opencode.json)", "Write(opencode.json)", "Edit(.mcp.json)", "Write(.mcp.json)",
+        # CI workflows run with the repository's secrets (JAR-317; gitops.PROTECTED checks every letter case after the run)
+        "Edit(.github/**)", "Write(.github/**)")
 
 
 @dataclass

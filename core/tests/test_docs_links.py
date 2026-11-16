@@ -136,3 +136,50 @@ def test_historical_docs_are_marked():
     for rel in ("docs/plans/SW_NEXT_STEPS.md", "docs/plans/FULL_TEST_PLAN.md", "docs/SW_V1_WORK_PACKAGE.md",
                 "docs/JARVES_SW_V2_IMPLEMENTATION_SPEC.md", "docs/JARVES_SW_V3_WORK_PACKAGE.md", "docs/archive/ROADMAP.md"):
         assert "Historical, superseded by" in (ROOT / rel).read_text(encoding="utf-8")[:600], rel
+
+
+# JAR-120: DOC_MAP / CONTEXT_MAP drift check (dead links, broken anchors, missing index entries).
+MAPS = ("docs/DOC_MAP.md", "docs/CONTEXT_MAP.md")
+
+
+def _slug(heading: str) -> str:
+    """GitHub-style heading anchor: lower case, punctuation dropped, spaces become hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def _broken_links(path: Path) -> list[str]:
+    """Relative links in `path` whose file is missing, or whose `#anchor` names no heading in that Markdown file."""
+    broken = []
+    for target in _links(path):
+        if re.match(r"[a-z][a-z0-9+.-]*:", target, re.I):
+            continue
+        file_part, _, anchor = target.partition("#")
+        dest = (path.parent / file_part).resolve() if file_part else path
+        if not dest.exists():
+            broken.append(target)
+        elif anchor and dest.is_file() and dest.suffix == ".md":
+            headings = re.findall(r"^#{1,6}\s+(.+?)\s*#*$", dest.read_text(encoding="utf-8"), re.M)
+            if anchor not in {_slug(h) for h in headings}:
+                broken.append(target)
+    return broken
+
+
+def test_link_checker_flags_dead_files_and_anchors(tmp_path):
+    (tmp_path / "real.md").write_text("# Real doc\n\n## Some Section: one\n", encoding="utf-8")
+    index = tmp_path / "MAP.md"
+    index.write_text("[ok](real.md) [ok2](real.md#some-section-one) [web](https://example.invalid/x)\n"
+                     "[gone](missing.md) [bad anchor](real.md#nope) [self](#nowhere)\n"
+                     "```\n[in code](ignored.md)\n```\n", encoding="utf-8")
+    assert _broken_links(index) == ["missing.md", "real.md#nope", "#nowhere"]
+
+
+@pytest.mark.parametrize("rel", MAPS)
+def test_doc_map_and_context_map_have_no_dead_links_or_anchors(rel):
+    assert not _broken_links(ROOT / rel), f"{rel}: fix or remove {_broken_links(ROOT / rel)}"
+
+
+def test_every_context_map_entry_is_in_doc_map():
+    """CONTEXT_MAP is the agent subset of the full index; anything it points at must also be registered in DOC_MAP."""
+    doc_map = ROOT / "docs" / "DOC_MAP.md"
+    extra = _resolved_links(ROOT / "docs" / "CONTEXT_MAP.md") - _resolved_links(doc_map) - {doc_map.resolve()}
+    assert not extra, f"add to docs/DOC_MAP.md: {sorted(str(p.relative_to(ROOT)) for p in extra)}"
