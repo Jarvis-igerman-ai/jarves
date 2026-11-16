@@ -244,10 +244,15 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
+        from . import webchild
         from .opener import listening
         try:
-            if not listening(a.port):  # a key left by a crashed server must not yield a code nobody accepts
-                raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise)")
+            # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen, on
+            # --port or else on the port the running web server recorded (non-default ports work without --port).
+            ports = [a.port] + [p for p in [webchild.read(home).get("port")] if isinstance(p, int) and p != a.port]
+            if not any(listening(p) for p in ports):
+                raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise) "
+                                               "or pass its port with --port")
             shown = unlock.issue(home)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)

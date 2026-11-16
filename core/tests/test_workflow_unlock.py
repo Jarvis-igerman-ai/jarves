@@ -2,7 +2,6 @@
 import io
 import json
 import os
-import socket
 import tempfile
 import threading
 import unittest
@@ -246,7 +245,8 @@ class UnlockTests(unittest.TestCase):
         err = io.StringIO()
         with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
                 redirect_stdout(io.StringIO()), redirect_stderr(err):
-            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]), 0)
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
+                                       "open", "--no-open"]), 0)   # the dashboard listens: the hint comes from issue()
         self.assertIn("No unlock code yet", err.getvalue())
 
     def test_750_a_failed_second_start_keeps_the_live_servers_key(self):
@@ -268,15 +268,14 @@ class UnlockTests(unittest.TestCase):
         self.server.unlock_key.withdraw(self.home)
         self.assertNotEqual((self.home / unlock.PUB_FILE).read_bytes(), other_pub)
         self.assertTrue((self.home / unlock.PUB_FILE).exists())     # a foreign key is not removed
-        with socket.socket() as s:                                  # a free port where nothing listens
-            s.bind(("127.0.0.1", 0))
-            dead = str(s.getsockname()[1])
-        base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", dead]
+        base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", "1"]
         err = io.StringIO()
-        with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.listening", return_value=False), \
+                patch("jarves.workflow.opener.open_dashboard", return_value=0), redirect_stdout(io.StringIO()), redirect_stderr(err):
             self.assertEqual(cli.main(base + ["unlock"]), 2)
             cli.main(base + ["open", "--no-open"])
         self.assertIn("no dashboard is running", err.getvalue())
+        self.assertIn("--port", err.getvalue())
         self.assertIn("No unlock code yet", err.getvalue())
         self.assertNotIn("Unlock code", err.getvalue())
         self.assertFalse((self.home / unlock.FILE).exists())       # no code bound to the dead key
@@ -304,8 +303,37 @@ class UnlockTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 Server(self.home, 0)
         close.assert_called_once()
-        self.assertTrue(close.call_args.args[0].socket._closed)
+        self.assertEqual(close.call_args.args[0].socket.fileno(), -1)
         self.assertTrue((self.home / unlock.PUB_FILE).exists())     # the live server's key is untouched
+
+    def test_750_unlock_finds_the_recorded_non_default_port_without_flag(self):
+        from jarves.workflow import webchild
+        webchild.record(self.home, self.server.server_port)       # what serve() records after bind
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]   # default --port 8188
+        out = io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                patch("jarves.workflow.opener.listening", side_effect=lambda p: p == self.server.server_port), redirect_stdout(out):
+            self.assertEqual(cli.main(argv), 0)
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": out.getvalue().split(": ")[-1].strip()})[0], 200)
+
+    def test_750_key_write_retries_a_briefly_locked_target_then_gives_up(self):
+        real, calls, sleeps = os.replace, [], []
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) < 3:
+                raise PermissionError("in use")                    # Windows: another process has it open
+            real(src, dst)
+        target = self.home / "x.json"
+        with patch("jarves.workflow.unlock.os.replace", side_effect=flaky):
+            unlock._write_private(target, "{}", _sleep=sleeps.append)
+        self.assertEqual((len(calls), len(sleeps), target.read_text(encoding="ascii")), (3, 2, "{}"))
+        sleeps.clear()
+        with patch("jarves.workflow.unlock.os.replace", side_effect=PermissionError("in use")), self.assertRaises(PermissionError):
+            unlock._write_private(target, "[]", _sleep=sleeps.append)
+        self.assertEqual(len(sleeps), unlock.REPLACE_TRIES - 1)
+        self.assertEqual(target.read_text(encoding="ascii"), "{}")
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.endswith(".tmp")], [])   # temp file removed
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
