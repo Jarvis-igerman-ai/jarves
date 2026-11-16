@@ -30,7 +30,7 @@ from . import logs
 from . import browser_liveview as bl
 from . import browser_recording as br
 from .browser import candidates
-from .browser_pilot import PilotError, PilotSession, page_scope
+from .browser_pilot import PilotDriver, PilotError, PilotSession, page_scope
 from .pilot_proxy import PilotProxy
 
 CALL_TIMEOUT_S = 20.0
@@ -75,7 +75,7 @@ def kill_tree(pid: int) -> None:
         logs.warn("browser", "BROWSER_DRIVER_KILL_FAILED", "could not kill the abandoned pilot browser")
 
 
-class PlaywrightDriver:
+class PlaywrightDriver(PilotDriver):
     uses_pilot_proxy = True                                         # every connection goes through PilotProxy (PilotSession contract, #574)
 
     def __init__(self, proxy: PilotProxy, session_ref: Callable[[], PilotSession | None], *, launch: dict | None = None,

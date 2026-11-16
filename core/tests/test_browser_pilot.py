@@ -386,3 +386,37 @@ def test_574_a_driver_without_the_pilot_proxy_may_not_open_a_public_page(tmp_pat
     s, d, _ = mk(tmp_path / "proxied")
     s.open("https://example.com/")
     assert d.opened == ["https://example.com/"]
+
+
+def test_574_the_production_late_wiring_forwards_the_proxy_flag(tmp_path):
+    """Review R1 on 9a33608: PilotService builds the session over browser_driver._Late; the flag must reach the session through it."""
+    from jarves import browser_driver as bd
+
+    class Stub(FakeDriver):                                     # stands in for PlaywrightDriver: no Chromium is launched
+        pass
+    for flag, ok in ((True, True), (False, False), (None, False)):
+        holder: dict = {}
+        s = bp.PilotSession(tmp_path / str(flag), bd._Late(holder), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+        d = Stub()
+        if flag is None:
+            del d.uses_pilot_proxy
+        else:
+            d.uses_pilot_proxy = flag
+        holder["d"] = d                                         # the driver exists only after the session (as in PilotService.start)
+        if ok:
+            s.open("https://example.com/")
+            assert d.opened == ["https://example.com/"]
+        else:
+            with pytest.raises(bp.PilotError) as e:
+                s.open("https://example.com/")
+            assert e.value.code == "BROWSER_PILOT_URL" and d.opened == []
+    s = bp.PilotSession(tmp_path / "early", bd._Late({}), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+    with pytest.raises(bp.PilotError) as e:                     # before the real driver exists nothing public is allowed
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_URL"
+
+
+def test_574_the_real_driver_declares_the_proxy_and_new_drivers_fail_closed():
+    from jarves import browser_driver as bd
+    assert bd.PlaywrightDriver.uses_pilot_proxy is True and bp.PilotDriver.uses_pilot_proxy is False
+    assert issubclass(bd.PlaywrightDriver, bp.PilotDriver)

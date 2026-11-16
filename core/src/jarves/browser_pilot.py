@@ -216,6 +216,12 @@ def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) ->
     return scope
 
 
+class PilotDriver:
+    """Base for real page drivers (see the PilotSession contract). uses_pilot_proxy defaults to False, so a new driver is refused
+    on public pages until it really connects only through PilotProxy and says so (#574). Fakes may declare it without the base."""
+    uses_pilot_proxy: bool = False
+
+
 class PilotSession:
     """One read-only session over a page driver (a fake in tests). The driver contract, enforced when the session is made
     so a real driver cannot skip it (#566):
