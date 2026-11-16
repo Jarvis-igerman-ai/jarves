@@ -267,6 +267,8 @@ def test_install_backups_are_capped_by_max_install_issue_1016(profile, capsys):
     capped = [n for i in range(4) for n in installs[i] if n != installs[0][1]]  # oldest pre-migration: checkpoints=5
     assert all(f"removed by the install cap (backup.max_install)" in out and f": {n}\n" in out for n in capped)
     assert out.count("removed by the install cap") == 7 and installs[0][1] not in out
+    assert out.index("removed 8 old backup(s)") < out.index("install-cap removals (oldest first):") < out.index(
+        "removed by the install cap")                                  # a header splits this run from the history
     for bad in (-1, 1, 2):                                             # 1-2 cannot hold the newest of every kind
         with pytest.raises(ValueError):
             backup.set_settings(profile, {"max_install": bad})
@@ -324,6 +326,23 @@ def test_install_cap_deletions_by_the_automatic_prune_stay_visible_issue_1016(pr
     monkeypatch.setattr(backup, "_save_state", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
     assert backup.prune_report(profile)["capped"] == ["jarves-backup-20250101-030000-manual.zip"]
     assert warned == ["BACKUP_STATE_FAILED"]                          # a failed record is logged, prune still works
+
+
+def test_state_lock_ignores_a_faked_platform_and_a_busy_lock_keeps_the_backup_issue_1016(profile, monkeypatch):
+    """Tests fake sys.platform="win32" on Linux: the state lock must not import msvcrt then. A busy or failing
+    state write after a verified archive is logged and the archive is still returned (not an exception)."""
+    monkeypatch.setattr(backup.sys, "platform", "win32" if os.name != "nt" else "linux")
+    first = backup.create(profile, "manual")
+    assert backup.read_state(profile)["last"]["path"] == first.name
+    warned = []
+    monkeypatch.setattr(backup.logs, "warn", lambda *a, **k: warned.append(a[1]))
+
+    def busy(*a, **k):
+        raise TimeoutError("backup_state.json.lock is held by another process")
+    monkeypatch.setattr(backup, "_save_state", busy)
+    second = backup.create(profile, "manual", now=time.time() + 5)
+    assert second.is_file() and backup.verify(second)["ok"] and warned == ["BACKUP_STATE_FAILED"]
+    assert backup.read_state(profile)["last"]["path"] == first.name     # not recorded, but not lost either
 
 
 def test_auto_backup_due_daily_and_switchable(profile):

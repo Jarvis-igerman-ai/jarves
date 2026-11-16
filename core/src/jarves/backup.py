@@ -269,8 +269,8 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
             logs.error("backup", "BACKUP_FAILED", "backup could not be written", error_type=type(e).__name__)
             raise BackupError("BACKUP_FAILED", f"backup could not be written ({type(e).__name__}: {str(e)[:120]})",
                               "free some disk space or check folder permissions") from e
-    _save_state(home, {"last": {"path": final.name, "ts": now, "kind": kind, "ok": True, "files": len(files)}},
-                kind=kind)
+    _record_state(home, {"last": {"path": final.name, "ts": now, "kind": kind, "ok": True, "files": len(files)}},
+                  kind=kind)
     logs.info("backup", "BACKUP_DONE", "backup written", backup=final.name, kind=kind, files=len(files), excluded=len(skipped),
               bytes=final.stat().st_size)
     prune(home)
@@ -298,22 +298,41 @@ def read_state(home: Path) -> dict:
 @contextlib.contextmanager
 def _state_file_lock(home: Path):
     """OS file lock next to backup_state.json so the Core and a CLI never lose each other's update."""
-    from .runtime.lock import _try_lock, _unlock
     p = _state_path(home).with_name(STATE_FILE + ".lock")
     p.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(p, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         deadline = time.monotonic() + STATE_LOCK_WAIT
-        while not _try_lock(fd):
+        while not _os_lock(fd, True):
             if time.monotonic() >= deadline:
                 raise TimeoutError(f"{p.name} is held by another process")
             time.sleep(0.05)
         try:
             yield
         finally:
-            _unlock(fd)
+            _os_lock(fd, False)
     finally:
         os.close(fd)
+
+
+def _os_lock(fd: int, take: bool) -> bool:
+    """Non-blocking lock/unlock of byte 0. Picks the lock API by what the OS provides, not by sys.platform
+    (tests fake sys.platform="win32" on Linux, where msvcrt does not exist)."""
+    try:
+        import fcntl
+    except ImportError:                                      # Windows
+        import msvcrt
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK if take else msvcrt.LK_UNLCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        fcntl.flock(fd, (fcntl.LOCK_EX | fcntl.LOCK_NB) if take else fcntl.LOCK_UN)
+        return True
+    except OSError:
+        return False
 
 
 def _save_state(home: Path, changes: dict, kind: str | None = None, capped: list[str] | None = None) -> None:
@@ -336,6 +355,17 @@ def _save_state(home: Path, changes: dict, kind: str | None = None, capped: list
         except OSError:
             _unlink(Path(tmp))
             raise
+
+
+def _record_state(home: Path, changes: dict, kind: str | None = None) -> bool:
+    """_save_state for callers whose real work is already done (a verified archive, a start): a lock timeout or
+    write error is logged once per call site event and does not undo that work."""
+    try:
+        _save_state(home, changes, kind=kind)
+        return True
+    except OSError as e:                                     # includes TimeoutError from the state lock
+        logs.warn("backup", "BACKUP_STATE_FAILED", "backup state not saved", error_type=type(e).__name__)
+        return False
 
 
 def capped_history(home: Path) -> list[dict]:
@@ -594,7 +624,7 @@ def restore_test(path: Path) -> dict:
             report["checks"].append({"db": "open stores", "ok": False, "error": type(e).__name__})
         report["ok"] = all(c["ok"] for c in report["checks"])
     if path.parent.name == BACKUP_DIR:
-        _save_state(path.parent.parent, {"last_restore_test": {"name": path.name, "ok": report["ok"],
+        _record_state(path.parent.parent, {"last_restore_test": {"name": path.name, "ok": report["ok"],
                                                                "ts": time.time()}})
     logs.info("backup", "RESTORE_TEST", "restore test finished", ok=report["ok"], backup=path.name)
     return report
@@ -614,7 +644,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if st.get("version") == __version__:
         return None
     if not any(home.glob("*.db")):                  # first run: nothing to protect yet
-        _save_state(home, {"version": __version__})
+        _record_state(home, {"version": __version__})
         return None
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
@@ -623,7 +653,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
         if health is not None:
             health.set("backup", "degraded", "pre-migration checkpoint failed", e.action)
         return None
-    _save_state(home, {"version": __version__})
+    _record_state(home, {"version": __version__})
     return p
 
 
@@ -807,7 +837,10 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             rep = prune_report(home)
             print(f"removed {len(rep['gone'])} old backup(s)")
-            for e in capped_history(home):                    # #1016: incl. the automatic prune after each backup
+            hist = capped_history(home)                       # #1016: incl. the automatic prune after each backup
+            if hist:
+                print("earlier and current install-cap removals (oldest first):")
+            for e in hist:
                 when = datetime.fromtimestamp(e["ts"]).strftime("%Y-%m-%d %H:%M") if isinstance(
                     e.get("ts"), (int, float)) else "?"
                 print(f"removed by the install cap (backup.max_install) {when}: {e['name']}")
