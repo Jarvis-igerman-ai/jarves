@@ -244,7 +244,10 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
+        from .opener import listening
         try:
+            if not listening(a.port):  # a key left by a crashed server must not yield a code nobody accepts
+                raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise)")
             shown = unlock.issue(home)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -254,16 +257,18 @@ def main(argv=None) -> int:
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.
         # The token link is printed only with --no-open; it stays out of event logs and process arguments.
-        from .opener import open_dashboard
+        from .opener import listening, open_dashboard
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
+            if not listening(a.port):  # a listening dashboard has already published its key (server_activate)
+                raise unlock.UnlockUnavailable("dashboard not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
         except unlock.UnlockUnavailable:
-            print("No unlock code yet: the dashboard has not published its key; run 'jarvis workflow unlock' when it is up.", file=sys.stderr)
+            print("No unlock code yet: the dashboard is not running or has no key; run 'jarvis workflow unlock' when it is up.", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

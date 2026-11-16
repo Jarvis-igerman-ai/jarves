@@ -143,6 +143,14 @@ class Server(ThreadingHTTPServer):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
+    def server_activate(self) -> None:
+        # #750: publish the unlock key after a successful (exclusive) bind and BEFORE listening, so a dashboard that
+        # accepts connections always has its current key published. A failed publish closes the socket
+        # (TCPServer.__init__ calls server_close on any error here).
+        self.unlock_key.publish(self.home)
+        self._published = True
+        super().server_activate()
+
     def __init__(self, home: Path, port: int = 8188, *, store: Store | None = None, profile_home: Path | None = None):
         self.home = Path(home)
         self.profile_home = profile_home or self.home.parent
@@ -161,8 +169,8 @@ class Server(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
         self.unlock_key = unlock.ServerKey()    # #750: private half only in memory
-        super().__init__(("127.0.0.1", port), Handler)
-        self.unlock_key.publish(self.home)       # after a successful bind: a failed second start keeps the live key
+        self._published = False                 # a failed second start must not withdraw the live server's key
+        super().__init__(("127.0.0.1", port), Handler)   # publishes the key in server_activate (after bind)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
 
@@ -192,6 +200,8 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
+        if self._published:
+            self.unlock_key.withdraw(self.home)  # no stale key after a clean stop (#750)
         super().server_close()
         self.store.close()
 

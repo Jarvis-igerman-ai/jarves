@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import socket
 import tempfile
 import threading
 import unittest
@@ -133,7 +134,7 @@ class UnlockTests(unittest.TestCase):
         autopilot.save(self.home, policy)
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
-            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]), 0)
         self.assertIn("unlocked for 6 hours", out.getvalue())
         self.assertNotIn("0 days", out.getvalue())
 
@@ -192,7 +193,7 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(self.request("/api/unlock", {"code": "1234"})[0], 401)
 
     def test_cli_unlock_refuses_agents_and_non_terminals_and_open_prints_no_code(self):
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         out, err = io.StringIO(), io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": "1"}), redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(cli.main(argv), 3)
@@ -207,7 +208,7 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())
 
     def test_cli_unlock_in_terminal_shows_code_that_the_server_accepts(self):
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
             self.assertEqual(cli.main(argv), 0)
@@ -220,11 +221,7 @@ class UnlockTests(unittest.TestCase):
         """#750: a file reader (access.token + unlock.json) must not be able to confirm a code offline."""
         shown = unlock.issue(self.home)
         stolen = {p.name: p.read_bytes() for p in self.home.iterdir() if p.is_file()}
-        record = json.loads(stolen[unlock.FILE])
-        if "salt" in record:                                        # old format: salted scrypt of the code
-            import hashlib
-            digest = hashlib.scrypt(shown.encode(), salt=bytes.fromhex(record["salt"]), **unlock._SCRYPT)
-            self.assertNotEqual(digest.hex(), record["hash"], "unlock.json confirms the code offline")
+        self.assertEqual(set(json.loads(stolen[unlock.FILE])), {"eph", "tag", "expires"})  # no salt+scrypt hash
         with tempfile.TemporaryDirectory() as other:                # attacker copy with its own key
             for name, raw in stolen.items():
                 (Path(other) / name).write_bytes(raw)
@@ -240,7 +237,7 @@ class UnlockTests(unittest.TestCase):
         with self.assertRaises(unlock.UnlockUnavailable):      # low-order point: no shared secret
             unlock.issue(self.home)
         (self.home / unlock.PUB_FILE).unlink()
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         err = io.StringIO()
         with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
             self.assertEqual(cli.main(argv), 2)
@@ -255,10 +252,60 @@ class UnlockTests(unittest.TestCase):
     def test_750_a_failed_second_start_keeps_the_live_servers_key(self):
         before = (self.home / unlock.PUB_FILE).read_bytes()
         with self.assertRaises(OSError):
-            Server(self.home, self.server.server_port, store=self.store)
-        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)
+            Server(self.home, self.server.server_port)
+        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)   # neither replaced nor withdrawn
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+
+    def test_750_clean_stop_withdraws_only_its_own_key_and_a_stale_key_gives_no_code(self):
+        other = Server(self.home, 0)                                 # a second dashboard replaces the key
+        other_pub = (self.home / unlock.PUB_FILE).read_bytes()
+        other.server_close()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())    # clean stop removes its own key
+        self.server.unlock_key.publish(self.home)
+        stale = unlock.ServerKey()
+        stale.publish(self.home)                                    # left behind by a crashed server
+        self.server.unlock_key.withdraw(self.home)
+        self.assertNotEqual((self.home / unlock.PUB_FILE).read_bytes(), other_pub)
+        self.assertTrue((self.home / unlock.PUB_FILE).exists())     # a foreign key is not removed
+        with socket.socket() as s:                                  # a free port where nothing listens
+            s.bind(("127.0.0.1", 0))
+            dead = str(s.getsockname()[1])
+        base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", dead]
+        err = io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(cli.main(base + ["unlock"]), 2)
+            cli.main(base + ["open", "--no-open"])
+        self.assertIn("no dashboard is running", err.getvalue())
+        self.assertIn("No unlock code yet", err.getvalue())
+        self.assertNotIn("Unlock code", err.getvalue())
+        self.assertFalse((self.home / unlock.FILE).exists())       # no code bound to the dead key
+
+    def test_750_a_listening_dashboard_has_already_published_its_key(self):
+        (self.home / unlock.PUB_FILE).unlink()
+        seen = []
+        orig = Server.server_activate
+        def activate(srv):
+            seen.append((srv.home / unlock.PUB_FILE).exists())    # bound, not yet listening
+            orig(srv)
+        with patch.object(Server, "server_activate", activate):
+            s2 = Server(self.home, 0)
+        try:
+            self.assertEqual(seen, [False])                          # not before activate...
+            self.assertTrue((self.home / unlock.PUB_FILE).exists())  # ...but before __init__ returns (listen)
+            self.assertIn(s2.unlock_key.pub, (self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
+        finally:
+            s2.server_close()
+
+    def test_750_a_failed_publish_closes_the_socket(self):
+        real_close = Server.server_close
+        with patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
+                patch.object(Server, "server_close", autospec=True, side_effect=real_close) as close:
+            with self.assertRaises(OSError):
+                Server(self.home, 0)
+        close.assert_called_once()
+        self.assertTrue(close.call_args.args[0].socket._closed)
+        self.assertTrue((self.home / unlock.PUB_FILE).exists())     # the live server's key is untouched
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
