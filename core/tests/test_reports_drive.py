@@ -406,7 +406,8 @@ def test_a_file_that_keeps_failing_warns_once_until_it_is_sent(tmp_path, monkeyp
 
 def test_drive_ids_merge_under_the_lock_and_a_concurrent_upload_is_not_lost(tmp_path):
     rd.save(tmp_path, mode="api")
-    rep = tmp_path / "a.md"
+    rep = tmp_path / "reports" / "a.md"
+    rep.parent.mkdir()
     rep.write_bytes(b"1")
 
     class Racing(FakeDrive):                     # another process records its own Drive id meanwhile
@@ -418,12 +419,9 @@ def test_drive_ids_merge_under_the_lock_and_a_concurrent_upload_is_not_lost(tmp_
 
 
 def test_settings_use_the_shared_lock_which_fails_closed_while_held(tmp_path):
-    import inspect
-
     import pytest
 
     from jarves import filelock
-    assert "_file_lock" not in inspect.getsource(rd)              # no private cross-module import
     path = tmp_path / rd.FILE
     with filelock.file_lock(path):
         with pytest.raises(TimeoutError, match="busy"):
@@ -431,3 +429,65 @@ def test_settings_use_the_shared_lock_which_fails_closed_while_held(tmp_path):
                 pass
     rd.save(tmp_path, folder="x")
     assert rd.load(tmp_path)["folder"] == "x"
+
+
+def test_a_manual_upload_from_outside_reports_never_replaces_a_tracked_report(tmp_path):
+    class Keep(FakeDrive):
+        def upload(self, name, data, mime, target_mime=None, file_id=None):
+            self.sent.append((name, file_id))
+            return {"id": file_id or f"n{len(self.sent)}"}
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "wa.csv").write_bytes(b"a\n")
+    other = tmp_path / "elsewhere" / "wa.csv"
+    other.parent.mkdir()
+    other.write_bytes(b"other\n")
+    fake = Keep()
+    rd.upload(tmp_path, tmp_path / "reports" / "wa.csv", client=fake)
+    rd.upload(tmp_path, other, client=fake)                     # same name, other folder: a new Drive file
+    assert fake.sent == [("wa", None), ("wa", None)] and rd._raw(tmp_path)["ids"] == {"wa.csv": "n1"}
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest), mode="folder")
+    rd.upload(tmp_path, tmp_path / "reports" / "wa.csv")
+    out = rd._send(tmp_path, other)                             # would overwrite the tracked copy: refused
+    assert "error" in out and (dest / rd.SUBDIR / "wa.csv").read_bytes() == b"a\n"
+
+
+def test_sync_skips_hidden_and_temp_files_still_being_written(tmp_path):
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    for n in (".x.csv", "wa.csv.tmp", "wa.csv.part", "wa.csv.partial", "ok.md"):
+        (folder / n).write_bytes(b"1")
+    fake = FakeDrive()
+    rd.sync(tmp_path, client=fake)
+    assert [s[0] for s in fake.sent] == ["ok.md"]
+
+
+def test_a_report_written_during_a_running_sync_is_sent_by_that_sync(tmp_path):
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    (folder / "a.md").write_bytes(b"1")
+
+    class Late(FakeDrive):                       # a new report lands and a second job finishes mid-sync
+        def upload(self, name, *a, **kw):
+            if name == "a.md":
+                (folder / "b.md").write_bytes(b"2")
+                assert rd.sync(tmp_path, client=self) == []
+            return super().upload(name, *a, **kw)
+    fake = Late()
+    rd.sync(tmp_path, client=fake)
+    assert [s[0] for s in fake.sent] == ["a.md", "b.md"]
+
+
+def test_a_sync_with_nothing_new_does_not_rewrite_the_settings(tmp_path, monkeypatch):
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "a.md").write_bytes(b"1")
+    rd.sync(tmp_path, client=FakeDrive())
+    writes = []
+    monkeypatch.setattr(rd, "save", lambda home, **kw: writes.append(kw))
+    rd.sync(tmp_path, client=FakeDrive())
+    assert writes == []

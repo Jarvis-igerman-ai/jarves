@@ -48,3 +48,9 @@ he = "ההעלאה אומרת שצריך לחבר מחדש את גוגל"
 en = "The upload says Google needs to be reconnected"
 fix_he = "הריצו שוב jarvis reports drive signin ואשרו את ההרשאה."
 fix_en = "Run jarvis reports drive signin again and allow the permission."
+
+[[problems]]
+he = "כיביתי את המצב ורוצה להסיר גם את הרשאת הדרייב"
+en = "I turned it off and also want to remove the Drive permission"
+fix_he = "כיבוי (jarvis features off reports_drive) עוצר את השליחה, אבל ההרשאה נשארת בחשבון גוגל. להסרה: בחשבון גוגל, אבטחה, חיבורים לאפליקציות ושירותים של צד שלישי, בחרו את האפליקציה של JARVES והסירו את הגישה."
+fix_en = "Turning it off (jarvis features off reports_drive) stops sending, but the permission stays in your Google account. To remove it: in your Google account, Security, third-party apps and services connections, pick the JARVES app and remove its access."

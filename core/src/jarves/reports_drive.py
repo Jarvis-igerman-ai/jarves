@@ -25,6 +25,8 @@ UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multip
 UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=multipart"
 _WARNED: set[str] = set()                       # warnings already logged in the current outage: once each
 _SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
+_RERUN = threading.Event()                      # a job finished while a sync ran: that sync goes round again
+SKIP_SUFFIXES = (".tmp", ".part", ".partial", ".crdownload", "~")   # a writer may still be writing these
 SUBDIR = "JARVES reports"                       # its own subfolder: never overwrites an owner file in Drive
 MAX_UPLOAD = 5 * 1024 * 1024                    # Google documents uploadType=multipart for files up to 5 MB
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
@@ -106,21 +108,32 @@ class DriveApi:
         return r.json()
 
 
+def _tracked(home: Path, path: Path) -> bool:
+    """Only a file directly in <home>/reports/ owns its Drive file id and its copy; a manual upload from elsewhere
+    never replaces it."""
+    try:
+        return path.resolve().parent == (Path(home) / "reports").resolve()
+    except OSError:
+        return False
+
+
 def upload(home: Path, path: Path, *, client=None) -> dict:
     """Send one report the configured way. Raises FileNotFoundError / ValueError with a plain reason."""
     path, st = Path(path), load(home)
     if not path.is_file():
         raise FileNotFoundError(f"no such report: {path}")
+    tracked = _tracked(home, path)
     if st["mode"] == "api":
         mime = MIMES.get(path.suffix.lower(), "application/octet-stream")
         csv = path.suffix.lower() == ".csv"
         if path.stat().st_size > MAX_UPLOAD:
             raise ValueError(clilang.fmt("הדוח גדול מדי להעלאה (מעל 5MB): השתמשו ב-jarvis reports drive folder PATH",
                                          "report too big for one Drive upload (over 5 MB): use jarvis reports drive folder PATH"))
-        ids = dict(_raw(home).get("ids") or {})          # report name -> its Drive file id: update, not duplicate
+        ids = _raw(home).get("ids") if tracked else None  # report name -> its Drive file id: update, not duplicate
         r = (client or DriveApi(home)).upload(path.stem if csv else path.name, path.read_bytes(), mime,
-                                             SHEET if csv else None, file_id=ids.get(path.name))
-        if r.get("id"):
+                                             SHEET if csv else None,
+                                             file_id=ids.get(path.name) if isinstance(ids, dict) else None)
+        if tracked and r.get("id"):
             save(home, ids_add={path.name: r["id"]})
         return {"mode": "api", "id": r.get("id", "")}
     dest = Path(st["folder"])
@@ -128,6 +141,9 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
         raise ValueError("no Google Drive folder set: run jarvis reports drive folder PATH")
     dest = dest / SUBDIR
     dest.mkdir(exist_ok=True)
+    if not tracked and (dest / path.name).exists():
+        raise ValueError(clilang.fmt(f"כבר יש דוח בשם {path.name} בדרייב: שנו את שם הקובץ",
+                                     f"a report named {path.name} is already in Drive: rename the file"))
     tmp = dest / f".{path.name}.jarves-{uuid.uuid4().hex[:8]}.part"   # a cut copy never shows as the report
     try:
         shutil.copy2(path, tmp)
@@ -187,12 +203,18 @@ def after_report(home: Path, path: Path, *, features, client=None) -> dict | Non
 
 def sync(home: Path, *, client=None) -> list[dict]:
     """Send every new or changed file in <home>/reports/ once (remembered by name and mtime in reports_drive.json)."""
-    if not _SYNC_LOCK.acquire(blocking=False):
-        return []                               # a sync is already running; the next job run picks up the rest
-    try:
-        return _sync(home, client)
-    finally:
-        _SYNC_LOCK.release()
+    _RERUN.set()
+    out: list[dict] = []
+    while _RERUN.is_set():                      # re-check after release: a job that finished meanwhile is not lost
+        if not _SYNC_LOCK.acquire(blocking=False):
+            return out                          # the running sync sees _RERUN and goes round once more
+        try:
+            while _RERUN.is_set():
+                _RERUN.clear()
+                out += _sync(home, client)
+        finally:
+            _SYNC_LOCK.release()
+    return out
 
 
 def _folder_missing(home: Path) -> bool:
@@ -209,10 +231,13 @@ def _folder_missing(home: Path) -> bool:
 def _sync(home: Path, client) -> list[dict]:
     if _folder_missing(home):
         return []
-    sent = dict(_raw(home).get("sent") or {})
+    before = _raw(home).get("sent")
+    sent = dict(before) if isinstance(before, dict) else {}
     out = []
     folder = Path(home) / "reports"
     for f in sorted(folder.iterdir()) if folder.is_dir() else []:
+        if f.name.startswith(".") or f.name.lower().endswith(SKIP_SUFFIXES):
+            continue
         if f.is_file() and sent.get(f.name) != f.stat().st_mtime:
             r = _send(home, f, client)
             out.append(r)
@@ -226,7 +251,8 @@ def _sync(home: Path, client) -> list[dict]:
                 break
             elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
-    save(home, sent=sent)
+    if sent != before:                          # nothing new: the settings file is not rewritten
+        save(home, sent=sent)
     return out
 
 
