@@ -24,10 +24,12 @@ class SpeechCache:
     def get(self, key: str) -> tuple[np.ndarray, int] | None:
         try:
             with wave.open(str(self._path(key)), "rb") as w:
+                if w.getsampwidth() != 2 or w.getnchannels() != 1:
+                    return None                     # not what put() writes: a miss, never noise played as speech
                 rate, raw = w.getframerate(), w.readframes(w.getnframes())
             a = np.frombuffer(raw, "<i2").astype(np.float32) / 32768.0
             return (a, rate) if len(a) > rate // 4 else None
-        except (OSError, EOFError, wave.Error):
+        except (OSError, EOFError, wave.Error, ValueError):  # ValueError: truncated mid-sample (odd byte count)
             return None
 
     def put(self, key: str, samples: np.ndarray, rate: int) -> None:
