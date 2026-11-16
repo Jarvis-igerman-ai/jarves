@@ -529,6 +529,7 @@ def signature(findings: list[dict], complete: bool, refused: dict[str, str] | No
 
 
 _ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
+_RUN_SOURCES = ("main_ci", "nightly", "codeql_run")                # workflow runs, read through the Actions API
 
 
 def refused_sources(coverage: dict) -> dict[str, str]:
@@ -550,8 +551,10 @@ def owner_actions(coverage: dict) -> list[str]:
         ([k for k, r in refused.items() if r != "http_401" and k in _ALERT_SOURCES],
          "the feature is off for this repository (turn it on under Settings > Code security) "
          "or the scan's token cannot read it (give it read access)."),
-        ([k for k, r in refused.items() if r != "http_401" and k not in _ALERT_SOURCES],
-         "give the scan's token read access to Actions and check that the workflow exists.")]
+        ([k for k, r in refused.items() if r != "http_401" and k in _RUN_SOURCES],
+         "give the scan's token read access to Actions and check that the workflow exists."),
+        ([k for k, r in refused.items() if r != "http_401" and k not in _ALERT_SOURCES + _RUN_SOURCES],
+         "the scan's token cannot read it (give it read access).")]
     lines = []
     for keys, text in groups:
         if keys:

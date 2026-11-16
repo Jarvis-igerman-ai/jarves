@@ -163,7 +163,8 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
 
 def test_issue_480_refused_sources_name_the_owner_action():
     cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
-           "main_ci": "incomplete:http_403", "nightly": "incomplete:http_401", "local_diagnostics": "skipped:no_local_registry",
+           "main_ci": "incomplete:http_403", "codeql_run": "incomplete:http_404", "nightly": "incomplete:http_401",
+           "future_source": "incomplete:http_403", "local_diagnostics": "skipped:no_local_registry",
            "boundary": "incomplete:not_run"}
     body = ss.tracker_body([], cov, 0, "s", "full")
     acts = [ln for ln in body.splitlines() if ln.startswith("Owner action")]
@@ -171,7 +172,9 @@ def test_issue_480_refused_sources_name_the_owner_action():
         "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
         "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
         "under Settings > Code security) or the scan's token cannot read it (give it read access).",
-        "Owner action (HTTP 403: main_ci): give the scan's token read access to Actions and check that the workflow exists."]
+        "Owner action (HTTP 403/404: codeql_run, main_ci): give the scan's token read access to Actions and check that the "
+        "workflow exists.",
+        "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
     assert not [ln for ln in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light").splitlines()
                 if ln.startswith("Owner action")]
     assert ss.owner_actions({"x": None, "dependabot": 403}) == []        # malformed coverage values add nothing
