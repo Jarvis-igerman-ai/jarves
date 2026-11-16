@@ -18,6 +18,7 @@ FAKE = {
     "core/src/jarves/dashboard_static/agents.js": "PAGES.agents = function(){}; PAGES.agent = x;",
     "core/src/jarves/dashboard_static/guides.js": 'PAGES.guides = a; PAGES["guide-for"] = b;',
     "core/src/jarves/pages.d/camera.toml": 'page = "camera"\ngroup = "assistant"\n',
+    "core/src/jarves/dashboard_static/agent_detail.js": "PAGES.agent = function(){};",
 }
 KNOWN = ["home", "settings", "agents", "guides", "camera"]
 
@@ -32,6 +33,11 @@ def test_page_script_maps_to_the_pages_it_registers_and_unknown_detail_pages_are
     pl = pr_demo.plan(["core/src/jarves/dashboard_static/agents.js"], read, KNOWN)
     assert pl["user_facing"] and pl["pages"] == ["agents"]          # "agent" is a detail page, not in the nav
     assert pr_demo.registered_pages(FAKE["core/src/jarves/dashboard_static/guides.js"]) == ["guides", "guide-for"]
+
+
+def test_script_registering_only_detail_pages_is_shown_on_the_overview():
+    pl = pr_demo.plan(["core/src/jarves/dashboard_static/agent_detail.js"], read, KNOWN)
+    assert pl["user_facing"] and pl["pages"] == ["home", "settings"]
 
 
 def test_shared_shell_locales_modules_guides_phone_and_cli():
@@ -101,6 +107,17 @@ def test_summary_lists_checks_notes_and_the_artifact_name():
             "checks": [{"name": "home: no browser errors", "ok": False}], "notes": ["x"], "files": ["home-after.png"]}
     md = pr_demo.summary_md(demo)
     assert "demo-12" in md and "FAIL: home: no browser errors" in md and "PROBLEMS FOUND" in md and "home-after.png" in md
+
+
+def test_summary_escapes_pr_text_and_child_logs():
+    demo = {"pr": "12", "what_changed": "[x](http://evil) ![i](http://evil/p.png) <b>|`", "title": "t", "ok": False,
+            "checks": [{"name": "a|b", "ok": True}], "notes": ["after: failed: boom\n::add-mask::secret\n::error::x"],
+            "files": ["[f](http://evil).png"]}
+    md = pr_demo.summary_md(demo)
+    assert "](" not in md and "<b>" not in md and "![" not in md and "|`" not in md
+    assert not any(line.lstrip().startswith("::") for line in md.splitlines())
+    assert "add-mask" in md and md.count("- note:") == 1              # the log stays visible, on one line
+    assert pr_demo.md_text("a\r\n::b") == "a b"
 
 
 def test_pr_demo_workflow_is_read_only_pr_only_and_never_puts_pr_text_in_a_script():
@@ -316,6 +333,7 @@ def test_ci_cli_exit_code_and_missing_base(tmp_path, monkeypatch):
     demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli.py"])
     assert demo["ok"] is False and any("No base checkout" in n for n in demo["notes"])
     assert demo["checks"] == [{"name": "jarvis --help exits 0", "ok": False, "detail": []}]
+    assert any("help output only" in n for n in demo["notes"])           # changed command output is not shown
 
 
 def test_child_timeout_is_a_failed_side_not_a_crash(monkeypatch):

@@ -95,6 +95,8 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
                 ids = registered_pages(text(f))
             except OSError:
                 ids = []
+            if known_pages is not None:                  # detail-only scripts (PAGES.agent): no nav page to open
+                ids = [i for i in ids if i in known_pages]
             add(ids or OVERVIEW, f"{f}: page script")
         elif f.startswith(STATIC) and f.endswith((".css", ".html")):
             stem = Path(f).stem
@@ -468,6 +470,9 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
             "files": [], "checks": [], "notes": [], "ok": True, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if not pl["user_facing"]:
         demo["notes"].append("No user-visible change found (no dashboard page, phone site, guide or CLI file).")
+    if pl["cli"]:
+        demo["notes"].append("Command line: help output only (" + ", ".join(pl["cli"]) + "); a change to what a "
+                             "command prints is not run in CI, so it is not shown here.")
     sides = [("after", ROOT)] + ([("before", base_core)] if base_core and (base_core / "src").is_dir() else [])
     if len(sides) == 1:
         demo["notes"].append("No base checkout: only the 'after' side was rendered.")
@@ -513,13 +518,22 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
     return demo
 
 
+def md_text(text) -> str:
+    """PR-controlled text (title, body line, child logs, file names) as one inert markdown line: no links, images,
+    HTML or table breaks, and no line that starts with ``::`` (a GitHub workflow command in the step log)."""
+    lines = [re.sub(r"^\s*(?:::)+", "", x) for x in str(text).splitlines()]
+    one = " ".join(" ".join(lines).split())
+    return re.sub(r"([\\`*_\[\]()<>|!#~])", r"\\\1", one)
+
+
 def summary_md(demo: dict) -> str:
     """Markdown for the job summary (GitHub cannot inline artifact images, so it lists them)."""
-    lines = [f"### Demo for PR #{demo['pr']}: {demo['what_changed'] or demo['title']}",
-             f"Result: {'OK' if demo['ok'] else 'PROBLEMS FOUND'}. Download the artifact `demo-{demo['pr']}`.", ""]
-    lines += [f"- {'pass' if c['ok'] else 'FAIL'}: {c['name']}" for c in demo["checks"]]
-    lines += [f"- note: {n}" for n in demo["notes"]]
-    lines += ["", "Files: " + ", ".join(demo["files"])]
+    pr = md_text(demo["pr"])
+    lines = [f"### Demo for PR #{pr}: {md_text(demo['what_changed'] or demo['title'])}",
+             f"Result: {'OK' if demo['ok'] else 'PROBLEMS FOUND'}. Download the artifact demo-{pr}.", ""]
+    lines += [f"- {'pass' if c['ok'] else 'FAIL'}: {md_text(c['name'])}" for c in demo["checks"]]
+    lines += [f"- note: {md_text(n)}" for n in demo["notes"]]
+    lines += ["", "Files: " + ", ".join(md_text(f) for f in demo["files"])]
     return "\n".join(lines) + "\n"
 
 
