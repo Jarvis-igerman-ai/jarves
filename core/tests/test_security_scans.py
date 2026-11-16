@@ -200,10 +200,13 @@ def test_issue_480_actions_only_403_never_asks_to_turn_a_feature_on():
     assert "turn the feature on" not in body                               # Actions runs have no feature switch
 
 
-def test_issue_480_sources_not_fully_read_uses_the_same_labels_as_the_owner_lines():
-    body = ss.tracker_body([], {"dependabot": "incomplete:http_403", "nightly": "incomplete:http_500"}, 0, "s", "light")
+def test_issue_480_sources_not_fully_read_uses_the_same_labels_and_order_as_the_owner_lines():
+    body = ss.tracker_body([], {"zz_new": "incomplete:x", "nightly": "incomplete:http_500",
+                                "secret_scanning": "incomplete:http_403", "code_scanning": "incomplete:http_403"},
+                           0, "s", "light")
     gaps = body.split("Sources not fully read: ")[1].split("\n")[0]
-    assert gaps == "Dependabot alerts (incomplete:http_403), Nightly workflow runs (incomplete:http_500)"
+    assert gaps == ("Code scanning alerts (incomplete:http_403), Secret scanning alerts (incomplete:http_403), "
+                    "Nightly workflow runs (incomplete:http_500), zz_new (incomplete:x)")   # display order, unknown last
 
 
 def test_issue_480_the_token_name_in_the_owner_line_is_the_one_the_scanner_reads(monkeypatch):
@@ -222,6 +225,18 @@ def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_onc
                   "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
     assert scan(None, gh)["issue"]["status"] == "updated" and "Owner action" in gh.issues[0]["body"]
     assert scan(None, gh)["issue"]["status"] == "unchanged"                # and only once
+
+
+def test_issue_480_a_format_only_resign_resolves_nothing(home):
+    """A stored pre-#480 signature with the same findings: the tracker is rewritten, but nothing counts as resolved."""
+    gh = FakeGitHub(code_scanning=[alert(1)])
+    first = scan(home, gh)
+    st = ss.load_state(home)
+    st["signature"] = "0" * 16                                             # as if signed by the old body format
+    ss.save_state(home, st)
+    again = scan(home, gh)
+    assert again["changed"] and again["resolved"] == 0
+    assert [f["fp"] for f in again["findings"]] == [f["fp"] for f in first["findings"]]
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

@@ -540,6 +540,12 @@ _ALERTS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot al
 _RUNS = {"main_ci": "Main CI workflow runs", "nightly": "Nightly workflow runs",
          "codeql_run": "CodeQL workflow runs"}                # Actions runs: no feature to turn on, only the token
 _LABELS = {**_ALERTS, **_RUNS, "local_diagnostics": "Local diagnostics", "boundary": "Boundary check"}
+_ORDER = {k: i for i, k in enumerate(_LABELS)}
+
+
+def _refused(keys: dict, coverage: dict, code: str) -> str:
+    """#480: display labels of the sources in `keys` that GitHub refused with HTTP `code`, in display order."""
+    return ", ".join(lbl for k, lbl in keys.items() if coverage.get(k) == f"incomplete:http_{code}")
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -560,26 +566,26 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     lines += ["", f"Resolved since the previous scan (source read completely): {resolved}", ""]
     gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
-                 + ("Sources not fully read: " + ", ".join(f"{_LABELS.get(k, k)} ({v})" for k, v in sorted(gaps.items()))
+                 + ("Sources not fully read: " + ", ".join(f"{_LABELS.get(k, k)} ({gaps[k]})"
+                                                for k in sorted(gaps, key=lambda k: (_ORDER.get(k, len(_ORDER)), k)))
                     if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
     # #480: say what the owner can do, not only the HTTP code. Labels in display order, each listed once.
-    def refused(keys: dict, code: str) -> str:
-        return ", ".join(lbl for k, lbl in keys.items() if coverage.get(k) == f"incomplete:http_{code}")
     token = (f"a fine-grained token, read-only on only these sources, as {TOKEN_ENV} (the hosted workflow must also "
              "pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
-    n401 = ", ".join(x for x in (refused(_ALERTS, "401"), refused(_RUNS, "401")) if x)
+    n401 = ", ".join(x for x in (_refused(_ALERTS, coverage, "401"), _refused(_RUNS, coverage, "401")) if x)
+    alerts403, runs403 = _refused(_ALERTS, coverage, "403"), _refused(_RUNS, coverage, "403")
     if n401:                                             # 401 = missing, expired or invalid token, never a disabled feature
         lines.append(f"Owner action: GitHub rejected the scan's token for {n401} (HTTP 401: missing, expired "
                      f"or invalid). Set {token}")
-    if refused(_ALERTS, "403"):
+    if alerts403:
         # GitHub answers 403 both for a token without access and for a feature that is off for the repository
         # (e.g. Dependabot alerts disabled), so the line names both causes and does not guess which one it is.
-        lines.append(f"Owner action: GitHub refused {refused(_ALERTS, '403')} (HTTP 403). Either turn the feature on "
+        lines.append(f"Owner action: GitHub refused {alerts403} (HTTP 403). Either turn the feature on "
                      f"for the repository, or give the scan {token}")
-    if refused(_RUNS, "403"):                            # workflow runs have no feature switch: only the token applies
-        lines.append(f"Owner action: GitHub refused {refused(_RUNS, '403')} (HTTP 403). Give the scan {token}")
+    if runs403:                                          # workflow runs have no feature switch: only the token applies
+        lines.append(f"Owner action: GitHub refused {runs403} (HTTP 403). Give the scan {token}")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
