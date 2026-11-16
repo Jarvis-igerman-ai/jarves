@@ -195,12 +195,14 @@ async def test_a_finished_scheduler_job_sends_new_reports_only_while_on_and_keep
     (home / "reports").mkdir()
     (home / "reports" / "wa.csv").write_bytes(b"a,b\n")       # what whatsapp_collect leaves behind
 
-    class Feats:
-        def __init__(self, on):
-            self.home, self.on = home, on
+    from jarves.config import Config
+    from jarves.features import Features
 
-        def active(self, fid):
-            return fid != rd.FEATURE or self.on
+    def Feats(on):                                          # the real switch object the Core gives the scheduler
+        f = Features(Config(), home)
+        f.set("scheduler", True)
+        f.set(rd.FEATURE, on)
+        return f
 
     async def run(on):
         db = UserDB(home / f"m{on}.db")
@@ -279,7 +281,7 @@ def test_after_report_checks_the_switch_itself_not_the_caller(tmp_path):
 def test_no_folder_skips_the_sync_and_warns_once_per_outage(tmp_path, monkeypatch):
     warned = []
     monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append(a[1]))
-    monkeypatch.setattr(rd, "_NO_FOLDER_WARNED", False)
+    monkeypatch.setattr(rd, "_WARNED", set())
     (tmp_path / "reports").mkdir()
     for n in ("a.md", "b.md"):
         (tmp_path / "reports" / n).write_bytes(b"1")
@@ -292,3 +294,70 @@ def test_no_folder_skips_the_sync_and_warns_once_per_outage(tmp_path, monkeypatc
     shutil.rmtree(dest)
     (tmp_path / "reports" / "c.md").write_bytes(b"1")
     assert rd.sync(tmp_path) == [] and warned == ["NO_FOLDER", "NO_FOLDER"]   # a new outage warns again
+
+
+def test_hook_failure_is_logged_once_with_the_type_only(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append((a[1], kw)))
+    monkeypatch.setattr(rd, "_WARNED", set())
+
+    class Broken:
+        home = tmp_path
+
+        def active(self, fid):
+            raise KeyError("secret detail")
+    rd.on_job_finished(Broken())
+    rd.on_job_finished(Broken())
+    assert warned == [("HOOK_FAILED", {"error": "KeyError"})]
+
+
+def _http(status, why=""):
+    import httpx
+    req = httpx.Request("POST", rd.UPLOAD_URL)
+    body = {"error": {"errors": [{"reason": why}]}} if why else {}
+    return httpx.HTTPStatusError(str(status), request=req, response=httpx.Response(status, json=body, request=req))
+
+
+def test_quota_or_rate_limit_403_does_not_ask_to_sign_in_again():
+    assert "signin" in rd.reason(_http(401)) and "signin" in rd.reason(_http(403, "insufficientPermissions"))
+    for why in ("rateLimitExceeded", "userRateLimitExceeded", "storageQuotaExceeded"):
+        assert "signin" not in rd.reason(_http(403, why)) and "Drive" in rd.reason(_http(403, why))
+
+
+def test_expired_signin_stops_the_sync_and_warns_once_per_outage(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append(a[1]))
+    monkeypatch.setattr(rd, "_WARNED", set())
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    for n in ("a.md", "b.md"):
+        (tmp_path / "reports" / n).write_bytes(b"1")
+    calls = []
+
+    class Expired:
+        def upload(self, *a, **kw):
+            calls.append(a[0])
+            raise _http(401)
+    rd.sync(tmp_path, client=Expired())
+    rd.sync(tmp_path, client=Expired())
+    assert warned == ["RECONNECT"] and calls == ["a.md", "a.md"]      # stops at the first file, logs once
+    assert len(rd.sync(tmp_path, client=FakeDrive())) == 2
+    rd.sync(tmp_path, client=Expired())
+    assert warned == ["RECONNECT"]                                 # nothing new to send: no new warning
+
+
+def test_settings_write_is_atomic_and_a_broken_copy_leaves_no_partial_report(tmp_path, monkeypatch):
+    rd.save(tmp_path, folder="x")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [rd.FILE, rd.FILE + ".lock"]
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    rep = tmp_path / "r.md"
+    rep.write_bytes(b"12345")
+
+    def half(src, dst):
+        open(dst, "wb").write(b"12")
+        raise OSError("disk gone")
+    monkeypatch.setattr(rd.shutil, "copy2", half)
+    assert "error" in rd.after_report(tmp_path, rep, features=ON)
+    assert list(dest.iterdir()) == []

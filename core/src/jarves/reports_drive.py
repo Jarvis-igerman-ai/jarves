@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
+import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -21,7 +23,7 @@ DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
 SHEET = "application/vnd.google-apps.spreadsheet"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
 UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=multipart"
-_NO_FOLDER_WARNED = False                       # the missing-folder warning is logged once per outage
+_WARNED: set[str] = set()                       # warnings already logged in the current outage: once each
 _SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
@@ -47,9 +49,28 @@ def load(home: Path) -> dict:
 
 
 def save(home: Path, **kw) -> dict:
-    d = {**_raw(home), **load(home), **kw}
-    (Path(home) / FILE).write_text(json.dumps(d), encoding="utf-8")
+    """Merge under a cross-process lock (CLI vs the sync thread) and replace the file atomically."""
+    from .drive_mode import _file_lock
+    path = Path(home) / FILE
+    with _file_lock(path):
+        d = {**_raw(home), **load(home), **kw}
+        fd, tmp = tempfile.mkstemp(dir=home, prefix=FILE, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(d))
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
     return d
+
+
+def _first(code: str) -> bool:
+    """True only the first time `code` happens in the current outage (bounded logs)."""
+    if code in _WARNED:
+        return False
+    _WARNED.add(code)
+    return True
 
 
 class DriveApi:
@@ -96,17 +117,43 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
     dest = Path(st["folder"])
     if not st["folder"] or not dest.is_dir():
         raise ValueError("no Google Drive folder set: run jarvis reports drive folder PATH")
-    shutil.copy2(path, dest / path.name)
+    tmp = dest / f".{path.name}.jarves-{uuid.uuid4().hex[:8]}.part"   # a cut copy never shows as the report
+    try:
+        shutil.copy2(path, tmp)
+        os.replace(tmp, dest / path.name)
+    finally:
+        tmp.unlink(missing_ok=True)
     return {"mode": "folder", "copied": str(dest / path.name)}
 
 
 RECONNECT = ("GOOGLE_AUTH_EXPIRED", "GOOGLE_NOT_CONNECTED", "GOOGLE_SCOPE_MISSING", "GOOGLE_NO_REFRESH_TOKEN")
 
 
+BUSY = ("rateLimitExceeded", "userRateLimitExceeded", "storageQuotaExceeded", "dailyLimitExceeded")
+
+
+def _drive_reasons(resp) -> set[str]:
+    try:
+        errs = resp.json().get("error", {}).get("errors", [])
+        return {x.get("reason") for x in errs if isinstance(x, dict)}
+    except (ValueError, AttributeError):        # not JSON, or not the Drive error shape
+        return set()
+
+
+def needs_reconnect(e: Exception) -> bool:
+    resp = getattr(e, "response", None)
+    status = getattr(resp, "status_code", None)
+    if status == 403 and _drive_reasons(resp) & set(BUSY):      # a full Drive or a rate limit is not a sign-in problem
+        return False
+    return status in (401, 403) or getattr(e, "code", None) in RECONNECT
+
+
 def reason(e: Exception) -> str:
     """One plain sentence for the owner: a missing or refused sign-in says how to reconnect."""
-    status = getattr(getattr(e, "response", None), "status_code", None)
-    if status in (401, 403) or getattr(e, "code", None) in RECONNECT:
+    if getattr(getattr(e, "response", None), "status_code", None) == 403 and not needs_reconnect(e):
+        return clilang.fmt("גוגל דרייב מלא או עמוס כרגע: הדוח יישלח בהמשך",
+                           "Google Drive is full or busy right now: the report is sent later")
+    if needs_reconnect(e):
         return clilang.fmt("צריך לחבר מחדש את גוגל: הריצו jarvis reports drive signin",
                            "Google needs to be reconnected: run jarvis reports drive signin")
     return str(e) or type(e).__name__
@@ -116,11 +163,12 @@ def _send(home: Path, path: Path, client=None) -> dict:
     try:
         return upload(home, path, client=client)
     except Exception as e:      # a report write must never fail because Drive is unavailable
-        return {"error": reason(e)}
+        return {"error": reason(e), **({"reconnect": True} if needs_reconnect(e) else {})}
 
 
 def after_report(home: Path, path: Path, *, features, client=None) -> dict | None:
-    """Hook for report writers (whatsapp_collect and others): checks the switch itself; never raises."""
+    """Hook for report writers (whatsapp_collect and others): checks the switch itself; never raises.
+    Blocking (file copy or HTTP + asyncio.run for the token): an async writer calls it via asyncio.to_thread."""
     if features is None or not features.active(FEATURE):
         return None
     return _send(home, path, client)
@@ -138,13 +186,11 @@ def sync(home: Path, *, client=None) -> list[dict]:
 
 def _folder_missing(home: Path) -> bool:
     """Folder mode with no usable folder: skip the sync and warn once per outage, not per file per job run."""
-    global _NO_FOLDER_WARNED
     st = load(home)
     if st["mode"] != "folder" or (st["folder"] and Path(st["folder"]).is_dir()):
-        _NO_FOLDER_WARNED = False
+        _WARNED.discard("NO_FOLDER")
         return False
-    if not _NO_FOLDER_WARNED:
-        _NO_FOLDER_WARNED = True
+    if _first("NO_FOLDER"):
         logs.warn("reports_drive", "NO_FOLDER", "no Google Drive folder set; reports are not sent")
     return True
 
@@ -161,7 +207,12 @@ def _sync(home: Path, client) -> list[dict]:
             out.append(r)
             if r and "error" not in r:
                 sent[f.name] = f.stat().st_mtime
-            elif r:
+                _WARNED.discard("RECONNECT")
+            elif r.get("reconnect"):            # every other file would fail the same way: stop, warn once
+                if _first("RECONNECT"):
+                    logs.warn("reports_drive", "RECONNECT", "Google sign-in expired or refused; reports are not sent")
+                break
+            else:
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
     save(home, sent=sent)
     return out
@@ -170,10 +221,12 @@ def _sync(home: Path, client) -> list[dict]:
 def on_job_finished(features) -> None:
     """Scheduler hook: with the switch on, sync the reports folder off the event loop. Never raises."""
     try:
-        if features is not None and getattr(features, "home", None) and features.active(FEATURE):
+        if features is not None and features.active(FEATURE):
             threading.Thread(target=sync, args=(features.home,), daemon=True, name="reports-drive").start()
-    except Exception:
-        pass
+            _WARNED.discard("HOOK_FAILED")
+    except Exception as e:      # a finished job must not fail because of this hook; say so once, type only
+        if _first("HOOK_FAILED"):
+            logs.warn("reports_drive", "HOOK_FAILED", "reports to Drive hook failed", error=type(e).__name__)
 
 
 def cmd_drive(a, cfg, home) -> int:
