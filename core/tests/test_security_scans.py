@@ -161,6 +161,34 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     assert "never read as zero" in gh.issues[0]["body"]
 
 
+def test_issue_480_refused_sources_name_the_owner_action():
+    cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
+           "main_ci": "incomplete:http_403", "nightly": "incomplete:http_401", "local_diagnostics": "skipped:no_local_registry",
+           "boundary": "incomplete:not_run"}
+    body = ss.tracker_body([], cov, 0, "s", "full")
+    acts = [ln for ln in body.splitlines() if ln.startswith("Owner action")]
+    assert acts == [
+        "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
+        "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
+        "under Settings > Code security) or the scan's token cannot read it (give it read access).",
+        "Owner action (HTTP 403: main_ci): give the scan's token read access to Actions and check that the workflow exists."]
+    assert not [ln for ln in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light").splitlines()
+                if ln.startswith("Owner action")]
+    assert ss.owner_actions({"x": None, "dependabot": 403}) == []        # malformed coverage values add nothing
+
+
+def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
+    import hashlib
+    old_sig = hashlib.sha256(b"i|").hexdigest()[:16]                      # main's signature: findings only
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"
+    assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    assert ss.signature([], True) == ss.signature([], True, {})            # complete coverage keeps the old signature
+    assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_401"})
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)
