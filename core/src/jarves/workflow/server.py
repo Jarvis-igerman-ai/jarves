@@ -147,6 +147,8 @@ class Server(ThreadingHTTPServer):
         self.home = Path(home)
         self.profile_home = profile_home or self.home.parent
         self.token = access_token(self.home)
+        self.unlock_key = unlock.ServerKey()      # #750: the code-checking key stays in this process's memory
+        self.unlock_key.publish(self.home)
         self.store = store or Store(self.home / "workflow.db")
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
@@ -465,10 +467,10 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code, self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
                 prev_salt, n = self.server.unlock_wrong
                 n = (n if prev_salt == salt else 0) + 1

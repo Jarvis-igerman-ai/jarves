@@ -301,6 +301,15 @@ def test_574_a_pin_hosts_exception_stops_the_session_and_refuses(tmp_path):
     assert s2.request_allowed("https://example.com/x") is False and s2.state == bp.STOPPED
 
 
+@pytest.mark.parametrize("name", ["pin_hosts", "open", "text", "screenshot", "close"])
+@pytest.mark.parametrize("value", [None, True, "MAP * 1.2.3.4"])
+def test_574_item1_a_driver_whose_contract_method_is_not_callable_is_refused_at_creation(tmp_path, name, value):
+    d = FakeDriver()
+    setattr(d, name, value)                  # hasattr alone let this pass: a non-callable pin_hosts silently drops the DNS pinning
+    with pytest.raises(TypeError, match=name):
+        bp.PilotSession(tmp_path, d, enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+
+
 def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_shared_and_capped(tmp_path, monkeypatch):
     s, d, _ = mk(tmp_path, resolver=lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     assert s.request_allowed("https://example.com/") is False

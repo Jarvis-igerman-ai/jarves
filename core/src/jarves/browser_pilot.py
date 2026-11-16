@@ -230,7 +230,9 @@ class PilotSession:
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
-        missing = [n for n in ("open", "text", "screenshot", "close", "pin_hosts", "current_url") if not hasattr(driver, n)]
+        # #574 item 1: hasattr alone let a non-callable pin_hosts (None, a flag string) through, silently dropping the pinning
+        missing = [n for n in ("open", "text", "screenshot", "close", "pin_hosts") if not callable(getattr(driver, n, None))]
+        missing += [] if hasattr(driver, "current_url") else ["current_url"]
         if missing:
             raise TypeError("the pilot driver must implement " + ", ".join(missing) + " (see PilotSession)")
         self.home, self.driver, self.enabled, self.clock = Path(home), driver, enabled, clock

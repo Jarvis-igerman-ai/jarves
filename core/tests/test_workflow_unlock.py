@@ -148,7 +148,7 @@ class UnlockTests(unittest.TestCase):
     def test_code_expiry_attempt_limit_and_no_token_leak(self):
         self.login()
         code = unlock.issue(self.home, now=1.0)          # issued long ago
-        self.assertFalse(unlock.consume(self.home, code))
+        self.assertFalse(unlock.consume(self.home, code, self.server.unlock_key))
         self.assertFalse((self.home / unlock.FILE).exists())
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
@@ -215,6 +215,31 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
         self.assertNotIn(self.server.token, out.getvalue())
+
+    def test_750_an_agent_reading_every_file_in_the_home_cannot_check_a_code_guess(self):
+        shown = unlock.issue(self.home)
+        record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
+        self.assertFalse({"salt", "hash"} & set(record))               # the old scrypt(code, salt) record was an offline oracle
+        files = b"".join(p.read_bytes() for p in self.home.rglob("*") if p.is_file())
+        self.assertNotIn(self.server.unlock_key._priv.private_bytes_raw(), files)   # the checking key lives in server memory only
+        self.assertFalse(unlock.consume(self.home, shown, unlock.ServerKey()))      # any key an attacker can make is useless
+        self.assertTrue(unlock.consume(self.home, shown, self.server.unlock_key))
+
+    def test_750_a_restarted_server_refuses_an_old_code_and_no_server_means_no_code(self):
+        shown = unlock.issue(self.home)
+        restarted = Server(self.home, 0)                                # new in-memory key, published over the old one
+        self.addCleanup(restarted.server_close)
+        self.assertFalse(unlock.consume(self.home, shown, restarted.unlock_key))
+        for bad in ("", "[]", '{"pub": "00"}', "{"):
+            (self.home / unlock.PUB_FILE).write_text(bad, encoding="ascii")
+            with self.assertRaises(unlock.UnlockUnavailable):
+                unlock.issue(self.home)
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()) as out, \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(argv), 3)
+        self.assertIn("dashboard", err.getvalue())
+        self.assertNotIn("Unlock code", out.getvalue())
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
