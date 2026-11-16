@@ -244,19 +244,26 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {unlock.issue(home)}")
+        try:
+            shown = unlock.issue(home)
+        except unlock.UnlockUnavailable as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            return 2
+        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {shown}")
         return 0
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.
         # The token link is printed only with --no-open; it stays out of event logs and process arguments.
         from .opener import open_dashboard
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
+        from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            from . import unlock
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
+        except unlock.UnlockUnavailable:
+            print("No unlock code yet: the dashboard has not published its key; run 'jarvis workflow unlock' when it is up.", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

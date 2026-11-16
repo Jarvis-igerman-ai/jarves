@@ -216,6 +216,50 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
         self.assertNotIn(self.server.token, out.getvalue())
 
+    def test_750_files_in_the_home_are_no_offline_oracle_for_the_code(self):
+        """#750: a file reader (access.token + unlock.json) must not be able to confirm a code offline."""
+        shown = unlock.issue(self.home)
+        stolen = {p.name: p.read_bytes() for p in self.home.iterdir() if p.is_file()}
+        record = json.loads(stolen[unlock.FILE])
+        if "salt" in record:                                        # old format: salted scrypt of the code
+            import hashlib
+            digest = hashlib.scrypt(shown.encode(), salt=bytes.fromhex(record["salt"]), **unlock._SCRYPT)
+            self.assertNotEqual(digest.hex(), record["hash"], "unlock.json confirms the code offline")
+        with tempfile.TemporaryDirectory() as other:                # attacker copy with its own key
+            for name, raw in stolen.items():
+                (Path(other) / name).write_bytes(raw)
+            self.assertFalse(unlock.consume(Path(other), shown, key=unlock.ServerKey()))
+            self.assertFalse(unlock.consume(Path(other), shown))
+        self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
+
+    def test_750_issue_without_a_published_server_key_is_unavailable(self):
+        (self.home / unlock.PUB_FILE).write_text("{not json", encoding="ascii")
+        with self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)
+        (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": "00" * 32}), encoding="ascii")
+        with self.assertRaises(unlock.UnlockUnavailable):      # low-order point: no shared secret
+            unlock.issue(self.home)
+        (self.home / unlock.PUB_FILE).unlink()
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        err = io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(cli.main(argv), 2)
+        self.assertIn("dashboard", err.getvalue())
+        self.assertFalse((self.home / unlock.FILE).exists())
+        err = io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]), 0)
+        self.assertIn("No unlock code yet", err.getvalue())
+
+    def test_750_a_failed_second_start_keeps_the_live_servers_key(self):
+        before = (self.home / unlock.PUB_FILE).read_bytes()
+        with self.assertRaises(OSError):
+            Server(self.home, self.server.server_port, store=self.store)
+        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
         html = (Path(cli.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
