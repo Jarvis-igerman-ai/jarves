@@ -391,13 +391,10 @@ def test_574_a_driver_without_the_pilot_proxy_may_not_open_a_public_page(tmp_pat
 def test_574_the_production_late_wiring_forwards_the_proxy_flag(tmp_path):
     """Review R1 on 9a33608: PilotService builds the session over browser_driver._Late; the flag must reach the session through it."""
     from jarves import browser_driver as bd
-
-    class Stub(FakeDriver):                                     # stands in for PlaywrightDriver: no Chromium is launched
-        pass
     for flag, ok in ((True, True), (False, False), (None, False)):
         holder: dict = {}
         s = bp.PilotSession(tmp_path / str(flag), bd._Late(holder), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
-        d = Stub()
+        d = FakeDriver()                                        # stands in for PlaywrightDriver: no Chromium is launched
         if flag is None:
             del d.uses_pilot_proxy
         else:
@@ -420,3 +417,20 @@ def test_574_the_real_driver_declares_the_proxy_and_new_drivers_fail_closed():
     from jarves import browser_driver as bd
     assert bd.PlaywrightDriver.uses_pilot_proxy is True and bp.PilotDriver.uses_pilot_proxy is False
     assert issubclass(bd.PlaywrightDriver, bp.PilotDriver)
+
+
+def test_574_a_proxy_less_driver_cannot_reach_a_public_host_from_a_local_page(tmp_path):
+    """Review (opus) on 2b4b881: open() alone was not enough. A local page may load or navigate to a public host; that goes
+    through request_allowed (route handler) and the final-URL check, which must refuse it too without the pilot proxy."""
+    s, d, _ = mk(tmp_path)
+    del d.uses_pilot_proxy
+    s.open("http://127.0.0.1:8000/")
+    assert s.request_allowed("http://127.0.0.1:8000/app.js") is True       # local subresources still load
+    assert s.request_allowed("https://example.com/x.js") is False          # a public subresource or click target is refused
+    assert all("example.com" not in m for m in d.pinned)                   # and never pinned for a proxy-less driver
+    d.final = "https://example.com/"                                       # a local page that redirects to a public host
+    with pytest.raises(bp.PilotError) as e:
+        s.open("http://127.0.0.1:8000/go")
+    assert e.value.code == "BROWSER_PILOT_REDIRECT" and s.state == bp.STOPPED
+    s, d, _ = mk(tmp_path / "proxied")                                     # the proxied driver keeps public access
+    assert s.request_allowed("https://example.com/x.js") is True

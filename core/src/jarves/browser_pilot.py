@@ -239,8 +239,9 @@ class PilotSession:
     request_allowed(url) is the guard for every request, redirect target and subresource reached through page.route. It is
     the SECOND line: WebSockets, WebRTC, service workers and prefetch bypass page.route (#574 item 3), and a redirect has
     already been fetched when the final URL is checked after open (item 6). The proxy (the first line) vets every
-    connection before a byte is sent. A driver declares it with uses_pilot_proxy = True; open() refuses a public page for any
-    other driver (BROWSER_PILOT_URL). The flag is a declaration the session cannot test, like pin_hosts."""
+    connection before a byte is sent. A driver declares it with uses_pilot_proxy = True; for any other driver open() refuses a
+    public page (BROWSER_PILOT_URL) or a redirect to one (BROWSER_PILOT_REDIRECT) and request_allowed passes loopback only.
+    The flag is a declaration the session cannot test, like pin_hosts."""
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
@@ -271,6 +272,11 @@ class PilotSession:
             if host not in self.pins:
                 self.pins[host] = list(self._raw_resolver(host))
             return self.pins[host]
+
+    def _proxied(self) -> bool:
+        """#574: public hosts only for a driver that declares it dials solely through PilotProxy (the first line). Checked at
+        every public gate (open, its final URL, request_allowed), not only open: a local page may lead to a public host."""
+        return getattr(self.driver, "uses_pilot_proxy", False) is True
 
     def _pin_or_stop(self) -> bool:
         """Hand the vetted addresses to the driver. An exception from the driver stops the session (fail closed, #574 item 4)."""
@@ -483,12 +489,13 @@ class PilotSession:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
         if (self.after_human or self.local_only) and scope != "local":
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local test pages can be opened in this session")
-        if scope != "local" and getattr(self.driver, "uses_pilot_proxy", False) is not True:   # #574: the proxy is the first line
+        if scope != "local" and not self._proxied():         # #574: the proxy is the first line
             raise self._refuse("open", "BROWSER_PILOT_URL", "public pages need a driver that connects only through the pilot proxy")
         if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
             raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)
-        if not vet_url(self._final_url(), self.resolver):    # a redirect or script navigation, or an unreadable address
+        final = vet_url(self._final_url(), self.resolver)    # a redirect or script navigation, or an unreadable address
+        if not final or (final != "local" and not self._proxied()):
             self.stop()
             raise self._refuse("open", "BROWSER_PILOT_REDIRECT", "the page led to an address that may not be read; the session was stopped")
         self._receipt("open", "ok")
@@ -513,7 +520,7 @@ class PilotSession:
         a stopped session allows nothing."""
         if self.state == STOPPED:
             return False
-        if self.state == HUMAN or self.after_human or self.local_only:      # a public script in a page the owner typed into could read the keys
+        if self.state == HUMAN or self.after_human or self.local_only or not self._proxied():   # owner typed / no proxy (#574)
             return page_scope(url) == "local"
         try:
             ok = bool(vet_url(url, self.resolver))
