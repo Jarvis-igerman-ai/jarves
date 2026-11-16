@@ -227,9 +227,9 @@ class UnlockTests(unittest.TestCase):
 
     def test_750_a_restarted_server_refuses_an_old_code_and_no_server_means_no_code(self):
         shown = unlock.issue(self.home)
-        restarted = Server(self.home, 0)                                # new in-memory key, published over the old one
-        self.addCleanup(restarted.server_close)
-        self.assertFalse(unlock.consume(self.home, shown, restarted.unlock_key))
+        restarted = unlock.ServerKey()                                  # what a server restart does: a new in-memory key, published
+        restarted.publish(self.home)                                    # (no second Server: it would hold workflow.db open on Windows)
+        self.assertFalse(unlock.consume(self.home, shown, restarted))
         for bad in ("", "[]", '{"pub": "00"}', "{"):
             (self.home / unlock.PUB_FILE).write_text(bad, encoding="ascii")
             with self.assertRaises(unlock.UnlockUnavailable):
