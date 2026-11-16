@@ -1,1 +1,0 @@
-- Fixed: `jarvis reports drive upload FILE` in Drive API mode before sign-in, offline or refused by Drive prints a plain reason and exits 1 instead of a traceback (JAR-274).

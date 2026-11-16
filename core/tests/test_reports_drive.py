@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 
 from jarves import cli, reports_drive as rd
 from jarves.features import CATALOG
@@ -10,6 +11,17 @@ from jarves.features import CATALOG
 
 def switch_on():
     assert cli.main(["features", "beta", "on"]) == 0 and cli.main(["features", "on", rd.FEATURE]) == 0
+
+
+class Feats:
+    def __init__(self, on):
+        self.on = on
+
+    def active(self, fid):
+        return self.on and fid == rd.FEATURE
+
+
+ON, OFF = Feats(True), Feats(False)
 
 
 class FakeDrive:
@@ -34,7 +46,7 @@ def test_off_copies_nothing(tmp_path):
     rep = tmp_path / "reports" / "wa.csv"
     rep.parent.mkdir()
     rep.write_bytes(b"a,b\n")
-    assert rd.after_report(tmp_path, rep, active=False) is None
+    assert rd.after_report(tmp_path, rep, features=OFF) is None
     assert not list(dest.iterdir())
 
 
@@ -45,7 +57,7 @@ def test_folder_copy_and_api_upload_converts_csv_to_sheet(tmp_path):
     dest = tmp_path / "gdrive"
     dest.mkdir()
     rd.save(tmp_path, folder=str(dest))
-    out = rd.after_report(tmp_path, rep, active=True)
+    out = rd.after_report(tmp_path, rep, features=ON)
     assert out["mode"] == "folder" and (dest / "wa.csv").read_bytes() == b"a,b\n"
     rd.save(tmp_path, mode="api")
     fake = FakeDrive()
@@ -143,7 +155,7 @@ def test_drive_refusing_the_token_says_reconnect_and_keeps_the_report(home, caps
     rd.save(home, mode="api")
     rep = home / "r.csv"
     rep.write_text("a,b\n", encoding="utf-8")
-    out = rd.after_report(home, rep, active=True, client=Refused())
+    out = rd.after_report(home, rep, features=ON, client=Refused())
     assert "run jarvis reports drive signin" in out["error"] and rep.read_text(encoding="utf-8") == "a,b\n"
 
 
@@ -251,3 +263,32 @@ def test_csv_whose_sheet_was_deleted_in_drive_comes_back_as_a_sheet(tmp_path, mo
     assert rd.DriveApi(tmp_path).upload("wa", b"a,b\n", "text/csv", rd.SHEET, file_id="gone") == {"id": "new"}
     assert [m for m, _ in calls] == ["patch", "post"]
     assert rd.SHEET.encode() in calls[1][1]       # re-created as a Google Sheet, not a plain CSV
+
+
+def test_after_report_checks_the_switch_itself_not_the_caller(tmp_path):
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    rep = tmp_path / "r.md"
+    rep.write_bytes(b"1")
+    assert rd.after_report(tmp_path, rep, features=None) is None
+    assert rd.after_report(tmp_path, rep, features=OFF) is None and not list(dest.iterdir())
+    assert rd.after_report(tmp_path, rep, features=ON)["mode"] == "folder"
+
+
+def test_no_folder_skips_the_sync_and_warns_once_per_outage(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append(a[1]))
+    monkeypatch.setattr(rd, "_NO_FOLDER_WARNED", False)
+    (tmp_path / "reports").mkdir()
+    for n in ("a.md", "b.md"):
+        (tmp_path / "reports" / n).write_bytes(b"1")
+    assert rd.sync(tmp_path) == [] and rd.sync(tmp_path) == []
+    assert warned == ["NO_FOLDER"]                       # once, not once per file per job run
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    assert len(rd.sync(tmp_path)) == 2
+    shutil.rmtree(dest)
+    (tmp_path / "reports" / "c.md").write_bytes(b"1")
+    assert rd.sync(tmp_path) == [] and warned == ["NO_FOLDER", "NO_FOLDER"]   # a new outage warns again

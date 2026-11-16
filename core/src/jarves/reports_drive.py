@@ -21,6 +21,7 @@ DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
 SHEET = "application/vnd.google-apps.spreadsheet"
 UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
 UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=multipart"
+_NO_FOLDER_WARNED = False                       # the missing-folder warning is logged once per outage
 _SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
@@ -111,14 +112,18 @@ def reason(e: Exception) -> str:
     return str(e) or type(e).__name__
 
 
-def after_report(home: Path, path: Path, *, active: bool, client=None) -> dict | None:
-    """Hook for report writers (whatsapp_collect and others): send only when the switch is on; never raises."""
-    if not active:
-        return None
+def _send(home: Path, path: Path, client=None) -> dict:
     try:
         return upload(home, path, client=client)
     except Exception as e:      # a report write must never fail because Drive is unavailable
         return {"error": reason(e)}
+
+
+def after_report(home: Path, path: Path, *, features, client=None) -> dict | None:
+    """Hook for report writers (whatsapp_collect and others): checks the switch itself; never raises."""
+    if features is None or not features.active(FEATURE):
+        return None
+    return _send(home, path, client)
 
 
 def sync(home: Path, *, client=None) -> list[dict]:
@@ -131,13 +136,28 @@ def sync(home: Path, *, client=None) -> list[dict]:
         _SYNC_LOCK.release()
 
 
+def _folder_missing(home: Path) -> bool:
+    """Folder mode with no usable folder: skip the sync and warn once per outage, not per file per job run."""
+    global _NO_FOLDER_WARNED
+    st = load(home)
+    if st["mode"] != "folder" or (st["folder"] and Path(st["folder"]).is_dir()):
+        _NO_FOLDER_WARNED = False
+        return False
+    if not _NO_FOLDER_WARNED:
+        _NO_FOLDER_WARNED = True
+        logs.warn("reports_drive", "NO_FOLDER", "no Google Drive folder set; reports are not sent")
+    return True
+
+
 def _sync(home: Path, client) -> list[dict]:
+    if _folder_missing(home):
+        return []
     sent = dict(_raw(home).get("sent") or {})
     out = []
     folder = Path(home) / "reports"
     for f in sorted(folder.iterdir()) if folder.is_dir() else []:
         if f.is_file() and sent.get(f.name) != f.stat().st_mtime:
-            r = after_report(home, f, active=True, client=client)
+            r = _send(home, f, client)
             out.append(r)
             if r and "error" not in r:
                 sent[f.name] = f.stat().st_mtime
