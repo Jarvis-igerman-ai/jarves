@@ -11,12 +11,12 @@ from jarves import features as feat
 SECRET = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
 
 
-class FakeDriver:
+class FakeDriver(bp.PilotDriver):
     """current_url is a PROPERTY like Playwright page.url and Selenium driver.current_url (#566)."""
 
     def __init__(self):
         self.opened, self.closed, self.final, self.pinned = [], False, None, []
-        self.uses_pilot_proxy = True                              # stands in for PlaywrightDriver, which dials only through PilotProxy
+        self.uses_pilot_proxy = True       # explicit opt-in like PlaywrightDriver; `del` exposes the PilotDriver default (R2)
 
     @property
     def current_url(self):
@@ -434,3 +434,30 @@ def test_574_a_proxy_less_driver_cannot_reach_a_public_host_from_a_local_page(tm
     assert e.value.code == "BROWSER_PILOT_REDIRECT" and s.state == bp.STOPPED
     s, d, _ = mk(tmp_path / "proxied")                                     # the proxied driver keeps public access
     assert s.request_allowed("https://example.com/x.js") is True
+
+
+def test_574_fakes_inherit_the_fail_closed_base_default(tmp_path):
+    """Review R2 on af08a36: the fakes subclass PilotDriver, so removing the opt-in exercises the real base default."""
+    s, d, _ = mk(tmp_path)
+    del d.uses_pilot_proxy
+    assert d.uses_pilot_proxy is bp.PilotDriver.uses_pilot_proxy is False
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_URL"
+
+
+def test_574_read_and_screenshot_stop_a_proxy_less_driver_that_landed_on_a_public_page(tmp_path):
+    """Review R1 on af08a36: the only agent actions after open are read and screenshot (there is no click or back); both
+    re-check the current page so a script navigation past page.route cannot show a public page without the proxy."""
+    for kind in ("read", "screenshot"):
+        s, d, _ = mk(tmp_path / kind)
+        del d.uses_pilot_proxy
+        s.open("http://127.0.0.1:8000/")
+        assert getattr(s, kind)()                                         # a local page is still readable
+        d.final = "https://example.com/"                                  # a script navigation the route handler missed
+        with pytest.raises(bp.PilotError) as e:
+            getattr(s, kind)()
+        assert e.value.code == "BROWSER_PILOT_REDIRECT" and s.state == bp.STOPPED
+    s, d, _ = mk(tmp_path / "proxied")                                    # a proxied driver keeps reading public pages
+    s.open("https://example.com/")
+    assert s.read()["untrusted_text"] and s.screenshot()["bytes"] > 0

@@ -240,7 +240,8 @@ class PilotSession:
     the SECOND line: WebSockets, WebRTC, service workers and prefetch bypass page.route (#574 item 3), and a redirect has
     already been fetched when the final URL is checked after open (item 6). The proxy (the first line) vets every
     connection before a byte is sent. A driver declares it with uses_pilot_proxy = True; for any other driver open() refuses a
-    public page (BROWSER_PILOT_URL) or a redirect to one (BROWSER_PILOT_REDIRECT) and request_allowed passes loopback only.
+    public page (BROWSER_PILOT_URL) or a redirect to one (BROWSER_PILOT_REDIRECT), read/screenshot stop the session on a
+    public page, and request_allowed passes loopback only.
     The flag is a declaration the session cannot test, like pin_hosts."""
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
@@ -275,7 +276,7 @@ class PilotSession:
 
     def _proxied(self) -> bool:
         """#574: public hosts only for a driver that declares it dials solely through PilotProxy (the first line). Checked at
-        every public gate (open, its final URL, request_allowed), not only open: a local page may lead to a public host."""
+        every public gate (open, its final URL, request_allowed, read, screenshot), not only open: a local page may lead to a public host."""
         return getattr(self.driver, "uses_pilot_proxy", False) is True
 
     def _pin_or_stop(self) -> bool:
@@ -462,6 +463,13 @@ class PilotSession:
             raise self._refuse(kind, "BROWSER_PILOT_NOT_AGENT", f"the session is {self.state}: the agent may not act")
         if kind not in OBSERVE_KINDS:
             raise self._refuse(kind, "BROWSER_PILOT_READ_ONLY", "the pilot only observes: no click, fill, submit or login")
+
+    def _still_allowed(self, kind: str) -> None:
+        """#574 review R1: read and screenshot re-check where the page IS. A script navigation that slipped past page.route
+        must not let a proxy-less driver show a public page; the session stops, as after a refused redirect in open()."""
+        if not self._proxied() and page_scope(self._final_url()) != "local":
+            self.stop()
+            raise self._refuse(kind, "BROWSER_PILOT_REDIRECT", "the page led to an address that may not be read; the session was stopped")
         if self.clock() - self.started > self.max_seconds or self.seq >= self.max_actions:
             self.stop()
             raise PilotError("BROWSER_PILOT_CAP", "the session reached its time or action cap and was stopped")
@@ -560,6 +568,7 @@ class PilotSession:
 
     def _read(self) -> dict:
         self._gate("read")
+        self._still_allowed("read")
         raw = str(self.driver.text() or "")
         raw = self._hide_typed(raw)
         text = logs.redact(raw[:2 * MAX_TEXT])
@@ -578,6 +587,7 @@ class PilotSession:
     def _screenshot(self) -> dict:
         """Metadata only: no image is stored or returned in B1 (the redacting viewer is B2), so nothing can leak."""
         self._gate("screenshot")
+        self._still_allowed("screenshot")
         n = len(self.driver.screenshot() or b"")
         self._receipt("screenshot", "ok")
         return {"bytes": n, "stored": False}
