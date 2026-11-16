@@ -30,6 +30,12 @@ def _history(home, turns, tools=()):
 
 
 @pytest.fixture
+def privacy_off(monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)                       # full-text mode: the note text is kept
+
+
+@pytest.fixture
 def on(monkeypatch):
     monkeypatch.setattr(feat.Features, "active", lambda self, fid: fid == wf.FEATURE)
 
@@ -114,7 +120,7 @@ def test_cases_are_bounded_and_deletable(home, monkeypatch):
     assert len(wf.cases(home)) == 2                                     # corrupt rows skipped, never a crash
 
 
-async def test_voice_tool_is_lazy_and_saves_from_the_core_store(home):
+async def test_voice_tool_is_lazy_and_saves_from_the_core_store(home, privacy_off):
     _history(home, [(1, "user", "what is 2+2"), (2, "assistant", "five")])
     st = Store(home / "store.db")
     reg = SkillRegistry()
@@ -133,6 +139,7 @@ async def test_voice_tool_is_lazy_and_saves_from_the_core_store(home):
 
 
 def test_cli_wrong_list_show_delete(home, capsys, on):
+    (home / "config.toml").write_text("[log]\nprivacy = false\n", encoding="utf-8")   # full text: the note is kept
     _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
     assert cli.main(["feedback", "wrong", "--note", "rude"]) == 0
     cid = wf.cases(home)[0]["id"]
@@ -142,6 +149,15 @@ def test_cli_wrong_list_show_delete(home, capsys, on):
     assert json.loads(capsys.readouterr().out)["note"] == "rude"
     assert cli.main(["feedback", "show", "nope"]) == 2
     assert cli.main(["feedback", "delete", cid]) == 0 and wf.cases(home) == []
+
+
+def test_cli_note_follows_the_config_privacy_switch(home, capsys, on, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)                       # the process flag is not what the CLI reads
+    _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
+    r = wf.cmd_feedback(SimpleNamespace(action="wrong", target="", note="met Dana", json=True),
+                        SimpleNamespace(log=SimpleNamespace(privacy=True)), home)
+    assert r == 0 and wf.cases(home)[0]["note"] == "<8 chars>"
 
 
 def test_cli_wrong_refuses_while_off(home, capsys):
@@ -191,3 +207,43 @@ def test_dashboard_routes_are_gated_and_local_only(home, monkeypatch):
     nobody = SimpleNamespace(home=home)                                          # review R2: missing principal = refused
     assert wrong(nobody, None, {})[0] == 403 and listing(nobody, None, None)[0] == 403
     assert remove(nobody, m, {})[0] == 403
+
+
+def test_privacy_mode_keeps_only_the_note_length(home, monkeypatch):
+    """Review R1 (round 3): in log privacy mode the note can quote the turn, so it is kept as its length only."""
+    from jarves import logs
+    _history(home, [(1, "user", "<9 chars>"), (2, "assistant", "<4 chars>")])
+    monkeypatch.setattr(logs, "_privacy", True)
+    case = wf.report_wrong(home, via="cli", note="met Dana at the clinic", now=NOW)["case"]
+    assert case["note"] == "<22 chars>" and "Dana" not in wf.path(home).read_text(encoding="utf-8")
+    monkeypatch.setattr(logs, "_privacy", False)
+    assert wf.report_wrong(home, via="cli", note="met Dana", now=NOW)["case"]["note"] == "met Dana"
+
+
+def test_cli_side_opens_the_history_read_only(home):
+    """Review R3: the CLI/dashboard never runs the Store schema/migrations on the Core's store.db."""
+    import sqlite3
+    db = sqlite3.connect(home / "store.db")
+    db.executescript("CREATE TABLE turns (id INTEGER PRIMARY KEY, session_id TEXT, ts REAL, role TEXT, text TEXT);"
+                     "CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, session_id TEXT, ts REAL, name TEXT);"
+                     "INSERT INTO turns (session_id, ts, role, text) VALUES ('s1', 1, 'user', 'hi'), ('s1', 2, 'assistant', 'yo');")
+    db.commit()
+    assert wf.last_exchange(home)["reply"] == "yo"
+    tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    db.close()
+    assert tables == {"turns", "tool_calls"}                            # no schema or migration was written
+
+
+def test_list_reads_under_the_writer_lock(home, monkeypatch):
+    """Review R2: a reader holding the file open while os.replace runs fails on Windows, so cases() takes the lock."""
+    import contextlib
+    held = []
+
+    @contextlib.contextmanager
+    def lock(p):
+        held.append(p)
+        yield
+    _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
+    wf.report_wrong(home, via="cli")
+    monkeypatch.setattr(wf, "_file_lock", lock)
+    assert len(wf.cases(home)) == 1 and held == [wf.path(home)]

@@ -7,8 +7,8 @@ REDACTED local feedback case in `<home>/feedback_wrong.jsonl`. A case has the sh
 
 Redaction, before anything is written: credentials and profile paths (logs.redact), e-mails and phone numbers
 (logs.redact_pii); a turn that looks sensitive (password, PIN, card, ID, long digit runs: curator._SENSITIVE) is
-replaced by its length only; every text is capped. With log privacy on the history holds lengths only, and so does
-the case. The file is capped at MAX_CASES cases; `jarvis feedback delete ID` removes one.
+replaced by its length only; every text is capped. With log privacy on (logs.privacy(), the flag the history store
+masks with) the history holds lengths only, and so does the case: the note too is kept as its length. The file is capped at MAX_CASES cases; `jarvis feedback delete ID` removes one.
 """
 from __future__ import annotations
 
@@ -82,14 +82,26 @@ def redact(text: object, limit: int = MAX_CHARS) -> str:
 
 # ------------------------------------------------------------------------------------------ the last exchange
 def _open_store(home, store=None):
-    """The Core passes its own history store; the CLI and dashboard open store.db read-side (never create it)."""
+    """The Core passes its own history store; the CLI and dashboard open store.db READ-ONLY (sqlite mode=ro: no
+    schema, migration or pragma write on a DB the Core holds open, and never created)."""
     if store is not None:
         return store, False
     db = Path(home) / "store.db"
     if not db.exists():
         return None, False
-    from .store import Store
-    return Store(db), True
+    return _ReadOnly(db), True
+
+
+class _ReadOnly:
+    def __init__(self, db: Path) -> None:
+        self._db = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        self._db.row_factory = sqlite3.Row
+
+    def rows(self, sql: str, args: tuple = ()) -> list[dict]:
+        return [dict(r) for r in self._db.execute(sql, args)]
+
+    def close(self) -> None:
+        self._db.close()
 
 
 def is_feedback_turn(text) -> bool:
@@ -133,9 +145,13 @@ def last_exchange(home, *, store=None) -> dict | None:
             st.close()
 
 
-def make_case(ex: dict, *, via: str, note: str = "", now: datetime | None = None) -> dict:
+def make_case(ex: dict, *, via: str, note: str = "", now: datetime | None = None, privacy: bool | None = None) -> dict:
+    """privacy None = logs.privacy(): on, the note (model- or owner-written, may quote the turn) keeps its length only."""
     if via not in VIAS:
         raise ValueError(f"via must be one of {VIAS}")
+    note = str(note or "").strip()
+    if note and (logs.privacy() if privacy is None else privacy):
+        note = f"<{len(note)} chars>"
     say, reply = redact(ex.get("say")), redact(ex.get("reply"))
     tools = []
     for t in ex.get("tools") or []:
@@ -175,7 +191,11 @@ def save(home, case: dict) -> dict:
 
 
 def cases(home) -> list[dict]:
-    return _read(path(home))
+    p = path(home)
+    if not p.exists():
+        return []
+    with _LOCK, _file_lock(p):                  # never read while a writer replaces the file (Windows os.replace)
+        return _read(p)
 
 
 def get(home, cid: str) -> dict | None:
@@ -194,13 +214,13 @@ def delete(home, cid: str) -> bool:
 
 
 def report_wrong(home, *, via: str, note: str = "", store=None, failure_log_on: bool = False,
-                 now: datetime | None = None) -> dict:
+                 now: datetime | None = None, privacy: bool | None = None) -> dict:
     """The one entry point (voice, dashboard, CLI). {"ok", "code", "case"?}. Also counts a `user_correction` in the
     JAR-229 failure log when that switch is on (metadata only)."""
     ex = last_exchange(home, store=store)
     if ex is None:
         return {"ok": False, "code": "FEEDBACK_NO_EXCHANGE"}
-    case = save(home, make_case(ex, via=via, note=note, now=now))
+    case = save(home, make_case(ex, via=via, note=note, now=now, privacy=privacy))
     try:
         from . import failure_log
         failure_log.record(home, "user_correction", on=failure_log_on, now=now)
@@ -324,7 +344,8 @@ def cmd_feedback(a, cfg, home) -> int:
                   "המשוב כבוי (בטא).")
             return 2
     if a.action == "wrong":
-        r = report_wrong(home, via="cli", note=a.note, failure_log_on=bool(fs.active("failure_log")))
+        r = report_wrong(home, via="cli", note=a.note, failure_log_on=bool(fs.active("failure_log")),
+                         privacy=bool(getattr(getattr(cfg, "log", None), "privacy", True)))   # the CLI skips logs.setup
         out = r if a.json else say(r, lang)
         rc = 0 if r["ok"] else 1
     elif a.action == "list":
