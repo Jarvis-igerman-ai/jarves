@@ -2,7 +2,9 @@
 CLI). Hermetic: tmp home, a store.db written directly, injected clock; nothing is sent."""
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -18,7 +20,7 @@ NOW = datetime(2026, 11, 16, 12, 0)
 
 def _history(home, turns, tools=()):
     st = Store(home / "store.db")
-    st.x("INSERT INTO sessions (id, kind, started) VALUES ('s1', 'live', 1)")
+    st.x("INSERT OR IGNORE INTO sessions (id, kind, started) VALUES ('s1', 'live', 1)")
     for ts, role, text in turns:
         st.x("INSERT INTO turns (session_id, ts, role, text, chars) VALUES ('s1', ?, ?, ?, ?)", (ts, role, text, len(text)))
     for ts, name in tools:
@@ -54,6 +56,23 @@ def test_last_exchange_skips_the_feedback_turn_and_what_followed(home):
     assert ex["tools"] == ["web_search"]
 
 
+def test_an_older_feedback_turn_or_everyday_phrase_never_moves_the_cut(home):
+    """Review R1: a second report saves the NEWEST exchange, and an earlier question containing 'לא נכון' is kept."""
+    _history(home, [(1, "user", "q1"), (2, "assistant", "a1"), (3, "user", "that was wrong"), (4, "assistant", "sorry"),
+                    (5, "user", "q2"), (6, "assistant", "a2")])
+    assert (wf.last_exchange(home)["say"], wf.last_exchange(home)["reply"]) == ("q2", "a2")
+    _history(home, [(7, "user", "האם זה לא נכון שהשמש קרה?"), (8, "assistant", "זה לא נכון.")])
+    assert wf.last_exchange(home)["say"] == "האם זה לא נכון שהשמש קרה?"
+    _history(home, [(9, "user", "that was wrong"), (10, "assistant", "sorry")])        # the current feedback turn
+    assert wf.last_exchange(home)["say"] == "האם זה לא נכון שהשמש קרה?"
+
+
+def test_text_kept_is_false_when_both_turns_are_masked_as_sensitive():
+    """Review R5: the '<sensitive, N chars>' form counts as no text kept."""
+    case = wf.make_case({"say": "הסיסמה שלי היא hunter2", "reply": "הסיסמה שלך היא hunter2"}, via="cli")
+    assert case["say"].startswith("<sensitive") and case["text_kept"] is False
+
+
 def test_no_history_means_no_case_and_no_store_is_created(home):
     r = wf.report_wrong(home, via="cli")
     assert r == {"ok": False, "code": "FEEDBACK_NO_EXCHANGE"}
@@ -67,7 +86,8 @@ def test_report_saves_a_redacted_eval_shaped_case_and_counts_a_correction(home):
     case = r["case"]
     assert r["ok"] and wf.cases(home) == [case]
     assert case["lang"] == "en" and case["via"] == "voice" and case["saved"] == "2026-11-16T12:00:00"
-    assert case["tools"] == ["phone_call", "other"] and case["text_kept"] is True
+    assert case["tools"] == ["phone_call", "other"] and case["say"].startswith("<sensitive")
+    assert case["text_kept"] is False                                   # both turns masked (review R5)
     raw = wf.path(home).read_text(encoding="utf-8")
     assert "050" not in raw and "dana@x.io" not in raw
     assert fl.weekly(home, now=NOW) == ["1x user_correction"]
@@ -118,6 +138,24 @@ def test_cli_wrong_refuses_while_off(home, capsys):
     _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
     assert cli.main(["feedback", "wrong"]) == 2
     assert not wf.path(home).exists()
+    wf.save(home, wf.make_case({"say": "hi", "reply": "bye"}, via="cli"))
+    assert cli.main(["feedback", "list"]) == 2                              # review R6: same switch as the dashboard
+    assert cli.main(["feedback", "show", wf.cases(home)[0]["id"]]) == 2
+
+
+def test_core_registry_hides_and_refuses_the_tool_while_the_feature_is_off(home):
+    """Review R4: the real Features gate on the registry, feature OFF (the default): not offered, a call refused."""
+    from jarves.config import Config
+    _history(home, [(1, "user", "q"), (2, "assistant", "a")])
+    reg = SkillRegistry()
+    reg.gate = feat.Features(Config(), home).gate
+    core = SimpleNamespace(home=home, registry=reg, history=None, cfg=SimpleNamespace(voice=SimpleNamespace(language="en")),
+                           features=SimpleNamespace(active=lambda fid: False))
+    wf.attach(core)
+    reg.open_lazy("Jarvis, that was wrong")
+    assert "report_wrong_answer" not in [t.name for t in reg.tools()]
+    res = asyncio.run(reg.call("report_wrong_answer", {}))
+    assert not res.ok and not wf.path(home).exists()
 
 
 def test_dashboard_routes_are_gated_and_local_only(home, monkeypatch):
@@ -133,5 +171,13 @@ def test_dashboard_routes_are_gated_and_local_only(home, monkeypatch):
     code, body = wrong(ctx, None, {"note": "x"})
     assert code == 200 and body["case"]["via"] == "dashboard"
     assert listing(ctx, None, None)[1]["cases"][0]["id"] == body["case"]["id"]
+    remove = routes[("POST", r"/api/feedback/(FB-[0-9a-f]{8})/delete")]          # review R9
+    m = re.match(r"^/api/feedback/(FB-[0-9a-f]{8})/delete$", f"/api/feedback/{body['case']['id']}/delete")
+    assert remove(ctx, m, {})[0] == 200 and listing(ctx, None, None)[1]["cases"] == []
+    assert remove(ctx, m, {})[0] == 404
+    assert wrong(ctx, None, {})[0] == 200 and wf.cases(home)                     # store still has an exchange
     phone = SimpleNamespace(home=home, principal={"kind": "device"})
     assert wrong(phone, None, {})[0] == 403 and listing(phone, None, None)[0] == 403
+    nobody = SimpleNamespace(home=home)                                          # review R2: missing principal = refused
+    assert wrong(nobody, None, {})[0] == 403 and listing(nobody, None, None)[0] == 403
+    assert remove(nobody, m, {})[0] == 403

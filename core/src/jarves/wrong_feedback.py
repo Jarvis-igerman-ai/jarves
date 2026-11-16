@@ -33,11 +33,13 @@ MAX_CASES = 200
 MAX_CHARS = 600
 MAX_TOOLS = 5
 LOOKBACK_TURNS = 30
+FEEDBACK_MAX_CHARS = 60           # a longer turn with "לא נכון" is a real question, not the feedback phrase
 VIAS = ("voice", "dashboard", "cli")
 _LOCK = threading.Lock()
 _ID = re.compile(r"FB-[0-9a-f]{8}")
 _SAFE_TOOL = re.compile(r"[A-Za-z][A-Za-z0-9_.]{0,39}")
-_MASKED = re.compile(r"^<\d+ chars>$")
+_MASKED = re.compile(r"^<(sensitive, )?\d+ chars>$")     # privacy-mode length or a masked sensitive turn
+_LENGTH_ONLY = re.compile(r"^<\d+ chars>$")
 _HEBREW = re.compile(r"[֐-׿]")
 # The feedback phrase itself: offers the voice tool (lazy) and is skipped when finding the exchange it is about.
 WRONG = (r"that('s| was| is)? (wrong|incorrect|not right|not correct)|wrong answer|you('re| are| were) wrong|"
@@ -68,7 +70,7 @@ def _now() -> datetime:                     # the one clock; tests replace it
 def redact(text: object, limit: int = MAX_CHARS) -> str:
     """A turn as it may be kept: secrets, paths, e-mails and phones masked; a sensitive turn becomes its length."""
     s = str(text or "").strip()
-    if not s or _MASKED.match(s):
+    if not s or _LENGTH_ONLY.match(s):
         return s
     if _SENSITIVE.search(s):
         return f"<sensitive, {len(s)} chars>"
@@ -88,6 +90,12 @@ def _open_store(home, store=None):
     return Store(db), True
 
 
+def is_feedback_turn(text) -> bool:
+    """A short feedback phrase ("Jarvis, that was wrong"), not a question that merely contains "לא נכון"."""
+    t = str(text or "").strip()
+    return bool(_WRONG.search(t)) and len(t) <= FEEDBACK_MAX_CHARS and not t.endswith("?")
+
+
 def last_exchange(home, *, store=None) -> dict | None:
     """The newest user turn and JARVES's answer to it, skipping the "that was wrong" turn itself (and anything said
     after it). None when the history is empty or off. Returned texts are RAW: callers redact (make_case does)."""
@@ -97,10 +105,11 @@ def last_exchange(home, *, store=None) -> dict | None:
     try:
         rows = st.rows("SELECT session_id, ts, role, text FROM turns ORDER BY ts DESC, id DESC LIMIT ?",
                        (LOOKBACK_TURNS,))
-        for i, r in enumerate(rows):                  # the newest feedback phrase cuts off itself and what followed
-            if r["role"] == "user" and _WRONG.search(r["text"] or ""):
-                rows = rows[i + 1:]
-                break
+        # Skip the feedback phrase only when it is the NEWEST user turn (only replies follow it): an older "that was
+        # wrong" or an everyday "לא נכון" inside an earlier question never moves the cut (review R1).
+        i = next((k for k, r in enumerate(rows) if r["role"] == "user"), None)
+        if i is not None and is_feedback_turn(rows[i]["text"]):
+            rows = rows[i + 1:]
         reply: list[dict] = []
         for i, r in enumerate(rows):
             if r["role"] == "assistant":
@@ -243,8 +252,8 @@ def attach(core):
 
 # ------------------------------------------------------------------------------------------ dashboard
 def _local(ctx):
-    who = getattr(ctx, "principal", None)
-    if who is not None and who.get("kind") != "local":
+    who = getattr(ctx, "principal", None)             # missing principal = refused (fail closed, review R2)
+    if not (isinstance(who, dict) and who.get("kind") == "local"):
         return 403, {"error": "feedback cases are shown only on this computer"}
     return None
 
@@ -273,7 +282,7 @@ def api_wrong(ctx, m, body):
         return refused
     r = report_wrong(ctx.home, via="dashboard", note=str((body or {}).get("note") or ""),
                      failure_log_on=bool(feat._ctx_features(ctx).active("failure_log")))
-    return (200 if r["ok"] else 404), r
+    return (200, r) if r["ok"] else (404, {**r, "error": r["code"]})
 
 
 def api_delete(ctx, m, body):
@@ -304,11 +313,12 @@ def cmd_feedback(a, cfg, home) -> int:
     lang = "he" if clilang.current() == "he" else "en"
     fs = feat.Features(cfg, home)
     out = None
-    if a.action == "wrong":
+    if a.action in ("wrong", "list", "show"):         # the same switch as the dashboard (review R6); delete always works
         if not fs.active(FEATURE):
             print("Feedback is off (beta): jarvis features beta on, then jarvis features on wrong_feedback. / "
                   "המשוב כבוי (בטא).")
             return 2
+    if a.action == "wrong":
         r = report_wrong(home, via="cli", note=a.note, failure_log_on=bool(fs.active("failure_log")))
         out = r if a.json else say(r, lang)
         rc = 0 if r["ok"] else 1

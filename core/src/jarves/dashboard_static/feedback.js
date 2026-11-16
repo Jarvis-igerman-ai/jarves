@@ -20,9 +20,9 @@
     try {
       const r = await api("/api/feedback/wrong", { method: "POST", body: JSON.stringify({ note }) });
       st.msg = tx(`נשמר כמשוב (${r.case.id}). שום דבר לא נשלח.`, `Saved as feedback (${r.case.id}). Nothing was sent.`);
-    } catch (e) {
-      st.msg = tx("לא נמצאה שיחה אחרונה לשמור. אולי היסטוריית השיחות כבויה.",
-        "No last exchange to save. The conversation history may be off.");
+    } catch (e) {                // only "no exchange" (404) gets that text; refused/off/network show the error (R7)
+      st.msg = e.message === "FEEDBACK_NO_EXCHANGE" ? tx("לא נמצאה שיחה אחרונה לשמור. אולי היסטוריית השיחות כבויה.",
+        "No last exchange to save. The conversation history may be off.") : e.message;
     }
     await load(); draw();
   }

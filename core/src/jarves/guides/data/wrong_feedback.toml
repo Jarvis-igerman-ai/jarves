@@ -28,8 +28,8 @@ he = "אחרי תשובה לא נכונה אמרו \"ג׳רוויס, זה היה
 en = "After a wrong answer say \"Jarvis, that was wrong\" (you can add what was wrong), or press the button on the Feedback page, or run jarvis feedback wrong --note \"...\"."
 
 [[steps]]
-he = "לראות: jarvis feedback list ו-jarvis feedback show FB-.... למחוק אחד: jarvis feedback delete FB-.... לכבות: jarvis features off wrong_feedback."
-en = "To see them: jarvis feedback list and jarvis feedback show FB-.... To delete one: jarvis feedback delete FB-.... To turn it off: jarvis features off wrong_feedback."
+he = "לראות: jarvis feedback list ו-jarvis feedback show FB-.... הרשימה מוצגת רק כשהמשוב פועל, כמו בלוח הבקרה. למחוק אחד (גם כשהוא כבוי): jarvis feedback delete FB-.... לכבות: jarvis features off wrong_feedback."
+en = "To see them: jarvis feedback list and jarvis feedback show FB-.... The list shows only while the feedback is on, as on the dashboard. To delete one (also while it is off): jarvis feedback delete FB-.... To turn it off: jarvis features off wrong_feedback."
 
 [[problems]]
 he = "ג׳רוויס אומר שלא מצא שיחה אחרונה"
