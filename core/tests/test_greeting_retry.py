@@ -177,19 +177,39 @@ def test_wake_session_gets_a_short_greeting_when_the_feature_is_on():
     assert Core.wake_greeting(off) is None and not off._greeted
 
 
-@pytest.mark.parametrize("starts", [True, False])
-async def test_wake_greeting_is_claimed_only_when_the_session_starts(starts):
-    """#520: a wake session that never opened (budget, mute, connect failure) must not use up the start-greeting."""
+@pytest.mark.parametrize("outcome", ["opened", "not_opened", "error"])
+async def test_wake_greeting_is_claimed_only_when_the_session_starts(outcome):
+    """#520: a wake session that never opened (budget, mute, connect failure, error) must not use up the
+    start-greeting; while it connects the claim is held, so a face connecting meanwhile does not greet twice."""
     from jarves.app import Core
     ns = _ns(lang="en")
     ns.live, seen = None, []
 
     async def start_live(*, greeting=None, ack=False):
-        seen.append(greeting)
-        ns.live = object() if starts else None
+        seen.append((greeting, ns._greeted))     # claimed while connecting
+        if outcome == "error":
+            raise RuntimeError("connect failed")
+        ns.live = object() if outcome == "opened" else None
+    ns._start_live, ns.wake_greeting = start_live, lambda: Core.wake_greeting(ns)
+    if outcome == "error":
+        with pytest.raises(RuntimeError):
+            await Core._open_wake_live(ns)
+    else:
+        await Core._open_wake_live(ns)
+    assert seen == [("I'm listening.", True)] and ns._greeted is (outcome == "opened")
+
+
+async def test_wake_without_greeting_never_claims_the_start_greeting():
+    from jarves.app import Core
+    ns = _ns(greeting=False)
+    ns.live = None
+
+    async def start_live(*, greeting=None, ack=False):
+        assert greeting is None and not ns._greeted
+        ns.live = object()
     ns._start_live, ns.wake_greeting = start_live, lambda: Core.wake_greeting(ns)
     await Core._open_wake_live(ns)
-    assert seen == ["I'm listening."] and ns._greeted is starts
+    assert not ns._greeted
 
 
 def test_wake_greeting_follows_ui_language_and_is_silent_in_drive_mode():

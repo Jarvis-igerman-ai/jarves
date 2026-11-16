@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sys
 import threading
-import time
 from typing import Callable
 
 from .. import logs
@@ -118,7 +117,8 @@ class TkDotBackend:
     def _run(self) -> None:
         try:
             import tkinter as tk
-            root = self._new_root(tk)
+            from ..approval_popup import new_tk_root
+            root = new_tk_root(tk)        # #520: same transient Tcl init retry as the approval popup
             root.overrideredirect(True)
             root.attributes("-topmost", True)
             root.attributes("-alpha", 0.85)
@@ -154,20 +154,6 @@ class TkDotBackend:
             root.mainloop()
         except Exception:
             logs.debug("runtime", "DOT_UNAVAILABLE", "listening dot unavailable (no display or Tk)")
-
-    @staticmethod
-    def _new_root(tk):
-        """#520: Windows sometimes fails to read Tcl's init scripts; retry those transient errors like the approval
-        popup does (approval_popup.build), so one flaky read does not leave the dot dead for the whole run."""
-        for attempt in range(5):
-            try:
-                return tk.Tk()
-            except tk.TclError as e:
-                transient = any(k in str(e) for k in ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
-                                                      "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
-                if attempt == 4 or not transient:
-                    raise
-                time.sleep(0.25 * (attempt + 1))
 
     @staticmethod
     def _click_through(root) -> None:

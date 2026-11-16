@@ -169,7 +169,7 @@ def test_never_inside_greeting_pending_window(lc):
 
 def test_dot_retries_a_transient_tcl_init_error(monkeypatch):
     """#520 (2): the approval popup retries Windows' transient Tcl init errors; the dot's own Tk() did not, so one
-    flaky 'couldn't read file auto.tcl' read left the dot dead for the whole run. It retries the same way now."""
+    flaky 'couldn't read file auto.tcl' read left the dot dead for the whole run. It uses the popup's retry now."""
     import sys
     import types
     from unittest import mock
@@ -185,7 +185,8 @@ def test_dot_retries_a_transient_tcl_init_error(monkeypatch):
         return mock.MagicMock()
     fake = types.SimpleNamespace(Tk=make_root, TclError=TclError, Canvas=mock.MagicMock())
     monkeypatch.setitem(sys.modules, "tkinter", fake)
-    monkeypatch.setattr(indicator.time, "sleep", lambda s: None)
+    from jarves import approval_popup
+    monkeypatch.setattr(approval_popup.time, "sleep", lambda s: None)
     monkeypatch.setattr(indicator.sys, "platform", "linux")
     logged = []
     monkeypatch.setattr(indicator.logs, "debug", lambda *a, **k: logged.append(a[1]))

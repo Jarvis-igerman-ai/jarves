@@ -2065,11 +2065,21 @@ class Core:
 
     async def _open_wake_live(self) -> None:
         """#179: every wake session opens with a short spoken cue (the greeting was once per Core start only).
-        #520: the start-greeting is used up only when the session really opened (not on budget/mute/connect failure)."""
+        #520: the start-greeting is claimed while the session connects (a face connecting meanwhile must not greet a
+        second time) and given back when no session opened (budget, muted mic, connect failure or an error)."""
         greeting = self.wake_greeting()
-        await self._start_live(ack=True, greeting=greeting)
-        if greeting and self.live is not None:
-            self._greeted = True          # the wake session greeted: no second start-greeting when the face connects later
+        if not greeting:
+            await self._start_live(ack=True, greeting=greeting)
+            return
+        was = self._greeted
+        self._greeted = True
+        opened = False
+        try:
+            await self._start_live(ack=True, greeting=greeting)
+            opened = self.live is not None
+        finally:
+            if not opened:
+                self._greeted = was
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""
