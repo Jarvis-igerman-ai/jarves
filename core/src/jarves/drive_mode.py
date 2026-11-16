@@ -129,42 +129,10 @@ def shorten(text: str, limit: int = MAX_SPOKEN_CHARS) -> str:
 LOCK_WAIT_S = 5.0
 
 
-@contextlib.contextmanager
 def _file_lock(path: Path, wait_s: float | None = None):
-    """An exclusive cross-process lock on `<path>.lock` (msvcrt on Windows, flock elsewhere). Fails closed: if it
-    cannot be taken within `wait_s` (default LOCK_WAIT_S, read at call time) a TimeoutError is raised and nothing is
-    written (issue #300)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(path.with_name(path.name + ".lock"), "a+b")
-    try:
-        deadline = time.monotonic() + (LOCK_WAIT_S if wait_s is None else wait_s)
-        while True:
-            try:
-                fh.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("drive queue is locked by another process") from None
-                time.sleep(0.02)
-        try:
-            yield
-        finally:
-            with contextlib.suppress(OSError):
-                fh.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-    finally:
-        fh.close()
+    """The shared cross-process lock (filelock.file_lock); default wait LOCK_WAIT_S, read at call time (issue #300)."""
+    from .filelock import file_lock
+    return file_lock(path, LOCK_WAIT_S if wait_s is None else wait_s, "drive queue is locked by another process")
 
 
 @dataclass

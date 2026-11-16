@@ -415,3 +415,19 @@ def test_drive_ids_merge_under_the_lock_and_a_concurrent_upload_is_not_lost(tmp_
             return {"id": "f1"}
     rd.upload(tmp_path, rep, client=Racing())
     assert rd._raw(tmp_path)["ids"] == {"other.md": "f9", "a.md": "f1"}
+
+
+def test_settings_use_the_shared_lock_which_fails_closed_while_held(tmp_path):
+    import inspect
+
+    import pytest
+
+    from jarves import filelock
+    assert "_file_lock" not in inspect.getsource(rd)              # no private cross-module import
+    path = tmp_path / rd.FILE
+    with filelock.file_lock(path):
+        with pytest.raises(TimeoutError, match="busy"):
+            with filelock.file_lock(path, 0.05, "busy"):
+                pass
+    rd.save(tmp_path, folder="x")
+    assert rd.load(tmp_path)["folder"] == "x"

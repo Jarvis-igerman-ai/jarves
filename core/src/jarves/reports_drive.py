@@ -52,9 +52,9 @@ def load(home: Path) -> dict:
 
 def save(home: Path, **kw) -> dict:
     """Merge under a cross-process lock (CLI vs the sync thread) and replace the file atomically."""
-    from .drive_mode import _file_lock
+    from .filelock import file_lock
     path = Path(home) / FILE
-    with _file_lock(path):
+    with file_lock(path):
         raw = _raw(home)
         add = kw.pop("ids_add", None) or {}     # re-read under the lock: a concurrent writer's ids are kept
         d = {**raw, **load(home), **kw}
