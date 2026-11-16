@@ -460,3 +460,28 @@ def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_onc
     r = scan(home, gh)
     assert r["issue"]["status"] == "updated" and r["resolved"] == 0 and _owner_lines(gh.issues[0]["body"])
     assert scan(home, gh, now=day(1))["issue"]["status"] == "unchanged"
+
+
+class RefusingGitHub(FakeGitHub):
+    """Real collectors, real keys: alerts answer HTTP 401, workflow runs answer HTTP 403."""
+
+    def __call__(self, method, path, payload=None):
+        if method == "GET" and "/alerts" in path:
+            self.calls.append((method, path, payload))
+            return 401, None
+        if method == "GET" and "/actions/workflows/" in path:
+            self.calls.append((method, path, payload))
+            return 403, None
+        return super().__call__(method, path, payload)
+
+
+def test_issue_480_a_full_scan_with_401_alerts_and_403_runs_publishes_both_owner_lines(home):
+    gh = RefusingGitHub()
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
+    r = scan(home, gh, kind="full")
+    assert r["coverage"]["dependabot"] == "incomplete:http_401" and r["coverage"]["main_ci"] == "incomplete:http_403"
+    lines = _owner_lines(gh.issues[0]["body"])
+    assert len(lines) == 2, lines
+    assert "Code scanning alerts, Dependabot alerts, Secret scanning alerts (HTTP 401" in lines[0]
+    assert "Main CI runs, Nightly runs, CodeQL runs (HTTP 403/404)" in lines[1]
+    assert all("read first, before GH_TOKEN, GITHUB_TOKEN" in ln for ln in lines)

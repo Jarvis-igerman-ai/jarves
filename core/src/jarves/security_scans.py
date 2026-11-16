@@ -569,7 +569,7 @@ def owner_actions(coverage: dict) -> list[str]:
         return [k for k in table if str(coverage.get(k, "")).split(":")[-1] in codes]
 
     def token(perms: list[str]) -> str:
-        return (f"give the token in {TOKEN_ENVS[0]} Read-only access to: "
+        return (f"give the token in {TOKEN_ENVS[0]} (read first, before {', '.join(TOKEN_ENVS[1:])}) Read-only access to: "
                 + ", ".join(dict.fromkeys(perms)) + " (fine-grained token, this repository only).")
     out = []
     bad_tok = keys(_ALERTS, ("http_401",)) + keys(_RUNS, ("http_401",))
