@@ -45,6 +45,8 @@ _HEBREW = re.compile(r"[֐-׿]")
 WRONG = (r"that('s| was| is)? (wrong|incorrect|not right|not correct)|wrong answer|you('re| are| were) wrong|"
          r"לא נכון|טעית|תשובה (שגויה|לא נכונה)|זה שגוי|זה היה שגוי")
 _WRONG = re.compile(WRONG, re.IGNORECASE)
+_LEAD = re.compile(r"^(?:(?:no|nope|לא)\W+)?(?:(?:זה|זו)\s+(?:היה|הייתה|היתה)?\s*)?", re.IGNORECASE)   # "no, " / "זה היה "
+_NAME = re.compile(r"^\W*(?:(?:hey|ok|okay)\s+)?(?:jarvis|jarves|ג['׳]?(?:א)?רו?ו?יס|ג'ארביס)\W*", re.IGNORECASE)
 ABOUT = ("'Jarvis, that was wrong' (voice, dashboard Feedback page or jarvis feedback wrong) saves the last exchange, "
          "redacted, as a local feedback case the factory can turn into a regression test; nothing leaves the PC")
 
@@ -93,6 +95,9 @@ def _open_store(home, store=None):
 def is_feedback_turn(text) -> bool:
     """A short feedback phrase ("Jarvis, that was wrong"), not a question that merely contains "לא נכון"."""
     t = str(text or "").strip()
+    rest = _NAME.sub("", t, count=1)
+    if _WRONG.match(rest) or _WRONG.match(_LEAD.sub("", rest, count=1)):   # STARTS with the phrase: any length (R3)
+        return True
     return bool(_WRONG.search(t)) and len(t) <= FEEDBACK_MAX_CHARS and not t.endswith("?")
 
 

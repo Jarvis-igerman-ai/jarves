@@ -67,6 +67,16 @@ def test_an_older_feedback_turn_or_everyday_phrase_never_moves_the_cut(home):
     assert wf.last_exchange(home)["say"] == "האם זה לא נכון שהשמש קרה?"
 
 
+def test_a_long_correction_that_starts_with_the_phrase_is_skipped(home):
+    """Review R3: 'Jarvis that was wrong, ...' of any length is the feedback turn, not the exchange to save."""
+    long = "Jarvis that was wrong, the capital of Australia is Canberra not Sydney, please remember that next time"
+    _history(home, [(1, "user", "what is the capital of Australia"), (2, "assistant", "Sydney"),
+                    (3, "user", long), (4, "assistant", "Sorry, Canberra.")])
+    assert len(long) > wf.FEEDBACK_MAX_CHARS and wf.last_exchange(home)["reply"] == "Sydney"
+    assert wf.is_feedback_turn("ג׳רוויס, זה היה לא נכון, " + "ה" * 80)
+    assert not wf.is_feedback_turn("האם זה לא נכון שהשמש קרה? " + "ה" * 80)
+
+
 def test_text_kept_is_false_when_both_turns_are_masked_as_sensitive():
     """Review R5: the '<sensitive, N chars>' form counts as no text kept."""
     case = wf.make_case({"say": "הסיסמה שלי היא hunter2", "reply": "הסיסמה שלך היא hunter2"}, via="cli")
