@@ -171,9 +171,9 @@ def test_issue_480_a_403_names_the_owner_action_and_stays_incomplete(home):
     assert "INCOMPLETE" in body and "never read as zero" in body
     assert "Owner action: GitHub refused Code scanning alerts, Dependabot alerts, Secret scanning alerts (HTTP 403)" in body
     assert "turn the feature on for the repository" in body                 # a 403 can also mean the feature is off
-    assert "dependabot, secret_scanning" not in body.split("Owner action")[1]      # display labels, not raw keys
-    assert f"as {ss.TOKEN_ENV} " in body
-    assert "fine-grained token, read-only on only these sources" in body   # least privilege, not a broad PAT
+    assert (f"a fine-grained token as {ss.TOKEN_ENV} with only these repository permissions, each Read-only: "
+            "Code scanning alerts, Dependabot alerts, Secret scanning alerts (") in body   # exact, least privilege
+    assert body.count("INCOMPLETE until") == 1                              # one closing line, not one per owner line
     clean = ss.tracker_body([], {"dependabot": "complete", "secret_scanning": "incomplete:http_500"}, 0, "s", "light")
     assert "Owner action" not in clean                                     # only an access refusal asks the owner
 
@@ -182,7 +182,7 @@ def test_issue_480_a_401_asks_for_a_valid_token_never_to_turn_a_feature_on():
     b401 = ss.tracker_body([], {"code_scanning": "incomplete:http_401", "dependabot": "complete"}, 0, "s", "light")
     assert "Owner action: GitHub rejected the scan's token for Code scanning alerts (HTTP 401" in b401
     assert "turn the feature on" not in b401 and "Dependabot alerts" not in b401
-    assert f"fine-grained token, read-only on only these sources, as {ss.TOKEN_ENV}" in b401
+    assert "with only these repository permissions, each Read-only: Code scanning alerts (" in b401
 
 
 def test_issue_480_labels_follow_display_order_and_401_403_get_their_own_lines():
@@ -192,12 +192,25 @@ def test_issue_480_labels_follow_display_order_and_401_403_get_their_own_lines()
     assert "refused Code scanning alerts, Secret scanning alerts (HTTP 403). Either turn the feature on" in runs
     assert "refused Main CI workflow runs, CodeQL workflow runs (HTTP 403). Give the scan a fine-grained" in runs
     assert "rejected the scan's token for Nightly workflow runs (HTTP 401" in runs
+    assert runs.count("each Read-only: Actions (") == 2                     # Actions runs need only Actions
+    tail = runs.split("\n")[runs.split("\n").index("Coverage stays INCOMPLETE until the owner action above is done.") - 1]
+    assert tail.startswith("Owner action: GitHub refused Main CI")         # INCOMPLETE once, after every owner line
+    assert runs.count("INCOMPLETE until") == 1
 
 
 def test_issue_480_actions_only_403_never_asks_to_turn_a_feature_on():
     body = ss.tracker_body([], {"main_ci": "incomplete:http_403", "dependabot": "complete"}, 0, "s", "light")
     assert "Owner action: GitHub refused Main CI workflow runs (HTTP 403). Give the scan" in body
     assert "turn the feature on" not in body                               # Actions runs have no feature switch
+
+
+def test_issue_480_a_404_on_alerts_says_the_feature_is_off_and_runs_404_asks_nothing():
+    dep = ss.tracker_body([], {"dependabot": "incomplete:http_404", "main_ci": "incomplete:http_404"}, 0, "s", "light")
+    assert ("Owner action: GitHub found nothing to read for Dependabot alerts (HTTP 404: the feature is off or not "
+            "set up for the repository). Turn the feature on.") in dep          # no token ask, no CodeQL hint
+    assert "Main CI" not in dep.split("Owner action")[1]                   # a 404 run is not an owner action
+    cs = ss.tracker_body([], {"code_scanning": "incomplete:http_404"}, 0, "s", "light")
+    assert "let the CodeQL workflow finish one run on main (no analysis yet)." in cs
 
 
 def test_issue_480_sources_not_fully_read_uses_the_same_labels_and_order_as_the_owner_lines():

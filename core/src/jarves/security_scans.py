@@ -543,9 +543,23 @@ _LABELS = {**_ALERTS, **_RUNS, "local_diagnostics": "Local diagnostics", "bounda
 _ORDER = {k: i for i, k in enumerate(_LABELS)}
 
 
-def _refused(keys: dict, coverage: dict, code: str) -> str:
-    """#480: display labels of the sources in `keys` that GitHub refused with HTTP `code`, in display order."""
-    return ", ".join(lbl for k, lbl in keys.items() if coverage.get(k) == f"incomplete:http_{code}")
+_PERMS = {**_ALERTS, **{k: "Actions" for k in _RUNS}}      # fine-grained token permission each source needs
+
+
+def _refused(keys, coverage: dict, code: str) -> list[str]:
+    """#480: the sources in `keys` that GitHub refused with HTTP `code`, in display order."""
+    return [k for k in keys if coverage.get(k) == f"incomplete:http_{code}"]
+
+
+def _names(ks: list[str]) -> str:
+    return ", ".join(_LABELS[k] for k in ks)
+
+
+def _token(ks: list[str]) -> str:
+    """#480: least privilege - name the exact fine-grained permissions for these sources, nothing broader."""
+    perms = ", ".join(dict.fromkeys(_PERMS[k] for k in ks))
+    return (f"a fine-grained token as {TOKEN_ENV} with only these repository permissions, each Read-only: {perms} "
+            "(the hosted workflow must also pass it, a reviewed workflow change).")
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -571,21 +585,27 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                     if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-    # #480: say what the owner can do, not only the HTTP code. Labels in display order, each listed once.
-    token = (f"a fine-grained token, read-only on only these sources, as {TOKEN_ENV} (the hosted workflow must also "
-             "pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
-    n401 = ", ".join(x for x in (_refused(_ALERTS, coverage, "401"), _refused(_RUNS, coverage, "401")) if x)
-    alerts403, runs403 = _refused(_ALERTS, coverage, "403"), _refused(_RUNS, coverage, "403")
+    # #480: say what the owner can do, not only the HTTP code. Sources in display order, each listed once.
+    n401, a403, r403, a404 = (_refused(_PERMS, coverage, "401"), _refused(_ALERTS, coverage, "403"),
+                              _refused(_RUNS, coverage, "403"), _refused(_ALERTS, coverage, "404"))
+    actions = []
     if n401:                                             # 401 = missing, expired or invalid token, never a disabled feature
-        lines.append(f"Owner action: GitHub rejected the scan's token for {n401} (HTTP 401: missing, expired "
-                     f"or invalid). Set {token}")
-    if alerts403:
+        actions.append(f"Owner action: GitHub rejected the scan's token for {_names(n401)} (HTTP 401: missing, "
+                       f"expired or invalid). Set {_token(n401)}")
+    if a403:
         # GitHub answers 403 both for a token without access and for a feature that is off for the repository
         # (e.g. Dependabot alerts disabled), so the line names both causes and does not guess which one it is.
-        lines.append(f"Owner action: GitHub refused {alerts403} (HTTP 403). Either turn the feature on "
-                     f"for the repository, or give the scan {token}")
-    if runs403:                                          # workflow runs have no feature switch: only the token applies
-        lines.append(f"Owner action: GitHub refused {runs403} (HTTP 403). Give the scan {token}")
+        actions.append(f"Owner action: GitHub refused {_names(a403)} (HTTP 403). Either turn the feature on "
+                       f"for the repository, or give the scan {_token(a403)}")
+    if r403:                                             # workflow runs have no feature switch: only the token applies
+        actions.append(f"Owner action: GitHub refused {_names(r403)} (HTTP 403). Give the scan {_token(r403)}")
+    if a404:                                             # alert APIs answer 404 for a feature that is off or not set up
+        actions.append(f"Owner action: GitHub found nothing to read for {_names(a404)} (HTTP 404: the feature is off "
+                       "or not set up for the repository). Turn the feature on"
+                       + (", or let the CodeQL workflow finish one run on main (no analysis yet)."
+                          if "code_scanning" in a404 else "."))
+    if actions:
+        lines += actions + ["Coverage stays INCOMPLETE until the owner action above is done."]
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
