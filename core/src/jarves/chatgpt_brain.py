@@ -253,7 +253,8 @@ class ChatGPTBrain:
             self.history.pop(0)
 
     async def reply(self, text: str, on_delta=None) -> str:
-        """on_delta is accepted for the terminal chat; this route returns the finished text (not streamed)."""
+        """on_delta is accepted for the terminal chat but never called: this route returns the finished text (not
+        streamed), so callers show the returned text, including the JAR-322 "Sources:" line."""
         ok, code, action = self.available()
         if not ok:
             raise BrainUnavailable(code, action, action)

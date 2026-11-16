@@ -461,6 +461,8 @@ async def test_plan_web_answer_names_its_sources_but_history_does_not(tmp_path):
     b, _ = brain_with(tmp_path, srv, chatgpt_model="gpt-6-luna")
     text = await b.reply("מה מזג האוויר בתל אביב?")
     assert text == "בתל אביב 24 מעלות.\n\nמקורות: example.com, other.org"
-    assert await b.reply("Weather?") == "It is sunny.\n\nSources: news.example.net"
+    pieces: list[str] = []                 # R1: this route never streams, so callers show the returned text (with the line)
+    assert await b.reply("Weather?", on_delta=pieces.append) == "It is sunny.\n\nSources: news.example.net"
+    assert pieces == []
     assert await b.reply("תודה") == "בכיף"                                  # no citation: nothing added
     assert "מקורות" not in json.dumps(srv.bodies[2]["input"], ensure_ascii=False)
