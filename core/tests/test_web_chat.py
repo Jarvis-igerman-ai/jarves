@@ -653,9 +653,11 @@ def test_dashboard_chat_api_and_feature_switch(rig):
     st, s = owner_req(d, "POST", "/api/chat/silent", {"on": True})
     assert st == 200 and s["silent"]["setting"] is True
     assert owner_req(d, "POST", "/api/chat/silent", {"on": "yes"})[0] == 400
-    from jarves.features import Features
-    time.sleep(1.1)                        # other processes are picked up within a second (features._refresh)
-    Features(r.cfg, r.home).set("web_chat", False)
+    from jarves.features import Features, _ctx_features
+    Features(r.cfg, r.home).set("web_chat", False)  # "another process" writes the switch
+    served = _ctx_features(d.ctx)
+    served._mtime = None                   # same-tick mtime must not hide the write
+    served.poll()                          # what the 1 s refresh does, without waiting for the real clock
     st, body = owner_req(d, "GET", "/api/chat/state")
     assert st == 403 and body["code"] == "CHAT_FEATURE_OFF"
     assert owner_req(d, "POST", "/api/chat/send", {"text": "x"})[1]["code"] == "CHAT_FEATURE_OFF"

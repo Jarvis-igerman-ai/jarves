@@ -243,14 +243,20 @@ def test_a_hung_page_cannot_keep_the_browser_alive_after_stop(world, monkeypatch
     pid = d._node_pid
     assert pid and _pid_alive(pid)
     monkeypatch.setattr(bd, "CLOSE_WAIT_S", 1.0)
-    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(40), 1.0), daemon=True).start()
-    time.sleep(0.3)
+    busy, release = threading.Event(), threading.Event()
+
+    def stuck():
+        busy.set()
+        release.wait(40)                                                # a page call that never answers in time
+    threading.Thread(target=lambda: _swallow(d._job, stuck, 1.0), daemon=True).start()
+    assert busy.wait(10)                                                # the worker is inside the stuck call
     t0 = time.time()
     svc.stop()
     assert time.time() - t0 < 10
     end = time.time() + 10
     while time.time() < end and _pid_alive(pid):
         time.sleep(0.3)
+    release.set()
     assert not _pid_alive(pid)                                          # the abandoned driver's whole process tree was killed
 
 
@@ -266,11 +272,17 @@ def test_a_job_that_missed_its_deadline_never_runs_late(world):
     svc.start(url)
     d = svc.driver
     ran = []
-    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(1.5), 5.0), daemon=True).start()
-    time.sleep(0.2)
+    busy, release = threading.Event(), threading.Event()
+
+    def slow():
+        busy.set()
+        release.wait(10)
+    threading.Thread(target=lambda: _swallow(d._job, slow, 15.0), daemon=True).start()
+    assert busy.wait(10)                                                # the worker is inside the slow job
     with pytest.raises(bd.DriverError):
         d._job(lambda: ran.append(1), 0.3)                              # queued behind the slow job, gives up after 0.3 s
-    time.sleep(2.5)
+    release.set()
+    assert d._job(lambda: "next", 10.0) == "next"                       # FIFO: the stale job was dequeued before this ran
     assert ran == []                                                    # the worker skipped it instead of running it late
 
 
