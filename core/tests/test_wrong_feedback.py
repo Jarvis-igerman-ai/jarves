@@ -104,7 +104,8 @@ def test_a_long_correction_that_starts_with_the_phrase_is_skipped(home):
 
 def test_text_kept_is_false_when_both_turns_are_masked_as_sensitive():
     """Review R5: the '<sensitive, N chars>' form counts as no text kept."""
-    case = wf.make_case({"say": "הסיסמה שלי היא hunter2", "reply": "הסיסמה שלך היא hunter2"}, via="cli")
+    case = wf.make_case({"say": "הסיסמה שלי היא hunter2", "reply": "הסיסמה שלך היא hunter2"}, via="cli",
+                         privacy=False)
     assert case["say"].startswith("<sensitive") and case["text_kept"] is False
 
 
@@ -117,7 +118,8 @@ def test_no_history_means_no_case_and_no_store_is_created(home):
 def test_report_saves_a_redacted_eval_shaped_case_and_counts_a_correction(home):
     _history(home, [(1, "user", "Call Dana at 050-123-4567"), (2, "assistant", "Calling Dana at 050-123-4567")],
              tools=[(1.5, "phone_call"), (1.6, "call Dana now")])
-    r = wf.report_wrong(home, via="voice", note="wrong person, mail dana@x.io", failure_log_on=True, now=NOW)
+    r = wf.report_wrong(home, via="voice", note="wrong person, mail dana@x.io", failure_log_on=True, now=NOW,
+                       privacy=False)
     case = r["case"]
     assert r["ok"] and wf.cases(home) == [case]
     assert case["lang"] == "en" and case["via"] == "voice" and case["saved"] == "2026-11-16T12:00:00"
@@ -306,3 +308,44 @@ def test_feedback_page_tolerates_a_non_string_exchange_time():
     from pathlib import Path
     js = (Path(wf.__file__).parent / "dashboard_static" / "feedback.js").read_text(encoding="utf-8")
     assert "c.exchange_at.replace(" not in js and js.count("String(c.exchange_at).replace(") == 2
+
+
+def test_privacy_on_masks_full_text_history_in_every_path(home, capsys, on, monkeypatch):
+    """Doctor round: history recorded with privacy off, privacy on at report time: say, reply and note keep lengths."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    _history(home, [(1, "user", "met Dana at the clinic"), (2, "assistant", "noted Dana")])
+    case = wf.report_wrong(home, via="cli", note="Dana", now=NOW, privacy=True)["case"]
+    assert (case["say"], case["reply"], case["note"], case["text_kept"]) == ("<22 chars>", "<10 chars>", "<4 chars>", False)
+    monkeypatch.setattr(feat, "_ctx_features", lambda ctx: SimpleNamespace(active=lambda fid: fid == wf.FEATURE))
+    ctx = SimpleNamespace(home=home, principal={"kind": "local"}, cfg=SimpleNamespace(log=SimpleNamespace(privacy=True)))
+    assert wf.api_wrong(ctx, None, {})[1]["case"]["say"] == "<22 chars>"
+    cli_cfg = SimpleNamespace(log=SimpleNamespace(privacy=True))
+    assert wf.cmd_feedback(SimpleNamespace(action="wrong", target="", note="", json=True), cli_cfg, home) == 0
+    assert "Dana" not in wf.path(home).read_text(encoding="utf-8")
+
+
+def test_the_exchange_never_mixes_interleaved_sessions(home):
+    """Doctor round: question, answer and tools come from ONE session, also when another session talks in between."""
+    st = Store(home / "store.db")
+    for s in ("s1", "s2"):
+        st.x("INSERT OR IGNORE INTO sessions (id, kind, started) VALUES (?, 'live', 1)", (s,))
+    for s, ts, role, text in [("s1", 1, "user", "q one"), ("s2", 2, "user", "q two"), ("s1", 3, "assistant", "a one"),
+                              ("s2", 4, "assistant", "a two"), ("s1", 5, "user", "that was wrong")]:
+        st.x("INSERT INTO turns (session_id, ts, role, text, chars) VALUES (?, ?, ?, ?, ?)", (s, ts, role, text, len(text)))
+    st.x("INSERT INTO tool_calls (session_id, ts, name) VALUES ('s2', 2.5, 'two_tool')")
+    st.x("INSERT INTO tool_calls (session_id, ts, name) VALUES ('s1', 1.5, 'one_tool')")
+    st.commit()
+    st.close()
+    ex = wf.last_exchange(home)
+    assert (ex["say"], ex["reply"], ex["tools"]) == ("q one", "a one", ["one_tool"])
+
+
+def test_an_unopenable_history_is_logged_not_raised(home, monkeypatch):
+    (home / "store.db").write_bytes(b"")
+    def boom(*a, **k):
+        raise wf.sqlite3.OperationalError("unable to open database file")
+    monkeypatch.setattr(wf.sqlite3, "connect", boom)
+    seen = []
+    monkeypatch.setattr(wf.logs, "warn", lambda *a, **k: seen.append(a[1]))
+    assert wf.last_exchange(home) is None and seen == ["FEEDBACK_HISTORY_UNREADABLE"]

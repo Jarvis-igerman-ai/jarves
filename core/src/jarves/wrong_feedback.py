@@ -7,8 +7,8 @@ REDACTED local feedback case in `<home>/feedback_wrong.jsonl`. A case has the sh
 
 Redaction, before anything is written: credentials and profile paths (logs.redact), e-mails and phone numbers
 (logs.redact_pii); a turn that looks sensitive (password, PIN, card, ID, long digit runs: curator._SENSITIVE) is
-replaced by its length only; every text is capped. With log privacy on (logs.privacy(), the flag the history store
-masks with) the history holds lengths only, and so does the case: the note too is kept as its length. The file is capped at MAX_CASES cases; `jarvis feedback delete ID` removes one.
+replaced by its length only; every text is capped. With log privacy on, the case keeps say, reply and note as their
+lengths only, even for turns the history recorded in full before privacy was switched on. The file is capped at MAX_CASES cases; `jarvis feedback delete ID` removes one.
 """
 from __future__ import annotations
 
@@ -119,28 +119,22 @@ def is_feedback_turn(text) -> bool:
 
 def last_exchange(home, *, store=None) -> dict | None:
     """The newest user turn and JARVES's answer to it, skipping the "that was wrong" turn itself (and anything said
-    after it). None when the history is empty or off. Returned texts are RAW: callers redact (make_case does)."""
-    st, owned = _open_store(home, store)
-    if st is None:
-        return None
+    after it). Question, answer and tools always come from ONE session: sessions are tried newest first, so turns of
+    an interleaved session never mix in. None when the history is empty or off. Returned texts are RAW: callers
+    redact (make_case does)."""
+    st = owned = None
     try:
-        rows = st.rows("SELECT session_id, ts, role, text FROM turns ORDER BY ts DESC, id DESC LIMIT ?",
-                       (LOOKBACK_TURNS,))
-        # Skip the feedback phrase only while it is the NEWEST remaining user turn: "q, a, that was wrong, sorry, that
-        # was wrong" skips both reports and their replies and saves q/a. An older "that was wrong" BEFORE a newer
-        # question, or an everyday "לא נכון" inside a question, never moves the cut.
-        while ((i := next((k for k, r in enumerate(rows) if r["role"] == "user"), None)) is not None
-               and is_feedback_turn(rows[i]["text"])):
-            rows = rows[i + 1:]
-        reply: list[dict] = []
-        for i, r in enumerate(rows):
-            if r["role"] == "assistant":
-                reply.append(r)
-            elif r["role"] == "user" and reply:
-                tools = st.rows("SELECT name FROM tool_calls WHERE session_id = ? AND ts >= ? AND ts <= ? ORDER BY ts, id",
-                                (r["session_id"], r["ts"], reply[0]["ts"]))
-                return {"say": r["text"] or "", "reply": " ".join((x["text"] or "") for x in reversed(reply)).strip(),
-                        "ts": reply[0]["ts"], "tools": [t["name"] for t in tools]}
+        st, owned = _open_store(home, store)
+        if st is None:
+            return None
+        sessions: dict[str, list[dict]] = {}         # insertion order = the session with the newest turn first
+        for r in st.rows("SELECT session_id, ts, role, text FROM turns ORDER BY ts DESC, id DESC LIMIT ?",
+                         (LOOKBACK_TURNS,)):
+            sessions.setdefault(r["session_id"], []).append(r)
+        for rows in sessions.values():
+            ex = _exchange(st, rows)
+            if ex:
+                return ex
         return None
     except sqlite3.Error:
         logs.warn("wrong_feedback", "FEEDBACK_HISTORY_UNREADABLE", "the conversation history could not be read")
@@ -148,6 +142,26 @@ def last_exchange(home, *, store=None) -> dict | None:
     finally:
         if owned:
             st.close()
+
+
+def _exchange(st, rows: list[dict]) -> dict | None:
+    """One session's turns, newest first."""
+    # Skip the feedback phrase only while it is the NEWEST remaining user turn: "q, a, that was wrong, sorry, that
+    # was wrong" skips both reports and their replies and saves q/a. An older "that was wrong" BEFORE a newer
+    # question, or an everyday "לא נכון" inside a question, never moves the cut.
+    while ((i := next((k for k, r in enumerate(rows) if r["role"] == "user"), None)) is not None
+           and is_feedback_turn(rows[i]["text"])):
+        rows = rows[i + 1:]
+    reply: list[dict] = []
+    for r in rows:
+        if r["role"] == "assistant":
+            reply.append(r)
+        elif r["role"] == "user" and reply:
+            tools = st.rows("SELECT name FROM tool_calls WHERE session_id = ? AND ts >= ? AND ts <= ? ORDER BY ts, id",
+                            (r["session_id"], r["ts"], reply[0]["ts"]))
+            return {"say": r["text"] or "", "reply": " ".join((x["text"] or "") for x in reversed(reply)).strip(),
+                    "ts": reply[0]["ts"], "tools": [t["name"] for t in tools]}
+    return None
 
 
 def _at(ts) -> str:
@@ -158,14 +172,19 @@ def _at(ts) -> str:
         return ""
 
 
+def _length_only(text) -> str:
+    t = str(text or "").strip()
+    return t if not t or _MASKED.match(t) else f"<{len(t)} chars>"
+
+
 def make_case(ex: dict, *, via: str, note: str = "", now: datetime | None = None, privacy: bool | None = None) -> dict:
-    """privacy None = logs.privacy(): on, the note (model- or owner-written, may quote the turn) keeps its length only."""
+    """privacy None = logs.privacy(). On, say, reply AND note keep their length only, also for turns the history
+    recorded in full while privacy was off (the note may quote the turn)."""
     if via not in VIAS:
         raise ValueError(f"via must be one of {VIAS}")
-    note = str(note or "").strip()
-    if note and (logs.privacy() if privacy is None else privacy):
-        note = f"<{len(note)} chars>"
-    say, reply = redact(ex.get("say")), redact(ex.get("reply"))
+    private = logs.privacy() if privacy is None else bool(privacy)
+    say, reply, note = (_length_only(t) if private else t for t in (ex.get("say"), ex.get("reply"), note))
+    say, reply = redact(say), redact(reply)
     tools = []
     for t in ex.get("tools") or []:
         t = t if _SAFE_TOOL.fullmatch(str(t)) else "other"
@@ -291,6 +310,8 @@ def attach(core):
     core.registry.register(WrongFeedbackSkill(
         core.home, store, lambda: "he" if getattr(core.cfg.voice, "language", "he") == "he" else "en",
         lambda: core.features.active("failure_log")))
+    # Allowed without a confirmation prompt: it only appends a redacted case to a local file the owner asked for in
+    # that very turn (feature-gated, nothing leaves the PC); it never widens any other approval.
     core.registry.allowed_actions.add("report_wrong_answer")
 
 
