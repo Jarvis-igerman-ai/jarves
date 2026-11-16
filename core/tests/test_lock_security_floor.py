@@ -1,47 +1,49 @@
 """Regression for #480 (GHSA-mf5v-w3w3-f6cg): the Core lockfile must not pin a
-vulnerable opentelemetry-api, and its hashes must be the PyPI-published ones."""
+vulnerable opentelemetry-api. Hermetic: reads uv.lock only. Artifact digests
+are not pinned here; `uv sync --locked` verifies them against the index."""
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
-from packaging.version import InvalidVersion, Version
+import pytest
 
 LOCK = Path(__file__).resolve().parents[1] / "uv.lock"
-PYPI_JSON = "https://pypi.org/pypi/opentelemetry-api/{version}/json"
-
-# Digests checked against https://pypi.org/pypi/opentelemetry-api/1.45.2/json
-# on 2026-11-16.
-PYPI_SHA256 = {
-    "opentelemetry_api-1.45.2.tar.gz": "d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4",
-    "opentelemetry_api-1.45.2-py3-none-any.whl": "2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34",
-}
+PATCHED = (1, 45, 2, 0)
 
 
-def _package(name: str) -> dict:
+def _release(raw: str) -> tuple[int, ...]:
+    """Release tuple of a PEP 440 version (no third-party parser). A pre or dev
+    release sorts below its final release, so it gets a trailing -1."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)*)([.\-_]?(?:a|b|rc|dev)\d*)?(\.post\d+)?(\+[A-Za-z0-9.]+)?", raw.strip())
+    if not m:
+        raise AssertionError(f"opentelemetry-api version {raw!r} in uv.lock is not PEP 440")
+    parts = tuple(int(p) for p in m.group(1).split("."))
+    parts = parts + (0,) * (3 - len(parts))
+    return parts + ((-1,) if m.group(2) else (0,))
+
+
+def _version(name: str) -> str:
     data = tomllib.loads(LOCK.read_text(encoding="utf-8"))
-    matches = [p for p in data["package"] if p.get("name") == name]
+    matches = [p for p in data.get("package", []) if p.get("name") == name]
     assert len(matches) == 1, f"expected one {name} entry, got {len(matches)}"
-    return matches[0]
+    return matches[0]["version"]
 
 
 def test_opentelemetry_api_at_or_above_patched_version() -> None:
-    raw = _package("opentelemetry-api")["version"]
-    try:
-        version = Version(raw)
-    except InvalidVersion as exc:
-        raise AssertionError(f"opentelemetry-api version {raw!r} in uv.lock is not PEP 440") from exc
-    assert version >= Version("1.45.2"), f"opentelemetry-api {raw} is vulnerable (GHSA-mf5v-w3w3-f6cg)"
+    raw = _version("opentelemetry-api")
+    assert _release(raw) >= PATCHED, f"opentelemetry-api {raw} is vulnerable (GHSA-mf5v-w3w3-f6cg)"
 
 
-def test_opentelemetry_api_hashes_match_pypi() -> None:
-    # A later bump must re-verify its digests against PyPI and update this table.
-    pkg = _package("opentelemetry-api")
-    artifacts = [pkg["sdist"], *pkg["wheels"]]
-    seen = {a["url"].rsplit("/", 1)[-1]: a["hash"] for a in artifacts}
-    assert seen == {k: f"sha256:{v}" for k, v in PYPI_SHA256.items()}, (
-        f"uv.lock opentelemetry-api {pkg['version']} artifacts differ from the verified table; "
-        f"re-check each sha256 against {PYPI_JSON.format(version=pkg['version'])} "
-        "(urls[].digests.sha256) and update PYPI_SHA256"
-    )
+def test_release_parser_orders_versions() -> None:
+    assert _release("1.45.1") < PATCHED <= _release("1.45.2")
+    assert _release("1.46") > PATCHED
+    assert _release("1.45.2rc1") < PATCHED
+    assert _release("1.45.2.post1+local") >= PATCHED
+
+
+def test_release_parser_rejects_malformed() -> None:
+    with pytest.raises(AssertionError, match="not PEP 440"):
+        _release("latest")
