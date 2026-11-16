@@ -358,7 +358,8 @@ class PilotService:
 
 class _Late:
     """The PilotSession needs a driver at construction; the proxy needs the session, and the driver needs the proxy. This forwards
-    every contract name to the real driver once it exists (before that nothing is called)."""
+    every contract name to the real driver once it exists (before that nothing is called). It MUST also forward
+    uses_pilot_proxy: PilotSession._proxied() reads it on every public gate (#574), and an empty holder raises, so it fails closed."""
 
     def __init__(self, holder: dict) -> None:
         self._h = holder

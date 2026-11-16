@@ -463,6 +463,9 @@ class PilotSession:
             raise self._refuse(kind, "BROWSER_PILOT_NOT_AGENT", f"the session is {self.state}: the agent may not act")
         if kind not in OBSERVE_KINDS:
             raise self._refuse(kind, "BROWSER_PILOT_READ_ONLY", "the pilot only observes: no click, fill, submit or login")
+        if self.clock() - self.started > self.max_seconds or self.seq >= self.max_actions:
+            self.stop()
+            raise PilotError("BROWSER_PILOT_CAP", "the session reached its time or action cap and was stopped")
 
     def _still_allowed(self, kind: str) -> None:
         """#574 review R1: read and screenshot re-check where the page IS. A script navigation that slipped past page.route
@@ -470,9 +473,6 @@ class PilotSession:
         if not self._proxied() and page_scope(self._final_url()) != "local":
             self.stop()
             raise self._refuse(kind, "BROWSER_PILOT_REDIRECT", "the page led to an address that may not be read; the session was stopped")
-        if self.clock() - self.started > self.max_seconds or self.seq >= self.max_actions:
-            self.stop()
-            raise PilotError("BROWSER_PILOT_CAP", "the session reached its time or action cap and was stopped")
 
     # --- the only things the agent can do
     def _agent_call(self, fn, *a):

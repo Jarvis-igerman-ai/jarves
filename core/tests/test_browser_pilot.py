@@ -166,6 +166,21 @@ def test_action_cap_stops(tmp_path):
     assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED
 
 
+def test_574_review_open_and_act_keep_the_time_and_action_cap(tmp_path):
+    """Review R1 on 56b89cf: the cap lives in _gate, so open (and act) are capped too, not only read and screenshot."""
+    s, d, t = mk(tmp_path, max_seconds=60)
+    t[0] += 61
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED and d.opened == []
+    s, d, _ = mk(tmp_path / "n", max_actions=2)
+    s.open("https://example.com/")
+    s.open("https://example.com/a")
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/b")
+    assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED and len(d.opened) == 2
+
+
 @pytest.mark.parametrize("answer", [["10.0.0.1"], ["169.254.169.254"], ["127.0.0.1"], ["100.64.0.1"], ["93.184.216.34", "192.168.1.5"],
                                     ["::1"], ["::ffff:10.0.0.1"], []])
 def test_public_name_resolving_to_a_private_address_is_refused(tmp_path, answer):
