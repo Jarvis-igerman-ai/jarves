@@ -24,7 +24,8 @@ class FakeGitHub:
     """Records every call; serves canned alert lists and workflow runs; keeps issues in memory."""
 
     def __init__(self, code_scanning=(), dependabot=(), secrets=(), checks="success", nightly="success", codeql="success",
-                 access=True):
+                 access=True, runs_access=True):
+        self.runs_access = runs_access
         self.code_scanning, self.dependabot, self.secrets = list(code_scanning), list(dependabot), list(secrets)
         self.runs = {"jarves-checks.yml": checks, "nightly.yml": nightly, "codeql.yml": codeql}
         self.access, self.issues, self.calls, self.fail = access, [], [], None
@@ -42,6 +43,8 @@ class FakeGitHub:
                 return (200, self.secrets) if self.access else (403, None)
             if "/actions/workflows/" in path:
                 wf = path.split("/actions/workflows/")[1].split("/")[0]
+                if not self.runs_access:
+                    return 403, None
                 return 200, {"workflow_runs": [{"conclusion": self.runs[wf], "created_at": "2026-10-23T00:00:00Z"}]}
             if path.startswith("/issues?"):
                 return 200, [dict(i) for i in self.issues]
@@ -181,7 +184,20 @@ def test_issue_480_refused_sources_name_the_owner_action():
     assert ss.refused_sources({"code_scanning": "complete:http_403", "dependabot": "skipped:http_404"}) == {}
 
 
-LIVE_480_SIG = "6490f068a3c2e39a"        # the sig stored on the live #480 tracker (incomplete, no findings), before #480
+# Read from the live #480 issue body on 16 Nov 2026 (incomplete coverage, no findings): "<!-- sig:6490f068a3c2e39a -->".
+LIVE_480_SIG = "6490f068a3c2e39a"
+
+
+def test_issue_480_actions_refusals_from_the_real_collectors_get_the_actions_line():
+    """The source names come from run_collectors itself, so a renamed collector cannot fall to the generic line."""
+    r = ss.run_collectors("full", FakeGitHub(runs_access=False), VER, now=T0, sleep=lambda s: None,
+                          boundary=lambda: {"failed": False})
+    run_keys = sorted(k for k, v in r["coverage"].items() if v == "incomplete:http_403")
+    assert run_keys == sorted(ss._RUN_SOURCES)
+    assert set(ss._ALERT_SOURCES) <= set(r["coverage"])
+    assert ss.owner_actions(r["coverage"]) == [
+        f"Owner action (HTTP 403: {', '.join(run_keys)}): give the scan's token read access to Actions and check that "
+        "the workflow exists."]
 
 
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
