@@ -516,8 +516,7 @@ def test_gate_cli_checks_the_tag_signature_when_owner_signers_are_set(tmp_path, 
 
 
 @pytest.mark.skipif(not __import__("shutil").which("ssh-keygen"), reason="needs ssh-keygen for a real SSH tag signature")
-@pytest.mark.skipif(sys.platform == "win32", reason="the release gate runs on ubuntu-24.04 (release.yml); Windows OpenSSH "
-                                                    "signing differs and the fake-runner test covers the decision logic")
+@pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); deselected elsewhere (no-skips rule)
 def test_gate_real_ssh_tag_signature_owner_key_only(tmp_path):
     """#605 (review R1): git verify-tag exits 0 for a GOOD signature by a key NOT in allowed_signers ("No principal
     matched", trust undefined); the gate must accept only the owner's listed key."""
