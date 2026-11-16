@@ -10,9 +10,12 @@ This tool never installs and never answers an install question. The install itse
 code 0) into scenarios-<ts>.json and writes one demo per ticket (JAR-214, JAR-320, JAR-321): demo-<ticket>-<ts>.json
 plus an SVG image of the command transcript. JAR-214 and JAR-320 have no installed-product command, so their demo
 runs the regression test from this checkout with the core venv Python (`target: source-tests`); no pytest = SKIPPED.
-`check` prints last_install_age_h (newest-build records only), scenario_pass_pct (latest run), demos_24h_with_image
-(passing demos with their image), demos_24h_not_passing and unreadable (malformed record files, skipped).
-ok = install record under 26 h, pass % known and at least one passing demo with image.
+`check` prints newest_beta_installed_age_h (age of the last record where `update check` said the installed build is
+the newest), scenario_pass_pct (latest run under 26 h), demos_24h_with_image (passing demos with their image),
+demos_24h_installed_pass, demos_24h_not_passing and unreadable (malformed record files, skipped). ok = that record
+under 26 h, pass % known and at least one passing installed-product demo with image. Output tails go through the
+product's log redaction; each step times out after 300 s and the whole run is capped at 1800 s.
+Daily caller: the autopilot beta-verify task (workflow/autopilot_watch.py beta_step) lists `run` and `check`.
 Every record is its own file written via a unique temp file and os.replace, so runs never race on a shared file.
 """
 from __future__ import annotations
@@ -32,8 +35,11 @@ from xml.sax.saxutils import escape
 
 CORE = Path(__file__).resolve().parents[1]
 INSTALL = ("update", "check")  # read-only; installing is `jarvis update auto` (owner switch), never this tool
-SCENARIOS = (("S01", ("doctor",)), ("S02", ("selftest",)), ("S03", ("status",)),
-             ("S04", ("budget", "test-limits")), ("S05", ("features", "diff")))
+# Unattended daily, so device- and popup-free only: no `doctor` (it records the microphone and beeps), selftest
+# without --deep/--audio (audio_roundtrip runs only with --audio), cached update status, local Core status, the
+# throw-away-database limits proof and the read-only feature list.
+SCENARIOS = (("S01", ("update", "status")), ("S02", ("selftest",)), ("S03", ("status",)),
+             ("S04", ("budget", "test-limits")), ("S05", ("features", "list")))
 
 
 def core_python() -> str:
@@ -49,11 +55,13 @@ DEMOS = (("JAR-214", "source-tests", PY_TEST + ("tests/test_workflow_hooks.py::C
                                                 "test_state_changing_routes_relock_after_expiry_and_ignore_other_sessions",)),
          ("JAR-321", "installed", ("jarvis", "budget", "test-limits")))
 MAX_INSTALL_AGE_H = 26
+STEP_TIMEOUT_S = 300
+RUN_BUDGET_S = 1800  # whole run; steps after the budget are recorded SKIPPED, not run
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
-def real_runner(jarvis: str = "jarvis", timeout: int = 1800):
+def real_runner(jarvis: str = "jarvis", timeout: int = STEP_TIMEOUT_S):
     def run(argv):
         argv = [jarvis if a == "jarvis" else a for a in argv]
         try:
@@ -67,8 +75,19 @@ def real_runner(jarvis: str = "jarvis", timeout: int = 1800):
     return run
 
 
+def _redact(text: str) -> str:
+    """The product's own log redaction (secrets, user names in paths, e-mails); fail closed without it."""
+    try:
+        if str(CORE / "src") not in sys.path:
+            sys.path.append(str(CORE / "src"))
+        from jarves.logs import mask_emails, redact
+    except ImportError:
+        return "<output withheld: redaction unavailable>"
+    return mask_emails(redact(text))
+
+
 def _tail(text: str, lines: int = 20) -> list[str]:
-    return [_CTRL.sub("", _ANSI.sub("", s))[:200] for s in str(text).splitlines()[-lines:]]
+    return [_CTRL.sub("", _ANSI.sub("", s))[:200] for s in _redact(str(text)).splitlines()[-lines:]]
 
 
 def _write(folder: Path, name: str, text: str) -> None:
@@ -90,8 +109,9 @@ def render_svg(title: str, lines: list[str]) -> str:
             f'<g fill="#eee">{text}</g></svg>\n')
 
 
-def run_daily(home, run, now: float | None = None) -> dict:
+def run_daily(home, run, now: float | None = None, clock=time.monotonic, budget_s: float = RUN_BUDGET_S) -> dict:
     now = time.time() if now is None else now
+    start = clock()
     folder = Path(home) / "beta_records"
     folder.mkdir(parents=True, exist_ok=True)
     stamp = f"{int(now)}-{uuid.uuid4().hex[:8]}"  # unique: two runs in one second never overwrite each other
@@ -103,11 +123,17 @@ def run_daily(home, run, now: float | None = None) -> dict:
         return {"install": install}
     scenarios = []
     for sid, args in SCENARIOS:
+        if clock() - start > budget_s:
+            scenarios.append({"id": sid, "cmd": " ".join(args), "result": "SKIPPED", "rc": None,
+                              "tail": [f"run budget of {budget_s:g} s used up"]})
+            continue
         code, text = run(["jarvis", *args])
         scenarios.append({"id": sid, "cmd": " ".join(args), "result": "PASS" if code == 0 else "FAIL",
                           "rc": code, "tail": _tail(text)})
     _write(folder, f"scenarios-{stamp}.json", json.dumps({"at": now, "scenarios": scenarios}))
     for ticket, target, argv in DEMOS:
+        if clock() - start > budget_s:
+            break  # no demo record at all: an unrun demo must not look like a result
         code, text = run(list(argv))
         missing = target == "source-tests" and "No module named pytest" in text
         result = "PASS" if code == 0 else "SKIPPED" if missing else "FAIL"
@@ -132,7 +158,8 @@ def _load(path: Path):
 def check(home, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     folder = Path(home) / "beta_records"
-    last_ok, scen, demos, not_passing, bad = None, None, 0, 0, 0
+    last_ok, scen, demos, installed, not_passing, bad = None, None, 0, 0, 0, 0
+    fresh = lambda at, hours: 0 <= now - at <= hours * 3600  # noqa: E731
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         data = _load(path)
         rows = data.get("scenarios") if data else None
@@ -140,12 +167,14 @@ def check(home, now: float | None = None) -> dict:
             bad += 1
         elif path.name.startswith("install-") and data.get("ok") is True:
             last_ok = max(last_ok or data["at"], data["at"])
-        elif path.name.startswith("scenarios-") and (scen is None or data["at"] >= scen["at"]):
-            scen = data
-        elif path.name.startswith("demo-") and 0 <= now - data["at"] <= 86400 and data.get("image") \
+        elif path.name.startswith("scenarios-"):
+            if fresh(data["at"], MAX_INSTALL_AGE_H) and (scen is None or data["at"] >= scen["at"]):
+                scen = data
+        elif path.name.startswith("demo-") and fresh(data["at"], 24) and data.get("image") \
                 and (folder / Path(str(data["image"])).name).is_file():
             if data.get("result") == "PASS":
                 demos += 1
+                installed += data.get("target") == "installed"
             else:
                 not_passing += 1
     pct = None
@@ -153,9 +182,11 @@ def check(home, now: float | None = None) -> dict:
         rows = scen["scenarios"]
         pct = round(100.0 * sum(isinstance(r, dict) and r.get("result") == "PASS" for r in rows) / len(rows), 1)
     hours = None if last_ok is None else (now - last_ok) / 3600
-    ok = hours is not None and 0 <= hours < MAX_INSTALL_AGE_H and pct is not None and demos > 0  # unrounded age
-    return {"ok": ok, "last_install_age_h": None if hours is None else round(hours, 1), "scenario_pass_pct": pct,
-            "demos_24h_with_image": demos, "demos_24h_not_passing": not_passing, "unreadable": bad}
+    ok = (hours is not None and 0 <= hours < MAX_INSTALL_AGE_H and pct is not None  # unrounded age
+          and installed > 0)  # source-test demos alone never make the installed beta look healthy
+    return {"ok": ok, "newest_beta_installed_age_h": None if hours is None else round(hours, 1),
+            "scenario_pass_pct": pct, "demos_24h_with_image": demos, "demos_24h_installed_pass": installed,
+            "demos_24h_not_passing": not_passing, "unreadable": bad}
 
 
 def main(argv=None) -> int:

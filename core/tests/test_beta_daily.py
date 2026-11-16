@@ -35,16 +35,47 @@ def test_green_run_writes_install_scenario_and_demo_records(tmp_path):
     assert [p.name.split("-")[1] + "-" + p.name.split("-")[2] for p in svgs] == ["JAR-214", "JAR-320", "JAR-321"]
     scen = json.loads(next((tmp_path / "beta_records").glob("scenarios-*.json")).read_text(encoding="utf-8"))
     assert {s["id"]: s["result"] for s in scen["scenarios"]} == {f"S0{i}": "PASS" for i in range(1, 6)}
+    assert "doctor" not in {s["cmd"] for s in scen["scenarios"]}  # records the mic and beeps: never unattended
     report = bd.check(tmp_path, now=NOW + 3600)
-    assert report == {"ok": True, "last_install_age_h": 1.0, "scenario_pass_pct": 100.0,
-                      "demos_24h_with_image": 3, "demos_24h_not_passing": 0, "unreadable": 0}
+    assert report == {"ok": True, "newest_beta_installed_age_h": 1.0, "scenario_pass_pct": 100.0,
+                      "demos_24h_with_image": 3, "demos_24h_installed_pass": 1, "demos_24h_not_passing": 0,
+                      "unreadable": 0}
 
 
 def test_failing_scenario_is_recorded_as_fail(tmp_path):
-    bd.run_daily(tmp_path, runner(fail=("test-limits",)), now=NOW)
+    bd.run_daily(tmp_path, runner(fail=("selftest",)), now=NOW)
     report = bd.check(tmp_path, now=NOW)
     assert report["scenario_pass_pct"] == 80.0 and report["ok"] is True
-    assert report["demos_24h_with_image"] == 2 and report["demos_24h_not_passing"] == 1  # failing JAR-321 not counted
+
+
+def test_failing_installed_demo_fails_the_check_even_if_source_demos_pass(tmp_path):
+    bd.run_daily(tmp_path, runner(fail=("test-limits",)), now=NOW)
+    report = bd.check(tmp_path, now=NOW)
+    assert report["demos_24h_with_image"] == 2 and report["demos_24h_not_passing"] == 1
+    assert report["demos_24h_installed_pass"] == 0 and report["ok"] is False
+
+
+def test_old_scenario_record_gives_unknown_pass_pct(tmp_path):
+    bd.run_daily(tmp_path, runner(), now=NOW - 27 * 3600)
+    for p in (tmp_path / "beta_records").glob("*.json"):
+        if not p.name.startswith("scenarios-"):
+            p.write_text(json.dumps({**json.loads(p.read_text(encoding="utf-8")), "at": NOW}), encoding="utf-8")
+    assert bd.check(tmp_path, now=NOW)["scenario_pass_pct"] is None
+
+
+def test_run_budget_skips_remaining_steps(tmp_path):
+    ticks = iter(range(0, 10_000, 1000))
+    run = runner()
+    bd.run_daily(tmp_path, run, now=NOW, clock=lambda: next(ticks), budget_s=2500)
+    scen = json.loads(next((tmp_path / "beta_records").glob("scenarios-*.json")).read_text(encoding="utf-8"))
+    assert [s["result"] for s in scen["scenarios"]] == ["PASS", "PASS", "SKIPPED", "SKIPPED", "SKIPPED"]
+    assert len(run.calls) == 3 and not list((tmp_path / "beta_records").glob("demo-*"))
+    assert bd.real_runner.__defaults__[1] == 300
+
+
+def test_output_tails_are_redacted():
+    tail = bd._tail("key sk-abcdefghijklmnop at C:\\Users\\noa\\x and /home/noa/y mail noa@example.com")
+    assert "sk-abcdefghijklmnop" not in tail[0] and "noa" not in tail[0].replace("<user>", "")
 
 
 def test_only_failing_or_skipped_demos_fail_the_check(tmp_path):
@@ -61,7 +92,7 @@ def test_only_failing_or_skipped_demos_fail_the_check(tmp_path):
 def test_newer_build_waiting_is_not_a_good_install(tmp_path):
     run = runner(newer=True)
     bd.run_daily(tmp_path, run, now=NOW)
-    assert len(run.calls) == 1 and bd.check(tmp_path, now=NOW)["last_install_age_h"] is None
+    assert len(run.calls) == 1 and bd.check(tmp_path, now=NOW)["newest_beta_installed_age_h"] is None
 
 
 def test_two_runs_in_one_second_keep_both_records(tmp_path):
@@ -99,13 +130,13 @@ def test_failed_install_check_writes_record_but_runs_no_scenarios(tmp_path):
     rec = json.loads(next((tmp_path / "beta_records").glob("install-*.json")).read_text(encoding="utf-8"))
     assert rec["ok"] is False and rec["rc"] == 1
     report = bd.check(tmp_path, now=NOW)
-    assert report["ok"] is False and report["last_install_age_h"] is None and report["scenario_pass_pct"] is None
+    assert report["ok"] is False and report["newest_beta_installed_age_h"] is None and report["scenario_pass_pct"] is None
 
 
 def test_stale_install_and_old_demos_fail_the_check(tmp_path):
     bd.run_daily(tmp_path, runner(), now=NOW)
     report = bd.check(tmp_path, now=NOW + 27 * 3600)
-    assert report["ok"] is False and report["last_install_age_h"] == 27.0 and report["demos_24h_with_image"] == 0
+    assert report["ok"] is False and report["newest_beta_installed_age_h"] == 27.0 and report["demos_24h_with_image"] == 0
 
 
 def test_demo_without_its_image_does_not_count(tmp_path):
