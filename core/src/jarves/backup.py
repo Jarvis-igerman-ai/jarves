@@ -17,9 +17,10 @@ Retention (adjustable, memory.db settings `backup.*`, `jarvis backup settings`):
 per day for the last 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 5;
 pre-migration / pre-restore checkpoints the last 3 each. Only automatic backups are thinned by the day/week rule.
 #1016: on top of the counts, all backups together stay under `max_gb` (default 4 GB, 0 = no size limit): the oldest
-go first, but never the newest backup, the newest automatic one or the backup `jarvis update --rollback` needs.
-Before writing, create() checks free disk space; when short it prunes first and refuses (BACKUP_NO_SPACE) rather
-than filling the drive. A beta install takes ONE backup: the updater and the next Core start reuse it.
+go first, but never a manual one, the newest backup, the newest automatic one, the backup `jarvis update --rollback`
+needs or the one being restored. Before writing, create() checks free disk space; when short it prunes first and
+refuses (BACKUP_NO_SPACE) rather than filling the drive. A beta install takes ONE backup, which the updater reuses;
+the next Core start reuses it too when no data file changed since it was written.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -180,6 +181,9 @@ def plan(home: Path, settings: dict | None = None) -> tuple[list[tuple[Path, str
             continue
         if p.name.endswith(_SKIP_SUFFIX) or p.name.endswith(".bad.json"):
             continue
+        if dirs[:1] == ["updates"] and p.suffix.lower() == ".exe":
+            continue            # #1016: downloaded installers (new + previous, ~100+ MB each) are not user data
+                                # and are re-downloadable; they made every backup hundreds of MB bigger
         if p.name == "faces.db" and not settings.get("include_faces"):
             skipped.append({"name": rel, "reason": "face data (biometric): backup.include_faces is off"})
             continue
@@ -219,8 +223,10 @@ def backup_dir(home: Path) -> Path:
     return Path(home) / BACKUP_DIR
 
 
-def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None) -> Path:
-    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left)."""
+def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None,
+           protect: frozenset[str] = frozenset()) -> Path:
+    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left).
+    `protect`: backup names the prune after writing must keep (restore passes the archive it restores from)."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     home = Path(home)
@@ -236,7 +242,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
-    ensure_space(home, take)
+    ensure_space(home, take, protect)
     files = []
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
@@ -278,7 +284,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                 kind=kind)
     logs.info("backup", "BACKUP_DONE", "backup written", backup=final.name, kind=kind, files=len(files), excluded=len(skipped),
               bytes=final.stat().st_size)
-    prune(home)
+    prune(home, protect)
     return final
 
 
@@ -301,14 +307,14 @@ def _free_bytes(home: Path) -> int:
     return shutil.disk_usage(backup_dir(home)).free
 
 
-def ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
+def ensure_space(home: Path, take: list[tuple[Path, str]], protect: frozenset[str] = frozenset()) -> None:
     """#1016: a backup never fills the drive. Short on room: prune first; still short: BACKUP_NO_SPACE (an install
     then stops before anything changes)."""
     need = _estimate_bytes(home, take) + SPACE_MARGIN_BYTES
     try:
         if _free_bytes(home) >= need:
             return
-        prune(home)
+        prune(home, protect)
         free = _free_bytes(home)
     except OSError:
         return                                               # cannot measure: the write itself reports ENOSPC
@@ -435,8 +441,10 @@ def usage(home: Path) -> dict:
     return {"count": len(items), "bytes": total, "max_gb": gb, "over": bool(gb) and total > gb * 1e9}
 
 
-def prune(home: Path) -> list[str]:
-    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind."""
+def prune(home: Path, protect: frozenset[str] = frozenset()) -> list[str]:
+    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind, the rollback backup or
+    a name in `protect`. The size budget never deletes a manual backup (the owner took it on purpose; only the
+    manual count limits those)."""
     s = get_settings(home)
     items = list_backups(home)
     keep: set[str] = set()
@@ -451,13 +459,15 @@ def prune(home: Path) -> list[str]:
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
     if autos:
         keep.add(autos[0]["name"])
+    names = {b["name"] for b in items}
     protected = {items[0]["name"]} if items else set()
     if autos:
         protected.add(autos[0]["name"])
+    protected |= {b["name"] for b in items if b["kind"] == "manual"}
     rb = rollback_backup(home)
-    if rb:
-        keep.add(rb)
-        protected.add(rb)
+    for name in {rb, *protect} & names:
+        keep.add(name)
+        protected.add(name)
     budget = float(s.get("max_gb") or 0) * 1e9
     if budget > 0:                                            # #1016: all backups together stay under max_gb
         kept = [b for b in items if b["name"] in keep]       # newest first
@@ -548,7 +558,7 @@ def restore(path: Path, target: Path, *, force: bool = False, checkpoint_first: 
                           "stop it first (`jarvis stop`), then restore again")
     pre = None
     if checkpoint_first and target.is_dir() and any(target.glob("*.db")):
-        pre = create(target, "pre-restore", note=f"before restoring {path.name}")
+        pre = create(target, "pre-restore", note=f"before restoring {path.name}", protect=frozenset({path.name}))
     man = res["manifest"]
     try:
         done = _extract(path, target, man)
@@ -655,8 +665,9 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
 
 
 def _update_backup_for(home: Path, version: str, now: float | None = None) -> Path | None:
-    """The verified backup the updater took right before installing `version` (the Core was stopped for setup, so
-    the data is the same), or None."""
+    """The verified backup the updater took before installing `version`, or None. Reused only while it still holds
+    the current data: the Core may have run (and written) between that backup and setup, so any data file, SQLite
+    WAL/journal included, changed after the archive was written means a fresh checkpoint (review of #1016)."""
     try:
         from .updates import read_previous
         rec = read_previous(home)
@@ -671,7 +682,16 @@ def _update_backup_for(home: Path, version: str, now: float | None = None) -> Pa
     except (TypeError, ValueError):
         return None
     p = backup_dir(home) / Path(rec["backup"]).name
-    return p if p.is_file() else None
+    try:
+        written = p.stat().st_mtime
+        take, _skipped = plan(home, get_settings(home))
+        paths = [q for q, rel in take if not rel.startswith("updates/")]      # the updater's own bookkeeping,
+        paths += [q.with_name(q.name + sfx) for q in list(paths) for sfx in ("-wal", "-journal")]   # (above)
+        if any(q.stat().st_mtime > written for q in paths if q.exists()):
+            return None
+    except OSError:
+        return None
+    return p
 
 
 def due(home: Path, now: float | None = None) -> bool:

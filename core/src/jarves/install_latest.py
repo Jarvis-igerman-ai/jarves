@@ -531,7 +531,9 @@ def real_deps(a, cfg, home: Path) -> Deps:
 
     def backup_now() -> Path:
         # #1016: ONE backup per install. A checkpoint (kept the last `checkpoints`, not crowding out the owner's
-        # manual backups); the updater reuses it as the rollback backup and the next Core start as its checkpoint.
+        # manual backups); the updater reuses it as the rollback backup and the next Core start as its checkpoint
+        # when no data changed since. It is taken before the download: data written during the download, before the
+        # Core stops, is not in it, so a rollback does not bring that back (accepted, review of #1016).
         taken["path"] = backup.checkpoint(home, "before a beta install")
         return taken["path"]
 

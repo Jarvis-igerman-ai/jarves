@@ -271,6 +271,16 @@ def test_size_budget_drops_oldest_but_keeps_newest_and_rollback_backup_issue_101
         backup.set_settings(profile, {"max_gb": -1})
 
 
+def test_downloaded_installers_are_not_archived_issue_1016(profile):
+    (profile / "updates" / "previous").mkdir(parents=True)
+    (profile / "updates" / "JARVES-Setup-9.9.exe").write_bytes(b"MZ" * 100)
+    (profile / "updates" / "previous" / "JARVES-Setup-9.8.exe").write_bytes(b"MZ" * 100)
+    (profile / "updates" / "auto_update.json").write_text("{}", encoding="utf-8")
+    rels = {rel for _p, rel in backup.plan(profile)[0]}
+    assert "updates/auto_update.json" in rels                          # the owner's update settings stay
+    assert not any(r.endswith(".exe") for r in rels)
+
+
 def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
     bdir = profile / "backups"
     bdir.mkdir()
@@ -302,6 +312,28 @@ def test_start_checkpoint_reuses_the_update_backup_issue_1016(profile, monkeypat
     (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
     p = backup.startup_checkpoint(profile)
     assert p is not None and p != bak and len(backup.list_backups(profile)) == before + 1
+    backup._save_state(profile, {"version": "1.0"})                   # review: data written after the backup
+    rec["created_ts"] = time.time()
+    (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
+    later = os.stat(bak).st_mtime + 5
+    os.utime(profile / "memory.db", (later, later))
+    p2 = backup.startup_checkpoint(profile)
+    assert p2 is not None and p2 not in (bak, p)                       # a fresh checkpoint, not the stale one
+
+
+def test_restore_over_budget_keeps_the_archive_it_restores_issue_1016(profile, monkeypatch):
+    monkeypatch.setattr(backup, "core_running", lambda home, port=None: False)
+    backup.set_settings(profile, {"max_gb": 0, "checkpoints": 5})
+    old = backup.create(profile, "pre-migration", now=time.time() - 3600)
+    backup.create(profile, "pre-migration", now=time.time() - 60)
+    mine = backup.create(profile, "manual", now=time.time() - 30)
+    backup.set_settings(profile, {"max_gb": 1 / 1e9})                  # far over budget from now on
+    backup.restore(old, profile)                                       # its pre-restore checkpoint prunes...
+    assert old.is_file()                                               # ...but never the archive being restored
+    assert mine.is_file()                                              # and the budget never deletes manual backups
+    backup.set_settings(profile, {"max_gb": 1 / 1e9})                  # (settings live in the restored memory.db)
+    backup.prune(profile)
+    assert not old.is_file() and mine.is_file()                        # outside a restore it is fair game
 
 
 def test_cli_settings_for_manual_checkpoints_and_size_issue_1016(profile, capsys):
