@@ -58,7 +58,7 @@ def test_folder_copy_and_api_upload_converts_csv_to_sheet(tmp_path):
     dest.mkdir()
     rd.save(tmp_path, folder=str(dest))
     out = rd.after_report(tmp_path, rep, features=ON)
-    assert out["mode"] == "folder" and (dest / "wa.csv").read_bytes() == b"a,b\n"
+    assert out["mode"] == "folder" and (dest / rd.SUBDIR / "wa.csv").read_bytes() == b"a,b\n"
     rd.save(tmp_path, mode="api")
     fake = FakeDrive()
     out = rd.upload(tmp_path, rep, client=fake)
@@ -82,10 +82,10 @@ def test_folder_must_exist_and_cli_status_folder_upload(home, capsys):
     rep = tmp_path / "r.txt"
     rep.write_text("x", encoding="utf-8")
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 1      # the switch is off: nothing is sent
-    assert "jarvis features on reports_drive" in capsys.readouterr().out and not (dest / "r.txt").exists()
+    assert "jarvis features on reports_drive" in capsys.readouterr().out and not (dest / rd.SUBDIR / "r.txt").exists()
     switch_on()
     assert cli.main(["reports", "drive", "upload", str(rep)]) == 0
-    assert (dest / "r.txt").exists()
+    assert (dest / rd.SUBDIR / "r.txt").exists()
 
 
 def test_sync_sends_each_new_report_once_and_the_scheduler_hook_respects_the_switch(tmp_path, monkeypatch):
@@ -95,7 +95,7 @@ def test_sync_sends_each_new_report_once_and_the_scheduler_hook_respects_the_swi
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "a.md").write_bytes(b"1")
     assert len(rd.sync(tmp_path)) == 1 and rd.sync(tmp_path) == []
-    assert (dest / "a.md").read_bytes() == b"1" and rd.load(tmp_path)["folder"] == str(dest)
+    assert (dest / rd.SUBDIR / "a.md").read_bytes() == b"1" and rd.load(tmp_path)["folder"] == str(dest)
     calls = []
 
     class Now:
@@ -220,11 +220,11 @@ async def test_a_finished_scheduler_job_sends_new_reports_only_while_on_and_keep
     await run(False)
     assert not list(dest.iterdir())                          # switch off: nothing leaves the PC
     await run(True)
-    assert (dest / "wa.csv").read_bytes() == b"a,b\n"
+    assert (dest / rd.SUBDIR / "wa.csv").read_bytes() == b"a,b\n"
     (home / "reports" / "b.md").write_bytes(b"x")
     rd.save(home, folder=str(home / "gone"))                 # Drive folder unavailable
     await run(True)
-    assert (home / "reports" / "b.md").read_bytes() == b"x" and not (dest / "b.md").exists()
+    assert (home / "reports" / "b.md").read_bytes() == b"x" and not (dest / rd.SUBDIR / "b.md").exists()
 
 
 def test_changed_report_updates_the_same_drive_file_not_a_duplicate(tmp_path):
@@ -360,4 +360,58 @@ def test_settings_write_is_atomic_and_a_broken_copy_leaves_no_partial_report(tmp
         raise OSError("disk gone")
     monkeypatch.setattr(rd.shutil, "copy2", half)
     assert "error" in rd.after_report(tmp_path, rep, features=ON)
-    assert list(dest.iterdir()) == []
+    assert list((dest / rd.SUBDIR).iterdir()) == []
+
+
+def test_folder_copy_never_overwrites_an_owner_file_in_the_drive_folder(tmp_path):
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    (dest / "x.md").write_text("mine", encoding="utf-8")
+    rd.save(tmp_path, folder=str(dest))
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "x.md").write_text("1", encoding="utf-8")
+    rd.sync(tmp_path)
+    assert (dest / "x.md").read_text(encoding="utf-8") == "mine"            # JARVES writes only into its own subfolder
+    assert (dest / rd.SUBDIR / "x.md").read_text(encoding="utf-8") == "1"
+
+
+def test_api_skips_a_report_too_big_for_one_upload(tmp_path, monkeypatch):
+    monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
+    rd.save(tmp_path, mode="api")
+    rep = tmp_path / "big.csv"
+    rep.write_bytes(b"12345")
+    fake = FakeDrive()
+    out = rd.after_report(tmp_path, rep, features=ON, client=fake)
+    assert fake.sent == [] and "too big" in out["error"]
+
+
+def test_a_file_that_keeps_failing_warns_once_until_it_is_sent(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append((a[1], kw.get("file"))))
+    monkeypatch.setattr(rd, "_WARNED", set())
+    monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "big.md").write_bytes(b"12345")
+    rd.sync(tmp_path, client=FakeDrive())
+    rd.sync(tmp_path, client=FakeDrive())
+    assert warned == [("SEND_FAILED", "big.md")]
+    monkeypatch.setattr(rd, "MAX_UPLOAD", 100)
+    rd.sync(tmp_path, client=FakeDrive())
+    monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
+    (tmp_path / "reports" / "big.md").write_bytes(b"123456")
+    rd.sync(tmp_path, client=FakeDrive())
+    assert warned == [("SEND_FAILED", "big.md")] * 2                     # a new outage for that file warns again
+
+
+def test_drive_ids_merge_under_the_lock_and_a_concurrent_upload_is_not_lost(tmp_path):
+    rd.save(tmp_path, mode="api")
+    rep = tmp_path / "a.md"
+    rep.write_bytes(b"1")
+
+    class Racing(FakeDrive):                     # another process records its own Drive id meanwhile
+        def upload(self, *a, **kw):
+            rd.save(tmp_path, ids_add={"other.md": "f9"})
+            return {"id": "f1"}
+    rd.upload(tmp_path, rep, client=Racing())
+    assert rd._raw(tmp_path)["ids"] == {"other.md": "f9", "a.md": "f1"}

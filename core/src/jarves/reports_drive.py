@@ -25,6 +25,8 @@ UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multip
 UPDATE_URL = "https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=multipart"
 _WARNED: set[str] = set()                       # warnings already logged in the current outage: once each
 _SYNC_LOCK = threading.Lock()                   # one sync at a time: no double send, no racing settings write
+SUBDIR = "JARVES reports"                       # its own subfolder: never overwrites an owner file in Drive
+MAX_UPLOAD = 5 * 1024 * 1024                    # Google documents uploadType=multipart for files up to 5 MB
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
 feat.register(FEATURE, "דוחות לגוגל דרייב", "Reports to Google Drive", False, stage="beta",
@@ -53,7 +55,11 @@ def save(home: Path, **kw) -> dict:
     from .drive_mode import _file_lock
     path = Path(home) / FILE
     with _file_lock(path):
-        d = {**_raw(home), **load(home), **kw}
+        raw = _raw(home)
+        add = kw.pop("ids_add", None) or {}     # re-read under the lock: a concurrent writer's ids are kept
+        d = {**raw, **load(home), **kw}
+        if add:
+            d["ids"] = {**(raw.get("ids") if isinstance(raw.get("ids"), dict) else {}), **add}
         fd, tmp = tempfile.mkstemp(dir=home, prefix=FILE, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -108,15 +114,20 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
     if st["mode"] == "api":
         mime = MIMES.get(path.suffix.lower(), "application/octet-stream")
         csv = path.suffix.lower() == ".csv"
+        if path.stat().st_size > MAX_UPLOAD:
+            raise ValueError(clilang.fmt("הדוח גדול מדי להעלאה (מעל 5MB): השתמשו ב-jarvis reports drive folder PATH",
+                                         "report too big for one Drive upload (over 5 MB): use jarvis reports drive folder PATH"))
         ids = dict(_raw(home).get("ids") or {})          # report name -> its Drive file id: update, not duplicate
         r = (client or DriveApi(home)).upload(path.stem if csv else path.name, path.read_bytes(), mime,
                                              SHEET if csv else None, file_id=ids.get(path.name))
         if r.get("id"):
-            save(home, ids={**ids, path.name: r["id"]})
+            save(home, ids_add={path.name: r["id"]})
         return {"mode": "api", "id": r.get("id", "")}
     dest = Path(st["folder"])
     if not st["folder"] or not dest.is_dir():
         raise ValueError("no Google Drive folder set: run jarvis reports drive folder PATH")
+    dest = dest / SUBDIR
+    dest.mkdir(exist_ok=True)
     tmp = dest / f".{path.name}.jarves-{uuid.uuid4().hex[:8]}.part"   # a cut copy never shows as the report
     try:
         shutil.copy2(path, tmp)
@@ -208,11 +219,12 @@ def _sync(home: Path, client) -> list[dict]:
             if r and "error" not in r:
                 sent[f.name] = f.stat().st_mtime
                 _WARNED.discard("RECONNECT")
+                _WARNED.discard("SEND_FAILED:" + f.name)
             elif r.get("reconnect"):            # every other file would fail the same way: stop, warn once
                 if _first("RECONNECT"):
                     logs.warn("reports_drive", "RECONNECT", "Google sign-in expired or refused; reports are not sent")
                 break
-            else:
+            elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
     save(home, sent=sent)
     return out

@@ -26,12 +26,12 @@ action = "feature_on:reports_drive"
 check = "active:reports_drive"
 
 [[steps]]
-he = "אפשרות א (מומלצת): jarvis reports drive folder ונתיב התיקייה של גוגל דרייב במחשב."
-en = "Option A (recommended): jarvis reports drive folder and the path of your Google Drive folder on the PC."
+he = "אפשרות א (מומלצת): jarvis reports drive folder ונתיב התיקייה של גוגל דרייב במחשב. הדוחות נכנסים לתת-תיקייה JARVES reports, כך שקבצים שלכם לא נדרסים."
+en = "Option A (recommended): jarvis reports drive folder and the path of your Google Drive folder on the PC. Reports go into a JARVES reports subfolder, so your own files are never overwritten."
 
 [[steps]]
-he = "אפשרות ב: jarvis reports drive signin. הדפדפן נפתח, אתם מתחברים ומאשרים. לכיבוי: jarvis features off reports_drive."
-en = "Option B: jarvis reports drive signin. Your browser opens, you sign in and allow. To turn off: jarvis features off reports_drive."
+he = "אפשרות ב: jarvis reports drive signin. הדפדפן נפתח, אתם מתחברים ומאשרים. דוח מעל 5MB לא מועלה כך; השתמשו באפשרות א. לכיבוי: jarvis features off reports_drive."
+en = "Option B: jarvis reports drive signin. Your browser opens, you sign in and allow. A report over 5 MB is not uploaded this way; use option A. To turn off: jarvis features off reports_drive."
 
 [[steps]]
 he = "לשליחה ידנית של דוח אחד: jarvis reports drive upload ושם הקובץ."
