@@ -385,6 +385,11 @@ def public_publish(dist: Path, keep: int = 3, env: dict | None = None, gh: GitHu
     env = os.environ if env is None else env
     if dry_run:
         return _dry_run_plan(dist, env, "stable")
+    # #544: in GitHub Actions a real publish runs only from a tag ref (the protected stable-release environment admits
+    # tags only); a branch run is refused before any secret is read. Defence in depth: the environment is the control.
+    if env.get("GITHUB_ACTIONS") == "true" and env.get("GITHUB_REF_TYPE") != "tag":
+        raise SystemExit("Public releases: refused - a real publish runs only from a tag ref "
+                         f"(GITHUB_REF_TYPE={str(env.get('GITHUB_REF_TYPE') or '')[:20]!r}, #544)")
     # `missing` holds only the NAMES from PUBLIC_SECRETS (env var names, public in docs/RELEASE_HOSTING.md), never an
     # env value: the values are read only by the `.strip()` emptiness test and are not printed.
     missing = [k for k in PUBLIC_SECRETS if not str(env.get(k) or "").strip()]

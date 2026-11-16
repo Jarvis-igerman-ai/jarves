@@ -88,3 +88,12 @@ def test_automerge_only_turns_on_auto_merge_for_the_native_queue():
     assert not any("checkout" in s.get("uses", "") and "ref" in s.get("with", {}) for s in doc["jobs"]["enqueue"]["steps"])
     assert doc[True]["workflow_run"]["workflows"] == ["jarves-checks"] and "labeled" in doc[True]["pull_request_target"]["types"]
     assert not (WF / "next-flow.yml").exists()                                   # the `next` flow is retired with it
+
+
+def test_signoff_sheet_and_release_docs_never_automerge():
+    """#543: the owner's signature lives in docs/reviews/MANUAL_TEST_*.md; a docs-only PR touching it (or docs/release/)
+    must not get an automerge class, else an agent could flip rows after the owner signed and it merges by label."""
+    for f in ("docs/reviews/MANUAL_TEST_4.6.0.md", "docs/reviews/RELEASE_CHECKLIST_4.6.0.md", "docs/release/x.md"):
+        c, why = rc.classify([f, "docs/NOW.md"])
+        assert c is None and why == f"high-risk path: {f}", f
+    assert cls(["docs/reviews/OTHER_REVIEW.md"]) == "docs"                       # ordinary review notes stay docs

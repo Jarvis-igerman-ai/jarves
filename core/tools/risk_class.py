@@ -36,6 +36,8 @@ HIGH_RISK = (
     ".claude/*", "core/src/jarves/workflow/hooks.py", "core/src/jarves/workflow/bootstrap.py",
     "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 )
+# #543: the owner's release signature lives in these docs; they are never "just docs" (no automerge class).
+SIGNOFF_DOCS = ("docs/reviews/MANUAL_TEST_*", "docs/reviews/RELEASE_CHECKLIST_*", "docs/release/*")
 BLOCKING_LABELS = {"needs-review", "no-automerge", "do-not-merge", "wip"}
 GUIDES = ("core/src/jarves/guides/data/*.toml",)
 LOCALES = ("core/src/jarves/dashboard_static/locales/*", "core/src/jarves/locales/*", "core/src/jarves/*catalog*.json",
@@ -78,7 +80,7 @@ def classify(files, lines: int = 0, labels=frozenset(), author: str = "", mode: 
         return None, "dependabot PRs are handled by dependabot-automerge.yml"
     if not files:
         return None, "no changed files"
-    risky = [f for f in files if is_high_risk(f) and not is_docs(f)]
+    risky = [f for f in files if (is_high_risk(f) and not is_docs(f)) or _m(f, SIGNOFF_DOCS)]
     if risky:
         return None, f"high-risk path: {risky[0]}"
     if all(is_docs(f) for f in files):

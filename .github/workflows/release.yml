@@ -80,6 +80,9 @@ jobs:
           python3 packaging/release.py verify --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
           python3 packaging/release.py stamp --dir dist --commit "${{ steps.find.outputs.sha }}" --tree "${{ steps.find.outputs.tree }}"
       - name: Rows hash recorded by the owner outside the sheet (annotated tag message, #605)
+        env:
+          # owner-only repository variable (ssh allowed_signers lines): the gate requires a tag signed by a listed key
+          ALLOWED_SIGNERS: ${{ vars.RELEASE_ALLOWED_SIGNERS }}
         run: |
           # an annotated tag message line "Rows hash: <sha256>" (printed by `jarvis release signoff --finish`); a lightweight tag
           # or a dispatch on main has none (a dry run then only prints a note)
@@ -88,6 +91,8 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
+            printf '%s\n' "$ALLOWED_SIGNERS" > "$RUNNER_TEMP/allowed_signers"     # empty when unset: the gate refuses
+            echo "JARVES_ALLOWED_SIGNERS_FILE=$RUNNER_TEMP/allowed_signers" >> "$GITHUB_ENV"
             if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
               h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
               [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"

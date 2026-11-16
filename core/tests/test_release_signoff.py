@@ -465,3 +465,80 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
     assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
+
+
+class _Run:
+    def __init__(self, code=0, err=""):
+        self.code, self.err, self.calls = code, err, []
+
+    def __call__(self, cmd, **kw):
+        import subprocess
+        self.calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, self.code, "", self.err)
+
+
+def test_gate_tag_signature_by_owner_key(tmp_path):
+    """#605: the tag's 'Rows hash' is authentic only when the tag is signed by a key in the owner's allowed-signers list
+    (kept outside the repo). Missing/empty list, a bad tag name, a git error or a bad/unlisted signature refuse."""
+    signers = tmp_path / "allowed_signers"
+    probs = gate.tag_signature_problems
+    assert any("missing or empty" in p for p in probs(tmp_path, "v4.1.0", signers, run=_Run()))
+    signers.write_text("owner ssh-ed25519 AAAA\n", encoding="utf-8")
+    ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
+    assert probs(tmp_path, "v4.1.0", signers, run=ok) == []
+    cmd = ok.calls[0]
+    assert f"gpg.ssh.allowedSignersFile={signers}" in cmd and cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"]
+    assert "gpg.minTrustLevel=fully" in cmd and "gpg.ssh.program=ssh-keygen" in cmd
+    stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
+    assert any("not signed by the owner" in p for p in probs(tmp_path, "v4.1.0", signers, run=_Run(0, stranger)))
+    bad = probs(tmp_path, "v4.1.0", signers, run=_Run(1, "error: no signature found\n" + "x" * 900))
+    assert len(bad) == 1 and "no signature found" in bad[0] and len(bad[0]) < 500
+    assert any("not a stable tag" in p for p in probs(tmp_path, "main;rm", signers, run=ok))
+
+    def boom(cmd, **kw):
+        raise FileNotFoundError("git")
+    assert any("cannot verify" in p for p in probs(tmp_path, "v4.1.0", signers, run=boom))
+
+
+def test_gate_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsys):
+    """#605: a real publish (JARVES_REQUIRE_ROWS_HASH=1) refuses without the owner's signers list (fail closed); the
+    workflow writes the owner-only repository variable to that file on a tag ref."""
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    monkeypatch.delenv("JARVES_ALLOWED_SIGNERS_FILE", raising=False)
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--require-rows-hash"])
+    assert rc == 1 and "RELEASE_ALLOWED_SIGNERS" in capsys.readouterr().out
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS_FILE", str(tmp_path / "absent"))
+    rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    assert rc == 1 and "allowed-signers file absent is missing or empty" in capsys.readouterr().out
+    wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "vars.RELEASE_ALLOWED_SIGNERS" in wf and "JARVES_ALLOWED_SIGNERS_FILE=" in wf
+    assert wf.index("JARVES_ALLOWED_SIGNERS_FILE=") > wf.index('if [ "$REF_TYPE" = "tag" ]')
+
+
+@pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); deselected elsewhere
+def test_gate_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
+    """#605: with real git + ssh-keygen, a tag signed by the owner's listed key passes; a good signature by an unlisted
+    key (git verify-tag can exit 0 with "No principal matched") is refused."""
+    import subprocess
+    for k, v in (("HOME", str(tmp_path)), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_GLOBAL", str(tmp_path / "gc"))):
+        monkeypatch.setenv(k, v)                                   # no runner/user git config leaks in
+
+    def sh(*cmd, cwd=tmp_path):
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        assert r.returncode == 0, f"{cmd[:2]}: {r.stderr[-400:]}"
+    for who in ("owner", "stranger"):
+        sh("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(tmp_path / who))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ("git", "-c", "user.name=o", "-c", "user.email=o@x")
+    sh("git", "init", "-q", cwd=repo)
+    sh(*git, "commit", "-q", "--allow-empty", "-m", "c", cwd=repo)
+    for who, tag in (("owner", "v4.1.0"), ("stranger", "v4.1.1")):
+        sh(*git, "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen", "-c", f"user.signingkey={tmp_path / who}",
+           "tag", "-s", tag, "-m", "Rows hash: " + "a" * 64, cwd=repo)
+    signers = tmp_path / "allowed_signers"
+    signers.write_text('owner namespaces="git" ' + (tmp_path / "owner.pub").read_text(encoding="utf-8"), encoding="utf-8")
+    assert gate.tag_signature_problems(repo, "v4.1.0", signers) == []
+    bad = gate.tag_signature_problems(repo, "v4.1.1", signers)
+    assert len(bad) == 1 and "not signed by the owner" in bad[0]
