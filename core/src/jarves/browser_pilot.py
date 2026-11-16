@@ -225,8 +225,15 @@ class PilotSession:
       pin_hosts(m)  called with {host: [vetted ip, ...]} before every open and whenever a new host was vetted: the driver
                     must connect ONLY to these addresses (Chromium --host-resolver-rules "MAP host ip", or a proxy that
                     connects to the vetted IP). Every name is resolved ONCE per session and all answers are vetted, so a
-                    rebinding server cannot hand the browser a second, private answer.
-    request_allowed(url) is the guard for every request, redirect target and subresource."""
+                    rebinding server cannot hand the browser a second, private answer. A host NOT in the map must be
+                    refused, never resolved by the browser itself (Chromium "MAP * ~NOTFOUND"). The session can only check
+                    that pin_hosts EXISTS, not that it works (#574 item 1): a no-op pin_hosts loses the rebinding guard. A
+                    launch flag cannot pin a host first seen later, so a real driver must reach the network ONLY through
+                    PilotProxy (pilot_proxy.py), which dials the vetted addresses itself; PlaywrightDriver does exactly that.
+    request_allowed(url) is the guard for every request, redirect target and subresource reached through page.route. It is
+    the SECOND line: WebSockets, WebRTC, service workers and prefetch bypass page.route (#574 item 3), and a redirect has
+    already been fetched when the final URL is checked after open (item 6). The proxy (the first line) vets every
+    connection before a byte is sent; a driver without it must not be used on a public page."""
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
