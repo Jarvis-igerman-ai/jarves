@@ -5,6 +5,10 @@ Method: static read of the code paths that touch subprocesses, files, network, S
 `origin/main`. Nothing was exercised at runtime: every finding is **UNVERIFIED by test** unless it says otherwise.
 Not read in full: `projectmgr/{engine,pipeline,surfaces,cards,debate,plan}.py`, route/auth layers that call these modules.
 Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md`, V6 review. No secrets are included here.
+Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) was received truncated (1 of 12); the
+other 11 findings were not received and are **not reflected here** (UNVERIFIED whether covered).
+Disclosure: this repo is public. #1-#2 describe unfixed paths already stated in public issues #1096/#1097; fixes are
+proposed in #1108 (not merged).
 
 Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness needing a fix; P3 hardening.
 
@@ -12,10 +16,10 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 
 | # | Module | Sev | Finding | Fix route |
 |---|---|---|---|---|
-| 1 | projectmgr/gitops | P1 | `.github/` is not in `PROTECTED` | Tier R proposal, #1096 |
-| 2 | projectmgr/gitops | P2 | `PROTECTED` check is case-sensitive | Tier R proposal, #1097 |
-| 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | fix PR (Tier N), #1098 |
-| 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | fix PR (Tier N), #1099 |
+| 1 | projectmgr/gitops | P1 | `.github/` is not in `PROTECTED` | Tier R, proposed in #1108, #1096; see disposition |
+| 2 | projectmgr/gitops | P2 | `PROTECTED` check is case-sensitive | Tier R, proposed in #1108, #1097; see disposition |
+| 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | proposed in #1108 (Tier R), #1098; see disposition |
+| 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | proposed in #1108 (Tier R), #1099; see disposition |
 | 5 | projectmgr/gitops | P3 | `remove_worktree` guard is `"projects" in parts` | follow-up |
 | 6 | projectmgr/gitops, service | P3 | refs passed to git without `--` / leading `-` check | follow-up |
 | 7 | devstatus | P3 | read token reuses `JARVES_UPDATE_TOKEN`; cache holds issue/PR titles in plain JSON | follow-up |
@@ -78,7 +82,7 @@ check command.
 One issue per defect (AGENTS.md rule 8):
 - P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Tier R (workflows/secrets): **proposed only**; a PR touching `PROTECTED` needs the owner's decision.
 - P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Tier R (gate, `no-automerge`): **proposed only**, same reason.
-- P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
-- P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Tier N; fix **not done in this task** (report-only, Tier L), separate fix PR.
+- P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Fix **not done in this task** (report-only; this PR is Tier R by label); fix proposed in #1108 (below).
+- P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Fix **not done in this task** (report-only; this PR is Tier R by label); fix proposed in #1108 (below).
 - Fix status (2026-11-16): fixes for #1096-#1099 are **proposed** in open PR [#1108](https://github.com/Jarvis-igerman-ai/jarves/pull/1108) (JAR-376, Tier R, not merged; its diff touches `PROTECTED`/`is_protected`, `_kill_pid` with a process identity token, and `looks_sensitive`), pending the owner/council decision (required for #1096 and #1097). The issues stay open until a fix merges with evidence.
 - P3 #5-#10: hardening notes, no issue each; track in `docs/reviews/FINDINGS_LEDGER.md` when picked up.
