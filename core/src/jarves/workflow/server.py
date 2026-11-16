@@ -148,7 +148,6 @@ class Server(ThreadingHTTPServer):
         self.profile_home = profile_home or self.home.parent
         self.token = access_token(self.home)
         self.unlock_key = unlock.ServerKey()      # #750: the code-checking key stays in this process's memory
-        self.unlock_key.publish(self.home)
         self.store = store or Store(self.home / "workflow.db")
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
@@ -158,11 +157,20 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_wrong = ("", 0)             # (code eph, wrong tries over ALL sessions); 5 cancel the code
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
-        super().__init__(("127.0.0.1", port), Handler)
+        try:
+            super().__init__(("127.0.0.1", port), Handler)
+            # #750: publish only once the port is ours, so a failed second start never replaces the live server's key.
+            self.unlock_key.publish(self.home)
+        except BaseException:
+            if hasattr(self, "socket"):
+                self.socket.close()
+            if store is None:
+                self.store.close()  # a failed start (port in use) must not keep workflow.db open
+            raise
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
 
@@ -468,17 +476,17 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
+                eph = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+                eph = ""
             if not (isinstance(code, str) and unlock.consume(self.server.home, code, self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
-                prev_salt, n = self.server.unlock_wrong
-                n = (n if prev_salt == salt else 0) + 1
+                prev_eph, n = self.server.unlock_wrong
+                n = (n if prev_eph == eph else 0) + 1
                 if n >= 5:
                     path.unlink(missing_ok=True)
                     n = 0
-                self.server.unlock_wrong = (salt, n)
+                self.server.unlock_wrong = (eph, n)
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = ("", 0)

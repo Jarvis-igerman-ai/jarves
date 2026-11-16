@@ -253,6 +253,32 @@ class UnlockTests(unittest.TestCase):
         with self.assertRaises(unlock.UnlockUnavailable):
             unlock.issue(self.home)
 
+    def test_750_a_failed_second_start_leaves_the_live_servers_key(self):
+        before = (self.home / unlock.PUB_FILE).read_bytes()
+        with self.assertRaises(OSError):                                # port in use: the second start fails at bind
+            Server(self.home, self.server.server_port)
+        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)
+        shown = unlock.issue(self.home)
+        self.assertTrue(unlock.consume(self.home, shown, self.server.unlock_key))
+
+    def test_750_issue_reads_key_and_pid_from_one_record_and_refuses_pid_zero_or_negative(self):
+        pub = self.server.unlock_key._pub()
+        for pid in (0, -1, None):
+            (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": pub, "pid": pid}), encoding="ascii")
+            with patch.object(unlock, "_alive", return_value=True):     # POSIX kill(-1, 0) reports "alive"
+                with self.assertRaisesRegex(unlock.UnlockUnavailable, "not running"):
+                    unlock.issue(self.home)
+        reads = []
+        real = Path.read_text
+        def counting(path, *a, **k):
+            if path.name == unlock.PUB_FILE:
+                reads.append(path.name)
+            return real(path, *a, **k)
+        self.server.unlock_key.publish(self.home)
+        with patch.object(Path, "read_text", counting):
+            unlock.issue(self.home)
+        self.assertEqual(reads, [unlock.PUB_FILE])                      # one read: a republish cannot mix two servers
+
     def test_750_a_locked_unlock_file_is_retried_once_then_reported_by_open(self):
         real, calls = unlock._write, []
         def flaky(path, record):
@@ -260,12 +286,13 @@ class UnlockTests(unittest.TestCase):
             if path.name == unlock.FILE and len(calls) == 1:
                 raise PermissionError("in use")
             real(path, record)
-        with patch.object(unlock, "_write", flaky):
+        with patch.object(unlock, "_write", flaky), patch.object(unlock, "_sleep") as pause:
             shown = unlock.issue(self.home)                             # first replace fails, the retry works
         self.assertEqual(calls, [unlock.FILE, unlock.FILE])
+        pause.assert_called_once_with(unlock.RETRY_PAUSE_S)             # a short pause lets the reader close the file
         self.assertTrue(unlock.consume(self.home, shown, self.server.unlock_key))
         argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]
-        with patch.object(unlock, "_write", side_effect=PermissionError("in use")), \
+        with patch.object(unlock, "_write", side_effect=PermissionError("in use")), patch.object(unlock, "_sleep"), \
                 patch("jarves.workflow.opener.open_dashboard", return_value=0), \
                 patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), \
                 redirect_stderr(io.StringIO()) as err:

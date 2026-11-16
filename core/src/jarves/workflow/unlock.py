@@ -26,6 +26,8 @@ CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 PUB_FILE = "unlock_pub.json"
+RETRY_PAUSE_S = 0.2   # Windows: give a reader holding unlock.json time to close it before the one retry
+_sleep = time.sleep   # injectable for hermetic tests
 
 
 class UnlockUnavailable(RuntimeError):
@@ -87,12 +89,12 @@ def _alive(pid: int) -> bool:
 def issue(home: Path, *, now: float | None = None) -> str:
     """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
     try:
-        pub = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))["pub"]
-        peer = X25519PublicKey.from_public_bytes(bytes.fromhex(pub))
-        pid = int(json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii")).get("pid") or 0)
+        published = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))  # read once: key and pid of ONE server
+        peer = X25519PublicKey.from_public_bytes(bytes.fromhex(published["pub"]))
+        pid = int(published.get("pid") or 0)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run unlock again") from exc
-    if not _alive(pid):  # a crashed server never withdrew its key: a code for it could never be checked
+    if pid <= 0 or not _alive(pid):  # pid <= 0 is no publisher (POSIX kill(-1, 0) would even report alive)  # a crashed server never withdrew its key: a code for it could never be checked
         raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run unlock again")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     eph_key = X25519PrivateKey.generate()
@@ -106,6 +108,7 @@ def issue(home: Path, *, now: float | None = None) -> str:
         except OSError as exc:
             if attempt == 2:
                 raise UnlockUnavailable(f"could not save the unlock code ({exc.__class__.__name__}); run unlock again") from exc
+            _sleep(RETRY_PAUSE_S)
     return raw
 
 
