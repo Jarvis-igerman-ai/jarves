@@ -50,7 +50,7 @@ def test_top_error_says_what_to_do_in_both_languages(en):
 # Runs i18n.js (Hebrew chosen) plus the real api() and fail() bodies cut out of app.js, with stubbed fetch/DOM.
 NODE_HARNESS = r"""
 const fs = require("fs"), vm = require("vm");
-const [he, i18n, app] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8"));
+const [he, i18n, app] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n"));   // Windows CRLF checkout
 const cut = (re) => { const m = re.exec(app); if (!m) throw new Error("not found: " + re); return m[0]; };
 const api = cut(/async function api\([\s\S]*?\n}\n/), fail = cut(/function fail\(e\)[^\n]*\n[^\n]*\n/);
 const noop = () => {};
