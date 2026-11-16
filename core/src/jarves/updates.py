@@ -574,7 +574,8 @@ class UpdateChecker:
     def prepare_install(self, approved: bool, backup: Path | str | None = None) -> dict:
         """Download + verify + back up. Returns {installer, backup, version}; launching is a separate step.
         `backup`: a verified backup the caller has just taken (install_latest's "backup now"); it is reused instead
-        of writing a second archive of the same data (#1016). Missing file: a new checkpoint is taken."""
+        of writing a second archive of the same data (#1016) only while it verifies, lies in the backup folder and
+        no data changed after it; otherwise a new checkpoint is taken."""
         if approved is not True:
             raise UpdateError("UPDATE_NEEDS_APPROVAL", "an update is installed only after the user approves it")
         if sys.platform != "win32":
@@ -601,9 +602,11 @@ class UpdateChecker:
         try:
             exe = self.download(rel)
             up.write(self.home, "backing_up")
-            given = Path(backup) if backup else None
-            bak = given if given is not None and given.is_file() else \
-                backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
+            bak = Path(backup) if backup else None
+            if bak is not None and not _reusable_backup(self.home, bak):
+                bak = None                   # outside the backup folder, broken, or the data changed during the download
+            if bak is None:
+                bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
         except UpdateError as e:
             up.fail(self.home, e.code)
             raise
@@ -925,6 +928,18 @@ def offer_rollback(home: Path, *, ask: Callable | None = None, popen: Callable |
 
 
 # ---------------------------------------------------------------------- backup before update / migration
+def _reusable_backup(home: Path, path: Path) -> bool:
+    """#1016: a backup the caller took before the download is the rollback backup only while it is a verified
+    archive in this home's backup folder and no data changed after it (the Core runs during the download)."""
+    from . import backup
+    if not backup.still_current(home, path):
+        return False
+    try:
+        return bool(backup.verify(path).get("ok"))
+    except (OSError, backup.BackupError):
+        return False
+
+
 def backup_before_update(home: Path, label: str) -> Path:
     """WP-M5's verified pre-migration backup (jarves.backup.checkpoint: SQLite-safe copies, integrity check, no
     credentials). Any failure stops the update: no install without a verified restore point."""

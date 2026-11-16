@@ -339,6 +339,29 @@ def test_restore_over_budget_keeps_the_archive_it_restores_issue_1016(profile, m
     assert not old.is_file() and mine.is_file()                        # outside a restore it is fair game
 
 
+def test_restore_keeps_the_installers_a_rollback_relaunches_issue_1016(profile, monkeypatch):
+    """Installers under updates/ are not archived any more; a restore must leave them where they are."""
+    monkeypatch.setattr(backup, "core_running", lambda home, port=None: False)
+    arch = backup.create(profile, "manual")
+    prev = profile / "updates" / "previous" / "JARVES-Setup-0.1.0.7.exe"
+    prev.parent.mkdir(parents=True)
+    prev.write_bytes(b"MZ old installer")
+    assert backup.restore(arch, profile)["ok"]
+    assert prev.read_bytes() == b"MZ old installer"
+
+
+def test_doctor_backup_size_names_manual_backups_and_their_fix_issue_1016(profile, monkeypatch):
+    from jarves import selfcheck
+    from jarves.config import Config
+    monkeypatch.setattr(backup, "usage", lambda home: {"count": 9, "bytes": 6e9, "max_gb": 4.0, "over": True})
+    c = selfcheck.SelfCheck(profile, Config(), system=lambda home: {"disk_free_gb": 50, "memory": {}})
+    out: list = []
+    c._system(out, {})
+    f, = [x for x in out if x.fingerprint == "backup_size"]
+    assert "manual backups" in f.detail and "--manual" in f.fix
+    assert "ידניים" in f.detail_he and "--manual" in f.fix_he
+
+
 def test_cli_settings_for_manual_checkpoints_and_size_issue_1016(profile, capsys):
     from jarves import cli
     assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "1", "--max-gb", "3"]) == 0

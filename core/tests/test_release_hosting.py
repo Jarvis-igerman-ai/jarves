@@ -382,19 +382,40 @@ def test_hosted_install_needs_approval_and_verifies_sha_and_size(tmp_path, monke
 
 
 def test_install_reuses_the_backup_just_taken_issue_1016(tmp_path, monkeypatch):
+    import os
+    from jarves import backup
     monkeypatch.setattr(sys, "platform", "win32")
     made = []
     monkeypatch.setattr(updates, "backup_before_update", lambda home, label: made.append(label) or home / "new.zip")
-    given = tmp_path / "given.zip"
+    monkeypatch.setattr(backup, "verify", lambda p: {"ok": Path(p).name != "broken.zip"})
+    db = tmp_path / "memory.db"
+    db.write_bytes(b"SQLite format 3\x00")
+    os.utime(db, (1000, 1000))
+    bdir = backup.backup_dir(tmp_path)
+    bdir.mkdir()
+    given = bdir / "given.zip"
     given.write_bytes(b"PK")
+    os.utime(given, (2000, 2000))
     host, pub = _hosted(tmp_path)
     u = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub])
     u.check(force=True)
     r = u.prepare_install(approved=True, backup=given)
     assert r["backup"] == str(given) and made == []                    # one backup per install, not two
-    assert updates.read_previous(tmp_path)["backup"] == str(given)    # and it is the rollback backup
-    r = u.prepare_install(approved=True, backup=tmp_path / "missing.zip")
+    prev = updates.read_previous(tmp_path)
+    assert prev["backup"] == str(given) and isinstance(prev["created_ts"], float)  # start checkpoint can reuse it
+    r = u.prepare_install(approved=True, backup=bdir / "missing.zip")
     assert r["backup"] == str(tmp_path / "new.zip") and len(made) == 1
+    outside = tmp_path / "elsewhere.zip"                               # not in the backup folder (review R6)
+    outside.write_bytes(b"PK")
+    os.utime(outside, (2000, 2000))
+    assert u.prepare_install(approved=True, backup=outside)["backup"] == str(tmp_path / "new.zip") and len(made) == 2
+    broken = bdir / "broken.zip"                                       # does not verify
+    broken.write_bytes(b"PK")
+    os.utime(broken, (2000, 2000))
+    assert u.prepare_install(approved=True, backup=broken)["backup"] == str(tmp_path / "new.zip") and len(made) == 3
+    (tmp_path / "memory.db-wal").write_bytes(b"x")                     # the Core wrote during the download (R1)
+    os.utime(tmp_path / "memory.db-wal", (3000, 3000))
+    assert u.prepare_install(approved=True, backup=given)["backup"] == str(tmp_path / "new.zip") and len(made) == 4
 
 
 def test_cached_release_is_reverified_at_install_time(tmp_path, monkeypatch):

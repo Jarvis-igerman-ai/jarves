@@ -423,3 +423,22 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
     f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks
+
+
+def test_real_deps_take_one_checkpoint_and_hand_it_to_the_updater_issue_1016(tmp_path, monkeypatch):
+    """#1016: install-latest's "backup now" is a checkpoint (not a manual backup) and the same archive reaches
+    prepare_install(backup=...), so the install writes one backup, not two."""
+    from jarves import backup, updates
+    from jarves.config import Config
+    home = tmp_path / "h"
+    (home / "updates").mkdir(parents=True)
+    taken, got = [], []
+    monkeypatch.setattr(backup, "checkpoint", lambda h, reason: taken.append((h, reason)) or h / "backups" / "cp.zip")
+    monkeypatch.setattr(backup, "create", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no manual backup")))
+    monkeypatch.setattr(updates.UpdateChecker, "prepare_install",
+                        lambda self, approved, backup=None: got.append((approved, backup)) or {"backup": str(backup)})
+    d = il.real_deps(argparse.Namespace(), Config(), home)
+    p = d.backup_now()
+    assert taken == [(home, "before a beta install")] and p == home / "backups" / "cp.zip"
+    d.prepare("beta")
+    assert got == [(True, p)]

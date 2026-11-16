@@ -683,16 +683,23 @@ def _update_backup_for(home: Path, version: str, now: float | None = None) -> Pa
     except (TypeError, ValueError):
         return None
     p = backup_dir(home) / Path(rec["backup"]).name
+    return p if still_current(home, p) else None
+
+
+def still_current(home: Path, p: Path) -> bool:
+    """True when `p` is an archive in this home's backup folder and no data file (SQLite WAL/journal included,
+    the updater's own files excepted) changed after it was written: it still holds the current data (#1016)."""
     try:
+        p = Path(p)
+        if p.parent.resolve() != backup_dir(home).resolve() or not p.is_file():
+            return False
         written = p.stat().st_mtime
-        take, _skipped = plan(home, get_settings(home))
+        take, _skipped = plan(home, {"include_faces": True})  # every data file; get_settings would open memory.db
         paths = [q for q, rel in take if not (rel.startswith("updates/") or rel == "updates.json")]  # updater's own
-        paths += [q.with_name(q.name + sfx) for q in list(paths) for sfx in ("-wal", "-journal")]   # (above)
-        if any(q.stat().st_mtime > written for q in paths if q.exists()):
-            return None
+        paths += [q.with_name(q.name + sfx) for q in list(paths) for sfx in ("-wal", "-journal")]
+        return not any(q.stat().st_mtime > written for q in paths if q.exists())
     except OSError:
-        return None
-    return p
+        return False
 
 
 def due(home: Path, now: float | None = None) -> bool:
