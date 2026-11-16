@@ -2060,7 +2060,8 @@ class Core:
                 # "yes?" so the user can talk the moment the second chime sounds
                 self._spawn(self._chime("wake"))
                 await self.set_face("listening")
-                await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
+                await self.link.send_face("assistant.activity", {"kind": "connecting", "text": self.wake_connecting_text(),
+                                                                  "detail": ""})
                 await self._open_wake_live()
 
     async def _open_wake_live(self) -> None:
@@ -2080,6 +2081,10 @@ class Core:
         finally:
             if not opened:
                 self._greeted = was
+
+    def wake_connecting_text(self) -> str:
+        """#520: the face text while a wake session connects, in the voice language (was Hebrew for every language)."""
+        return "מתחבר…" if self.cfg.voice.language == "he" else "Connecting…"
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""

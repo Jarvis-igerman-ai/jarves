@@ -177,6 +177,13 @@ def test_wake_session_gets_a_short_greeting_when_the_feature_is_on():
     assert Core.wake_greeting(off) is None and not off._greeted
 
 
+@pytest.mark.parametrize("lang,text", [("he", "מתחבר…"), ("en", "Connecting…")])
+def test_wake_connecting_text_follows_the_voice_language(lang, text):
+    """#520 (1): the face text shown while a wake session connects was Hebrew for every voice language."""
+    from jarves.app import Core
+    assert Core.wake_connecting_text(_ns(lang=lang)) == text
+
+
 @pytest.mark.parametrize("outcome", ["opened", "not_opened", "error"])
 async def test_wake_greeting_is_claimed_only_when_the_session_starts(outcome):
     """#520: a wake session that never opened (budget, mute, connect failure, error) must not use up the
