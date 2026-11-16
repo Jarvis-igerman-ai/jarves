@@ -2,6 +2,8 @@ package api
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -214,8 +216,8 @@ func TestBackfillSinceAndUnansweredRequest(t *testing.T) {
 	for i := 0; i <= backfillRetries; i++ { // WhatsApp never answers again
 		tm.fire()
 	}
-	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 {
-		t.Fatalf("a request WhatsApp never answers must end as a reported incomplete chat, not hang: %s", got.raw)
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || got.body["chats_done"] != 0.0 {
+		t.Fatalf("a request WhatsApp never answers must end as a reported incomplete chat (not done), not hang: %s", got.raw)
 	}
 }
 
@@ -495,8 +497,8 @@ func TestBackfillDelayedAnswerOfARetriedRequestDoesNotFinishTheChat(t *testing.T
 	if got := e.drain(0); got.body["state"] != "running" || len(e.requests()) != 3 {
 		t.Fatalf("a delayed answer completed a later request: %d requests, state %v", len(e.requests()), got.body["state"])
 	}
-	e.answerFor("", dana, 0, 0, "end") // C's own answer: nothing older
-	if got := e.drain(3); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+	e.answerFor("", dana, 0, 0, "end") // C's answer names no request after a timeout: it may be late, so incomplete
+	if got := e.drain(3); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || got.body["chats_done"] != 0.0 {
 		t.Fatalf("end: state %v, incomplete %v", got.body["state"], got.body["chats_incomplete"])
 	}
 }
@@ -633,7 +635,8 @@ func TestBackfillLostAnswerDoesNotSwallowEveryLaterCompletion(t *testing.T) {
 		t.Fatalf("the first chat did not finish: %d requests", len(e.requests()))
 	}
 	e.answerFor("", second, 0, 0, "d")
-	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+	// both finished on id-less answers after a timeout: reported incomplete, never silently done
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 2.0 || got.body["chats_done"] != 0.0 {
 		t.Fatalf("end %s", got.raw)
 	}
 }
@@ -651,8 +654,8 @@ func TestBackfillLeftoverOrphanCostsTheNextChatOneTimeout(t *testing.T) {
 	second := e.requests()[len(e.requests())-1].Chat
 	e.answerFor("", second, 0, 0, "c") // taken for A's late answer
 	tm.fire()                          // the request times out: no new orphan
-	e.answerFor("", second, 0, 0, "d") // the retry's empty answer finishes the chat
-	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 0.0 {
+	e.answerFor("", second, 0, 0, "d") // the retry's empty answer ends the chat, id-less after a timeout: incomplete
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 || got.body["chats_done"] != 1.0 {
 		t.Fatalf("end %s", got.raw)
 	}
 }
@@ -676,7 +679,61 @@ func TestBackfillManyInheritedOrphansDoNotExhaustAResponsiveChat(t *testing.T) {
 		e.answerFor("", second, 0, 0, fmt.Sprintf("x%d", i)) // genuine empty answer (may be taken for a late one)
 		tm.fire()
 	}
-	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 1.0 {
-		t.Fatalf("only the unanswered chat may be incomplete: %s", got.raw)
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_incomplete"] != 2.0 || got.body["chats_done"] != 0.0 {
+		t.Fatalf("the unanswered chat and the id-less finish after timeouts are incomplete: %s", got.raw)
+	}
+}
+
+// Without any timeout in the run, an id-less empty answer cannot be a late one: the chat is done, not incomplete.
+func TestBackfillIdlessFinishWithoutTimeoutIsDone(t *testing.T) {
+	e := readyBackfill(t, func(c *Config) { c.AfterFunc = (&timers{}).after })
+	e.mustOK(e.do("POST", "/history/backfill", e.admin, map[string]any{}))
+	e.answerFor("", dana, 0, 0, "end")
+	if got := e.drain(0); got.body["state"] != "done" || got.body["chats_done"] != 1.0 || got.body["chats_incomplete"] != 0.0 {
+		t.Fatalf("end %s", got.raw)
+	}
+}
+
+// blockedBody blocks the first Read until released: a slow admin client.
+type blockedBody struct{ started, release chan struct{} }
+
+func (b *blockedBody) Read(p []byte) (int, error) {
+	select {
+	case <-b.started:
+	default:
+		close(b.started)
+	}
+	<-b.release
+	return 0, fmt.Errorf("client gone")
+}
+
+func (b *blockedBody) Close() error { return nil }
+
+// A policy write takes the dispatch gate only after its body is read: a slow body never delays a backfill stop/dispatch.
+func TestBackfillGateIsNotHeldWhilePolicyBodyIsRead(t *testing.T) {
+	e := readyBackfill(t)
+	for _, path := range []string{"/mode", "/allow", "/read_scope", "/retention"} {
+		body := &blockedBody{started: make(chan struct{}), release: make(chan struct{})}
+		req := httptest.NewRequest("POST", path, body)
+		h := map[string]http.HandlerFunc{"/mode": e.s.hMode, "/allow": e.s.hAllow, "/read_scope": e.s.hReadScope,
+			"/retention": e.s.hRetention}[path]
+		done := make(chan struct{})
+		go func() { h(httptest.NewRecorder(), req); close(done) }()
+		<-body.started
+		stopped := make(chan struct{})
+		go func() { e.s.bfStop(); close(stopped) }()
+		if !waitFor(t, 2*time.Second, func() bool {
+			select {
+			case <-stopped:
+				return true
+			default:
+				return false
+			}
+		}) {
+			close(body.release)
+			t.Fatalf("%s holds the backfill gate while its body is read", path)
+		}
+		close(body.release)
+		<-done
 	}
 }

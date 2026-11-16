@@ -59,12 +59,13 @@ type backfill struct {
 	accepted  int                  // new messages buffered from the answer that is out
 	reqDrop   int                  // messages of the answer that is out that did not fit
 	orphans   int                  // timed-out requests whose answer may still arrive (answers without an id)
+	lateRisk  bool                 // a request of this run timed out: an id-less answer may be a late one
 	swallowed bool                 // an answer during the request that is out was taken for an orphan's late answer
 	dropped   int                  // messages that did not fit the buffer (their answer is asked again)
 	lost      int                  // overflow given up after backfillRetries answers without progress
-	partial   int                  // chats that moved on incomplete: lost messages, unanswered, or left the read scope
+	partial   int                  // chats that moved on incomplete: lost messages, unanswered, left the read scope, or ambiguous
 	total     int
-	done      int
+	done      int // chats finished complete (skipped ones included); never counts a chat in chats_incomplete
 	skipped   int // readable chats without a stored message to anchor on
 	received  int
 	buf       []bfMsg
@@ -121,10 +122,15 @@ func (s *Server) bfClearLocked(state string) {
 // bfNextChatLocked moves on to the next chat. Orphans are kept: an empty answer names neither its chat nor its
 // request, so a late empty answer of an earlier chat could otherwise finish the next chat unasked (silent loss).
 // They stay bounded: a timeout adds one only when no answer came during that request (see `swallowed`).
-func (s *Server) bfNextChatLocked() {
+// A chat counts either in done (complete) or in partial (incomplete), never in both.
+func (s *Server) bfNextChatLocked(complete bool) {
 	b := &s.bf
 	b.queue, b.retries, b.seen, b.ties = b.queue[1:], 0, nil, nil
-	b.done++
+	if complete {
+		b.done++
+	} else {
+		b.partial++
+	}
 }
 
 // bfPruneLocked applies a read-policy change at once: buffered messages of chats that left the read scope are
@@ -158,7 +164,8 @@ func (s *Server) bfStop() {
 	}
 }
 
-// wipe zeroes buffered messages so their text does not linger in a slice's backing array.
+// wipe drops the references buffered messages hold, so the slice's backing array no longer keeps their text
+// reachable. Go strings are immutable: the bytes stay in memory until the garbage collector reuses it.
 func wipe(l []bfMsg) {
 	for i := range l {
 		l[i] = bfMsg{}
@@ -181,8 +188,7 @@ func (s *Server) bfNext() {
 		return
 	}
 	for len(b.queue) > 0 && !s.readableLocked(b.queue[0].chat) { // left the read scope: never ask for it again
-		s.bfNextChatLocked()
-		b.partial++ // its history was not collected: reported incomplete, not as a normal finish
+		s.bfNextChatLocked(false) // its history was not collected: reported incomplete, not as a normal finish
 	}
 	if len(b.queue) == 0 {
 		b.state = "done"
@@ -220,7 +226,7 @@ func (s *Server) bfNext() {
 		wait = backfillWait
 	}
 	s.mu.Unlock()
-	s.cfg.AfterFunc(wait, func() { s.bfAnswered(gen, true) }) // the phone may never answer
+	s.cfg.AfterFunc(wait, func() { s.bfAnswered(gen, true, false) }) // the phone may never answer
 }
 
 // bfMessage buffers one on-demand history message (onEvent, without s.mu).
@@ -295,12 +301,13 @@ func (s *Server) bfAnswer(chats []string, reqID string) {
 	}
 	s.mu.Unlock()
 	if ok {
-		s.bfAnswered(gen, false)
+		s.bfAnswered(gen, false, reqID == "")
 	}
 }
 
 // bfAnswered finishes the request gen: the chat is done when the answer brought nothing older (or timed out).
-func (s *Server) bfAnswered(gen int, timeout bool) {
+// idless: the answer named no request, so after a timeout in this run it may be a late answer of another request.
+func (s *Server) bfAnswered(gen int, timeout, idless bool) {
 	s.mu.Lock()
 	b := &s.bf
 	if gen != b.gen || !b.waiting {
@@ -322,14 +329,14 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 	// inherited orphans can never exhaust a responsive chat's retry budget.
 	if timeout && !b.swallowed {
 		b.orphans++
+		b.lateRisk = true
 	}
 	if (timeout && !b.swallowed) || (b.truncated && b.accepted == 0) {
 		b.retries++ // no progress: a message that never fits, or a phone that never answers, must not loop forever
 	}
 	switch {
 	case !s.readableLocked(b.queue[0].chat): // left the read scope while asked: not collected, not "finished"
-		s.bfNextChatLocked()
-		b.partial++
+		s.bfNextChatLocked(false)
 	case !b.overDedup && (timeout || b.truncated) && b.retries <= backfillRetries:
 		// unanswered, or part of the answer did not fit: ask again from the same anchor (after Core has drained
 		// when truncated); `seen` skips what is already buffered, so the retry adds exactly the missing messages
@@ -337,11 +344,12 @@ func (s *Server) bfAnswered(gen int, timeout bool) {
 		b.needDrain = b.truncated && len(b.buf) > 0 // an empty buffer has nothing to drain: waiting would stall
 	case timeout || b.truncated || b.overDedup: // explicit, reported loss: the chat is incomplete, never silently "finished"
 		b.lost += b.reqDrop
-		b.partial++
-		s.bfNextChatLocked()
+		s.bfNextChatLocked(false)
 		lost = F{"lost": b.reqDrop, "unanswered": timeout}
 	case !b.older: // nothing new and older (with `since`, finishing costs this one extra request: accepted)
-		s.bfNextChatLocked()
+		// an id-less empty answer after a timeout may be another request's late answer: the chat's history may not
+		// have been collected, so it is reported incomplete rather than done (PROTOCOL.md 3a fallback)
+		s.bfNextChatLocked(!(idless && b.lateRisk))
 	default: // the anchor moved: only messages at the new anchor's timestamp can come again
 		ties, at := map[string]bool{}, b.queue[0].anchor.TS
 		if at == b.reqAnchor.TS {

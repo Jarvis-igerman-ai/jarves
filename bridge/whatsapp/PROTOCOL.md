@@ -119,22 +119,28 @@ Matching (fallback heuristic, only for an answer that names no request):
   does not finish the chat. If it was the real answer, the request times out and is asked again; that timeout does
   not count as a retry and adds no new late answer to expect, so earlier unanswered requests cost a responsive chat
   time, never its completion.
-- Residual risk (UNVERIFIED, two late answers in a row): if a swallowed late answer is followed by this request's
-  own answer also arriving late, that empty answer can finish a later request, possibly of the next chat when it
-  names no chat. Transports that echo the request id are not affected.
+- Two late answers in a row: if a swallowed late answer is followed by this request's own answer also arriving
+  late, that empty answer can end a later request, possibly of the next chat when it names no chat. So once any
+  request of the run has timed out, a chat that an id-less empty answer ends counts in `chats_incomplete`, not in
+  `chats_done`: its history may not have been collected. Transports that echo the request id are not affected.
+  Whether the real phone echoes the id is UNVERIFIED; check it before the CLI or dashboard ships (JAR-290).
 
 Read scope and wipe triggers:
 - Read scope is checked again before every request. A chat that leaves it is never asked again (it counts in
   `chats_incomplete`, also while its request is out), and its buffered messages are wiped as soon as the policy
   changes.
 - Read-policy writes, stop and unlink wait for a request being sent (at most 15 s), so once they return no forbidden
-  request goes out.
-- Stop, kill, mode `off`, keep-nothing and unlink clear the buffer. Acknowledged messages are wiped from memory.
+  request goes out. A policy write takes this wait only after its request body is read and validated.
+- Stop, kill, mode `off`, keep-nothing and unlink clear the buffer. For acknowledged and cleared messages the
+  bridge drops its references; Go strings cannot be overwritten, so the bytes stay in memory until the garbage
+  collector reuses it.
   Logs carry counts only.
 
 `GET /history/backfill?cursor=N`:
 - Returns `{state: idle|running|done|stopped|failed, chats_total, chats_done, chats_skipped, received, buffered,
   dropped, lost, chats_incomplete, error, batch, messages, next_cursor}`.
+- Each finished chat counts once: in `chats_done` (complete; this includes `chats_skipped`) or in `chats_incomplete`,
+  never in both.
 - It first drops every buffered message with a sequence number up to `cursor`, then returns the next readable
   messages. Pass `next_cursor` on the following read to acknowledge them.
 - Sequence numbers keep growing across backfill runs (until the bridge restarts), so a cursor kept from an earlier

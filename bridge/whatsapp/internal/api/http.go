@@ -414,8 +414,6 @@ func (s *Server) hSend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
-	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
-	defer s.bfGate.Unlock()
 	var b struct {
 		Mode          string `json:"mode"`
 		OverrideWatch bool   `json:"override_watch"`
@@ -428,11 +426,13 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.nowTS()
+	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	prev := s.pol.Mode
 	if b.Mode == "send" && prev != "send" && !b.OverrideWatch {
 		if left := s.watchDaysLeftLocked(); left > 0 {
 			s.mu.Unlock()
+			s.bfGate.Unlock()
 			writeErr(w, 409, "WA_WATCH_WINDOW", map[string]any{"days_left": left})
 			return
 		}
@@ -450,6 +450,7 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.savePolicyLocked()
 	s.mu.Unlock()
+	s.bfGate.Unlock()
 	if prev != b.Mode {
 		s.log.Info("WA_MODE", "Mode changed.", F{"mode": b.Mode, "override_watch": b.OverrideWatch})
 		s.hub.broadcast("", map[string]any{"type": "mode.changed", "mode": b.Mode})
@@ -459,8 +460,6 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
-	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
-	defer s.bfGate.Unlock()
 	var b struct {
 		List string `json:"list"`
 		Op   string `json:"op"`
@@ -478,6 +477,7 @@ func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "WA_GROUP_REFUSED", nil)
 		return
 	}
+	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	l := &s.pol.ReadAllow
 	if b.List == "send" {
@@ -497,13 +497,12 @@ func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
 	n := len(*l)
 	s.savePolicyLocked()
 	s.mu.Unlock()
+	s.bfGate.Unlock()
 	s.log.Info("WA_ALLOW", "Allow-list changed.", F{"list": b.List, "op": b.Op, "count": n})
 	writeJSON(w, 200, map[string]any{"ok": true, "list": b.List, "count": n})
 }
 
 func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
-	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
-	defer s.bfGate.Unlock()
 	var b struct {
 		AllDirect *bool `json:"all_direct"`
 		Groups    *bool `json:"groups"`
@@ -515,6 +514,7 @@ func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "WA_BAD_REQUEST", nil)
 		return
 	}
+	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	if b.AllDirect != nil {
 		s.pol.ReadScope.AllDirect = *b.AllDirect
@@ -525,6 +525,7 @@ func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
 	sc := s.pol.ReadScope
 	s.savePolicyLocked()
 	s.mu.Unlock()
+	s.bfGate.Unlock()
 	writeJSON(w, 200, map[string]any{"ok": true, "read_scope": sc})
 }
 
@@ -641,8 +642,6 @@ func (s *Server) hUnlink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
-	s.bfGate.Lock() // read-policy write: serialized with backfill dispatch (bfNext)
-	defer s.bfGate.Unlock()
 	var b struct {
 		Days        *int `json:"days"`
 		KeepNothing bool `json:"keep_nothing"`
@@ -654,6 +653,7 @@ func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "WA_BAD_REQUEST", nil)
 		return
 	}
+	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	s.pol.RetentionDays, s.pol.KeepNothing = *b.Days, b.KeepNothing
 	if b.KeepNothing {
@@ -661,6 +661,7 @@ func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
 	}
 	s.savePolicyLocked()
 	s.mu.Unlock()
+	s.bfGate.Unlock()
 	s.purgeRetention()
 	writeJSON(w, 200, map[string]any{"ok": true, "retention_days": *b.Days, "keep_nothing": b.KeepNothing})
 }
