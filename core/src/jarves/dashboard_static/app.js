@@ -24,7 +24,7 @@ async function api(path, opts = {}) {
     headers: { "Content-Type": "application/json", ...(opts.method && opts.method !== "GET"
       ? { "X-Jarves": "1", "X-CSRF-Token": window.JARVES_CSRF || "" } : {}) } });   // CSRF: paired phones (m4.js)
   const data = await r.json().catch(() => ({ error: r.statusText }));
-  // server errors are English sources: shown in the page language (JL.t, catalog) at every "Failed: " site (JAR-128)
+  // server errors are English sources: translated once here (JL.t, catalog); callers show e.message as is (JAR-128)
   if (!r.ok) { const en = data.error || r.statusText; const err = new Error(window.JL ? JL.t(en) : en);
     err.en = en; err.code = data.code; err.next = data.next; throw err; }
   return data;
@@ -45,7 +45,7 @@ const header = (title, sub, ...right) => el("div", { class: "row" },
 function render(...nodes) { $main.replaceChildren(...nodes.flat(2).filter((n) => n !== null && n !== undefined && n !== false)); }
 // what happened + what to do (JAR-128): most load failures are a stopped or restarting JARVES
 function fail(e) { render(el("div", { class: "card empty", role: "alert" }, tx("לא נטען: ", "Could not load: ") + e.message,
-  el("div", { class: "small" }, tx("בדקו ש-JARVES פועל (jarvis status) ורעננו את הדף.", "Check that JARVES is running (jarvis status), then refresh the page.")))); }
+  el("div", { class: "small" }, JL.t("Check that JARVES is running (jarvis status), then refresh the page.")))); }   // one source: the catalog
 
 const tip = document.getElementById("tip");
 function hoverTip(node, lines) {
