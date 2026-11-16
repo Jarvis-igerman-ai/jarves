@@ -76,6 +76,8 @@ def kill_tree(pid: int) -> None:
 
 
 class PlaywrightDriver:
+    uses_pilot_proxy = True                                         # every connection goes through PilotProxy (PilotSession contract, #574)
+
     def __init__(self, proxy: PilotProxy, session_ref: Callable[[], PilotSession | None], *, launch: dict | None = None,
                  call_timeout: float = CALL_TIMEOUT_S, recorder=None) -> None:
         if os.environ.get("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK"):

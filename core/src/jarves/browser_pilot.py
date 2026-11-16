@@ -233,7 +233,8 @@ class PilotSession:
     request_allowed(url) is the guard for every request, redirect target and subresource reached through page.route. It is
     the SECOND line: WebSockets, WebRTC, service workers and prefetch bypass page.route (#574 item 3), and a redirect has
     already been fetched when the final URL is checked after open (item 6). The proxy (the first line) vets every
-    connection before a byte is sent; a driver without it must not be used on a public page."""
+    connection before a byte is sent. A driver declares it with uses_pilot_proxy = True; open() refuses a public page for any
+    other driver (BROWSER_PILOT_URL). The flag is a declaration the session cannot test, like pin_hosts."""
 
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
@@ -476,6 +477,8 @@ class PilotSession:
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local (loopback) or public http(s) pages can be read")
         if (self.after_human or self.local_only) and scope != "local":
             raise self._refuse("open", "BROWSER_PILOT_URL", "only local test pages can be opened in this session")
+        if scope != "local" and getattr(self.driver, "uses_pilot_proxy", False) is not True:   # #574: the proxy is the first line
+            raise self._refuse("open", "BROWSER_PILOT_URL", "public pages need a driver that connects only through the pilot proxy")
         if not self._pin_or_stop():                          # the host was resolved and vetted once: the driver connects only there
             raise PilotError("BROWSER_PILOT_PIN", "the browser could not be limited to the checked addresses; the session was stopped")
         self.driver.open(url)

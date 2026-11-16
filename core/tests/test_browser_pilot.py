@@ -16,6 +16,7 @@ class FakeDriver:
 
     def __init__(self):
         self.opened, self.closed, self.final, self.pinned = [], False, None, []
+        self.uses_pilot_proxy = True                              # stands in for PlaywrightDriver, which dials only through PilotProxy
 
     @property
     def current_url(self):
@@ -364,3 +365,24 @@ def test_623_timed_out_running_lookup_stays_counted_until_it_finishes(monkeypatc
             break
         threading.Event().wait(0.05)
     assert bp._PENDING == 0                                  # released when the lookup really finished
+
+
+def test_574_a_driver_without_the_pilot_proxy_may_not_open_a_public_page(tmp_path):
+    """#574 / review R1: pin_hosts can only be checked to EXIST, so a public page needs a driver that declares it reaches the
+    network only through PilotProxy (uses_pilot_proxy is True). Anything else is refused before the driver is touched."""
+    for flag in (None, False, "yes", 1):
+        s, d, _ = mk(tmp_path / str(flag))
+        if flag is None:
+            del d.uses_pilot_proxy
+        else:
+            d.uses_pilot_proxy = flag
+        with pytest.raises(bp.PilotError) as e:
+            s.open("https://example.com/")
+        assert e.value.code == "BROWSER_PILOT_URL" and d.opened == [] and d.pinned == []
+    s, d, _ = mk(tmp_path / "local")
+    del d.uses_pilot_proxy
+    s.open("http://127.0.0.1:8000/")                          # a local test page needs no proxy
+    assert d.opened == ["http://127.0.0.1:8000/"]
+    s, d, _ = mk(tmp_path / "proxied")
+    s.open("https://example.com/")
+    assert d.opened == ["https://example.com/"]
