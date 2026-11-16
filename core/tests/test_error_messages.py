@@ -52,7 +52,7 @@ def test_top_error_says_what_to_do_in_both_languages(en):
 # and the real chatview.js WORDS with its word() helper and failed-reply fallback line.
 NODE_HARNESS = r"""
 const fs = require("fs"), vm = require("vm");
-const [he, i18n, app, chat] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n"));   // Windows CRLF checkout
+const [he, i18n, app, chat, browser, m4] = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8").replace(/\r\n/g, "\n"));   // Windows CRLF checkout
 const cut = (re, src = app) => { const m = re.exec(src); if (!m) throw new Error("not found: " + re); return m[0]; };
 const api = cut(/async function api\([\s\S]*?\n}\n/), fail = cut(/const tc = [^\n]*\nfunction fail\(e\)[^\n]*\n[^\n]*\n/);
 const noop = () => {};
@@ -68,6 +68,15 @@ vm.runInContext(he + "\n" + i18n + "\n" + api + "\n" + fail + "\n" + chat, ctx);
 const word = cut(/const word = [^\n]*;/, chat), reply = cut(/const text = e\.text \|\| [^\n]*;/, chat);
 const said = (e) => vm.runInContext(`(() => { const WORDS = JarvesChat.WORDS; ${word} ${reply} return text; })()`,
   Object.assign(ctx, { e }));
+// the real catch branches of browser.js (live view busy) and m4.js (voice cost confirm), given a Hebrew e.message
+const busy = cut(/if \(\/busy\/i\.test\([^\n]*\n\s*img\.style\.display = "none"; end\(e\.message\);/, browser);
+const costCatch = cut(/if \(!approve && [^\n]*\n\s*vMsg\.textContent = [^\n]*;/, m4);
+const branch = (code, e) => vm.runInContext(`(() => { const out = { asked: null };
+  const clockEl = {}, img = { style: {} }, vMsg = {}, approve = false, v = {};
+  const end = (t) => { out.ended = t; }, confirm = (t) => { out.asked = t; return true; }, choose = () => "retried";
+  const r = (() => { ${code} })(); out.clock = clockEl.textContent; out.msg = vMsg.textContent; out.r = r; return out; })()`,
+  Object.assign(ctx, { e }));
+const heErr = (msg, en) => Object.assign(new Error(msg), { en });
 (async () => {
   let err = null;
   try { await vm.runInContext("api('/api/x', { method: 'POST' })", ctx); } catch (e) { err = e; }
@@ -77,7 +86,11 @@ const said = (e) => vm.runInContext(`(() => { const WORDS = JarvesChat.WORDS; ${
   ctx.JL = undefined; vm.runInContext("fail", ctx)(new Error("x")); const bare = flat(ctx.out); ctx.JL = JL;   // i18n.js missing
   process.stdout.write(JSON.stringify({ message: err.message, en: err.en, code: err.code, next: err.next,
                                         page, bare, stopping: said({ ok: false, code: "CHAT_STOPPING" }),
-                                        other: said({ ok: false, code: "NOT_A_CODE" }) }));
+                                        other: said({ ok: false, code: "NOT_A_CODE" }),
+                                        busy: branch(busy, heErr("הדף עסוק", "the page is busy")),
+                                        notBusy: branch(busy, heErr("נכשל", "grant expired")),
+                                        cost: branch(costCatch, heErr("נדרש אישור", "approve the cost before switching")),
+                                        noCost: branch(costCatch, heErr("לא ידוע", "unknown voice")) }));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
 
@@ -91,7 +104,7 @@ def _run_node(tmp_path):
     he_js.write_bytes(locale_parts.render_js("he"))      # the served catalog: base plus parts
     harness = tmp_path / "harness.js"
     harness.write_text(NODE_HARNESS, encoding="utf-8")
-    r = subprocess.run(["node", str(harness), str(he_js)] + [str(STATIC / f) for f in ("i18n.js", "app.js", "chatview.js")],
+    r = subprocess.run(["node", str(harness), str(he_js)] + [str(STATIC / f) for f in ("i18n.js", "app.js", "chatview.js", "browser.js", "m4.js")],
                        capture_output=True, encoding="utf-8", timeout=60)      # utf-8: Windows would decode as cp1252
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
@@ -116,7 +129,16 @@ def test_chat_failed_reply_shows_hebrew_words_for_stopping_and_the_fallback(tmp_
     assert got["other"] == "משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs."
 
 
-# matching on e.message breaks in Hebrew mode (api() translates it): callers match the English source e.en instead
+def test_browser_busy_and_voice_cost_branches_match_the_english_while_showing_hebrew(tmp_path):
+    """Hebrew mode: the real browser.js busy branch and m4.js cost-confirm branch decide on e.en, show Hebrew text."""
+    got = _run_node(tmp_path)
+    assert got["busy"].get("clock") == "הדף עסוק, מנסה שוב" and "ended" not in got["busy"]
+    assert got["notBusy"]["ended"] == "נכשל" and "clock" not in got["notBusy"]
+    assert got["cost"]["asked"] == "נדרש אישור\n\nלאשר את השינוי?" and got["cost"]["r"] == "retried"
+    assert got["noCost"]["asked"] is None and got["noCost"]["msg"] == "לא שונה: לא ידוע"
+
+
+# secondary guard: matching on e.message breaks in Hebrew mode (api() translates it): callers match the English source e.en instead
 MESSAGE_LOGIC = re.compile(r"\.message\s*(===|!==|==|!=|\.(test|match|includes|indexOf|startsWith|endsWith|search)\b)"
                            r"|switch\s*\([^)]*\.message|\.(test|match|exec|includes|indexOf|startsWith)\((?![^)]*\.en\b)[^)]*\.message")
 

@@ -1,5 +1,6 @@
 {
  "dict": {
+  "Approve this change?": "לאשר את השינוי?",
   "chat is not running here": "השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את ג'רביס.",
   "chat is not running here: start `jarvis web` or JARVES": "השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את ג'רביס.",
   "Check that JARVES is running (jarvis status), then refresh the page.": "בדקו שג'רביס פועל (jarvis status) ורעננו את הדף.",
@@ -8,7 +9,7 @@
   "message too long: 4000 characters at most, split it into several messages": "ההודעה ארוכה מדי: עד 4000 תווים. חלקו אותה לכמה הודעות.",
   "only the computer itself can do this: do it in the dashboard on that computer": "רק המחשב עצמו יכול לעשות את זה: עשו זאת בלוח הבקרה במחשב.",
   "profiles are managed only on this computer": "פרופילים מנוהלים רק במחשב הזה. פתחו את לוח הבקרה במחשב.",
-  "shutting down": "ג'רביס נסגר כעת. המתינו כמה שניות ונסו שוב.",
+  "shutting down": "ג'רביס נעצר או מופעל מחדש. המתינו כמה שניות ונסו שוב.",
   "Something went wrong. Try again; if it repeats, open the Health page or run jarvis logs.": "משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs.",
   "still loading, retry in a few seconds": "עדיין נטען. נסו שוב בעוד כמה שניות.",
   "the briefing is not available right now: try again in a minute": "התדריך לא זמין כרגע. נסו שוב בעוד דקה.",
