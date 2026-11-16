@@ -906,6 +906,25 @@ class SelfCheck:
                     "Backup page.",
                 fix_he="פנו מקום בדיסק (הגדרות האחסון של Windows). אפשר למחוק גיבויים ישנים בעמוד הגיבוי.",
                 effort="minutes", action={"type": "open", "page": "#/backup"}))
+        try:                                                  # #1016: backups over their size limit
+            from . import backup as _backup
+            bu = _backup.usage(self.home)
+        except Exception:                                     # noqa: BLE001
+            bu = {}
+        if bu.get("over"):
+            gb, lim = bu["bytes"] / 1e9, bu["max_gb"]
+            out.append(Finding(
+                "backup_size", "system", "medium", f"Backups use {gb:.1f} GB, over the {lim:g} GB limit",
+                f"הגיבויים תופסים {gb:.1f} GB, מעל המגבלה של {lim:g} GB",
+                detail="The limit is kept automatically; the backups still over it are protected (the newest one, "
+                       "the newest daily one and the one an update rollback needs).",
+                detail_he="המגבלה נשמרת אוטומטית. הגיבויים שעדיין מעליה מוגנים: החדש ביותר, היומי האחרון וזה "
+                          "שנדרש להחזרת עדכון.",
+                evidence=[f"{bu['count']} backup(s), {gb:.2f} GB, limit {lim:g} GB"],
+                cause="large data or a low limit", cause_he="הרבה נתונים או מגבלה נמוכה",
+                fix="Run `jarvis backup prune`, or raise the limit: jarvis backup settings --max-gb 8",
+                fix_he="הריצו jarvis backup prune, או הגדילו את המגבלה: jarvis backup settings --max-gb 8",
+                effort="minutes", action={"type": "command", "command": "jarvis backup prune"}))
         mem = s.get("memory") or {}
         avail = mem.get("available_mb")
         if isinstance(avail, (int, float)) and avail < 500:

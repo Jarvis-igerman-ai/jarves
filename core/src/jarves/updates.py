@@ -571,8 +571,10 @@ class UpdateChecker:
                   size=len(data))
         return out
 
-    def prepare_install(self, approved: bool) -> dict:
-        """Download + verify + back up. Returns {installer, backup, version}; launching is a separate step."""
+    def prepare_install(self, approved: bool, backup: Path | str | None = None) -> dict:
+        """Download + verify + back up. Returns {installer, backup, version}; launching is a separate step.
+        `backup`: a verified backup the caller has just taken (install_latest's "backup now"); it is reused instead
+        of writing a second archive of the same data (#1016). Missing file: a new checkpoint is taken."""
         if approved is not True:
             raise UpdateError("UPDATE_NEEDS_APPROVAL", "an update is installed only after the user approves it")
         if sys.platform != "win32":
@@ -599,7 +601,9 @@ class UpdateChecker:
         try:
             exe = self.download(rel)
             up.write(self.home, "backing_up")
-            bak = backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
+            given = Path(backup) if backup else None
+            bak = given if given is not None and given.is_file() else \
+                backup_before_update(self.home, f"pre-update-{self.current}-to-{rel['version']}")
         except UpdateError as e:
             up.fail(self.home, e.code)
             raise

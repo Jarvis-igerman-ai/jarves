@@ -235,12 +235,82 @@ def test_retention_7_daily_4_weekly(profile):
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
     assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 5     # #1016: was 10
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
     with pytest.raises(ValueError):
         backup.set_settings(profile, {"daily": 0})
+
+
+def _placeholder(bdir, kind, when, size):
+    p = bdir / f"jarves-backup-{when:%Y%m%d-%H%M%S}-{kind}.zip"
+    p.write_bytes(b"x" * size)
+    return p
+
+
+def test_size_budget_drops_oldest_but_keeps_newest_and_rollback_backup_issue_1016(profile):
+    from jarves import updates
+    bdir = profile / "backups"
+    bdir.mkdir()
+    start = datetime(2026, 11, 10, 3, 0)
+    names = [_placeholder(bdir, "pre-migration", start - timedelta(hours=i), 1000).name for i in range(3)]
+    rb = names[2]                                                      # the oldest one is the rollback backup
+    pdir = profile / "updates" / updates.PREVIOUS_DIR
+    pdir.mkdir(parents=True)
+    (pdir / updates.PREVIOUS_FILE).write_text(json.dumps({"version": "1.0", "to": "1.1", "backup": str(bdir / rb)}),
+                                              encoding="utf-8")
+    backup.set_settings(profile, {"max_gb": 1500 / 1e9})               # room for one and a half
+    gone = backup.prune(profile)
+    left = {b["name"] for b in backup.list_backups(profile)}
+    assert gone == [names[1]] and left == {names[0], rb}               # over budget only by protected backups
+    assert backup.usage(profile)["over"] is True
+    backup.set_settings(profile, {"max_gb": 0})                        # 0 = no size limit
+    assert backup.usage(profile)["over"] is False
+    with pytest.raises(ValueError):
+        backup.set_settings(profile, {"max_gb": -1})
+
+
+def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    for i in range(6):
+        _placeholder(bdir, "manual", datetime(2026, 11, 10, 3, 0) - timedelta(minutes=i), 10)
+    monkeypatch.setattr(backup, "_free_bytes", lambda home: 1)
+    with pytest.raises(backup.BackupError) as e:
+        backup.create(profile, "manual")
+    assert e.value.code == "BACKUP_NO_SPACE"
+    assert len(backup.list_backups(profile)) == 5                      # pruned first (manual keeps 5)
+    assert not list(bdir.glob("*.partial"))
+    monkeypatch.setattr(backup, "_free_bytes", lambda home: 10 ** 12)
+    assert backup.create(profile, "manual").is_file()
+
+
+def test_start_checkpoint_reuses_the_update_backup_issue_1016(profile, monkeypatch):
+    from jarves import updates
+    bak = backup.checkpoint(profile, "before a beta install")
+    backup._save_state(profile, {"version": "1.0"})
+    pdir = profile / "updates" / updates.PREVIOUS_DIR
+    pdir.mkdir(parents=True)
+    rec = {"version": "1.0", "to": backup.__version__, "backup": str(bak), "created_ts": time.time()}
+    (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
+    before = len(backup.list_backups(profile))
+    assert backup.startup_checkpoint(profile) == bak                   # no second archive of the same data
+    assert len(backup.list_backups(profile)) == before
+    backup._save_state(profile, {"version": "1.0"})
+    rec["created_ts"] = time.time() - backup.REUSE_UPDATE_BACKUP_S - 60   # an old update: take a fresh one
+    (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
+    p = backup.startup_checkpoint(profile)
+    assert p is not None and p != bak and len(backup.list_backups(profile)) == before + 1
+
+
+def test_cli_settings_for_manual_checkpoints_and_size_issue_1016(profile, capsys):
+    from jarves import cli
+    assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "1", "--max-gb", "3"]) == 0
+    s = backup.get_settings(profile)
+    assert (s["manual"], s["checkpoints"], s["max_gb"]) == (2, 1, 3.0)
+    assert cli.main(["backup", "list"]) == 0
+    assert "limit 3 GB" in capsys.readouterr().out
 
 
 def test_auto_backup_due_daily_and_switchable(profile):

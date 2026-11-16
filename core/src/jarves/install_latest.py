@@ -527,10 +527,18 @@ def real_deps(a, cfg, home: Path) -> Deps:
     def start_core() -> None:
         cli.cmd_start(argparse.Namespace(show=False), cfg, home)
 
+    taken: dict = {}
+
+    def backup_now() -> Path:
+        # #1016: ONE backup per install. A checkpoint (kept the last `checkpoints`, not crowding out the owner's
+        # manual backups); the updater reuses it as the rollback backup and the next Core start as its checkpoint.
+        taken["path"] = backup.checkpoint(home, "before a beta install")
+        return taken["path"]
+
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
-                backup_now=lambda: backup.create(home, "manual"),
-                check=check, prepare=lambda ch: checker(ch).prepare_install(approved=True),
+                backup_now=backup_now,
+                check=check, prepare=lambda ch: checker(ch).prepare_install(approved=True, backup=taken.get("path")),
                 core_running=running,
                 detect_running=lambda up_: runmarks.detect_running(home, core_up=up_),
                 record_was_running=lambda w: record_was_running(home, w),

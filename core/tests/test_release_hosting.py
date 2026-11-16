@@ -381,6 +381,22 @@ def test_hosted_install_needs_approval_and_verifies_sha_and_size(tmp_path, monke
         assert e.value.code == "UPDATE_CHECKSUM_MISMATCH"
 
 
+def test_install_reuses_the_backup_just_taken_issue_1016(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    made = []
+    monkeypatch.setattr(updates, "backup_before_update", lambda home, label: made.append(label) or home / "new.zip")
+    given = tmp_path / "given.zip"
+    given.write_bytes(b"PK")
+    host, pub = _hosted(tmp_path)
+    u = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub])
+    u.check(force=True)
+    r = u.prepare_install(approved=True, backup=given)
+    assert r["backup"] == str(given) and made == []                    # one backup per install, not two
+    assert updates.read_previous(tmp_path)["backup"] == str(given)    # and it is the rollback backup
+    r = u.prepare_install(approved=True, backup=tmp_path / "missing.zip")
+    assert r["backup"] == str(tmp_path / "new.zip") and len(made) == 1
+
+
 def test_cached_release_is_reverified_at_install_time(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(updates, "backup_before_update", lambda home, label: home / "bak.zip")

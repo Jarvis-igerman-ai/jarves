@@ -13,9 +13,13 @@ refresh token), logs, caches, health snapshots and the backups folder itself. Fa
 biometric: left out unless backup.include_faces is on. So an archive can be shared without leaking a key; after a
 restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt login`, `jarvis google login`).
 
-Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
-7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+Retention (adjustable, memory.db settings `backup.*`, `jarvis backup settings`): automatic backups keep the newest
+per day for the last 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 5;
+pre-migration / pre-restore checkpoints the last 3 each. Only automatic backups are thinned by the day/week rule.
+#1016: on top of the counts, all backups together stay under `max_gb` (default 4 GB, 0 = no size limit): the oldest
+go first, but never the newest backup, the newest automatic one or the backup `jarvis update --rollback` needs.
+Before writing, create() checks free disk space; when short it prunes first and refuses (BACKUP_NO_SPACE) rather
+than filling the drive. A beta install takes ONE backup: the updater and the next Core start reuse it.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,7 +63,10 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 7, "weekly": 4, "manual": 5, "checkpoints": 3, "max_gb": 4.0, "include_faces": False,
+            "auto": True}
+SPACE_MARGIN_BYTES = 256 * 1024 * 1024      # left free after a backup: SQLite writes and logs need room
+REUSE_UPDATE_BACKUP_S = 6 * 3600            # a Core start after an update reuses that update's backup (#1016)
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -101,6 +108,14 @@ def set_settings(home: Path, changes: dict) -> dict:
             if not 0 <= n <= 365 or (k == "daily" and n < 1):
                 raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
             clean[k] = n
+        elif k == "max_gb":
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                raise ValueError("max_gb must be a number")
+            if not 0 <= f <= 10000:
+                raise ValueError("max_gb must be between 0 (no size limit) and 10000")
+            clean[k] = f
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
                 raise ValueError(f"{k} must be true or false")
@@ -221,6 +236,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
+    ensure_space(home, take)
     files = []
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
@@ -264,6 +280,43 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
               bytes=final.stat().st_size)
     prune(home)
     return final
+
+
+def _estimate_bytes(home: Path, take: list[tuple[Path, str]]) -> int:
+    """Expected archive size: the newest existing backup (same data, compressed) or, for the first one, the raw
+    size of what goes in (an upper bound)."""
+    items = list_backups(home)
+    if items:
+        return int(items[0]["size"] * 1.2)
+    total = 0
+    for p, _rel in take:
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
+def _free_bytes(home: Path) -> int:
+    return shutil.disk_usage(backup_dir(home)).free
+
+
+def ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
+    """#1016: a backup never fills the drive. Short on room: prune first; still short: BACKUP_NO_SPACE (an install
+    then stops before anything changes)."""
+    need = _estimate_bytes(home, take) + SPACE_MARGIN_BYTES
+    try:
+        if _free_bytes(home) >= need:
+            return
+        prune(home)
+        free = _free_bytes(home)
+    except OSError:
+        return                                               # cannot measure: the write itself reports ENOSPC
+    if free < need:
+        logs.warn("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=free, needs=need)
+        raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free / 1e9:.1f} GB free, "
+                          f"about {need / 1e9:.1f} GB needed)",
+                          "free disk space, or lower the backup size limit: jarvis backup settings --max-gb 2")
 
 
 def _unlink(p: Path) -> None:
@@ -364,6 +417,24 @@ def list_backups(home: Path) -> list[dict]:
     return out
 
 
+def rollback_backup(home: Path) -> str | None:
+    """Name of the backup `jarvis update --rollback` restores (the pre-update one): retention never deletes it."""
+    try:
+        from .updates import read_previous
+        bak = read_previous(home).get("backup")
+    except Exception:                                        # noqa: BLE001  (a broken record must not stop a prune)
+        return None
+    return Path(bak).name if bak else None
+
+
+def usage(home: Path) -> dict:
+    """Total size of the backups against the size limit (for `backup list` and doctor)."""
+    items = list_backups(home)
+    total = sum(b["size"] for b in items)
+    gb = float(get_settings(home).get("max_gb") or 0)
+    return {"count": len(items), "bytes": total, "max_gb": gb, "over": bool(gb) and total > gb * 1e9}
+
+
 def prune(home: Path) -> list[str]:
     """Apply retention; returns the deleted names. Never deletes the newest backup of a kind."""
     s = get_settings(home)
@@ -380,6 +451,23 @@ def prune(home: Path) -> list[str]:
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
     if autos:
         keep.add(autos[0]["name"])
+    protected = {items[0]["name"]} if items else set()
+    if autos:
+        protected.add(autos[0]["name"])
+    rb = rollback_backup(home)
+    if rb:
+        keep.add(rb)
+        protected.add(rb)
+    budget = float(s.get("max_gb") or 0) * 1e9
+    if budget > 0:                                            # #1016: all backups together stay under max_gb
+        kept = [b for b in items if b["name"] in keep]       # newest first
+        total = sum(b["size"] for b in kept)
+        for b in reversed(kept):                             # the oldest go first
+            if total <= budget:
+                break
+            if b["name"] not in protected:
+                keep.discard(b["name"])
+                total -= b["size"]
     gone = []
     for b in items:
         if b["name"] not in keep:
@@ -549,6 +637,12 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if not any(home.glob("*.db")):                  # first run: nothing to protect yet
         _save_state(home, {"version": __version__})
         return None
+    reused = _update_backup_for(home, __version__)
+    if reused is not None:                          # #1016: the update to this version already backed this data up
+        logs.info("backup", "BACKUP_CHECKPOINT_REUSED", "pre-update backup reused as the start checkpoint",
+                  backup=reused.name)
+        _save_state(home, {"version": __version__})
+        return reused
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
     except BackupError as e:
@@ -558,6 +652,26 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
         return None
     _save_state(home, {"version": __version__})
     return p
+
+
+def _update_backup_for(home: Path, version: str, now: float | None = None) -> Path | None:
+    """The verified backup the updater took right before installing `version` (the Core was stopped for setup, so
+    the data is the same), or None."""
+    try:
+        from .updates import read_previous
+        rec = read_previous(home)
+    except Exception:                                        # noqa: BLE001
+        return None
+    if not rec or rec.get("to") != version or not rec.get("backup"):
+        return None
+    now = time.time() if now is None else now
+    try:
+        if not 0 <= now - float(rec.get("created_ts") or 0) <= REUSE_UPDATE_BACKUP_S:
+            return None
+    except (TypeError, ValueError):
+        return None
+    p = backup_dir(home) / Path(rec["backup"]).name
+    return p if p.is_file() else None
 
 
 def due(home: Path, now: float | None = None) -> bool:
@@ -693,6 +807,9 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="how many manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="how many pre-migration / pre-restore checkpoints to keep")
+    b.add_argument("--max-gb", type=float, help="size limit for all backups together, in GB (0 = no limit)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -720,7 +837,9 @@ def cmd_backup(a, cfg, home) -> int:
             items = list_backups(home)
             for b in items:
                 print(f"{b['name']}  {b['kind']:13} {b['size'] / 1024:8.1f} KB")
-            print(f"{len(items)} backup(s) in {backup_dir(home)}")
+            u = usage(home)
+            limit = f"limit {u['max_gb']:g} GB" if u["max_gb"] else "no size limit"
+            print(f"{len(items)} backup(s), {u['bytes'] / 1e9:.2f} GB ({limit}) in {backup_dir(home)}")
         elif a.action in ("verify", "test"):
             p = _resolve(home, a.name)
             if p is None:
@@ -739,7 +858,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly), ("manual", a.manual),
+                                    ("checkpoints", a.checkpoints), ("max_gb", a.max_gb)) if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
