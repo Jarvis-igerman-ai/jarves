@@ -128,6 +128,9 @@ type Engine interface {
 	// RequestHistory asks the phone for up to count messages of chat sent before anchor (on-demand history
 	// sync). Results arrive later as MessageEvent{History: true}; the API layer applies every rule to them.
 	// id (from NewRequestID) is sent as the request's message id, so its answer can be matched to it.
+	// Invariant: never deliver an event synchronously on the caller's goroutine (the API holds its backfill gate
+	// across this call; a handler that takes the gate, e.g. a kill or account warning, would deadlock). whatsmeow
+	// dispatches events on its own goroutines (UNVERIFIED against a real phone).
 	RequestHistory(ctx context.Context, id, chat string, anchor HistoryAnchor, count int) error
 	// NewRequestID returns a fresh message id for RequestHistory.
 	NewRequestID() string
