@@ -466,3 +466,13 @@ async def test_plan_web_answer_names_its_sources_but_history_does_not(tmp_path):
     assert pieces == []
     assert await b.reply("תודה") == "בכיף"                                  # no citation: nothing added
     assert "מקורות" not in json.dumps(srv.bodies[2]["input"], ensure_ascii=False)
+
+
+def test_both_routes_share_the_sources_helper():
+    """JAR-322 review: one public helper picks the label and format, so the plan and API routes cannot drift."""
+    import jarves.chatgpt_brain as cb
+    from jarves.brain import with_sources
+    assert cb.with_sources is with_sources
+    assert with_sources("שלום", ["https://www.a.com/x"]) == "שלום\n\nמקורות: a.com"
+    assert with_sources("Hi", ["https://a.com/x"]) == "Hi\n\nSources: a.com"
+    assert with_sources("Hi", []) == "Hi" and with_sources("", ["https://a.com"]) == ""

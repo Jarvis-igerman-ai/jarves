@@ -16,7 +16,7 @@ import httpx
 
 from . import logs, usage
 from .brain import (INSTRUCTIONS, render_instructions, BackendTrace, BrainUnavailable, billing_summary, cited_urls,
-                    sources_line, _HEBREW)
+                    with_sources)
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
 from .config import AIConfig
@@ -288,9 +288,7 @@ class ChatGPTBrain:
                 while self.history and self.history[0].get("role") != "user":
                     self.history.pop(0)       # keep the window starting at a user message
                 logs.info("ai", "AI_REPLY", "ChatGPT plan replied", model_calls=calls, used_today=used)
-                answer = self._text(outputs)
-                line = sources_line(cited, hebrew_label=bool(_HEBREW.search(answer)))   # JAR-322: same as API route
-                return f"{answer}\n\n{line}" if answer and line else answer
+                return with_sources(self._text(outputs), cited)          # JAR-322: same helper as the API route
             for fc in fcalls:
                 res = await self.registry.call(plain_tool_name(fc), fc.get("arguments") or "{}")
                 turn.append({"type": "function_call_output", "call_id": fc["call_id"], "output": res.to_model()})
