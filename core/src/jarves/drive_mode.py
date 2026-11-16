@@ -167,6 +167,9 @@ def _file_lock(path: Path, wait_s: float | None = None):
         fh.close()
 
 
+file_lock = _file_lock      # public name for other modules (wrong_feedback, JAR-230 review R4)
+
+
 @dataclass
 class QueueItem:
     id: int

@@ -24,8 +24,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import features as feat, logs
-from .curator import _SENSITIVE
-from .drive_mode import _file_lock          # the existing cross-process lock (flock / msvcrt), fails closed
+from .curator import SENSITIVE as _SENSITIVE
+from .drive_mode import file_lock as _file_lock          # the existing cross-process lock (flock / msvcrt), fails closed
 from .skills import Skill, Tool, ToolResult
 
 FEATURE = "wrong_feedback"
@@ -122,10 +122,10 @@ def last_exchange(home, *, store=None) -> dict | None:
     try:
         rows = st.rows("SELECT session_id, ts, role, text FROM turns ORDER BY ts DESC, id DESC LIMIT ?",
                        (LOOKBACK_TURNS,))
-        # Skip the feedback phrase only when it is the NEWEST user turn (only replies follow it): an older "that was
-        # wrong" or an everyday "לא נכון" inside an earlier question never moves the cut (review R1).
-        i = next((k for k, r in enumerate(rows) if r["role"] == "user"), None)
-        if i is not None and is_feedback_turn(rows[i]["text"]):
+        # Skip the feedback phrase only while it is the NEWEST remaining user turn: "q, a, that was wrong, sorry, that
+        # was wrong" skips both reports and their replies and saves q/a. An older "that was wrong" BEFORE a newer
+        # question, or an everyday "לא נכון" inside a question, never moves the cut.
+        while (i := next((k for k, r in enumerate(rows) if r["role"] == "user"), None)) is not None                 and is_feedback_turn(rows[i]["text"]):
             rows = rows[i + 1:]
         reply: list[dict] = []
         for i, r in enumerate(rows):
@@ -145,6 +145,14 @@ def last_exchange(home, *, store=None) -> dict | None:
             st.close()
 
 
+def _at(ts) -> str:
+    """When the saved exchange happened (local time), so a press long after the conversation is visible (review R2)."""
+    try:
+        return datetime.fromtimestamp(float(ts)).isoformat(timespec="minutes")
+    except (TypeError, ValueError, OverflowError, OSError):
+        return ""
+
+
 def make_case(ex: dict, *, via: str, note: str = "", now: datetime | None = None, privacy: bool | None = None) -> dict:
     """privacy None = logs.privacy(): on, the note (model- or owner-written, may quote the turn) keeps its length only."""
     if via not in VIAS:
@@ -159,6 +167,7 @@ def make_case(ex: dict, *, via: str, note: str = "", now: datetime | None = None
         if t not in tools:
             tools.append(t)
     return {"id": "FB-" + secrets.token_hex(4), "saved": (now or _now()).isoformat(timespec="seconds"), "via": via,
+            "exchange_at": _at(ex.get("ts")),
             "lang": "he" if _HEBREW.search(str(ex.get("say") or "") + str(ex.get("reply") or "")) else "en",
             "say": say, "reply": reply, "tools": tools[:MAX_TOOLS], "note": redact(note, 300),
             "text_kept": not (_MASKED.match(say) and _MASKED.match(reply))}
@@ -233,9 +242,9 @@ def report_wrong(home, *, via: str, note: str = "", store=None, failure_log_on: 
 def say(r: dict, lang: str) -> str:
     he = lang == "he"
     if r.get("ok"):
-        cid = r["case"]["id"]
-        return (f"תודה, שמרתי את השיחה האחרונה כמשוב ({cid}). שום דבר לא נשלח." if he else
-                f"Thanks, I saved the last exchange as feedback ({cid}). Nothing was sent.")
+        cid, at = r["case"]["id"], r["case"].get("exchange_at", "").replace("T", " ")
+        return (f"תודה, שמרתי את השיחה האחרונה{f' (מ-{at})' if at else ''} כמשוב ({cid}). שום דבר לא נשלח." if he else
+                f"Thanks, I saved the last exchange{f' (from {at})' if at else ''} as feedback ({cid}). Nothing was sent.")
     return ("לא מצאתי שיחה אחרונה לשמור. אולי היסטוריית השיחות כבויה." if he else
             "I found no last exchange to save. The conversation history may be off.")
 
@@ -333,6 +342,11 @@ def add_cli(sub) -> None:
     p.add_argument("--json", action="store_true")
 
 
+def _from(c: dict) -> str:
+    at = str(c.get("exchange_at") or "").replace("T", " ")
+    return f"from {at}  " if at else ""
+
+
 def cmd_feedback(a, cfg, home) -> int:
     from . import clilang
     lang = "he" if clilang.current() == "he" else "en"
@@ -351,6 +365,7 @@ def cmd_feedback(a, cfg, home) -> int:
     elif a.action == "list":
         rows = list(reversed(cases(home)))
         out = rows if a.json else ("\n".join(f"{c['id']}  {c.get('saved', '')}  {c.get('via', '')}  "
+                                             f"{_from(c)}"
                                              f"{str(c.get('say', ''))[:60]}" for c in rows)
                                    or "No feedback saved. / לא נשמר משוב.")
         rc = 0

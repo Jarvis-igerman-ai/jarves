@@ -35,6 +35,7 @@ LLM_INPUT_CHARS = 6000
 
 _SENSITIVE = re.compile(r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|password|passcode|"
                         r"\bpin\b|credit\s*card|\bssn\b|\d{6,}|\d[\d -]{10,}\d", re.I)
+SENSITIVE = _SENSITIVE       # public name for other modules (wrong_feedback, JAR-230 review R4)
 _SKIP = re.compile(r"^(?:תזכור|זכור|תשכח|שכח|remember|forget)\b", re.I)
 _STOP_WORDS = {"ואני", "אני", "ו", "אבל", "וגם", "גם", "היום", "עכשיו", "כי", "and", "but", "i", "today", "now"}
 _TAIL = re.compile(r"\s+(?:אבל|כי|ואני|וגם|ו?בגלל|but|because|and\s+i)\b.*$", re.I)

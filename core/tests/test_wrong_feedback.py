@@ -73,6 +73,25 @@ def test_an_older_feedback_turn_or_everyday_phrase_never_moves_the_cut(home):
     assert wf.last_exchange(home)["say"] == "האם זה לא נכון שהשמש קרה?"
 
 
+def test_two_reports_in_a_row_save_the_exchange_before_both(home):
+    """Review round 4 R1: "q, a, that was wrong, sorry, that was wrong" saves q/a, not the first report and its reply."""
+    _history(home, [(1, "user", "q"), (2, "assistant", "a"), (3, "user", "that was wrong"), (4, "assistant", "sorry"),
+                    (5, "user", "Jarvis, that was wrong")])
+    ex = wf.last_exchange(home)
+    assert (ex["say"], ex["reply"]) == ("q", "a")
+
+
+def test_the_case_and_every_output_show_when_the_exchange_happened(home, capsys, on):
+    """Review round 4 R2: a press long after the conversation shows the exchange's own time, not only the save time."""
+    ts = datetime(2026, 11, 10, 9, 30).timestamp()
+    _history(home, [(ts, "user", "hi"), (ts + 1, "assistant", "bye")])
+    r = wf.report_wrong(home, via="cli", now=NOW, privacy=False)
+    assert r["case"]["exchange_at"] == "2026-11-10T09:30" and r["case"]["saved"].startswith("2026-11-16")
+    assert "2026-11-10 09:30" in wf.say(r, "en") and "2026-11-10 09:30" in wf.say(r, "he")
+    assert cli.main(["feedback", "list"]) == 0 and "from 2026-11-10 09:30" in capsys.readouterr().out
+    assert wf._at(None) == "" and wf._at("x") == ""
+
+
 def test_a_long_correction_that_starts_with_the_phrase_is_skipped(home):
     """Review R3: 'Jarvis that was wrong, ...' of any length is the feedback turn, not the exchange to save."""
     long = "Jarvis that was wrong, the capital of Australia is Canberra not Sydney, please remember that next time"
