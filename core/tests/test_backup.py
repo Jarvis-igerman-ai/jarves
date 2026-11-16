@@ -369,13 +369,30 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
 
 def test_install_then_core_start_makes_one_backup_not_two(profile, monkeypatch):
     """#1016: the installer's verified checkpoint is reused at the next Core start instead of a second backup."""
+    clock = [2_000_000_000.0]                                          # fixed fake clock, later than any real file time
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
     installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
     monkeypatch.setattr(backup, "__version__", "9.9.9")
     assert backup.startup_checkpoint(profile) == installer
     assert len(backup.list_backups(profile)) == 1 and backup.read_state(profile)["version"] == "9.9.9"
-    backup.create(profile, "manual", now=time.time() + 2)             # the Core ran and backed up since
+    clock[0] += 2
+    backup.create(profile, "manual")                                  # the Core ran and backed up since
     monkeypatch.setattr(backup, "__version__", "9.9.10")
     assert backup.startup_checkpoint(profile) != installer and len(backup.list_backups(profile)) == 3
+
+
+def test_installer_checkpoint_is_not_reused_after_a_core_ran_on_the_data(profile, monkeypatch):
+    """#1016 review R2: a rolled-back upgrade ran the old Core (it rewrote health.json) after the installer's
+    checkpoint, so that checkpoint misses data and the new version's first start takes its own."""
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    (profile / "health.json").write_text("{}", encoding="utf-8")
+    os.utime(profile / "health.json", (clock[0] + 3600, clock[0] + 3600))   # the old Core ran an hour later
+    clock[0] += 2 * 3600
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    p = backup.startup_checkpoint(profile)
+    assert p is not None and p != installer and len(backup.list_backups(profile)) == 2
 
 
 def test_cli_sets_manual_and_checkpoint_retention(profile, capsys):

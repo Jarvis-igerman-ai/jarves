@@ -549,7 +549,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if not any(home.glob("*.db")):                  # first run: nothing to protect yet
         _save_state(home, {"version": __version__})
         return None
-    p = _unchanged_since_backup(home)
+    p = _reusable_installer_checkpoint(home)
     if p is not None:                               # #1016: the installer's checkpoint already holds this data
         logs.info("backup", "BACKUP_REUSED", "pre-migration checkpoint reused", backup=p.name)
         _save_state(home, {"version": __version__})
@@ -565,12 +565,22 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     return p
 
 
-def _unchanged_since_backup(home: Path, max_age_s: float = 6 * 3600) -> Path | None:
-    """The installer's verified pre-migration checkpoint, when it is the newest backup and recent: the Core was stopped
-    from that checkpoint until this first start, so a second pre-migration backup would only repeat it (#1016)."""
+def _reusable_installer_checkpoint(home: Path, max_age_s: float = 6 * 3600) -> Path | None:
+    """The installer's verified pre-migration checkpoint, when it is the newest backup, recent, and no Core has run on
+    this data since: a second pre-migration backup would only repeat it (#1016). Database times cannot tell, because
+    the installer migrates right after its checkpoint; a running Core rewrites health.json, so a newer health.json
+    means a Core (e.g. the old one after a rollback) changed the data. The archive name holds whole seconds, so a
+    write in the same second counts as newer."""
     items = list_backups(home)
     newest = max(items, key=lambda b: b["ts"]) if items else None
     if not newest or newest["kind"] != "pre-migration" or not 0 <= time.time() - newest["ts"] <= max_age_s:
+        return None
+    try:
+        if (home / "health.json").stat().st_mtime >= newest["ts"]:
+            return None
+    except FileNotFoundError:
+        pass                                        # no Core has written a snapshot here at all
+    except OSError:
         return None
     path = backup_dir(home) / newest["name"]
     try:
