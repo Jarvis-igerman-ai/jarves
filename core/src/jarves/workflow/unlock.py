@@ -1,7 +1,7 @@
 """Owner-presence unlock for the dashboard answer paths (#750).
 
 The private link (access.token) only opens a READ-ONLY session. Answering, deferring, reopening or opening a helper
-window needs an unlock code that is shown only in the owner's own terminal (`workflow_console.py unlock`, or `open`
+window needs an unlock code that is shown only in the owner's own terminal (`jarvis workflow unlock`, or `open`
 in a terminal). The code is never stored. The running dashboard server holds an X25519 key in memory only and publishes
 its public half (unlock_pub.json); the CLI stores an ephemeral public key and an HMAC tag of the code under the shared
 secret. An agent that READS every file in the workflow home (access.token included) cannot check a guess offline:
@@ -108,11 +108,11 @@ def issue(home: Path, *, now: float | None = None, wait_s: float = 0.0) -> str:
         peer = X25519PublicKey.from_public_bytes(bytes.fromhex(published["pub"]))
         pid = int(published.get("pid") or 0)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run unlock again") from exc
+        raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run jarvis workflow unlock again") from exc
     # pid <= 0 is no publisher (POSIX kill(-1, 0) would even report alive).
     # A crashed server never withdrew its key: a code for it could never be checked.
     if pid <= 0 or not _alive(pid):
-        raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run unlock again")
+        raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run jarvis workflow unlock again")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     eph_key = X25519PrivateKey.generate()
     eph = eph_key.public_key().public_bytes_raw()
@@ -124,7 +124,7 @@ def issue(home: Path, *, now: float | None = None, wait_s: float = 0.0) -> str:
             break
         except OSError as exc:
             if attempt == 2:
-                raise UnlockUnavailable(f"could not save the unlock code ({exc.__class__.__name__}); run unlock again") from exc
+                raise UnlockUnavailable(f"could not save the unlock code ({exc.__class__.__name__}); run jarvis workflow unlock again") from exc
             _sleep(RETRY_PAUSE_S)
     return raw
 

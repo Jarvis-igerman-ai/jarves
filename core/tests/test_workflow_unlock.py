@@ -295,12 +295,22 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(pauses, [unlock.PUB_POLL_S])                   # one short, bounded wait, then the code
         self.assertIn("Unlock code for answering", err.getvalue())
         (self.home / unlock.PUB_FILE).unlink()
-        with patch.object(unlock, "_sleep") as pause, self.assertRaises(unlock.UnlockUnavailable):
-            unlock.issue(self.home, wait_s=1.0)                         # nobody publishes: give up after the bound
+        with patch.object(unlock, "_sleep") as pause, self.assertRaisesRegex(unlock.UnlockUnavailable, "jarvis workflow unlock"):
+            unlock.issue(self.home, wait_s=1.0)                         # nobody publishes: give up, say how to retry
         self.assertEqual(pause.call_count, round(1.0 / unlock.PUB_POLL_S))
         with patch.object(unlock, "_sleep") as pause, self.assertRaises(unlock.UnlockUnavailable):
             unlock.issue(self.home)                                     # plain 'unlock' does not wait
         pause.assert_not_called()
+
+    def test_750_cryptography_is_a_locked_core_runtime_dependency(self):
+        import tomllib
+        core = Path(__file__).resolve().parents[1]
+        project = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+        spec = next(d for d in project["dependencies"] if d.split(">")[0].strip() == "cryptography")
+        self.assertGreaterEqual(int(spec.split(">=")[1].split(",")[0].split(".")[0]), 40)   # public/private_bytes_raw need >= 40
+        lock = tomllib.loads((core / "uv.lock").read_text(encoding="utf-8"))
+        locked = next(p["version"] for p in lock["package"] if p["name"] == "cryptography")
+        self.assertGreaterEqual(int(locked.split(".")[0]), 40)          # the installer ships uv.lock wheels (--frozen --no-dev)
 
     def test_750_issue_reads_key_and_pid_from_one_record_and_refuses_pid_zero_or_negative(self):
         pub = self.server.unlock_key._pub()
