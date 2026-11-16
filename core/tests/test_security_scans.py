@@ -171,24 +171,28 @@ def test_issue_480_refused_sources_name_the_owner_action():
     assert acts == [
         "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
         "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
-        "under Settings > Code security) or the scan's token cannot read it (give it read access).",
+        "in the repository's security settings) or the scan's token cannot read it (give it read access).",
         "Owner action (HTTP 403/404: codeql_run, main_ci): give the scan's token read access to Actions and check that the "
         "workflow exists.",
         "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
     assert not [ln for ln in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light").splitlines()
                 if ln.startswith("Owner action")]
     assert ss.owner_actions({"x": None, "dependabot": 403}) == []        # malformed coverage values add nothing
+    assert ss.refused_sources({"code_scanning": "complete:http_403", "dependabot": "skipped:http_404"}) == {}
+
+
+LIVE_480_SIG = "6490f068a3c2e39a"        # the sig stored on the live #480 tracker (incomplete, no findings), before #480
 
 
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
-    import hashlib
-    old_sig = hashlib.sha256(b"i|").hexdigest()[:16]                      # main's signature: findings only
+    old_sig = LIVE_480_SIG
     gh = FakeGitHub(access=False)
     gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
     assert scan(None, gh)["issue"]["status"] == "updated"
     assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
     assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
-    assert ss.signature([], True) == ss.signature([], True, {})            # complete coverage keeps the old signature
+    assert ss.signature([], False) == ss.signature([], False, {}) == LIVE_480_SIG    # no refusals: old signature kept
+    assert ss.signature([], True) == ss.signature([], True, {})
     assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_401"})
 
 

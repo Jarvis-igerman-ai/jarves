@@ -536,7 +536,7 @@ def refused_sources(coverage: dict) -> dict[str, str]:
     """{source: "http_401" | "http_403" | "http_404"} for the sources GitHub refused; other values are ignored."""
     out = {}
     for k, v in coverage.items():
-        reason = v.partition(":")[2] if isinstance(v, str) else ""
+        reason = v[len("incomplete:"):] if isinstance(v, str) and v.startswith("incomplete:") else ""
         if reason in ("http_401", "http_403", "http_404"):
             out[str(k)] = reason
     return out
@@ -549,7 +549,7 @@ def owner_actions(coverage: dict) -> list[str]:
         ([k for k, r in refused.items() if r == "http_401"],
          "the scan's GitHub token is missing, expired or invalid; set a valid token."),
         ([k for k, r in refused.items() if r != "http_401" and k in _ALERT_SOURCES],
-         "the feature is off for this repository (turn it on under Settings > Code security) "
+         "the feature is off for this repository (turn it on in the repository's security settings) "
          "or the scan's token cannot read it (give it read access)."),
         ([k for k, r in refused.items() if r != "http_401" and k in _RUN_SOURCES],
          "give the scan's token read access to Actions and check that the workflow exists."),
