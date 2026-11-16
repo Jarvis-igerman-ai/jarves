@@ -19,6 +19,7 @@ pre-restore checkpoints the last 5 each. Only automatic backups are thinned by t
 `backup.max_install` (default 8, 0 = no cap, else at least 3) is a hard cap on manual + pre-migration + pre-restore
 backups together, newest first, so each beta install (a manual + a pre-migration backup) cannot fill the disk (#1016).
 The newest backup of each of those kinds is one of the kept ones; automatic backups are not counted or touched.
+Every backup the cap deletes is recorded (`capped` in backup_state.json, last 50) and listed by `jarvis backup prune`.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -66,6 +67,8 @@ INSTALL_KINDS = ("manual", "pre-migration", "pre-restore")
 DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "max_install": 8, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
+_state_lock = threading.Lock()                               # backup_state.json read-modify-write
+CAPPED_KEEP = 50                                             # newest install-cap deletions kept in the state file
 
 
 class BackupError(Exception):
@@ -290,16 +293,32 @@ def read_state(home: Path) -> dict:
         return {}
 
 
-def _save_state(home: Path, changes: dict, kind: str | None = None) -> None:
-    st = read_state(home)
-    st.update(changes)
-    if kind == "auto":
-        st["last_auto"] = changes.get("last", {}).get("ts")
-    p = _state_path(home)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st, indent=1), encoding="utf-8")
-    os.replace(tmp, p)
+def _save_state(home: Path, changes: dict, kind: str | None = None, capped: list[str] | None = None) -> None:
+    with _state_lock:
+        st = read_state(home)
+        st.update(changes)
+        if kind == "auto":
+            st["last_auto"] = changes.get("last", {}).get("ts")
+        if capped:                                           # #1016: a visible record of what the install cap deleted
+            old = st.get("capped") if isinstance(st.get("capped"), list) else []
+            now = time.time()
+            st["capped"] = (old + [{"name": n, "ts": now} for n in capped])[-CAPPED_KEEP:]
+        p = _state_path(home)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=STATE_FILE + ".", suffix=".tmp", dir=p.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(st, indent=1))
+            os.replace(tmp, p)
+        except OSError:
+            _unlink(Path(tmp))
+            raise
+
+
+def capped_history(home: Path) -> list[dict]:
+    """Install backups the `backup.max_install` cap deleted (oldest first, at most CAPPED_KEEP); skips bad entries."""
+    h = read_state(home).get("capped")
+    return [e for e in h if isinstance(e, dict) and isinstance(e.get("name"), str)] if isinstance(h, list) else []
 
 
 # ---------------------------------------------------------------------- verify
@@ -378,7 +397,7 @@ def prune(home: Path) -> list[str]:
 def prune_report(home: Path) -> dict:
     """Apply retention; {"gone": deleted names, "capped": the deleted ones only `backup.max_install` removed}."""
     s = get_settings(home)
-    items = list_backups(home)
+    items = sorted(list_backups(home), key=lambda b: (b["ts"], b["name"]), reverse=True)  # newest first, explicitly
     keep: set[str] = set()
     autos = [b for b in items if b["kind"] == "auto"]
     days, weeks = {}, {}
@@ -412,7 +431,13 @@ def prune_report(home: Path) -> dict:
             _unlink(p)
     if gone:
         logs.info("backup", "BACKUP_PRUNED", "old backups removed", removed=len(gone))
-    return {"gone": gone, "capped": [n for n in gone if n in cut]}
+    capped = [n for n in gone if n in cut]
+    if capped:
+        try:
+            _save_state(home, {}, capped=capped)
+        except OSError as e:
+            logs.warn("backup", "BACKUP_STATE_FAILED", "install-cap record not saved", error_type=type(e).__name__)
+    return {"gone": gone, "capped": capped}
 
 
 # ---------------------------------------------------------------------- restore
@@ -759,8 +784,10 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             rep = prune_report(home)
             print(f"removed {len(rep['gone'])} old backup(s)")
-            for n in rep["capped"]:                           # #1016: say what the install cap deleted
-                print(f"removed by the install cap (backup.max_install): {n}")
+            for e in capped_history(home):                    # #1016: incl. the automatic prune after each backup
+                when = datetime.fromtimestamp(e["ts"]).strftime("%Y-%m-%d %H:%M") if isinstance(
+                    e.get("ts"), (int, float)) else "?"
+                print(f"removed by the install cap (backup.max_install) {when}: {e['name']}")
         elif a.action == "settings":
             ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly),
                                                  ("max_install", a.max_install)) if v is not None}

@@ -265,7 +265,7 @@ def test_install_backups_are_capped_by_max_install_issue_1016(profile, capsys):
     names = {b["name"] for b in backup.list_backups(profile)}
     assert names == {auto, *installs[5], *installs[4]} and "removed 8 old backup(s)" in out
     capped = [n for i in range(4) for n in installs[i] if n != installs[0][1]]  # oldest pre-migration: checkpoints=5
-    assert all(f"removed by the install cap (backup.max_install): {n}" in out for n in capped)
+    assert all(f"removed by the install cap (backup.max_install)" in out and f": {n}\n" in out for n in capped)
     assert out.count("removed by the install cap") == 7 and installs[0][1] not in out
     for bad in (-1, 1, 2):                                             # 1-2 cannot hold the newest of every kind
         with pytest.raises(ValueError):
@@ -279,6 +279,37 @@ def test_install_backups_are_capped_by_max_install_issue_1016(profile, capsys):
     more = [fake("manual", start + timedelta(days=10 + i)) for i in range(4)]
     assert backup.prune_report(profile) == {"gone": [], "capped": []}
     assert {b["name"] for b in backup.list_backups(profile)} == {auto, *installs[5], restore, *more}
+
+
+def test_install_cap_deletions_by_the_automatic_prune_stay_visible_issue_1016(profile, capsys, monkeypatch):
+    """#1016: create() prunes right after writing; what the cap deleted there must still be listed later."""
+    from jarves import cli
+    bdir = backup.backup_dir(profile)
+    bdir.mkdir(parents=True, exist_ok=True)
+    old = [f"jarves-backup-202601{d:02d}-030000-manual.zip" for d in (1, 2, 3, 4)]
+    for n in old:
+        (bdir / n).write_bytes(b"x")
+    backup.set_settings(profile, {"max_install": 3})
+    new = backup.create(profile, "manual", now=datetime(2026, 2, 1, 3, 0).timestamp())  # writes, then prunes itself
+    names = {b["name"] for b in backup.list_backups(profile)}
+    assert names == {new.name, old[2], old[3]}
+    assert [e["name"] for e in backup.capped_history(profile)] == [old[1], old[0]]
+    assert cli.main(["backup", "prune"]) == 0                         # nothing left to remove, the record stays
+    out = capsys.readouterr().out
+    assert "removed 0 old backup(s)" in out
+    assert all(f": {n}" in out and "removed by the install cap" in out for n in old[:2])
+    st = json.loads((bdir / backup.STATE_FILE).read_text(encoding="utf-8"))
+    st["capped"] = st["capped"] + ["junk", {"ts": 1}]                  # malformed entries are skipped, not fatal
+    (bdir / backup.STATE_FILE).write_text(json.dumps(st), encoding="utf-8")
+    assert [e["name"] for e in backup.capped_history(profile)] == [old[1], old[0]]
+    backup._save_state(profile, {}, capped=[f"x{i}" for i in range(backup.CAPPED_KEEP + 5)])
+    assert len(backup.capped_history(profile)) == backup.CAPPED_KEEP  # bounded record
+    (bdir / f"jarves-backup-20250101-030000-manual.zip").write_bytes(b"x")
+    warned = []
+    monkeypatch.setattr(backup.logs, "warn", lambda *a, **k: warned.append(a[1]))
+    monkeypatch.setattr(backup, "_save_state", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    assert backup.prune_report(profile)["capped"] == ["jarves-backup-20250101-030000-manual.zip"]
+    assert warned == ["BACKUP_STATE_FAILED"]                          # a failed record is logged, prune still works
 
 
 def test_auto_backup_due_daily_and_switchable(profile):
