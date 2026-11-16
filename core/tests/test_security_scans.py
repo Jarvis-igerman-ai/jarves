@@ -169,17 +169,18 @@ def test_issue_480_a_403_names_the_owner_action_and_stays_incomplete(home):
     scan(None, gh)
     body = gh.issues[0]["body"]
     assert "INCOMPLETE" in body and "never read as zero" in body
-    assert "Owner action: the scan token cannot read Code scanning alerts, Dependabot alerts, Secret scanning alerts" in body
+    assert "Owner action: GitHub refused Code scanning alerts, Dependabot alerts, Secret scanning alerts" in body
+    assert "turn the feature on for the repository" in body                 # a 403 can also mean the feature is off
     assert "dependabot, secret_scanning" not in body.split("Owner action")[1]      # display labels, not raw keys
     assert f"as {ss.TOKEN_ENV} " in body
     clean = ss.tracker_body([], {"dependabot": "complete", "secret_scanning": "incomplete:http_500"}, 0, "s", "light")
     assert "Owner action" not in clean                                     # only an access refusal asks the owner
     b401 = ss.tracker_body([], {"code_scanning": "incomplete:http_401", "dependabot": "complete"}, 0, "s", "light")
-    assert "cannot read Code scanning alerts (HTTP 401/403)" in b401 and "Dependabot alerts" not in b401
+    assert "refused Code scanning alerts (HTTP 401/403)" in b401 and "Dependabot alerts" not in b401
     runs = ss.tracker_body([], {"main_ci": "incomplete:http_403", "nightly": "incomplete:http_401",
                                 "codeql_run": "incomplete:http_403", "dependabot": "complete"}, 0, "s", "full")
-    assert "cannot read Actions workflow runs (HTTP 401/403)" in runs     # Actions sources too, label listed once
-    assert runs.count("Actions workflow runs") == 2                        # "cannot read X" + "access to X"
+    assert "refused Actions workflow runs (HTTP 401/403)" in runs     # Actions sources too, label listed once
+    assert runs.count("Actions workflow runs") == 2                        # "refused X" + "access to X"
 
 
 def test_issue_480_the_token_name_in_the_owner_line_is_the_one_the_scanner_reads(monkeypatch):

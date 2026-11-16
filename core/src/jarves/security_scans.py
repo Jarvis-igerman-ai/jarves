@@ -563,9 +563,11 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     denied = sorted(k for k, v in coverage.items() if k in _ACCESS and v in ("incomplete:http_401", "incomplete:http_403"))
     if denied:                                           # #480: say what the owner can do, not only the HTTP code
         names = ", ".join(dict.fromkeys(_ACCESS[k] for k in denied))   # one label per access kind
-        lines.append(f"Owner action: the scan token cannot read {names} (HTTP 401/403). Give the scan a token with read "
-                     f"access to {names} as {TOKEN_ENV} (the hosted workflow must also pass it, a reviewed workflow "
-                     "change); the coverage stays INCOMPLETE until then.")
+        # GitHub answers 403 both for a token without access and for a feature that is off for the repository
+        # (e.g. Dependabot alerts disabled), so the line names both causes and does not guess which one it is.
+        lines.append(f"Owner action: GitHub refused {names} (HTTP 401/403). Either turn the feature on for the "
+                     f"repository, or give the scan a token with read access to {names} as {TOKEN_ENV} (the hosted "
+                     "workflow must also pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
