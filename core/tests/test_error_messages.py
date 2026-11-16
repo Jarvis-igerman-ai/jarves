@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -90,9 +91,15 @@ const heErr = (msg, en) => Object.assign(new Error(msg), { en });
                                         busy: branch(busy, heErr("הדף עסוק", "the page is busy")),
                                         notBusy: branch(busy, heErr("נכשל", "grant expired")),
                                         cost: branch(costCatch, heErr("נדרש אישור", "approve the cost before switching")),
-                                        noCost: branch(costCatch, heErr("לא ידוע", "unknown voice")) }));
+                                        noCost: branch(costCatch, heErr("לא ידוע", "unknown voice")),
+                                        words: Object.fromEntries(JSON.parse(process.env.CHAT_CODES || "[]").map(
+                                          (c) => [c, said({ ok: false, code: c })])) }));
 })().catch((e) => { console.error(e); process.exit(1); });
 """
+
+
+# chat_engine codes the chat view can receive: each must reach the user as a sentence, never a raw server string
+CHAT_CODES = ("CHAT_STOPPING", "CHAT_BUSY", "CHAT_UNAVAILABLE", "CHAT_TOO_LONG", "CHAT_FEATURE_OFF", "UI_ACTION_FORBIDDEN")
 
 
 def _run_node(tmp_path):
@@ -105,7 +112,8 @@ def _run_node(tmp_path):
     harness = tmp_path / "harness.js"
     harness.write_text(NODE_HARNESS, encoding="utf-8")
     r = subprocess.run(["node", str(harness), str(he_js)] + [str(STATIC / f) for f in ("i18n.js", "app.js", "chatview.js", "browser.js", "m4.js")],
-                       capture_output=True, encoding="utf-8", timeout=60)      # utf-8: Windows would decode as cp1252
+                       capture_output=True, encoding="utf-8", timeout=60,
+                       env={**os.environ, "CHAT_CODES": json.dumps(CHAT_CODES)})      # utf-8: Windows would decode as cp1252
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
@@ -144,22 +152,44 @@ MESSAGE_LOGIC = re.compile(r"\.message\s*(===|!==|==|!=|\.(test|match|includes|i
 
 
 def test_no_dashboard_caller_matches_on_the_translated_error_message():
-    hits = [f"{f.name}:{n}" for f in sorted(STATIC.glob("*.js")) if f.name != "i18n.js"
+    """All dashboard scripts, the phone app (mobile/) included: none decides on the translated e.message."""
+    hits = [f"{f.relative_to(STATIC)}:{n}" for f in sorted(STATIC.rglob("*.js"))
+            if f.name != "i18n.js" and "locales" not in f.parts
             for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1) if MESSAGE_LOGIC.search(line)]
     assert not hits, f"match on e.en (English) or e.code, not e.message: {hits}"
 
 
-def test_chat_too_long_texts_match_the_server_limit():
-    """The 4000 in the catalog key and in chatview.js WORDS is MAX_TEXT; a new limit must update those texts."""
-    assert chat_engine.MAX_TEXT == 4000
-    assert f"message too long: {chat_engine.MAX_TEXT} characters at most" in "".join(locale_parts.catalog("he")["dict"])
+def test_no_client_matches_the_reworded_server_texts():
+    """JAR-128 reworded server errors; no script (dashboard or phone) may still compare against the old exact text."""
+    old = ('"only the computer itself can do this"', '"the briefing is not available right now"')
+    hits = [f"{f.relative_to(STATIC)}: {o}" for f in sorted(STATIC.rglob("*.js")) if "locales" not in f.parts
+            for o in old if o in f.read_text(encoding="utf-8")]
+    assert not hits, hits
+
+
+def _chat(tmp_path, stopping=False):
+    core = SimpleNamespace(home=str(tmp_path), approvals=None, stopping=stopping)
+    return chat_engine.WebChat(core, loop=None)     # the refusals below return before any turn reaches the loop
+
+
+def test_too_long_chat_message_is_refused_with_the_limit_and_a_next_step(tmp_path):
+    """Behavioural: submit() refuses MAX_TEXT+1 characters with 413 CHAT_TOO_LONG; the text names the limit, says what
+    to do, and has Hebrew; the chat view words for that code name the same limit."""
+    status, body = _chat(tmp_path).submit("x" * (chat_engine.MAX_TEXT + 1))
+    assert status == 413 and body["code"] == "CHAT_TOO_LONG"
+    assert str(chat_engine.MAX_TEXT) in body["error"] and ACTION.search(body["error"])
+    assert HE_ACTION.search(locale_parts.catalog("he")["dict"][body["error"]])
     assert f"({chat_engine.MAX_TEXT} characters at most)" in (STATIC / "chatview.js").read_text(encoding="utf-8")
 
 
-def test_every_chat_engine_error_code_has_friendly_words():
-    """chat_engine codes the chat view can receive must map to a sentence, never a raw server string."""
-    engine = (SRC / "chat_engine.py").read_text(encoding="utf-8")
-    view = (STATIC / "chatview.js").read_text(encoding="utf-8")
-    for code in ("CHAT_STOPPING", "CHAT_BUSY", "CHAT_UNAVAILABLE", "CHAT_TOO_LONG", "UI_ACTION_FORBIDDEN"):
-        assert f'"code": "{code}"' in engine, code
-        assert re.search(rf"\b{code}: \[", view), f"chatview.js WORDS lacks {code}"
+def test_stopping_chat_returns_the_code_the_view_has_words_for(tmp_path):
+    status, body = _chat(tmp_path, stopping=True).submit("hello")
+    assert status == 503 and body["code"] == "CHAT_STOPPING" and body["code"] in CHAT_CODES
+
+
+def test_every_chat_error_code_reaches_the_user_as_words_not_the_fallback(tmp_path):
+    """Runs chatview.js's real word() for each code (Hebrew mode): each gets its own sentence, not the generic fallback."""
+    words = _run_node(tmp_path)["words"]
+    fallback = "משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs."
+    for code in CHAT_CODES:
+        assert words.get(code) and words[code] != fallback, f"chatview.js WORDS lacks {code}"
