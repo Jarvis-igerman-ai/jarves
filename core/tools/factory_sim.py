@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TEST = ROOT / "core" / "tests" / "test_workflow_factory_sim.py"
 WRAPPER_TESTS = {"test_sim_stop_hook_idle_nudge_rules", "test_sim_supervisor_dead_watchdog", "test_sim_end_to_end_day"}
+RUN_TIMEOUT_S = 1800  # a stalled scenario must not hang the nightly run (#757)
 LABEL = {"PASSED": "PASS", "FAILED": "FAIL", "ERROR": "FAIL", "SKIPPED": "NOT RUN (wrapper missing)", "XFAIL": "XFAIL (known bug)",
          "XPASS": "FAIL (unexpected pass)"}
 
@@ -101,8 +102,15 @@ def main(argv=None) -> int:
            "-o", f"pythonpath={(ROOT / 'core' / 'src').as_posix()}"]
     if args.k:
         cmd += ["-k", args.k]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT,
-                          env={**os.environ, "PYTHONPATH": str(ROOT / "core" / "src")})
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT,
+                              env={**os.environ, "PYTHONPATH": str(ROOT / "core" / "src")}, timeout=RUN_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        tail = str(exc.output or "")[-800:]
+        print(f"TIMEOUT: the simulation did not finish within {RUN_TIMEOUT_S} s (a scenario stalled)")
+        if args.nightly:
+            record(args.home, [{"name": "timeout", "result": "FAIL (timeout)"}], 1, tail)
+        return 1
     out = proc.stdout + proc.stderr
     if args.v:
         print(out)
@@ -125,6 +133,9 @@ def main(argv=None) -> int:
         if args.nightly:
             record(args.home, [], 1, out[-800:])
         return 1
+    if proc.returncode != 0 and not failed:  # pytest itself failed (internal error, teardown, ...)
+        failed = 1
+        results.append({"name": "pytest_exit", "result": f"FAIL (pytest exit {proc.returncode})"})
     if args.nightly:
         record(args.home, results, failed, out[-800:] if failed else "")
     print("\nALL SCENARIOS OK" if not failed else f"\n{failed} SCENARIO(S) FAILED (run with -v)")

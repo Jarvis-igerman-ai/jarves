@@ -1,0 +1,1 @@
+- Fixed: eight tests no longer depend on the real clock (fixed sleeps and a midnight race replaced with fake clocks or events): hotfix bridge, web chat switch, browser driver deadlines, budget across processes, SWR cache, backup, usage thresholds (JAR-134).

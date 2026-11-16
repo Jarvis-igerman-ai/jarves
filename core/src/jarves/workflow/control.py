@@ -59,11 +59,14 @@ def exclusive(path: Path, *, wait_s: float = 0.0, sleep=time.sleep, clock=time.m
         try:
             yield
         finally:
-            stream.seek(0)
-            if os.name == "nt":
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            try:
+                stream.seek(0)
+                if os.name == "nt":
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass  # closing the handle releases the lock; an unlock error must not turn a clean stop unclean (#879)
 
 
 def _live_holder_probe(home: Path, wall=time.time):

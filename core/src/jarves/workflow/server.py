@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -53,9 +54,12 @@ def owner_only_file(path: Path) -> bool:
     try:
         r = subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{account}:(F)"],
                            capture_output=True, timeout=15, check=False, **hidden_popen_kwargs())
-        return r.returncode == 0
+        ok = r.returncode == 0
     except (OSError, subprocess.SubprocessError):
-        return False
+        ok = False
+    if not ok:  # never silent (#824): the file may still carry the inherited folder ACL
+        logging.getLogger(__name__).warning("could not set an owner-only ACL on %s", path.name)
+    return ok
 
 
 _TIGHTENED: set[str] = set()
@@ -85,9 +89,9 @@ def access_token(home: Path) -> str:
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             return access_token(home)
+        owner_only_file(path)  # lock down before the secret is written (#824)
         with os.fdopen(fd, "w", encoding="ascii") as f:
             f.write(token)
-        owner_only_file(path)
         return token
 
 
@@ -122,10 +126,10 @@ def save_sessions(home: Path, digests: dict[str, float]) -> None:
     path = Path(home) / "sessions.json"
     tmp = path.with_name(f"sessions.{os.getpid()}.{threading.get_ident()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"version": 1, "sessions": digests}, f)
     os.replace(tmp, path)
-    owner_only_file(path)
 
 
 class Server(ThreadingHTTPServer):
@@ -390,10 +394,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/unlock":
                 self._unlock(data)
                 return
-            if (re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|confirm|defer|reopen|discuss|ask-more)", path)
+            if ((re.fullmatch(r"/api/questions/[A-Za-z0-9_.:-]+/(answer|confirm|defer|reopen|discuss|ask-more)", path)
                     or re.fullmatch(r"/api/tasks/[A-Za-z0-9_.:-]+/transition", path)
-                    or path in {"/api/followups", "/api/owner", "/api/tasks", "/api/dispatch"}) and not self._unlock_left():
-                # #903: routes that change task state, owner mode or launch work need the same unlock.
+                    or path in {"/api/followups", "/api/owner", "/api/tasks", "/api/dispatch", "/api/trace/settings"})
+                    and not self._unlock_left()):
+                # #903: routes that change task state, owner mode, detailed trace capture or launch work need the unlock.
                 # #750: the private link alone is read-only; answering needs the code from the owner's terminal.
                 self._json(403, {"error": "answers are locked: run 'jarvis workflow unlock' in your own terminal and type the code",
                                  "locked": True})

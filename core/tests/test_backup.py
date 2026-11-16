@@ -102,7 +102,7 @@ def test_paired_device_tokens_are_never_archived(profile):
 
 
 def test_sqlite_snapshot_is_consistent_under_a_live_writer(profile):
-    stop = threading.Event()
+    stop, writing = threading.Event(), threading.Event()
 
     def writer():
         db = sqlite3.connect(str(profile / "memory.db"), timeout=10)
@@ -114,11 +114,12 @@ def test_sqlite_snapshot_is_consistent_under_a_live_writer(profile):
                 db.execute("INSERT INTO pairs VALUES (?, 1)", (i,))
                 db.execute("INSERT INTO pairs VALUES (?, 2)", (i,))
             i += 1
+            writing.set()
         db.close()
     t = threading.Thread(target=writer)
     t.start()
     try:
-        time.sleep(0.2)
+        assert writing.wait(10)            # the writer has committed at least once: backups race a live writer
         paths = [backup.create(profile, "manual") for _ in range(3)]
     finally:
         stop.set()

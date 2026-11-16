@@ -83,7 +83,8 @@ def test_a_refresh_started_before_invalidate_does_not_store_its_old_result():
     c = SwrCache(ttl_s=60, wait_s=0.1)
     gate = threading.Event()
     c.get("k", lambda: (gate.wait(5), (200, {"old": 1}))[1], lambda: (200, {"pending": True}))
+    done = c._flight["k"]                                    # set when the old refresh has finished
     c.invalidate()
     gate.set()
-    time.sleep(0.3)
+    assert done.wait(5)
     assert c.get("k", lambda: (200, {"new": 1}))[1] == {"new": 1}

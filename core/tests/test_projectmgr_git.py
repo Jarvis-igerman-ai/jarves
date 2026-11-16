@@ -73,3 +73,23 @@ def test_parallel_tasks_can_all_create_and_replace_their_worktrees(tmp_path):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert errors == []
+
+
+@pytest.mark.parametrize("path", [
+    ".github/workflows/ci.yml", ".GitHub/workflows/ci.yml", ".GITHUB/dependabot.yml",
+    ".Claude/settings.json", ".CLAUDE/agents/x.md", ".Codex/config.toml", ".OpenCode/x", ".Git/config",
+    ".GitHooks/pre-commit", "OpenCode.json", "sub/.MCP.json", ".GitModules", r".GitHub\workflows\ci.yml"])
+def test_protected_paths_are_refused_in_any_letter_case(path):
+    # JAR-317: Windows/macOS ignore case, so `.GitHub/...` is the same CI file as `.github/...`
+    prot, outside = gitops.violations([path], ["src/**"])
+    assert prot == [path] and outside == []
+
+
+@pytest.mark.parametrize("path", ["src/github/x.py", "docs/.github.md", "src/claude/x.py", "my.mcp.json.bak"])
+def test_ordinary_paths_with_similar_names_are_not_protected(path):
+    assert not gitops.is_protected(path)
+
+
+def test_agent_tool_rules_deny_edits_to_github_workflows():
+    from jarves.projectmgr import runners
+    assert "Edit(.github/**)" in runners.DENY and "Write(.github/**)" in runners.DENY
