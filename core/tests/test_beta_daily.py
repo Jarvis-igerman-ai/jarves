@@ -79,3 +79,9 @@ def test_malformed_records_are_counted_not_fatal(tmp_path):
 def test_svg_escapes_markup_and_control_chars():
     svg = bd.render_svg("JAR-1", ["a <b> & c\x07\x1b[31m"])
     assert "&lt;b&gt; &amp; c" in svg and "\x07" not in svg and "\x1b" not in svg and svg.startswith("<svg")
+
+
+def test_real_runner_reports_missing_command_and_exit_code():
+    assert bd.real_runner("/nonexistent/jarvis")(["jarvis", "status"])[0] == 127
+    rc, out = bd.real_runner()([sys.executable, "-c", "print('hi'); raise SystemExit(3)"])
+    assert rc == 3 and "hi" in out

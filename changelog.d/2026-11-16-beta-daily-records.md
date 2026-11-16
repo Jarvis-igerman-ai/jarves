@@ -1,0 +1,1 @@
+- Added: `core/tools/beta_daily.py run` installs the newest beta and always writes an install record, then runs scenarios S01-S05 with PASS/FAIL and writes demos (record plus SVG transcript image) for JAR-214, JAR-320 and JAR-321; `check` reports last good install age (must be under 26 h), scenario_pass_pct and demos_24h_with_image (JAR-456).
