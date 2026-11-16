@@ -33,7 +33,6 @@ MAX_CASES = 200
 MAX_CHARS = 600
 MAX_TOOLS = 5
 LOOKBACK_TURNS = 30
-FEEDBACK_MAX_CHARS = 60           # a longer turn with "לא נכון" is a real question, not the feedback phrase
 VIAS = ("voice", "dashboard", "cli")
 _LOCK = threading.Lock()
 _ID = re.compile(r"FB-[0-9a-f]{8}")
@@ -108,14 +107,14 @@ class _ReadOnly:
 
 
 def is_feedback_turn(text) -> bool:
-    """A short feedback phrase ("Jarvis, that was wrong"), not a question that merely contains "לא נכון"."""
+    """The feedback phrase ("Jarvis, that was wrong"), not a question or request that merely contains "לא נכון"."""
     t = str(text or "").strip()
     rest = _NAME.sub("", t, count=1)
     if t.endswith("?"):
         return False
-    if _WRONG_ALONE.match(rest) or _WRONG_ALONE.match(_LEAD.sub("", rest, count=1)):   # starts with it: any length
-        return True
-    return bool(_WRONG.search(t)) and len(t) <= FEEDBACK_MAX_CHARS and not t.endswith("?")
+    # Only a turn that STARTS with the phrase (after the name and "no," / "זה היה") is a report, at any length:
+    # "תזכיר לי שזה לא נכון לאכול מאוחר" merely contains it (review round 6 R4).
+    return bool(_WRONG_ALONE.match(rest) or _WRONG_ALONE.match(_LEAD.sub("", rest, count=1)))
 
 
 def last_exchange(home, *, store=None) -> dict | None:

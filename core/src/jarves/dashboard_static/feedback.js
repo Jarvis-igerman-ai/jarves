@@ -35,8 +35,8 @@
   function caseCard(c) {
     return el("div", { class: "card", dir: "auto" },
       el("div", { class: "row" }, el("b", { dir: "ltr" }, c.id), el("span", { class: "muted small" }, ` ${c.saved || ""} · ${c.via || ""}`),
-        c.exchange_at ? el("span", { class: "muted small" }, tx(` · השיחה מ-${c.exchange_at.replace("T", " ")}`,
-          ` · exchange from ${c.exchange_at.replace("T", " ")}`)) : null,
+        c.exchange_at ? el("span", { class: "muted small" }, tx(` · השיחה מ-${String(c.exchange_at).replace("T", " ")}`,
+          ` · exchange from ${String(c.exchange_at).replace("T", " ")}`)) : null,
         el("button", { type: "button", class: "ghost", "aria-label": tx(`מחיקת ${c.id}`, `Delete ${c.id}`), onclick: () => remove(c.id) },
           tx("מחיקה", "Delete"))),
       el("div", {}, el("span", { class: "muted" }, tx("אמרתם: ", "You said: ")), c.say || "—"),

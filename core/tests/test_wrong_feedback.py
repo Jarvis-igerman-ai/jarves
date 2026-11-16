@@ -97,7 +97,7 @@ def test_a_long_correction_that_starts_with_the_phrase_is_skipped(home):
     long = "Jarvis that was wrong, the capital of Australia is Canberra not Sydney, please remember that next time"
     _history(home, [(1, "user", "what is the capital of Australia"), (2, "assistant", "Sydney"),
                     (3, "user", long), (4, "assistant", "Sorry, Canberra.")])
-    assert len(long) > wf.FEEDBACK_MAX_CHARS and wf.last_exchange(home)["reply"] == "Sydney"
+    assert len(long) > 60 and wf.last_exchange(home)["reply"] == "Sydney"
     assert wf.is_feedback_turn("ג׳רוויס, זה היה לא נכון, " + "ה" * 80)
     assert not wf.is_feedback_turn("האם זה לא נכון שהשמש קרה? " + "ה" * 80)
 
@@ -252,6 +252,15 @@ def test_a_hebrew_question_that_starts_with_the_phrase_is_not_a_report(home):
     assert ex["say"] == q and ex["reply"] == "נכון, סידני."
 
 
+def test_a_short_turn_that_merely_contains_the_phrase_is_not_a_report(home):
+    """Review round 6 R4: only a turn that STARTS with the phrase is skipped as the report."""
+    req = "תזכיר לי שזה לא נכון לאכול מאוחר"
+    assert not wf.is_feedback_turn(req) and not wf.is_feedback_turn("I think that was wrong")
+    assert wf.is_feedback_turn("no, that was wrong") and wf.is_feedback_turn("זה היה לא נכון")
+    _history(home, [(1, "user", "hi"), (2, "assistant", "hello"), (3, "user", req), (4, "assistant", "אזכיר")])
+    assert wf.last_exchange(home)["say"] == req
+
+
 def test_privacy_mode_keeps_only_the_note_length(home, monkeypatch):
     """Review R1 (round 3): in log privacy mode the note can quote the turn, so it is kept as its length only."""
     from jarves import logs
@@ -290,3 +299,10 @@ def test_list_reads_under_the_writer_lock(home, monkeypatch):
     wf.report_wrong(home, via="cli", now=NOW)
     monkeypatch.setattr(wf, "_file_lock", lock)
     assert len(wf.cases(home)) == 1 and held == [wf.path(home)]
+
+
+def test_feedback_page_tolerates_a_non_string_exchange_time():
+    """Review round 6 R5: a hand-edited row (exchange_at = 5) must not break the Feedback page (no node in CI here)."""
+    from pathlib import Path
+    js = (Path(wf.__file__).parent / "dashboard_static" / "feedback.js").read_text(encoding="utf-8")
+    assert "c.exchange_at.replace(" not in js and js.count("String(c.exchange_at).replace(") == 2

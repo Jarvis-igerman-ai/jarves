@@ -11,8 +11,8 @@ expect_he = "ג׳רוויס עונה \"תודה, שמרתי את השיחה הא
 expect_en = "Jarvis answers \"Thanks, I saved the last exchange as feedback (FB-...)\". The command jarvis feedback list shows what was saved."
 cost_he = "חינם. קובץ מקומי בלבד."
 cost_en = "Free. A local file only."
-privacy_he = "שום דבר לא יוצא מהמחשב. סיסמאות, מפתחות, מיילים ומספרי טלפון מושחרים; משפט שנראה רגיש (סיסמה, קוד, כרטיס אשראי, מספרים ארוכים) נשמר רק כאורך. עם מצב פרטיות ביומן נשמר רק האורך, גם של ההערה. עד 200 משובים."
-privacy_en = "Nothing leaves this PC. Passwords, keys, e-mails and phone numbers are masked; a sentence that looks sensitive (password, code, credit card, long numbers) is kept as its length only. With log privacy on only lengths are kept, the note included. Up to 200 cases."
+privacy_he = "שום דבר לא יוצא מהמחשב. סיסמאות, מפתחות, מיילים ומספרי טלפון מושחרים; משפט שנראה רגיש (סיסמה, קוד, כרטיס אשראי, מספרים ארוכים) נשמר רק כאורך. עם מצב פרטיות ביומן נשמר רק האורך, גם של ההערה. עד 200 משובים; משוב נשמר עד שמוחקים אותו (jarvis feedback delete ID), גם אחרי מחיקת היסטוריית השיחות."
+privacy_en = "Nothing leaves this PC. Passwords, keys, e-mails and phone numbers are masked; a sentence that looks sensitive (password, code, credit card, long numbers) is kept as its length only. With log privacy on only lengths are kept, the note included. Up to 200 cases; a case stays until you delete it (jarvis feedback delete ID), also after the conversation history is cleared."
 
 [parity.features]
 wrong_feedback = "feedback"
