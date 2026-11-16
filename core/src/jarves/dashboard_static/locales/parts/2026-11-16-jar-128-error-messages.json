@@ -1,0 +1,21 @@
+{
+ "dict": {
+  "chat is not running here": "השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את ג'רביס.",
+  "chat is not running here: start `jarvis web` or JARVES": "השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את ג'רביס.",
+  "Check that JARVES is running (jarvis status), then refresh the page.": "בדקו שג'רביס פועל (jarvis status) ורעננו את הדף.",
+  "JARVES is not running; start it first (jarvis start)": "ג'רביס לא פועל. הפעילו אותו קודם (jarvis start).",
+  "JARVES is stopping or restarting. Wait a few seconds and send again.": "ג'רביס נעצר או מופעל מחדש. המתינו כמה שניות ושלחו שוב.",
+  "message too long: 4000 characters at most, split it into several messages": "ההודעה ארוכה מדי: עד 4000 תווים. חלקו אותה לכמה הודעות.",
+  "only the computer itself can do this: do it in the dashboard on that computer": "רק המחשב עצמו יכול לעשות את זה: עשו זאת בלוח הבקרה במחשב.",
+  "profiles are managed only on this computer": "פרופילים מנוהלים רק במחשב הזה. פתחו את לוח הבקרה במחשב.",
+  "shutting down": "ג'רביס נסגר כעת. המתינו כמה שניות ונסו שוב.",
+  "Something went wrong. Try again; if it repeats, open the Health page or run jarvis logs.": "משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs.",
+  "still loading, retry in a few seconds": "עדיין נטען. נסו שוב בעוד כמה שניות.",
+  "the briefing is not available right now: try again in a minute": "התדריך לא זמין כרגע. נסו שוב בעוד דקה.",
+  "the chat engine is not running": "מנוע השיחה לא פועל. הפעילו את ג'רביס ונסו שוב.",
+  "The message is too long (4000 characters at most). Shorten it or split it into several messages.": "ההודעה ארוכה מדי (עד 4000 תווים). קצרו אותה או חלקו לכמה הודעות.",
+  "the previous message is still being answered": "התשובה להודעה הקודמת עדיין נכתבת. המתינו רגע.",
+  "too many requests: wait a minute": "יותר מדי בקשות. המתינו דקה ונסו שוב.",
+  "wait a minute before trying again": "המתינו דקה לפני שמנסים שוב."
+ }
+}
