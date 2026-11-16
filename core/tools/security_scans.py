@@ -63,7 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     r = ss.run_scan(None, a.kind, trigger="hosted", client=ss.http_client(token, a.repo), now=datetime.now(timezone.utc),
                     report=not a.no_report, dry_run=a.dry_run, boundary=boundary_runner if a.kind == "full" else None,
-                    token_from=token_from)
+                    token_from=token_from,   # #480: in Actions GH_TOKEN is the workflow's github.token (security-scans.yml)
+                    actions_token=os.environ.get("GITHUB_ACTIONS") == "true" and token_from in ss.TOKEN_ENVS[1:])
     counts = {s: sum(f["severity"] == s for f in r.get("findings", [])) for s in ("P1", "P2", "P3")}
     out = {"kind": a.kind, "status": r["status"], "findings": len(r.get("findings", [])), **counts,
            "coverage": r.get("coverage", {}), "issue": (r.get("issue") or {}).get("status", "-"),

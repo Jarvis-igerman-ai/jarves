@@ -460,6 +460,8 @@ def test_issue_480_only_the_observed_http_codes_are_printed():
     alerts, runs = _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "light"))
     assert "Dependabot alerts (HTTP 403)." in alerts and "404" not in alerts
     assert "Main CI runs (HTTP 404)." in runs and "403" not in runs
+    assert "or the workflow file was renamed or removed" in runs
+    assert "renamed" not in _owner_lines(ss.tracker_body([], dict(GAPS_480, main_ci="incomplete:http_403"), 0, "0" * 16, "light"))[1]
 
 
 def test_issue_480_the_owner_line_names_the_token_source_the_scan_used_by_name_only():
@@ -470,20 +472,48 @@ def test_issue_480_the_owner_line_names_the_token_source_the_scan_used_by_name_o
     assert "give the token in JARVES_GITHUB_TOKEN (read first" in first and "this scan used" not in first
 
 
-def test_issue_480_the_hosted_run_names_gh_token_and_never_its_value(monkeypatch):
+def _hosted_480(monkeypatch, actions):
     import importlib.util
     p = Path(__file__).resolve().parents[1] / "tools" / "security_scans.py"
     spec = importlib.util.spec_from_file_location("security_scans_tool_480", p)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    monkeypatch.delenv("JARVES_GITHUB_TOKEN", raising=False)
+    for k in ("JARVES_GITHUB_TOKEN", "GITHUB_TOKEN", "GITHUB_REPOSITORY", "GITHUB_STEP_SUMMARY", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(k, raising=False)                              # hermetic on CI, where these are set
     monkeypatch.setenv("GH_TOKEN", SECRET)
-    gh = FakeGitHub(access=False)
+    if actions:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    gh, used = FakeGitHub(access=False), []
     gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
-    monkeypatch.setattr(ss, "http_client", lambda token, repo=ss.REPO: gh)
+    monkeypatch.setattr(ss, "http_client", lambda token, repo=ss.REPO: used.append((token, repo)) or gh)
     assert mod.main(["--kind", "light", "--json"]) == 0
-    body = gh.issues[0]["body"]
+    assert used == [(SECRET, ss.REPO)]                                    # main() resolves ss.http_client at call time
+    return gh.issues[0]["body"]
+
+
+def test_issue_480_the_hosted_run_names_gh_token_and_never_its_value(monkeypatch):
+    body = _hosted_480(monkeypatch, actions=False)
     assert "the token from GH_TOKEN that this scan used" in body and SECRET not in body
+
+
+def test_issue_480_in_actions_the_owner_line_fits_the_workflows_github_token(monkeypatch):
+    wf = (Path(__file__).resolve().parents[2] / ss.WORKFLOW_FILE).read_text(encoding="utf-8")
+    assert "GH_TOKEN: ${{ github.token }}" in wf                           # the wording below assumes this binding
+    body = _hosted_480(monkeypatch, actions=True)
+    dep = [ln for ln in _owner_lines(body) if "Dependabot" in ln][0]
+    assert "the Actions token can never read Dependabot alerts" in dep and "repository secret" in dep
+    assert f"map it to JARVES_GITHUB_TOKEN in the env of {ss.WORKFLOW_FILE}" in dep and SECRET not in body
+    assert "give the token from GH_TOKEN" not in body
+    runs = ss.owner_actions({"code_scanning": "incomplete:http_403", "nightly": "incomplete:http_403"}, "GH_TOKEN", True)
+    assert "`permissions: security-events: read`" in runs[0] and "repository secret" not in runs[0]
+    assert "`permissions: actions: read`" in runs[1]
+
+
+def test_issue_480_a_changed_refusal_code_or_token_source_rewrites_the_tracker():
+    a = ss.signature([], False, {"dependabot": "incomplete:http_403"})
+    assert a != ss.signature([], False, {"dependabot": "incomplete:http_401"})
+    assert a != ss.signature([], False, {"dependabot": "incomplete:http_403"}, "GH_TOKEN|1")
+    assert a == ss.signature([], False, {"dependabot": "incomplete:http_403", "local_diagnostics": "skipped:x"})
 
 
 def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once(home):
