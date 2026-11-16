@@ -13,6 +13,10 @@ changes something a user sees (dashboard pages, guides, CLI output) CI produces:
 - ``cli-<n>-before.svg`` / ``-after.svg`` (+ ``.png``): rendered terminal output of the affected read-only CLI help;
 - ``demo.json``: title, a one-line "what changed for you", the files, the checks (JS errors on the PR side fail ``ok``).
 
+A detail view (no nav entry) is opened through the page audit's seeded DEMO route (``session/{sid}``) or its parent
+page. A change to this tool or its workflow renders home, a seeded detail view, a guide, the phone site and the CLI
+as a self-check; only then does ``ci`` exit 1 when the demo is not ok.
+
 "before" is the PR's merge base (main), "after" the PR head. Each side is rendered by a child Python process whose
 PYTHONPATH points at that checkout's ``core/src`` and ``core/tools``; the child verifies which ``jarves`` it imported.
 
@@ -48,8 +52,15 @@ DESKTOP = {"width": 1280, "height": 800}
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 SECRET = re.compile(r"(?i)((?:token|secret|password|passwd|api[_-]?key|authorization)\S*\s*[=:]\s*)\S+")
 STORY = re.compile(r"(?im)^\s*(?:\*\*)?(?:what changed for you|now you can)(?:\*\*)?\s*:\s*(?:\*\*)?\s*(.+?)\s*$")
-CHILD_TIMEOUT = 300                                  # s per child; at most 4 children (20 min) + setup stay under the job's 30 min
+CHILD_TIMEOUT = 300                                  # s per child; up to 4 children (capture and CLI, both sides) = 20 min
+# + setup (uv sync, browser install, ~5 min) + side-by-side/PNG rendering stay under the job's 40 min (pr-demo.yml)
 PHONE = {"width": 390, "height": 844}
+# detail views (no nav entry) shown through their parent page when the page audit seeds no route for them
+DETAIL_PARENT = {"agent": "agents", "note": "memory", "guide": "guides", "raw": "conversations"}
+# a change to the demo tool itself renders a real dashboard page, a seeded detail view, a guide, the phone site and
+# the CLI, so this PR's own pr-demo run exercises the browser path (ci exits 1 when that self-check is not ok)
+SELF = ("core/tools/pr_demo.py", ".github/workflows/pr-demo.yml")
+SELF_PAGES = ["home", "session/{sid}", "guide/timers"]
 CLI_FILE = re.compile(r"^core/src/jarves/(?:([a-z0-9_]+?)_cli|cli|clilang|cli_parity)\.py$")
 
 
@@ -61,12 +72,13 @@ def registered_pages(js_text: str) -> list[str]:
 
 
 def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8", errors="replace"),
-         known_pages: list[str] | None = None, read_base=None) -> dict:
+         known_pages: list[str] | None = None, read_base=None, details: dict | None = None) -> dict:
     """Which user-visible surfaces a set of changed repo paths touches. ``read`` reads a repo path of the PR head,
-    ``read_base`` the same path on the base side (a file the PR deletes); both raise OSError for a missing file."""
+    ``read_base`` the same path on the base side (a file the PR deletes); both raise OSError for a missing file.
+    ``details`` maps a detail page id to the seeded DEMO route the page audit opens (``session`` -> ``session/{sid}``)."""
     pages: list[str] = []
     cli: list[str] = []
-    phone = False
+    phone = self_check = False
     reasons: list[str] = []
 
     def add(ps, why, force=False):
@@ -85,7 +97,12 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
 
     for f in files:
         f = f.replace("\\", "/")
-        if f.startswith(STATIC + "mobile/"):
+        if f in SELF:
+            self_check = phone = True
+            add(SELF_PAGES, f"{f}: the demo tool itself (self-check)", force=True)
+            if "--help" not in cli:
+                cli.append("--help")
+        elif f.startswith(STATIC + "mobile/"):
             phone = True
             reasons.append(f"{f}: phone site")
         elif f.startswith(STATIC + "locales/") or (f.startswith(STATIC) and f[len(STATIC):] in SHARED):
@@ -95,9 +112,10 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
                 ids = registered_pages(text(f))
             except OSError:
                 ids = []
-            if known_pages is not None:                  # detail-only scripts (PAGES.agent): no nav page to open
-                ids = [i for i in ids if i in known_pages]
-            add(ids or OVERVIEW, f"{f}: page script")
+            if known_pages is not None:                  # detail views: their seeded route, else their parent page
+                ids = [i if i in known_pages else (details or {}).get(i) or DETAIL_PARENT.get(i) for i in ids]
+                ids = [i for i in ids if i]
+            add(ids or OVERVIEW, f"{f}: page script", force=True)
         elif f.startswith(STATIC) and f.endswith((".css", ".html")):
             stem = Path(f).stem
             add([stem] if known_pages and stem in known_pages else OVERVIEW, f"{f}: page style")
@@ -119,7 +137,7 @@ def plan(files: list[str], read=lambda p: (REPO / p).read_text(encoding="utf-8",
             reasons.append(f"{f}: command line")
     if cli and "--help" not in cli and len(cli) < MAX_CLI:
         cli.append("--help")
-    return {"user_facing": bool(pages or cli or phone), "pages": pages[:MAX_PAGES], "more_pages": pages[MAX_PAGES:],
+    return {"user_facing": bool(pages or cli or phone), "self_check": self_check, "pages": pages[:MAX_PAGES], "more_pages": pages[MAX_PAGES:],
             "phone": phone, "cli": cli[:MAX_CLI], "reasons": reasons}
 
 
@@ -156,16 +174,31 @@ def base_reader(base: str):
     return read
 
 
-def known_pages_of(core: Path) -> list[str]:
-    """Dashboard nav pages of a checkout; loads its page audit without touching sys.path or sys.modules."""
+def _page_audit(core: Path):
+    """A checkout's page audit, loaded without touching sys.path or sys.modules (None when it cannot be loaded)."""
     import importlib.util
     try:
         spec = importlib.util.spec_from_file_location("_pr_demo_apc", core / "tools" / "all_pages_check.py")
         apc = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(apc)
-        return apc.nav_pages()
-    except Exception:                                    # an old checkout: no filter
+        return apc
+    except Exception:                                    # an old or broken checkout: no filter
+        return None
+
+
+def known_pages_of(core: Path) -> list[str]:
+    """Dashboard nav pages of a checkout."""
+    apc = _page_audit(core)
+    try:
+        return list(apc.nav_pages()) if apc else []
+    except (OSError, AttributeError):
         return []
+
+
+def detail_routes_of(core: Path) -> dict:
+    """Detail page id -> the seeded DEMO route the page audit opens (``session`` -> ``session/{sid}``)."""
+    routes = getattr(_page_audit(core), "EXTRA", None) or []
+    return {re.split(r"[/?]", r)[0]: r for r in routes if isinstance(r, str) and "/" in r}
 
 
 def what_changed(title: str, body: str) -> str:
@@ -209,7 +242,7 @@ def _launch(pw):
     try:
         import all_pages_check as apc
         return pw.chromium.launch(headless=True, **apc.launch_kwargs("msedge" if sys.platform == "win32" else ""))
-    except SystemExit:
+    except (SystemExit, AttributeError, ImportError):    # no browser found / an older page audit on the base side
         return pw.chromium.launch(headless=True)
 
 
@@ -250,12 +283,13 @@ def new_ctx(b, **kw):
 def phone_shot(b, d, label: str, out: Path) -> tuple[str, list[str]]:
     """The phone site (/m/) as a phone sees it: pair a DEMO phone with a one-time code, screenshot the app view."""
     errs: list[str] = []
-    d.mobile.enabled = True                              # the throw-away DEMO dashboard only; 127.0.0.1, test data
-    code = d.mobile.new_code(by="demo")["code"]
-    ctx = new_ctx(b, viewport=PHONE, is_mobile=True, has_touch=True, locale="en-US", color_scheme="light")
-    p = ctx.new_page()
-    p.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
+    ctx = None
     try:
+        d.mobile.enabled = True                          # the throw-away DEMO dashboard only; 127.0.0.1, test data
+        code = d.mobile.new_code(by="demo")["code"]
+        ctx = new_ctx(b, viewport=PHONE, is_mobile=True, has_touch=True, locale="en-US", color_scheme="light")
+        p = ctx.new_page()
+        p.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
         p.goto(d.url.split("/?")[0].rstrip("/") + f"/m/#c={code}")
         p.wait_for_selector("#pairView:not([hidden])", timeout=20000)
         p.fill("#name", "Demo phone")
@@ -266,10 +300,11 @@ def phone_shot(b, d, label: str, out: Path) -> tuple[str, list[str]]:
         p.screenshot(path=str(f))
         return f.name, errs
     except Exception as e:
-        errs.append(f"{type(e).__name__}: {str(e).splitlines()[0][:200]}")
+        errs.append(f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:200]}")
         return "", errs
     finally:
-        ctx.close()
+        if ctx is not None:
+            ctx.close()
 
 
 def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, lang: str, phone: bool = False) -> dict:
@@ -280,21 +315,21 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
     out.mkdir(parents=True, exist_ok=True)
     res: dict = {"label": label, "shots": {}, "errors": {}, "video": ""}
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        d, _sid = apc.start_dashboard(Path(tmp))
+        d, sid = apc.start_dashboard(Path(tmp))
         try:
             with sync_playwright() as pw:
                 b = _launch(pw)
                 try:
-                    targets = [(pg, d.url + "#/" + pg, DESKTOP) for pg in pages]
+                    targets = [(pg, d.url + "#/" + pg.replace("{sid}", str(sid)), DESKTOP) for pg in pages]
                     for name, url, vp in targets:
-                        ctx = new_ctx(b, viewport=vp, locale="en-US", color_scheme="light")
-                        ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
-                        p = ctx.new_page()
                         errs: list[str] = []
-                        p.on("pageerror", lambda e, errs=errs: errs.append(f"pageerror: {e}"))
-                        p.on("console", lambda m, errs=errs: errs.append(f"console.error: {m.text}")
-                             if m.type == "error" else None)
+                        ctx = new_ctx(b, viewport=vp, locale="en-US", color_scheme="light")
                         try:
+                            ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
+                            p = ctx.new_page()
+                            p.on("pageerror", lambda e, errs=errs: errs.append(f"pageerror: {e}"))
+                            p.on("console", lambda m, errs=errs: errs.append(f"console.error: {m.text}")
+                                 if m.type == "error" else None)
                             resp = p.goto(url)
                             if resp is not None and resp.status >= 400:
                                 errs.append(f"HTTP {resp.status}")
@@ -302,10 +337,11 @@ def capture(core: Path, pages: list[str], label: str, out: Path, video: bool, la
                             f = out / f"{safe(name)}-{label}.png"
                             p.screenshot(path=str(f))
                             res["shots"][name] = f.name
-                        except Exception as e:           # a page that does not exist on main yet, a timeout
-                            errs.append(f"{type(e).__name__}: {str(e).splitlines()[0][:200]}")
+                        except Exception as e:           # a timeout, a missing route, a browser failure
+                            errs.append(f"{type(e).__name__}: {(str(e).splitlines() or [''])[0][:200]}")
+                        finally:
+                            ctx.close()
                         res["errors"][name] = [scrub(x)[:300] for x in errs]
-                        ctx.close()
                     if phone:
                         shot, errs = phone_shot(b, d, label, out)
                         if shot:
@@ -332,25 +368,28 @@ def walkthrough(b, targets, out: Path, lang: str) -> str:
     """Open each page and scroll through it slowly; about 4 s per page, 20 s at most."""
     vdir = out / "_video"
     ctx = new_ctx(b, viewport=DESKTOP, record_video_dir=str(vdir), record_video_size=DESKTOP)
-    ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
-    p = ctx.new_page()
-    per = max(2500, min(5000, 18000 // len(targets)))
-    for name, url, vp in targets:
-        try:
-            p.set_viewport_size(vp)
-            p.goto(url)
-            _settle(p)
-            steps = 6
-            for i in range(steps):
-                p.evaluate(f"window.scrollTo({{top: (document.body.scrollHeight - innerHeight) * {(i + 1) / steps}, "
-                           "behavior: 'smooth'})")
+    vid = None
+    try:
+        ctx.add_init_script(f"try{{localStorage.setItem('jarves-lang','{lang}')}}catch(e){{}}")
+        p = ctx.new_page()
+        vid = p.video
+        per = max(2500, min(5000, 18000 // len(targets)))
+        for name, url, vp in targets:
+            try:
+                p.set_viewport_size(vp)
+                p.goto(url)
+                _settle(p)
+                steps = 6
+                for i in range(steps):
+                    p.evaluate(f"window.scrollTo({{top: (document.body.scrollHeight - innerHeight) * {(i + 1) / steps}"
+                               ", behavior: 'smooth'})")
+                    p.wait_for_timeout(per // (steps + 2))
+                p.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
                 p.wait_for_timeout(per // (steps + 2))
-            p.evaluate("window.scrollTo({top: 0, behavior: 'smooth'})")
-            p.wait_for_timeout(per // (steps + 2))
-        except Exception:
-            continue
-    vid = p.video
-    ctx.close()                                          # the video file is complete only after the context closes
+            except Exception:                            # one page failing must not end the recording
+                continue
+    finally:
+        ctx.close()                                      # the video file is complete only after the context closes
     dest = out / "walkthrough.webm"
     if vid and Path(vid.path()).exists():               # no ffmpeg: no file, the screenshots still count
         Path(vid.path()).replace(dest)
@@ -398,17 +437,32 @@ def svg_to_png(out: Path) -> None:
         try:
             for s in svgs:
                 ctx = new_ctx(b)
-                p = ctx.new_page()
-                p.goto(s.resolve().as_uri())
-                p.locator("svg").screenshot(path=str(s.with_suffix(".png")))
-                ctx.close()
+                try:
+                    p = ctx.new_page()
+                    p.goto(s.resolve().as_uri())
+                    p.locator("svg").screenshot(path=str(s.with_suffix(".png")))
+                finally:
+                    ctx.close()
         finally:
             b.close()
 
 
-def compare(out: Path, pages: list[str]) -> list[str]:
+def compare_html(before: Path, after: Path, same: bool, missing: str = "") -> str:
+    """The side-by-side page. A missing 'before' image is "not captured" with the capture's own reason: a timeout or
+    a browser failure looks the same as a new page, so this never claims the page did not exist before."""
+    left = (f'<img src="{before.resolve().as_uri()}">' if before.exists() else '<div class="none">No image: the '
+            f'"before" capture was unavailable ({html.escape(missing or "no reason recorded")[:300]}).</div>')
+    return ("<!doctype html><meta charset=utf-8><style>body{margin:0;font:600 20px system-ui;background:#f4f4f5}"
+            ".row{display:flex;gap:16px;padding:16px}.col{flex:1}.col p{margin:0 0 8px}"
+            "img{width:100%;border:1px solid #ccc;border-radius:6px}.none{padding:80px 20px;color:#666}"
+            f"</style><div class=row><div class=col><p>Before (main)</p>{left}</div>"
+            f'<div class=col><p>After (this change){" - no visible difference" if same else ""}</p>'
+            f'<img src="{after.resolve().as_uri()}"></div></div>')
+
+
+def compare(out: Path, pages: list[str], missing: dict | None = None) -> list[str]:
     """``<page>-compare.png``: before and after side by side with labels (rendered by the browser, no Pillow).
-    Returns the pages whose before and after screenshots are identical."""
+    ``missing``: page -> why its 'before' capture is unavailable. Returns the pages whose images are identical."""
     same = []
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
@@ -420,23 +474,17 @@ def compare(out: Path, pages: list[str]) -> list[str]:
                     continue
                 if a.exists() and a.read_bytes() == z.read_bytes():
                     same.append(name)
-                left = (f'<img src="{a.resolve().as_uri()}">' if a.exists()
-                        else '<div class="none">This page did not exist before this change.</div>')
-                doc = ("<!doctype html><meta charset=utf-8><style>body{margin:0;font:600 20px system-ui;background:#f4f4f5}"
-                       ".row{display:flex;gap:16px;padding:16px}.col{flex:1}.col p{margin:0 0 8px}"
-                       "img{width:100%;border:1px solid #ccc;border-radius:6px}.none{padding:80px 20px;color:#666}"
-                       f"</style><div class=row><div class=col><p>Before (main)</p>{left}</div>"
-                       f'<div class=col><p>After (this change){" - no visible difference" if name in same else ""}</p><img src="{z.resolve().as_uri()}"></div></div>')
                 h = out / f"_{safe(name)}.html"
-                h.write_text(doc, encoding="utf-8")
+                h.write_text(compare_html(a, z, name in same, (missing or {}).get(name, "")), encoding="utf-8")
                 ctx = new_ctx(b, viewport={"width": 1600, "height": 300})
-                p = ctx.new_page()
-                p.goto(h.resolve().as_uri())
-                p.wait_for_load_state("load")
-                f = out / f"{safe(name)}-compare.png"
-                p.screenshot(path=str(f), full_page=True)
-                ctx.close()
-                h.unlink()
+                try:
+                    p = ctx.new_page()
+                    p.goto(h.resolve().as_uri())
+                    p.wait_for_load_state("load")
+                    p.screenshot(path=str(out / f"{safe(name)}-compare.png"), full_page=True)
+                finally:
+                    ctx.close()
+                    h.unlink(missing_ok=True)
         finally:
             b.close()
     return same
@@ -464,7 +512,8 @@ def _child(core: Path, args: list[str]) -> dict:
 def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: str, files: list[str] | None,
        lang: str = "en") -> dict:
     files = changed_files(base) if files is None else files
-    pl = plan(files, known_pages=known_pages_of(ROOT) or None, read_base=base_reader(base))
+    pl = plan(files, known_pages=known_pages_of(ROOT) or None, read_base=base_reader(base),
+              details=detail_routes_of(ROOT))
     out.mkdir(parents=True, exist_ok=True)
     demo = {"pr": pr, "title": scrub(title)[:200], "what_changed": what_changed(title, body), "plan": pl,
             "files": [], "checks": [], "notes": [], "ok": True, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -476,6 +525,8 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
     sides = [("after", ROOT)] + ([("before", base_core)] if base_core and (base_core / "src").is_dir() else [])
     if len(sides) == 1:
         demo["notes"].append("No base checkout: only the 'after' side was rendered.")
+    shown = pl["pages"] + (["phone"] if pl["phone"] else [])
+    missing = {n: "no base checkout" for n in shown}     # page -> why its 'before' image is unavailable
     for label, core in sides:
         if pl["pages"] or pl["phone"]:
             args = ["capture", "--label", label, "--out", str(out), "--pages=" + ",".join(pl["pages"]), "--lang", lang]
@@ -485,6 +536,10 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
                 demo["notes"].append(f"{label}: page capture failed: {r.get('log', '')}")
                 if label == "after":
                     demo["ok"] = False
+            if label == "before":
+                errors, shots = r.get("errors") or {}, r.get("shots") or {}
+                missing = {n: "the capture failed" if r.get("failed") else
+                           scrub("; ".join(errors.get(n) or ["no screenshot"]))[:300] for n in shown if n not in shots}
             if label == "after" and pl["pages"] and not r.get("failed") and not r.get("video"):
                 demo["notes"].append("after: no walkthrough video was recorded. " + r.get("video_error", ""))
             for name, errs in (r.get("errors") or {}).items():
@@ -501,10 +556,9 @@ def ci(base: str, base_core: Path | None, pr: str, out: Path, title: str, body: 
                     demo["checks"].append({"name": "terminal images rendered", "ok": False, "detail": []})
                 for c in r.get("cli", []):
                     demo["checks"].append({"name": f"jarvis {c['cmd']} exits 0", "ok": c["rc"] == 0, "detail": []})
-    shown = pl["pages"] + (["phone"] if pl["phone"] else [])
     if shown:
         try:
-            for name in compare(out, shown):
+            for name in compare(out, shown, missing):
                 demo["notes"].append(f"{name}: looks the same before and after (the change is not visible here).")
         except Exception as e:
             demo["notes"].append(f"side-by-side images failed: {type(e).__name__}")
@@ -582,7 +636,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.summary:
             with open(a.summary, "a", encoding="utf-8") as fh:
                 fh.write(text)
-        return 0                                         # a demo informs the owner; it never blocks a merge
+        # a demo informs the owner and is not a required check; only a change to the demo tool itself fails the job
+        return 1 if demo["plan"].get("self_check") and not demo["ok"] else 0
     core = Path(a.core).resolve()
     here = Path(__file__).resolve().parent             # the script dir comes first on sys.path: use the side's own tools
     sys.path[:] = [str(core / "tools"), str(core / "src")] + [x for x in sys.path if x and Path(x).resolve() != here]

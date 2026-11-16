@@ -35,9 +35,22 @@ def test_page_script_maps_to_the_pages_it_registers_and_unknown_detail_pages_are
     assert pr_demo.registered_pages(FAKE["core/src/jarves/dashboard_static/guides.js"]) == ["guides", "guide-for"]
 
 
-def test_script_registering_only_detail_pages_is_shown_on_the_overview():
-    pl = pr_demo.plan(["core/src/jarves/dashboard_static/agent_detail.js"], read, KNOWN)
-    assert pl["user_facing"] and pl["pages"] == ["home", "settings"]
+def test_detail_only_script_captures_its_seeded_view_or_its_parent_page():
+    FAKE["core/src/jarves/dashboard_static/sess.js"] = "PAGES.session = a; PAGES.mystery = b;"
+    pl = pr_demo.plan(["core/src/jarves/dashboard_static/agent_detail.js", "core/src/jarves/dashboard_static/sess.js"],
+                      read, KNOWN, details={"session": "session/{sid}"})
+    assert pl["pages"] == ["agents", "session/{sid}"]                   # parent page, seeded DEMO route
+    assert pr_demo.plan(["core/src/jarves/dashboard_static/x.js"], lambda p: "PAGES.mystery = b;", KNOWN)["pages"] \
+        == ["home", "settings"]                                         # nothing known: the overview
+    assert pr_demo.detail_routes_of(ROOT)["session"] == "session/{sid}"  # the real page audit's seeded routes
+
+
+def test_a_change_to_the_demo_tool_runs_the_real_path_as_a_self_check():
+    for f in pr_demo.SELF:
+        pl = pr_demo.plan([f], read, KNOWN)
+        assert pl["self_check"] and pl["phone"] and pl["cli"] == ["--help"]
+        assert pl["pages"] == ["home", "session/{sid}", "guide/timers"]
+    assert pr_demo.plan(["core/src/jarves/cli.py"], read, KNOWN)["self_check"] is False
 
 
 def test_shared_shell_locales_modules_guides_phone_and_cli():
@@ -84,7 +97,8 @@ def test_known_pages_of_leaves_sys_path_and_modules_alone(tmp_path):
 def test_tests_docs_and_backend_are_not_user_facing():
     pl = pr_demo.plan(["core/tests/test_x.py", "docs/NOW.md", "core/src/jarves/store.py", ".github/workflows/a.yml"],
                       read, KNOWN)
-    assert pl == {"user_facing": False, "pages": [], "more_pages": [], "phone": False, "cli": [], "reasons": []}
+    assert pl == {"user_facing": False, "self_check": False, "pages": [], "more_pages": [], "phone": False, "cli": [],
+                  "reasons": []}
 
 
 def test_what_changed_prefers_the_pr_body_line_and_strips_ticket_prefixes():
@@ -128,7 +142,7 @@ def test_pr_demo_workflow_is_read_only_pr_only_and_never_puts_pr_text_in_a_scrip
     assert list(on) == ["pull_request"]                              # never pull_request_target: no secrets, fork-safe
     assert doc["permissions"] == {"contents": "read"}
     job = doc["jobs"]["demo"]
-    assert job["timeout-minutes"] <= 30
+    assert job["timeout-minutes"] * 60 >= 4 * pr_demo.CHILD_TIMEOUT + 15 * 60 and job["timeout-minutes"] <= 45
     runs = "\n".join(s.get("run", "") for s in job["steps"])
     assert "github.event.pull_request.title" not in runs and "github.event.pull_request.body" not in runs
     up = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
@@ -293,8 +307,9 @@ def _ci(tmp_path, monkeypatch, results, files):
         seen.append(args)
         return results[(args[args.index("--label") + 1], args[0])]
     monkeypatch.setattr(pr_demo, "_child", child)
-    monkeypatch.setattr(pr_demo, "compare", lambda out, pages: [])
+    monkeypatch.setattr(pr_demo, "compare", lambda out, pages, missing=None: MISSING.update(missing or {}) or [])
     monkeypatch.setattr(pr_demo, "svg_to_png", lambda out: None)
+    MISSING.clear()
     base = tmp_path / "base"
     (base / "src").mkdir(parents=True)
     out = tmp_path / "demo"
@@ -305,7 +320,8 @@ def _ci(tmp_path, monkeypatch, results, files):
     return demo, seen
 
 
-OKCAP = {"errors": {"home": [], "phone": []}}
+OKCAP = {"errors": {"home": [], "phone": []}, "shots": {"home": "home-x.png", "phone": "phone-x.png"}}
+MISSING: dict = {}
 
 
 def test_ci_after_failure_fails_before_failure_only_notes_and_phone_is_captured(tmp_path, monkeypatch):
@@ -366,3 +382,63 @@ def test_ci_cli_only_failed_after_child_is_not_ok(tmp_path, monkeypatch):
     demo = pr_demo.ci("main", None, "7", tmp_path, "t", "", ["core/src/jarves/cli.py"])
     assert demo["ok"] is False and any(n.startswith("after: CLI capture failed: boom") for n in demo["notes"])
     assert demo["checks"] == [{"name": "terminal images rendered", "ok": False, "detail": []}]
+
+
+def test_a_missing_before_image_is_unavailable_with_its_reason_never_a_new_page(tmp_path, monkeypatch):
+    files = ["core/src/jarves/dashboard_static/style.css"]
+    _ci(tmp_path, monkeypatch, {("after", "capture"): OKCAP, ("before", "capture"): {"failed": True}}, files)
+    assert MISSING == {"home": "the capture failed", "settings": "the capture failed"}
+    before = {"errors": {"home": ["TimeoutError: page.goto: Timeout 30000ms"], "settings": []}, "shots": {"settings": "s"}}
+    _ci(tmp_path / "2", monkeypatch, {("after", "capture"): OKCAP, ("before", "capture"): before}, files)
+    assert MISSING == {"home": "TimeoutError: page.goto: Timeout 30000ms"}
+    doc = pr_demo.compare_html(tmp_path / "none.png", tmp_path / "a.png", False, "TimeoutError: <x>")
+    assert "did not exist" not in doc and "unavailable (TimeoutError: &lt;x&gt;)" in doc
+
+
+def test_self_check_failure_fails_the_job_other_demos_never_do(tmp_path, monkeypatch):
+    bad = {"ok": False, "plan": {"self_check": True}, "pr": "1", "title": "", "what_changed": "", "checks": [],
+           "notes": [], "files": []}
+    monkeypatch.setattr(pr_demo, "ci", lambda *a: bad)
+    assert pr_demo.main(["ci", "--base", "main", "--out", str(tmp_path)]) == 1
+    bad["plan"]["self_check"] = False
+    assert pr_demo.main(["ci", "--base", "main", "--out", str(tmp_path)]) == 0
+
+
+def test_launch_falls_back_when_the_base_page_audit_has_no_launch_kwargs(monkeypatch):
+    monkeypatch.setitem(sys.modules, "all_pages_check", type(sys)("all_pages_check"))   # an older audit
+    launched = []
+
+    class PW:
+        class chromium:
+            @staticmethod
+            def launch(**kw):
+                launched.append(kw)
+                return "browser"
+    assert pr_demo._launch(PW) == "browser" and launched == [{"headless": True}]
+
+
+def test_a_failing_page_context_is_still_closed(tmp_path, monkeypatch):
+    closed = []
+
+    class Ctx:
+        def route(self, *a):
+            pass
+
+        def route_web_socket(self, *a):
+            pass
+
+        def add_init_script(self, *a):
+            raise RuntimeError("boom")
+
+        def close(self):
+            closed.append(1)
+
+    class B:
+        def new_context(self, **kw):
+            return Ctx()
+    try:
+        pr_demo.walkthrough(B(), [("home", "u", {})], tmp_path, "en")
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError:
+        pass
+    assert closed == [1]
