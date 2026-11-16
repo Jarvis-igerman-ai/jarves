@@ -50,6 +50,13 @@ API_BASE = "https://api.github.com"                     # tests inject a fake cl
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
 TRACKER_TITLE = "[Security] JARVES recurring scan summary"
 _SIG = re.compile(r"<!-- sig:([0-9a-f]{16}) -->")
+BODY_FORMAT = "2"                                       # bump when the tracker wording changes: the live issue is rewritten once
+TOKEN_ENVS = ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")    # find_token order; the tracker names the first
+# coverage key -> (display label, fine-grained Read-only permission); alert sources have a repo feature switch, runs do not
+_ALERTS = {"code_scanning": ("Code scanning alerts", "Code scanning alerts"),
+           "dependabot": ("Dependabot alerts", "Dependabot alerts"),
+           "secret_scanning": ("Secret scanning alerts", "Secret scanning alerts")}
+_RUNS = {"main_ci": ("Main CI runs", "Actions"), "nightly": ("Nightly runs", "Actions"), "codeql_run": ("CodeQL runs", "Actions")}
 MAX_HISTORY = 30
 MAX_LISTING = 100                                       # a full page of issues = lookup not certain: fail closed
 RECURRING_MIN = 3                                       # a local issue seen this often counts as recurring
@@ -298,7 +305,7 @@ def status(home: Path, now: datetime | None = None) -> dict:
 
 # ---------------------------------------------------------------------- GitHub (read-mostly)
 def find_token(env_only: bool = False) -> str:
-    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+    for k in TOKEN_ENVS:
         v = (os.environ.get(k) or "").strip()
         if v:
             return v
@@ -521,7 +528,7 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
 
 
 def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+    return hashlib.sha256((f"f{BODY_FORMAT}|" + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
 
 
 def _complete(coverage: dict) -> bool:
@@ -548,11 +555,40 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
+    lines += owner_actions(coverage)
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
+
+
+def owner_actions(coverage: dict) -> list[str]:
+    """#480: say what the owner can do about a source GitHub refused (HTTP 401/403/404), not only its code."""
+    def keys(table: dict, codes: tuple[str, ...]) -> list[str]:
+        return [k for k in table if str(coverage.get(k, "")).split(":")[-1] in codes]
+
+    def token(perms: list[str]) -> str:
+        return (f"give the token in {TOKEN_ENVS[0]} Read-only access to: "
+                + ", ".join(dict.fromkeys(perms)) + " (fine-grained token, this repository only).")
+    out = []
+    bad_tok = keys(_ALERTS, ("http_401",)) + keys(_RUNS, ("http_401",))
+    if bad_tok:
+        names = [(_ALERTS | _RUNS)[k] for k in bad_tok]
+        out.append("Owner action: GitHub rejected the scan's token for " + ", ".join(n for n, _ in names)
+                   + " (HTTP 401: missing, expired or invalid). Set a valid token: " + token([p for _, p in names]))
+    alerts = keys(_ALERTS, ("http_403", "http_404"))
+    if alerts:
+        names = [_ALERTS[k] for k in alerts]
+        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + " (HTTP 403/404). Either the "
+                   "feature is off for the repository (turn it on in the repository's security settings) or the scan's token "
+                   "cannot read it: " + token([p for _, p in names]))
+    runs = keys(_RUNS, ("http_403", "http_404"))
+    if runs:
+        names = [_RUNS[k] for k in runs]
+        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + " (HTTP 403/404). The scan's "
+                   "token cannot read workflow runs: " + token([p for _, p in names]))
+    return out
 
 
 def update_tracker(client, body: str, sig: str, have_findings: bool, sleep) -> dict:

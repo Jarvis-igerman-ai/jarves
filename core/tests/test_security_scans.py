@@ -411,3 +411,52 @@ def test_codeql_44_state_and_settings_files_never_store_a_planted_secret(tmp_pat
         blob = (tmp_path / name).read_text(encoding="utf-8")
         assert SECRET not in blob and "A1b2C3d4E5f6G7h8" not in blob
     assert "tracker_url" in (tmp_path / ss.STATE_FILE).read_text(encoding="utf-8")
+
+
+# ====================================================================== #480: the tracker names the owner action
+GAPS_480 = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
+            "main_ci": "complete", "nightly": "complete", "codeql_run": "complete", "local_diagnostics": "skipped:no_local_registry"}
+
+
+def _owner_lines(body):
+    return [ln for ln in body.splitlines() if ln.startswith("Owner action:")]
+
+
+def test_issue_480_refused_alert_sources_name_both_causes_and_the_read_only_token():
+    lines = _owner_lines(ss.tracker_body([], GAPS_480, 0, "0" * 16, "light"))
+    assert len(lines) == 1, lines
+    ln = lines[0]
+    assert "Dependabot alerts, Secret scanning alerts" in ln and "HTTP 403/404" in ln
+    assert "turn it on" in ln and ss.TOKEN_ENVS[0] in ln and "Read-only" in ln
+    assert "Code scanning" not in ln                                        # read completely: not named
+
+
+def test_issue_480_a_401_and_refused_workflow_runs_ask_only_for_a_token():
+    cov = dict(GAPS_480, dependabot="incomplete:http_401", secret_scanning="complete", main_ci="incomplete:http_403",
+               nightly="incomplete:http_404")
+    lines = _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "light"))
+    assert len(lines) == 2, lines
+    assert lines[0].startswith("Owner action: GitHub rejected the scan's token for Dependabot alerts (HTTP 401")
+    assert "Main CI runs, Nightly runs" in lines[1] and "Actions" in lines[1]
+    assert all("turn it on" not in ln and ss.TOKEN_ENVS[0] in ln for ln in lines)
+
+
+def test_issue_480_offline_or_complete_sources_add_no_owner_line():
+    cov = {k: "complete" for k in GAPS_480} | {"local_diagnostics": "skipped:no_local_registry", "boundary": "incomplete:not_run"}
+    assert _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "full")) == []
+
+
+def test_issue_480_the_named_token_is_the_one_the_scanner_reads_first(monkeypatch):
+    for i, k in enumerate(ss.TOKEN_ENVS):
+        monkeypatch.setenv(k, f"tok{i}")
+    assert ss.find_token(env_only=True) == "tok0" and ss.TOKEN_ENVS[0] == "JARVES_GITHUB_TOKEN"
+
+
+def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once(home):
+    import hashlib
+    old_sig = hashlib.sha256(b"i|").hexdigest()[:16]                       # the pre-#480 signature of #480's own state
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->", "html_url": ISSUE_URL}]
+    r = scan(home, gh)
+    assert r["issue"]["status"] == "updated" and r["resolved"] == 0 and _owner_lines(gh.issues[0]["body"])
+    assert scan(home, gh, now=day(1))["issue"]["status"] == "unchanged"
