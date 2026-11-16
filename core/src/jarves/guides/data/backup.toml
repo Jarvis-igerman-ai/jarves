@@ -37,15 +37,15 @@ en = "To restore: jarvis stop, then jarvis restore NAME. Your current data is sa
 action = "command:jarvis restore"
 
 [[steps]]
-he = "כמה גיבויים נשמרים: jarvis backup settings --manual 5 --checkpoints 3 --max-gb 4. הגבלת הגודל מוחקת את הישנים קודם, אבל לא את החדש ביותר ולא את הגיבוי של העדכון האחרון."
-en = "How many backups are kept: jarvis backup settings --manual 5 --checkpoints 3 --max-gb 4. The size limit removes the oldest first, never the newest one or the backup of the last update."
+he = "כמה גיבויים נשמרים: jarvis backup settings --manual 5 --checkpoints 3 --max-gb 4. הגבלת הגודל מוחקת את הישנים קודם, אבל אף פעם לא גיבוי ידני, לא את החדש ביותר ולא את הגיבוי של העדכון האחרון."
+en = "How many backups are kept: jarvis backup settings --manual 5 --checkpoints 3 --max-gb 4. The size limit removes the oldest first, never a manual backup, the newest one or the backup of the last update."
 action = "command:jarvis backup settings"
 
 [[problems]]
 he = "הגיבויים ממלאים את הדיסק"
 en = "Backups fill the disk"
-fix_he = "התקנת גרסה עושה עכשיו גיבוי אחד בלבד. הורידו את המגבלה עם jarvis backup settings --max-gb 2 והריצו jarvis backup prune. כשאין מספיק מקום, הגיבוי וההתקנה נעצרים בלי לשנות כלום."
-fix_en = "An install now takes one backup. Lower the limit with jarvis backup settings --max-gb 2 and run jarvis backup prune. When the disk is too full, the backup and the install stop without changing anything."
+fix_he = "התקנת גרסה עושה עכשיו לכל היותר שני גיבויים (היו שלושה), והקבצים של ההתקנה כבר לא נכנסים לגיבוי. הורידו את המגבלה עם jarvis backup settings --max-gb 2 והריצו jarvis backup prune. כשאין מספיק מקום, הגיבוי וההתקנה נעצרים בלי לשנות כלום."
+fix_en = "An install now takes at most two backups (was three), and installer files are no longer copied into them. Lower the limit with jarvis backup settings --max-gb 2 and run jarvis backup prune. When the disk is too full, the backup and the install stop without changing anything."
 
 [[problems]]
 he = "אחרי שחזור הוא לא מחובר לגוגל"

@@ -304,6 +304,9 @@ def test_start_checkpoint_reuses_the_update_backup_issue_1016(profile, monkeypat
     pdir.mkdir(parents=True)
     rec = {"version": "1.0", "to": backup.__version__, "backup": str(bak), "created_ts": time.time()}
     (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
+    later = os.stat(bak).st_mtime + 5
+    (profile / "updates.json").write_text("{}", encoding="utf-8")       # prepare_install writes this afterwards
+    os.utime(profile / "updates.json", (later, later))
     before = len(backup.list_backups(profile))
     assert backup.startup_checkpoint(profile) == bak                   # no second archive of the same data
     assert len(backup.list_backups(profile)) == before

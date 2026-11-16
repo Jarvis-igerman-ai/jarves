@@ -19,8 +19,9 @@ pre-migration / pre-restore checkpoints the last 3 each. Only automatic backups 
 #1016: on top of the counts, all backups together stay under `max_gb` (default 4 GB, 0 = no size limit): the oldest
 go first, but never a manual one, the newest backup, the newest automatic one, the backup `jarvis update --rollback`
 needs or the one being restored. Before writing, create() checks free disk space; when short it prunes first and
-refuses (BACKUP_NO_SPACE) rather than filling the drive. A beta install takes ONE backup, which the updater reuses;
-the next Core start reuses it too when no data file changed since it was written.
+refuses (BACKUP_NO_SPACE) rather than filling the drive. A beta install takes one backup, which the updater reuses as
+the rollback backup; the next Core start reuses it only when no data file changed since (usually the running Core
+did write, so that start takes its own checkpoint: at most two per install, was three, kept within `checkpoints`).
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -685,7 +686,7 @@ def _update_backup_for(home: Path, version: str, now: float | None = None) -> Pa
     try:
         written = p.stat().st_mtime
         take, _skipped = plan(home, get_settings(home))
-        paths = [q for q, rel in take if not rel.startswith("updates/")]      # the updater's own bookkeeping,
+        paths = [q for q, rel in take if not (rel.startswith("updates/") or rel == "updates.json")]  # updater's own
         paths += [q.with_name(q.name + sfx) for q in list(paths) for sfx in ("-wal", "-journal")]   # (above)
         if any(q.stat().st_mtime > written for q in paths if q.exists()):
             return None
