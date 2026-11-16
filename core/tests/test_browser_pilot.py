@@ -11,11 +11,12 @@ from jarves import features as feat
 SECRET = "sk-" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
 
 
-class FakeDriver:
+class FakeDriver(bp.PilotDriver):
     """current_url is a PROPERTY like Playwright page.url and Selenium driver.current_url (#566)."""
 
     def __init__(self):
         self.opened, self.closed, self.final, self.pinned = [], False, None, []
+        self.uses_pilot_proxy = True       # explicit opt-in like PlaywrightDriver; `del` exposes the PilotDriver default (R2)
 
     @property
     def current_url(self):
@@ -163,6 +164,21 @@ def test_action_cap_stops(tmp_path):
     with pytest.raises(bp.PilotError) as e:
         s.read()
     assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED
+
+
+def test_574_review_open_and_act_keep_the_time_and_action_cap(tmp_path):
+    """Review R1 on 56b89cf: the cap lives in _gate, so open (and act) are capped too, not only read and screenshot."""
+    s, d, t = mk(tmp_path, max_seconds=60)
+    t[0] += 61
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED and d.opened == []
+    s, d, _ = mk(tmp_path / "n", max_actions=2)
+    s.open("https://example.com/")
+    s.open("https://example.com/a")
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/b")
+    assert e.value.code == "BROWSER_PILOT_CAP" and s.state == bp.STOPPED and len(d.opened) == 2
 
 
 @pytest.mark.parametrize("answer", [["10.0.0.1"], ["169.254.169.254"], ["127.0.0.1"], ["100.64.0.1"], ["93.184.216.34", "192.168.1.5"],
@@ -364,3 +380,99 @@ def test_623_timed_out_running_lookup_stays_counted_until_it_finishes(monkeypatc
             break
         threading.Event().wait(0.05)
     assert bp._PENDING == 0                                  # released when the lookup really finished
+
+
+def test_574_a_driver_without_the_pilot_proxy_may_not_open_a_public_page(tmp_path):
+    """#574 / review R1: pin_hosts can only be checked to EXIST, so a public page needs a driver that declares it reaches the
+    network only through PilotProxy (uses_pilot_proxy is True). Anything else is refused before the driver is touched."""
+    for flag in (None, False, "yes", 1):
+        s, d, _ = mk(tmp_path / str(flag))
+        if flag is None:
+            del d.uses_pilot_proxy
+        else:
+            d.uses_pilot_proxy = flag
+        with pytest.raises(bp.PilotError) as e:
+            s.open("https://example.com/")
+        assert e.value.code == "BROWSER_PILOT_URL" and d.opened == [] and d.pinned == []
+    s, d, _ = mk(tmp_path / "local")
+    del d.uses_pilot_proxy
+    s.open("http://127.0.0.1:8000/")                          # a local test page needs no proxy
+    assert d.opened == ["http://127.0.0.1:8000/"]
+    s, d, _ = mk(tmp_path / "proxied")
+    s.open("https://example.com/")
+    assert d.opened == ["https://example.com/"]
+
+
+def test_574_the_production_late_wiring_forwards_the_proxy_flag(tmp_path):
+    """Review R1 on 9a33608: PilotService builds the session over browser_driver._Late; the flag must reach the session through it."""
+    from jarves import browser_driver as bd
+    for flag, ok in ((True, True), (False, False), (None, False)):
+        holder: dict = {}
+        s = bp.PilotSession(tmp_path / str(flag), bd._Late(holder), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+        d = FakeDriver()                                        # stands in for PlaywrightDriver: no Chromium is launched
+        if flag is None:
+            del d.uses_pilot_proxy
+        else:
+            d.uses_pilot_proxy = flag
+        holder["d"] = d                                         # the driver exists only after the session (as in PilotService.start)
+        if ok:
+            s.open("https://example.com/")
+            assert d.opened == ["https://example.com/"]
+        else:
+            with pytest.raises(bp.PilotError) as e:
+                s.open("https://example.com/")
+            assert e.value.code == "BROWSER_PILOT_URL" and d.opened == []
+    s = bp.PilotSession(tmp_path / "early", bd._Late({}), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+    with pytest.raises(bp.PilotError) as e:                     # before the real driver exists nothing public is allowed
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_URL"
+
+
+def test_574_the_real_driver_declares_the_proxy_and_new_drivers_fail_closed():
+    from jarves import browser_driver as bd
+    assert bd.PlaywrightDriver.uses_pilot_proxy is True and bp.PilotDriver.uses_pilot_proxy is False
+    assert issubclass(bd.PlaywrightDriver, bp.PilotDriver)
+
+
+def test_574_a_proxy_less_driver_cannot_reach_a_public_host_from_a_local_page(tmp_path):
+    """Review (opus) on 2b4b881: open() alone was not enough. A local page may load or navigate to a public host; that goes
+    through request_allowed (route handler) and the final-URL check, which must refuse it too without the pilot proxy."""
+    s, d, _ = mk(tmp_path)
+    del d.uses_pilot_proxy
+    s.open("http://127.0.0.1:8000/")
+    assert s.request_allowed("http://127.0.0.1:8000/app.js") is True       # local subresources still load
+    assert s.request_allowed("https://example.com/x.js") is False          # a public subresource or click target is refused
+    assert all("example.com" not in m for m in d.pinned)                   # and never pinned for a proxy-less driver
+    d.final = "https://example.com/"                                       # a local page that redirects to a public host
+    with pytest.raises(bp.PilotError) as e:
+        s.open("http://127.0.0.1:8000/go")
+    assert e.value.code == "BROWSER_PILOT_REDIRECT" and s.state == bp.STOPPED
+    s, d, _ = mk(tmp_path / "proxied")                                     # the proxied driver keeps public access
+    assert s.request_allowed("https://example.com/x.js") is True
+
+
+def test_574_fakes_inherit_the_fail_closed_base_default(tmp_path):
+    """Review R2 on af08a36: the fakes subclass PilotDriver, so removing the opt-in exercises the real base default."""
+    s, d, _ = mk(tmp_path)
+    del d.uses_pilot_proxy
+    assert d.uses_pilot_proxy is bp.PilotDriver.uses_pilot_proxy is False
+    with pytest.raises(bp.PilotError) as e:
+        s.open("https://example.com/")
+    assert e.value.code == "BROWSER_PILOT_URL"
+
+
+def test_574_read_and_screenshot_stop_a_proxy_less_driver_that_landed_on_a_public_page(tmp_path):
+    """Review R1 on af08a36: the only agent actions after open are read and screenshot (there is no click or back); both
+    re-check the current page so a script navigation past page.route cannot show a public page without the proxy."""
+    for kind in ("read", "screenshot"):
+        s, d, _ = mk(tmp_path / kind)
+        del d.uses_pilot_proxy
+        s.open("http://127.0.0.1:8000/")
+        assert getattr(s, kind)()                                         # a local page is still readable
+        d.final = "https://example.com/"                                  # a script navigation the route handler missed
+        with pytest.raises(bp.PilotError) as e:
+            getattr(s, kind)()
+        assert e.value.code == "BROWSER_PILOT_REDIRECT" and s.state == bp.STOPPED
+    s, d, _ = mk(tmp_path / "proxied")                                    # a proxied driver keeps reading public pages
+    s.open("https://example.com/")
+    assert s.read()["untrusted_text"] and s.screenshot()["bytes"] > 0
