@@ -259,10 +259,11 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): "
+                  f"{unlock.issue(home, wait_s=unlock.OPEN_WAIT_S if rc == 0 else 0.0)}", file=sys.stderr)
         except PermissionError:
             pass
-        except unlock.UnlockUnavailable as exc:  # the dashboard has not published its unlock key (yet)
+        except unlock.UnlockUnavailable as exc:  # no live dashboard published its key within OPEN_WAIT_S
             print(f"No unlock code: {exc}", file=sys.stderr)
         return rc
     if a.action == "web-check":

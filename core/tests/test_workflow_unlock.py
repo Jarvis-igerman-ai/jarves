@@ -280,6 +280,28 @@ class UnlockTests(unittest.TestCase):
             self.assertEqual(stop.call_args[0][0].socket.fileno(), -1)  # its socket is closed, no port left open
             self.assertEqual(len(closes), 1)
 
+    def test_750_open_waits_briefly_for_a_server_that_is_listening_but_has_not_published_yet(self):
+        (self.home / unlock.PUB_FILE).unlink()                          # port bound, key not written yet (a few lines later)
+        pauses = []
+        def publish_on_first_pause(seconds):
+            pauses.append(seconds)
+            self.server.unlock_key.publish(self.home)
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]
+        with patch.object(unlock, "_sleep", publish_on_first_pause), \
+                patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(argv), 0)
+        self.assertEqual(pauses, [unlock.PUB_POLL_S])                   # one short, bounded wait, then the code
+        self.assertIn("Unlock code for answering", err.getvalue())
+        (self.home / unlock.PUB_FILE).unlink()
+        with patch.object(unlock, "_sleep") as pause, self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home, wait_s=1.0)                         # nobody publishes: give up after the bound
+        self.assertEqual(pause.call_count, round(1.0 / unlock.PUB_POLL_S))
+        with patch.object(unlock, "_sleep") as pause, self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)                                     # plain 'unlock' does not wait
+        pause.assert_not_called()
+
     def test_750_issue_reads_key_and_pid_from_one_record_and_refuses_pid_zero_or_negative(self):
         pub = self.server.unlock_key._pub()
         for pid in (0, -1, None):

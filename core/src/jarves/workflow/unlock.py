@@ -26,6 +26,8 @@ CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 PUB_FILE = "unlock_pub.json"
+PUB_POLL_S = 0.1      # open: the server binds its port a moment before it writes unlock_pub.json
+OPEN_WAIT_S = 2.0     # open: at most this long for that key
 RETRY_PAUSE_S = 0.2   # Windows: give a reader holding unlock.json time to close it before the one retry
 _sleep = time.sleep   # injectable for hermetic tests
 
@@ -50,6 +52,8 @@ class ServerKey:
         """On server stop: remove the published key if it is still ours (a newer server's key stays)."""
         path = Path(home) / PUB_FILE
         try:
+            # Accepted race (fails closed): a newer server republishing between this read and the unlink loses its
+            # file, so issue() says "start the dashboard" until it is restarted; it can never make a wrong code valid.
             if json.loads(path.read_text(encoding="ascii")).get("pub") == self._pub():
                 path.unlink(missing_ok=True)
         except (OSError, ValueError, AttributeError):
@@ -86,10 +90,21 @@ def _alive(pid: int) -> bool:
     return alive(pid)
 
 
-def issue(home: Path, *, now: float | None = None) -> str:
-    """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
+def _read_pub(home: Path, wait_s: float) -> dict:
+    """Read the published key once; with wait_s, poll a missing file for at most wait_s (bounded, injectable sleep)."""
+    for _ in range(round(wait_s / PUB_POLL_S)):
+        try:
+            return json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
+        except FileNotFoundError:
+            _sleep(PUB_POLL_S)
+    return json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
+
+
+def issue(home: Path, *, now: float | None = None, wait_s: float = 0.0) -> str:
+    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
+    wait_s: how long to wait for a just-started server to publish its key (open uses OPEN_WAIT_S)."""
     try:
-        published = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))  # read once: key and pid of ONE server
+        published = _read_pub(home, wait_s)  # read once: key and pid of ONE server
         peer = X25519PublicKey.from_public_bytes(bytes.fromhex(published["pub"]))
         pid = int(published.get("pid") or 0)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
