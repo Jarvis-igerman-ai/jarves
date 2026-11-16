@@ -10,3 +10,5 @@ Date: 2026-11-09. Code under test: main at `09eec58b` (the later `main` head `95
 | #770 | `test_hidden_page_and_a_refused_wake_lock` (test_phone_hands_free_e2e.py) | 35 | 35 | 0 |
 
 Two overlapping runner loops executed concurrently (each targeting 20 runs), so counts exceed 20. Zero failures, so no deflake and no quarantine change: `core/tests/quarantine.toml` has no entry for these four issues. Issues are not closed by this report; the owner/PM decides. CI evidence is the PR check run.
+
+CI note (JAR-70, 2026-11-16): the first PR run failed only `test_dashboard_a11y.py::test_every_page_is_clean_in_a_real_browser` on Windows (`#langSlot select` wait timed out after 90 s), twice in the same job. That is known flake #994, already fixed on main by `24b75f0`. The branch predated that commit; merging `main` brings the fix in. This report's tests are not involved.
