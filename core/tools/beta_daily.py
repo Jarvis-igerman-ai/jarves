@@ -1,15 +1,18 @@
 """Daily installed-beta run that leaves records (JAR-456). Standard library only.
 
-    python core/tools/beta_daily.py run   --home DIR [--jarvis PATH]   # install newest beta, S01-S05, demos
+    python core/tools/beta_daily.py run   --home DIR [--jarvis PATH]   # record install, S01-S05, demos
     python core/tools/beta_daily.py check --home DIR                   # exit 0 = fresh install, known pass %, demos
 
-`run` installs the newest beta (`jarvis update install --channel beta --yes --silent`) and writes
-<home>/beta_records/install-<ts>.json (ok/rc/output tail) even when the install fails. Only after a good install it
-runs S01-S05 (PASS = exit code 0) into scenarios-<ts>.json and writes one demo per ticket (JAR-214, JAR-320, JAR-321):
-demo-<ticket>-<ts>.json plus an SVG image of the command transcript. JAR-214 and JAR-320 have no installed-product
-command, so their demo runs the regression test from this checkout (`target: source-tests`).
-`check` prints last_install_age_h (successful installs only), scenario_pass_pct (latest run), demos_24h_with_image and
-unreadable (malformed record files, skipped). ok = install under 26 h, pass % known and at least one demo with image.
+This tool never installs and never answers an install question. The install itself is the owner-approved path:
+`jarvis update auto on` (signed release, quiet moment, notice and backup first). `run` asks the read-only
+`jarvis update check` whether the installed build is the newest and writes <home>/beta_records/install-<ts>.json
+(ok = "Up to date", else the waiting version) every time. Only when it is the newest it runs S01-S05 (PASS = exit
+code 0) into scenarios-<ts>.json and writes one demo per ticket (JAR-214, JAR-320, JAR-321): demo-<ticket>-<ts>.json
+plus an SVG image of the command transcript. JAR-214 and JAR-320 have no installed-product command, so their demo
+runs the regression test from this checkout with the core venv Python (`target: source-tests`); no pytest = SKIPPED.
+`check` prints last_install_age_h (newest-build records only), scenario_pass_pct (latest run), demos_24h_with_image
+(passing demos with their image), demos_24h_not_passing and unreadable (malformed record files, skipped).
+ok = install record under 26 h, pass % known and at least one passing demo with image.
 Every record is its own file written via a unique temp file and os.replace, so runs never race on a shared file.
 """
 from __future__ import annotations
@@ -23,14 +26,24 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 CORE = Path(__file__).resolve().parents[1]
-INSTALL = ("update", "install", "--channel", "beta", "--yes", "--silent")
+INSTALL = ("update", "check")  # read-only; installing is `jarvis update auto` (owner switch), never this tool
 SCENARIOS = (("S01", ("doctor",)), ("S02", ("selftest",)), ("S03", ("status",)),
              ("S04", ("budget", "test-limits")), ("S05", ("features", "diff")))
-PY_TEST = (sys.executable, "-m", "pytest", "-q")
+
+
+def core_python() -> str:
+    for rel in (".venv/Scripts/python.exe", ".venv/bin/python"):
+        if (CORE / rel).is_file():
+            return str(CORE / rel)
+    return sys.executable
+
+
+PY_TEST = (core_python(), "-m", "pytest", "-q")
 DEMOS = (("JAR-214", "source-tests", PY_TEST + ("tests/test_workflow_hooks.py::ConcurrentSubagentStartTests",)),
          ("JAR-320", "source-tests", PY_TEST + ("tests/test_workflow_http.py::WorkflowHTTPTests::"
                                                 "test_state_changing_routes_relock_after_expiry_and_ignore_other_sessions",)),
@@ -81,11 +94,12 @@ def run_daily(home, run, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     folder = Path(home) / "beta_records"
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = int(now)
+    stamp = f"{int(now)}-{uuid.uuid4().hex[:8]}"  # unique: two runs in one second never overwrite each other
     rc, out = run(["jarvis", *INSTALL])
-    install = {"at": now, "ok": rc == 0, "rc": rc, "tail": _tail(out)}
+    newest = rc == 0 and "Up to date" in out
+    install = {"at": now, "ok": newest, "rc": rc, "tail": _tail(out), "installer": "jarvis update auto (owner switch)"}
     _write(folder, f"install-{stamp}.json", json.dumps(install))
-    if rc != 0:
+    if not newest:
         return {"install": install}
     scenarios = []
     for sid, args in SCENARIOS:
@@ -95,10 +109,12 @@ def run_daily(home, run, now: float | None = None) -> dict:
     _write(folder, f"scenarios-{stamp}.json", json.dumps({"at": now, "scenarios": scenarios}))
     for ticket, target, argv in DEMOS:
         code, text = run(list(argv))
+        missing = target == "source-tests" and "No module named pytest" in text
+        result = "PASS" if code == 0 else "SKIPPED" if missing else "FAIL"
         image = f"demo-{ticket}-{stamp}.svg"
         _write(folder, image, render_svg(f"{ticket} demo ({target}): rc={code}", _tail(text, 40)))
         _write(folder, f"demo-{ticket}-{stamp}.json", json.dumps(
-            {"at": now, "ticket": ticket, "target": target, "result": "PASS" if code == 0 else "FAIL", "image": image}))
+            {"at": now, "ticket": ticket, "target": target, "result": result, "image": image}))
     return {"install": install, "scenarios": scenarios}
 
 
@@ -116,7 +132,7 @@ def _load(path: Path):
 def check(home, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     folder = Path(home) / "beta_records"
-    last_ok, scen, demos, bad = None, None, 0, 0
+    last_ok, scen, demos, not_passing, bad = None, None, 0, 0, 0
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         data = _load(path)
         rows = data.get("scenarios") if data else None
@@ -128,15 +144,18 @@ def check(home, now: float | None = None) -> dict:
             scen = data
         elif path.name.startswith("demo-") and 0 <= now - data["at"] <= 86400 and data.get("image") \
                 and (folder / Path(str(data["image"])).name).is_file():
-            demos += 1
+            if data.get("result") == "PASS":
+                demos += 1
+            else:
+                not_passing += 1
     pct = None
     if scen:
         rows = scen["scenarios"]
         pct = round(100.0 * sum(isinstance(r, dict) and r.get("result") == "PASS" for r in rows) / len(rows), 1)
-    age = None if last_ok is None else round((now - last_ok) / 3600, 1)
-    ok = age is not None and 0 <= age < MAX_INSTALL_AGE_H and pct is not None and demos > 0
-    return {"ok": ok, "last_install_age_h": age, "scenario_pass_pct": pct, "demos_24h_with_image": demos,
-            "unreadable": bad}
+    hours = None if last_ok is None else (now - last_ok) / 3600
+    ok = hours is not None and 0 <= hours < MAX_INSTALL_AGE_H and pct is not None and demos > 0  # unrounded age
+    return {"ok": ok, "last_install_age_h": None if hours is None else round(hours, 1), "scenario_pass_pct": pct,
+            "demos_24h_with_image": demos, "demos_24h_not_passing": not_passing, "unreadable": bad}
 
 
 def main(argv=None) -> int:
