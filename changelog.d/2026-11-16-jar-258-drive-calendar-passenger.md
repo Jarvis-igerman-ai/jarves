@@ -1,0 +1,1 @@
+- Fixed: drive mode now has regression tests proving calendar reads (full event titles) are spoken only when the saved passenger setting is "alone"; ask, present, unknown or unreadable settings defer them, and the drive-mode guide explains the rule (JAR-258, #831).
