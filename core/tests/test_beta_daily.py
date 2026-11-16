@@ -76,6 +76,7 @@ def test_run_budget_skips_remaining_steps(tmp_path):
 def test_output_tails_are_redacted():
     tail = bd._tail("key sk-abcdefghijklmnop at C:\\Users\\noa\\x and /home/noa/y mail noa@example.com")
     assert "sk-abcdefghijklmnop" not in tail[0] and "noa" not in tail[0].replace("<user>", "")
+    assert "withheld" not in tail[0] and "<user>" in tail[0] and "<email>" in tail[0]  # redaction really ran
 
 
 def test_only_failing_or_skipped_demos_fail_the_check(tmp_path):
@@ -111,16 +112,16 @@ def test_age_just_under_26h_passes_without_rounding(tmp_path):
 
 
 def test_demo_test_node_ids_exist():
-    import importlib.util
+    import ast
     for _ticket, target, argv in bd.DEMOS:
         if target != "source-tests":
             continue
         path, *names = argv[-1].split("::")
-        spec = importlib.util.spec_from_file_location("demo_" + _ticket.replace("-", "_"), bd.CORE / path)
-        obj = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(obj)
+        body = ast.parse((bd.CORE / path).read_text(encoding="utf-8")).body  # parsed, never executed
         for name in names:
-            obj = getattr(obj, name)
+            node = next((n for n in body if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name == name), None)
+            assert node is not None, f"{path}: {name} missing"
+            body = node.body
 
 
 def test_failed_install_check_writes_record_but_runs_no_scenarios(tmp_path):
@@ -165,3 +166,32 @@ def test_real_runner_reports_missing_command_and_exit_code():
     assert bd.real_runner("/nonexistent/jarvis")(["jarvis", "status"])[0] == 127
     rc, out = bd.real_runner()([sys.executable, "-c", "print('hi'); raise SystemExit(3)"])
     assert rc == 3 and "hi" in out
+
+
+def test_prompting_command_fails_at_once_instead_of_waiting_for_the_timeout():
+    import subprocess
+    # The caller's stdin is an open pipe nobody writes to (like an unattended task). Without stdin=DEVNULL the
+    # prompting step inherits it, hangs for the whole step timeout and is recorded as rc 124.
+    code = ("import sys; sys.path.insert(0, sys.argv[1]); import beta_daily as bd; "
+            "print(bd.real_runner(timeout=5)([sys.executable, '-c', 'input()'])[0])")
+    child = subprocess.Popen([sys.executable, "-c", code, str(bd.CORE / "tools")], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        out = child.stdout.read()
+    finally:
+        child.stdin.close()
+        child.wait(timeout=30)
+    assert out.strip() not in ("0", "124")
+
+
+def test_launcher_is_resolved_on_path_like_a_windows_cmd_shim(monkeypatch):
+    monkeypatch.setattr(bd.shutil, "which", lambda name: sys.executable if name == "jarvis.cmd" else None)
+    rc, out = bd.real_runner("jarvis.cmd")(["jarvis", "-c", "print('shim ok')"])
+    assert rc == 0 and "shim ok" in out
+
+
+def test_up_to_date_marker_matches_the_unlocalized_cli_line():
+    # `jarvis update check` has no --json and exits 0 for both "up to date" and "new version", so the
+    # English line is the only signal; it is printed without clilang, and this pins it so localizing it fails here.
+    src = (bd.CORE / "src" / "jarves" / "cli.py").read_text(encoding="utf-8")
+    assert f'print(f"{bd.UP_TO_DATE} (checked ' in src

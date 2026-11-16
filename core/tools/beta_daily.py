@@ -6,7 +6,7 @@
 This tool never installs and never answers an install question. The install itself is the owner-approved path:
 `jarvis update auto on` (signed release, quiet moment, notice and backup first). `run` asks the read-only
 `jarvis update check` whether the installed build is the newest and writes <home>/beta_records/install-<ts>.json
-(ok = "Up to date", else the waiting version) every time. Only when it is the newest it runs S01-S05 (PASS = exit
+(ok = the unlocalized "Up to date" line, else the waiting version) every time. Only when it is the newest it runs S01-S05 (PASS = exit
 code 0) into scenarios-<ts>.json and writes one demo per ticket (JAR-214, JAR-320, JAR-321): demo-<ticket>-<ts>.json
 plus an SVG image of the command transcript. JAR-214 and JAR-320 have no installed-product command, so their demo
 runs the regression test from this checkout with the core venv Python (`target: source-tests`); no pytest = SKIPPED.
@@ -14,7 +14,8 @@ runs the regression test from this checkout with the core venv Python (`target: 
 the newest), scenario_pass_pct (latest run under 26 h), demos_24h_with_image (passing demos with their image),
 demos_24h_installed_pass, demos_24h_not_passing and unreadable (malformed record files, skipped). ok = that record
 under 26 h, pass % known and at least one passing installed-product demo with image. Output tails go through the
-product's log redaction; each step times out after 300 s and the whole run is capped at 1800 s.
+product's log redaction; each step times out after 300 s and the whole run is capped at 1800 s;
+stdin is closed so a prompt fails at once, and --jarvis is resolved on PATH (Windows .cmd shims too).
 Daily caller: the autopilot beta-verify task (workflow/autopilot_watch.py beta_step) lists `run` and `check`.
 Every record is its own file written via a unique temp file and os.replace, so runs never race on a shared file.
 """
@@ -25,6 +26,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,6 +37,9 @@ from xml.sax.saxutils import escape
 
 CORE = Path(__file__).resolve().parents[1]
 INSTALL = ("update", "check")  # read-only; installing is `jarvis update auto` (owner switch), never this tool
+# `update check` has no --json and exits 0 for "up to date" and "new version" alike; this line is printed in
+# English without clilang (cli.py cmd_update) and a test pins it there, so localizing it fails the tests first.
+UP_TO_DATE = "Up to date"
 # Unattended daily, so device- and popup-free only: no `doctor` (it records the microphone and beeps), selftest
 # without --deep/--audio (audio_roundtrip runs only with --audio), cached update status, local Core status, the
 # throw-away-database limits proof and the read-only feature list.
@@ -62,11 +67,13 @@ _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
 def real_runner(jarvis: str = "jarvis", timeout: int = STEP_TIMEOUT_S):
+    exe = shutil.which(jarvis) or jarvis  # Windows jarvis.cmd/.bat shims are not found by shell=False otherwise
+
     def run(argv):
-        argv = [jarvis if a == "jarvis" else a for a in argv]
-        try:
+        argv = [exe if a == "jarvis" else a for a in argv]
+        try:  # stdin closed: a prompting step fails at once instead of hanging until the timeout
             p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                               timeout=timeout, cwd=str(CORE))
+                               timeout=timeout, cwd=str(CORE), stdin=subprocess.DEVNULL)
         except FileNotFoundError as exc:
             return 127, f"not found: {exc}"
         except subprocess.TimeoutExpired:
@@ -116,7 +123,7 @@ def run_daily(home, run, now: float | None = None, clock=time.monotonic, budget_
     folder.mkdir(parents=True, exist_ok=True)
     stamp = f"{int(now)}-{uuid.uuid4().hex[:8]}"  # unique: two runs in one second never overwrite each other
     rc, out = run(["jarvis", *INSTALL])
-    newest = rc == 0 and "Up to date" in out
+    newest = rc == 0 and UP_TO_DATE in out
     install = {"at": now, "ok": newest, "rc": rc, "tail": _tail(out), "installer": "jarvis update auto (owner switch)"}
     _write(folder, f"install-{stamp}.json", json.dumps(install))
     if not newest:
