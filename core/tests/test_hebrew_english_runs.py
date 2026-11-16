@@ -5,21 +5,25 @@ Scans the server Hebrew (`hebrew.TEXT`, which includes `hebrew_parts/*.json`) an
 are ids, not prose, and are skipped. Hermetic: reads repo files only."""
 from __future__ import annotations
 
+import importlib
 import re
 
-from jarves import hebrew, locale_parts
+from jarves import dashboard, hebrew, locale_parts
 
 WORD = r"[A-Za-z][A-Za-z']*"
 RUN = re.compile(rf"(?<![\w{{$%/\\-]){WORD}(?:[ ]+{WORD}){{2,}}(?![\w}}/\\])")
 BACKTICKS = re.compile(r"`[^`]*`")
 COMMAND_START = ("jarvis ",)
+PRODUCT_NAMES = {"Codex App Server"}   # product names stay in English
 
 
 def english_runs(text: str) -> list[str]:
-    """Runs of 3+ consecutive bare English words in `text`, ignoring commands in backticks and `jarvis ...` commands."""
+    """Runs of 3+ consecutive bare English words in `text`, ignoring commands in backticks, `jarvis ...` commands
+    and product names."""
     if not isinstance(text, str):
         return []
-    return [m for m in RUN.findall(BACKTICKS.sub(" ", text)) if not m.startswith(COMMAND_START)]
+    return [m for m in RUN.findall(BACKTICKS.sub(" ", text))
+            if not m.startswith(COMMAND_START) and m not in PRODUCT_NAMES]
 
 
 def test_detector_finds_untranslated_prose_and_skips_commands():
@@ -27,10 +31,13 @@ def test_detector_finds_untranslated_prose_and_skips_commands():
     assert english_runs("הריצו: jarvis features on model_lab") == []
     assert english_runs("להתקנה: `python -m playwright install ffmpeg`") == []
     assert english_runs("וואטסאפ דרך Any.do ו-GitHub") == []
+    assert english_runs("שרת Codex App Server מדומה") == []
     assert english_runs(None) == []
 
 
 def test_hebrew_texts_have_no_runs_of_three_english_words():
+    for name in dashboard.PLUGIN_MODULES:   # plugins add their server Hebrew at import; scan the same set in any order
+        importlib.import_module(name)
     found = []
     for en, he_text in hebrew.TEXT.items():
         found += [("server", en, run) for run in english_runs(he_text)]
