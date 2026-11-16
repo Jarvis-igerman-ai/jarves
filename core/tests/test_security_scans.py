@@ -3,6 +3,7 @@ sleeping. Covers dedupe, timezone / DST, offline, failure / retry, quiet hours a
 synthetic finding creates exactly ONE non-sensitive issue."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -159,6 +160,55 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     scan(home, gh, now=day(1))
     assert "INCOMPLETE" in gh.issues[0]["body"] and "No open findings" in gh.issues[0]["body"]
     assert "never read as zero" in gh.issues[0]["body"]
+
+
+def test_issue_480_a_403_names_the_owner_action_and_stays_incomplete(home):
+    """#480: the tracker showed only 'dependabot (incomplete:http_403)' with no way to fix it."""
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
+    scan(None, gh)
+    body = gh.issues[0]["body"]
+    assert "INCOMPLETE" in body and "never read as zero" in body
+    assert "Owner action: GitHub refused Code scanning alerts, Dependabot alerts, Secret scanning alerts (HTTP 403)" in body
+    assert "turn the feature on for the repository" in body                 # a 403 can also mean the feature is off
+    assert "dependabot, secret_scanning" not in body.split("Owner action")[1]      # display labels, not raw keys
+    assert f"as {ss.TOKEN_ENV} " in body
+    assert "fine-grained token, read-only on only these sources" in body   # least privilege, not a broad PAT
+    clean = ss.tracker_body([], {"dependabot": "complete", "secret_scanning": "incomplete:http_500"}, 0, "s", "light")
+    assert "Owner action" not in clean                                     # only an access refusal asks the owner
+
+
+def test_issue_480_a_401_asks_for_a_valid_token_never_to_turn_a_feature_on():
+    b401 = ss.tracker_body([], {"code_scanning": "incomplete:http_401", "dependabot": "complete"}, 0, "s", "light")
+    assert "Owner action: GitHub rejected the scan's token for Code scanning alerts (HTTP 401" in b401
+    assert "turn the feature on" not in b401 and "Dependabot alerts" not in b401
+    assert f"fine-grained token, read-only on only these sources, as {ss.TOKEN_ENV}" in b401
+
+
+def test_issue_480_labels_follow_display_order_and_401_403_get_their_own_lines():
+    runs = ss.tracker_body([], {"main_ci": "incomplete:http_403", "nightly": "incomplete:http_401",
+                                "codeql_run": "incomplete:http_403", "secret_scanning": "incomplete:http_403",
+                                "code_scanning": "incomplete:http_403"}, 0, "s", "full")
+    assert "refused Code scanning alerts, Secret scanning alerts, Actions workflow runs (HTTP 403)" in runs
+    assert "rejected the scan's token for Actions workflow runs (HTTP 401" in runs
+
+
+def test_issue_480_the_token_name_in_the_owner_line_is_the_one_the_scanner_reads(monkeypatch):
+    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv(ss.TOKEN_ENV, "t-480")
+    monkeypatch.setenv("GH_TOKEN", "actions-token")
+    assert ss.find_token(env_only=True) == "t-480"                         # the named variable wins over GH_TOKEN
+
+
+def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once():
+    """The live #480 body carries a sig from the old wording; same findings must still get the owner line."""
+    gh = FakeGitHub(access=False)
+    old_sig = hashlib.sha256(b"i|").hexdigest()[:16]                       # pre-#480 signature: no format version
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL,
+                  "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated" and "Owner action" in gh.issues[0]["body"]
+    assert scan(None, gh)["issue"]["status"] == "unchanged"                # and only once
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

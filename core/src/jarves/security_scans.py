@@ -46,6 +46,7 @@ CONFIG_FILE = "security_scans.json"
 STATE_FILE = "security_scans_state.json"
 REPO = "Jarvis-igerman-ai/jarves"
 LABEL = "from-diagnostics"
+TOKEN_ENV = "JARVES_GITHUB_TOKEN"     # read first by find_token(); the tracker owner line names it (#480)
 API_BASE = "https://api.github.com"                     # tests inject a fake client instead
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
 TRACKER_TITLE = "[Security] JARVES recurring scan summary"
@@ -298,7 +299,7 @@ def status(home: Path, now: datetime | None = None) -> dict:
 
 # ---------------------------------------------------------------------- GitHub (read-mostly)
 def find_token(env_only: bool = False) -> str:
-    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+    for k in (TOKEN_ENV, "GH_TOKEN", "GITHUB_TOKEN"):
         v = (os.environ.get(k) or "").strip()
         if v:
             return v
@@ -520,8 +521,12 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
+BODY_FORMAT = "2"                                         # #480: bump when tracker_body() wording changes, so the
+                                                         # live tracker is rewritten once even with the same findings
+
+
 def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+    return hashlib.sha256((BODY_FORMAT + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
 
 
 def _complete(coverage: dict) -> bool:
@@ -529,6 +534,11 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
+_ACCESS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot alerts",
+           "secret_scanning": "Secret scanning alerts", "main_ci": "Actions workflow runs",
+           "nightly": "Actions workflow runs", "codeql_run": "Actions workflow runs"}
+
+
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
@@ -550,6 +560,19 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+    # #480: say what the owner can do, not only the HTTP code. Labels in _ACCESS order, each listed once.
+    names = {code: ", ".join(dict.fromkeys(lbl for k, lbl in _ACCESS.items() if coverage.get(k) == f"incomplete:http_{code}"))
+             for code in ("401", "403")}
+    token = (f"a fine-grained token, read-only on only these sources, as {TOKEN_ENV} (the hosted workflow must also "
+             "pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
+    if names["401"]:                                     # 401 = missing, expired or invalid token, never a disabled feature
+        lines.append(f"Owner action: GitHub rejected the scan's token for {names['401']} (HTTP 401: missing, expired "
+                     f"or invalid). Set {token}")
+    if names["403"]:
+        # GitHub answers 403 both for a token without access and for a feature that is off for the repository
+        # (e.g. Dependabot alerts disabled), so the line names both causes and does not guess which one it is.
+        lines.append(f"Owner action: GitHub refused {names['403']} (HTTP 403). Either turn the feature on for the "
+                     f"repository, or give the scan {token}")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
