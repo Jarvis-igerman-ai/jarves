@@ -23,6 +23,8 @@ SECRET = "hunter2-Correct-Horse-9"
 
 
 class Drv:
+    uses_pilot_proxy = True                                  # stands in for PlaywrightDriver, which dials only through PilotProxy (#574)
+
     def __init__(self, url=LOCAL):
         self.url, self.closed, self.inputs, self.page_text, self.on_input = url, False, [], "Login page", None
         self.text_calls = 0
