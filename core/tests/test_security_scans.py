@@ -450,6 +450,40 @@ def test_issue_480_the_named_token_is_the_one_the_scanner_reads_first(monkeypatc
     for i, k in enumerate(ss.TOKEN_ENVS):
         monkeypatch.setenv(k, f"tok{i}")
     assert ss.find_token(env_only=True) == "tok0" and ss.TOKEN_ENVS[0] == "JARVES_GITHUB_TOKEN"
+    assert ss.token_source("tok0") == "JARVES_GITHUB_TOKEN" and ss.token_source("tok1") == "GH_TOKEN"
+    assert ss.token_source("other") == "gh auth token" and ss.token_source("other", env_only=True) == ""
+    assert ss.token_source("") == ""
+
+
+def test_issue_480_only_the_observed_http_codes_are_printed():
+    cov = dict(GAPS_480, secret_scanning="complete", main_ci="incomplete:http_404")
+    alerts, runs = _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "light"))
+    assert "Dependabot alerts (HTTP 403)." in alerts and "404" not in alerts
+    assert "Main CI runs (HTTP 404)." in runs and "403" not in runs
+
+
+def test_issue_480_the_owner_line_names_the_token_source_the_scan_used_by_name_only():
+    cov = dict(GAPS_480, secret_scanning="complete")
+    used = _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "light", token_from="gh auth token"))[0]
+    assert "give the token from gh auth token that this scan used, or a token in JARVES_GITHUB_TOKEN" in used
+    first = _owner_lines(ss.tracker_body([], cov, 0, "0" * 16, "light", token_from="JARVES_GITHUB_TOKEN"))[0]
+    assert "give the token in JARVES_GITHUB_TOKEN (read first" in first and "this scan used" not in first
+
+
+def test_issue_480_the_hosted_run_names_gh_token_and_never_its_value(monkeypatch):
+    import importlib.util
+    p = Path(__file__).resolve().parents[1] / "tools" / "security_scans.py"
+    spec = importlib.util.spec_from_file_location("security_scans_tool_480", p)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.delenv("JARVES_GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("GH_TOKEN", SECRET)
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
+    monkeypatch.setattr(ss, "http_client", lambda token, repo=ss.REPO: gh)
+    assert mod.main(["--kind", "light", "--json"]) == 0
+    body = gh.issues[0]["body"]
+    assert "the token from GH_TOKEN that this scan used" in body and SECRET not in body
 
 
 def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once(home):
@@ -483,5 +517,5 @@ def test_issue_480_a_full_scan_with_401_alerts_and_403_runs_publishes_both_owner
     lines = _owner_lines(gh.issues[0]["body"])
     assert len(lines) == 2, lines
     assert "Code scanning alerts, Dependabot alerts, Secret scanning alerts (HTTP 401" in lines[0]
-    assert "Main CI runs, Nightly runs, CodeQL runs (HTTP 403/404)" in lines[1]
+    assert "Main CI runs, Nightly runs, CodeQL runs (HTTP 403)." in lines[1]                 # only the observed code
     assert all("read first, before GH_TOKEN, GITHUB_TOKEN" in ln for ln in lines)

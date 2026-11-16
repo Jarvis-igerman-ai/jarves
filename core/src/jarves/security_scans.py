@@ -319,6 +319,16 @@ def find_token(env_only: bool = False) -> str:
         return ""
 
 
+def token_source(token: str, env_only: bool = False) -> str:
+    """Where `token` came from, by NAME only (never the value); "" when not known."""
+    if not token:
+        return ""
+    for k in TOKEN_ENVS:
+        if (os.environ.get(k) or "").strip() == token:
+            return k
+    return "" if env_only else "gh auth token"
+
+
 def http_client(token: str, repo: str = REPO) -> Callable:
     """client(method, path, payload=None) -> (status, json-or-None). Raises Offline when GitHub is unreachable."""
     def call(method: str, path: str, payload: dict | None = None):
@@ -536,7 +546,7 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
-def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
+def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str, token_from: str = "") -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
              "This is ONE tracker; it is updated only when the set of findings changes.", ""]
@@ -555,7 +565,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
-    lines += owner_actions(coverage)
+    lines += owner_actions(coverage, token_from)
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
@@ -563,14 +573,24 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     return "\n".join(lines)
 
 
-def owner_actions(coverage: dict) -> list[str]:
-    """#480: say what the owner can do about a source GitHub refused (HTTP 401/403/404), not only its code."""
+def owner_actions(coverage: dict, token_from: str = "") -> list[str]:
+    """#480: say what the owner can do about a source GitHub refused (HTTP 401/403/404), not only its code.
+    `token_from` names (never shows) where the scan's token came from; "" = not known."""
+    def reason(k: str) -> str:
+        return str(coverage.get(k, "")).split(":")[-1]
+
     def keys(table: dict, codes: tuple[str, ...]) -> list[str]:
-        return [k for k in table if str(coverage.get(k, "")).split(":")[-1] in codes]
+        return [k for k in table if reason(k) in codes]
+
+    def http(ks: list[str]) -> str:
+        return "HTTP " + "/".join(sorted({reason(k)[5:] for k in ks}))
 
     def token(perms: list[str]) -> str:
-        return (f"give the token in {TOKEN_ENVS[0]} (read first, before {', '.join(TOKEN_ENVS[1:])}) Read-only access to: "
-                + ", ".join(dict.fromkeys(perms)) + " (fine-grained token, this repository only).")
+        first = f"{TOKEN_ENVS[0]} (read first, before {', '.join(TOKEN_ENVS[1:])})"
+        who = (f"the token from {token_from} that this scan used, or a token in {first}," if token_from and token_from != TOKEN_ENVS[0]
+               else f"the token in {first}")
+        return (f"give {who} Read-only access to: " + ", ".join(dict.fromkeys(perms))
+                + " (fine-grained token, this repository only).")
     out = []
     bad_tok = keys(_ALERTS, ("http_401",)) + keys(_RUNS, ("http_401",))
     if bad_tok:
@@ -580,13 +600,13 @@ def owner_actions(coverage: dict) -> list[str]:
     alerts = keys(_ALERTS, ("http_403", "http_404"))
     if alerts:
         names = [_ALERTS[k] for k in alerts]
-        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + " (HTTP 403/404). Either the "
+        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + f" ({http(alerts)}). Either the "
                    "feature is off for the repository (turn it on in the repository's security settings) or the scan's token "
                    "cannot read it: " + token([p for _, p in names]))
     runs = keys(_RUNS, ("http_403", "http_404"))
     if runs:
         names = [_RUNS[k] for k in runs]
-        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + " (HTTP 403/404). The scan's "
+        out.append("Owner action: GitHub refused " + ", ".join(n for n, _ in names) + f" ({http(runs)}). The scan's "
                    "token cannot read workflow runs: " + token([p for _, p in names]))
     return out
 
@@ -625,7 +645,7 @@ def update_tracker(client, body: str, sig: str, have_findings: bool, sleep) -> d
 # ---------------------------------------------------------------------- one scan
 def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: Callable | None = None, now: datetime | None = None,
              report: bool | None = None, dry_run: bool | None = None, boundary: Callable[[], dict] | None = None,
-             version: str = "", sleep: Callable[[float], None] = time.sleep) -> dict:
+             version: str = "", sleep: Callable[[float], None] = time.sleep, token_from: str = "") -> dict:
     """Run one scan. `home` None = stateless (hosted run: no history file, the tracker issue holds the signature).
     Never raises for a network problem: the result says offline / failed and the schedule retries with a back-off."""
     if kind not in KINDS:
@@ -647,6 +667,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
     try:
         if client is None:
             tok = find_token(env_only=home is None)
+            token_from = token_source(tok, env_only=home is None)
             if not tok:
                 raise Offline("no_token")
             client = http_client(tok)
@@ -671,7 +692,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         issue = {"status": "dry_run"}
     elif report:
         try:
-            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind), sig, bool(findings), sleep)
+            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind, token_from), sig, bool(findings), sleep)
         except Offline as e:
             return _fail(home, state, entry, result, now, "offline", str(e))
     result["issue"] = issue

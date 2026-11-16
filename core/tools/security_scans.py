@@ -57,11 +57,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refusing to scan {a.repo}: only {ss.REPO}", file=sys.stderr)
         return 2
     token = ss.find_token(env_only=True)
+    token_from = ss.token_source(token, env_only=True)
     if not token:
         print("no GH_TOKEN / GITHUB_TOKEN in the environment", file=sys.stderr)
         return 1
     r = ss.run_scan(None, a.kind, trigger="hosted", client=ss.http_client(token, a.repo), now=datetime.now(timezone.utc),
-                    report=not a.no_report, dry_run=a.dry_run, boundary=boundary_runner if a.kind == "full" else None)
+                    report=not a.no_report, dry_run=a.dry_run, boundary=boundary_runner if a.kind == "full" else None,
+                    token_from=token_from)
     counts = {s: sum(f["severity"] == s for f in r.get("findings", [])) for s in ("P1", "P2", "P3")}
     out = {"kind": a.kind, "status": r["status"], "findings": len(r.get("findings", [])), **counts,
            "coverage": r.get("coverage", {}), "issue": (r.get("issue") or {}).get("status", "-"),
