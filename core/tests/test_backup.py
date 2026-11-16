@@ -395,6 +395,24 @@ def test_installer_checkpoint_is_not_reused_after_a_core_ran_on_the_data(profile
     assert p is not None and p != installer and len(backup.list_backups(profile)) == 2
 
 
+def test_installer_checkpoint_is_not_reused_after_a_database_write_past_the_migration(profile, monkeypatch):
+    """#1016 review R5: a database written after the installer's migration (schema.json stamp), e.g. by a CLI command
+    while the Core was stopped, is missing from the checkpoint; a write inside the migration window is not."""
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    db = next(profile.glob("*.db"))
+    (profile / "schema.json").write_text('{"schema": 4}', encoding="utf-8")
+    os.utime(profile / "schema.json", (clock[0] + 60, clock[0] + 60))     # the installer's migration ended
+    os.utime(db, (clock[0] + 59, clock[0] + 59))                          # written by that migration
+    clock[0] += 600
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    assert backup._reusable_installer_checkpoint(profile) == installer
+    os.utime(db, (clock[0] - 60, clock[0] - 60))                          # a later write the checkpoint lacks
+    p = backup.startup_checkpoint(profile)
+    assert p is not None and p != installer and len(backup.list_backups(profile)) == 2
+
+
 def test_cli_sets_manual_and_checkpoint_retention(profile, capsys):
     """#1016: manual and pre-migration retention are settable from the CLI, not only daily/weekly."""
     import argparse

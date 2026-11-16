@@ -105,6 +105,21 @@ def test_schedule_command_refuses_an_ephemeral_worktree_path():
     tmp = Path("C:/work/jarves-main/.claude/worktrees/agent-1/core/tools/factory_sim.py")
     assert factory_sim.schedule_command(tmp).startswith("refused:")
     assert factory_sim.schedule_command(Path("C:/work/jarves-main/core/tools/factory_sim.py")).startswith("schtasks ")
+    assert factory_sim.schedule_command(Path("/srv/worktrees/jarves/core/tools/factory_sim.py")).startswith("schtasks ")
+
+
+def test_main_schedule_command_exits_1_when_refused(monkeypatch, capsys):
+    """#897 review R4: --schedule-command from an agent worktree exits 1 with a generic hint, no machine path."""
+    monkeypatch.setattr(factory_sim, "__file__", "/x/.claude/worktrees/agent-1/core/tools/factory_sim.py")
+    assert factory_sim.main(["--schedule-command"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("refused:") and "C:\\work" not in out
+
+
+def test_summary_keeps_urls_readable():
+    """#897 review R3: a URL is not rewritten into 'https:/<path>'; a bare POSIX path still is."""
+    out = factory_sim._summary("FAILED see https://github.com/a/b and /home/bob/t.py - x")
+    assert "https://github.com/a/b" in out and "/home/bob" not in out
 
 
 def test_auto_issue_has_an_area_label_and_redacts_ghr_and_posix_paths(monkeypatch):

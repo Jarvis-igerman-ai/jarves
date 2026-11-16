@@ -31,8 +31,9 @@ def schedule_command(here: Path | None = None) -> str:
     """Daily 03:00 in the PC's local (Israel) time; the owner or manager runs it once. Never from an agent worktree:
     that checkout is temporary, so the nightly task would point at a file that goes away (#897)."""
     here = here or Path(__file__).resolve()
-    if "worktrees" in here.parts:
-        return "refused: this is a temporary agent worktree; print the command from the main checkout (C:\\work\\jarves-main)"
+    parts = [x.lower() for x in here.parts]
+    if any(a == ".claude" and b == "worktrees" for a, b in zip(parts, parts[1:])):
+        return "refused: this is a temporary agent worktree (.claude/worktrees); print the command from the main checkout"
     return ('schtasks /Create /SC DAILY /ST 03:00 /TN "JARVES factory sim" /F /TR '
             f'"\\"{sys.executable}\\" \\"{here}\\" --nightly"')
 
@@ -56,7 +57,7 @@ def _summary(tail: str, limit: int = 600) -> str:
     lines = [ln.strip() for ln in (tail or "").splitlines()
              if re.match(r"^(FAILED|ERROR) |^=+ .*(passed|failed|error)", ln.strip())]
     text = "\n".join(lines[-5:]) or "(see local run for details)"
-    text = re.sub(r"[A-Za-z]:[\\/][^\s:]*|\\\\[^\s:]+|(?<![\w.])/(?:[\w.-]+/)+[\w.-]*", "<path>", text)
+    text = re.sub(r"(?<![\w.])[A-Za-z]:[\\/][^\s:]*|\\\\[^\s:]+|(?<![\w.])(?<!:/)/(?:[\w.-]+/)+[\w.-]*", "<path>", text)
     text = re.sub(r"\b(sk-|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|AKIA|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
     return text[:limit]
 

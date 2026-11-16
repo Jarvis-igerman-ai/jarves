@@ -582,12 +582,28 @@ def _reusable_installer_checkpoint(home: Path, max_age_s: float = 6 * 3600) -> P
         pass                                        # no Core has written a snapshot here at all
     except OSError:
         return None
+    if not _dbs_unchanged_since(home, newest["ts"]):
+        return None
     path = backup_dir(home) / newest["name"]
     try:
         note = str(read_manifest(path).get("note", ""))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile):
         return None
     return path if note.endswith("installer upgrade") else None
+
+
+def _dbs_unchanged_since(home: Path, ts: float) -> bool:
+    """True when no database (or its WAL) was written after the checkpoint, except by the installer's own migration:
+    migrations stamp schema.json after their last write, so a write later than both points (e.g. a CLI command while
+    the Core was stopped) means the checkpoint misses data (#1016 review R5). +1 s: archive names hold whole seconds."""
+    try:
+        ref = ts
+        marker = home / "schema.json"
+        if marker.is_file():
+            ref = max(ref, marker.stat().st_mtime)
+        return all(f.stat().st_mtime <= ref + 1 for f in home.iterdir() if f.name.endswith((".db", ".db-wal")))
+    except OSError:
+        return False
 
 
 def due(home: Path, now: float | None = None) -> bool:
