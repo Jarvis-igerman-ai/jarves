@@ -192,6 +192,7 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
+        self.unlock_key.withdraw(self.home)  # #750: a stopped server must not leave a key that issue() would use
         super().server_close()
         self.store.close()
 

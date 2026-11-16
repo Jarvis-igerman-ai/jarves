@@ -310,6 +310,15 @@ def test_574_item1_a_driver_whose_contract_method_is_not_callable_is_refused_at_
         bp.PilotSession(tmp_path, d, enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
 
 
+def test_574_item1_a_driver_property_that_raises_is_refused_with_the_contract_typeerror(tmp_path):
+    class Broken(FakeDriver):
+        @property
+        def pin_hosts(self):
+            raise RuntimeError("driver not started")
+    with pytest.raises(TypeError, match="pin_hosts"):
+        bp.PilotSession(tmp_path, Broken(), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+
+
 def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_shared_and_capped(tmp_path, monkeypatch):
     s, d, _ = mk(tmp_path, resolver=lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     assert s.request_allowed("https://example.com/") is False

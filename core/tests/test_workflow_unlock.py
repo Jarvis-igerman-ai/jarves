@@ -241,6 +241,37 @@ class UnlockTests(unittest.TestCase):
         self.assertIn("dashboard", err.getvalue())
         self.assertNotIn("Unlock code", out.getvalue())
 
+    def test_750_a_stopped_or_dead_server_gives_no_code_that_can_never_work(self):
+        other = unlock.ServerKey()
+        other.withdraw(self.home)                                       # not our key: the running server's key stays
+        self.assertTrue((self.home / unlock.PUB_FILE).exists())
+        with patch.object(unlock, "_alive", return_value=False):        # crashed server: the key file stayed behind
+            with self.assertRaisesRegex(unlock.UnlockUnavailable, "not running"):
+                unlock.issue(self.home)
+        self.server.unlock_key.withdraw(self.home)                      # what server_close does on a clean stop
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())
+        with self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)
+
+    def test_750_a_locked_unlock_file_is_retried_once_then_reported_by_open(self):
+        real, calls = unlock._write, []
+        def flaky(path, record):
+            calls.append(path.name)
+            if path.name == unlock.FILE and len(calls) == 1:
+                raise PermissionError("in use")
+            real(path, record)
+        with patch.object(unlock, "_write", flaky):
+            shown = unlock.issue(self.home)                             # first replace fails, the retry works
+        self.assertEqual(calls, [unlock.FILE, unlock.FILE])
+        self.assertTrue(unlock.consume(self.home, shown, self.server.unlock_key))
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]
+        with patch.object(unlock, "_write", side_effect=PermissionError("in use")), \
+                patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(argv), 0)
+        self.assertIn("No unlock code: could not save the unlock code (PermissionError)", err.getvalue())
+
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
         html = (Path(cli.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")

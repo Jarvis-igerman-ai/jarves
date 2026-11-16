@@ -6,8 +6,9 @@ in a terminal). The code is never stored. The running dashboard server holds an 
 its public half (unlock_pub.json); the CLI stores an ephemeral public key and an HMAC tag of the code under the shared
 secret. An agent that READS every file in the workflow home (access.token included) cannot check a guess offline:
 the tag key needs the server's in-memory private key. 5-minute expiry, single use, 5 wrong tries cancel it. Honest
-limit: a same-user process that can WRITE the workflow home could plant its own record; the CLI refuses agent
-environments and non-terminals (owner_only_guard)."""
+limits: a same-user process that can WRITE the workflow home could plant its own key or record, and one that can read
+the server's process memory (on Windows usually allowed for the same user, ReadProcessMemory) can take the private
+key; the CLI refuses agent environments and non-terminals (owner_only_guard)."""
 from __future__ import annotations
 
 import hashlib
@@ -37,8 +38,20 @@ class ServerKey:
     def __init__(self) -> None:
         self._priv = X25519PrivateKey.generate()
 
+    def _pub(self) -> str:
+        return self._priv.public_key().public_bytes_raw().hex()
+
     def publish(self, home: Path) -> None:
-        _write(Path(home) / PUB_FILE, {"pub": self._priv.public_key().public_bytes_raw().hex()})
+        _write(Path(home) / PUB_FILE, {"pub": self._pub(), "pid": os.getpid()})
+
+    def withdraw(self, home: Path) -> None:
+        """On server stop: remove the published key if it is still ours (a newer server's key stays)."""
+        path = Path(home) / PUB_FILE
+        try:
+            if json.loads(path.read_text(encoding="ascii")).get("pub") == self._pub():
+                path.unlink(missing_ok=True)
+        except (OSError, ValueError, AttributeError):
+            pass  # nothing published, unreadable or not ours: leave it; issue() checks the publisher is alive
 
     def shared(self, eph: bytes) -> bytes:
         return self._priv.exchange(X25519PublicKey.from_public_bytes(eph))
@@ -66,18 +79,33 @@ def _write(path: Path, record: dict) -> None:
         raise
 
 
+def _alive(pid: int) -> bool:
+    from ..orchestrator.procs import alive  # Windows-safe: os.kill(pid, 0) would terminate the process there
+    return alive(pid)
+
+
 def issue(home: Path, *, now: float | None = None) -> str:
     """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
     try:
         pub = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))["pub"]
         peer = X25519PublicKey.from_public_bytes(bytes.fromhex(pub))
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        pid = int(json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii")).get("pid") or 0)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run unlock again") from exc
+    if not _alive(pid):  # a crashed server never withdrew its key: a code for it could never be checked
+        raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run unlock again")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     eph_key = X25519PrivateKey.generate()
     eph = eph_key.public_key().public_bytes_raw()
     tag = _tag(eph_key.exchange(peer), eph, raw)
-    _write(Path(home) / FILE, {"eph": eph.hex(), "tag": tag.hex(), "expires": (now or time.time()) + CODE_TTL_S})
+    record = {"eph": eph.hex(), "tag": tag.hex(), "expires": (now or time.time()) + CODE_TTL_S}
+    for attempt in (1, 2):  # Windows: os.replace fails while the server has unlock.json open for reading; retry once
+        try:
+            _write(Path(home) / FILE, record)
+            break
+        except OSError as exc:
+            if attempt == 2:
+                raise UnlockUnavailable(f"could not save the unlock code ({exc.__class__.__name__}); run unlock again") from exc
     return raw
 
 
