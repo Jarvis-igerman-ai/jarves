@@ -165,3 +165,32 @@ def test_never_inside_greeting_pending_window(lc):
     lc.greeting, lc._first_audio, lc._t_ready = "hi", threading.Event(), 1995.0
     lc._last_activity = 0.0
     assert not lc._idle_stop_due()
+
+
+def test_dot_retries_a_transient_tcl_init_error(monkeypatch):
+    """#520 (2): the approval popup retries Windows' transient Tcl init errors; the dot's own Tk() did not, so one
+    flaky 'couldn't read file auto.tcl' read left the dot dead for the whole run. It retries the same way now."""
+    import sys
+    import types
+    from unittest import mock
+
+    class TclError(Exception):
+        pass
+    tries = []
+
+    def make_root():
+        tries.append(1)
+        if len(tries) == 1:
+            raise TclError('couldn\'t read file "auto.tcl"')
+        return mock.MagicMock()
+    fake = types.SimpleNamespace(Tk=make_root, TclError=TclError, Canvas=mock.MagicMock())
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    monkeypatch.setattr(indicator.time, "sleep", lambda s: None)
+    monkeypatch.setattr(indicator.sys, "platform", "linux")
+    logged = []
+    monkeypatch.setattr(indicator.logs, "debug", lambda *a, **k: logged.append(a[1]))
+    indicator.TkDotBackend()._run()
+    assert len(tries) == 2 and "DOT_UNAVAILABLE" not in logged
+    fake.Tk = mock.Mock(side_effect=TclError("no display name and no $DISPLAY"))     # not transient: no retry
+    indicator.TkDotBackend()._run()
+    assert fake.Tk.call_count == 1 and logged == ["DOT_UNAVAILABLE"]
