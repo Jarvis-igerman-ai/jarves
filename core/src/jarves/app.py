@@ -44,12 +44,13 @@ def make_agent(cfg: Config, registry: SkillRegistry, memory: MemoryStore, home: 
     """Text brain for the user's chosen connection (ai.connection); None when AI is off."""
     if cfg.ai.provider != "openai":
         return None
+    name = lambda: cfg.assistant_name     # live: a rename (identity.py updates cfg) reaches the next chat turn
     if cfg.ai.connection in ("chatgpt", "combined"):
         from .chatgpt_auth import ChatGPTAuth
         from .chatgpt_brain import ChatGPTBrain
-        return ChatGPTBrain(cfg.ai, registry, memory, ChatGPTAuth(home, transport=transport), cfg.assistant_name,
+        return ChatGPTBrain(cfg.ai, registry, memory, ChatGPTAuth(home, transport=transport), name,
                             transport=transport, budget=budget)
-    return AgentBrain(cfg.ai, registry, memory, cfg.assistant_name, budget=budget)
+    return AgentBrain(cfg.ai, registry, memory, name, budget=budget)
 
 
 def _delegation_kwargs(core) -> dict:
