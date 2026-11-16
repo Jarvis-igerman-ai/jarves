@@ -1,0 +1,1 @@
+- Fixed: silent installs restart a Core that was running (#343) and the installed Core runs the pinned WhatsApp bridge from the install folder (#466); the code fixes (#383, #522) were already on main and are now checked on the installed build 4.0.1.2860.
