@@ -417,7 +417,42 @@ async def test_step_popup_shows_the_arguments_in_full_and_never_cuts_silently(en
     await env.runner.tick()
     assert "TAIL-MARK" in prompts[0] and env.ran == [("act", long_text)]
     shown = gp.describe(env.store.get(p["id"]))
-    assert "more characters not shown" in shown                 # the plan text marks every cut
+    assert "TAIL-MARK" in shown and "not shown" not in shown    # #565 (3): the plan text shows the step in full too
+
+
+def _wiper(env):
+    async def wipe(a: Say):
+        env.ran.append(("wipe", a.text))
+        return ToolResult(True, "wiped")
+
+    class Wiper(Skill):
+        name = "wiper"
+        description = "destructive fake"
+
+        def tools(self):
+            return [Tool("fake_wipe", "w", wipe, Say, permission="destructive", confirm="Wipe it?")]
+    env.reg.register(Wiper())
+    env.reg.allowed_actions |= {"fake_wipe"}
+
+
+async def test_565_part3_plan_approval_shows_full_args_of_a_destructive_step_that_skips_the_step_popup(env):
+    """#565 (3): a confirm/destructive step gets only the tool's static prompt later, so the plan text must show it all."""
+    _wiper(env)
+    long_text = "y" * 700 + "WIPE-TAIL"
+    p = env.store.propose("wipe long", steps(("fake_wipe", {"text": long_text})))
+    shown = gp.describe(env.store.get(p["id"]))
+    assert "WIPE-TAIL" in shown and "not shown" not in shown
+
+
+async def test_565_part3_destructive_step_too_long_to_show_in_full_is_blocked_not_run(env):
+    """#565 (3): escaped args longer than the plan text shows are never run behind a static confirm prompt."""
+    _wiper(env)
+    p = env.store.propose("wipe hidden", steps(("fake_wipe", {"text": chr(0x200B) * 400})))
+    assert "not shown" in gp.describe(env.store.get(p["id"]))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["steps"][0]["status"] == "blocked" and not env.ran and "too long to show" in d["steps"][0]["error"]
 
 
 def test_565_one_show_text_escapes_format_and_control_characters_and_keeps_hebrew():

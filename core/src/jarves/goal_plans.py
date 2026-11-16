@@ -352,7 +352,7 @@ def describe(plan: dict) -> str:
     lines = [f"{_show_text(plan['title'], MAX_TITLE)} ({len(plan['steps'])} steps, up to {int(plan['timeout_s'] // 60)} min, "
              f"{plan['max_ai']} AI requests)"]
     for s in plan["steps"]:
-        lines.append(f"{s['idx'] + 1}. {_show_text(s['tool'], 80)} {_args_text(s['args'], 200)}"
+        lines.append(f"{s['idx'] + 1}. {_show_text(s['tool'], 80)} {_args_text(s['args'], STEP_SHOW_CHARS)}"
                      + (f"  - {_show_text(s['why'], MAX_WHY)}" if s["why"] else ""))
     return "\n".join(lines)
 
@@ -463,10 +463,10 @@ class PlanRunner:
             if consequential and p["tainted"]:
                 self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
                 return st.get(pid)
+            if consequential and _shown_len(step["args"]) > STEP_SHOW_CHARS:  # ESCAPED text, can be 6x longer; #565:
+                self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                return st.get(pid)                                  # also confirm/destructive steps (no step popup)
             if consequential and not tool.confirm and tool.permission != "destructive":
-                if _shown_len(step["args"]) > STEP_SHOW_CHARS:         # checked on the ESCAPED text: it can be 6x longer
-                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
-                    return st.get(pid)
                 ok = await self.registry.ask(
                     f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
                     f"{_args_text(step['args'], STEP_SHOW_CHARS)}\nRun this step?",
