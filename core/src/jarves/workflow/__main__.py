@@ -230,6 +230,12 @@ def main(argv=None) -> int:
         capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
+    def dashboard_listening(home: Path, port: int) -> bool:
+        """--port, or else the port the running web server recorded (#750: one rule for unlock and open)."""
+        from . import webchild
+        from .opener import listening
+        recorded = webchild.read(home).get("port")
+        return any(listening(p) for p in [port] + ([recorded] if isinstance(recorded, int) and recorded != port else []))
     if a.action == "unlock":
         # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
         from . import unlock
@@ -244,13 +250,9 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        from . import webchild
-        from .opener import listening
         try:
-            # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen, on
-            # --port or else on the port the running web server recorded (non-default ports work without --port).
-            ports = [a.port] + [p for p in [webchild.read(home).get("port")] if isinstance(p, int) and p != a.port]
-            if not any(listening(p) for p in ports):
+            # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen.
+            if not dashboard_listening(home, a.port):
                 raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise) "
                                                "or pass its port with --port")
             shown = unlock.issue(home)
@@ -267,7 +269,7 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            if not listening(a.port):  # a listening dashboard has already published its key (server_activate)
+            if not dashboard_listening(home, a.port):  # a listening dashboard has already published its key (server_activate)
                 raise unlock.UnlockUnavailable("dashboard not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:

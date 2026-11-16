@@ -269,15 +269,16 @@ class UnlockTests(unittest.TestCase):
         self.assertNotEqual((self.home / unlock.PUB_FILE).read_bytes(), other_pub)
         self.assertTrue((self.home / unlock.PUB_FILE).exists())     # a foreign key is not removed
         base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", "1"]
-        err = io.StringIO()
+        err, out = io.StringIO(), io.StringIO()
         with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.listening", return_value=False), \
-                patch("jarves.workflow.opener.open_dashboard", return_value=0), redirect_stdout(io.StringIO()), redirect_stderr(err):
+                patch("jarves.workflow.opener.open_dashboard", return_value=0), redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(cli.main(base + ["unlock"]), 2)
             cli.main(base + ["open", "--no-open"])
         self.assertIn("no dashboard is running", err.getvalue())
         self.assertIn("--port", err.getvalue())
         self.assertIn("No unlock code yet", err.getvalue())
         self.assertNotIn("Unlock code", err.getvalue())
+        self.assertNotIn("Unlock code", out.getvalue())             # unlock prints its success line to stdout
         self.assertFalse((self.home / unlock.FILE).exists())       # no code bound to the dead key
 
     def test_750_a_listening_dashboard_has_already_published_its_key(self):
@@ -316,6 +317,18 @@ class UnlockTests(unittest.TestCase):
             self.assertEqual(cli.main(argv), 0)
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": out.getvalue().split(": ")[-1].strip()})[0], 200)
+
+    def test_750_open_uses_the_same_recorded_port_rule_as_unlock(self):
+        from jarves.workflow import webchild
+        webchild.record(self.home, self.server.server_port)
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"]   # default --port 8188
+        err = io.StringIO()
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                patch("jarves.workflow.opener.listening", side_effect=lambda p: p == self.server.server_port), redirect_stderr(err):
+            self.assertEqual(cli.main(argv), 0)
+        self.assertNotIn("No unlock code yet", err.getvalue())
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": err.getvalue().split(": ")[-1].strip()})[0], 200)
 
     def test_750_key_write_retries_a_briefly_locked_target_then_gives_up(self):
         real, calls, sleeps = os.replace, [], []
