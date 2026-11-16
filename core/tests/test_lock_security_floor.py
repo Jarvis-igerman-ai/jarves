@@ -6,7 +6,10 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
 LOCK = Path(__file__).resolve().parents[1] / "uv.lock"
+PYPI_JSON = "https://pypi.org/pypi/opentelemetry-api/{version}/json"
 
 # Digests checked against https://pypi.org/pypi/opentelemetry-api/1.45.2/json
 # on 2026-11-16.
@@ -24,8 +27,12 @@ def _package(name: str) -> dict:
 
 
 def test_opentelemetry_api_at_or_above_patched_version() -> None:
-    version = tuple(int(x) for x in _package("opentelemetry-api")["version"].split("."))
-    assert version >= (1, 45, 2), f"opentelemetry-api {version} is vulnerable (GHSA-mf5v-w3w3-f6cg)"
+    raw = _package("opentelemetry-api")["version"]
+    try:
+        version = Version(raw)
+    except InvalidVersion as exc:
+        raise AssertionError(f"opentelemetry-api version {raw!r} in uv.lock is not PEP 440") from exc
+    assert version >= Version("1.45.2"), f"opentelemetry-api {raw} is vulnerable (GHSA-mf5v-w3w3-f6cg)"
 
 
 def test_opentelemetry_api_hashes_match_pypi() -> None:
@@ -33,4 +40,8 @@ def test_opentelemetry_api_hashes_match_pypi() -> None:
     pkg = _package("opentelemetry-api")
     artifacts = [pkg["sdist"], *pkg["wheels"]]
     seen = {a["url"].rsplit("/", 1)[-1]: a["hash"] for a in artifacts}
-    assert seen == {k: f"sha256:{v}" for k, v in PYPI_SHA256.items()}
+    assert seen == {k: f"sha256:{v}" for k, v in PYPI_SHA256.items()}, (
+        f"uv.lock opentelemetry-api {pkg['version']} artifacts differ from the verified table; "
+        f"re-check each sha256 against {PYPI_JSON.format(version=pkg['version'])} "
+        "(urls[].digests.sha256) and update PYPI_SHA256"
+    )
