@@ -32,6 +32,7 @@ checkpoint(home, reason) (before a migration/update: raises if it cannot be veri
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -68,6 +69,7 @@ DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "max_instal
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 _state_lock = threading.Lock()                               # backup_state.json read-modify-write
+STATE_LOCK_WAIT = 10.0                                       # seconds to wait for another process's state write
 CAPPED_KEEP = 50                                             # newest install-cap deletions kept in the state file
 
 
@@ -293,8 +295,29 @@ def read_state(home: Path) -> dict:
         return {}
 
 
+@contextlib.contextmanager
+def _state_file_lock(home: Path):
+    """OS file lock next to backup_state.json so the Core and a CLI never lose each other's update."""
+    from .runtime.lock import _try_lock, _unlock
+    p = _state_path(home).with_name(STATE_FILE + ".lock")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(p, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        deadline = time.monotonic() + STATE_LOCK_WAIT
+        while not _try_lock(fd):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"{p.name} is held by another process")
+            time.sleep(0.05)
+        try:
+            yield
+        finally:
+            _unlock(fd)
+    finally:
+        os.close(fd)
+
+
 def _save_state(home: Path, changes: dict, kind: str | None = None, capped: list[str] | None = None) -> None:
-    with _state_lock:
+    with _state_lock, _state_file_lock(home):
         st = read_state(home)
         st.update(changes)
         if kind == "auto":
@@ -434,7 +457,7 @@ def prune_report(home: Path) -> dict:
     capped = [n for n in gone if n in cut]
     if capped:
         try:
-            _save_state(home, {}, capped=capped)
+            _save_state(home, {}, capped=capped[::-1])        # oldest first, like the rest of the record
         except OSError as e:
             logs.warn("backup", "BACKUP_STATE_FAILED", "install-cap record not saved", error_type=type(e).__name__)
     return {"gone": gone, "capped": capped}

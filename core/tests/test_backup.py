@@ -293,7 +293,7 @@ def test_install_cap_deletions_by_the_automatic_prune_stay_visible_issue_1016(pr
     new = backup.create(profile, "manual", now=datetime(2026, 2, 1, 3, 0).timestamp())  # writes, then prunes itself
     names = {b["name"] for b in backup.list_backups(profile)}
     assert names == {new.name, old[2], old[3]}
-    assert [e["name"] for e in backup.capped_history(profile)] == [old[1], old[0]]
+    assert [e["name"] for e in backup.capped_history(profile)] == [old[0], old[1]]  # oldest first
     assert cli.main(["backup", "prune"]) == 0                         # nothing left to remove, the record stays
     out = capsys.readouterr().out
     assert "removed 0 old backup(s)" in out
@@ -301,9 +301,23 @@ def test_install_cap_deletions_by_the_automatic_prune_stay_visible_issue_1016(pr
     st = json.loads((bdir / backup.STATE_FILE).read_text(encoding="utf-8"))
     st["capped"] = st["capped"] + ["junk", {"ts": 1}]                  # malformed entries are skipped, not fatal
     (bdir / backup.STATE_FILE).write_text(json.dumps(st), encoding="utf-8")
-    assert [e["name"] for e in backup.capped_history(profile)] == [old[1], old[0]]
+    assert [e["name"] for e in backup.capped_history(profile)] == [old[0], old[1]]  # oldest first
     backup._save_state(profile, {}, capped=[f"x{i}" for i in range(backup.CAPPED_KEEP + 5)])
     assert len(backup.capped_history(profile)) == backup.CAPPED_KEEP  # bounded record
+    from jarves.runtime.lock import _try_lock, _unlock
+    before = (bdir / backup.STATE_FILE).read_text(encoding="utf-8")
+    fd = os.open(bdir / (backup.STATE_FILE + ".lock"), os.O_RDWR | os.O_CREAT)  # another process holds the lock
+    try:
+        assert _try_lock(fd)
+        monkeypatch.setattr(backup, "STATE_LOCK_WAIT", 0.0)
+        with pytest.raises(TimeoutError):
+            backup._save_state(profile, {}, capped=["lost"])
+        assert (bdir / backup.STATE_FILE).read_text(encoding="utf-8") == before   # nothing written unlocked
+    finally:
+        _unlock(fd)
+        os.close(fd)
+    backup._save_state(profile, {}, capped=["after"])                 # free again: the write goes through
+    assert backup.capped_history(profile)[-1]["name"] == "after"
     (bdir / f"jarves-backup-20250101-030000-manual.zip").write_bytes(b"x")
     warned = []
     monkeypatch.setattr(backup.logs, "warn", lambda *a, **k: warned.append(a[1]))
