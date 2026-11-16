@@ -1,0 +1,1 @@
+- Fixed: drive mode: WhatsApp send target now carries "+" so non-Israeli saved contacts match, and the passenger setting reuses one DB connection (#833)

@@ -1,0 +1,1 @@
+- Fixed: quarantined the flaky Windows test test_restart_rotates_the_token (showstopper #992) so CI stops failing on a named-pipe restart race.

@@ -1,0 +1,1 @@
+- Added: proposal reconciling the 18 scope requirements with no issue link (JAR-97, docs only).

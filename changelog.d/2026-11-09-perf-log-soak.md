@@ -1,0 +1,1 @@
+- Fixed: the Instagram audit log (instagram/audit.jsonl) is now size-bounded (500 KB, one older file kept) instead of growing without limit; added a hermetic log-size soak tool and test (JAR-90).

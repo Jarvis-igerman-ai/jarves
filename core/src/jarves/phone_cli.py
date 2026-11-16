@@ -228,7 +228,7 @@ def cmd_phone(a, cfg, home) -> int:
             if hit is None:
                 print(clilang.fmt("אין טלפון כזה (או שבוטל)", "no such paired phone (or it was revoked)"))
                 return 1
-            cur = list(hit.get("scopes") or DEFAULT_SCOPES)
+            cur = list(DEFAULT_SCOPES if hit.get("scopes") is None else hit["scopes"])
             for sc in a.grant or []:
                 cur = cur if sc in cur else cur + [sc]
             cur = [x for x in cur if x not in (a.revoke or [])]
@@ -236,7 +236,7 @@ def cmd_phone(a, cfg, home) -> int:
                 m.set_scopes(a.device, cur, by="cli")
             devs = [dict(hit, scopes=[x for x in ALL_SCOPES if x in cur])]
         for d in devs:
-            print(f"{d['id']}  {d['name']}: " + ", ".join(d.get("scopes") or DEFAULT_SCOPES))
+            print(f"{d['id']}  {d['name']}: " + (", ".join(DEFAULT_SCOPES if d.get("scopes") is None else d["scopes"]) or "(none)"))
         return 0
     if a.action == "bind":
         m.set_bind_tailnet_only(a.where == "tailnet", by="cli")

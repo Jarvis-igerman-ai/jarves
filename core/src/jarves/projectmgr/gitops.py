@@ -180,12 +180,16 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
 
 def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
-    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason."""
-    p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
-    if p.returncode == 0:
-        return []
-    files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
-    git(wt, "merge", "--abort", check=False)
+    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
+    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
+    common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
+    root = (Path(wt) / common).resolve() if common else Path(wt)
+    with _repo_lock(root.parent if root.name == ".git" else root):
+        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        if p.returncode == 0:
+            return []
+        files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
+        git(wt, "merge", "--abort", check=False)
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]

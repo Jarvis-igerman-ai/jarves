@@ -1,0 +1,1 @@
+- Added: Android companion offline basics (data layer): notes, reminders and timers stored on the phone, exact-alarm scheduling with an inexact fallback, re-arming after reboot, and a sync merge. (no screens yet)

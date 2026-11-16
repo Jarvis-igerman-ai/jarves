@@ -1,0 +1,1 @@
+- Fixed: Hebrew dashboard showed English "s" and "KB" after numbers (browser live timer, model lab latency, backup size); now translated (JAR-147)

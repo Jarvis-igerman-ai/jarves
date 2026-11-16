@@ -132,7 +132,8 @@ def test_speedtest_rate_needs_five_starts_and_counters_have_no_trend(home):
     ts = datetime.fromtimestamp(time.time() - 3600).isoformat()
     _log(home, [{"ts": ts, "code": "LIVE_GREETING_OK"}, {"ts": ts, "code": "LIVE_GREETING_MISSED"}])
     got = speedtest.measure_history(home)
-    assert got == {"greeting_ok": 1, "greeting_retry_ok": 0, "greeting_missed": 1}
+    assert got == {"greeting_ok": 1, "greeting_retry_ok": 0, "greeting_missed": 1,
+                   "greeting_tts_fallback": 0}
     m = speedtest.judge("greeting_ok", 50, speedtest.load_budgets(), "owner", [10, 10, 10])
     assert m.trend_pct is None and m.status == speedtest.PASS
     b = speedtest.load_budgets()
@@ -182,3 +183,10 @@ def test_wake_greeting_follows_ui_language_and_is_silent_in_drive_mode():
     assert Core.wake_greeting(_ns(lang="he")) == "אני מקשיב."
     d = _ns(drive=True)
     assert Core.wake_greeting(d) is None and not d._greeted
+
+
+def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
+    ts = datetime.fromtimestamp(time.time() - 3600).isoformat()
+    _log(tmp_path, [{"ts": ts, "code": "LIVE_GREETING_MISSED"}, {"ts": ts, "code": "LIVE_GREETING_TTS_FALLBACK"}])
+    got = speedtest.measure_history(tmp_path)
+    assert got["greeting_tts_fallback"] == 1 and got["greeting_missed"] == 1

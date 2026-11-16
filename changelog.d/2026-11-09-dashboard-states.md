@@ -1,0 +1,1 @@
+- Added: docs/proposals/2026-11-09-dashboard-states.md, a proposal reviewing dashboard empty, loading and error states with EN and HE copy (doc only).

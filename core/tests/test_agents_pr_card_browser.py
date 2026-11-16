@@ -27,6 +27,18 @@ def browser():
             b.close()
 
 
+def goto_retry(page, url, tries=4):
+    """Windows hosts under socket pressure fail Page.goto with net::ERR_NO_BUFFER_SPACE (#890): retry only that error."""
+    import time
+    for n in range(tries):
+        try:
+            return page.goto(url)
+        except Exception as exc:  # playwright Error
+            if "ERR_NO_BUFFER_SPACE" not in str(exc) or n == tries - 1:
+                raise
+            time.sleep(1 + n)
+
+
 def page_with(browser, dash, work, flag=True):  # noqa: F811
     ctx = browser.new_context(viewport={"width": 1200, "height": 900})
     p = ctx.new_page()
@@ -49,7 +61,7 @@ def page_with(browser, dash, work, flag=True):  # noqa: F811
     p.route(re.compile(r"/api/agents(\?.*)?$"), agents)
     p.route(re.compile(r"/api/github/work(\?.*)?$"), gh)
     p.add_init_script("try{localStorage.setItem('jarves-lang','en')}catch(e){}")
-    p.goto(dash.url + "#/agents")
+    goto_retry(p, dash.url + "#/agents")
     return ctx, p, errs
 
 
@@ -82,7 +94,7 @@ def test_the_page_never_asks_the_pr_route_when_the_switch_is_off(browser, dash):
     p.route(re.compile(r"/api/agents/approvals(\?.*)?$"), lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"pending": []})))
     p.route(re.compile(r"/api/agents(\?.*)?$"), lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
         {"enabled": True, "pr_card": False, "sessions": [], "projects": [{"name": "jarves"}], "digest": {"text": "none"}})))
-    p.goto(dash.url + "#/agents")
+    goto_retry(p, dash.url + "#/agents")
     p.wait_for_selector("text=New session", timeout=30000)
     assert asked == []
     ctx.close()

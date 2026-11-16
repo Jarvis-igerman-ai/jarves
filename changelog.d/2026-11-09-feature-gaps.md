@@ -1,0 +1,1 @@
+- Added: feature gap analysis proposal (docs/proposals/2026-11-09-feature-gaps.md), documentation only, no scope authorised.

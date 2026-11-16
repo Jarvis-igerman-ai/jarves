@@ -95,6 +95,13 @@ HE = {   # Hebrew answers for bridge codes (fixed strings)
 
 
 # ---------------------------------------------------------------------- files
+def _gate_target(number) -> str:
+    """The bridge stores digits only (972..., 4479...). Drive mode matches the REAL number against saved contacts in
+    E.164, so a bare international number gets its '+' (a national 0-number stays as is; empty = never known)."""
+    n = str(number or "").strip()
+    return "+" + n if n.isdigit() and not n.startswith("0") else n
+
+
 def bridge_dir(home: Path) -> Path:
     return Path(home) / "whatsapp_bridge"
 
@@ -1163,7 +1170,7 @@ class WhatsAppBridgeSkill(Skill):
             Tool("whatsapp_send", 'Send a whatsapp_compose draft. The system shows recipient, number and full text and asks the owner; do not ask yourself.', send, SendArgs,
                  permission="destructive", timeout_s=30, impact=send_impact, precheck=send_precheck,
                  recipient=lambda a: (self._drafts.get(a.draft_id) or {}).get("name"),
-                 target=lambda a: (self._drafts.get(a.draft_id) or {}).get("number") or "",    # LID contact: "" = never known
+                 target=lambda a: _gate_target((self._drafts.get(a.draft_id) or {}).get("number")),    # LID contact: "" = never known
                  approval_meta=send_meta),
         ]
 

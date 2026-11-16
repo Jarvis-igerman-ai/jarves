@@ -20,3 +20,15 @@ privacy_en = "None."
 he = "פתחו את עמוד \"עצמאות\" ובחרו רמה: רק להציע ולשאול (מומלץ), או להחיל לבד שינויים קטנים שאישרתם מראש."
 en = "Open the Autonomy page and choose a level: suggest and ask (recommended), or apply small pre-approved changes."
 action = "open:#/autonomy"
+
+[[problems]]
+he = "אין הצעות בעמוד \"עצמאות\""
+en = "No proposals on the Autonomy page"
+fix_he = "זה תקין אם ג'ארביס לא זיהה בעיה חוזרת. ודאו שהמתג דולק ושהרמה היא לפחות \"להציע ולשאול\"."
+fix_en = "That is normal if he has not seen a repeating problem. Make sure the switch is on and the level is at least suggest and ask."
+
+[[problems]]
+he = "אישרתי הצעה ולא אהבתי את התוצאה"
+en = "I approved a proposal and did not like the result"
+fix_he = "כל שינוי אפשר לבטל: ראו את ההצעות המאושרות בעמוד \"עצמאות\" וביטול השינוי משם."
+fix_en = "Every change can be undone: see the approved changes on the Autonomy page and undo it from there."

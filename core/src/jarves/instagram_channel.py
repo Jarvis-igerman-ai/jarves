@@ -65,6 +65,9 @@ def token_present() -> bool:
     return bool(os.environ.get(TOKEN_ENV, "").strip())
 
 
+AUDIT_MAX_BYTES = 500_000
+
+
 def idir(home: Path) -> Path:
     return Path(home) / "instagram"
 
@@ -81,6 +84,11 @@ def audit(home: Path, event: str, **fields) -> None:
     """Append-only JSON lines; holds message ids and the approved text, never a secret."""
     p = idir(home) / "audit.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if p.stat().st_size > AUDIT_MAX_BYTES:         # bounded: one older file is kept (JAR-90)
+            os.replace(p, p.with_suffix(".1.jsonl"))
+    except OSError:
+        pass
     with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps({"t": time.time(), "event": event, **fields}, ensure_ascii=False) + "\n")
 

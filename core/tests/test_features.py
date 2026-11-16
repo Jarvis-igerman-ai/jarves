@@ -352,3 +352,15 @@ async def test_core_follows_switches(home, cfg, monkeypatch):
         assert cfg.voice.wake_enabled is False and not c._wake_should_listen()
     finally:
         await c.stop()
+
+
+def test_enabled_but_never_checked_is_checking_not_unavailable():
+    """JAR-137: an enabled feature whose first probe has not finished must not be reported 'unavailable' (nobody
+    verified that); the state word and text say 'checking' on every surface."""
+    st = {"enabled": True, "available": False, "reason": feat.CHECKING_REASON, "check": "checking"}
+    assert feat.state_word(st) == "checking"
+    assert feat.state_text(st) == "checking"
+    assert feat.state_text(st, "he") == "בבדיקה"
+    assert feat.state_word({**st, "check": "fresh"}) == "unavailable"
+    assert feat.state_word({**st, "enabled": False}) == "off"
+    assert feat.state_word({**st, "available": True, "check": "fresh"}) == "on"

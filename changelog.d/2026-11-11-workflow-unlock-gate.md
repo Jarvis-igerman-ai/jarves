@@ -1,0 +1,1 @@
+- Fixed: regression tests now prove the workflow dashboard's task transition, owner mode, task creation and dispatch routes return 403 without the terminal unlock code (#903, JAR-215).

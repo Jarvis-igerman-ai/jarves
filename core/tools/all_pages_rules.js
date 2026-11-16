@@ -4,6 +4,7 @@
 // size, link names that repeat for different targets, lang/dir, direction of Hebrew/English blocks, elements that
 // stick out of the viewport, leftover "Loading..." / "undefined" texts, and the translation inventory (English
 // multi-word strings on a Hebrew page, Hebrew on an English page; logs, code and user content excluded).
+// opts.clipping adds the report-only layout rules clipped-text / overlap / scroll-cue (severity "info").
 // Called as  page.evaluate(RULES, {lang, width, reduced})  -> {issues: [{rule, sev, msg, where}], stats: {...}}
 (opts) => {
   const out = [], stats = {};
@@ -170,6 +171,67 @@
   for (const s of document.querySelectorAll(".appbar *")) {
     if (!visible(s) || !scrolls(s) || s.scrollWidth <= s.clientWidth + 2) continue;
     if (!s.classList.contains("fade") && !s.dataset.fade) add("hidden-scroll", "moderate", `content scrolls sideways with no cue (${s.scrollWidth}>${s.clientWidth})`, s);
+  }
+
+  // ------------------------------------------------------------------ report-only layout rules (JAR-79)
+  // Only with opts.clipping: severity "info", never part of the blocking sweep. Whole document, no exclusions for
+  // chat logs (the quiet-hours pill overlaps there).
+  if (opts.clipping) {
+    const ownText = (e) => { let t = ""; for (const c of e.childNodes) if (c.nodeType === 3) t += c.data; return t.trim(); };
+    const isCtl = (e) => /^(A|BUTTON|INPUT|SELECT|TEXTAREA|SUMMARY)$/.test(e.tagName) || e.getAttribute("role") === "button";
+    const live = (e) => visible(e) && !e.closest("[hidden],[inert],.closing");
+    let n = 0;
+    // 1. clipped-text: text cut by overflow with neither an ellipsis nor a title
+    for (const e of document.querySelectorAll("body *")) {
+      if (n >= 30) break;
+      if (!live(e) || !ownText(e)) continue;
+      const cs = getComputedStyle(e);
+      if (!/^(hidden|clip)$/.test(cs.overflowX) || e.scrollWidth <= e.clientWidth + 1) continue;
+      if (e.clientWidth <= 1 || e.clientHeight <= 1) continue;                         // visually-hidden (sr-only) text
+      if (cs.textOverflow === "ellipsis" && e.getAttribute("title")) continue;
+      n++;
+      add("clipped-text", "info", `text cut off (${e.scrollWidth}>${e.clientWidth}${cs.textOverflow === "ellipsis" ? ", ellipsis but no title" : ", no ellipsis"}) "${ownText(e).slice(0, 40)}"`, e);
+    }
+    // 2. overlap: sibling text/control boxes that intersect, and text whose centre is covered by another text/control
+    const boxy = (e) => live(e) && getComputedStyle(e).display !== "inline" && (ownText(e) || isCtl(e));   // wrapped inline boxes intersect by nature
+    const inter = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+    let m = 0;
+    const done = new Set();
+    for (const e of document.querySelectorAll("body *")) {
+      if (m >= 30) break;
+      if (!boxy(e) || done.has(e)) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      for (const o of e.parentElement ? e.parentElement.children : []) {
+        if (o === e || !boxy(o) || done.has(o) || o.contains(e) || e.contains(o)) continue;
+        const q = o.getBoundingClientRect();
+        if (q.width < 2 || q.height < 2 || !inter(r, q)) continue;
+        done.add(o); m++;
+        add("overlap", "info", `overlaps sibling ${where(o)} (${Math.round(Math.min(r.right, q.right) - Math.max(r.left, q.left))}x${Math.round(Math.min(r.bottom, q.bottom) - Math.max(r.top, q.top))} px)`, e);
+        break;
+      }
+      if (done.has(e) || !ownText(e)) continue;
+      const cx = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1), cy = r.top + Math.min(r.height / 2, 8);
+      if (cy < 0 || cy >= innerHeight) continue;
+      let hiddenByScroller = false;                  // scrolled out of its own scroller: not visible, so not overlapped
+      for (let x = e.parentElement; x && x !== document.body; x = x.parentElement) {
+        if (getComputedStyle(x).overflowY === "visible") continue;
+        const xr = x.getBoundingClientRect();
+        if (cy < xr.top || cy > xr.bottom || cx < xr.left || cx > xr.right) { hiddenByScroller = true; break; }
+      }
+      if (hiddenByScroller) continue;
+      const top = document.elementFromPoint(cx, cy);
+      if (!top || top === e || e.contains(top) || top.contains(e) || !(ownText(top) || isCtl(top))) continue;
+      if (top.closest("[role=dialog],dialog,.modal,#drawer,.toast")) continue;       // overlays cover by design
+      done.add(e); m++;
+      add("overlap", "info", `covered by ${where(top)}: "${ownText(e).slice(0, 40)}"`, e);
+    }
+    // 3. scroll-cue: every sideways scroller that hides content needs a cue (bottom strip too, not only .appbar)
+    for (const s of document.querySelectorAll("body *")) {
+      if (!live(s) || !scrolls(s) || s.scrollWidth <= s.clientWidth + 2) continue;
+      if (!s.classList.contains("fade") && !s.dataset.fade && !s.closest(".appbar"))
+        add("scroll-cue", "info", `content scrolls sideways with no cue (${s.scrollWidth}>${s.clientWidth})`, s);
+    }
   }
 
   // ------------------------------------------------------------------ leftover texts

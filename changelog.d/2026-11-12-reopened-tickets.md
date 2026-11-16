@@ -1,0 +1,1 @@
+- Added: regression pins for the fixes of the five reopened tickets (JAR-51/188/191/217/220) and a root-cause report: they were closed before their named check ran (JAR-268).

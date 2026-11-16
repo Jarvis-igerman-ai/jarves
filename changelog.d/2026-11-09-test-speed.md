@@ -1,0 +1,1 @@
+- Fixed: test_wake_hardneg shares one no-baseline training run between two tests (test-only, fewer repeated trainings).

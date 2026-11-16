@@ -1,0 +1,1 @@
+- Added: report-only layout rules (clipped-text, overlap, scroll-cue) for the all-pages check and a phone EN/HE 390/360 px sweep; hits are listed, nothing blocks (JAR-79).

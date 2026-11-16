@@ -1,0 +1,1 @@
+- Added: troubleshooting ("problems") sections in English and Hebrew for the Greeting, Background tasks, Personality, Alerts and Self-improvement guides.

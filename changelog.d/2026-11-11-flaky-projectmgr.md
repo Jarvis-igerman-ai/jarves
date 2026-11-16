@@ -1,0 +1,1 @@
+- Fixed: the parallel project-manager merge test (`test_parallel_tasks_merge_and_dependent_gets_handoff`) no longer flakes on slow CI runners (#1051, JAR-217).

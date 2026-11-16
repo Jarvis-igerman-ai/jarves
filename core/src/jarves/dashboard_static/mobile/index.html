@@ -40,15 +40,15 @@
     </div>
     <button type="button" id="drawerNew" class="drawer-new"></button>
     <nav class="tabs" role="tablist" aria-label="Pages" aria-orientation="vertical">
-      <button type="button" role="tab" id="tabbtn-chat" data-tab="chat" aria-selected="true"><span data-t="tab_chat">Chat</span></button>
-      <button type="button" role="tab" id="tabbtn-approvals" data-tab="approvals" aria-selected="false"><span data-t="tab_approvals">Approvals</span><span id="apprCount" class="badge" hidden></span></button>
-      <button type="button" role="tab" id="tabbtn-plans" data-tab="plans" aria-selected="false" hidden><span data-t="tab_plans">Plans</span></button>
-      <button type="button" role="tab" id="tabbtn-prefs" data-tab="prefs" aria-selected="false" hidden><span data-t="tab_prefs">Learned</span></button>
-      <button type="button" role="tab" id="tabbtn-drive" data-tab="drive" aria-selected="false" hidden><span data-t="tab_drive">Drive</span></button>
-      <button type="button" role="tab" id="tabbtn-browser" data-tab="browser" aria-selected="false" hidden><span data-t="tab_browser">Browser</span></button>
-      <button type="button" role="tab" id="tabbtn-voice" data-tab="voice" aria-selected="false"><span data-t="tab_voice">Voice</span></button>
-      <button type="button" role="tab" id="tabbtn-health" data-tab="health" aria-selected="false"><span data-t="tab_health">Health &amp; speed</span></button>
-      <button type="button" role="tab" id="tabbtn-home" data-tab="home" aria-selected="false"><span data-t="tab_home">This phone</span></button>
+      <button type="button" role="tab" id="tabbtn-chat" data-tab="chat" aria-controls="tab-chat" aria-selected="true"><span data-t="tab_chat">Chat</span></button>
+      <button type="button" role="tab" id="tabbtn-approvals" data-tab="approvals" aria-controls="tab-approvals" aria-selected="false"><span data-t="tab_approvals">Approvals</span><span id="apprCount" class="badge" hidden></span></button>
+      <button type="button" role="tab" id="tabbtn-plans" data-tab="plans" aria-controls="tab-plans" aria-selected="false" hidden><span data-t="tab_plans">Plans</span></button>
+      <button type="button" role="tab" id="tabbtn-prefs" data-tab="prefs" aria-controls="tab-prefs" aria-selected="false" hidden><span data-t="tab_prefs">Learned</span></button>
+      <button type="button" role="tab" id="tabbtn-drive" data-tab="drive" aria-controls="tab-drive" aria-selected="false" hidden><span data-t="tab_drive">Drive</span></button>
+      <button type="button" role="tab" id="tabbtn-browser" data-tab="browser" aria-controls="tab-browser" aria-selected="false" hidden><span data-t="tab_browser">Browser</span></button>
+      <button type="button" role="tab" id="tabbtn-voice" data-tab="voice" aria-controls="tab-voice" aria-selected="false"><span data-t="tab_voice">Voice</span></button>
+      <button type="button" role="tab" id="tabbtn-health" data-tab="health" aria-controls="tab-health" aria-selected="false"><span data-t="tab_health">Health &amp; speed</span></button>
+      <button type="button" role="tab" id="tabbtn-home" data-tab="home" aria-controls="tab-home" aria-selected="false"><span data-t="tab_home">This phone</span></button>
     </nav>
     <h2 id="histHead" class="drawer-sec">Recent conversations</h2>
     <button type="button" id="histLoad" class="drawer-new"></button>
@@ -76,7 +76,7 @@
   <div id="audioBar" class="audio" role="status" aria-live="polite" hidden></div>
   <div id="noticeBox" class="notices"></div>
 
-  <section id="tab-home" class="panel" hidden>
+  <section id="tab-home" class="panel" role="tabpanel" aria-labelledby="tabbtn-home" hidden>
     <ul id="homeList" class="list"></ul>
     <p class="muted" id="meInfo"></p>
     <p class="muted" id="trustNote" hidden></p>
@@ -84,39 +84,39 @@
     <button type="button" id="unpair" data-t="unpair">Un-pair this phone</button>
   </section>
 
-  <section id="tab-chat" class="panel">
+  <section id="tab-chat" class="panel" role="tabpanel" aria-labelledby="tabbtn-chat">
     <div id="chatRoot"></div>
   </section>
 
-  <section id="tab-voice" class="panel" hidden>
+  <section id="tab-voice" class="panel" role="tabpanel" aria-labelledby="tabbtn-voice" hidden>
     <p id="voiceNote" class="muted"></p>
     <button type="button" id="ptt" class="ptt" data-t="hold">Hold to talk</button>
     <p id="voiceOut" class="log" aria-live="polite"></p>
   </section>
 
-  <section id="tab-approvals" class="panel" hidden>
+  <section id="tab-approvals" class="panel" role="tabpanel" aria-labelledby="tabbtn-approvals" hidden>
     <p id="apprNote" class="muted"></p>
     <ul id="apprList" class="list"></ul>
   </section>
 
-  <section id="tab-plans" class="panel" hidden>
+  <section id="tab-plans" class="panel" role="tabpanel" aria-labelledby="tabbtn-plans" hidden>
     <div id="plansRoot"></div>
   </section>
 
-  <section id="tab-prefs" class="panel" hidden>
+  <section id="tab-prefs" class="panel" role="tabpanel" aria-labelledby="tabbtn-prefs" hidden>
     <div id="prefsRoot"></div>
   </section>
 
-  <section id="tab-drive" class="panel" hidden>
+  <section id="tab-drive" class="panel" role="tabpanel" aria-labelledby="tabbtn-drive" hidden>
     <div id="hfRoot"></div>
     <div id="driveRoot"></div>
   </section>
 
-  <section id="tab-browser" class="panel" hidden>
+  <section id="tab-browser" class="panel" role="tabpanel" aria-labelledby="tabbtn-browser" hidden>
     <div id="browserRoot"></div>
   </section>
 
-  <section id="tab-health" class="panel" hidden>
+  <section id="tab-health" class="panel" role="tabpanel" aria-labelledby="tabbtn-health" hidden>
     <ul id="statusList" class="list"></ul>
     <ul id="testList" class="list"></ul>
     <h2 data-t="goals" id="goalsHead" hidden>Goals</h2>

@@ -26,3 +26,15 @@ he = "ודאו שהמתג \"עריכת האופי והקבצים שלי\" דול
 en = "Keep the Edit my own persona files switch on if you want him to make the change himself."
 action = "feature_on:workspace_agent_edit"
 check = "enabled:workspace_agent_edit"
+
+[[problems]]
+he = "ביקשתי שינוי באופי והוא לא קרה"
+en = "I asked for a personality change and nothing changed"
+fix_he = "ודאו שהמתג \"עריכת האופי והקבצים שלי\" דולק. אם הוא כבוי, ג'ארביס רק מציע, ואתם עורכים את הקובץ בעמוד \"קבצי אישיות\"."
+fix_en = "Make sure the Edit my own persona files switch is on. If it is off he can only suggest, and you edit the file on the Workspace page."
+
+[[problems]]
+he = "השינוי האחרון לא מצא חן בעיניי"
+en = "I did not like the last change"
+fix_he = "אמרו \"תבטל את השינוי האחרון\". כל שינוי נשמר, ואפשר לחזור אליו."
+fix_en = "Say \"Undo the last change\". Every change is saved and can be reverted."

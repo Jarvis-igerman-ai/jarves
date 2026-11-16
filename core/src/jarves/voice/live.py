@@ -678,8 +678,9 @@ class SessionLifecycle:
         if audio is not None:
             try:
                 audio.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logs.debug(self._log_area, "VOICE_AUDIO_CLOSE_FAILED", "audio close failed",
+                           error_type=type(e).__name__)
         if getattr(self, "_flush_task", None) is not None:
             self._flush_task.cancel()
         if hasattr(self, "_flush_transcripts"):

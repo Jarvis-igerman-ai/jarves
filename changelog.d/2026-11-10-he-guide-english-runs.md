@@ -1,0 +1,1 @@
+- Fixed: guard test so Hebrew guide text cannot contain untranslated runs of 3+ English words (JAR-146); audit of all guides/data found only literal on-screen labels and commands, no text changes needed.

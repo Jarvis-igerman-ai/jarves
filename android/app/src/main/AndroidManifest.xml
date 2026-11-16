@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- A3b: a count of waiting approvals, never their content. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- T04 reminders: the exact-alarm and boot permissions and AlarmReceiver are NOT registered until part 2 (UI, sync, guide, off switch) lands (#1029). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
 
     <application

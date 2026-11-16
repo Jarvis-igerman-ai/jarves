@@ -36,11 +36,19 @@ def dashboard_open(home):
     return body
 
 
-async def next_request(svc) -> appr.Approval:
+async def next_request(svc, call=None) -> appr.Approval:
+    """Wait for the next approval ask; with `call`, fail fast and show its result if it ended without asking (#660)."""
     ev, box = asyncio.Event(), []
     svc.on_ask.append(lambda a: (box.append(a), ev.set()))
-    await asyncio.wait_for(ev.wait(), 10)
-    svc.on_ask.clear()
+    try:
+        waiter = asyncio.ensure_future(ev.wait())
+        await asyncio.wait([waiter] + ([call] if call else []), timeout=30, return_when=asyncio.FIRST_COMPLETED)
+        if not box:
+            waiter.cancel()
+            r = call.result() if call is not None and call.done() else None
+            raise AssertionError(f"no approval ask; call ended with {r!r}" if r is not None else "no approval ask within 30s")
+    finally:
+        svc.on_ask.clear()
     return box[0]
 
 
@@ -332,8 +340,8 @@ def helper_env(home):
     feat.detach()
 
 
-async def answer_next(svc, approved=True, typed=None):
-    a = await next_request(svc)
+async def answer_next(svc, approved=True, typed=None, call=None):
+    a = await next_request(svc, call)
     assert svc.answer(a.id, approved, channel="dashboard", typed=a.typed_code if typed is None else typed)[0]
     return a
 
@@ -407,7 +415,7 @@ async def test_dangerous_command_needs_the_code_and_timeout_kills(helper_env):
     e.reg.new_turn()
     e.reg._untrusted.clear()
     call = asyncio.create_task(e.reg.call("shell_propose", {"command": slow, "purpose": "wait", "timeout_s": 1}))
-    await answer_next(e.svc)
+    await answer_next(e.svc, call=call)
     r = await asyncio.wait_for(call, 30)
     assert r.code == "HELPER_TIMEOUT" and r.data["timed_out"] and r.data["seconds"] < 20
 

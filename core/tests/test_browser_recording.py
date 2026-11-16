@@ -245,3 +245,18 @@ def test_core_registers_browser_recording_before_features_md_is_written():
     out = subprocess.run([sys.executable, "-c", "import jarves.app, jarves.features as f; print('browser_recording' in [x if isinstance(x, str) else getattr(x, 'name', x) for x in f.CATALOG])"],
                          capture_output=True, text=True, timeout=120, env={**__import__('os').environ, "PYTHONPATH": str(__import__('pathlib').Path(br.__file__).resolve().parents[1])})
     assert out.stdout.strip() == "True", out.stderr
+
+
+def test_missing_ffmpeg_hint_has_hebrew_text(monkeypatch):
+    """Without Playwright's ffmpeg the switch shows an English hint; the Hebrew dashboard must translate it
+    (nightly a11y run failed 8/8 on this) and keep the command as a code literal."""
+    import re
+    from jarves import features as feat, locale_parts
+    monkeypatch.setattr(br, "ffmpeg_ready", lambda: False)
+    ok, hint = br._probe(feat.ProbeCtx.__new__(feat.ProbeCtx))
+    assert not ok and "playwright install ffmpeg" in hint
+    he = locale_parts.catalog("he")["dict"].get(hint)
+    assert he and he != hint, "Hebrew text for the missing-ffmpeg hint is absent"
+    assert re.search(r"[֐-׿]", he) and "`python -m playwright install ffmpeg`" in he
+    prose = re.sub(r"`[^`]*`", " ", he)
+    assert not re.search(r"[A-Za-z][a-z]+(?:[ \-]+[A-Za-z][a-z]+){2,}", prose), prose

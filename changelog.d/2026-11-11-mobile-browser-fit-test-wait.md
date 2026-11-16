@@ -1,0 +1,1 @@
+- Fixed: the phone Browser-tab fit test now waits for the take-over type box to be visible before checking the in-control layout, so a slow CI runner no longer turns the merge queue red (#1049, JAR-191).

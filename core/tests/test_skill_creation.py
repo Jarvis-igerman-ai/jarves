@@ -622,3 +622,18 @@ def test_literal_secret_shapes_are_refused(tmp_path):
         rep = mgr.propose(_md(name="notes_helper"), py)
         assert not rep["ok"] and rep["id"] is None, py
         assert not (mgr.drafts / "notes_helper").exists()
+
+
+def test_missing_or_corrupt_names_snapshot_warns_in_report_and_rewrites(tmp_path):
+    """#565 item 1: a CLI/dashboard process with no usable built-in names file must say so in the report."""
+    mgr = gen.GeneratedSkills(tmp_path)
+    rep = mgr.propose(MD_ONLY)
+    assert any("snapshot" in w for w in rep["warnings"])
+    (tmp_path / gen.ROOT).mkdir(parents=True, exist_ok=True)
+    mgr._names_file.write_text("{not json", encoding="utf-8")
+    assert mgr.snapshot_missing()
+    core = gen.GeneratedSkills(tmp_path, taken=lambda: ({"a"}, {"t"}))
+    core.save_taken_snapshot()                       # late rewrite repairs the file
+    assert not mgr.snapshot_missing()
+    rep = mgr.propose(MD_ONLY)
+    assert not any("snapshot" in w for w in rep["warnings"])

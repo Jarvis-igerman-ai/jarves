@@ -13,7 +13,7 @@ import zlib
 from pathlib import Path
 
 import pytest
-from test_mobile_phone_e2e import PHONE_FIT, _grant, browser, call, go, new_page, phone, token, ui_pair, until  # noqa: F401
+from test_mobile_phone_e2e import PHONE_FIT, TIMEOUT, _grant, browser, call, go, new_page, phone, token, ui_pair, until  # noqa: F401
 
 from jarves import browser_liveview as lv
 from jarves import browser_pilot as bp
@@ -255,6 +255,8 @@ def test_browser_tab_fits_390_and_360_px_in_english_and_hebrew(browser, phone, p
             page.set_viewport_size({"width": 390, "height": 844})
             page.tap(tap)
             page.wait_for_timeout(300)
+            if name == "3-in-control":                 # the type box shows when the takeover reply (or a frame) lands: on a
+                page.wait_for_selector("#bvType", state="visible", timeout=TIMEOUT)   # slow runner that is later (#1049)
         for w, h in ((390, 844), (360, 740)):
             page.set_viewport_size({"width": w, "height": h})
             page.wait_for_timeout(250)

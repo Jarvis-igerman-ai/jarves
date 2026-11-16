@@ -1,0 +1,1 @@
+- Added: dashboard payload meter (core/tools/dashboard_payload.py) and a test that guards first-load size and dead assets.

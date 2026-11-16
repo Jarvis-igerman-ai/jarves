@@ -1,0 +1,1 @@
+- Fixed: the agent bridge (Windows named pipe) could leak one pipe instance when it was stopped right after it started, so the next start failed with "Access is denied" until JARVES restarted; stop now waits for the listener thread before closing the pipe (#992). The phone browser-tab fit test and the bridge restart test leave quarantine (#1049, #992).

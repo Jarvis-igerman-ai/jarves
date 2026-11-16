@@ -2085,6 +2085,7 @@ _EXT_LATE = (
     ("skills.platform2", ("skills",), "COMMANDS"),                     # V6 #220: jarvis skills list|update|rollback
     ("self_aware", ("about", "whatsnew", "roadmap", "ticket"), "COMMANDS"),   # issue #61: jarvis about | whatsnew | roadmap | ticket
     ("workflow_cli", ("workflow",), "COMMANDS"),                       # local development ledger, no Core required
+    ("action_receipts", ("receipts",), "COMMANDS"),                    # V7-X1 #420: jarvis receipts status|list|clear
     None,                                                             # plugins.d/*.toml command modules go here
     ("whatsapp_admin", ("whatsapp",), {"whatsapp": "cmd_whatsapp"}),  # SW-V4 F: jarvis whatsapp status / link / ...
     ("orchestrator.surfaces", ("agents",), {"agents": "cmd_agents"}),  # SW-V4 E: jarvis agents list | ask | ...

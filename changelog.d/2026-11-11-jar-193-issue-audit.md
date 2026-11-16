@@ -1,0 +1,1 @@
+- Added: audit report of 19 already-fixed open issues, 9 closed with test and run evidence (JAR-193)

@@ -1012,7 +1012,10 @@ def state_word(st: dict) -> str:
     """The one state word every surface shows: on / off / unavailable (enabled but its prerequisites are missing)."""
     if not st["enabled"]:
         return "off"
-    return "on" if st["available"] else "unavailable"
+    if st["available"]:
+        return "on"
+    # never checked yet (probe still running): "unavailable" would be a claim nobody verified
+    return "checking" if st.get("check") == "checking" else "unavailable"
 
 
 def state_text(st: dict, lang: str = "en", reason=None) -> str:
@@ -1020,7 +1023,7 @@ def state_text(st: dict, lang: str = "en", reason=None) -> str:
     word = state_word(st)
     why = (reason or (lambda r: r))(st.get("reason") or "")
     if lang == "he":
-        base = {"on": "פועלת", "off": "כבויה", "unavailable": "לא זמינה"}[word]
+        base = {"on": "פועלת", "off": "כבויה", "unavailable": "לא זמינה", "checking": "בבדיקה"}[word]
         return f"{base} ({why})" if word == "unavailable" and why else base
     return f"unavailable ({why})" if word == "unavailable" and why else word
 

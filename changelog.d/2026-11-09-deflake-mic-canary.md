@@ -1,0 +1,1 @@
+- Fixed: lifted the quarantine of the mic-menu narrow-width and canary dashboard-journey tests after 20 consecutive passes each (#549, #778); #550 slow-cli probe verified stable.

@@ -31,3 +31,9 @@ he = "הוא שותק הרבה זמן"
 en = "He is silent for a long time"
 fix_he = "חיפוש יכול לקחת עד כחצי דקה. אם זה קורה הרבה, ראו את עמוד הבעיות."
 fix_en = "A search may take up to about half a minute. If it happens often, see the Issues page."
+
+[[problems]]
+he = "התשובה לא אומרת מאיפה המידע"
+en = "The answer does not say where the facts came from"
+fix_he = "כשהוא מחפש באינטרנט, התשובה מסתיימת בשורה \"מקורות:\" עם עד שלושה אתרים. אם אין שורה כזו, התשובה לא הגיעה מחיפוש: ודאו שהמתג \"חיפוש באינטרנט\" דולק ושאלו שוב. בשורת הפקודה: jarvis ask."
+fix_en = "When he searches the web, the answer ends with a \"Sources:\" line naming up to three sites. No such line means the answer did not come from a search: check that the Web search switch is on and ask again. From the command line: jarvis ask."

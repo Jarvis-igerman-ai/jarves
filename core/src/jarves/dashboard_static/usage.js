@@ -165,7 +165,7 @@
       b.disabled = false;
     } }, label);
     const rows = d.backups.map((b) => el("tr", {}, el("td", {}, el("code", {}, b.name)), el("td", {}, pill(b.kind === "auto" ? "plain" : "ok", b.kind)),
-      el("td", { class: "num" }, (b.size / 1024).toFixed(0) + " KB"), el("td", {}, when(b.ts)),
+      el("td", { class: "num" }, (b.size / 1024).toFixed(0) + tx(" ק״ב", " KB")), el("td", {}, when(b.ts)),
       el("td", {}, act("Verify", "/api/backup/verify", b.name), " ", act("Test restore", "/api/backup/test", b.name))));
     const s = d.settings;
     const daily = el("input", { type: "number", min: "1", max: "365", value: s.daily, "aria-label": JL.t("Daily backups kept") });

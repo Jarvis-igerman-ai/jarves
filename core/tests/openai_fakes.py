@@ -178,7 +178,7 @@ class FakeLiveServer:
 class ResponsesHTTPServer:
     """A REAL local HTTP server speaking the Responses streaming API (SSE) for the real openai SDK
     (`openai.AsyncOpenAI(base_url=srv.url, api_key="test-not-real")`). Each POST /v1/responses pops a script:
-    {"text", "calls": [function calls], "searches", "usage", "delay_s" (before the first event, on a real clock: a slow
+    {"text", "calls": [function calls], "searches", "annotations" (on the message), "usage", "delay_s" (before the first event, on a real clock: a slow
     backend), "drop" (close mid-stream), "status" (HTTP error code), "gate" (threading.Event to wait for)}.
     Records every request body and the count of requests (to prove a refused request was never sent)."""
 
@@ -249,7 +249,8 @@ class ResponsesHTTPServer:
                         ev({"type": "response.output_text.delta", "delta": text, "output_index": i, "item_id": "m",
                             "content_index": 0, "sequence_number": i + 1, "logprobs": []})
                         item = {"type": "message", "id": "m", "role": "assistant", "status": "completed",
-                                "content": [{"type": "output_text", "text": text, "annotations": []}]}
+                                "content": [{"type": "output_text", "text": text,
+                                             "annotations": list(s.get("annotations", []))}]}
                         ev({"type": "response.output_item.done", "output_index": i, "item": item, "sequence_number": i + 2})
                         out.append(item)
                     u = s.get("usage") or {"input_tokens": 1200, "output_tokens": 30}

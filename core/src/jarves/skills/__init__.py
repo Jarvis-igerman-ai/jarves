@@ -323,6 +323,8 @@ class SkillRegistry:
         self._recent_ok: dict[tuple, tuple] = {}   # V4-VC-3: (route, tool, args) -> (t, result, owner approved it)
         # drive mode (V6 #216, drive_mode.Gate): consulted before the approval prompt; None = not wired (no change)
         self.drive = None
+        # action receipts (V7-X1 #420, action_receipts.ReceiptLog): tool name/result/time only; None = not wired
+        self.receipts = None
         # self-diagnosis (#336): (tool, failed result, route) after every failed call; asks the owner, never raises
         self.on_failure: Callable[[str, "ToolResult", str], None] | None = None
 
@@ -606,6 +608,17 @@ class SkillRegistry:
                 continue
             raise TimeoutError
 
+    def _receipt(self, name: str, ok: bool, code: str, origin: str, ms: int) -> None:
+        """Action receipt (observation only). Only REGISTERED tool names are written: a model-chosen unknown name
+        (it may hold a secret or personal data) becomes the fixed placeholder "unknown_tool"."""
+        if self.receipts is None:
+            return
+        try:
+            known = name in self._tools
+        except Exception:                                  # noqa: BLE001
+            known = False
+        self.receipts.record(name if known else "unknown_tool", ok, code, origin, ms)
+
     async def call(self, name: str, raw_args: dict | str | None = None, *, origin: Origin = "model") -> ToolResult:
         """Issue #17: EVERY call ends in exactly one log record: TOOL_RESULT (it ran or was refused before running; `ms`
         leaves out the person's approval time) or TOOL_CANCELLED (the turn / session ended under it), so the diagnosis
@@ -617,10 +630,13 @@ class SkillRegistry:
         except asyncio.CancelledError:
             logs.info("skills", "TOOL_CANCELLED", "tool call cancelled before it finished (turn or session ended)",
                       tool=name, origin=origin, ms=round((time.monotonic() - t_run) * 1000))
+            self._receipt(name, False, "CANCELLED", origin, round((time.monotonic() - t_run) * 1000))
             raise
         log = logs.info if res.ok else logs.warn
         log("skills", "TOOL_RESULT", "tool finished", tool=name, ok=res.ok, result_code=res.code, origin=origin,
             ms=round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
+        self._receipt(name, res.ok, res.code, origin,
+                      round(max(0.0, time.monotonic() - t_run - (self.confirm_elapsed() - approval_wait)) * 1000))
         _tool_seen(name, res.ok, res.code, res.message)   # terminal + web chat: one line per call (TOOL_SINK)
         _blocks_seen(res.ui_blocks)                       # #444: validated UI blocks, owner-facing only
         _display_seen(res.display)                        # #363: read-only owner text (e.g. WhatsApp messages)

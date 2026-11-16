@@ -1,0 +1,1 @@
+- Fixed: the web chat quiet-hours test leaves quarantine; its clock was pinned on 11 Nov (JAR-216) but the entry was never removed (#1052). Flaky-test batch #367 #422 #788 #994 #1051 checked against the CI history: no repeat after their fixes (tracker #778).

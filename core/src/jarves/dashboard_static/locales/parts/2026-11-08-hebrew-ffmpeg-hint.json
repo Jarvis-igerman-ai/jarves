@@ -1,0 +1,16 @@
+{
+ "dict": {
+  "Pear Desktop is not running (idle, not an error): start it with the API Server plugin when you want music": "Pear Desktop לא רץ (במנוחה, לא תקלה): להפעלה דרך תוסף API Server כשרוצים מוזיקה",
+  "video needs Playwright's small ffmpeg: python -m playwright install ffmpeg": "הקלטת וידאו דורשת את כלי ffmpeg הקטן של Playwright. להתקנה: `python -m playwright install ffmpeg`"
+ },
+ "rules": [
+  [
+   "^camera found \\((.+)\\) but OpenCV is not installed; uv sync --extra camera$",
+   "נמצאה מצלמה ($1) אבל OpenCV לא מותקן; להתקנה: `uv sync --extra camera`"
+  ],
+  [
+   "^tray library not installed \\((.+)\\): uv sync --extra tray$",
+   "ספריית המגש לא מותקנת ($1); להתקנה: `uv sync --extra tray`"
+  ]
+ ]
+}

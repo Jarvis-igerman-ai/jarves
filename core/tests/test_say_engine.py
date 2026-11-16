@@ -56,6 +56,9 @@ def say_env(monkeypatch, tmp_path):
     # an earlier test on the same worker that dies late would then be reported as an extra "unhandled exception"
     # line in this test's output (#711/#422). Nothing here needs real logging setup, so keep it out of the process.
     monkeypatch.setattr(logs, "setup", lambda *a, **k: None)
+    # Handlers and crash hooks from earlier tests on this xdist worker stay installed process-wide; a late CRASH record
+    # (logs.log) from one of their threads would reach THIS test's captured stderr (#422). Records are not under test here.
+    monkeypatch.setattr(logs, "log", lambda *a, **k: None)
     monkeypatch.setenv("JARVES_HOME", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
     (tmp_path / "config.toml").write_text('[ai]\nconnection = "api_key"\n', encoding="utf-8")

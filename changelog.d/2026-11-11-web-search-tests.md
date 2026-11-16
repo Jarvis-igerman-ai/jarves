@@ -1,0 +1,1 @@
+- Added: tests for web search from the chat (stubbed search backend with cited results) and a guide entry explaining the Sources line (JAR-220).

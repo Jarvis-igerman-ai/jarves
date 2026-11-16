@@ -1,0 +1,1 @@
+- Fixed: phone scopes CLI no longer turns an empty scope list into the default scopes, and a NaN command age is refused as stale (V5 P3 hardening #206).

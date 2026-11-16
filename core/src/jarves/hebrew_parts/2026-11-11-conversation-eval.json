@@ -1,0 +1,5 @@
+{
+ "scripted Hebrew and English conversations scored against expected behaviour; demo/plumbing only, does not evaluate a beta yet": "שיחות מתוסרטות בעברית ובאנגלית מקבלות ציון מול ההתנהגות הצפויה; הדגמה של המנגנון בלבד, עדיין לא בודק גרסת בטא",
+ "scripted replies and keyword judge only; no live LLM judge yet": "תשובות מתוסרטות ושופט מילות מפתח בלבד; עדיין אין שופט חי של מודל שפה",
+ "not run on a Pi": "לא הורץ על Pi"
+}

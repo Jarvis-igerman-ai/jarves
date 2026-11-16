@@ -19,3 +19,15 @@ he = "הדליקו או כבו את המתג \"ברכת פתיחה\"."
 en = "Switch Greeting on or off."
 action = "feature_on:greeting"
 check = "enabled:greeting"
+
+[[problems]]
+he = "אין ברכה כשהחלון נפתח"
+en = "No greeting when the window opens"
+fix_he = "ודאו שהמתג \"ברכת פתיחה\" דולק ושיש רמקול מחובר. אם הוא כבוי, הדליקו אותו בעמוד המתגים או אמרו \"תברך אותי כשאתה עולה\"."
+fix_en = "Make sure the Greeting switch is on and a speaker is connected. If it is off, turn it on from the switches page."
+
+[[problems]]
+he = "הברכה מפריעה לי"
+en = "The greeting bothers me"
+fix_he = "כבו את המתג \"ברכת פתיחה\", או אמרו \"תפסיק להגיד שלום כשאתה עולה\"."
+fix_en = "Switch Greeting off, or say \"Stop saying hello when you start\"."

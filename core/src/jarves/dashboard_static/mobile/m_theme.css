@@ -61,7 +61,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .icon-btn:active { background: var(--surface-2); }
 body:has(#appView[hidden]) .app-only, body:has(#appView[hidden]) .bar .pill { display: none; }
 body:has(#appView[hidden]) .bar-title { padding-inline-start: var(--s3); }
-.bar .pill { margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0; font-size: var(--fs-xs); font-weight: 500; border-radius: 0;
+.bar .pill { margin: 0; display: inline-flex; align-items: center; gap: 6px; padding: 0; padding-inline-start: 3px; font-size: var(--fs-xs); font-weight: 500; border-radius: 0;
   background: transparent; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
 .bar .pill:empty { display: none; }
 .bar .pill::before { content: ""; flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--muted); }
@@ -342,7 +342,7 @@ body.drawer-open { overflow: hidden; }
 #tab-chat .jc-formwrap { padding: var(--s2) max(var(--s3), env(safe-area-inset-right)) calc(var(--s2) + env(safe-area-inset-bottom)) max(var(--s3), env(safe-area-inset-left)); }
 #tab-chat .jc-form { align-items: flex-end; gap: 2px; padding: 4px; border-radius: var(--r-field); border: 1px solid var(--line-2); background: var(--bg);
   box-shadow: var(--shadow-1); }
-#tab-chat .jc-form:focus-within { border-color: color-mix(in srgb, var(--fg) 28%, var(--line-2)); box-shadow: var(--shadow-1); }
+#tab-chat .jc-form:focus-within { border-color: var(--fg); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--fg); }
 #tab-chat .jc-in { padding: 10px 6px; font-size: var(--fs-body); max-block-size: 160px; overflow-y: auto; scrollbar-width: none; }
 #tab-chat .jc-in::-webkit-scrollbar { display: none; }
 #tab-chat .jc-in:focus-visible { outline: none; }

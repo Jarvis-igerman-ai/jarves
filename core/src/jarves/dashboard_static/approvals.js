@@ -69,7 +69,7 @@
 
   async function refresh() {
     let d;
-    try { d = await api("/api/approvals"); } catch (e) { return; }
+    try { d = await api("/api/approvals" + (document.hidden ? "?hidden=1" : "")); } catch (e) { return; }
     const badge = document.getElementById("apCount");                 // sidebar: how many requests wait for you
     if (badge) { const n = d.pending.length; badge.textContent = n ? String(n) : ""; badge.title = tx(`${n} ממתינים לאישור`, `${n} waiting for your approval`); }
     const key = JSON.stringify([d.pending.map((a) => [a.id, Math.round(a.seconds_left / 30)]), d.history.length, msg, busy,
@@ -124,7 +124,10 @@
   }
   if (typeof PAGES !== "undefined") Object.assign(PAGES, { approvals: pageApprovals });
   // #159: no polling while the tab is hidden (the popup / tray still ask); catch up the moment it is shown
+  // #477: a hidden tab still counts as a place to answer: a cheap heartbeat (browsers throttle it to ~1/min; the server
+  // keeps the marker fresh for 90 s after a hidden beat). It only marks presence; nothing is approved by it.
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+  setInterval(() => { if (document.hidden) refresh(); }, 20000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);

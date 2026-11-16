@@ -1,0 +1,1 @@
+- Added: hermetic tests for the previously untested procstats and workflow_cli modules (JAR-159).

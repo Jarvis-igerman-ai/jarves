@@ -1,0 +1,38 @@
+order = 62
+category = "everyday"
+features = ["failure_log"]
+suggest = false
+aliases = ["מה השתבש", "יומן כשלים", "דוח שבועי", "what went wrong", "failure log", "weekly report"]
+title_he = "יומן מה השתבש"
+title_en = "What went wrong log"
+what_he = "שומר במחשב רשימה קצרה של מה שהשתבש. כרגע נרשמות שגיאות כלים; \"לא הבין\", בקשה שחזרה ו\"לא נכון\" או \"עצור\" מתוכננים. נשמרים רק סוג הכשל, היום, שם הכלי וקוד השגיאה, אף פעם לא מה שנאמר. בטא, כבוי כברירת מחדל."
+what_en = "Keeps a short local list of what went wrong. Tool errors are recorded now; \"not understood\", a repeated request and \"wrong\" or \"stop\" are planned. Only the kind, the day, the tool name and the error code are kept, never what was said. Beta, off by default."
+expect_he = "הפקודה jarvis report weekly מציגה את 7 הימים האחרונים, הנפוץ ביותר קודם, למשל \"3x tool_error: calendar (TIMEOUT)\"."
+expect_en = "The command jarvis report weekly shows the last 7 days, most frequent first, for example \"3x tool_error: calendar (TIMEOUT)\"."
+cost_he = "חינם. קובץ מקומי בלבד."
+cost_en = "Free. A local file only."
+privacy_he = "שום דבר לא יוצא מהמחשב. בלי טקסט חופשי: שם כלי או קוד שאינם מזהה קצר נשמרים כ-other. הקובץ מוגבל ל-2000 שורות."
+privacy_en = "Nothing leaves this PC. No free text: a tool name or code that is not a short identifier is stored as other. The file is capped at 2000 rows."
+
+[parity.features]
+failure_log = "report"
+
+[[steps]]
+he = "הפעילו את הבטא ואז את היומן: jarvis features beta on ואחר כך jarvis features on failure_log."
+en = "Turn on beta, then the log: jarvis features beta on, then jarvis features on failure_log."
+action = "feature_on:failure_log"
+check = "active:failure_log"
+
+[[steps]]
+he = "פעם בשבוע הריצו jarvis report weekly וקבלו רשימה קצרה שאפשר להפוך לכרטיסי באג."
+en = "Once a week run jarvis report weekly to get a short list you can turn into bug tickets."
+
+[[steps]]
+he = "כדי לכבות: jarvis features off failure_log. כדי למחוק: מחקו את הקובץ failure_log.jsonl בתיקיית הבית של JARVES."
+en = "To turn it off: jarvis features off failure_log. To delete it: remove the file failure_log.jsonl in the JARVES home folder."
+
+[[problems]]
+he = "הדוח ריק"
+en = "The report is empty"
+fix_he = "בדקו שהיומן פועל עם jarvis features. נרשמים רק כשלים מהשבוע האחרון."
+fix_en = "Check the log is on with jarvis features. Only failures from the last week are listed."

@@ -458,3 +458,38 @@ def test_full_view_shape(home, gid):
     d = guides.full(guides.load()[gid], make(home))
     for k in ("steps", "say", "expect_he", "cost_he", "privacy_he", "problems", "platforms", "feature_rows", "links"):
         assert k in d, k
+
+
+_LATIN_RUN = re.compile(r"(?<![\w/#.:-])[A-Za-z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+){2,}(?![\w/])")
+_CMD_RUN = re.compile(r"\b(?:jarvis|gh|sudo|playwright)\b(?:\s+[A-Za-z][\w-]*)+")
+# literal UI labels / log lines / product names that must stay as the user sees them on screen
+_LITERAL = ("JARVES did not answer", "bridge restart needed", "not signed by a trusted key",
+            "Create new admin key", "Create new secret key", "Read and write", "Long-lived access tokens",
+            "Instagram Messaging API", "Telegram Bot API", "JARVES local CA", "JARVES recurring scan summary",
+            "Core was running", "Core was not running", "Set up JARVES now", "Windows protected your PC",
+            "every sunday at", "manage status connections", "Allow access to", "not signed by")
+
+
+def _he_strings(node, path=""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _he_strings(v, f"{path}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _he_strings(v, f"{path}[{i}]")
+    elif isinstance(node, str) and HE.search(node) and re.search(r"(^|[._])he$", path):
+        yield path, node
+
+
+def test_hebrew_guide_text_has_no_untranslated_english_runs():
+    """A Hebrew guide string must not contain a run of 3+ bare English words (a half translation). Commands
+    (jarvis ..., gh ...) and the literal on-screen labels listed above are allowed."""
+    import tomllib
+    bad = []
+    for f in sorted((Path(guides.__file__).parent / "data").glob("*.toml")):
+        for path, text in _he_strings(tomllib.loads(f.read_text(encoding="utf-8"))):
+            for lit in _LITERAL:
+                text = text.replace(lit, " ")
+            text = _CMD_RUN.sub(" ", text)
+            bad += [f"{f.name}{path}: {m.group()}" for m in _LATIN_RUN.finditer(text)]
+    assert not bad, "bare English runs in Hebrew guide text:\n" + "\n".join(bad)

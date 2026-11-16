@@ -106,8 +106,10 @@ async def test_no_greeting_audio_leaves_an_open_usable_silent_room(home, cfg, mo
         assert st["ready"] and st["phase"] == "ready"
         voice = holder[0]
         assert core.live is voice and voice.running and voice.greeting_outcome == "missed"
-        assert core._greeted and not core.tts.spoken                   # no second TTS greeting
+        assert core._greeted
+        assert len(core.tts.spoken) == 1                               # nudge + retry failed: ONE short TTS hello
         assert ("warn", "LIVE_GREETING_MISSED") in fast                # information code, not an error/crash
+        assert ("warn", "LIVE_GREETING_TTS_FALLBACK") in fast          # counted by selfspeed
         assert not [c for lvl, c in fast if lvl == "warn" and c in ("LIVE_STOP_FAILED",)]
         assert await _user_turn_works(voice, said)                     # a later user turn works
     finally:
@@ -130,5 +132,30 @@ async def test_connection_drop_right_after_session_started_fails_cleanly_without
         assert core.snapshot()["startup"]["phase"] == "failed"
         assert core.live is None and not holder[0].running           # nothing half-open (or billed) is left
         assert ("warn", "LIVE_GREETING_MISSED") not in fast
+    finally:
+        await core.stop()
+
+
+async def test_wake_path_missing_greeting_speaks_no_tts_hello(home, cfg, monkeypatch, fast):
+    """#1028: on a wake session the live mic is already open, so a missed greeting must stay silent (no TTS hello)."""
+    holder, said = [], []
+
+    def behaviour(conn, voice):                  # silent server: the greeting (and its nudge/retry) never arrives
+        conn.session.thinking = _Note(conn)
+        conn.session.commentary = _Note(conn)
+
+    core = await _core(home, cfg, monkeypatch, _factory(holder, behaviour, said))
+    try:
+        await core._start_live(greeting="hello", ack=True)       # the wake-word entry point (ack=True)
+        voice = holder[0]
+        assert core.live is voice and voice.running
+        for _ in range(200):
+            if ("warn", "LIVE_GREETING_MISSED") in fast:
+                break
+            await asyncio.sleep(0.02)
+        assert ("warn", "LIVE_GREETING_MISSED") in fast
+        assert core.tts.spoken == []                             # nothing spoken through TTS with the mic open
+        assert ("warn", "LIVE_GREETING_TTS_FALLBACK") not in fast
+        assert voice.running                                     # the session stays open and usable
     finally:
         await core.stop()

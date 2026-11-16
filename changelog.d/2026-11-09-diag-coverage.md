@@ -1,0 +1,1 @@
+- Fixed: the support bundle file list now shows the action-receipts file names instead of hiding them as pseudonyms (JAR-145).

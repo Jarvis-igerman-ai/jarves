@@ -1,0 +1,1 @@
+- Added: a web-search answer now ends with one short line naming up to three cited source domains ("Sources: example.com, other.org"; a Hebrew answer gets "מקורות: ..."), never raw links, and nothing when there is no citation (JAR-195).

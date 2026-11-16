@@ -46,12 +46,13 @@ GROUPS: dict[str, tuple[str, ...]] = {
              "idle_disk_read_kb_per_min"),
     "inproc": ("features_list_ms", "live_tools_probe_ms", "dashboard_first_load_ms", "dashboard_api_max_ms"),
     "history": ("tool_p50_ms", "tool_p95_ms", "wake_to_first_audio_s", "dead_air_p95_s",
-                "greeting_ok", "greeting_retry_ok", "greeting_missed", "greeting_missed_pct"),
+                "greeting_ok", "greeting_retry_ok", "greeting_missed", "greeting_tts_fallback", "greeting_missed_pct"),
     "net": ("openai_roundtrip_ms",),
     "installer": ("installer_size_mb",),
 }
 GREETING_CODES = {"LIVE_GREETING_OK": "greeting_ok", "LIVE_GREETING_RETRY_OK": "greeting_retry_ok",
-                  "LIVE_GREETING_MISSED": "greeting_missed"}     # #179 counters, from the log
+                  "LIVE_GREETING_MISSED": "greeting_missed",
+                  "LIVE_GREETING_TTS_FALLBACK": "greeting_tts_fallback"}     # #179 counters, from the log
 COUNTERS = tuple(GREETING_CODES.values())                        # counts only: no trend verdict (they grow by nature)
 BENCH_ONLY = ("child_processes", "rss_growth_mb", "stop_s")
 UNITS = {"ms": "ms", "s": "s", "mb": "MB", "pct": "%", "kb_per_min": "KB/min", "threads": "count"}
@@ -297,7 +298,7 @@ def measure_history(home: Path, *, now: float | None = None, **_) -> dict:
         k = GREETING_CODES.get(r.get("code"))
         if k and parse_ts(r.get("ts")) >= since:
             counts[k] += 1
-    starts = sum(counts.values())
+    starts = sum(v for k, v in counts.items() if k != "greeting_tts_fallback")     # the fallback follows a miss: not a start
     if starts:
         out.update(counts)
         if starts >= MIN_SAMPLES:

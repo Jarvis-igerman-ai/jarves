@@ -1,0 +1,1 @@
+- Fixed: a live greeting that never arrives (after the nudge and one retry) now falls back to one short TTS hello, counted as `greeting_tts_fallback` in selfspeed (#179). Live re-measure and ear check UNVERIFIED.

@@ -1,0 +1,1 @@
+- Fixed: workflow dashboard test now pins that the task transition, owner, tasks and dispatch routes return exactly 403 while the owner unlock gate is locked (JAR-259, #903).

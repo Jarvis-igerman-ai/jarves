@@ -10,6 +10,8 @@ Numbers (jarves-checks runs of the last N days, from `gh`):
   * green to merged      median minutes from the head commit's last green PR run to the merge (merged PRs in the window)
   * flakes               open issues titled "Flaky test: ..." and the entries in core/tests/quarantine.toml
   * cancelled runner-min wall minutes of cancelled runs (newer push or merge)
+  * job queue wait       median / p90 minutes from a job's created_at to started_at (runner wait, not work), sampled from the
+                         newest --job-sample completed runs; job work = started_at to completed_at
 Standard library + gh only.
 """
 from __future__ import annotations
@@ -75,7 +77,25 @@ def cancelled_minutes(runs: list[dict]) -> float:
     return sum(max(0.0, _min(r["created_at"], r["updated_at"])) for r in runs if r["conclusion"] == "cancelled")
 
 
-def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quarantined: int) -> str:
+def queue_waits(jobs: list[dict]) -> tuple[list[float], list[float]]:
+    """(queue wait minutes, work minutes) per job: created->started and started->completed. Skipped/unstarted jobs are ignored."""
+    waits, work = [], []
+    for j in jobs:
+        c, s, e = j.get("created_at"), j.get("started_at"), j.get("completed_at")
+        if not (c and s) or j.get("conclusion") in ("skipped", None):
+            continue
+        waits.append(max(0.0, _min(c, s)))
+        if e:
+            work.append(max(0.0, _min(s, e)))
+    return waits, work
+
+
+def _p90(xs: list[float]) -> str:
+    return f"{statistics.quantiles(xs, n=10, method='inclusive')[-1]:.1f}" if len(xs) > 1 else _median(xs)
+
+
+def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quarantined: int,
+           jobs: list[dict] | None = None, jobs_error: str | None = None) -> str:
     red, green, red_min = red_main(runs)
     rate = f"{100 * red / (red + green):.0f}% ({red}/{red + green})" if red + green else "-"
     rows = [("red-main rate", rate), ("red-main minutes", f"{red_min:.0f}"),
@@ -83,15 +103,42 @@ def render(days: int, runs: list[dict], prs: list[dict], flaky_issues: int, quar
             ("green to merged, median min", _median(green_to_merged(runs, prs))),
             ("open flaky-test issues", str(flaky_issues)), ("quarantined tests", str(quarantined)),
             ("cancelled runner-minutes", f"{cancelled_minutes(runs):.0f}")]
+    if jobs is not None:
+        waits, work = queue_waits(jobs)
+        if jobs_error and not jobs:
+            rows += [("job queue wait, median / p90 min", f"UNAVAILABLE ({jobs_error})")]
+        else:
+            note = f"; partial: {jobs_error}" if jobs_error else ""
+            rows += [("job queue wait, median / p90 min", f"{_median(waits)} / {_p90(waits)} (n={len(waits)}{note})"),
+                     ("job work, median / p90 min", f"{_median(work)} / {_p90(work)}")]
     today = dt.datetime.now(dt.timezone.utc).date().isoformat()
     return (f"**CI health {today}** (jarves-checks, last {days} days; `core/tools/ci_health.py`)\n\n| Number | Value |\n"
             "|---|---|\n" + "\n".join(f"| {k} | {v} |" for k, v in rows) + "\n")
+
+
+def sample_jobs(repo: str, since: str, n: int) -> tuple[list[dict], str | None]:
+    """(jobs, error) for the newest n completed jarves-checks runs; a failed read keeps what was collected and names the error."""
+    jobs: list[dict] = []
+    try:
+        ids = gh("api", f"repos/{repo}/actions/workflows/jarves-checks.yml/runs?created=>={since}&status=completed&per_page={n}",
+                 "--jq", ".workflow_runs[].id").split()
+        for rid in ids[:n]:
+            raw = gh("api", "--paginate", f"repos/{repo}/actions/runs/{rid}/jobs?per_page=100",
+                     "--jq", ".jobs[]|{created_at,started_at,completed_at,conclusion}")
+            jobs += [json.loads(x) for x in raw.splitlines() if x.strip()]
+    except (subprocess.CalledProcessError, OSError, ValueError) as exc:
+        first = (str(exc).splitlines() or [""])[0]
+        err = f"{type(exc).__name__}: {first}"[:120] if first else type(exc).__name__
+        print(f"ci_health: job read failed after {len(jobs)} jobs: {err}", file=sys.stderr)
+        return jobs, err
+    return jobs, None
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--repo", default="Jarvis-igerman-ai/jarves")
     ap.add_argument("--days", type=int, default=7)
+    ap.add_argument("--job-sample", type=int, default=10, help="completed runs to read jobs from for queue wait (0 = skip)")
     ap.add_argument("--comment", type=int, help="post the table as a comment on this issue")
     a = ap.parse_args(argv)
     since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=a.days)).strftime("%Y-%m-%d")
@@ -102,7 +149,9 @@ def main(argv: list[str] | None = None) -> int:
                         "--json", "headRefOid,mergedAt"))
     issues = json.loads(gh("issue", "list", "-R", a.repo, "--state", "open", "--search", "\"Flaky test:\" in:title",
                            "--json", "title"))
-    text = render(a.days, runs, prs, sum(i["title"].startswith("Flaky test:") for i in issues), len(ledger_ids()))
+    jobs, jobs_error = sample_jobs(a.repo, since, a.job_sample) if a.job_sample > 0 else (None, None)
+    text = render(a.days, runs, prs, sum(i["title"].startswith("Flaky test:") for i in issues), len(ledger_ids()),
+                  jobs, jobs_error)
     print(text)
     if a.comment:
         gh("issue", "comment", str(a.comment), "-R", a.repo, "--body", text)

@@ -205,3 +205,21 @@ def test_no_dashboard_page_uses_a_browser_confirm_for_destructive_actions():
             assert f"confirm({needle}" not in src and f'confirm("{needle}' not in src
     m3 = (static / "m3.js").read_text(encoding="utf-8")
     assert "waiting for approval on your screen" in m3 and "ממתין לאישור על המסך שלך" in m3
+
+
+def test_hidden_tab_heartbeat_keeps_dashboard_marker_fresh(home, monkeypatch):
+    """#477: a throttled background tab beats ~1/min; a hidden beat must still count as a place to answer for longer
+    than the 15 s visible window, and a stale one must not (the request then falls back to no_channel = denied)."""
+    svc = appr.ApprovalService(home, timeout_s=10)
+    ctx = SimpleNamespace(home=home)
+    appr.api_approvals(ctx, None, None, {"hidden": ["1"]})
+    real = time.time()
+    monkeypatch.setattr(appr.time, "time", lambda: real + 60)          # a throttled timer: 60 s later, no new beat
+    assert svc.dashboard_watching()
+    monkeypatch.setattr(appr.time, "time", lambda: real + appr.DASHBOARD_HIDDEN_FRESH_S + 5)
+    assert not svc.dashboard_watching()                                 # gone for good: nobody to ask, request refused
+    monkeypatch.undo()
+    appr.api_approvals(ctx, None, None)                                 # visible beat keeps the strict 15 s window
+    real = time.time()
+    monkeypatch.setattr(appr.time, "time", lambda: real + 60)
+    assert not svc.dashboard_watching()

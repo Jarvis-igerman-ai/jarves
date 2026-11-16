@@ -25,3 +25,15 @@ action = "open:#/alerts"
 he = "צריך שקט עכשיו? \"השהה התראות\" בעמוד השליטה (Controls) או אמרו \"אל תפריע לי\"."
 en = "Need quiet now? Pause alerts on the Controls page or say \"don't disturb me\"."
 action = "open:#/runtime"
+
+[[problems]]
+he = "יש יותר מדי התראות"
+en = "Too many alerts"
+fix_he = "בעמוד \"התראות\" הורידו את מספר ההתראות בשעה, או אמרו \"אל תפריע לי עד הערב\"."
+fix_en = "On the Alerts page lower the number of alerts per hour, or say \"Don't disturb me until the evening\"."
+
+[[problems]]
+he = "לא שמעתי התראה בלילה"
+en = "I heard no alert at night"
+fix_he = "זה תקין: בשעות השקט (ברירת מחדל 22:00 עד 07:00) התראה רק מופיעה כשורה על המסך, בלי קול. אפשר לשנות את השעות בעמוד \"התראות\"."
+fix_en = "That is expected: in quiet hours (default 22:00 to 07:00) an alert only shows as a silent line. Change the hours on the Alerts page."

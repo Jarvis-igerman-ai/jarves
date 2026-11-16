@@ -1,0 +1,1 @@
+- Added: core/tests/test_daily_limits.py proves the daily voice-minutes cap, the daily AI-request cap and their reset at local midnight on a real Budget (JAR-219, R-086).
