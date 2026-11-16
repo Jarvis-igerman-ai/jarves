@@ -216,12 +216,14 @@ def vet_url(url: str, resolver: Callable[[str], list[str]] = system_resolver) ->
     return scope
 
 
-def _callable_attr(obj, name: str) -> bool:
-    """A driver attribute that raises on access (any error, e.g. a broken property) counts as missing: contract TypeError."""
+def _driver_attr(obj, name: str, *, call: bool = True) -> bool:
+    """A driver attribute that raises on access (any error, e.g. a broken property) counts as missing: contract TypeError.
+    With call=True it must also be callable (current_url is a plain value, so call=False)."""
     try:
-        return callable(getattr(obj, name))
-    except Exception:  # noqa: BLE001 - deliberately broad: any failure means the contract method is not usable
+        value = getattr(obj, name)
+    except Exception:  # noqa: BLE001 - deliberately broad: any failure means the contract attribute is not usable
         return False
+    return callable(value) if call else True
 
 
 class PilotSession:
@@ -239,8 +241,8 @@ class PilotSession:
     def __init__(self, home: Path, driver, *, enabled: Callable[[], bool], clock: Callable[[], float] = time.monotonic,
                  resolver: Callable[[str], list[str]] = system_resolver, max_actions: int = MAX_ACTIONS, max_seconds: float = MAX_SECONDS) -> None:
         # #574 item 1: hasattr alone let a non-callable pin_hosts (None, a flag string) through, silently dropping the pinning
-        missing = [n for n in ("open", "text", "screenshot", "close", "pin_hosts") if not _callable_attr(driver, n)]
-        missing += [] if hasattr(driver, "current_url") else ["current_url"]
+        missing = [n for n in ("open", "text", "screenshot", "close", "pin_hosts") if not _driver_attr(driver, n)]
+        missing += [] if _driver_attr(driver, "current_url", call=False) else ["current_url"]
         if missing:
             raise TypeError("the pilot driver must implement " + ", ".join(missing) + " (see PilotSession)")
         self.home, self.driver, self.enabled, self.clock = Path(home), driver, enabled, clock

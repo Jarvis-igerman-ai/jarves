@@ -161,15 +161,14 @@ class Server(ThreadingHTTPServer):
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
+        # A failed bind (port in use) makes TCPServer.__init__ call server_close() itself: socket and store are closed
+        # there once, and withdraw() leaves the live server's key alone because it is not ours.
+        super().__init__(("127.0.0.1", port), Handler)
         try:
-            super().__init__(("127.0.0.1", port), Handler)
             # #750: publish only once the port is ours, so a failed second start never replaces the live server's key.
             self.unlock_key.publish(self.home)
         except BaseException:
-            if hasattr(self, "socket"):
-                self.socket.close()
-            if store is None:
-                self.store.close()  # a failed start (port in use) must not keep workflow.db open
+            self.server_close()  # bound but no key: free the port and workflow.db, then report the error
             raise
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"

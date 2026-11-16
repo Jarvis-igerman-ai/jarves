@@ -94,7 +94,9 @@ def issue(home: Path, *, now: float | None = None) -> str:
         pid = int(published.get("pid") or 0)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run unlock again") from exc
-    if pid <= 0 or not _alive(pid):  # pid <= 0 is no publisher (POSIX kill(-1, 0) would even report alive)  # a crashed server never withdrew its key: a code for it could never be checked
+    # pid <= 0 is no publisher (POSIX kill(-1, 0) would even report alive).
+    # A crashed server never withdrew its key: a code for it could never be checked.
+    if pid <= 0 or not _alive(pid):
         raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run unlock again")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     eph_key = X25519PrivateKey.generate()

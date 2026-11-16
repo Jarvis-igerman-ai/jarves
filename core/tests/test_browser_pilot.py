@@ -319,6 +319,15 @@ def test_574_item1_a_driver_property_that_raises_is_refused_with_the_contract_ty
         bp.PilotSession(tmp_path, Broken(), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
 
 
+def test_574_item1_a_current_url_property_that_raises_is_refused_with_the_contract_typeerror(tmp_path):
+    class Broken(FakeDriver):
+        @property
+        def current_url(self):
+            raise RuntimeError("driver not started")   # hasattr only hides AttributeError: this escaped __init__
+    with pytest.raises(TypeError, match="current_url"):
+        bp.PilotSession(tmp_path, Broken(), enabled=lambda: True, resolver=lambda h: ["93.184.216.34"])
+
+
 def test_574_a_failing_resolver_never_allows_a_request_and_the_dns_pool_is_shared_and_capped(tmp_path, monkeypatch):
     s, d, _ = mk(tmp_path, resolver=lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     assert s.request_allowed("https://example.com/") is False

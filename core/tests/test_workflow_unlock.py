@@ -14,6 +14,7 @@ from unittest.mock import patch
 from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
 from jarves.workflow.server import Server
+from jarves.workflow.store import Store
 
 
 class UnlockTests(unittest.TestCase):
@@ -260,6 +261,24 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)
         shown = unlock.issue(self.home)
         self.assertTrue(unlock.consume(self.home, shown, self.server.unlock_key))
+
+    def test_750_a_failed_start_closes_its_store_once_and_a_failed_publish_closes_the_socket(self):
+        real_close, closes = Store.close, []
+        def counting(store):
+            closes.append(store)
+            real_close(store)
+        with patch.object(Store, "close", counting):
+            with self.assertRaises(OSError):                            # bind fails: TCPServer.__init__ calls server_close
+                Server(self.home, self.server.server_port)
+            self.assertEqual(len(closes), 1)                            # cleaned up once, not again by a second path
+            closes.clear()
+            with patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
+                    patch.object(Server, "server_close", autospec=True, side_effect=Server.server_close) as stop:
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    Server(self.home, 0)                                # bound, then the key cannot be published
+            self.assertEqual(stop.call_count, 1)
+            self.assertEqual(stop.call_args[0][0].socket.fileno(), -1)  # its socket is closed, no port left open
+            self.assertEqual(len(closes), 1)
 
     def test_750_issue_reads_key_and_pid_from_one_record_and_refuses_pid_zero_or_negative(self):
         pub = self.server.unlock_key._pub()
