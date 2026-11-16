@@ -302,12 +302,31 @@ class UnlockTests(unittest.TestCase):
             unlock.issue(self.home)                                     # plain 'unlock' does not wait
         pause.assert_not_called()
 
+    def test_750_open_keeps_waiting_while_the_published_pid_is_a_crashed_server(self):
+        pub = self.server.unlock_key._pub()
+        (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": pub, "pid": 999999}), encoding="ascii")  # stale
+        alive = iter([False, False, True])                              # the new server publishes after two polls
+        with patch.object(unlock, "_alive", side_effect=lambda pid: next(alive)), patch.object(unlock, "_sleep") as pause:
+            self.assertRegex(unlock.issue(self.home, wait_s=1.0), r"^\d{4}$")
+        self.assertEqual(pause.call_count, 2)
+        with patch.object(unlock, "_alive", return_value=False), patch.object(unlock, "_sleep") as pause, \
+                self.assertRaisesRegex(unlock.UnlockUnavailable, "not running"):
+            unlock.issue(self.home, wait_s=1.0)                         # still dead after wait_s: bounded, then refuse
+        self.assertEqual(pause.call_count, round(1.0 / unlock.PUB_POLL_S))
+
+    def test_750_a_low_order_published_key_is_unlock_unavailable_not_a_traceback(self):
+        (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": "00" * 32, "pid": os.getpid()}), encoding="ascii")
+        with self.assertRaisesRegex(unlock.UnlockUnavailable, "not valid"):
+            unlock.issue(self.home)
+        self.assertFalse((self.home / unlock.FILE).exists())
+
     def test_750_cryptography_is_a_locked_core_runtime_dependency(self):
         import tomllib
         core = Path(__file__).resolve().parents[1]
         project = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-        spec = next(d for d in project["dependencies"] if d.split(">")[0].strip() == "cryptography")
-        self.assertGreaterEqual(int(spec.split(">=")[1].split(",")[0].split(".")[0]), 40)   # public/private_bytes_raw need >= 40
+        from packaging.requirements import Requirement
+        req = next(r for r in map(Requirement, project["dependencies"]) if r.name == "cryptography")
+        self.assertFalse(req.specifier.contains("39.9"))                # public/private_bytes_raw need >= 40
         lock = tomllib.loads((core / "uv.lock").read_text(encoding="utf-8"))
         locked = next(p["version"] for p in lock["package"] if p["name"] == "cryptography")
         self.assertGreaterEqual(int(locked.split(".")[0]), 40)          # the installer ships uv.lock wheels (--frozen --no-dev)

@@ -166,6 +166,8 @@ class Server(ThreadingHTTPServer):
         super().__init__(("127.0.0.1", port), Handler)
         try:
             # #750: publish only once the port is ours, so a failed second start never replaces the live server's key.
+            # One dashboard per workflow home (web-check assumes it): a second one on another port replaces this key, so
+            # codes typed into the first tab then fail closed until 'jarvis workflow unlock' is run again for it.
             self.unlock_key.publish(self.home)
         except BaseException:
             self.server_close()  # bound but no key: free the port and workflow.db, then report the error

@@ -90,33 +90,44 @@ def _alive(pid: int) -> bool:
     return alive(pid)
 
 
-def _read_pub(home: Path, wait_s: float) -> dict:
-    """Read the published key once; with wait_s, poll a missing file for at most wait_s (bounded, injectable sleep)."""
-    for _ in range(round(wait_s / PUB_POLL_S)):
-        try:
-            return json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
-        except FileNotFoundError:
-            _sleep(PUB_POLL_S)
-    return json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
-
-
-def issue(home: Path, *, now: float | None = None, wait_s: float = 0.0) -> str:
-    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
-    wait_s: how long to wait for a just-started server to publish its key (open uses OPEN_WAIT_S)."""
+def _read_live_pub(home: Path) -> X25519PublicKey:
+    """Key and pid from ONE published record; UnlockUnavailable if missing, malformed or its publisher is not running."""
     try:
-        published = _read_pub(home, wait_s)  # read once: key and pid of ONE server
+        published = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
         peer = X25519PublicKey.from_public_bytes(bytes.fromhex(published["pub"]))
         pid = int(published.get("pid") or 0)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("start the dashboard first (jarvis workflow open), then run jarvis workflow unlock again") from exc
     # pid <= 0 is no publisher (POSIX kill(-1, 0) would even report alive).
     # A crashed server never withdrew its key: a code for it could never be checked.
+    # Honest limit (fails closed): if the OS reused a crashed server's pid, the code is issued for a dead key and is
+    # never accepted; the owner restarts the dashboard. One dashboard per workflow home: a second one publishing
+    # here replaces the first one's key, so codes typed into the first one's tab are refused.
     if pid <= 0 or not _alive(pid):
         raise UnlockUnavailable("the dashboard that published the unlock key is not running; start it (jarvis workflow open), then run jarvis workflow unlock again")
-    raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
+    return peer
+
+
+def issue(home: Path, *, now: float | None = None, wait_s: float = 0.0) -> str:
+    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
+    wait_s: how long to wait for a just-started server to publish its key (open uses OPEN_WAIT_S); a missing file and a
+    stale record from a crashed server both keep the wait going, bounded by wait_s (injectable sleep)."""
+    for _ in range(round(wait_s / PUB_POLL_S)):
+        try:
+            peer = _read_live_pub(home)
+            break
+        except UnlockUnavailable:
+            _sleep(PUB_POLL_S)
+    else:
+        peer = _read_live_pub(home)
     eph_key = X25519PrivateKey.generate()
     eph = eph_key.public_key().public_bytes_raw()
-    tag = _tag(eph_key.exchange(peer), eph, raw)
+    try:
+        shared = eph_key.exchange(peer)
+    except ValueError as exc:  # a low-order point (corrupted or planted file) has no usable shared secret
+        raise UnlockUnavailable("the published unlock key is not valid; restart the dashboard (jarvis workflow open), then run jarvis workflow unlock again") from exc
+    raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
+    tag = _tag(shared, eph, raw)
     record = {"eph": eph.hex(), "tag": tag.hex(), "expires": (now or time.time()) + CODE_TTL_S}
     for attempt in (1, 2):  # Windows: os.replace fails while the server has unlock.json open for reading; retry once
         try:
