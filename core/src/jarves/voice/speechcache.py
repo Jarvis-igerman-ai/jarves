@@ -24,7 +24,7 @@ class SpeechCache:
     def get(self, key: str) -> tuple[np.ndarray, int] | None:
         try:
             with wave.open(str(self._path(key)), "rb") as w:
-                if w.getsampwidth() != 2 or w.getnchannels() != 1:
+                if w.getsampwidth() != 2 or w.getnchannels() != 1 or not 8000 <= w.getframerate() <= 48000:
                     return None                     # not what put() writes: a miss, never noise played as speech
                 rate, raw = w.getframerate(), w.readframes(w.getnframes())
             a = np.frombuffer(raw, "<i2").astype(np.float32) / 32768.0

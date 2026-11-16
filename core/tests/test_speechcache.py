@@ -67,3 +67,16 @@ def test_foreign_sample_format_is_a_miss(tmp_path):
         w.setframerate(RATE)
         w.writeframes(bytes(RATE * 2))
     assert c.get("k") is None
+
+
+def test_implausible_sample_rate_is_a_miss(tmp_path):
+    c = SpeechCache(tmp_path)
+    (tmp_path / "cache").mkdir()
+    with wave.open(str(c._path("k")), "wb") as w:           # 16-bit mono, but a damaged 1 kHz rate header
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(1000)
+        w.writeframes(bytes(4000))
+    assert c.get("k") is None
+    c.put("ok", tone(1.0), 48000)                            # the top of the sane range still caches
+    assert c.get("ok")[1] == 48000
