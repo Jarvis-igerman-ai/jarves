@@ -189,16 +189,29 @@ def test_issue_480_labels_follow_display_order_and_401_403_get_their_own_lines()
     runs = ss.tracker_body([], {"main_ci": "incomplete:http_403", "nightly": "incomplete:http_401",
                                 "codeql_run": "incomplete:http_403", "secret_scanning": "incomplete:http_403",
                                 "code_scanning": "incomplete:http_403"}, 0, "s", "full")
-    assert "refused Code scanning alerts, Secret scanning alerts, Actions workflow runs (HTTP 403)" in runs
-    assert "rejected the scan's token for Actions workflow runs (HTTP 401" in runs
+    assert "refused Code scanning alerts, Secret scanning alerts (HTTP 403). Either turn the feature on" in runs
+    assert "refused Main CI workflow runs, CodeQL workflow runs (HTTP 403). Give the scan a fine-grained" in runs
+    assert "rejected the scan's token for Nightly workflow runs (HTTP 401" in runs
+
+
+def test_issue_480_actions_only_403_never_asks_to_turn_a_feature_on():
+    body = ss.tracker_body([], {"main_ci": "incomplete:http_403", "dependabot": "complete"}, 0, "s", "light")
+    assert "Owner action: GitHub refused Main CI workflow runs (HTTP 403). Give the scan" in body
+    assert "turn the feature on" not in body                               # Actions runs have no feature switch
+
+
+def test_issue_480_sources_not_fully_read_uses_the_same_labels_as_the_owner_lines():
+    body = ss.tracker_body([], {"dependabot": "incomplete:http_403", "nightly": "incomplete:http_500"}, 0, "s", "light")
+    gaps = body.split("Sources not fully read: ")[1].split("\n")[0]
+    assert gaps == "Dependabot alerts (incomplete:http_403), Nightly workflow runs (incomplete:http_500)"
 
 
 def test_issue_480_the_token_name_in_the_owner_line_is_the_one_the_scanner_reads(monkeypatch):
-    for k in ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
-        monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv(ss.TOKEN_ENV, "t-480")
-    monkeypatch.setenv("GH_TOKEN", "actions-token")
-    assert ss.find_token(env_only=True) == "t-480"                         # the named variable wins over GH_TOKEN
+    assert ss.TOKEN_ENV == ss.TOKEN_ENVS[0]                                # one tuple drives both
+    for k in ss.TOKEN_ENVS:
+        monkeypatch.setenv(k, f"t-{k}")                                    # every variable set: order decides
+    assert ss.find_token(env_only=True) == f"t-{ss.TOKEN_ENV}"
+    assert f"as {ss.TOKEN_ENV} " in ss.tracker_body([], {"dependabot": "incomplete:http_403"}, 0, "s", "light")
 
 
 def test_issue_480_an_old_format_tracker_with_the_same_findings_is_rewritten_once():

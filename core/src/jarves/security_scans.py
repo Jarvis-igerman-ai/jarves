@@ -46,7 +46,8 @@ CONFIG_FILE = "security_scans.json"
 STATE_FILE = "security_scans_state.json"
 REPO = "Jarvis-igerman-ai/jarves"
 LABEL = "from-diagnostics"
-TOKEN_ENV = "JARVES_GITHUB_TOKEN"     # read first by find_token(); the tracker owner line names it (#480)
+TOKEN_ENVS = ("JARVES_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")   # find_token() reads them in this order
+TOKEN_ENV = TOKEN_ENVS[0]             # the one read first; the tracker owner line names it (#480)
 API_BASE = "https://api.github.com"                     # tests inject a fake client instead
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
 TRACKER_TITLE = "[Security] JARVES recurring scan summary"
@@ -299,7 +300,7 @@ def status(home: Path, now: datetime | None = None) -> dict:
 
 # ---------------------------------------------------------------------- GitHub (read-mostly)
 def find_token(env_only: bool = False) -> str:
-    for k in (TOKEN_ENV, "GH_TOKEN", "GITHUB_TOKEN"):
+    for k in TOKEN_ENVS:
         v = (os.environ.get(k) or "").strip()
         if v:
             return v
@@ -534,9 +535,11 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
-_ACCESS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot alerts",
-           "secret_scanning": "Secret scanning alerts", "main_ci": "Actions workflow runs",
-           "nightly": "Actions workflow runs", "codeql_run": "Actions workflow runs"}
+_ALERTS = {"code_scanning": "Code scanning alerts", "dependabot": "Dependabot alerts",
+           "secret_scanning": "Secret scanning alerts"}       # repository features the owner can turn on
+_RUNS = {"main_ci": "Main CI workflow runs", "nightly": "Nightly workflow runs",
+         "codeql_run": "CodeQL workflow runs"}                # Actions runs: no feature to turn on, only the token
+_LABELS = {**_ALERTS, **_RUNS, "local_diagnostics": "Local diagnostics", "boundary": "Boundary check"}
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -557,22 +560,26 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     lines += ["", f"Resolved since the previous scan (source read completely): {resolved}", ""]
     gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
-                 + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
+                 + ("Sources not fully read: " + ", ".join(f"{_LABELS.get(k, k)} ({v})" for k, v in sorted(gaps.items()))
+                    if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-    # #480: say what the owner can do, not only the HTTP code. Labels in _ACCESS order, each listed once.
-    names = {code: ", ".join(dict.fromkeys(lbl for k, lbl in _ACCESS.items() if coverage.get(k) == f"incomplete:http_{code}"))
-             for code in ("401", "403")}
+    # #480: say what the owner can do, not only the HTTP code. Labels in display order, each listed once.
+    def refused(keys: dict, code: str) -> str:
+        return ", ".join(lbl for k, lbl in keys.items() if coverage.get(k) == f"incomplete:http_{code}")
     token = (f"a fine-grained token, read-only on only these sources, as {TOKEN_ENV} (the hosted workflow must also "
              "pass it, a reviewed workflow change); the coverage stays INCOMPLETE until then.")
-    if names["401"]:                                     # 401 = missing, expired or invalid token, never a disabled feature
-        lines.append(f"Owner action: GitHub rejected the scan's token for {names['401']} (HTTP 401: missing, expired "
+    n401 = ", ".join(x for x in (refused(_ALERTS, "401"), refused(_RUNS, "401")) if x)
+    if n401:                                             # 401 = missing, expired or invalid token, never a disabled feature
+        lines.append(f"Owner action: GitHub rejected the scan's token for {n401} (HTTP 401: missing, expired "
                      f"or invalid). Set {token}")
-    if names["403"]:
+    if refused(_ALERTS, "403"):
         # GitHub answers 403 both for a token without access and for a feature that is off for the repository
         # (e.g. Dependabot alerts disabled), so the line names both causes and does not guess which one it is.
-        lines.append(f"Owner action: GitHub refused {names['403']} (HTTP 403). Either turn the feature on for the "
-                     f"repository, or give the scan {token}")
+        lines.append(f"Owner action: GitHub refused {refused(_ALERTS, '403')} (HTTP 403). Either turn the feature on "
+                     f"for the repository, or give the scan {token}")
+    if refused(_RUNS, "403"):                            # workflow runs have no feature switch: only the token applies
+        lines.append(f"Owner action: GitHub refused {refused(_RUNS, '403')} (HTTP 403). Give the scan {token}")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
