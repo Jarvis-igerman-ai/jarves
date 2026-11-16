@@ -147,6 +147,7 @@ SAFE_OFF = frozenset({
     "whatsapp_bridge",
     "whatsapp_send",
     "whats_new_card",
+    "wrong_feedback",
 })
 # Registered and grouped (so coverage checks see them) but never offered by the wizard: the owner decided (20 Oct)
 # that the Helper asks for EVERY command; the read-only allow-list exists only as `jarvis features on ...`.
@@ -164,6 +165,7 @@ GROUPS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "diagnosis_llm_pass",
         "self_diagnosis_ask",
         "failure_log",
+        "wrong_feedback",
         "self_diagnosis_handoff",
         "self_diagnosis_ai_wording",
         "conversation_recall",
@@ -1337,6 +1339,8 @@ BUNDLE: dict[str, list[Callable[[], tuple[bool, str]]]] = {
     "diagnosis_llm_pass": [_mod("jarves.diagnose")],
     "self_diagnosis_ask": [_mod("jarves.diag.failure_gate"), _mod("jarves.diag.areas")],
     "failure_log": [_mod("jarves.failure_log"), _data("jarves.guides", "data/failure_log.toml")],
+    "wrong_feedback": [_mod("jarves.wrong_feedback"), _data("jarves.guides", "data/wrong_feedback.toml"),
+                       _data("jarves", "dashboard_static/feedback.js")],
     "self_diagnosis_ai_wording": [_mod("jarves.diag.areas")],
     "self_diagnosis_handoff": [_mod("jarves.diag.handoff"), _mod("jarves.orchestrator"), _data("jarves.guides", "data/diagnosis.toml")],
     "self_check": [_mod("jarves.selfcheck"), _data("jarves", "dashboard_static/selfcheck.js"),

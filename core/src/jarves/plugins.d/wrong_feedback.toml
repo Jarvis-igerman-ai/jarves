@@ -1,0 +1,6 @@
+# dashboard: registers the Feedback page API (/api/feedback...) and the Features row.
+# addons: the setup wizard imports it so the row is offered on first run. The voice tool is registered ONCE by
+# Core.start (app.py); these loaders only import.
+dashboard = ["jarves.wrong_feedback"]
+addons = ["jarves.wrong_feedback"]
+cli = ["jarves.wrong_feedback"]

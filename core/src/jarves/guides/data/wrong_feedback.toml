@@ -1,0 +1,38 @@
+order = 63
+category = "everyday"
+features = ["wrong_feedback"]
+suggest = false
+aliases = ["זה היה לא נכון", "טעית", "משוב", "that was wrong", "wrong answer", "feedback"]
+title_he = "משוב: זה היה לא נכון"
+title_en = "Feedback: that was wrong"
+what_he = "כשג׳רוויס טעה, אמרו \"ג׳רוויס, זה היה לא נכון\", לחצו על הכפתור בדף המשוב או הריצו jarvis feedback wrong. נשמרת השיחה האחרונה: מה אמרתם, מה הוא ענה ושמות הכלים, אחרי השחרה. כך אפשר להפוך טעות לבדיקה שמונעת אותה בעתיד. בטא, כבוי כברירת מחדל."
+what_en = "When Jarvis got it wrong, say \"Jarvis, that was wrong\", press the button on the Feedback page or run jarvis feedback wrong. The last exchange is saved: what you said, what he answered and the tool names, after redaction. A mistake can then become a test that prevents it next time. Beta, off by default."
+expect_he = "ג׳רוויס עונה \"תודה, שמרתי את השיחה האחרונה כמשוב (FB-...)\". הפקודה jarvis feedback list מציגה את מה שנשמר."
+expect_en = "Jarvis answers \"Thanks, I saved the last exchange as feedback (FB-...)\". The command jarvis feedback list shows what was saved."
+cost_he = "חינם. קובץ מקומי בלבד."
+cost_en = "Free. A local file only."
+privacy_he = "שום דבר לא יוצא מהמחשב. סיסמאות, מפתחות, מיילים ומספרי טלפון מושחרים; משפט שנראה רגיש (סיסמה, קוד, כרטיס אשראי, מספרים ארוכים) נשמר רק כאורך. עם מצב פרטיות ביומן נשמר רק האורך. עד 200 משובים."
+privacy_en = "Nothing leaves this PC. Passwords, keys, e-mails and phone numbers are masked; a sentence that looks sensitive (password, code, credit card, long numbers) is kept as its length only. With log privacy on only lengths are kept. Up to 200 cases."
+
+[parity.features]
+wrong_feedback = "feedback"
+
+[[steps]]
+he = "הפעילו את הבטא ואז את המשוב: jarvis features beta on ואחר כך jarvis features on wrong_feedback."
+en = "Turn on beta, then feedback: jarvis features beta on, then jarvis features on wrong_feedback."
+action = "feature_on:wrong_feedback"
+check = "active:wrong_feedback"
+
+[[steps]]
+he = "אחרי תשובה לא נכונה אמרו \"ג׳רוויס, זה היה לא נכון\" (אפשר להוסיף מה היה לא נכון), או לחצו על הכפתור בדף המשוב, או הריצו jarvis feedback wrong --note \"...\"."
+en = "After a wrong answer say \"Jarvis, that was wrong\" (you can add what was wrong), or press the button on the Feedback page, or run jarvis feedback wrong --note \"...\"."
+
+[[steps]]
+he = "לראות: jarvis feedback list ו-jarvis feedback show FB-.... למחוק אחד: jarvis feedback delete FB-.... לכבות: jarvis features off wrong_feedback."
+en = "To see them: jarvis feedback list and jarvis feedback show FB-.... To delete one: jarvis feedback delete FB-.... To turn it off: jarvis features off wrong_feedback."
+
+[[problems]]
+he = "ג׳רוויס אומר שלא מצא שיחה אחרונה"
+en = "Jarvis says he found no last exchange"
+fix_he = "המשוב קורא את היסטוריית השיחות. בדקו שההיסטוריה פועלת (history.enabled בהגדרות) ושהייתה שיחה לפני המשוב."
+fix_en = "Feedback reads the conversation history. Check that history is on (history.enabled in settings) and that there was an exchange before the feedback."

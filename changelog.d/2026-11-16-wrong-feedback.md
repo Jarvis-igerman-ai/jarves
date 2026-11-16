@@ -1,0 +1,1 @@
+- Added: 'Jarvis, that was wrong' feedback (beta, off): voice, dashboard Feedback page and jarvis feedback wrong save the last exchange, redacted, as a local case (JAR-230).

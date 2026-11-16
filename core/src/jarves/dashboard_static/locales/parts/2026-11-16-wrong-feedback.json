@@ -1,0 +1,13 @@
+{
+ "dict": {
+  "Feedback": "משוב",
+  "Feedback is off (beta): turn it on in Features: first beta features, then the wrong_feedback switch. Or in a terminal: jarvis features on wrong_feedback.": "המשוב כבוי (בטא). הפעילו בדף היכולות: קודם יכולות בטא, ואז המתג “wrong_feedback”. או בטרמינל: “jarvis features on wrong_feedback”.",
+  "JARVES answered: ": "JARVES ענה: ",
+  "No feedback saved yet.": "עוד לא נשמר משוב.",
+  "No last exchange to save. The conversation history may be off.": "לא נמצאה שיחה אחרונה לשמור. אולי היסטוריית השיחות כבויה.",
+  "That was wrong: save the last exchange": "זה היה לא נכון: שמרו את השיחה האחרונה",
+  "What was wrong (optional)": "מה היה לא נכון (רשות)",
+  "When an answer was wrong: press the button, or say “Jarvis, that was wrong”. The last exchange is saved, redacted, on this PC only.": "כשתשובה הייתה לא נכונה: לחצו על הכפתור, או אמרו “ג׳רוויס, זה היה לא נכון”. נשמרת השיחה האחרונה, מושחרת, במחשב בלבד.",
+  "You said: ": "אמרתם: "
+ }
+}

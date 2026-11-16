@@ -69,7 +69,7 @@ V = "voice"
 TOOL_GROUPS: dict[str, object] = {
     "alerts": (D, "alerts are read and answered on the Alerts page"), "app": "mic",
     "appearance": "appearance", "autonomy": (D, "the Autonomy page"), "briefing": "jobs",
-    "github_work": "github", "browser": "browser", "calc": (V, "arithmetic inside a conversation"), "calendar": "calendar",
+    "github_work": "github", "wrong_feedback": "feedback", "browser": "browser", "calc": (V, "arithmetic inside a conversation"), "calendar": "calendar",
     "calendar_write": "calendar", "camera": "camera", "clock": (V, "the time inside a conversation"),
     "contacts": "contacts", "dashboard": "dashboard", "display": "show", "features": "features",
     "files": (D, "the My files page"), "gmail": "mail", "google_connect": "google",
