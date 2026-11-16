@@ -41,3 +41,9 @@ he = "אחרי שחזור הוא לא מחובר לגוגל"
 en = "After a restore Google is not connected"
 fix_he = "זה בכוונה: מפתחות לא נשמרים בגיבוי. הריצו jarvis key ו-jarvis google start."
 fix_en = "On purpose: keys are not backed up. Run jarvis key and jarvis google start."
+
+[[problems]]
+he = "הגיבויים ממלאים את הדיסק אחרי הרבה התקנות בטא"
+en = "Backups fill the disk after many beta installs"
+fix_he = "גיבויים ידניים, לפני-עדכון ולפני-שחזור נשמרים עד 8 יחד (תמיד נשאר החדש מכל סוג). לשינוי: jarvis backup settings --max-install N (0 = בלי הגבלה, אחרת לפחות 3). jarvis backup prune מראה מה נמחק בגלל ההגבלה."
+fix_en = "Manual, pre-migration and pre-restore backups keep at most 8 together (the newest of each kind always stays). To change it: jarvis backup settings --max-install N (0 = no cap, otherwise at least 3). jarvis backup prune lists what the cap removed."

@@ -372,6 +372,11 @@ def list_backups(home: Path) -> list[dict]:
 
 def prune(home: Path) -> list[str]:
     """Apply retention; returns the deleted names. Never deletes the newest backup of a kind."""
+    return prune_report(home)["gone"]
+
+
+def prune_report(home: Path) -> dict:
+    """Apply retention; {"gone": deleted names, "capped": the deleted ones only `backup.max_install` removed}."""
     s = get_settings(home)
     items = list_backups(home)
     keep: set[str] = set()
@@ -390,7 +395,10 @@ def prune(home: Path) -> list[str]:
         inst = [b["name"] for b in items if b["kind"] in INSTALL_KINDS and b["name"] in keep]
         floor = [n for n in inst if n in newest]
         rest = [n for n in inst if n not in newest][:s["max_install"] - len(floor)]
-        keep -= set(inst) - set(floor) - set(rest)
+        cut = set(inst) - set(floor) - set(rest)
+        keep -= cut
+    else:
+        cut = set()
     gone = []
     for b in items:
         if b["name"] not in keep:
@@ -404,7 +412,7 @@ def prune(home: Path) -> list[str]:
             _unlink(p)
     if gone:
         logs.info("backup", "BACKUP_PRUNED", "old backups removed", removed=len(gone))
-    return gone
+    return {"gone": gone, "capped": [n for n in gone if n in cut]}
 
 
 # ---------------------------------------------------------------------- restore
@@ -704,7 +712,7 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
-    b.add_argument("--max-install", type=int, help="most manual + checkpoint backups kept together (0 = no cap)")
+    b.add_argument("--max-install", type=int, help="most manual + pre-migration + pre-restore backups kept together (0 = no cap)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -749,7 +757,10 @@ def cmd_backup(a, cfg, home) -> int:
                   f"{r.get('memories', '?')} memories, {r.get('conversations', '?')} conversations")
             return 0 if r["ok"] else 1
         elif a.action == "prune":
-            print(f"removed {len(prune(home))} old backup(s)")
+            rep = prune_report(home)
+            print(f"removed {len(rep['gone'])} old backup(s)")
+            for n in rep["capped"]:                           # #1016: say what the install cap deleted
+                print(f"removed by the install cap (backup.max_install): {n}")
         elif a.action == "settings":
             ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly),
                                                  ("max_install", a.max_install)) if v is not None}

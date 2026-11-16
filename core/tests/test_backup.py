@@ -260,19 +260,24 @@ def test_install_backups_are_capped_by_max_install_issue_1016(profile, capsys):
     assert backup.get_settings(profile)["max_install"] == 8            # a cap is on by default
     assert cli.main(["backup", "settings", "--max-install", "4"]) == 0
     assert '"max_install": 4' in capsys.readouterr().out
-    gone = backup.prune(profile)
+    assert cli.main(["backup", "prune"]) == 0
+    out = capsys.readouterr().out
     names = {b["name"] for b in backup.list_backups(profile)}
-    assert names == {auto, *installs[5], *installs[4]} and len(gone) == 8
-    for bad in (-1, 2):                                                # 1-2 cannot hold the newest of every kind
+    assert names == {auto, *installs[5], *installs[4]} and "removed 8 old backup(s)" in out
+    capped = [n for i in range(4) for n in installs[i] if n != installs[0][1]]  # oldest pre-migration: checkpoints=5
+    assert all(f"removed by the install cap (backup.max_install): {n}" in out for n in capped)
+    assert out.count("removed by the install cap") == 7 and installs[0][1] not in out
+    for bad in (-1, 1, 2):                                             # 1-2 cannot hold the newest of every kind
         with pytest.raises(ValueError):
             backup.set_settings(profile, {"max_install": bad})
+    assert backup.set_settings(profile, {"max_install": 3})["max_install"] == 3
     restore = fake("pre-restore", start - timedelta(days=8))           # an old one is still its kind's newest
     backup.set_settings(profile, {"max_install": 3})
     backup.prune(profile)
     assert {b["name"] for b in backup.list_backups(profile)} == {auto, *installs[5], restore}
     backup.set_settings(profile, {"max_install": 0})                   # 0 = no cap: per-kind rules only
     more = [fake("manual", start + timedelta(days=10 + i)) for i in range(4)]
-    assert backup.prune(profile) == []
+    assert backup.prune_report(profile) == {"gone": [], "capped": []}
     assert {b["name"] for b in backup.list_backups(profile)} == {auto, *installs[5], restore, *more}
 
 
