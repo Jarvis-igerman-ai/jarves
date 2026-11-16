@@ -45,6 +45,9 @@ _HEBREW = re.compile(r"[֐-׿]")
 WRONG = (r"that('s| was| is)? (wrong|incorrect|not right|not correct)|wrong answer|you('re| are| were) wrong|"
          r"לא נכון|טעית|תשובה (שגויה|לא נכונה)|זה שגוי|זה היה שגוי")
 _WRONG = re.compile(WRONG, re.IGNORECASE)
+# A turn that STARTS with the phrase is a report only when the phrase ends there or at punctuation, never with "ש..."
+# / "that ..." after it ("לא נכון שהבירה היא סידני?" is a question).
+_WRONG_ALONE = re.compile(rf"(?:{WRONG})(?=\s*(?:$|[.,!;:\-–—]))", re.IGNORECASE)
 _LEAD = re.compile(r"^(?:(?:no|nope|לא)\W+)?(?:(?:זה|זו)\s+(?:היה|הייתה|היתה)?\s*)?", re.IGNORECASE)   # "no, " / "זה היה "
 _NAME = re.compile(r"^\W*(?:(?:hey|ok|okay)\s+)?(?:jarvis|jarves|ג['׳]?(?:א)?רו?ו?יס|ג'ארביס)\W*", re.IGNORECASE)
 ABOUT = ("'Jarvis, that was wrong' (voice, dashboard Feedback page or jarvis feedback wrong) saves the last exchange, "
@@ -108,7 +111,9 @@ def is_feedback_turn(text) -> bool:
     """A short feedback phrase ("Jarvis, that was wrong"), not a question that merely contains "לא נכון"."""
     t = str(text or "").strip()
     rest = _NAME.sub("", t, count=1)
-    if _WRONG.match(rest) or _WRONG.match(_LEAD.sub("", rest, count=1)):   # STARTS with the phrase: any length (R3)
+    if t.endswith("?"):
+        return False
+    if _WRONG_ALONE.match(rest) or _WRONG_ALONE.match(_LEAD.sub("", rest, count=1)):   # starts with it: any length
         return True
     return bool(_WRONG.search(t)) and len(t) <= FEEDBACK_MAX_CHARS and not t.endswith("?")
 
@@ -125,7 +130,8 @@ def last_exchange(home, *, store=None) -> dict | None:
         # Skip the feedback phrase only while it is the NEWEST remaining user turn: "q, a, that was wrong, sorry, that
         # was wrong" skips both reports and their replies and saves q/a. An older "that was wrong" BEFORE a newer
         # question, or an everyday "לא נכון" inside a question, never moves the cut.
-        while (i := next((k for k, r in enumerate(rows) if r["role"] == "user"), None)) is not None                 and is_feedback_turn(rows[i]["text"]):
+        while ((i := next((k for k, r in enumerate(rows) if r["role"] == "user"), None)) is not None
+               and is_feedback_turn(rows[i]["text"])):
             rows = rows[i + 1:]
         reply: list[dict] = []
         for i, r in enumerate(rows):
@@ -222,6 +228,11 @@ def delete(home, cid: str) -> bool:
     return True
 
 
+def cfg_privacy(cfg) -> bool:
+    """log.privacy from the config the dashboard and CLI hold (the dashboard switch updates it too); missing = on."""
+    return bool(getattr(getattr(cfg, "log", None), "privacy", True))
+
+
 def report_wrong(home, *, via: str, note: str = "", store=None, failure_log_on: bool = False,
                  now: datetime | None = None, privacy: bool | None = None) -> dict:
     """The one entry point (voice, dashboard, CLI). {"ok", "code", "case"?}. Also counts a `user_correction` in the
@@ -315,7 +326,8 @@ def api_wrong(ctx, m, body):
     if refused:
         return refused
     r = report_wrong(ctx.home, via="dashboard", note=str((body or {}).get("note") or ""),
-                     failure_log_on=bool(feat._ctx_features(ctx).active("failure_log")))
+                     failure_log_on=bool(feat._ctx_features(ctx).active("failure_log")),
+                     privacy=cfg_privacy(getattr(ctx, "cfg", None)))
     return (200, r) if r["ok"] else (404, {**r, "error": r["code"]})
 
 
@@ -359,7 +371,7 @@ def cmd_feedback(a, cfg, home) -> int:
             return 2
     if a.action == "wrong":
         r = report_wrong(home, via="cli", note=a.note, failure_log_on=bool(fs.active("failure_log")),
-                         privacy=bool(getattr(getattr(cfg, "log", None), "privacy", True)))   # the CLI skips logs.setup
+                         privacy=cfg_privacy(cfg))
         out = r if a.json else say(r, lang)
         rc = 0 if r["ok"] else 1
     elif a.action == "list":

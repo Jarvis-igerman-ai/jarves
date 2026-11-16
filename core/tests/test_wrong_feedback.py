@@ -109,7 +109,7 @@ def test_text_kept_is_false_when_both_turns_are_masked_as_sensitive():
 
 
 def test_no_history_means_no_case_and_no_store_is_created(home):
-    r = wf.report_wrong(home, via="cli")
+    r = wf.report_wrong(home, via="cli", now=NOW)
     assert r == {"ok": False, "code": "FEEDBACK_NO_EXCHANGE"}
     assert not (home / "store.db").exists() and not wf.path(home).exists()
 
@@ -131,7 +131,7 @@ def test_report_saves_a_redacted_eval_shaped_case_and_counts_a_correction(home):
 def test_cases_are_bounded_and_deletable(home, monkeypatch):
     monkeypatch.setattr(wf, "MAX_CASES", 3)
     _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
-    ids = [wf.report_wrong(home, via="cli")["case"]["id"] for _ in range(5)]
+    ids = [wf.report_wrong(home, via="cli", now=NOW)["case"]["id"] for _ in range(5)]
     assert [c["id"] for c in wf.cases(home)] == ids[-3:]
     assert wf.delete(home, ids[-1]) and not wf.delete(home, ids[-1])
     assert [c["id"] for c in wf.cases(home)] == ids[2:4]
@@ -228,6 +228,30 @@ def test_dashboard_routes_are_gated_and_local_only(home, monkeypatch):
     assert remove(nobody, m, {})[0] == 403
 
 
+def test_dashboard_note_privacy_follows_the_config_like_the_cli(home, monkeypatch):
+    """Review round 5 R4: the dashboard reads cfg.log.privacy (the switch updates it), not the process flag."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    monkeypatch.setattr(feat, "_ctx_features", lambda ctx: SimpleNamespace(active=lambda fid: fid == wf.FEATURE))
+    _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
+    ctx = SimpleNamespace(home=home, principal={"kind": "local"}, cfg=SimpleNamespace(log=SimpleNamespace(privacy=True)))
+    assert wf.api_wrong(ctx, None, {"note": "met Dana"})[1]["case"]["note"] == "<8 chars>"
+    ctx.cfg.log.privacy = False
+    assert wf.api_wrong(ctx, None, {"note": "met Dana"})[1]["case"]["note"] == "met Dana"
+
+
+def test_a_hebrew_question_that_starts_with_the_phrase_is_not_a_report(home):
+    """Review round 5 R1: "לא נכון ש...?" is a question; the report after it must save that question's exchange."""
+    q = "לא נכון שהבירה של אוסטרליה היא סידני?"
+    assert not wf.is_feedback_turn(q) and not wf.is_feedback_turn("that was wrong, wasn't it?")
+    assert not wf.is_feedback_turn("לא נכון שהשמש קרה " + "ה" * 80)
+    assert wf.is_feedback_turn("ג׳רוויס, זה היה לא נכון") and wf.is_feedback_turn("Jarvis, that was wrong.")
+    _history(home, [(1, "user", "hi"), (2, "assistant", "hello"), (3, "user", q), (4, "assistant", "נכון, סידני."),
+                    (5, "user", "ג׳רוויס, זה היה לא נכון"), (6, "assistant", "סליחה")])
+    ex = wf.last_exchange(home)
+    assert ex["say"] == q and ex["reply"] == "נכון, סידני."
+
+
 def test_privacy_mode_keeps_only_the_note_length(home, monkeypatch):
     """Review R1 (round 3): in log privacy mode the note can quote the turn, so it is kept as its length only."""
     from jarves import logs
@@ -263,6 +287,6 @@ def test_list_reads_under_the_writer_lock(home, monkeypatch):
         held.append(p)
         yield
     _history(home, [(1, "user", "hi"), (2, "assistant", "bye")])
-    wf.report_wrong(home, via="cli")
+    wf.report_wrong(home, via="cli", now=NOW)
     monkeypatch.setattr(wf, "_file_lock", lock)
     assert len(wf.cases(home)) == 1 and held == [wf.path(home)]
