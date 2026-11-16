@@ -128,7 +128,8 @@
   // keeps the marker fresh for 90 s after a hidden beat). It only marks presence; nothing is approved by it.
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
   setInterval(() => { if (document.hidden) refresh(); }, 20000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  // #477: also beat the moment the tab is hidden (a ?hidden=1 beat), so it never looks absent before the first 20 s beat
+  document.addEventListener("visibilitychange", () => refresh());
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);
 })();

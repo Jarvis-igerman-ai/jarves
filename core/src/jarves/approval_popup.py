@@ -310,23 +310,31 @@ class FlatButton:
 
 
 # ---------------------------------------------------------------------- the window
+_TCL_TRANSIENT = ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
+                  "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable")
+
+
+def new_tk_root(tk, tries: int = 5):
+    """Windows: Tcl's init scripts are read now and then with a failure ("couldn't read file ...auto.tcl",
+    'invalid command name "tcl_findLibrary"'): retry those transient errors a few times. Shared with the hidden-mode
+    listening dot (#520), so both Tk users recover the same way. Any other TclError is raised at once."""
+    for attempt in range(tries):
+        try:
+            return tk.Tk()
+        except tk.TclError as e:
+            if attempt == tries - 1 or not any(k in str(e) for k in _TCL_TRANSIENT):
+                raise
+            time.sleep(0.25 * (attempt + 1))
+    raise ValueError("tries must be >= 1")
+
+
 def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | None = None,
           scale: float | None = None, where: str = "bottom-right"):
     import tkinter as tk
     from tkinter import font as tkfont
 
     _dpi_aware()
-    for attempt in range(5):
-        try:
-            root = tk.Tk()
-            break
-        except tk.TclError as e:      # Windows: Tcl's init scripts are read now and then with a failure ("couldn't read
-            msg = str(e)              # file ...auto.tcl", 'invalid command name "tcl_findLibrary"'): retry a few times
-            transient = any(k in msg for k in ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
-                                               "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
-            if attempt == 4 or not transient:
-                raise
-            time.sleep(0.25 * (attempt + 1))
+    root = new_tk_root(tk)
     lang = pick_lang(req)
     S = STRINGS[lang]
     rtl = lang == "he"

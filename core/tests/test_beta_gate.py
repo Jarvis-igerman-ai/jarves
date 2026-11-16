@@ -289,3 +289,17 @@ def test_prefs_prompt_cli_is_friendly_when_locked(home, capsys):
     err = capsys.readouterr().err
     assert rc == 1 and BETA_MSG in err and "Traceback" not in err
     assert not make(home).enabled("prefs_in_prompt")
+
+
+def test_auto_update_switch_maps_the_lock_to_one_friendly_error(home):
+    """#469 (1d): the CLI and dashboard turn auto-update on through set_switch; a locked beta must surface the one
+    friendly gate message as an UpdateError (no raw BetaLocked) and stay off."""
+    from jarves import auto_update, updates
+    cfg = Config()
+    f = Features(cfg, home)
+    assert feat.stage_of(auto_update.FEATURE) == "beta" and f.enabled("update_check")
+    with pytest.raises(updates.UpdateError) as ei:
+        auto_update.set_switch(cfg, home, True, "test")
+    assert not isinstance(ei.value, BetaLocked) and ei.value.code == BetaLocked.code
+    assert BETA_MSG in str(ei.value) and "בטא" in str(ei.value)
+    assert not Features(cfg, home).enabled(auto_update.FEATURE)
