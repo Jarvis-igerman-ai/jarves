@@ -532,7 +532,9 @@ func (s *Server) onEvent(e engine.Event) {
 		s.hub.broadcast("", map[string]any{"type": "connection.state", "state": ev.State})
 	case engine.AccountWarningEvent:
 		now := s.nowTS()
-		s.bfGate.Lock()
+		// End the backfill first, without the dispatch gate (as a kill does): a stalled send never delays the
+		// self-kill, and its result is discarded because bfKillClear bumped gen.
+		s.bfKillClear()
 		s.mu.Lock()
 		s.pol.WarningsTotal++
 		s.pol.WarningsSinceRead++
@@ -540,7 +542,6 @@ func (s *Server) onEvent(e engine.Event) {
 		s.pol.ReadSince = nil // PROTOCOL section 5: any warning resets read_since to null
 		s.savePolicyLocked()
 		s.mu.Unlock()
-		s.bfGate.Unlock()
 		s.log.Warn("WA_ACCOUNT_WARNING", "WhatsApp account warning; the bridge killed itself.", F{"code": ev.Code})
 		s.hub.broadcast("", map[string]any{"type": "account.warning", "code": ev.Code})
 		s.selfKill("account_warning:" + ev.Code)

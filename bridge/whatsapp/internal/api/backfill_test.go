@@ -788,3 +788,20 @@ func TestBackfillKillDoesNotWaitForAStalledDispatch(t *testing.T) {
 		t.Fatalf("state %q after kill", st)
 	}
 }
+
+func TestBackfillAccountWarningDoesNotWaitForAStalledDispatch(t *testing.T) {
+	e := readyBackfill(t)
+	entered, release := gateDispatch(e)
+	defer close(release)
+	go e.do("POST", "/history/backfill", e.admin, map[string]any{})
+	<-entered
+	if !returnsSoon(t, func() { e.s.onEvent(engine.AccountWarningEvent{Code: engine.WarnStreamReplaced}) }) {
+		t.Fatal("account-warning self-kill waited for the stalled dispatch")
+	}
+	e.s.mu.Lock()
+	st, killed, warn := e.s.bf.state, e.s.killed, e.s.pol.AccountWarning
+	e.s.mu.Unlock()
+	if st != "stopped" || !killed || warn == nil {
+		t.Fatalf("state %q killed %v warning %v after account warning", st, killed, warn)
+	}
+}
