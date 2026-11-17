@@ -35,6 +35,7 @@ FEATURE = "qa_installs_enabled"
 SCENARIOS = (("status", ["status"]), ("features", ["features"]), ("about", ["about"]), ("health", ["health"]))
 OFF_MSG = ("The daily installed-beta check is OFF. The owner turns it on with: "
            "jarvis features on qa_installs_enabled (beta: jarvis features beta on first).")
+WINDOWS_ONLY = "The daily installed-beta check runs on Windows only: the signed installer does not exist here."
 _CHECK = re.compile(r"^\s*\[(PASS|FAIL)\]\s+([^:]+?)(?::\s*(.*))?$")
 
 
@@ -127,18 +128,21 @@ INSTALL_WAIT_S = 5400 + 600                                         # install_la
 TICK_S = 3600.0
 
 
-def _supported(platform: str = sys.platform) -> bool:
+def _supported(platform: str | None = None) -> bool:
     """The signed installer is Windows only (catalog: the Pi is not_applicable); `enabled` does not check targets."""
-    return platform == "win32"
+    return (platform or sys.platform) == "win32"
+
+
+CORRUPT = -1.0
 
 
 def _marker_time(path: Path) -> float | None:
-    """The start time in an install.started marker; None when empty, 0.0 (long ago) when unreadable or corrupt."""
+    """The start time in an install.started marker; None when empty, CORRUPT when unreadable or not a number."""
     try:
         raw = path.read_text(encoding="utf-8").strip()
         return float(raw) if raw else None
     except (OSError, ValueError):
-        return 0.0
+        return CORRUPT
 
 
 def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=lambda: [],
@@ -149,8 +153,8 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         return "off"
     if not supported():
         return "unsupported"
-    root = Path(home) / "qa" / "daily"
-    d = _open_day(root, day())                                        # begun before UTC midnight: finish it first
+    root, today = Path(home) / "qa" / "daily", day()
+    d = _open_day(root, today)                                        # begun before UTC midnight: finish it first
     out = root / d
     done = out / "tick.checked"                                       # ours: a manual `check` does not end the day
     if done.is_file():
@@ -173,18 +177,33 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
             return "spawn_failed"
         return "installing"
     since = _marker_time(marker)
-    if since is None:                                                 # crashed before the clock was written
-        since = clock()
+    if since is None or (since == CORRUPT and d == today):            # crashed before the clock was written, or a
+        since = clock()                                               # broken marker today: an install may still run
         marker.write_text(str(since), encoding="utf-8")
+    elif since == CORRUPT:                                            # yesterday's: long over, judge it now
+        since = 0.0
     text = report(d, since) or ""                                     # only what was written after this attempt began
     final = text.startswith(("PASS", "FAIL")) and _of_day(text.splitlines()[0], d)
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
     try:
         do_check(d)                                                   # never reported: check writes the P1 draft
+    except Exception as e:                                            # status must show this day, not the one before
+        _write_check_failed(out, d, e)
+        raise
     finally:                                                          # a check that raises still ends the day (once)
         done.write_text(str(clock()), encoding="utf-8")
     return "checked"
+
+
+def _write_check_failed(out: Path, d: str, e: Exception) -> None:
+    detail = _clean(f"{type(e).__name__}: {e}")
+    bugs = [{"priority": "P1", "check": "qa-daily check", "title": "P1: daily beta check 'qa-daily check' failed",
+             "detail": detail, "evidence": f"qa/daily/{d}/bugs.json", "local_only": True}]
+    try:                                                              # best effort: the caller re-raises e, so the
+        (out / "bugs.json").write_text(json.dumps(bugs, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError:                                                   # Core loop logs QA_DAILY_TICK_FAILED once
+        pass
 
 
 INSTALL_FILE = "install.txt"                                         # begin() ended without setup: no report file
@@ -205,7 +224,7 @@ def _report_reader(home, day: str, since: float = 0.0):
 
 def _since(home, day: str) -> float:
     m = Path(home) / "qa" / "daily" / day / "install.started"
-    return (_marker_time(m) or 0.0) if m.is_file() else 0.0
+    return max(_marker_time(m) or 0.0, 0.0) if m.is_file() else 0.0
 
 
 SPAWN_LOG = "spawn.log"                                               # the detached child's stdout + stderr
@@ -279,6 +298,9 @@ def cmd_qa_daily(a, cfg, home) -> int:
         print(OFF_MSG)
         return 2
     action = getattr(a, "action", "status")
+    if action in ("install", "check") and not _supported():          # `run` goes through tick's own guard
+        print(WINDOWS_ONLY)
+        return 2
     if action == "install":
         from . import install_latest
         dry = bool(getattr(a, "dry_run", False))
@@ -336,6 +358,7 @@ hebrew.TEXT.update({
     EVIDENCE: "בדיקות יחידה test_qa_daily.py (כבוי כברירת מחדל, טיוטות P1/P2, הסתרת פרטים, דמה בלבד; בלי התקנה אמיתית)",
     BLOCKER: "מעולם לא הורץ במחשב של הבעלים",
     PI: "תוכנית ההתקנה היא ל-Windows בלבד",
+    WINDOWS_ONLY: "הבדיקה היומית של הבטא המותקנת רצה רק ב-Windows: תוכנית ההתקנה החתומה לא קיימת כאן.",
     OFF_MSG: "הבדיקה היומית של הבטא המותקנת כבויה. הבעלים מפעיל אותה עם: "
              "jarvis features on qa_installs_enabled (בטא: קודם jarvis features beta on).",
 })

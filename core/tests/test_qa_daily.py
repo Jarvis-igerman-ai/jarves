@@ -15,6 +15,13 @@ REPORT = ("FAIL  install-latest  2026-11-12 06:00 UTC\nversion: 4.5.0 -> 4.5.1-b
           "  [PASS] version\n  [FAIL] doctor: mic missing, mail me at someone@example.com\n  [PASS] selftest")
 
 
+@pytest.fixture(autouse=True)
+def _windows(monkeypatch):
+    """The installer is Windows only (`_supported`); these tests exercise the Windows path on any host."""
+    real = qa_daily._supported
+    monkeypatch.setattr(qa_daily, "_supported", lambda platform=None: True if platform is None else real(platform))
+
+
 def _deps(home, report=REPORT, fail=("health",)):
     calls = []
 
@@ -393,3 +400,47 @@ def test_the_daily_tick_does_nothing_where_the_installer_does_not_exist(home):
     assert _tick(home, "2026-11-13", spawned, checked, supported=lambda: False) == "unsupported"
     assert spawned == [] and not (home / "qa").exists()
     assert qa_daily._supported("linux") is False and qa_daily._supported("win32") is True
+
+
+def test_a_corrupt_marker_for_today_waits_like_an_empty_one(home):
+    """JAR-232 review #1229 R1: a corrupt marker for today checked at once and could accept an older report."""
+    _write(home / "qa" / "daily" / "2026-11-13" / "install.started", "garbage", 1000)
+    spawned, checked = [], []
+    assert _tick(home, "2026-11-13", spawned, checked) == "waiting" and checked == [] and spawned == []
+    assert float((home / "qa" / "daily" / "2026-11-13" / "install.started").read_text(encoding="utf-8")) > 1000
+
+
+def test_manual_install_and_check_refuse_where_the_installer_does_not_exist(home, monkeypatch, capsys):
+    """JAR-232 review #1229 R2: `qa-daily install` still called install-latest on the Pi."""
+    from jarves import install_latest
+    _on(home)
+    seen = []
+    monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: seen.append(a) or 0)
+    monkeypatch.setattr(qa_daily, "_supported", lambda platform=None: False)
+    for action in ("install", "check"):
+        assert qa_daily.cmd_qa_daily(_args(action), Config(), home) == 2
+        assert qa_daily.WINDOWS_ONLY in capsys.readouterr().out
+    assert seen == [] and not (home / "qa").exists() and qa_daily.WINDOWS_ONLY in hebrew_text()
+
+
+def hebrew_text():
+    from jarves import hebrew
+    return hebrew.TEXT
+
+
+def test_a_check_that_raises_leaves_a_p1_draft_that_status_shows(home, capsys):
+    """JAR-232 review #1229 R3: a crashed check ended the day without bugs.json, so status showed the day before."""
+    _write(home / "qa" / "daily" / "2026-11-12" / "bugs.json", "[]", 1000)
+    spawned, checked = [], []
+    _tick(home, "2026-11-13", spawned, checked)                              # installing
+
+    def boom(_d):
+        raise OSError("disk full at C:\\Users\\igal\\x")
+    with pytest.raises(OSError):
+        _tick(home, "2026-11-13", spawned, checked, do_check=boom, clock=lambda: 1e10)
+    bugs = json.loads((home / "qa" / "daily" / "2026-11-13" / "bugs.json").read_text(encoding="utf-8"))
+    assert [(b["priority"], b["check"]) for b in bugs] == [("P1", "qa-daily check")]
+    assert "OSError" in bugs[0]["detail"] and "igal" not in bugs[0]["detail"]
+    _on(home)
+    assert qa_daily.cmd_qa_daily(_args("status"), Config(), home) == 0
+    assert "2026-11-13: FAIL (1 bug drafts)" in capsys.readouterr().out
