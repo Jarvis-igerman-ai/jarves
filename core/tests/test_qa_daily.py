@@ -348,3 +348,48 @@ def test_an_empty_start_marker_does_not_accept_an_older_report(home):
     r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", spawn=lambda a: None,
                       report=lambda d, s: seen.append(s), do_check=lambda d: None, clock=lambda: 5000.0)
     assert r == "waiting" and seen == [5000.0] and (rec / "install.started").read_text() == "5000.0"
+
+
+def _tick(home, day, spawned, checked, **kw):
+    kw.setdefault("do_check", checked.append)
+    kw.setdefault("clock", lambda: 1000.0 + qa_daily.INSTALL_WAIT_S * 9)
+    return qa_daily.tick(home, enabled=lambda: True, day=lambda: day, report=lambda _d, _s: None,
+                         spawn=spawned.append, **kw)
+
+
+def test_an_old_unchecked_or_corrupt_attempt_never_blocks_today(home):
+    """JAR-232 review R2: an unchecked day older than yesterday, a corrupt marker or a check that raises kept
+    `_open_day` on that day every hour, so today's install never started."""
+    root = home / "qa" / "daily"
+    _write(root / "2026-11-01" / "install.started", "1000.0", 1000)        # abandoned long ago
+    _write(root / "2026-11-12" / "install.started", "not a number", 1000)  # yesterday, corrupt
+    spawned, checked = [], []
+    assert _tick(home, "2026-11-13", spawned, checked) == "checked" and checked == ["2026-11-12"]
+    assert _tick(home, "2026-11-13", spawned, checked) == "installing" and spawned == [["qa-daily", "install"]]
+
+    def boom(_d):
+        raise OSError("disk full")
+    with pytest.raises(OSError):
+        _tick(home, "2026-11-13", spawned, checked, do_check=boom, clock=lambda: 1e10)
+    assert _tick(home, "2026-11-13", spawned, checked) == "done"            # the failure ended the day, not looped
+
+
+def test_manual_check_judges_the_open_install_day_after_midnight(home, monkeypatch, capsys):
+    """JAR-232 review R3: after UTC midnight `check` judged the new, empty day, not the install still open."""
+    from jarves import install_latest
+    _on(home)
+    monkeypatch.setattr(install_latest, "_cli_subprocess", lambda argv: (0, "ok"))
+    monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-13")
+    _write(home / "qa" / "daily" / "2026-11-12" / "install.started", "1000.0", 1000)
+    _write(home / "updates" / install_latest.REPORT_FILE, REPORT.replace("FAIL", "PASS").replace("06:00", "23:55"), 2000)
+    assert qa_daily.cmd_qa_daily(_args("check"), Config(), home) == 0
+    assert "qa/daily/2026-11-12" in capsys.readouterr().out
+    assert not (home / "qa" / "daily" / "2026-11-13").exists()
+
+
+def test_the_daily_tick_does_nothing_where_the_installer_does_not_exist(home):
+    """JAR-232 review R6: the catalog marks the Pi not_applicable, but the thread would still spawn install-latest."""
+    spawned, checked = [], []
+    assert _tick(home, "2026-11-13", spawned, checked, supported=lambda: False) == "unsupported"
+    assert spawned == [] and not (home / "qa").exists()
+    assert qa_daily._supported("linux") is False and qa_daily._supported("win32") is True

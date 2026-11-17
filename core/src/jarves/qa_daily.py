@@ -21,6 +21,7 @@ import io
 import json
 import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -114,9 +115,11 @@ def _of_day(head: str, d: str) -> bool:
 
 
 def _open_day(root: Path, today: str) -> str:
-    """The day of the newest install attempt not yet checked (it may have begun before UTC midnight), else today."""
+    """The day of the newest install attempt not yet checked (it may have begun before UTC midnight), else today.
+    Only yesterday can still be open: an older unchecked attempt is abandoned, never a reason to skip today."""
+    yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
     days = sorted(m.parent.name for m in root.glob("*/install.started")
-                  if m.parent.name <= today and not (m.parent / "tick.checked").is_file())
+                  if m.parent.name in (yesterday, today) and not (m.parent / "tick.checked").is_file())
     return days[-1] if days else today
 
 
@@ -124,11 +127,28 @@ INSTALL_WAIT_S = 5400 + 600                                         # install_la
 TICK_S = 3600.0
 
 
-def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=lambda: []) -> str:
-    """One daily step: off | done | busy | installing | waiting | checked. Install and check at most once a day;
-    the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
+def _supported(platform: str = sys.platform) -> bool:
+    """The signed installer is Windows only (catalog: the Pi is not_applicable); `enabled` does not check targets."""
+    return platform == "win32"
+
+
+def _marker_time(path: Path) -> float | None:
+    """The start time in an install.started marker; None when empty, 0.0 (long ago) when unreadable or corrupt."""
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        return float(raw) if raw else None
+    except (OSError, ValueError):
+        return 0.0
+
+
+def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=lambda: [],
+         supported=lambda: True) -> str:
+    """One daily step: off | unsupported | done | busy | installing | waiting | checked. Install and check at most
+    once a day; the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
     if not enabled():
         return "off"
+    if not supported():
+        return "unsupported"
     root = Path(home) / "qa" / "daily"
     d = _open_day(root, day())                                        # begun before UTC midnight: finish it first
     out = root / d
@@ -152,17 +172,18 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
                                             f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
             return "spawn_failed"
         return "installing"
-    raw = marker.read_text(encoding="utf-8").strip()
-    if not raw:                                                       # crashed before the clock was written
-        raw = str(clock())
-        marker.write_text(raw, encoding="utf-8")
-    since = float(raw)
+    since = _marker_time(marker)
+    if since is None:                                                 # crashed before the clock was written
+        since = clock()
+        marker.write_text(str(since), encoding="utf-8")
     text = report(d, since) or ""                                     # only what was written after this attempt began
     final = text.startswith(("PASS", "FAIL")) and _of_day(text.splitlines()[0], d)
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
-    do_check(d)                                                       # never reported: check writes the P1 draft
-    done.write_text(str(clock()), encoding="utf-8")
+    try:
+        do_check(d)                                                   # never reported: check writes the P1 draft
+    finally:                                                          # a check that raises still ends the day (once)
+        done.write_text(str(clock()), encoding="utf-8")
     return "checked"
 
 
@@ -184,7 +205,7 @@ def _report_reader(home, day: str, since: float = 0.0):
 
 def _since(home, day: str) -> float:
     m = Path(home) / "qa" / "daily" / day / "install.started"
-    return float(m.read_text(encoding="utf-8") or 0) if m.is_file() else 0.0
+    return (_marker_time(m) or 0.0) if m.is_file() else 0.0
 
 
 SPAWN_LOG = "spawn.log"                                               # the detached child's stdout + stderr
@@ -224,7 +245,7 @@ def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
     return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d, since: _report_reader(home, d, since)(),
-                spawn=lambda argv: _spawn_hidden(argv, Path(home) / "qa" / "daily" / day / SPAWN_LOG), busy=busy, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
+                spawn=lambda argv: _spawn_hidden(argv, Path(home) / "qa" / "daily" / day / SPAWN_LOG), busy=busy, supported=_supported, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:
@@ -238,7 +259,7 @@ def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> thr
             try:
                 from .auto_update import core_busy
                 r = _tick_real(core.cfg, core.home, busy=lambda: core_busy(core))
-                if r not in ("off", "done", "waiting", "busy"):
+                if r not in ("off", "unsupported", "done", "waiting", "busy"):
                     logs.info("updates", "QA_DAILY_TICK", "daily installed-beta check step", step=r)
             except Exception as e:                                    # never stops the Core
                 logs.warn("updates", "QA_DAILY_TICK_FAILED", "daily beta check step failed", error_type=type(e).__name__)
@@ -277,8 +298,8 @@ def cmd_qa_daily(a, cfg, home) -> int:
         return 1 if step == "spawn_failed" else 0
     if action == "check":
         from .install_latest import _cli_subprocess
-        day = _today()
-        res = check(Deps(home, _report_reader(home, day), _cli_subprocess, day))
+        day = _open_day(Path(home) / "qa" / "daily", _today())          # the same day `install` and the tick use
+        res = check(Deps(home, _report_reader(home, day, _since(home, day)), _cli_subprocess, day))
         for b in res["bugs"]:
             print(f"  [{b['priority']}] {b['check']}: {b['detail'][:160]}")
         print(("PASS" if res["ok"] else "FAIL") + f"  qa-daily  demo + bug drafts (local only): <data folder>/{res['dir']}")
