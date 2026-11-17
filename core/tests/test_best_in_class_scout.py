@@ -118,6 +118,20 @@ def test_pypi_rules(tmp_path):
     assert bic.check_online(data, fetcher("1.1.7")) == []          # patch the pin already installs
     assert "evaluate" in bic.check_online(data, fetcher("1.3.0"))[0]["detail"]
     assert "outside the pin <2" in bic.check_online(data, fetcher("2.0.1"))[0]["detail"]
+    for rec, latest in (("1.0", "1.0.5"), ("2.0.0", "2.0.3"), ("1", "1.0.2")):  # trailing zeros: a patch, not a minor
+        assert bic.check_online(bic.load(registry(tmp_path, [pypi(recorded=rec)])), fetcher(latest)) == []
+    assert "evaluate" in bic.check_online(bic.load(registry(tmp_path, [pypi(recorded="1.0")])), fetcher("1.1"))[0]["detail"]
+
+
+def test_asset_suffix_stripped_only_with_image_extension():
+    ids = bic.page_ids('<img src="gpt-x-3-texture.webp"><a>gpt-voice-block</a><a>gpt-y-texture</a>')
+    assert "gpt-x-3" in ids and "gpt-voice-block" in ids and "gpt-y-texture" in ids
+
+
+def test_unknown_kind_rejected(tmp_path):
+    import pytest
+    with pytest.raises(ValueError, match="unknown kind 'pipy'"):
+        bic.load(registry(tmp_path, [pypi(kind="pipy")]))
 
 
 def test_fetch_errors_are_findings_and_sources_fetched_once(tmp_path):

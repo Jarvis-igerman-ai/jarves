@@ -27,7 +27,9 @@ from typing import Callable
 REPO = Path(__file__).resolve().parents[2]
 REGISTRY = REPO / "docs" / "decisions" / "best_in_class.toml"
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_ASSET = re.compile(r"(\.(png|webp|jpe?g|svg|gif))$|(-(texture|block))$")
+_IMG = re.compile(r"\.(png|webp|jpe?g|svg|gif)$")
+_ASSET_SUFFIX = re.compile(r"-(texture|block)$")  # stripped only from image file names
+KINDS = ("openai-model", "pypi", "manual")
 
 Fetch = Callable[[str], str]
 
@@ -38,6 +40,8 @@ def load(path: Path = REGISTRY) -> dict:
         for key in ("id", "stage", "kind", "recorded", "source", "checked"):
             if key not in e:
                 raise ValueError(f"registry entry {e.get('id', '?')}: missing {key}")
+        if e["kind"] not in KINDS:
+            raise ValueError(f"registry entry {e['id']}: unknown kind {e['kind']!r} (expected one of {KINDS})")
     return data
 
 
@@ -84,9 +88,8 @@ def page_ids(text: str) -> set[str]:
     out = set()
     for tok in _TOKEN.findall(text):
         tok = tok.rstrip(".-_")
-        prev = None
-        while prev != tok:
-            prev, tok = tok, _ASSET.sub("", tok)
+        if _IMG.search(tok):
+            tok = _ASSET_SUFFIX.sub("", _IMG.sub("", tok))
         out.add(tok)
     return out
 
@@ -127,12 +130,18 @@ def _openai(e: dict, text: str) -> list[dict]:
     return out
 
 
+def _minor(text: str) -> tuple[int, int]:
+    """(major, minor), padding missing parts with 0, so 1.0 and 1.0.5 compare equal."""
+    parts = [int(p) for p in re.findall(r"\d+", text)][:2]
+    return tuple(parts + [0] * (2 - len(parts)))  # type: ignore[return-value]
+
+
 def _pypi(e: dict, text: str) -> list[dict]:
     latest = json.loads(text)["info"]["version"]
     pin = e.get("pin_below")
     if pin and vtuple(latest) >= vtuple(pin):
         where = f"outside the pin <{pin}"
-    elif vtuple(latest)[:2] > vtuple(e["recorded"])[:2]:
+    elif _minor(latest) > _minor(e["recorded"]):
         where = "new minor/major, allowed by the pin: evaluate and raise the floor"
     else:
         return []  # a patch the pin already installs is not a scout finding
