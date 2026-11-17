@@ -19,6 +19,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -71,6 +72,7 @@ def check(deps: Deps) -> dict:
     lines = ["JARVES daily installed-beta check (local only)"]
 
     def bug(prio: str, name: str, detail: str) -> None:
+        name = _clean(name, 80)                                       # from the report text: redact it too
         bugs.append({"priority": prio, "check": name, "title": f"{prio}: daily beta check '{name}' failed",
                      "detail": _clean(detail), "evidence": f"{rel}/demo.txt", "local_only": True})
 
@@ -164,15 +166,19 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         if busy():
             return "busy"
         out.mkdir(parents=True, exist_ok=True)
+        started = clock()
         try:                                                          # exclusive: a manual `run` cannot spawn twice
             with open(marker, "x", encoding="utf-8") as f:
-                f.write(str(clock()))
+                f.write(str(started))
         except FileExistsError:
             return "waiting"
         try:
             spawn(["qa-daily", "install"])
         except Exception as e:                                        # the day's draft carries the real cause
-            (out / INSTALL_FILE).write_text(f"FAIL  install-latest  {d} (not started)\n"
+            rec = out / INSTALL_FILE
+            if rec.is_file() and rec.stat().st_mtime >= started:      # the child ran and stopped early (exit 1):
+                return "installing"                                   # its own record is the result, keep it
+            rec.write_text(f"FAIL  install-latest  {d} (not started)\n"
                                             f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
             return "spawn_failed"
         return "installing"
@@ -186,6 +192,8 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     final = text.startswith(("PASS", "FAIL")) and _of_day(text.splitlines()[0], d)
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
+    if not _claim(out / CHECK_CLAIM, clock):                          # another tick (Core or manual run) checks
+        return "checking"
     try:
         do_check(d)                                                   # never reported: check writes the P1 draft
     except Exception as e:                                            # status must show this day, not the one before
@@ -194,6 +202,34 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     finally:                                                          # a check that raises still ends the day (once)
         done.write_text(str(clock()), encoding="utf-8")
     return "checked"
+
+
+CHECK_CLAIM = "check.claimed"
+CHECK_STALE_S = 4 * 3600.0                                            # > 6 checks x the 300 s CLI timeout, with margin
+
+
+def _claim(path: Path, clock) -> bool:
+    """Atomically claim the day's check (O_EXCL). A claim older than CHECK_STALE_S was left by a Core that died
+    mid-check: it is renamed away (only one tick wins the rename) and claimed afresh."""
+    for _ in range(2):
+        try:
+            with open(path, "x", encoding="utf-8") as f:
+                f.write(str(clock()))
+            return True
+        except FileExistsError:
+            t = _marker_time(path)
+            if t is not None and t != CORRUPT and clock() - t <= CHECK_STALE_S:
+                return False
+            moved = path.with_name(f"{path.name}.stale-{os.getpid()}-{threading.get_ident()}")
+            try:
+                os.replace(path, moved)
+            except FileNotFoundError:                                 # another tick recovered it first
+                return False
+            t = _marker_time(moved)
+            if t is not None and t != CORRUPT and clock() - t <= CHECK_STALE_S:
+                return False                                          # moved a fresh claim: its owner checks
+            moved.unlink(missing_ok=True)
+    return False
 
 
 def _write_check_failed(out: Path, d: str, e: Exception) -> None:

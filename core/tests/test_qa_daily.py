@@ -158,18 +158,20 @@ def test_up_to_date_or_early_stop_is_recorded_and_judged_not_lost(home, monkeypa
     from jarves import install_latest
     _on(home)
     monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-12")
-    (home / "updates").mkdir()
-    (home / "updates" / install_latest.REPORT_FILE).write_text(
-        "PASS  install-latest  2026-11-12 01:00 UTC\nversion: 4.5.0 -> 4.5.1\n", encoding="utf-8")
+    _write(home / "updates" / install_latest.REPORT_FILE,
+           "PASS  install-latest  2026-11-12 01:00 UTC\nversion: 4.5.0 -> 4.5.1\n", 1000)
+    rec = home / "qa" / "daily" / "2026-11-12" / qa_daily.INSTALL_FILE
     up = "PASS  install-latest  2026-11-12 06:00 UTC\n  [PASS] find newest beta installer\n  [PASS] up to date: nothing newer"
     monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(up) or 0)
     assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 0
+    os.utime(rec, (2000, 2000))                                            # written after the stable report
     deps = qa_daily.Deps(home, qa_daily._report_reader(home, "2026-11-12"),
                          lambda argv: (0, "JARVES 4.5.1-beta.3 (BETA)" if argv[0] == "update" else "ok"), "2026-11-12")
     assert qa_daily.check(deps)["bugs"] == []
     stop = "FAIL  install-latest  2026-11-12 07:00 UTC\n  [FAIL] backup now: BACKUP_DISK_FULL"
     monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: print(stop) or 1)
     assert qa_daily.cmd_qa_daily(_args("install"), Config(), home) == 1
+    os.utime(rec, (3000, 3000))
     assert [b["check"] for b in qa_daily.check(deps)["bugs"]] == ["backup now"]
 
 
@@ -444,3 +446,50 @@ def test_a_check_that_raises_leaves_a_p1_draft_that_status_shows(home, capsys):
     _on(home)
     assert qa_daily.cmd_qa_daily(_args("status"), Config(), home) == 0
     assert "2026-11-13: FAIL (1 bug drafts)" in capsys.readouterr().out
+
+
+def test_a_child_that_stops_early_with_exit_1_keeps_its_own_record(home):
+    """JAR-232 council (opus): install-latest exits 1 on a quick early stop after writing install.txt; the start
+    check overwrote that record with 'not started', so the day's P1 named the wrong check."""
+    rec = home / "qa" / "daily" / "2026-11-12" / qa_daily.INSTALL_FILE
+    stop = "FAIL  install-latest  2026-11-12 07:00 UTC\n  [FAIL] backup now: BACKUP_DISK_FULL\n"
+
+    def spawn(_argv):
+        _write(rec, stop, 1001)
+        raise RuntimeError("child exited 1 at start: ...")
+    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda _d, _s: None,
+                      spawn=spawn, do_check=lambda _d: None, clock=lambda: 1000.0)
+    assert r == "installing" and rec.read_text(encoding="utf-8") == stop
+    deps, _ = _deps(home, fail=())
+    deps.report = qa_daily._report_reader(home, "2026-11-12", 1000.0)
+    assert [b["check"] for b in qa_daily.check(deps)["bugs"]] == ["backup now"]
+
+
+def test_only_one_of_two_concurrent_ticks_runs_the_check(home):
+    """JAR-232 council (gpt): the Core tick and a manual `run` could both pass the tick.checked test and check twice."""
+    spawned, checked, inner = [], [], []
+    _tick(home, "2026-11-12", spawned, checked)                              # installing
+
+    def do_check(d):                                                          # a second tick arrives mid-check
+        checked.append(d)
+        inner.append(_tick(home, "2026-11-12", spawned, checked, clock=lambda: 1e10))
+    assert _tick(home, "2026-11-12", spawned, checked, do_check=do_check, clock=lambda: 1e10) == "checked"
+    assert checked == ["2026-11-12"] and inner == ["checking"]
+
+
+def test_an_interrupted_check_claim_is_recovered(home):
+    day = home / "qa" / "daily" / "2026-11-12"
+    _write(day / "install.started", "1000.0", 1000)
+    t = 1000.0 + qa_daily.INSTALL_WAIT_S + 10
+    _write(day / "check.claimed", str(t), t)                                 # the Core died mid-check
+    spawned, checked = [], []
+    assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: t + 60) == "checking" and checked == []
+    assert _tick(home, "2026-11-12", spawned, checked,
+                 clock=lambda: t + 1 + qa_daily.CHECK_STALE_S) == "checked" and checked == ["2026-11-12"]
+
+
+def test_a_check_name_from_the_report_is_redacted(home):
+    deps, _ = _deps(home, report=REPORT.replace("[FAIL] doctor:", "[FAIL] mail igal@example.com token=abc123:"),
+                    fail=())
+    names = [b["check"] + b["title"] for b in qa_daily.check(deps)["bugs"]]
+    assert names and not any("igal@" in n or "abc123" in n for n in names)
