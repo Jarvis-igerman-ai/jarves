@@ -106,9 +106,10 @@ def _c(tmp_path):
 
 def test_execute_garbage_age_is_not_stale(tmp_path):
     c = _c(tmp_path)
-    for age in ("abc", None, [], float("nan")):
+    for age in ("abc", None, []):
         assert c.stale(age) is False
     assert c.stale(float("inf")) is True
+    assert c.stale(float("nan")) is True        # NaN age is refused like an over-age command (#206 F7)
 
 
 def test_execute_runs_without_cid_and_does_not_store_500(tmp_path):
