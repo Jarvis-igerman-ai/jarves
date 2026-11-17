@@ -6,6 +6,7 @@ the model pass (validated, never acted on, failure keeps rows flagged), dedup, t
 right-to-left workbook), the tool (read gate, taint, counts not texts, logs without text) and the CLI."""
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -540,3 +541,63 @@ def test_a_malformed_model_answer_keeps_the_local_row_flagged(bad):
     r = wcol.rule_row(m("שילמתי 300 שקל"), "chat", "אבי", "אבי")
     assert wcol.apply_model(r, bad) and r.uncertain and "model answer invalid" in r.why_unsure
     assert "payee guessed" in r.why_unsure and r.what_for == ""
+
+
+# ---------------------------------------------------------------------- salvage (JAR-273): the model has a deadline
+class _Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+async def test_a_slow_model_stops_at_the_deadline_and_the_files_are_still_written(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(wcol.logs, "warn", lambda *a, **kw: warned.append(a[1]))
+    msgs = [m(f"שילמתי {i + 1} שקל", mid=f"p{i}", ts=T0 - i, from_me=True) for i in range(4 * wcol.MODEL_BATCH)]
+    clk, calls = _Clock(), []
+
+    async def slow(items, topic):                            # each batch "takes" 40 s on the fake clock
+        calls.append(len(items))
+        clk.t += 40.0
+        return [{"i": x["i"], "relevant": True, "sure": True} for x in items]
+    res = await wcol.collect(tmp_path, "תשלום", msgs, names={}, contacts=[], model=slow, now=T0,
+                             clock=clk, deadline=100.0)
+    assert len(calls) == 3 and res.counts()["deadline_batches"] == 1      # 0, 40, 80 s ran; at 120 s it stopped
+    assert len(res.rows) == len(msgs) and {p.suffix for p in res.files} == {".csv", ".xlsx", ".md"}
+    late = [r for r in res.rows if "no model check" in r.why_unsure]
+    assert len(late) == wcol.MODEL_BATCH and all(r.uncertain for r in late)
+    assert warned == ["WA_COLLECT_MODEL_DEADLINE"]                          # one warning per run, not per batch
+
+
+async def test_a_hanging_model_batch_is_cut_at_the_deadline():
+    rows = [wcol.rule_row(m("שילמתי 100 שקל", mid="1", from_me=True), "chat", "אבי", "אבי")]
+
+    async def hangs(items, topic):
+        await asyncio.sleep(3600)
+    kept, st = await wcol.model_pass(rows, ["x"], "תשלום", hangs, clock=lambda: 0.0, deadline=0.01)
+    assert len(kept) == 1 and kept[0].uncertain and st["failed_batches"] == 1
+
+
+def test_answer_and_summary_label_payee_names_as_from_messages():
+    sums = [{"payee": "אבי", "total_ils": 450.0, "count": 1}]
+    assert "שמות מתוך ההודעות" in wcol.answer_he({"rows": 1, "uncertain": 0, "total_ils": 450.0}, sums, [])
+    assert "שמות מתוך ההודעות" in wcol.summary_he("תשלום", [], sums)
+
+
+async def test_the_tool_gives_the_model_pass_a_deadline_inside_its_timeout(bridge, home, clock, monkeypatch):
+    _seed(bridge, clock())
+    monkeypatch.setattr(wcol, "COLLECT_BUDGET_S", 0.0)      # budget already spent: no model batch may start
+    calls = []
+
+    async def model(items, topic):
+        calls.append(1)
+        return []
+    r = await make_reg(home, clock, model=model).call("whatsapp_collect", {"topic": "תשלומים", "contacts": ["אבי"]})
+    assert r.ok and r.data["files"] and not calls and r.data["counts"]["deadline_batches"] == 1
+
+
+def test_the_collect_budget_leaves_room_to_write_inside_the_tool_timeout(home):
+    tool = next(t for t in wab.WhatsAppBridgeSkill(home).tools() if t.name == "whatsapp_collect")
+    assert wcol.READ_DEADLINE_S < wcol.COLLECT_BUDGET_S <= tool.timeout_s - 10

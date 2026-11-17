@@ -833,11 +833,13 @@ def _collect_resolve(chats: list[dict], who: str, book: dict) -> dict | None:
 
 
 async def run_collect(home: Path, client, *, topic: str, contacts: list[str], chat: str = "", since: str = "",
-                      until: str = "", formats=None, archive=None, model=None, now: float) -> tuple:
+                      until: str = "", formats=None, archive=None, model=None, now: float,
+                      clock=time.monotonic) -> tuple:
     """The ONE whatsapp_collect pipeline (JAR-273), for the tool and `jarvis whatsapp collect`: list chats (the read
     gate), merge alias ids, resolve the people (a name that is no chat is still found where others mention it) and
     --chat, gather, then wcol.collect. Raises BridgeError (a locked archive is WA_STORE_LOCKED) or DateError.
-    Returns (Result, mention_only)."""
+    Returns (Result, mention_only). The model pass ends wcol.COLLECT_BUDGET_S after the start (`clock`)."""
+    deadline = clock() + wcol.COLLECT_BUDGET_S
     t0, t1 = whatsapp_archive.parse_when(since, now), whatsapp_archive.parse_when(until, now, end=True)
     raw = await asyncio.to_thread(client.chats, None, CAP_MESSAGES)
     chats = merge_aliases(raw)
@@ -871,7 +873,8 @@ async def run_collect(home: Path, client, *, topic: str, contacts: list[str], ch
         msgs.truncated.append("chats")
     res = await wcol.collect(home, topic, msgs, names=names, contacts=people, chat=only, since=t0, until=t1,
                              model=model, formats=formats or list(wcol.FORMATS),
-                             clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon)
+                             clean=lambda t: pol.clean_text(t or "")[0], now=now, canon=canon,
+                             clock=clock, deadline=deadline)
     return res, mention_only
 
 

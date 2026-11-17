@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import io
+import asyncio
 import json
 import re
 import time
@@ -37,6 +38,7 @@ MAX_READS = 400                 # archive pages + bridge chat reads per run (eac
 READ_DEADLINE_S = 120.0         # reading stops after this; below the tool's 180 s timeout, so a report is still written
 MAX_ROWS = 400                  # rows in one report (the newest are kept; older ones are reported as cut)
 MODEL_BATCH = 25                # messages per model request
+COLLECT_BUDGET_S = 165.0        # read + model pass end by this (from the start); 15 s left of the 180 s tool timeout to write
 QUOTE_CHARS = 120
 FIELD_CHARS = 60
 FORMATS = ("csv", "xlsx", "md")
@@ -317,9 +319,14 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
     return True
 
 
-async def model_pass(rows: list[Row], texts: list[str], topic: str, model: ModelFn | None) -> tuple[list[Row], dict]:
-    """Batches of MODEL_BATCH through `model`; a failed batch keeps its rule rows (flagged). Returns kept rows + stats."""
-    stats = {"model": model is not None, "batches": 0, "failed_batches": 0, "dropped_off_topic": 0}
+async def model_pass(rows: list[Row], texts: list[str], topic: str, model: ModelFn | None, *,
+                     clock: Callable[[], float] = time.monotonic,
+                     deadline: float | None = None) -> tuple[list[Row], dict]:
+    """Batches of MODEL_BATCH through `model`; a failed batch keeps its rule rows (flagged). Returns kept rows + stats.
+    At `deadline` (a `clock()` time) no new batch starts and a running one is cut: those rows stay rule rows, flagged
+    "no model check" (counted in `deadline_batches`), so the report is still written inside the tool timeout."""
+    stats = {"model": model is not None, "batches": 0, "failed_batches": 0, "dropped_off_topic": 0,
+             "deadline_batches": 0}
     if model is None:
         for r in rows:
             r.flag("no model check")
@@ -327,11 +334,18 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
     keep: list[Row] = []
     for start in range(0, len(rows), MODEL_BATCH):
         part = rows[start:start + MODEL_BATCH]
+        left = None if deadline is None else deadline - clock()
+        if left is not None and left <= 0:
+            stats["deadline_batches"] += 1
+            for r in part:
+                r.flag("no model check")
+            keep += part
+            continue
         items = [{"i": i, "date": r.date, "chat": r.chat, "sender": r.sender, "text": texts[start + i][:500]}
                  for i, r in enumerate(part)]
         stats["batches"] += 1
         try:
-            answer = await model(items, topic)
+            answer = await asyncio.wait_for(model(items, topic), timeout=left)
         except Exception as e:                                   # budget, network, bad JSON: rule rows stay
             logs.warn("whatsapp", "WA_COLLECT_MODEL_FAILED", "WhatsApp collect model batch failed",
                       error_type=type(e).__name__)
@@ -492,7 +506,8 @@ def _ils(v: float) -> str:
 
 def summary_he(topic: str, rows: list[Row], sums: list[dict], *, cut: int = 0, dupes: int = 0,
                model: bool = True, files: list[str] | None = None, truncated: list[str] | None = None) -> str:
-    """The short Hebrew summary (also the .md file). Counts, totals and file names only: no message text."""
+    """The short Hebrew summary (also the .md file): counts, totals, file names and payee names (from messages, so
+    labelled as such); no message text."""
     unsure = sum(r.uncertain for r in rows)
     total = round(sum(r.amount or 0.0 for r in rows), 2)
     lines = [f"# איסוף הודעות וואטסאפ: {topic}", "",
@@ -500,7 +515,7 @@ def summary_he(topic: str, rows: list[Row], sums: list[dict], *, cut: int = 0, d
     if rows:
         lines.append(f"מתאריך {rows[0].date} עד {rows[-1].date}.")
     if sums:
-        lines += ["", "## סכום לפי מקבל"] + [f"- {safe_cell(g['payee'])}: {_ils(g['total_ils'])} ({g['count']} הודעות)"
+        lines += ["", "## סכום לפי מקבל (שמות מתוך ההודעות)"] + [f"- {safe_cell(g['payee'])}: {_ils(g['total_ils'])} ({g['count']} הודעות)"
                                              for g in sums]
     notes = []
     if dupes:
@@ -572,7 +587,8 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
                   contacts: list[Contact], chat: str | None = None, since: float | None = None,
                   until: float | None = None, model: ModelFn | None = None, formats: Iterable[str] = FORMATS,
                   clean: Callable[[str], str] = str, now: float | None = None,
-                  canon: dict[str, str] | None = None) -> Result:
+                  canon: dict[str, str] | None = None, clock: Callable[[], float] = time.monotonic,
+                  deadline: float | None = None) -> Result:
     """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names` maps chat id -> display name; `canon`
     maps every alias id of one person (old phone chat + new LID chat) to ONE chat id, so the chat filter, the
     same-message check and the forward check treat them as one chat."""
@@ -595,12 +611,15 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
     picked = picked[:MAX_ROWS]
     rows = [rule_row(m, reason, label, names.get(m.get("chat", ""), ""), clean=clean) for m, reason, label in picked]
     texts = [clean(_text_of(m)) for m, _, _ in picked]
-    rows, mstats = await model_pass(rows, texts, topic, model)
+    rows, mstats = await model_pass(rows, texts, topic, model, clock=clock, deadline=deadline)
     rows, dupes = dedup(rows)
     sums = totals(rows)
     files = write_report(home, topic, rows, sums, formats=formats, cut=cut, dupes=dupes, model=model is not None,
                          now=now, truncated=truncated)
     by_reason: dict[str, int] = {}
+    if mstats["deadline_batches"]:
+        logs.warn("whatsapp", "WA_COLLECT_MODEL_DEADLINE", "WhatsApp collect model pass stopped at its deadline",
+                  count=mstats["deadline_batches"])
     for r in rows:
         by_reason[r.reason] = by_reason.get(r.reason, 0) + 1
     logs.info("whatsapp", "WA_COLLECTED", "WhatsApp messages collected into a report at the owner's request",
@@ -609,12 +628,12 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
 
 
 def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
-    """The short Hebrew chat answer: counts and totals only; rows cut by MAX_ROWS and a cut read are always said."""
+    """The short Hebrew chat answer: counts and totals; payee names come from messages (untrusted) and say so; rows cut by MAX_ROWS and a cut read are always said."""
     cut = " לא כל ההודעות נקראו, ייתכן שחסרות." if c.get("retrieval_truncated") else ""
     if not c.get("rows"):
         return "לא מצאתי הודעות על הנושא הזה." + cut
     sums = "; ".join(f"{g['payee']}: {g['total_ils']:g} ₪" for g in totals_[:5])
-    return (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ ({sums})."
+    return (f"אספתי {c['rows']} הודעות, סך הכול {c['total_ils']:g} ₪ (שמות מתוך ההודעות: {sums})."
             + (f" {c['uncertain']} מסומנות לבדיקה." if c.get("uncertain") else "")
             + (f" הדוח נחתך: {c['cut']} הודעות ישנות לא נכנסו. צמצמו עם --since או --from." if c.get("cut") else "")
             + cut
