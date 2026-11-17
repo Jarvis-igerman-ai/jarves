@@ -558,7 +558,7 @@ def owner_actions(coverage: dict) -> list[str]:
     lines = []
     for keys, text in groups:
         if keys:
-            codes = "/".join(sorted({refused[k][5:] for k in keys}))
+            codes = "/".join(sorted({refused[k].removeprefix("http_") for k in keys}))
             lines.append(f"Owner action (HTTP {codes}: {', '.join(sorted(keys))}): {text}")
     return lines
 

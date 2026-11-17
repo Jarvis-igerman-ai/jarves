@@ -3,6 +3,7 @@ sleeping. Covers dedupe, timezone / DST, offline, failure / retry, quiet hours a
 synthetic finding creates exactly ONE non-sensitive issue."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -184,7 +185,8 @@ def test_issue_480_refused_sources_name_the_owner_action():
     assert ss.refused_sources({"code_scanning": "complete:http_403", "dependabot": "skipped:http_404"}) == {}
 
 
-# Read from the live #480 issue body on 16 Nov 2026 (incomplete coverage, no findings): "<!-- sig:6490f068a3c2e39a -->".
+# Read from the live #480 issue body on 16 and 17 Nov 2026 (incomplete coverage, no findings): "<!-- sig:6490f068a3c2e39a -->".
+# Re-derivable without the live issue: it is sha256("i|")[:16], the pre-#480 formula for incomplete coverage, no findings.
 LIVE_480_SIG = "6490f068a3c2e39a"
 
 
@@ -207,6 +209,7 @@ def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(h
     assert scan(None, gh)["issue"]["status"] == "updated"
     assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
     assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    assert hashlib.sha256(b"i|").hexdigest()[:16] == LIVE_480_SIG                        # re-derivable without the live issue
     assert ss.signature([], False) == ss.signature([], False, {}) == LIVE_480_SIG    # no refusals: old signature kept
     assert ss.signature([], True) == ss.signature([], True, {})
     assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_401"})
