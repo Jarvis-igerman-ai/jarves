@@ -393,9 +393,14 @@ def test_install_reuses_the_backup_just_taken_issue_1016(tmp_path, monkeypatch):
     os.utime(db, (1000, 1000))
     bdir = backup.backup_dir(tmp_path)
     bdir.mkdir()
-    given = bdir / "given.zip"
-    given.write_bytes(b"PK")
-    os.utime(given, (2000, 2000))
+    import zipfile
+
+    def archive(path, created=2000):                                   # a real zip whose manifest has its start time
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("manifest.json", json.dumps({"created": created}))
+        os.utime(path, (2000, 2000))
+        return path
+    given = archive(bdir / "given.zip")
     host, pub = _hosted(tmp_path)
     u = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub])
     u.check(force=True)
@@ -406,16 +411,19 @@ def test_install_reuses_the_backup_just_taken_issue_1016(tmp_path, monkeypatch):
     r = u.prepare_install(approved=True, backup=bdir / "missing.zip")
     assert r["backup"] == str(tmp_path / "new.zip") and len(made) == 1
     outside = tmp_path / "elsewhere.zip"                               # not in the backup folder (review R6)
-    outside.write_bytes(b"PK")
-    os.utime(outside, (2000, 2000))
+    archive(outside)
     assert u.prepare_install(approved=True, backup=outside)["backup"] == str(tmp_path / "new.zip") and len(made) == 2
-    broken = bdir / "broken.zip"                                       # does not verify
-    broken.write_bytes(b"PK")
-    os.utime(broken, (2000, 2000))
+    broken = archive(bdir / "broken.zip")                              # does not verify
     assert u.prepare_install(approved=True, backup=broken)["backup"] == str(tmp_path / "new.zip") and len(made) == 3
+    early = archive(bdir / "early.zip", created=500)                   # zip started before memory.db's last write
+    assert u.prepare_install(approved=True, backup=early)["backup"] == str(tmp_path / "new.zip") and len(made) == 4
+    nomanifest = bdir / "nomanifest.zip"                               # not an archive: never reused
+    nomanifest.write_bytes(b"PK")
+    os.utime(nomanifest, (2000, 2000))
+    assert u.prepare_install(approved=True, backup=nomanifest)["backup"] == str(tmp_path / "new.zip") and len(made) == 5
     (tmp_path / "memory.db-wal").write_bytes(b"x")                     # the Core wrote during the download (R1)
     os.utime(tmp_path / "memory.db-wal", (3000, 3000))
-    assert u.prepare_install(approved=True, backup=given)["backup"] == str(tmp_path / "new.zip") and len(made) == 4
+    assert u.prepare_install(approved=True, backup=given)["backup"] == str(tmp_path / "new.zip") and len(made) == 6
 
 
 def test_cached_release_is_reverified_at_install_time(tmp_path, monkeypatch):

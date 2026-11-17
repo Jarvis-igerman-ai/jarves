@@ -444,9 +444,10 @@ def usage(home: Path) -> dict:
 
 
 def prune(home: Path, protect: frozenset[str] = frozenset()) -> list[str]:
-    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind, the rollback backup or
-    a name in `protect`. The size budget never deletes a manual backup (the owner took it on purpose; only the
-    manual count limits those)."""
+    """Apply retention; returns the deleted names. The count limits keep at least the newest backup of each kind.
+    The size budget (max_gb) may then remove older and newest checkpoints too, but never the newest backup overall,
+    the newest automatic backup, any manual backup (only the manual count limits those), the rollback backup or a
+    name in `protect`."""
     s = get_settings(home)
     items = list_backups(home)
     keep: set[str] = set()
