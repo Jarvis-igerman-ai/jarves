@@ -139,3 +139,24 @@ Branch verdicts: `v5/phone-prefs-183` **MERGE**, `v5/phone-goalplans-184` **MERG
 5. F5 + F10 + F11 on branch 185 before it merges.
 6. F6: runner deny list for `--output`, plus a live Claude Code check.
 7. F7, F9, F13, F14: small phone and continuity fixes (can be one PR with a test each).
+
+## Fix status (checked 2026-11-16 against `main` at 595e21eb, JAR-34)
+
+Acceptance for #189: every P0-P2 finding has a fix PR or a stated reason. There are no P0 or P1 findings. All six P2 findings are fixed on `main`. Evidence class: code reading plus git history. These are not installed-product checks.
+
+| Finding | Sev | Module | Issue | Fix PR | State on `main` (what to look at) |
+|---|---|---|---|---|---|
+| F1 | P2 | goal_plans, approvals, mobile | #200 | #245 (merged 2026-10-25) | Plan and step approvals use `pc_only=True` (`goal_plans.py` `goal_plan_step` / `goal_plan_run` / dashboard approve). `mobile.py` refuses a phone approve of a `pc_only` row. |
+| F2 | P2 | preferences | #201 | #256 (merged 2026-10-25) | A model `pref_edit` calls `edit(..., repropose=True)`, so a confirmed item goes back to `proposed`. The `pref_confirm` popup shows the text (`confirm_meta`). |
+| F3 | P2 | goal_plans | #202 | #248 (merged 2026-10-25) | `goal_plan_show` is `untrusted_output=True`, so reading notes or results taints the turn. |
+| F4 | P2 | continuity, goal_plans, projectmgr, dashboard_auth | #203 | #259 (merged 2026-10-25) | `/api/continuity`, `/api/goal-plans`, `/api/agents` and `/api/projects` are in `DEVICE_READ_DENY`. Residual, accepted: `GET /api/continuity` still marks the desktop beat and fetches desktop notices. Only the loopback owner can reach it now: devices are denied, the Host allow-list blocks DNS rebinding, and the SameSite=Strict cookie blocks cross-site GETs. Moving that work to a POST is hygiene, not a P2. |
+| F5 | P2 | phone indicator (branch 185) | #204 | #272 (merged; commit a05cd80c) | `indicator.js` has a 5 s request timeout and an 8 s staleness limit, and the server sends `ts`. A stale or hung reading shows "unknown". |
+| F6 | P2 | projectmgr | #205 | #451 (merged; commit 7b02f6f1) | `runners.py` limits read-only git to exact forms (`READ_GIT`). `DENY` covers `--output`, `-o`, `-c`, `--ext-diff`, `--upload-pack` and `--exec`. Tests are in `test_projectmgr.py`. UNVERIFIED: no check against a live Claude Code run (stated on #205). |
+
+P3 and hardening items are tracked on #206:
+- Fixed on `main`: F7, F8 (commit 1db57f6a; `TOOL_APPROVAL_TIMEOUT` / `TOOL_APPROVAL_UNAVAILABLE` also block), F9 (#451), F10 and F11 (#272, da202af7), F12 and F14 (da202af7), H1 (67ad9726).
+- Open PR #1108 (`no-automerge`, JAR-376): H2 (a phone edit re-proposes), H3 and H4 (guide text), and part of F13 (the phone reply ledger keeps no words when privacy is on).
+- Still open: F13 plan-step evidence at rest. This needs an owner decision because privacy is ON by default, so blanking evidence would remove plan proof for every owner. The question is recorded in #1108.
+
+Per-module summary (P0-P2 open on `main`): goal_plans 0, continuity 0, devstatus 0 (no findings), projectmgr 0, preferences 0.
+No secrets were read or written for this update.
