@@ -60,6 +60,20 @@ family = '^gpt-realtime-(\d+(?:\.\d+)?)-mini$'
 source = "https://developers.openai.com/api/docs/models"
 checked = "2026-11-16"
 
+# speech_http_model is OFF by default since #1224: gpt-4o-mini-tts shuts down 14 Jan 2027 and the replacement OpenAI
+# names (gpt-realtime-2.1-mini) is the realtime speech_model above, not a /v1/audio/speech model. "manual" keeps a
+# monthly re-check: when OpenAI lists a supported /v1/audio/speech model, re-enable it here, in config.py and in
+# voice/wake_eval.py (OPENAI_TTS_MODEL, `wake-eval --openai`).
+[[entry]]
+id = "speech_http_model"
+stage = "voice"
+kind = "manual"
+recorded = "off"
+code = "core/src/jarves/config.py"
+code_match = 'speech_http_model: str = ""'
+source = "https://developers.openai.com/api/docs/deprecations"
+checked = "2026-11-17"
+
 [[entry]]
 id = "openai-agents"
 stage = "agents"

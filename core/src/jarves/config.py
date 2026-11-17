@@ -120,7 +120,7 @@ class VoiceConfig(_Strict):
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
     # optional /v1/audio/speech model for typed replies and `jarvis say`. "" = off: speech_model speaks instead.
-    # gpt-4o-mini-tts (shutdown 14 Jan 2027, #1224) and tts-1 are retired by OpenAI and are refused.
+    # gpt-4o-mini-tts (shutdown 14 Jan 2027, #1224) is retired by OpenAI and is refused.
     speech_http_model: str = ""
     speech_voice: str = "marin"
     wake_no_speech_s: float = Field(12, ge=0, le=120)   # a wake-started conversation where nobody speaks ends after this (false wake); 0 = off
