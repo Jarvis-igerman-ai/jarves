@@ -273,16 +273,83 @@ class UnlockTests(unittest.TestCase):
             foreign.bind(("127.0.0.1", 0))
             foreign.listen(1)                                        # an unrelated process now owns the stale port
             port = foreign.getsockname()[1]
-            unlock.ServerKey().publish(h)                      # left by a crashed dashboard of this home
+            unlock.ServerKey().publish(h, port)                      # left by a crashed dashboard of this home
             err = io.StringIO()
             with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
                 self.assertEqual(cli.main(["--home", str(h), "--profile-home", str(h), "--port", str(port), "unlock"]), 2)
             self.assertFalse((h / unlock.FILE).exists())            # no code bound to the dead key
+            self.assertIn("has no unlock key", err.getvalue())       # it listens: not "no dashboard is running"
+            self.assertNotIn("no dashboard is running", err.getvalue())
             other = Server(h, 0)                                     # a new dashboard replaces the stale key
             try:
                 self.assertIn(other.unlock_key.pub, (h / unlock.PUB_FILE).read_text(encoding="ascii"))
             finally:
                 other.server_close()
+
+    def test_750_keyless_second_dashboard_takes_over_when_the_first_stops(self):
+        s2 = Server(self.home, 0)
+        try:
+            self.assertFalse(s2._published)                          # the fixture dashboard holds the key
+            s2.service_actions()
+            self.assertFalse(s2._published)                          # still held: nothing published
+            self.server.unlock_key.withdraw(self.home)               # the first dashboard stops
+            self.server._key_lock.release()
+            s2._next_key_try = 0                                     # skip the retry pause (clock-free)
+            s2.service_actions()
+            self.assertTrue(s2._published)
+            self.assertEqual(unlock.published_port(self.home), s2.server_port)
+            self.assertTrue(unlock.key_held(self.home))
+        finally:
+            s2.server_close()
+
+    def test_750_keyless_retry_publish_failure_releases_the_lock_and_warns_once(self):
+        s2 = Server(self.home, 0)
+        try:
+            self.server.unlock_key.withdraw(self.home)
+            self.server._key_lock.release()
+            with patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
+                    self.assertLogs("jarves.workflow.server", "WARNING") as logs:
+                for _ in range(2):
+                    s2._next_key_try = 0
+                    s2.service_actions()
+            self.assertEqual(len(logs.records), 1)                   # bounded: once per outage
+            self.assertFalse(s2._published)
+            self.assertFalse(unlock.key_held(self.home))             # the lock is given back for a later retry
+        finally:
+            s2.server_close()
+
+    def test_750_a_held_probe_during_startup_does_not_leave_the_dashboard_keyless(self):
+        from jarves.runtime import lock
+        real, calls = lock._try_lock, []
+        def busy_once(fd):
+            calls.append(fd)
+            return len(calls) > 1 and real(fd)                       # a CLI held() probe holds the lock for one try
+        with tempfile.TemporaryDirectory() as tmp, patch.object(lock, "_try_lock", busy_once), patch.object(lock.time, "sleep"):
+            s2 = Server(Path(tmp), 0)
+            try:
+                self.assertTrue(s2._published)
+            finally:
+                s2.server_close()
+
+    def test_750_held_probe_in_the_same_process_keeps_the_lock(self):
+        from jarves.runtime import lock
+        for _ in range(3):
+            self.assertTrue(unlock.key_held(self.home))              # flock/msvcrt: per open file, not per process
+        with self.assertRaises(lock.AlreadyRunning):
+            lock.InstanceLock(self.home, unlock.KEY_LOCK).acquire(tries=1)
+
+    def test_750_unlock_only_for_the_dashboard_that_holds_the_key(self):
+        s2 = Server(self.home, 0)                                    # a keyless second dashboard of this home
+        try:
+            base = ["--home", str(self.home), "--profile-home", str(self.home), "--port"]
+            err, out = io.StringIO(), io.StringIO()
+            with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out), redirect_stderr(err):
+                self.assertEqual(cli.main(base + [str(s2.server_port), "unlock"]), 2)
+                self.assertFalse((self.home / unlock.FILE).exists())
+                self.assertIn(f"--port {self.server.server_port}", err.getvalue())
+                self.assertEqual(cli.main(base + [str(self.server.server_port), "unlock"]), 0)
+        finally:
+            s2.server_close()
 
     def test_750_clean_stop_withdraws_only_its_own_key_and_a_stale_key_gives_no_code(self):
         with tempfile.TemporaryDirectory() as alone:
@@ -291,7 +358,7 @@ class UnlockTests(unittest.TestCase):
             other.server_close()
             self.assertFalse((Path(alone) / unlock.PUB_FILE).exists())   # clean stop removes its own key
         stale = unlock.ServerKey()
-        stale.publish(self.home)                                    # left behind by a crashed server
+        stale.publish(self.home, 1)                                    # left behind by a crashed server
         self.server.unlock_key.withdraw(self.home)
         self.assertTrue((self.home / unlock.PUB_FILE).exists())     # a foreign key is not removed
         base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", "1"]

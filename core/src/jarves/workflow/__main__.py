@@ -230,12 +230,21 @@ def main(argv=None) -> int:
         capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
-    def dashboard_listening(home: Path, port: int) -> bool:
-        """--port, or else the port the running web server recorded (#750: one rule for unlock and open)."""
-        from . import webchild
+    def unlock_ready(home: Path, port: int) -> None:
+        """Raise UnlockUnavailable unless the dashboard on --port (else on the recorded port) holds the live key (#750)."""
+        from . import unlock, webchild
         from .opener import listening
         recorded = webchild.read(home).get("port")
-        return any(listening(p) for p in [port] + ([recorded] if isinstance(recorded, int) and recorded != port else []))
+        live = next((p for p in [port] + ([recorded] if isinstance(recorded, int) and recorded != port else []) if listening(p)), None)
+        if live is None:
+            raise unlock.UnlockUnavailable(f"no dashboard is running on port {port}; start it first (jarvis workflow supervise) "
+                                           "or pass its port with --port")
+        if not unlock.key_held(home):           # the published key is stale, or the dashboard is still taking it over
+            raise unlock.UnlockUnavailable(f"the dashboard on port {live} has no unlock key yet; wait a few seconds or restart it")
+        owner = unlock.published_port(home)
+        if owner != live:                       # a code for another dashboard's key would count as a wrong try here
+            raise unlock.UnlockUnavailable(f"the unlock key belongs to the dashboard on port {owner}; use that dashboard "
+                                           f"(pass --port {owner})")
     if a.action == "unlock":
         # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
         from . import unlock
@@ -251,10 +260,7 @@ def main(argv=None) -> int:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
         try:
-            # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen.
-            if not (dashboard_listening(home, a.port) and unlock.key_held(home)):   # held: the key is not stale
-                raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise) "
-                                               "or pass its port with --port")
+            unlock_ready(home, a.port)          # a code only for a live key held by the dashboard on that port
             shown = unlock.issue(home)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
@@ -269,13 +275,12 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            if not (dashboard_listening(home, a.port) and unlock.key_held(home)):  # a listening dashboard has already published its key (server_activate)
-                raise unlock.UnlockUnavailable("dashboard not running")
+            unlock_ready(home, a.port)
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
-        except unlock.UnlockUnavailable:
-            print("No unlock code yet: the dashboard is not running or has no key; run 'jarvis workflow unlock' when it is up.", file=sys.stderr)
+        except unlock.UnlockUnavailable as exc:
+            print(f"No unlock code yet: {exc}. Run 'jarvis workflow unlock' when it is ready.", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

@@ -98,6 +98,7 @@ def access_token(home: Path) -> str:
 
 SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
+KEY_RETRY_S = 5            # a keyless dashboard retries the unlock key lock this often (#750)
 
 
 def session_key(token: str, session: str) -> str:
@@ -148,15 +149,31 @@ class Server(ThreadingHTTPServer):
         # #750: publish the unlock key after a successful (exclusive) bind and BEFORE listening, so a dashboard that
         # accepts connections always has its current key published. A failed publish closes the socket
         # (TCPServer.__init__ calls server_close on any error here). A live dashboard of the same home holds the key
-        # lock: this one then publishes (and later withdraws) nothing; its codes fail closed.
-        try:
-            self._key_lock.acquire("workflow-dashboard")
-        except AlreadyRunning:
-            pass
-        else:
-            self.unlock_key.publish(self.home)
-            self._published = True
+        # lock: this one then publishes (and later withdraws) nothing and retries in service_actions.
+        self._take_key()
         super().server_activate()
+
+    def _take_key(self, tries: int = 5) -> None:
+        try:
+            self._key_lock.acquire("workflow-dashboard", tries=tries)
+        except AlreadyRunning:
+            return
+        self.unlock_key.publish(self.home, self.server_port)
+        self._published = True
+
+    def service_actions(self) -> None:
+        """serve_forever calls this every poll: a keyless dashboard takes the key once the holder is gone (#750)."""
+        super().service_actions()
+        if self._published or self.stopping.is_set() or time.monotonic() < self._next_key_try:
+            return
+        self._next_key_try = time.monotonic() + KEY_RETRY_S
+        try:
+            self._take_key(tries=1)
+        except OSError as exc:                  # publish failed: give the lock back, report once, retry later
+            self._key_lock.release()
+            if not self._key_error_logged:
+                self._key_error_logged = True
+                logging.getLogger(__name__).warning("workflow dashboard: unlock key not published (%s); retrying every %d s", exc, KEY_RETRY_S)
 
     def __init__(self, home: Path, port: int = 8188, *, store: Store | None = None, profile_home: Path | None = None):
         self.home = Path(home)
@@ -178,6 +195,8 @@ class Server(ThreadingHTTPServer):
         self.unlock_key = unlock.ServerKey()    # #750: private half only in memory
         self._published = False                 # a failed second start must not withdraw the live server's key
         self._key_lock = InstanceLock(self.home, unlock.KEY_LOCK)
+        self._next_key_try = 0.0
+        self._key_error_logged = False
         super().__init__(("127.0.0.1", port), Handler)   # publishes the key in server_activate (after bind)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"

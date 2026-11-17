@@ -75,13 +75,13 @@ class InstanceLock:
     def held(self) -> bool:
         return self._fd is not None
 
-    def acquire(self, mode: str = "") -> bool:
+    def acquire(self, mode: str = "", tries: int = 5) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        for attempt in range(5):             # a `held()` probe holds the lock for microseconds: retry briefly
+        for attempt in range(max(tries, 1)):  # a `held()` probe holds the lock for microseconds: retry briefly
             if _try_lock(fd):
                 break
-            if attempt == 4:
+            if attempt >= tries - 1:
                 os.close(fd)
                 raise AlreadyRunning(read_holder(self.path.parent))
             time.sleep(0.05)

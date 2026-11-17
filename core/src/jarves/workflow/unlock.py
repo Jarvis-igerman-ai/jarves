@@ -10,7 +10,8 @@ hold only public keys and a tag, so this leaks no oracle. Honest limit (issue #7
 unlock.json from the public key) or run code as the owner's OS user can still create a code. The CLI refuses agent
 environments and non-terminals (owner_only_guard). One key per home: the publishing server holds an OS lock
 (unlock_pub.lock, released by the OS even on a crash). A second server of the same home publishes nothing (so its clean
-stop withdraws nothing); a key whose lock is free is stale: no code is issued for it and the next server replaces it."""
+stop withdraws nothing) and retries the lock every few seconds, taking over when the first stops. A key whose lock is free
+is stale: no code is issued for it. The CLI issues a code only for the dashboard on the published port."""
 from __future__ import annotations
 
 import hashlib
@@ -48,8 +49,8 @@ class ServerKey:
     def pub(self) -> str:
         return self._key.public_key().public_bytes_raw().hex()
 
-    def publish(self, home: Path) -> None:
-        _write_private(Path(home) / PUB_FILE, json.dumps({"pub": self.pub}))
+    def publish(self, home: Path, port: int) -> None:
+        _write_private(Path(home) / PUB_FILE, json.dumps({"pub": self.pub, "port": port}))
 
     def withdraw(self, home: Path) -> None:
         """Remove the published key on clean shutdown, only while it is still this server's key.
@@ -65,6 +66,15 @@ class ServerKey:
 
     def shared(self, peer_hex: str) -> bytes:
         return self._key.exchange(X25519PublicKey.from_public_bytes(bytes.fromhex(peer_hex)))
+
+
+def published_port(home: Path) -> int | None:
+    """Port of the dashboard whose key is published, or None (missing, damaged or old-format file)."""
+    try:
+        port = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii")).get("port")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return port if isinstance(port, int) and not isinstance(port, bool) else None
 
 
 def key_held(home: Path) -> bool:
