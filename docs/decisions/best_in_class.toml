@@ -1,0 +1,118 @@
+# Best-in-class registry (JAR-233): the models, voice and agent libraries JARVES ships today.
+# One row per stage. `recorded` must match the code (`code` file contains `code_match`).
+# The monthly scout reads this file:
+#   python core/tools/best_in_class_scout.py            # offline: drift + overdue rows
+#   python core/tools/best_in_class_scout.py --online   # also fetches each `source` (official docs / PyPI)
+# The scout only reports. A newer option is a candidate, never an automatic switch:
+# a change goes through a normal PR with tests, and then `checked` is updated here.
+#
+# kind = "openai-model": `source` is the official models page; `family` is a regex with ONE capture group
+#        holding the version, newer = a listed id in the same family with a higher version.
+# kind = "pypi":         `package` on pypi.org; newer = latest release above `recorded` (the pin floor);
+#        `pin_below` (optional) flags a latest release outside the current pin.
+# kind = "manual":       no machine-readable official source; only the age of `checked` is reported.
+
+[meta]
+max_age_days = 31
+deprecations = "https://developers.openai.com/api/docs/deprecations"
+
+[[entry]]
+id = "text_model"
+stage = "model"
+kind = "openai-model"
+recorded = "gpt-6-luna"
+code = "core/src/jarves/config.py"
+code_match = 'text_model: str = "gpt-6-luna"'
+family = '^gpt-(\d+(?:\.\d+)?)-luna$'
+source = "https://developers.openai.com/api/docs/models"
+checked = "2026-11-16"
+
+[[entry]]
+id = "live_model"
+stage = "voice"
+kind = "openai-model"
+recorded = "gpt-live-1"
+code = "core/src/jarves/config.py"
+code_match = 'live_model: str = "gpt-live-1"'
+family = '^gpt-live-(\d+(?:\.\d+)?)$'
+source = "https://developers.openai.com/api/docs/models"
+checked = "2026-11-16"
+
+[[entry]]
+id = "realtime_model"
+stage = "voice"
+kind = "openai-model"
+recorded = "gpt-realtime-2.1"
+code = "core/src/jarves/config.py"
+code_match = 'realtime_model: str = "gpt-realtime-2.1"'
+family = '^gpt-realtime-(\d+(?:\.\d+)?)$'
+source = "https://developers.openai.com/api/docs/models"
+checked = "2026-11-16"
+
+[[entry]]
+id = "speech_model"
+stage = "voice"
+kind = "openai-model"
+recorded = "gpt-realtime-2.1-mini"
+code = "core/src/jarves/config.py"
+code_match = 'speech_model: str = "gpt-realtime-2.1-mini"'
+family = '^gpt-realtime-(\d+(?:\.\d+)?)-mini$'
+source = "https://developers.openai.com/api/docs/models"
+checked = "2026-11-16"
+
+[[entry]]
+id = "speech_http_model"
+stage = "voice"
+kind = "openai-model"
+recorded = "gpt-4o-mini-tts"
+code = "core/src/jarves/config.py"
+code_match = 'speech_http_model: str = "gpt-4o-mini-tts"'
+family = '^gpt-(\d+(?:\.\d+)?)o?-mini-tts$'
+source = "https://developers.openai.com/api/docs/models"
+checked = "2026-11-16"
+
+[[entry]]
+id = "openai-agents"
+stage = "agents"
+kind = "pypi"
+package = "openai-agents"
+recorded = "0.24.0"
+pin_below = "0.25"
+code = "core/pyproject.toml"
+code_match = '"openai-agents>=0.24.0,<0.25"'
+source = "https://pypi.org/pypi/openai-agents/json"
+checked = "2026-11-16"
+
+[[entry]]
+id = "faster-whisper"
+stage = "voice"
+kind = "pypi"
+package = "faster-whisper"
+recorded = "1.2"
+code = "core/pyproject.toml"
+code_match = '"faster-whisper>=1.2"'
+source = "https://pypi.org/pypi/faster-whisper/json"
+checked = "2026-11-16"
+
+[[entry]]
+id = "pyopen-wakeword"
+stage = "voice"
+kind = "pypi"
+package = "pyopen-wakeword"
+recorded = "1.1"
+pin_below = "2"
+code = "core/pyproject.toml"
+code_match = '"pyopen-wakeword>=1.1,<2"'
+source = "https://pypi.org/pypi/pyopen-wakeword/json"
+checked = "2026-11-16"
+
+[[entry]]
+id = "stt_model"
+stage = "voice"
+kind = "manual"
+recorded = "small"
+code = "core/src/jarves/config.py"
+code_match = 'stt_model: str = "small"'
+source = "https://huggingface.co/ivrit-ai"
+checked = "2026-11-16"
+note = "Offline fallback STT; Hebrew accuracy option ivrit-ai/whisper-large-v3-turbo-ct2. Pi 5 UNTESTED."
