@@ -154,12 +154,21 @@ class Server(ThreadingHTTPServer):
         super().server_activate()
 
     def _take_key(self, tries: int = 5) -> None:
-        try:
-            self._key_lock.acquire("workflow-dashboard", tries=tries)
-        except AlreadyRunning:
-            return
-        self.unlock_key.publish(self.home, self.server_port)
-        self._published = True
+        # _key_guard: server_close (another thread) must not release between our `stopping` check and acquire,
+        # or a closed server would re-take the lock and publish a key for a dead port.
+        with self._key_guard:
+            if self.stopping.is_set():
+                return
+            try:
+                self._key_lock.acquire("workflow-dashboard", tries=tries)
+            except AlreadyRunning:
+                return
+            try:
+                self.unlock_key.publish(self.home, self.server_port)
+            except OSError:
+                self._key_lock.release()        # never hold the key lock without a published key
+                raise
+            self._published = True
 
     def service_actions(self) -> None:
         """serve_forever calls this every poll: a keyless dashboard takes the key once the holder is gone (#750)."""
@@ -169,8 +178,7 @@ class Server(ThreadingHTTPServer):
         self._next_key_try = time.monotonic() + KEY_RETRY_S
         try:
             self._take_key(tries=1)
-        except OSError as exc:                  # publish failed: give the lock back, report once, retry later
-            self._key_lock.release()
+        except OSError as exc:                  # publish failed (lock already given back): report once, retry later
             if not self._key_error_logged:
                 self._key_error_logged = True
                 logging.getLogger(__name__).warning("workflow dashboard: unlock key not published (%s); retrying every %d s", exc, KEY_RETRY_S)
@@ -195,6 +203,7 @@ class Server(ThreadingHTTPServer):
         self.unlock_key = unlock.ServerKey()    # #750: private half only in memory
         self._published = False                 # a failed second start must not withdraw the live server's key
         self._key_lock = InstanceLock(self.home, unlock.KEY_LOCK)
+        self._key_guard = threading.Lock()
         self._next_key_try = 0.0
         self._key_error_logged = False
         super().__init__(("127.0.0.1", port), Handler)   # publishes the key in server_activate (after bind)
@@ -227,9 +236,11 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
-        if self._published:
-            self.unlock_key.withdraw(self.home)  # no stale key after a clean stop (#750)
-        self._key_lock.release()
+        with self._key_guard:
+            if self._published:
+                self.unlock_key.withdraw(self.home)  # no stale key after a clean stop (#750)
+                self._published = False
+            self._key_lock.release()
         super().server_close()
         self.store.close()
 

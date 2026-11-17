@@ -217,9 +217,19 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, out.getvalue())
 
     def test_750_files_in_the_home_are_no_offline_oracle_for_the_code(self):
-        """#750: a file reader (access.token + unlock.json) must not be able to confirm a code offline."""
+        """#750: a file reader (access.token + unlock.json) must not be able to confirm a code offline.
+
+        Indirect proof of the ECDH/HKDF construction: the tag key is HKDF(X25519(eph_priv, server_priv)); a reader has
+        only both PUBLIC keys and the tag, and both private halves live in memory only (the CLI's and the server's), so
+        a copy of every file plus a fresh key can confirm nothing. Recomputing the shared secret from public keys alone
+        would mean breaking X25519, which no test can show; this test guards the file contents and the key binding."""
         shown = unlock.issue(self.home)
-        stolen = {p.name: p.read_bytes() for p in self.home.iterdir() if p.is_file()}
+        def read(p):                        # a held lock file's byte 0 is OS-locked on Windows: read what follows
+            with open(p, "rb") as f:
+                f.seek(1 if p.suffix == ".lock" else 0)
+                return f.read()
+        stolen = {p.name: read(p) for p in self.home.iterdir() if p.is_file()}
+        self.assertIn(unlock.KEY_LOCK, stolen)                          # the held key lock is read too (holder info only)
         self.assertEqual(set(json.loads(stolen[unlock.FILE])), {"eph", "tag", "expires"})  # no salt+scrypt hash
         with tempfile.TemporaryDirectory() as other:                # attacker copy with its own key
             for name, raw in stolen.items():
@@ -422,6 +432,37 @@ class UnlockTests(unittest.TestCase):
         with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
                 patch("jarves.workflow.opener.listening", side_effect=lambda p: p == self.server.server_port), redirect_stderr(err):
             self.assertEqual(cli.main(argv), 0)
+        self.assertNotIn("No unlock code yet", err.getvalue())
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": err.getvalue().split(": ")[-1].strip()})[0], 200)
+
+    def test_750_a_named_lock_reports_its_own_holder_not_the_cores(self):
+        from jarves.runtime.lock import AlreadyRunning, InstanceLock
+        core = InstanceLock(self.home)
+        core.acquire("core")                                        # the Core lock of the same home, other holder info
+        try:
+            with self.assertRaises(AlreadyRunning) as ctx:
+                InstanceLock(self.home, unlock.KEY_LOCK).acquire("second", tries=1)
+            self.assertEqual(ctx.exception.holder["mode"], "workflow-dashboard")   # the key lock's holder, not "core"
+        finally:
+            core.release()
+
+    def test_750_a_closed_server_never_takes_the_key_again(self):
+        with tempfile.TemporaryDirectory() as alone:
+            other = Server(Path(alone), 0)
+            other.server_close()
+            other._take_key(tries=1)                                 # a late service_actions retry after close
+            self.assertFalse(unlock.key_held(Path(alone)))
+            self.assertFalse((Path(alone) / unlock.PUB_FILE).exists())
+
+    def test_750_open_waits_briefly_for_a_just_started_dashboard_to_take_its_key(self):
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "open", "--no-open"]
+        err, sleeps = io.StringIO(), []
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                patch.object(unlock, "key_held", side_effect=[False, False, True, True]), \
+                patch("time.sleep", side_effect=sleeps.append), redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(cli.main(argv), 0)
+        self.assertEqual(sleeps, [0.1, 0.1])            # two "not yet" checks, then the key is there
         self.assertNotIn("No unlock code yet", err.getvalue())
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": err.getvalue().split(": ")[-1].strip()})[0], 200)

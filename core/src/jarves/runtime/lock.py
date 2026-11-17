@@ -53,10 +53,10 @@ def _unlock(fd: int) -> None:
         pass
 
 
-def read_holder(home: Path) -> dict | None:
-    """What the lock file says about its owner (may be stale when no Core runs: use `held()` for truth)."""
+def read_holder(home: Path, name: str = LOCK_FILE) -> dict | None:
+    """What the lock file (the Core lock, or the named lock) says about its owner (may be stale: use `held()` for truth)."""
     try:
-        with open(home / LOCK_FILE, "rb") as f:
+        with open(home / name, "rb") as f:
             f.seek(1)                         # byte 0 is locked by the owner (mandatory on Windows): skip it
             raw = f.read(4096).decode("utf-8", "replace").strip()
         return json.loads(raw) if raw else None
@@ -83,7 +83,7 @@ class InstanceLock:
                 break
             if attempt >= tries - 1:
                 os.close(fd)
-                raise AlreadyRunning(read_holder(self.path.parent))
+                raise AlreadyRunning(read_holder(self.path.parent, self.path.name))
             time.sleep(0.05)
         info = json.dumps({"pid": os.getpid(), "started": time.time(), "mode": mode}).encode("utf-8")
         # byte 0 is the locked byte (Windows locks are mandatory: never write it); the owner info follows it

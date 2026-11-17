@@ -80,6 +80,7 @@ def utf8_streams() -> None:
 
 
 AGENT_REFUSED = ("autopilot", "authorize", "bootstrap")
+OPEN_KEY_WAIT_S = 2.0  # `open` waits at most this long for a just-started dashboard to take its unlock key (#750)
 OWNER_ONLY_MESSAGE = "owner questions are answered in the dashboard or in your own terminal"
 
 
@@ -230,8 +231,11 @@ def main(argv=None) -> int:
         capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
-    def unlock_ready(home: Path, port: int) -> None:
-        """Raise UnlockUnavailable unless the dashboard on --port (else on the recorded port) holds the live key (#750)."""
+    def unlock_ready(home: Path, port: int, wait_s: float = 0.0) -> None:
+        """Raise UnlockUnavailable unless the dashboard on --port (else on the recorded port) holds the live key (#750).
+
+        wait_s: a dashboard that `open` has just started may still be taking its key; wait that long (bounded)."""
+        import time
         from . import unlock, webchild
         from .opener import listening
         recorded = webchild.read(home).get("port")
@@ -239,6 +243,9 @@ def main(argv=None) -> int:
         if live is None:
             raise unlock.UnlockUnavailable(f"no dashboard is running on port {port}; start it first (jarvis workflow supervise) "
                                            "or pass its port with --port")
+        deadline = time.monotonic() + wait_s
+        while not unlock.key_held(home) and time.monotonic() < deadline:
+            time.sleep(0.1)
         if not unlock.key_held(home):           # the published key is stale, or the dashboard is still taking it over
             raise unlock.UnlockUnavailable(f"the dashboard on port {live} has no unlock key yet; wait a few seconds or restart it")
         owner = unlock.published_port(home)
@@ -275,7 +282,7 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            unlock_ready(home, a.port)
+            unlock_ready(home, a.port, wait_s=OPEN_KEY_WAIT_S)
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
