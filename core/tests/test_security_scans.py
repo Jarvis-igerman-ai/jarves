@@ -212,6 +212,7 @@ def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(h
     assert ss.signature([], False) == ss.signature([], False, {}) == LIVE_480_SIG    # no refusals: old signature kept
     assert ss.signature([], True) == ss.signature([], True, {})
     assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_401"})
+    assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_404"})  # same action text
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):
