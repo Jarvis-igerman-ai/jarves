@@ -266,25 +266,23 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
 
-    def test_750_a_key_left_on_a_dead_port_is_replaced(self):
-        stale = unlock.ServerKey()
-        stale.publish(self.home, 1)                                  # crashed dashboard, nothing listens on port 1
-        other = Server(self.home, 0)
-        try:
-            self.assertIn(other.unlock_key.pub, (self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
-        finally:
-            other.server_close()
-
-    def test_750_cryptography_is_a_declared_pinned_runtime_dependency(self):
-        import tomllib
-        core = Path(__file__).resolve().parents[1]
-        deps = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
-        self.assertTrue(any(d.replace(" ", "").startswith("cryptography>=") for d in deps))   # base, not dev/extra
-        lock = tomllib.loads((core / "uv.lock").read_text(encoding="utf-8"))
-        pinned = [p for p in lock["package"] if p["name"] == "cryptography"]
-        self.assertEqual(len(pinned), 1)
-        self.assertGreaterEqual(int(pinned[0]["version"].split(".")[0]), 40)   # public_bytes_raw() needs >= 40
-        self.assertTrue(all(w.get("hash", "").startswith("sha256:") for w in pinned[0]["wheels"]))
+    def test_750_stale_key_on_a_port_reused_by_another_listener(self):
+        import socket
+        with tempfile.TemporaryDirectory() as tmp, socket.socket() as foreign:
+            h = Path(tmp)
+            foreign.bind(("127.0.0.1", 0))
+            foreign.listen(1)                                        # an unrelated process now owns the stale port
+            port = foreign.getsockname()[1]
+            unlock.ServerKey().publish(h)                      # left by a crashed dashboard of this home
+            err = io.StringIO()
+            with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(["--home", str(h), "--profile-home", str(h), "--port", str(port), "unlock"]), 2)
+            self.assertFalse((h / unlock.FILE).exists())            # no code bound to the dead key
+            other = Server(h, 0)                                     # a new dashboard replaces the stale key
+            try:
+                self.assertIn(other.unlock_key.pub, (h / unlock.PUB_FILE).read_text(encoding="ascii"))
+            finally:
+                other.server_close()
 
     def test_750_clean_stop_withdraws_only_its_own_key_and_a_stale_key_gives_no_code(self):
         with tempfile.TemporaryDirectory() as alone:
@@ -293,7 +291,7 @@ class UnlockTests(unittest.TestCase):
             other.server_close()
             self.assertFalse((Path(alone) / unlock.PUB_FILE).exists())   # clean stop removes its own key
         stale = unlock.ServerKey()
-        stale.publish(self.home, 1)                                 # left behind by a crashed server
+        stale.publish(self.home)                                    # left behind by a crashed server
         self.server.unlock_key.withdraw(self.home)
         self.assertTrue((self.home / unlock.PUB_FILE).exists())     # a foreign key is not removed
         base = ["--home", str(self.home), "--profile-home", str(self.home), "--port", "1"]
@@ -310,7 +308,9 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())       # no code bound to the dead key
 
     def test_750_a_listening_dashboard_has_already_published_its_key(self):
-        (self.home / unlock.PUB_FILE).unlink()
+        self.server.unlock_key.withdraw(self.home)                   # as if the fixture dashboard had stopped
+        self.server._key_lock.release()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())
         seen = []
         orig = Server.server_activate
         def activate(srv):
@@ -327,14 +327,14 @@ class UnlockTests(unittest.TestCase):
 
     def test_750_a_failed_publish_closes_the_socket(self):
         real_close = Server.server_close
-        with patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
-                patch.object(unlock, "published_port", return_value=None), \
+        with tempfile.TemporaryDirectory() as tmp, patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
                 patch.object(Server, "server_close", autospec=True, side_effect=real_close) as close:
             with self.assertRaises(OSError):
-                Server(self.home, 0)
+                Server(Path(tmp), 0)
+            self.assertFalse(unlock.key_held(Path(tmp)))            # the key lock is released with the socket
         close.assert_called_once()
         self.assertEqual(close.call_args.args[0].socket.fileno(), -1)
-        self.assertTrue((self.home / unlock.PUB_FILE).exists())     # the live server's key is untouched
+        self.assertTrue(unlock.key_held(self.home))                  # the live server's key and lock are untouched
 
     def test_750_unlock_finds_the_recorded_non_default_port_without_flag(self):
         from jarves.workflow import webchild

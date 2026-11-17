@@ -8,8 +8,9 @@ sees no value that can confirm a guess offline, so token-plus-files READERS can 
 code is cancelled). Windows: the 0o600 mode does not restrict other local accounts (no owner-only ACL yet); the files
 hold only public keys and a tag, so this leaks no oracle. Honest limit (issue #750): an agent that can WRITE files in the workflow home (it can forge
 unlock.json from the public key) or run code as the owner's OS user can still create a code. The CLI refuses agent
-environments and non-terminals (owner_only_guard). One key per home: a second server on another port keeps the live
-server's key (it publishes nothing, so its own clean stop withdraws nothing); a key left on a dead port is replaced."""
+environments and non-terminals (owner_only_guard). One key per home: the publishing server holds an OS lock
+(unlock_pub.lock, released by the OS even on a crash). A second server of the same home publishes nothing (so its clean
+stop withdraws nothing); a key whose lock is free is stale: no code is issued for it and the next server replaces it."""
 from __future__ import annotations
 
 import hashlib
@@ -24,10 +25,13 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from ..runtime.lock import held
+
 CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 PUB_FILE = "unlock_pub.json"  # the running server's public key; its private key never leaves server memory
+KEY_LOCK = "unlock_pub.lock"  # held by the server whose key is published, for its whole life
 
 
 class UnlockUnavailable(RuntimeError):
@@ -44,8 +48,8 @@ class ServerKey:
     def pub(self) -> str:
         return self._key.public_key().public_bytes_raw().hex()
 
-    def publish(self, home: Path, port: int) -> None:
-        _write_private(Path(home) / PUB_FILE, json.dumps({"pub": self.pub, "port": port}))
+    def publish(self, home: Path) -> None:
+        _write_private(Path(home) / PUB_FILE, json.dumps({"pub": self.pub}))
 
     def withdraw(self, home: Path) -> None:
         """Remove the published key on clean shutdown, only while it is still this server's key.
@@ -63,13 +67,9 @@ class ServerKey:
         return self._key.exchange(X25519PublicKey.from_public_bytes(bytes.fromhex(peer_hex)))
 
 
-def published_port(home: Path) -> int | None:
-    """Port of the dashboard whose key is published, or None (missing, damaged or old-format file)."""
-    try:
-        port = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii")).get("port")
-    except (OSError, ValueError, AttributeError):
-        return None
-    return port if isinstance(port, int) and not isinstance(port, bool) else None
+def key_held(home: Path) -> bool:
+    """True while a live server holds the key lock, i.e. the published key has its private half in memory somewhere."""
+    return held(Path(home), KEY_LOCK)
 
 
 REPLACE_TRIES = 5          # Windows: os.replace fails while another process briefly has the target open

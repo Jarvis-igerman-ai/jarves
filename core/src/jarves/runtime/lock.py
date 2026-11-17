@@ -67,8 +67,8 @@ def read_holder(home: Path) -> dict | None:
 class InstanceLock:
     """acquire() -> True (we are the Core) or raises AlreadyRunning. Re-entrant per process is NOT needed."""
 
-    def __init__(self, home: Path) -> None:
-        self.path = home / LOCK_FILE
+    def __init__(self, home: Path, name: str = LOCK_FILE) -> None:
+        self.path = home / name
         self._fd: int | None = None
 
     @property
@@ -101,9 +101,9 @@ class InstanceLock:
         os.close(fd)
 
 
-def held(home: Path) -> bool:
-    """True when some process holds the Core lock right now (probe: lock + immediately unlock)."""
-    path = home / LOCK_FILE
+def held(home: Path, name: str = LOCK_FILE) -> bool:
+    """True when some process holds the Core lock (or the named lock) right now (probe: lock + immediately unlock)."""
+    path = home / name
     if not path.exists():
         return False
     try:

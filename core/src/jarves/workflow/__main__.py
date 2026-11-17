@@ -252,7 +252,7 @@ def main(argv=None) -> int:
             return 3
         try:
             # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen.
-            if not dashboard_listening(home, a.port):
+            if not (dashboard_listening(home, a.port) and unlock.key_held(home)):   # held: the key is not stale
                 raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise) "
                                                "or pass its port with --port")
             shown = unlock.issue(home)
@@ -269,7 +269,7 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            if not dashboard_listening(home, a.port):  # a listening dashboard has already published its key (server_activate)
+            if not (dashboard_listening(home, a.port) and unlock.key_held(home)):  # a listening dashboard has already published its key (server_activate)
                 raise unlock.UnlockUnavailable("dashboard not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:

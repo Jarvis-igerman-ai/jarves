@@ -23,7 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .discuss import Helper, RateLimited
-from .opener import listening
+from ..runtime.lock import AlreadyRunning, InstanceLock
 from . import unlock
 from .autopilot import owner_unlock_s
 from .store import Store
@@ -147,11 +147,14 @@ class Server(ThreadingHTTPServer):
     def server_activate(self) -> None:
         # #750: publish the unlock key after a successful (exclusive) bind and BEFORE listening, so a dashboard that
         # accepts connections always has its current key published. A failed publish closes the socket
-        # (TCPServer.__init__ calls server_close on any error here). A dashboard of the same home that still listens on
-        # another port keeps its key: this one then publishes (and later withdraws) nothing; its codes fail closed.
-        live = unlock.published_port(self.home)
-        if live is None or live == self.server_port or not listening(live):
-            self.unlock_key.publish(self.home, self.server_port)
+        # (TCPServer.__init__ calls server_close on any error here). A live dashboard of the same home holds the key
+        # lock: this one then publishes (and later withdraws) nothing; its codes fail closed.
+        try:
+            self._key_lock.acquire("workflow-dashboard")
+        except AlreadyRunning:
+            pass
+        else:
+            self.unlock_key.publish(self.home)
             self._published = True
         super().server_activate()
 
@@ -174,6 +177,7 @@ class Server(ThreadingHTTPServer):
         self.discuss = Helper(self.home, token=self.token)
         self.unlock_key = unlock.ServerKey()    # #750: private half only in memory
         self._published = False                 # a failed second start must not withdraw the live server's key
+        self._key_lock = InstanceLock(self.home, unlock.KEY_LOCK)
         super().__init__(("127.0.0.1", port), Handler)   # publishes the key in server_activate (after bind)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
@@ -206,6 +210,7 @@ class Server(ThreadingHTTPServer):
         self.stopping.set()
         if self._published:
             self.unlock_key.withdraw(self.home)  # no stale key after a clean stop (#750)
+        self._key_lock.release()
         super().server_close()
         self.store.close()
 
