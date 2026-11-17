@@ -44,8 +44,8 @@ action = "command:jarvis backup settings"
 [[problems]]
 he = "הגיבויים ממלאים את הדיסק"
 en = "Backups fill the disk"
-fix_he = "התקנת גרסה עושה עכשיו לכל היותר שני גיבויים (היו שלושה), והקבצים של ההתקנה כבר לא נכנסים לגיבוי. הורידו את המגבלה עם jarvis backup settings --max-gb 2 והריצו jarvis backup prune. כשאין מספיק מקום, הגיבוי וההתקנה נעצרים בלי לשנות כלום."
-fix_en = "An install now takes at most two backups (was three), and installer files are no longer copied into them. Lower the limit with jarvis backup settings --max-gb 2 and run jarvis backup prune. When the disk is too full, the backup and the install stop without changing anything."
+fix_he = "התקנת גרסה עושה בדרך כלל שניים או שלושה גיבויים, שנשמרים בתוך המגבלות של checkpoints ו-max_gb, והקבצים של ההתקנה כבר לא נכנסים לגיבוי. הורידו את המגבלה עם jarvis backup settings --max-gb 2 והריצו jarvis backup prune. כשאין מספיק מקום, הגיבוי וההתקנה נעצרים בלי לשנות כלום."
+fix_en = "An install usually takes two or three backups, kept within the checkpoints and max_gb limits, and installer files are no longer copied into them. Lower the limit with jarvis backup settings --max-gb 2 and run jarvis backup prune. When the disk is too full, the backup and the install stop without changing anything."
 
 [[problems]]
 he = "אחרי שחזור הוא לא מחובר לגוגל"

@@ -296,32 +296,53 @@ def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
     assert backup.create(profile, "manual").is_file()
 
 
+def _settle(home, when):
+    for q in home.rglob("*"):
+        if q.is_file() and "backups" not in q.parts:
+            os.utime(q, (when, when))
+
+
 def test_start_checkpoint_reuses_the_update_backup_issue_1016(profile, monkeypatch):
     from jarves import updates
+    now = 2_000_000_000.0                                              # fixed clock and file times (no real clock)
+    monkeypatch.setattr(backup.time, "time", lambda: now)
+    _settle(profile, now - 100)
     bak = backup.checkpoint(profile, "before a beta install")
+    os.utime(bak, (now + 50, now + 50))                                # archive finished after it started
     backup._save_state(profile, {"version": "1.0"})
     pdir = profile / "updates" / updates.PREVIOUS_DIR
     pdir.mkdir(parents=True)
-    rec = {"version": "1.0", "to": backup.__version__, "backup": str(bak), "created_ts": time.time()}
+    rec = {"version": "1.0", "to": backup.__version__, "backup": str(bak), "created_ts": now}
     (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
-    later = os.stat(bak).st_mtime + 5
     (profile / "updates.json").write_text("{}", encoding="utf-8")       # prepare_install writes this afterwards
-    os.utime(profile / "updates.json", (later, later))
+    _settle(profile / "updates", now + 60)
+    os.utime(profile / "updates.json", (now + 60, now + 60))
     before = len(backup.list_backups(profile))
     assert backup.startup_checkpoint(profile) == bak                   # no second archive of the same data
     assert len(backup.list_backups(profile)) == before
+    os.utime(profile / "memory.db", (now + 10, now + 10))              # written while the zip was being finished
+    assert not backup.still_current(profile, bak)                      # review: compared with the archive start
+    os.utime(profile / "memory.db", (now - 100, now - 100))
     backup._save_state(profile, {"version": "1.0"})
-    rec["created_ts"] = time.time() - backup.REUSE_UPDATE_BACKUP_S - 60   # an old update: take a fresh one
+    rec["created_ts"] = now - backup.REUSE_UPDATE_BACKUP_S - 60         # an old update: take a fresh one
     (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
     p = backup.startup_checkpoint(profile)
     assert p is not None and p != bak and len(backup.list_backups(profile)) == before + 1
-    backup._save_state(profile, {"version": "1.0"})                   # review: data written after the backup
-    rec["created_ts"] = time.time()
-    (pdir / updates.PREVIOUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
-    later = os.stat(bak).st_mtime + 5
-    os.utime(profile / "memory.db", (later, later))
-    p2 = backup.startup_checkpoint(profile)
-    assert p2 is not None and p2 not in (bak, p)                       # a fresh checkpoint, not the stale one
+
+
+def test_space_estimate_is_capped_at_the_raw_data_size_issue_1016(profile, monkeypatch):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    _placeholder(bdir, "manual", datetime(2026, 11, 10, 3, 0), 10 ** 6)  # an old archive with installers inside
+    take = [(profile / "config.toml", "config.toml")]
+    assert backup._estimate_bytes(profile, take) == (profile / "config.toml").stat().st_size
+
+
+def test_free_space_is_measured_before_the_backup_folder_exists_issue_1016(profile, monkeypatch):
+    seen = []
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda d: seen.append(d) or type("U", (), {"free": 7})())
+    assert not backup.backup_dir(profile).exists()
+    assert backup._free_bytes(profile) == 7 and seen == [profile.resolve()]
 
 
 def test_restore_over_budget_keeps_the_archive_it_restores_issue_1016(profile, monkeypatch):

@@ -442,3 +442,25 @@ def test_real_deps_take_one_checkpoint_and_hand_it_to_the_updater_issue_1016(tmp
     assert taken == [(home, "before a beta install")] and p == home / "backups" / "cp.zip"
     d.prepare("beta")
     assert got == [(True, p)]
+
+
+def test_no_space_for_the_backup_stops_the_install_before_anything_changes_issue_1016(tmp_path):
+    from jarves import backup
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+
+    def full():
+        f.calls.append("backup")
+        raise backup.BackupError("BACKUP_NO_SPACE", "not enough free disk space for a backup", "free disk space")
+    d.backup_now = full
+    rep = il.run(d)
+    assert not rep.ok and not rep.changed and f.calls == ["backup"]
+    assert "BACKUP_NO_SPACE" in rep.render()
+
+
+def test_no_space_for_the_rollback_backup_stops_before_the_launch_issue_1016(tmp_path):
+    f = Fake(tmp=tmp_path, prep_error=UpdateError("UPDATE_BACKUP_FAILED", "backup before the update failed "
+                                                                         "(BACKUP_NO_SPACE); not installing"))
+    rep = il.run(f.deps())
+    assert not rep.ok and not rep.changed and "stop" not in f.calls
+    assert not any(str(c).startswith("launch") for c in f.calls) and "BACKUP_NO_SPACE" in rep.render()

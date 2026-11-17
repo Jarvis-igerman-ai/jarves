@@ -20,8 +20,8 @@ pre-migration / pre-restore checkpoints the last 3 each. Only automatic backups 
 go first, but never a manual one, the newest backup, the newest automatic one, the backup `jarvis update --rollback`
 needs or the one being restored. Before writing, create() checks free disk space; when short it prunes first and
 refuses (BACKUP_NO_SPACE) rather than filling the drive. A beta install takes one backup, which the updater reuses as
-the rollback backup; the next Core start reuses it only when no data file changed since (usually the running Core
-did write, so that start takes its own checkpoint: at most two per install, was three, kept within `checkpoints`).
+the rollback backup only while no data file changed since; the running Core usually writes during the download, so
+an install usually takes two or three checkpoints, kept within `checkpoints` and `max_gb`.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -290,22 +290,23 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
 
 
 def _estimate_bytes(home: Path, take: list[tuple[Path, str]]) -> int:
-    """Expected archive size: the newest existing backup (same data, compressed) or, for the first one, the raw
-    size of what goes in (an upper bound)."""
-    items = list_backups(home)
-    if items:
-        return int(items[0]["size"] * 1.2)
+    """Expected archive size: the newest existing backup (same data, compressed) but never more than the raw size
+    of what goes in (an upper bound: older archives may still hold the installers, review of #1016)."""
     total = 0
     for p, _rel in take:
         try:
             total += p.stat().st_size
         except OSError:
             pass
-    return total
+    items = list_backups(home)
+    return min(int(items[0]["size"] * 1.2), total) if items else total
 
 
 def _free_bytes(home: Path) -> int:
-    return shutil.disk_usage(backup_dir(home)).free
+    d = backup_dir(home).resolve()
+    while not d.exists() and d.parent != d:                  # not created yet: measure the disk it will live on
+        d = d.parent
+    return shutil.disk_usage(d).free
 
 
 def ensure_space(home: Path, take: list[tuple[Path, str]], protect: frozenset[str] = frozenset()) -> None:
@@ -694,6 +695,10 @@ def still_current(home: Path, p: Path) -> bool:
         if p.parent.resolve() != backup_dir(home).resolve() or not p.is_file():
             return False
         written = p.stat().st_mtime
+        try:                                                 # a write during the zip is missed by the final mtime:
+            written = min(written, float(read_manifest(p)["created"]))   # compare against the start (review)
+        except (KeyError, TypeError, ValueError, zipfile.BadZipFile):
+            return False
         take, _skipped = plan(home, {"include_faces": True})  # every data file; get_settings would open memory.db
         paths = [q for q, rel in take if not (rel.startswith("updates/") or rel == "updates.json")]  # updater's own
         paths += [q.with_name(q.name + sfx) for q in list(paths) for sfx in ("-wal", "-journal")]
