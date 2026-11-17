@@ -84,10 +84,10 @@ def test_openai_tts_text_goes_through_dictionary(tmp_path, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "AsyncClient", C)
     try:
-        asyncio.run(OpenAISpeechTTS().synth("שלום ולצחי"))
+        asyncio.run(OpenAISpeechTTS("test-tts").synth("שלום ולצחי"))
         assert sent["input"] == "שלום וּלְ" + TZACHI
         f.write_text("- צחי = טסחי\n", encoding="utf-8")
-        asyncio.run(OpenAISpeechTTS().synth("שלום ולצחי"))
+        asyncio.run(OpenAISpeechTTS("test-tts").synth("שלום ולצחי"))
         assert sent["input"] == "שלום ולטסחי"
     finally:
         pronounce.set_path(None)

@@ -61,17 +61,6 @@ source = "https://developers.openai.com/api/docs/models"
 checked = "2026-11-16"
 
 [[entry]]
-id = "speech_http_model"
-stage = "voice"
-kind = "openai-model"
-recorded = "gpt-4o-mini-tts"
-code = "core/src/jarves/config.py"
-code_match = 'speech_http_model: str = "gpt-4o-mini-tts"'
-family = '^gpt-(\d+(?:\.\d+)?)o?-mini-tts$'
-source = "https://developers.openai.com/api/docs/models"
-checked = "2026-11-16"
-
-[[entry]]
 id = "openai-agents"
 stage = "agents"
 kind = "pypi"

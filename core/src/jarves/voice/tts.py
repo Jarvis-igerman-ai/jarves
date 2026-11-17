@@ -45,17 +45,31 @@ HEBREW_STYLE = ("Speak natural, clear Israeli Hebrew, warmly and at a calm pace,
                 "Pronounce names exactly as written. Read only the given text.")
 
 
+# OpenAI's deprecations page names gpt-realtime-2.1-mini (voice.speech_model) as their replacement (#1224).
+RETIRED_SPEECH_MODELS = frozenset({"gpt-4o-mini-tts", "gpt-4o-mini-tts-2025-03-20", "gpt-4o-mini-tts-2025-12-15",
+                                   "tts-1", "tts-1-hd"})
+
+
 class OpenAISpeechTTS:
     """OpenAI /v1/audio/speech: a dedicated TTS model (not a conversation model)."""
     name = "openai-tts"
     quality = "cloud"
     langs = ("he", "en")
 
-    def __init__(self, model: str = "gpt-4o-mini-tts", voice: str = "marin", timeout_s: float = 60) -> None:
+    def __init__(self, model: str = "", voice: str = "marin", timeout_s: float = 60) -> None:
         self.model, self.voice, self.timeout = model, voice, timeout_s
+
+    def _model_problem(self) -> str:
+        if not self.model:
+            return "off (voice.speech_http_model is empty; the realtime speaker is used)"
+        if self.model in RETIRED_SPEECH_MODELS:
+            return f"{self.model} is retired by OpenAI; clear voice.speech_http_model"
+        return ""
 
     def check(self) -> tuple[bool, str]:
         import os
+        if problem := self._model_problem():
+            return False, problem
         if not os.environ.get("OPENAI_API_KEY", "").strip():
             return False, "OPENAI_API_KEY not set (run: jarvis key)"
         return True, f"{self.model} voice {self.voice}"
@@ -64,6 +78,8 @@ class OpenAISpeechTTS:
         import os
         import httpx
         from .. import pronounce
+        if problem := self._model_problem():
+            raise TTSUnavailable("TTS_MODEL_RETIRED", problem, "set voice.speech_http_model to a supported model")
         text = pronounce.apply(text)             # user pronunciation dictionary (PRONUNCIATIONS.md)
         body = {"model": self.model, "voice": self.voice, "input": text, "response_format": "pcm"}
         if text_lang(text) == "he":

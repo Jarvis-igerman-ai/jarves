@@ -119,7 +119,9 @@ class VoiceConfig(_Strict):
     stt_fallback_model: str = "tiny"
     stt_compute: str = "int8"
     tts_voice_hint: str = "he-IL"
-    speech_http_model: str = "gpt-4o-mini-tts"   # /v1/audio/speech model for typed replies and `jarvis say`
+    # optional /v1/audio/speech model for typed replies and `jarvis say`. "" = off: speech_model speaks instead.
+    # gpt-4o-mini-tts (shutdown 14 Jan 2027, #1224) and tts-1 are retired by OpenAI and are refused.
+    speech_http_model: str = ""
     speech_voice: str = "marin"
     wake_no_speech_s: float = Field(12, ge=0, le=120)   # a wake-started conversation where nobody speaks ends after this (false wake); 0 = off
     chime: bool = True                     # soft sound when "Hey Jarvis" is heard and when the conversation is ready
