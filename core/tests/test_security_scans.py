@@ -185,7 +185,6 @@ def test_issue_480_refused_sources_name_the_owner_action():
     assert ss.refused_sources({"code_scanning": "complete:http_403", "dependabot": "skipped:http_404"}) == {}
 
 
-# Read from the live #480 issue body on 16 and 17 Nov 2026 (incomplete coverage, no findings): "<!-- sig:6490f068a3c2e39a -->".
 # Re-derivable without the live issue: it is sha256("i|")[:16], the pre-#480 formula for incomplete coverage, no findings.
 LIVE_480_SIG = "6490f068a3c2e39a"
 

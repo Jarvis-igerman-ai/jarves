@@ -536,7 +536,7 @@ def refused_sources(coverage: dict) -> dict[str, str]:
     """{source: "http_401" | "http_403" | "http_404"} for the sources GitHub refused; other values are ignored."""
     out = {}
     for k, v in coverage.items():
-        reason = v[len("incomplete:"):] if isinstance(v, str) and v.startswith("incomplete:") else ""
+        reason = v.removeprefix("incomplete:") if isinstance(v, str) and v.startswith("incomplete:") else ""
         if reason in ("http_401", "http_403", "http_404"):
             out[str(k)] = reason
     return out
