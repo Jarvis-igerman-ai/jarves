@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from .discuss import Helper, RateLimited
+from .opener import listening
 from . import unlock
 from .autopilot import owner_unlock_s
 from .store import Store
@@ -143,6 +144,17 @@ class Server(ThreadingHTTPServer):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
+    def server_activate(self) -> None:
+        # #750: publish the unlock key after a successful (exclusive) bind and BEFORE listening, so a dashboard that
+        # accepts connections always has its current key published. A failed publish closes the socket
+        # (TCPServer.__init__ calls server_close on any error here). A dashboard of the same home that still listens on
+        # another port keeps its key: this one then publishes (and later withdraws) nothing; its codes fail closed.
+        live = unlock.published_port(self.home)
+        if live is None or live == self.server_port or not listening(live):
+            self.unlock_key.publish(self.home, self.server_port)
+            self._published = True
+        super().server_activate()
+
     def __init__(self, home: Path, port: int = 8188, *, store: Store | None = None, profile_home: Path | None = None):
         self.home = Path(home)
         self.profile_home = profile_home or self.home.parent
@@ -156,11 +168,13 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_wrong = ("", 0)             # (code eph key, wrong tries over ALL sessions); 5 cancel the code
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
-        super().__init__(("127.0.0.1", port), Handler)
+        self.unlock_key = unlock.ServerKey()    # #750: private half only in memory
+        self._published = False                 # a failed second start must not withdraw the live server's key
+        super().__init__(("127.0.0.1", port), Handler)   # publishes the key in server_activate (after bind)
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
 
@@ -190,6 +204,8 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
+        if self._published:
+            self.unlock_key.withdraw(self.home)  # no stale key after a clean stop (#750)
         super().server_close()
         self.store.close()
 
@@ -465,10 +481,10 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code, key=self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
                 prev_salt, n = self.server.unlock_wrong
                 n = (n if prev_salt == salt else 0) + 1

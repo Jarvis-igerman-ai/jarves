@@ -230,6 +230,12 @@ def main(argv=None) -> int:
         capture_stderr(home)  # stderr (tracebacks included) is also appended, timestamped, to <home>/supervisor.log
         supervisor(home, a.profile_home.resolve(), a.port, sync_github=not a.no_sync, update_enabled=not a.no_sync)
         return 0
+    def dashboard_listening(home: Path, port: int) -> bool:
+        """--port, or else the port the running web server recorded (#750: one rule for unlock and open)."""
+        from . import webchild
+        from .opener import listening
+        recorded = webchild.read(home).get("port")
+        return any(listening(p) for p in [port] + ([recorded] if isinstance(recorded, int) and recorded != port else []))
     if a.action == "unlock":
         # Owner presence for dashboard answers (#750): the code appears only here, in the owner's own terminal.
         from . import unlock
@@ -244,19 +250,32 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {unlock.issue(home)}")
+        try:
+            # A key left by a crashed server must not yield a code nobody accepts: the dashboard must listen.
+            if not dashboard_listening(home, a.port):
+                raise unlock.UnlockUnavailable(f"no dashboard is running on port {a.port}; start it first (jarvis workflow supervise) "
+                                               "or pass its port with --port")
+            shown = unlock.issue(home)
+        except unlock.UnlockUnavailable as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+            return 2
+        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {shown}")
         return 0
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.
         # The token link is printed only with --no-open; it stays out of event logs and process arguments.
         from .opener import open_dashboard
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
+        from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            from . import unlock
+            if not dashboard_listening(home, a.port):  # a listening dashboard has already published its key (server_activate)
+                raise unlock.UnlockUnavailable("dashboard not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
+        except unlock.UnlockUnavailable:
+            print("No unlock code yet: the dashboard is not running or has no key; run 'jarvis workflow unlock' when it is up.", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.
