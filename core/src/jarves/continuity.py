@@ -19,6 +19,7 @@ only read and send commands):
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
 import time
@@ -303,7 +304,7 @@ class Continuity:
 
     def snooze(self, minutes: float, *, by: str = "user") -> float:
         mins = float(minutes)
-        mins = 1.0 if mins != mins else max(1.0, min(mins, SNOOZE_MAX_MIN))      # NaN -> the minimum, +-inf clamp
+        mins = 1.0 if math.isnan(mins) else max(1.0, min(mins, SNOOZE_MAX_MIN))      # NaN -> the minimum, +-inf clamp
         until = self.clock() + mins * 60
         self._set("sig.snooze_until", until)
         logs.info("continuity", "SIGNALS_SNOOZED", "proactive signals snoozed", by=by, minutes=round(mins))
