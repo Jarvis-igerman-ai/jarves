@@ -205,6 +205,7 @@ class Core:
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
         self._greeted = False
+        self._greet_claim: object | None = None     # #520: the wake session's provisional greeting claim
         self.voice_mode = "off"
         self._voice_connecting = False
         # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
@@ -899,10 +900,10 @@ class Core:
         await self.dev.face_set_state(self.dev.face_state)
         await self.link.send_face("status", self.snapshot())
         if self.cfg.voice.activation == "conversation" and not self._greeted:
-            self._greeted = True
+            self._mark_greeted()
             self._run_busy(self.greet())
         elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and not self._greeted:
-            self._greeted = True
+            self._mark_greeted()
             logs.info("core", "GREETING", "saying hello (once per start)", speech="cloud" if (self.cfg.ai.provider == "openai" and self.cfg.ai.connection != "chatgpt") else "local")
             self._run_busy(self.greet())      # busy => the wake mic is closed while JARVES talks (no self-trigger)
 
@@ -1369,14 +1370,15 @@ class Core:
             except Exception:
                 logs.debug("tts", "CHIME_FAILED", "could not play the chime")
 
-    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
+    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> bool:
+        """Open a live voice session; True only when this call opened one (#520: the wake greeting claim)."""
         if self.stopping or getattr(self.dev, "mic_muted", False):
-            return
+            return False
         if self.live is not None or self._voice_connecting:
             # QA 19 Oct (suite_voice): a face connecting after a failed startup started a SECOND live session while
             # the first was still open (two billed sessions, one never heard). One conversation at a time.
             logs.info("voice", "LIVE_ALREADY_RUNNING", "a live conversation is already open; not starting another")
-            return
+            return False
         self._warm_probes()               # P0.3: ready before session_config() builds the tool list (after connect)
         await self.link.send_face("assistant.activity", {"text": "Loading voice connection..."})
         gate = daily_limits.admit_voice(self.budget)
@@ -1384,7 +1386,7 @@ class Core:
             # No cloud session for a budget that cannot carry one (it would end ~1 s later and reconnect in a loop).
             await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             await self.announce_limit(gate.view)
-            return
+            return False
         v = self.cfg.voice
         async def output_level(level: float) -> None:
             await self.link.send_face("speaker.level", {"level": round(level, 3)})
@@ -1546,25 +1548,25 @@ class Core:
                 await self.announce_limit(lv)
             else:
                 await self.notify_error(e.code, "הגעתי למגבלת השימוש היומית", e.action)
-            return
+            return False
         except Exception as e:
             logs.error("voice", "LIVE_START_FAILED", "live voice failed to start", **logs.error_fields(e))
             self.health.set("voice", "degraded", f"live voice failed: {type(e).__name__}",
                             "check OPENAI_API_KEY/internet; push-to-talk still works")
             if ended[0]:
-                return                              # on_end already told the user
+                return False                        # on_end already told the user
             await self.notify_error("LIVE_START_FAILED", "live voice could not start", "check the internet / API key")
-            return
+            return False
         finally:
             self._voice_connecting = False
             if ack:
                 await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
             await self.link.broadcast("status", self.snapshot())
         if getattr(live, "running", True) is False:
-            return                                  # ended during start (on_end already handled it)
+            return False                            # ended during start (on_end already handled it)
         if self.stopping:
             await live.stop()
-            return
+            return False
         self.live = live
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
@@ -1577,6 +1579,7 @@ class Core:
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+        return True
 
     async def _wake_greeting_watch(self, live) -> None:
         try:
@@ -1653,7 +1656,7 @@ class Core:
                               error_type=type(e).__name__)
                     self._startup_stage("waiting_audio", "No greeting audio arrived; speaking a short TTS hello.")
                     await self._greeting_tts_fallback()
-                self._greeted = True                # the greeting is this live session's, or the one startup TTS hello above
+                self._mark_greeted()                # the greeting is this live session's, or the one startup TTS hello above
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")
                 deadline = time.monotonic() + 20
@@ -2072,15 +2075,20 @@ class Core:
         if not greeting:
             await self._start_live(ack=True, greeting=greeting)
             return
-        was = self._greeted
-        self._greeted = True
+        was, token = self._greeted, object()
+        self._greeted, self._greet_claim = True, token
         opened = False
         try:
-            await self._start_live(ack=True, greeting=greeting)
-            opened = self.live is not None
+            opened = await self._start_live(ack=True, greeting=greeting) is True
         finally:
-            if not opened:
-                self._greeted = was
+            if self._greet_claim is token:
+                self._greet_claim = None
+                if not opened:
+                    self._greeted = was     # still our claim: nobody else greeted meanwhile, so give it back
+
+    def _mark_greeted(self) -> None:
+        """The start-greeting is used for good; a pending wake claim (#520) must not give it back."""
+        self._greeted, self._greet_claim = True, None
 
     def wake_connecting_text(self) -> str:
         """#520: the face text while a wake session connects, in the voice language (was Hebrew for every language)."""

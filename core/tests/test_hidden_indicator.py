@@ -189,7 +189,8 @@ def test_dot_retries_a_transient_tcl_init_error(monkeypatch):
     monkeypatch.setattr(approval_popup.time, "sleep", lambda s: None)
     monkeypatch.setattr(indicator.sys, "platform", "linux")
     logged = []
-    monkeypatch.setattr(indicator.logs, "debug", lambda *a, **k: logged.append(a[1]))
+    monkeypatch.setattr(indicator.logs, "debug",
+                        lambda *a, **k: logged.extend(v for v in (*a, *k.values()) if v == "DOT_UNAVAILABLE"))
     indicator.TkDotBackend()._run()
     assert len(tries) == 2 and "DOT_UNAVAILABLE" not in logged
     fake.Tk = mock.Mock(side_effect=TclError("no display name and no $DISPLAY"))     # not transient: no retry

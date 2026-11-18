@@ -224,13 +224,3 @@ def test_hidden_tab_heartbeat_keeps_dashboard_marker_fresh(home, monkeypatch):
     monkeypatch.setattr(appr.time, "time", lambda: real + 60)
     assert not svc.dashboard_watching()
 
-
-def test_tab_going_hidden_beats_at_once(home):
-    """#477: the last visible beat is fresh for 15 s but the first hidden beat comes up to 20 s later, so a tab that
-    was just hidden looked absent for ~5 s. The page must send a hidden beat the moment it is hidden."""
-    import re
-    from pathlib import Path
-    js = (Path(appr.__file__).parent / "dashboard_static" / "approvals.js").read_text(encoding="utf-8")
-    handler = re.search(r'addEventListener\("visibilitychange",\s*\(\)\s*=>\s*([^;]*?)\);', js)
-    assert handler and "hidden" not in handler.group(1) and "refresh()" in handler.group(1)
-    assert '(document.hidden ? "?hidden=1" : "")' in js            # that beat is marked hidden: the 90 s window

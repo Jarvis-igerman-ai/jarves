@@ -184,26 +184,33 @@ def test_wake_connecting_text_follows_the_voice_language(lang, text):
     assert Core.wake_connecting_text(_ns(lang=lang)) == text
 
 
-@pytest.mark.parametrize("outcome", ["opened", "not_opened", "error"])
+@pytest.mark.parametrize("outcome", ["opened", "not_opened", "already_live", "error", "greeted_meanwhile"])
 async def test_wake_greeting_is_claimed_only_when_the_session_starts(outcome):
-    """#520: a wake session that never opened (budget, mute, connect failure, error) must not use up the
-    start-greeting; while it connects the claim is held, so a face connecting meanwhile does not greet twice."""
+    """#520: a wake session that never opened (budget, mute, connect failure, error, or one already live) must not
+    use up the start-greeting; while it connects the claim is held, so a face connecting meanwhile does not greet
+    twice; a greeting another path really gave during the connect is never taken back."""
     from jarves.app import Core
     ns = _ns(lang="en")
-    ns.live, seen = None, []
+    ns.live, ns._greet_claim, seen = None, None, []
 
     async def start_live(*, greeting=None, ack=False):
         seen.append((greeting, ns._greeted))     # claimed while connecting
         if outcome == "error":
             raise RuntimeError("connect failed")
-        ns.live = object() if outcome == "opened" else None
+        if outcome == "already_live":
+            ns.live = object()                   # someone else's session: this call opened nothing
+            return False
+        if outcome == "greeted_meanwhile":
+            Core._mark_greeted(ns)               # e.g. the startup hello finished during the connect
+        return outcome == "opened"
     ns._start_live, ns.wake_greeting = start_live, lambda: Core.wake_greeting(ns)
     if outcome == "error":
         with pytest.raises(RuntimeError):
             await Core._open_wake_live(ns)
     else:
         await Core._open_wake_live(ns)
-    assert seen == [("I'm listening.", True)] and ns._greeted is (outcome == "opened")
+    assert seen == [("I'm listening.", True)] and ns._greeted is (outcome in ("opened", "greeted_meanwhile"))
+    assert ns._greet_claim is None
 
 
 async def test_wake_without_greeting_never_claims_the_start_greeting():
@@ -214,6 +221,7 @@ async def test_wake_without_greeting_never_claims_the_start_greeting():
     async def start_live(*, greeting=None, ack=False):
         assert greeting is None and not ns._greeted
         ns.live = object()
+        return True
     ns._start_live, ns.wake_greeting = start_live, lambda: Core.wake_greeting(ns)
     await Core._open_wake_live(ns)
     assert not ns._greeted
