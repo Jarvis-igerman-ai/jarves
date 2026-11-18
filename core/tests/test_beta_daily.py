@@ -47,16 +47,10 @@ def test_green_run_writes_install_scenario_and_demo_records(tmp_path):
                       "unreadable": 0}
 
 
-def test_failing_scenario_is_recorded_as_fail(tmp_path):
-    bd.run_daily(tmp_path, runner(fail=("selftest",)), now=NOW)
+def test_failing_scenario_and_installed_demo_fail_the_check_even_if_source_demos_pass(tmp_path):
+    bd.run_daily(tmp_path, runner(fail=("selftest", "test-limits")), now=NOW)
     report = bd.check(tmp_path, now=NOW)
-    assert report["scenario_pass_pct"] == 80.0 and report["ok"] is True
-
-
-def test_failing_installed_demo_fails_the_check_even_if_source_demos_pass(tmp_path):
-    bd.run_daily(tmp_path, runner(fail=("test-limits",)), now=NOW)
-    report = bd.check(tmp_path, now=NOW)
-    assert report["demos_24h_with_image"] == 2 and report["demos_24h_not_passing"] == 1
+    assert report["scenario_pass_pct"] == 60.0 and report["demos_24h_with_image"] == 2 and report["demos_24h_not_passing"] == 1
     assert report["demos_24h_installed_pass"] == 0 and report["ok"] is False
 
 
@@ -84,21 +78,12 @@ def test_output_tails_are_redacted():
     assert "withheld" not in tail[0] and "<user>" in tail[0] and "<email>" in tail[0]  # redaction really ran
 
 
-def test_only_failing_or_skipped_demos_fail_the_check(tmp_path):
-    bd.run_daily(tmp_path, runner(fail=("-q", "test-limits")), now=NOW)
-    assert bd.check(tmp_path, now=NOW)["ok"] is False
-    home = tmp_path / "skip"
-    base = runner()
+def test_source_demos_without_pytest_are_skipped(tmp_path):
+    home, base = tmp_path, runner()
     bd.run_daily(home, lambda argv: (1, "No module named pytest") if "-q" in argv else base(argv), now=NOW)
     results = {json.loads(p.read_text(encoding="utf-8"))["ticket"]: json.loads(p.read_text(encoding="utf-8"))["result"]
                for p in (home / "beta_records").glob("demo-*.json")}
     assert results == {"JAR-214": "SKIPPED", "JAR-320": "SKIPPED", "JAR-321": "PASS"}
-
-
-def test_newer_build_waiting_is_not_a_good_install(tmp_path):
-    run = runner(newer=True)
-    bd.run_daily(tmp_path, run, now=NOW)
-    assert len(run.calls) == 1 and bd.check(tmp_path, now=NOW)["newest_beta_installed_age_h"] is None
 
 
 def test_two_runs_in_one_second_keep_both_records(tmp_path):
@@ -127,16 +112,6 @@ def test_demo_test_node_ids_exist():
             node = next((n for n in body if isinstance(n, (ast.ClassDef, ast.FunctionDef)) and n.name == name), None)
             assert node is not None, f"{path}: {name} missing"
             body = node.body
-
-
-def test_failed_install_check_writes_record_but_runs_no_scenarios(tmp_path):
-    run = runner(fail=("check",))
-    bd.run_daily(tmp_path, run, now=NOW)
-    assert len(run.calls) == 1
-    rec = json.loads(next((tmp_path / "beta_records").glob("install-*.json")).read_text(encoding="utf-8"))
-    assert rec["ok"] is False and rec["rc"] == 1
-    report = bd.check(tmp_path, now=NOW)
-    assert report["ok"] is False and report["newest_beta_installed_age_h"] is None and report["scenario_pass_pct"] is None
 
 
 def test_stale_install_and_old_demos_fail_the_check(tmp_path):
@@ -198,10 +173,13 @@ def test_launcher_is_resolved_on_path_like_a_windows_cmd_shim(monkeypatch):
 def test_offline_or_unparsable_update_check_is_not_newest(tmp_path):
     # `update check --json` exits 1 with "error" when offline; a stray text line is not trusted either (R3)
     for rc, out in ((1, update_line(error="network unreachable")), (0, update_line(error="cached")),
-                    (0, "JARVES 1.0\nUp to date (checked now)."), (0, "")):
-        home = tmp_path / str(len(list(tmp_path.iterdir())))
-        bd.run_daily(home, lambda argv, r=(rc, out): r, now=NOW)
-        assert bd.check(home, now=NOW)["newest_beta_installed_age_h"] is None
+                    (0, update_line(available=True)), (0, "JARVES 1.0\nUp to date (checked now)."), (0, "")):
+        home, calls = tmp_path / str(len(list(tmp_path.iterdir()))), []
+        bd.run_daily(home, lambda argv, r=(rc, out): calls.append(argv) or r, now=NOW)
+        rec = json.loads(next((home / "beta_records").glob("install-*.json")).read_text(encoding="utf-8"))
+        assert len(calls) == 1 and rec["ok"] is False and rec["rc"] == rc  # recorded, no scenarios run
+        report = bd.check(home, now=NOW)
+        assert report["newest_beta_installed_age_h"] is None and report["scenario_pass_pct"] is None
 
 
 def test_future_dated_install_record_is_ignored(tmp_path):
@@ -222,4 +200,13 @@ def test_cli_update_check_json(tmp_path, monkeypatch, capsys):
         line = json.loads(capsys.readouterr().out.strip())
         assert (line["available"], line["error"]) == (st["available"], st["error"])
         assert bd._newest(json.dumps(line)) is (code == 0 and not st["available"])
-    assert cli.main(["update", "install", "--json"]) == 2
+    # the exact call beta_daily makes: `update check --json` through the real UpdateChecker.check branch (R2)
+    from jarves import features
+    monkeypatch.setattr(features.Features, "enabled", lambda self, name: True)
+    for st, code in (({"available": False, "error": "network unreachable"}, 1), ({"available": False, "error": None}, 0)):
+        monkeypatch.setattr(updates.UpdateChecker, "check", lambda self, force=False, st=st: {"checked_at": "now", **st})
+        assert cli.main(["update", "check", "--json"]) == code
+        line = json.loads(capsys.readouterr().out.strip())
+        assert (line["available"], line["error"]) == (False, st["error"]) and bd._newest(json.dumps(line)) is (code == 0)
+    for action in (["install"], ["auto", "status"]):  # --json is never silently ignored (R4)
+        assert cli.main(["update", *action, "--json"]) == 2

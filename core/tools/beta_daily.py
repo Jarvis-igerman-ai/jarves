@@ -1,23 +1,16 @@
 """Daily installed-beta run that leaves records (JAR-456). Standard library only.
 
-    python core/tools/beta_daily.py run   --home DIR [--jarvis PATH]   # record install, S01-S05, demos
-    python core/tools/beta_daily.py check --home DIR                   # exit 0 = fresh install, known pass %, demos
+    python core/tools/beta_daily.py run   --home DIR [--jarvis PATH]
+    python core/tools/beta_daily.py check --home DIR   # exit 0 = healthy
 
-This tool never installs and never answers an install question. The install itself is the owner-approved path:
-`jarvis update auto on` (signed release, quiet moment, notice and backup first). `run` asks the read-only
-`jarvis update check --json` whether the installed build is the newest and writes <home>/beta_records/install-<ts>.json
-(ok = exit 0, no error and nothing newer available; offline or failed checks exit 1) every time. Only when it is the newest it runs S01-S05 (PASS = exit
-code 0) into scenarios-<ts>.json and writes one demo per ticket (JAR-214, JAR-320, JAR-321): demo-<ticket>-<ts>.json
-plus an SVG image of the command transcript. JAR-214 and JAR-320 have no installed-product command, so their demo
-runs the regression test from this checkout with the core venv Python (`target: source-tests`); no pytest = SKIPPED.
-`check` prints newest_beta_installed_age_h (age of the last record where `update check` said the installed build is
-the newest; records dated in the future are ignored), scenario_pass_pct (latest run under 26 h), demos_24h_with_image (passing demos with their image),
-demos_24h_installed_pass, demos_24h_not_passing and unreadable (malformed record files, skipped). ok = that record
-under 26 h, pass % known and at least one passing installed-product demo with image. Output tails go through the
-product's log redaction; each step times out after 300 s and the whole run is capped at 1800 s;
-stdin is closed so a prompt fails at once, and --jarvis is resolved on PATH (Windows .cmd shims too).
-Daily caller: the autopilot beta-verify task (workflow/autopilot_watch.py beta_step) lists `run` and `check`.
-Every record is its own file written via a unique temp file and os.replace, so runs never race on a shared file.
+run: never installs (that is the owner's `jarvis update auto`). It asks `jarvis update check --json`
+  and always writes <home>/beta_records/install-<ts>.json (ok = newest, no error). Only when newest:
+  S01-S05 (PASS = exit 0) into scenarios-<ts>.json, then one demo record plus an SVG transcript per
+  ticket. JAR-214/JAR-320 run their regression test from this checkout (no pytest = SKIPPED);
+  JAR-321 reuses S04. Tails are redacted, stdin is closed, 300 s per step, 1800 s per run.
+check: newest_beta_installed_age_h (future records ignored), scenario_pass_pct (last 26 h) and
+  passing demos_24h_with_image. ok = install under 26 h, pass % known, a passing installed demo.
+Each record is its own file (unique temp file + os.replace). Caller: autopilot beta-verify task.
 """
 from __future__ import annotations
 

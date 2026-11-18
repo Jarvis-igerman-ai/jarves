@@ -1900,12 +1900,12 @@ def cmd_update(a, cfg, home) -> int:
             return 1
         print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
-    if a.action == "auto":
-        return _update_auto(a, cfg, home)
     as_json = getattr(a, "json", False)
     if as_json and (a.action not in ("check", "status") or getattr(a, "rollback", False)):
         print("--json works only with `update check` or `update status`")
         return 2
+    if a.action == "auto":
+        return _update_auto(a, cfg, home)
     u = UpdateChecker(home, cfg=cfg)
     if not as_json:
         print(version_line(home) + f"; update channel {u.channel}")
