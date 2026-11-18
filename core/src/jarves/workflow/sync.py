@@ -71,15 +71,16 @@ def pr_files(get, number: int, sha: str) -> list[str]:
 
 
 REQUIRED_CHECK = "CI result (single required check)"  # the one jarves-checks gate main must pass
+BETA_JOB = "beta"  # package.yml beta publish job; judged separately from main's CI state
 _BAD = ("failure", "timed_out", "startup_failure")
 
 
-def _gate_state(runs: list) -> str | None:
-    """State from the newest run of the required gate; None when the gate has no run here."""
-    gate = [r for r in runs if isinstance(r, dict) and r.get("name") == REQUIRED_CHECK]
+def _gate_state(runs: list, name: str = REQUIRED_CHECK) -> str | None:
+    """State from the newest run of check `name`; None when it has no run here."""
+    gate = [r for r in runs if isinstance(r, dict) and r.get("name") == name]
     if not gate:
         return None
-    if not all(isinstance(r.get("id"), int) for r in gate):
+    if not all(type(r.get("id")) is int for r in gate):  # bool is an int subclass: reject it
         return "unknown"
     newest = max(gate, key=lambda r: r["id"])
     if newest.get("status") != "completed":
@@ -114,6 +115,20 @@ def main_ci_state(get, sha: str) -> str:
         return "success" if ok else "unknown"
     except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
         return "unknown"
+
+
+def beta_job_failed(get, sha: str) -> bool:
+    """True only when the newest `beta` publish run on this sha completed with a failure.
+
+    main_ci_state ignores this job (JAR-406), so the failure is surfaced here instead: release
+    health alerts on it and the autopilot does not open a beta-verify task for an unpublished beta.
+    A later successful re-run clears it. Fetch errors or no run: False (unknown raises nothing)."""
+    try:
+        data = get(f"/repos/{REPO}/commits/{sha}/check-runs?check_name={quote(BETA_JOB)}&per_page=100")
+    except (OSError, ValueError):
+        return False
+    runs = data.get("check_runs") if isinstance(data, dict) else None
+    return _gate_state(runs if isinstance(runs, list) else [], BETA_JOB) == "failure"
 
 
 def main_ci_green(get, sha: str) -> bool:
@@ -166,6 +181,7 @@ def collect(get=public_get) -> dict:
     committed = ((branch["commit"].get("commit") or {}).get("committer") or {}).get("date", "")
     state = main_ci_state(get, sha)
     return {"issues": issues, "prs": prs, "sha": sha, "truncated": truncated, "ci_green": state == "success", "ci_state": state,
+            "beta_failed": beta_job_failed(get, sha),
             "main_committed_at": committed, "latest_beta": latest_beta(get)}
 
 
@@ -329,6 +345,7 @@ def apply_snapshot(store, snapshot: dict, plan: dict | None = None, bug_labels=B
                               if tracked_issue(x, bug_labels)][:MAX_OPEN_ROWS],
               "open_prs": [{**x, "title": x["title"][:120]} for x in snapshot.get("prs", []) if x["state"] == "open"],
               "ci_green": bool(snapshot.get("ci_green")), "ci_state": snapshot.get("ci_state", "unknown"),
+              "beta_failed": bool(snapshot.get("beta_failed")),
               "main_committed_at": snapshot.get("main_committed_at", ""), "latest_beta": snapshot.get("latest_beta"),
               "scope_note": plan.get("scope_note", ""), "error": ""}
     if issue_tasks:

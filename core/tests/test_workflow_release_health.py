@@ -108,12 +108,19 @@ class SyncFieldTests(unittest.TestCase):
 
         def state(gate_runs, others=(), total=None):
             every = list(gate_runs) + list(others)
+            paths = []
+
             def get(path):
+                paths.append(path)
                 if "check_name=" in path:
-                    self.assertIn("check_name=CI%20result", path)
                     return {"total_count": len(gate_runs), "check_runs": list(gate_runs)}
                 return {"total_count": total or len(every), "check_runs": every}
-            return sync.main_ci_state(get, "s")
+            result = sync.main_ci_state(get, "s")
+            # The full quoted gate name is asked first; the unfiltered list only as a fallback.
+            self.assertEqual(paths[0], "/repos/Jarvis-igerman-ai/jarves/commits/s/check-runs"
+                             "?check_name=CI%20result%20%28single%20required%20check%29&per_page=100")
+            self.assertEqual(len(paths), 1 if gate_runs else 2)
+            return result
 
         def run(i, conclusion, status="completed", name=gate):
             return {"id": i, "name": name, "status": status, "conclusion": conclusion}
@@ -126,7 +133,49 @@ class SyncFieldTests(unittest.TestCase):
         self.assertEqual(state([run(5, "cancelled")]), "unknown")
         self.assertEqual(state([run(5, "success")], total=178), "success")  # main fef9ae06: >100 checks
         self.assertEqual(state([{"id": "x", "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
+        self.assertEqual(state([{"id": True, "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
         self.assertEqual(state([], [flake]), "failure")  # no gate run seen: unchanged all-checks rule
+
+    def test_beta_job_failure_is_reported_separately(self):
+        """JAR-406: main_ci_state ignores the beta job, so its failure is surfaced on its own."""
+        from jarves.workflow import sync
+
+        def failed(runs):
+            def get(path):
+                self.assertIn("?check_name=beta&", path)
+                return {"check_runs": runs}
+            return sync.beta_job_failed(get, "s")
+
+        def run(i, conclusion, name="beta"):
+            return {"id": i, "name": name, "status": "completed", "conclusion": conclusion}
+        self.assertTrue(failed([run(1, "failure")]))
+        self.assertFalse(failed([run(1, "failure"), run(2, "success")]))    # a passing re-run clears it
+        self.assertFalse(failed([run(1, "failure", name="beta-docs")]))     # exact job name only
+        self.assertFalse(failed([]))
+        self.assertFalse(failed(None))
+
+        def boom(path):
+            raise OSError("down")
+        self.assertFalse(sync.beta_job_failed(boom, "s"))                    # unknown raises nothing
+        self.assertEqual(ReleaseHealthTests().kinds({"sha": "c" * 40, "ci_state": "success", "beta_failed": True}),
+                         ["beta_failed"])
+        self.assertEqual(ReleaseHealthTests().kinds({"sha": "c" * 40, "beta_failed": True, "error": "x"}), [])
+
+    def test_failed_beta_job_opens_no_beta_verify_task(self):
+        from jarves.workflow import autopilot_loop
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "w.db")
+            self.addCleanup(store.close)
+            src = {"sha": "d" * 40, "synced_at": 1, "open_prs": [], "open_issues": [], "ci_green": True}
+
+            def betas():
+                out = autopilot_loop._watch(store, Path(tmp), {"enabled": True, "kill": False},
+                                            stop=lambda *a: None, notify=lambda *a: None)
+                return [o for o in out if o["action"] == "beta_verify_task"]
+            store.set_source({**src, "beta_failed": True})
+            self.assertEqual(betas(), [])
+            store.set_source({**src, "beta_failed": False})               # re-run passed: same sha gets its task
+            self.assertEqual(len(betas()), 1)
 
     def test_collect_carries_draft_auto_merge_and_ci_state(self):
         from jarves.workflow import sync
@@ -146,6 +195,7 @@ class SyncFieldTests(unittest.TestCase):
         self.assertTrue(p["auto_merge"])
         self.assertEqual(snap["ci_state"], "pending")
         self.assertFalse(snap["ci_green"])
+        self.assertFalse(snap["beta_failed"])
 
 
 if __name__ == "__main__":
