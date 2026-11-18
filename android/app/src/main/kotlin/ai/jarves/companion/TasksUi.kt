@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -71,6 +72,10 @@ fun taskStateText(state: String): Int = when (state.trim().lowercase()) {
     else -> R.string.task_state_other
 }
 
+/** The card shows only while the PC lists the `tasks` scope for this phone and has not refused it (403) or unpaired it (401). */
+fun tasksCardVisible(scopes: List<String>, st: Plans?): Boolean =
+    "tasks" in scopes && st != Plans.NotAllowed && st != Plans.Revoked
+
 // ---------- State holder (lives in AppModel) ----------
 
 class TasksModel(
@@ -105,10 +110,11 @@ class TasksModel(
 
 /** The PC's tasks, read-only. Approving, skipping and deleting a step stay on the computer. Shown only when the PC lists the tasks scope for this phone. */
 @Composable
-fun TasksCard(session: Session, link: Link, model: TasksModel) {
-    LaunchedEffect(session.token, link) { model.refresh(session) }
+fun TasksCard(session: Session, link: Link.Online, model: TasksModel) {
+    // Without the scope nothing is read. Each status tick is a new Link.Online: the PC's server_time changes per answer.
+    if (tasksCardVisible(link.info.scopes, null)) LaunchedEffect(session.token, link) { model.refresh(session) }
     val st by model.state.collectAsStateWithLifecycle()
-    if (st == Plans.NotAllowed || st == Plans.Revoked) return
+    if (!tasksCardVisible(link.info.scopes, st)) return
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(R.string.task_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
@@ -116,7 +122,7 @@ fun TasksCard(session: Session, link: Link, model: TasksModel) {
                 is Plans.Listed -> if (!l.enabled) Text(stringResource(R.string.task_off)) else if (l.plans.isEmpty()) Text(stringResource(R.string.task_none)) else l.plans.forEach { p ->
                     Text(p.title.ifBlank { "…" }, style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        stringResource(R.string.task_line, stringResource(taskStateText(p.state)), p.stepsDone, p.steps, p.progress),
+                        pluralStringResource(R.plurals.task_line, p.steps, stringResource(taskStateText(p.state)), p.stepsDone, p.steps, p.progress),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (p.needsPc) Text(stringResource(R.string.task_needs_pc), style = MaterialTheme.typography.bodySmall)

@@ -108,7 +108,11 @@
     <string name="task_off">המשימות כבויות במחשב.</string>
     <string name="task_none">אין משימות כרגע.</string>
     <string name="task_unreachable">לא הצלחנו לקרוא את המשימות. הן מתרעננות לבד.</string>
-    <string name="task_line">%1$s · %2$d מתוך %3$d צעדים הושלמו · %4$d%%</string>
+    <plurals name="task_line">
+        <item quantity="one">%1$s · %2$d מתוך %3$d צעד הושלם · %4$d%%</item>
+        <item quantity="two">%1$s · %2$d מתוך %3$d צעדים הושלמו · %4$d%%</item>
+        <item quantity="other">%1$s · %2$d מתוך %3$d צעדים הושלמו · %4$d%%</item>
+    </plurals>
     <string name="task_needs_pc">צריך אתכם במחשב.</string>
     <string name="task_pc_only">אישור, דילוג או מחיקה של צעד נעשים במחשב.</string>
     <string name="task_state_draft">ממתינה לאישור</string>

@@ -108,7 +108,10 @@
     <string name="task_off">Tasks are switched off on the computer.</string>
     <string name="task_none">No tasks right now.</string>
     <string name="task_unreachable">Could not read the tasks. They refresh on their own.</string>
-    <string name="task_line">%1$s · %2$d of %3$d steps done · %4$d%%</string>
+    <plurals name="task_line">
+        <item quantity="one">%1$s · %2$d of %3$d step done · %4$d%%</item>
+        <item quantity="other">%1$s · %2$d of %3$d steps done · %4$d%%</item>
+    </plurals>
     <string name="task_needs_pc">Needs you on the computer.</string>
     <string name="task_pc_only">Approving, skipping or deleting a step is done on the computer.</string>
     <string name="task_state_draft">Waiting for approval</string>

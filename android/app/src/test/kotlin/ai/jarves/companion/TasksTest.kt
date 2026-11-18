@@ -1,6 +1,14 @@
 package ai.jarves.companion
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
@@ -14,7 +22,11 @@ private class PlansRec(val status: Int = 200, val body: String = "{}", val boom:
     }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class TasksTest {
+    private val session = Session("pc:1", "tok", "pin", "dev")
+    private val listed = """{"plans":[{"id":1,"title":"a","state":"done","steps":[]}]}"""
+
     @Test
     fun plansAreReadOnlyGetAndParsedWithStepCounts() {
         val body = """{"enabled":true,"pc_only":["approve","skip","delete"],"plans":[
@@ -60,5 +72,57 @@ class TasksTest {
         assertEquals(R.string.task_state_running, taskStateText("running"))
         assertEquals(R.string.task_state_done, taskStateText("DONE"))
         assertEquals(R.string.task_state_other, taskStateText("weird"))
+    }
+
+    @Test
+    fun theModelReadsOnceAndANewerReadReplacesTheOlder() = runTest {
+        val pc = PlansRec(body = listed)
+        var reads = 0
+        val m = TasksModel(this, StandardTestDispatcher(testScheduler)) { reads++; CompanionClient(it.base, pc) }
+        m.refresh(session); m.refresh(session)               // the first read is cancelled before it runs
+        advanceUntilIdle()
+        assertEquals(1, reads)
+        assertEquals(1, (m.state.value as Plans.Listed).plans.size)
+    }
+
+    @Test
+    fun aNewPairingStartsEmpty() = runTest {
+        val m = TasksModel(this, StandardTestDispatcher(testScheduler)) { CompanionClient(it.base, PlansRec(body = listed)) }
+        m.refresh(session); advanceUntilIdle()
+        assertTrue(m.state.value is Plans.Listed)
+        m.refresh(session.copy(token = "other"))
+        assertNull(m.state.value)                            // nothing from the old pairing is shown
+        advanceUntilIdle()
+        assertTrue(m.state.value is Plans.Listed)
+    }
+
+    @Test
+    fun aCrashingReadIsUnreachableButCancellationIsNotSwallowed() = runTest {
+        val bad = TasksModel(this, StandardTestDispatcher(testScheduler)) { throw IllegalStateException("x") }
+        bad.refresh(session); advanceUntilIdle()
+        assertEquals(Plans.Unreachable, bad.state.value)
+        val cancelled = TasksModel(this, StandardTestDispatcher(testScheduler)) { throw CancellationException("gone") }
+        cancelled.refresh(session); advanceUntilIdle()
+        assertNull(cancelled.state.value)                    // rethrown, not turned into a failure line
+    }
+
+    @Test
+    fun theCardNeedsTheScopeAndHidesOnRefusalOrUnpair() {
+        assertFalse(tasksCardVisible(listOf("chat", "status"), null))
+        assertFalse(tasksCardVisible(listOf("chat"), Plans.Listed(emptyList(), true)))
+        assertTrue(tasksCardVisible(listOf("tasks"), null))
+        assertTrue(tasksCardVisible(listOf("tasks"), Plans.Unreachable))
+        assertTrue(tasksCardVisible(listOf("tasks"), Plans.Listed(emptyList(), false)))
+        assertFalse(tasksCardVisible(listOf("tasks"), Plans.NotAllowed))
+        assertFalse(tasksCardVisible(listOf("tasks"), Plans.Revoked))
+    }
+
+    @Test
+    fun eachStatusTickIsANewLinkSoTheCardReadsAgain() {
+        fun info(t: Double) = """{"api":1,"api_min":1,"core_version":"4","server_time":$t,"pc":{"state":"online","core":"running"},"scopes":["tasks"]}"""
+        val a = CompanionClient("pc:1", PlansRec(body = info(1.0))).check("t")
+        val b = CompanionClient("pc:1", PlansRec(body = info(11.0))).check("t")
+        assertTrue(a is Link.Online)
+        assertNotEquals(a, b)                                // the PC sends time.time() per answer (mobile_companion.py)
     }
 }
