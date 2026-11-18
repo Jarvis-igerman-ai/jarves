@@ -598,8 +598,8 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     else:
         lines.append("**No open findings in the sources that were read completely.**")
     lines += ["", f"Resolved since the previous scan (source read completely): {resolved}", ""]
-    gaps = coverage_gaps(coverage)
-    lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
+    gaps = coverage_gaps(coverage, skipped=False)        # the signature's gap set: skipped sources would go stale
+    lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (last rewritten by the {kind} scan). "
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")

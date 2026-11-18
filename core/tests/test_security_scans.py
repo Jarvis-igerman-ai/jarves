@@ -246,6 +246,8 @@ def test_issue_480_light_and_full_scans_alternating_keep_the_tracker(home):
     assert scan(None, gh)["issue"]["status"] == "updated"                  # light: local_diagnostics skipped
     assert scan(None, gh, kind="full", now=day(1))["issue"]["status"] == "unchanged"   # full: + boundary skipped
     assert scan(None, gh, now=day(2))["issue"]["status"] == "unchanged"
+    body = gh.issues[0]["body"]                                    # only what the signature covers is published (R1)
+    assert "skipped" not in body and "(last rewritten by the light scan)" in body
     fine = {"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry"}
     assert ss.signature([], True, ss.coverage_gaps(fine, skipped=False)) == hashlib.sha256(b"c|").hexdigest()[:16]
 
