@@ -62,10 +62,12 @@ def save(home: Path, **kw) -> dict:
     with file_lock(path):
         raw = _raw(home)
         add = kw.pop("ids_add", None) or {}     # re-read under the lock: a concurrent writer's ids are kept
+        sent_add = kw.pop("sent_add", None) or {}   # {"sent_<mode>": {name: mtime}} merged the same way
         prune = kw.pop("prune", False)
         d = {**raw, **load(home), **kw}
-        if add:
-            d["ids"] = {**(raw.get("ids") if isinstance(raw.get("ids"), dict) else {}), **add}
+        for k, new in (("ids", add), *sent_add.items()):
+            if new:
+                d[k] = {**(raw.get(k) if isinstance(raw.get(k), dict) else {}), **new}
         if prune:                               # a deleted report leaves no entry behind: the file stays small
             for k in ("ids", "sent_folder", "sent_api"):
                 if isinstance(d.get(k), dict):
@@ -218,9 +220,25 @@ def _sweep(dest: Path, now: float | None = None) -> None:
             continue
 
 
+def _guarded(fn, *args, **kw):
+    """Run a background send; any failure (e.g. the settings lock held by the CLI) warns once, type only."""
+    try:
+        r = fn(*args, **kw)
+    except Exception as e:      # a report write or a finished job must never fail because of Drive
+        if _first("SYNC_FAILED"):
+            logs.warn("reports_drive", "SYNC_FAILED", "reports to Drive sync failed", error=type(e).__name__)
+        return None
+    _WARNED.discard("SYNC_FAILED")
+    return r
+
+
 def after_report(home: Path, path: Path, *, features, client=None) -> dict | None:
     """Hook for report writers (whatsapp_collect and others): checks the switch itself; never raises.
     Blocking (file copy or HTTP + asyncio.run for the token): an async writer calls it via asyncio.to_thread."""
+    return _guarded(_after_report, home, path, features=features, client=client)
+
+
+def _after_report(home: Path, path: Path, *, features, client=None) -> dict | None:
     if features is None or not features.active(FEATURE):
         return None
     if not _tracked(home, path):
@@ -229,7 +247,7 @@ def after_report(home: Path, path: Path, *, features, client=None) -> dict | Non
         key, m = _sent_key(home), _mtime(path)
         r = _send(home, path, client)
         if "error" not in r and m is not None:
-            save(home, **{key: {**_sent(home, key), path.name: m}})
+            save(home, sent_add={key: {path.name: m}})
     if _RERUN.is_set():                         # a job finished while we held the lock: its reports go now
         sync(home, client=client)
     return r
@@ -310,7 +328,7 @@ def _sync(home: Path, client) -> list[dict]:
             elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=_tag(f.name), error=r.get("kind", ""))
     if sent != before:                          # nothing new: the settings file is not rewritten
-        save(home, prune=True, **{key: sent})
+        save(home, prune=True, sent_add={key: sent})     # merged under the lock; prune drops deleted ones
     return out
 
 
@@ -318,7 +336,7 @@ def on_job_finished(features) -> None:
     """Scheduler hook: with the switch on, sync the reports folder off the event loop. Never raises."""
     try:
         if features is not None and features.active(FEATURE):
-            threading.Thread(target=sync, args=(features.home,), daemon=True, name="reports-drive").start()
+            threading.Thread(target=_guarded, args=(sync, features.home), daemon=True, name="reports-drive").start()
             _WARNED.discard("HOOK_FAILED")
     except Exception as e:      # a finished job must not fail because of this hook; say so once, type only
         if _first("HOOK_FAILED"):
@@ -348,13 +366,20 @@ def cmd_drive(a, cfg, home) -> int:
             return 1
         save(home, mode="api")
     elif a.drive_action == "upload":
-        import httpx
         from .google_auth import GoogleAuthError
+        errs: tuple = (OSError, ValueError, GoogleAuthError)
+        if load(home)["mode"] == "api":         # httpx is needed only for the API; a folder copy works without it
+            import httpx
+            errs += (httpx.HTTPError,)
+        path = Path(a.file)
+        key, m = _sent_key(home), _mtime(path)  # read before the send, like the sync
         try:
-            print(json.dumps(upload(home, Path(a.file))))
-        except (OSError, ValueError, GoogleAuthError, httpx.HTTPError) as e:   # not signed in, offline, Drive refused
+            print(json.dumps(upload(home, path)))
+        except errs as e:                       # not signed in, offline, Drive refused
             print(reason(e))
             return 1
+        if _tracked(home, path) and m is not None:  # a report in <home>/reports/: the next sync does not resend it
+            save(home, sent_add={key: {path.name: m}})
         return 0
     print(json.dumps({**load(home), "enabled": on}))
     return 0

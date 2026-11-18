@@ -5,8 +5,19 @@ import asyncio
 import json
 import shutil
 
+import pytest
+
 from jarves import cli, reports_drive as rd
 from jarves.features import CATALOG
+
+
+@pytest.fixture(autouse=True)
+def _clean_module_state(monkeypatch):
+    """Module-global warning keys and the re-run flag never leak from one test into the next."""
+    monkeypatch.setattr(rd, "_WARNED", set())
+    rd._RERUN.clear()
+    yield
+    rd._RERUN.clear()
 
 
 def switch_on():
@@ -110,7 +121,7 @@ def test_sync_sends_each_new_report_once_and_the_scheduler_hook_respects_the_swi
     assert calls == []
     feats.on = True
     rd.on_job_finished(feats)
-    assert calls == [(tmp_path,)]
+    assert calls == [(rd.sync, tmp_path)]
 
 
 def test_overlapping_sync_is_skipped_and_failed_signin_is_a_plain_error(home, tmp_path, monkeypatch, capsys):
@@ -635,3 +646,55 @@ def test_a_deleted_failed_report_drops_its_warning_key(tmp_path, monkeypatch):
     (tmp_path / "reports" / "big.md").unlink()
     rd.sync(tmp_path, client=FakeDrive())
     assert not [k for k in rd._WARNED if k.startswith("SEND_FAILED:")]
+
+
+def test_a_settings_lock_timeout_in_the_sync_thread_or_after_report_warns_once_and_never_raises(tmp_path, monkeypatch):
+    warned = []
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append((a[1], kw)))
+    dest = tmp_path / "gdrive"
+    dest.mkdir()
+    rd.save(tmp_path, folder=str(dest))
+    rep = tmp_path / "reports" / "a.md"
+    rep.parent.mkdir()
+    rep.write_bytes(b"1")
+
+    def busy(home, **kw):
+        raise TimeoutError("file is locked by another process")
+    monkeypatch.setattr(rd, "save", busy)
+    started = []
+
+    class Now:
+        def __init__(self, target, args, **kw):
+            started.append(lambda: target(*args))
+
+        def start(self):
+            pass
+    monkeypatch.setattr(rd.threading, "Thread", Now)
+    rd.on_job_finished(type("F", (), {"home": tmp_path, "active": lambda self, fid: True})())
+    started[0]()                                   # the thread body: no exception escapes
+    started[0]()
+    assert rd.after_report(tmp_path, rep, features=ON) is None
+    assert warned == [("SYNC_FAILED", {"error": "TimeoutError"})]
+
+
+def test_a_manual_upload_of_a_tracked_report_is_not_sent_again_by_the_next_sync(home, monkeypatch):
+    dest = home / "gdrive"
+    dest.mkdir()
+    rd.save(home, folder=str(dest))
+    rep = home / "reports" / "a.md"
+    rep.parent.mkdir()
+    rep.write_bytes(b"1")
+    switch_on()
+    assert cli.main(["reports", "drive", "upload", str(rep)]) == 0
+    assert rd._raw(home)["sent_folder"] == {"a.md": rep.stat().st_mtime}
+    assert rd.sync(home) == []
+
+
+def test_a_folder_mode_upload_does_not_need_httpx(home, monkeypatch, capsys):
+    import sys
+    monkeypatch.setitem(sys.modules, "httpx", None)     # import httpx would raise ImportError
+    rep = home / "r.txt"
+    rep.write_text("x", encoding="utf-8")
+    switch_on()
+    assert cli.main(["reports", "drive", "upload", str(rep)]) == 1      # no folder set: a plain error, not a crash
+    assert "no Google Drive folder set" in capsys.readouterr().out
