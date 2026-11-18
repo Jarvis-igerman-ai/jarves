@@ -4,7 +4,7 @@ pages = ["whatsapp"]
 features = []
 aliases = ["איסוף הודעות וואטסאפ", "דוח תשלומים מוואטסאפ", "whatsapp collect", "collect payment messages"]
 links = ["whatsapp_archive", "whatsapp_bridge"]
-error_codes = ["WA_ARCHIVE_OFF", "WA_BAD_DATE", "WA_AMBIGUOUS", "WA_UNKNOWN_CONTACT"]
+error_codes = ["WA_ARCHIVE_OFF", "WA_BRIDGE_DOWN", "WA_BAD_DATE", "WA_AMBIGUOUS", "WA_UNKNOWN_CONTACT"]
 title_he = "איסוף הודעות וואטסאפ לפי נושא לדוח (בטא)"
 title_en = "Collect WhatsApp messages on a topic into a report (beta)"
 what_he = "אוסף מהארכיון כל הודעה על נושא, למשל תשלומים, גם עם מילים נרדפות (תשלום, שילמתי, העברה, ביט, פייבוקס, שח). אפשר לבחור אנשי קשר, ואז נכנסות גם הודעות בצ'אטים אחרים שמזכירים אותם. לכל הודעה: תאריך, צ'אט, שולח, סכום בשקלים, אמצעי תשלום וציטוט קצר. שורה בלי סכום ודאי מסומנת כלא ודאית. התוצאה נשמרת בתיקיית הדוחות כקובץ CSV וסיכום קצר בעברית."
@@ -41,3 +41,9 @@ he = "חסרות הודעות שבהן מופיע רק סכום"
 en = "Messages with only an amount are missing"
 fix_he = "החיפוש לפי מילים; הודעה עם מספר בלבד בלי מילה מהרשימה או סימן שקל במילים לא נמצאת. חפשו גם בעצמכם: jarvis whatsapp search."
 fix_en = "Search is by words; a message with only a number and no listed word or shekel word is not found. Also search yourself: jarvis whatsapp search."
+
+[[problems]]
+he = "כתוב שהגשר לא פועל"
+en = "It says the bridge is not running"
+fix_he = "האיסוף בודק מול הגשר אילו צ'אטים מותר לקרוא (עד 500 צ'אטים; מעבר לכך תופיע אזהרה). הפעילו אותו: jarvis whatsapp start, ובדקו: jarvis whatsapp status."
+fix_en = "Collect asks the bridge which chats may be read (up to 500 chats; past that a warning is shown). Start it: jarvis whatsapp start, then check: jarvis whatsapp status."

@@ -555,6 +555,9 @@ def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
     return 0
 
 
+CHAT_CAP = 500
+
+
 def _collect_cli(home: Path, cfg, a, args: list[str]) -> int:
     """`jarvis whatsapp collect TOPIC`: archive only (all time by default); the bridge's chat list is the read gate."""
     if not args:
@@ -570,8 +573,9 @@ def _collect_cli(home: Path, cfg, a, args: list[str]) -> int:
     except arc.DateError:
         print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
         return 2
-    chats = BridgeClient(home).chats(None, 500)
+    chats = BridgeClient(home).chats(None, CHAT_CAP)
     names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    chats_full = len(chats) >= CHAT_CAP                  # chats past the cap are treated as unreadable: say so
 
     def one(who: str) -> str:
         hits = wab.resolve(chats, who, wab.contacts_book(home))
@@ -584,9 +588,12 @@ def _collect_cli(home: Path, cfg, a, args: list[str]) -> int:
                        chat=one(a.chat) if a.chat.strip() else None, since=since)
     paths = wcol.write_report(home, rep, topic, stamp=time.strftime("%Y%m%d-%H%M%S"), fmt=a.fmt)
     if a.json:
-        _print({k: rep[k] for k in ("totals", "uncertain")} | {"rows": len(rep["rows"]), "files": [str(p) for p in paths]}, True)
+        _print({k: rep[k] for k in ("totals", "uncertain", "truncated")} | {"rows": len(rep["rows"]), "chats_full": chats_full,
+                                                                          "files": [str(p) for p in paths]}, True)
     else:
         print(wcol.summary(rep, topic) + "\n".join(str(p) for p in paths))
+        if chats_full:
+            print(clilang.fmt(f"אזהרה: נקראו רק {CHAT_CAP} צ'אטים ראשונים.", f"Warning: only the first {CHAT_CAP} chats were read."))
     return 0
 
 

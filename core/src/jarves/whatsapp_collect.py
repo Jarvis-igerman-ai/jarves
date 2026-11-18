@@ -1,6 +1,7 @@
 """JAR-273 slice 1: `jarvis whatsapp collect TOPIC`: every archived message on a topic (Hebrew folding + topic synonyms,
-plus messages in other chats that MENTION the chosen contacts) as rows: date, chat, sender, with, amount ILS, method,
-short quote. Deduplicated, sorted by date, totalled per chat; rows without a sure amount are flagged. Saved under
+plus messages in other chats that MENTION the chosen contacts) as rows: date, chat, sender, amount ILS, method,
+short quote. Deduplicated, sorted by date, totalled per chat and direction (paid by me / received); rows without a sure
+amount are flagged. Every search is paged until the archive is exhausted (`truncated` if a cap stops it). Saved under
 <home>/reports/ as CSV + a short Hebrew summary. Local and rule-based: no model, message text is only data."""
 from __future__ import annotations
 
@@ -19,11 +20,12 @@ SYNONYMS = {"payment": ("תשלום", "שילמתי", "שילמת", "שולם", 
                         "קבלה", "חשבונית", "payment", "paid", "paybox", "transfer", "invoice", "receipt")}
 METHODS = (("bit", ("ביט", "bit")), ("paybox", ("פייבוקס", "paybox")), ("bank transfer", ("העברה", "העברתי", "transfer")),
            ("cash", ("מזומן", "cash")), ("cheque", ("צק", "שק", "cheque")), ("card", ("אשראי", "card")))
-_NUM = r"(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?"
+_NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\d,])"   # "12,50" is never a sure 50
 _CUR = r"(?:₪|ש\"ח|ש״ח|שח|שקלים|שקל|nis|ils)(?![א-תA-Za-z])"
 _SURE = (re.compile(_NUM + r"\s*" + _CUR, re.I), re.compile(r"(?:₪|nis|ils)\s*" + _NUM, re.I))
 _ANY = re.compile(_NUM)
-COLUMNS = ("date", "chat", "sender", "with", "amount_ils", "method", "quote", "uncertain")
+COLUMNS = ("date", "chat", "sender", "direction", "amount_ils", "method", "quote", "uncertain")
+PAGE, MAX_PAGES = 200, 50                    # the archive returns at most 200 per query; 10,000 per word at most
 
 
 def terms(topic: str) -> tuple[str, ...]:
@@ -53,7 +55,7 @@ def row(m: dict, names: dict[str, str]) -> dict:
     sender = "אני" if m.get("from_me") else (clean_text(str(m.get("sender_name") or ""))[0][:40]
                                               if str(m.get("chat", "")).endswith("@g.us") else chat)
     return {"id": m.get("id"), "chat_id": m.get("chat"), "ts": float(m.get("ts") or 0), "date": _ymd(m.get("ts") or 0),
-            "chat": chat, "sender": sender, "with": chat, "amount_ils": amount, "quote": text[:80], "uncertain": not sure,
+            "chat": chat, "sender": sender, "direction": "paid" if m.get("from_me") else "received", "amount_ils": amount, "quote": text[:80], "uncertain": not sure,
             "method": next((name for name, words in METHODS if toks & {fold(w).strip() for w in words}), "")}
 
 
@@ -62,20 +64,34 @@ def collect(archive, topic: str, *, names: dict[str, str], contacts: dict[str, s
     """`names` = the readable chats (id -> name), a hard filter. `contacts` (id -> name): keep their chats and any
     message elsewhere that mentions their first name."""
     found: dict[tuple, dict] = {}
+    truncated = False
     for word in terms(topic):
-        for m in archive.search(word, chat=chat, since=since, readable=set(names), limit=200):
-            found.setdefault((m.get("chat"), m.get("id")), m)
+        until = None
+        for _ in range(MAX_PAGES):
+            hits = archive.search(word, chat=chat, since=since, until=until, readable=set(names), limit=PAGE)
+            for m in hits:
+                found.setdefault((m.get("chat"), m.get("id")), m)
+            if len(hits) < PAGE:
+                break
+            until = min(float(m.get("ts") or 0) for m in hits)          # newest first: the next page is older
+            ties = archive.search(word, chat=chat, since=until, until=until + 1e-3, readable=set(names), limit=PAGE)
+            truncated |= len(ties) >= PAGE
+            for m in ties:
+                found.setdefault((m.get("chat"), m.get("id")), m)
+        else:
+            truncated = True
     if contacts:
         firsts = {fold(n).split()[0] for n in contacts.values() if fold(n).split()}
         found = {k: m for k, m in found.items() if m.get("chat") in contacts
                  or firsts & set(index_text(str(m.get("text") or "")).split())}
     rows = sorted((row(m, names) for m in found.values()), key=lambda r: (r["ts"], str(r["id"])))
-    totals: dict[str, float] = {}
+    totals: dict[str, dict[str, float]] = {"paid": {}, "received": {}}
     for r in rows:
         if not r["uncertain"]:
-            totals[r["with"]] = totals.get(r["with"], 0.0) + r["amount_ils"]
-    return {"rows": rows, "totals": dict(sorted(totals.items())), "uncertain": sum(r["uncertain"] for r in rows),
-            "untrusted": True}
+            side = totals[r["direction"]]
+            side[r["chat"]] = side.get(r["chat"], 0.0) + r["amount_ils"]
+    return {"rows": rows, "totals": {k: dict(sorted(v.items())) for k, v in totals.items()},
+            "uncertain": sum(r["uncertain"] for r in rows), "truncated": truncated, "untrusted": True}
 
 
 def _cell(v) -> str:
@@ -99,9 +115,13 @@ def _atomic(path: Path, text: str, encoding: str) -> None:
 
 
 def summary(rep: dict, topic: str) -> str:
-    lines = [f"# איסוף וואטסאפ: {topic}", "", f"{len(rep['rows'])} הודעות, לא ודאי: {rep['uncertain']}", "",
-             "## סכום לפי צ'אט (₪, רק שורות ודאיות)"]
-    return "\n".join(lines + [f"- {k}: {_money(v)}" for k, v in rep["totals"].items()]) + "\n"
+    lines = [f"# איסוף וואטסאפ: {topic}", "", f"{len(rep['rows'])} הודעות, לא ודאי: {rep['uncertain']}"]
+    if rep.get("truncated"):
+        lines.append("אזהרה: החיפוש נעצר במגבלה, ייתכן שחסרות הודעות (truncated)")
+    for side, title in (("paid", "שילמתי"), ("received", "קיבלתי")):
+        lines += ["", f"## {title}, לפי צ'אט (₪, רק שורות ודאיות)"]
+        lines += [f"- {k}: {_money(v)}" for k, v in rep["totals"].get(side, {}).items()]
+    return "\n".join(lines) + "\n"
 
 
 def write_report(home: Path, rep: dict, topic: str, *, stamp: str, fmt: str = "csv") -> list[Path]:
@@ -110,7 +130,8 @@ def write_report(home: Path, rep: dict, topic: str, *, stamp: str, fmt: str = "c
         raise ValueError("format must be csv or md (xlsx is not built yet)")
     out = Path(home) / "reports"
     out.mkdir(parents=True, exist_ok=True)
-    base = out / f"whatsapp-collect-{'-'.join(fold(topic).split())[:40] or 'topic'}-{stamp}"
+    slug = re.sub(r"[^\w-]+", "", "-".join(fold(topic).split()))[:40].strip("-") or "topic"   # never a path or ":"
+    base = out / f"whatsapp-collect-{slug}-{re.sub(r'[^0-9-]', '', stamp)}"
     paths = []
     if fmt == "csv":
         buf = io.StringIO()
