@@ -125,8 +125,9 @@ class AutopilotTests(unittest.TestCase):
 
 class WorkerAllowListPolicyFileTests(unittest.TestCase):
     """#932/JAR-213: the owner's worker_allowed_tools override refuses rules that directly let a worker rewrite
-    autopilot.json. Residual (not covered): the kept `<python> -m pytest` form runs worker-written conftest.py, test
-    files and `-p` plugins, and git commit/merge run repository hooks."""
+    autopilot.json; the first command word is checked against an allowlist. Residual (not covered): the kept
+    `<python> -m pytest` form runs worker-written conftest.py, test files and `-p` plugins; the kept git forms run
+    hooks and programs named in repository config or .gitattributes (fsmonitor, pager, diff.external, textconv)."""
 
     BASE = {k: v for k, v in autopilot.DEFAULTS.items()}
 
@@ -153,13 +154,19 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
                      "Bash(.:*)", "Bash(source:*)", "Bash(git:*)", "Bash(gh:*)", "Bash(make:*)", "Bash(npm:*)",
                      "Bash(npx:*)", "Bash(pip:*)", "Bash(uv:*)", "Bash(git -c:*)", "Bash(git rebase:*)",
                      "Bash(git 'diff':*)", "Bash(gh alias:*)", "Bash(gh extension:*)", "Bash(cargo:*)",
-                     "Bash(git fetch --upload-pack=./x.sh:*)", "Bash(git diff -c core.pager=x:*)"):
+                     "Bash(git fetch --upload-pack=./x.sh:*)", "Bash(git diff -c core.pager=x:*)",
+                     # review R12/R13: brace/glob/tilde expansion in the first word; words outside the allowlist
+                     "Bash({python,-c} *)", "Bash({sed,-i}:*)", "Bash(pytho?:*)", "Bash(pyt[h]on:*)", "Bash(~/x:*)",
+                     "Bash(ipython:*)", "Bash(bpython:*)", "Bash(nvim:*)", "Bash(emacs:*)", "Bash(R:*)",
+                     "Bash(julia:*)", "Bash(ts-node:*)", "Bash(tsx:*)", "Bash(gdb:*)", "Bash(sqlite3:*)",
+                     "Bash(sort:*)", "Bash(shuf:*)", "Bash(xcopy:*)", "Bash(robocopy:*)", "Bash(copy:*)",
+                     "Bash(sedona-report:*)", "Bash(./ls:*)", "Bash(/tmp/grep:*)", "Bash(ls; python -c x)"):
             with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
                 self.check(["Bash(ls:*)", rule])
 
     def test_narrow_rules_stay_allowed(self):
         for rules in (["Bash(python -m pytest:*)"], ["Bash(C:/py/python.exe -m pytest:*)", "Read"],
-                      ["Bash(git diff:*)", "Bash(grep:*)", "Bash(sedona-report:*)"],
+                      ["Bash(git diff:*)", "Bash(grep:*)", "Bash(ls:*)", "Bash(git log --grep=exec:*)"],
                       ["Bash(git status:*)", "Bash(git commit:*)", "Bash(gh pr:*)", "Bash(gh issue:*)"],
                       ["Bash(C:\\py\\python.exe -m pytest:*)"]):
             with self.subTest(rules=rules):
