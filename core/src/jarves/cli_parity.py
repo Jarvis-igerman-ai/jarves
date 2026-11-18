@@ -628,6 +628,9 @@ def cmd_jobs(a, cfg, home) -> int:
 
 
 def cmd_reports(a, cfg, home) -> int:
+    if a.action == "drive":
+        from . import reports_drive
+        return reports_drive.cmd_drive(a, cfg, home)
     from .scheduler import PERIODS, Scheduler, find_reports, report_get
     db = _db(home)
     try:
@@ -783,6 +786,12 @@ def add_cli(sub) -> None:
     rl.add_argument("--query", default="")
     rsh = rps.add_parser("show")
     rsh.add_argument("id", type=int)
+    rdv = rps.add_parser("drive", help="send reports to Google Drive: status / folder PATH / signin / upload FILE")
+    rdvs = rdv.add_subparsers(dest="drive_action", required=True)
+    rdvs.add_parser("status")
+    rdvs.add_parser("signin", help="you sign in once in your browser (drive.file permission only)")
+    rdvs.add_parser("folder", help="your Google Drive for desktop folder").add_argument("path")
+    rdvs.add_parser("upload").add_argument("file")
 
 
 COMMANDS = {"timers": cmd_timers, "lists": cmd_lists, "goals": cmd_goals, "prefs": cmd_prefs, "proactive": cmd_proactive, "dev": cmd_dev, "notes": cmd_notes, "jobs": cmd_jobs, "reports": cmd_reports}

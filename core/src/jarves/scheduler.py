@@ -922,6 +922,8 @@ class Scheduler:
         level = logs.info if err is None else logs.warn
         level("scheduler", f"JOB_{state.upper()}", "job run finished", state=state, job=job["id"], run=run["id"],
               report=rid, late=late, attempts=run["attempts"], error_code=None if err is None else err.code)
+        from . import reports_drive                      # JAR-274: new report files to Google Drive when switched on
+        reports_drive.on_job_finished(self.features)
         delivery = _j(job["delivery"], ["report"])
         self.poke()                                  # the loop delivers the alert now, not at the next poll
         if err is not None:
