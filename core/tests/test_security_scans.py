@@ -191,6 +191,13 @@ def test_issue_480_no_refusal_or_malformed_coverage_adds_no_owner_action():
     assert "Owner action" not in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light")
 
 
+def test_issue_480_tracker_body_uses_the_refused_dict_the_signature_used():
+    cov = {"dependabot": "incomplete:http_403"}
+    assert ss.owner_actions(cov, refused={}) == []                                 # the passed dict wins, no re-derivation
+    body = ss.tracker_body([], cov, 0, "s", "light", refused={"dependabot": "http_401"})
+    assert "Owner action (HTTP 401: dependabot)" in body and "HTTP 403" not in body.split("Owner action")[1]
+
+
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
     live_sig = "6490f068a3c2e39a"                       # the live #480 signature = sha256("i|")[:16], no refusals
     assert ss.signature([], False) == ss.signature([], False, {}) == live_sig

@@ -542,9 +542,10 @@ def refused_sources(coverage: object) -> dict[str, str]:
             and v.removeprefix("incomplete:") in _REFUSED}
 
 
-def owner_actions(coverage: object) -> list[str]:
-    """One line per kind of refusal, naming what the owner can do (#480). Never names a token value or its source."""
-    refused = refused_sources(coverage)
+def owner_actions(coverage: object, refused: dict[str, str] | None = None) -> list[str]:
+    """One line per kind of refusal, naming what the owner can do (#480). Never names a token value or its source.
+    `refused` = the dict the signature already used (run_scan passes it), so the body and signature cannot drift."""
+    refused = refused_sources(coverage) if refused is None else refused
     other = [k for k, r in refused.items() if r != "http_401"]
     groups = [([k for k, r in refused.items() if r == "http_401"],
                "the scan's GitHub token is missing, expired or invalid; set a valid token."),
@@ -568,7 +569,8 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
-def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
+def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str,
+                 refused: dict[str, str] | None = None) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
              "This is ONE tracker; it is updated only when the findings or the refused sources change.", ""]
@@ -589,7 +591,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-        lines += owner_actions(coverage)
+        lines += owner_actions(coverage, refused)
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
@@ -661,7 +663,8 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete, refused_sources(coverage))
+    refused = refused_sources(coverage)
+    sig = signature(findings, complete, refused)
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))
@@ -675,7 +678,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         issue = {"status": "dry_run"}
     elif report:
         try:
-            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind), sig, bool(findings), sleep)
+            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind, refused), sig, bool(findings), sleep)
         except Offline as e:
             return _fail(home, state, entry, result, now, "offline", str(e))
     result["issue"] = issue
