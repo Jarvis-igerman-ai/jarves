@@ -36,6 +36,9 @@ HIGH_RISK = (
     ".claude/*", "core/src/jarves/workflow/hooks.py", "core/src/jarves/workflow/bootstrap.py",
     "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 )
+# Owner sign-off sheets and release evidence (#543): editing them can fake the owner's signature, so they are
+# Tier R (high-risk, never "just docs"). Matched case-insensitively.
+SIGNOFF_DOCS = ("docs/reviews/manual_test_*.md", "docs/release/*")
 BLOCKING_LABELS = {"needs-review", "no-automerge", "do-not-merge", "wip"}
 GUIDES = ("core/src/jarves/guides/data/*.toml",)
 LOCALES = ("core/src/jarves/dashboard_static/locales/*", "core/src/jarves/locales/*", "core/src/jarves/*catalog*.json",
@@ -47,13 +50,17 @@ def _m(path: str, patterns) -> bool:
     return any(fnmatch.fnmatchcase(path, p) for p in patterns)
 
 
+def is_signoff(path: str) -> bool:
+    return _m(path.lower(), SIGNOFF_DOCS)
+
+
 def is_high_risk(path: str) -> bool:
-    return _m(path, HIGH_RISK)
+    return _m(path, HIGH_RISK) or is_signoff(path)
 
 
 def is_docs(path: str) -> bool:
     name = path.rsplit("/", 1)[-1].lower()
-    if name in ("claude.md", "agents.md") or path.startswith(".claude/"):
+    if name in ("claude.md", "agents.md") or path.startswith(".claude/") or is_signoff(path):
         return False                      # instruction files steer agents: never "just docs"
     return path.startswith("docs/") or name.endswith(".md") or name.startswith("changelog") or name == "doc_map.md"
 

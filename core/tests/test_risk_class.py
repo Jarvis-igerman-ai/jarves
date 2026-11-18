@@ -88,3 +88,19 @@ def test_automerge_only_turns_on_auto_merge_for_the_native_queue():
     assert not any("checkout" in s.get("uses", "") and "ref" in s.get("with", {}) for s in doc["jobs"]["enqueue"]["steps"])
     assert doc[True]["workflow_run"]["workflows"] == ["jarves-checks"] and "labeled" in doc[True]["pull_request_target"]["types"]
     assert not (WF / "next-flow.yml").exists()                                   # the `next` flow is retired with it
+
+
+@pytest.mark.parametrize("path", [
+    "docs/reviews/MANUAL_TEST_4.0.1.md", "docs/reviews/manual_test_4.1.0.md",
+    "docs/release/SIGN_OFF_4.0.1.md", "docs/release/OWNER_REVIEW_4.0.1.md", "DOCS/Release/evidence_4.0.1.md",
+])
+def test_signoff_sheet_and_release_docs_never_automerge(path):
+    """#543: the owner sign-off sheet is not 'just docs'; a docs-only PR must not edit it unreviewed."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import integration_branch as ib  # noqa: PLC0415
+
+    assert rc.is_high_risk(path) and not rc.is_docs(path)
+    assert cls([path]) is None and cls([path, "docs/NOW.md"]) is None
+    assert rc.classify([path])[1] == f"high-risk path: {path}"
+    assert ib.tier_of([path], []) == "R"
+    assert cls(["docs/reviews/FINDINGS_LEDGER.md", "docs/release_notes.md"]) == "docs"
