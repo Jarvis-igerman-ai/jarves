@@ -33,6 +33,8 @@ FLAGS = ("code", "full", "perf", "installer", "cad", "blender", "godot", "whatsa
 
 DOCS = re.compile(r"^(docs/|[^/]+\.md$|LICENSE|\.gitignore|\.github/(dependabot\.yml|secret_scanning\.yml|ISSUE_TEMPLATE/|PULL_REQUEST_TEMPLATE))")
 GUIDES = re.compile(r"^core/src/jarves/guides/data/[^/]+\.toml$")
+# a changelog fragment is checked by test_changelog_parts (Linux shard), not by Windows/browser/installer jobs (#873)
+CHANGELOG = re.compile(r"^changelog\.d/[^/]+\.md$")
 SELF = re.compile(r"^(\.github/workflows/jarves-checks\.yml|core/tools/ci_(plan|flake|reuse)\.py|core/tests/conftest\.py)$")
 RULES = {
     "perf": r"^(core/(src/|tools/(bench_startup|perf_gate)|perf_budgets|pyproject|uv\.lock))",
@@ -114,7 +116,7 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     if event == "pull_request":
         out["installer"] = any(re.match(PR_INSTALLER, f) for f in files)
     out["code"] = bool(rest) or bool(read)
-    out["full"] = any(not GUIDES.match(f) for f in rest)      # guides-only: just the Linux shard
+    out["full"] = any(not (GUIDES.match(f) or CHANGELOG.match(f)) for f in rest)   # guides/changelog-only: Linux shard
     if not out["full"]:
         out = {**out, **{k: False for k in RULES}}
     return out

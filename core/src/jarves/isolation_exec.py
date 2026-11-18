@@ -13,22 +13,35 @@ import os
 import sys
 
 
+def _tasks_of(pid: str, uid: int) -> int:
+    """Tasks of one process when its REAL uid is `uid`, else 0; 0 when it vanished. The kernel charges RLIMIT_NPROC
+    to the real uid, while /proc/<pid> is owned by the effective uid (a setuid helper the user runs looks like
+    root's), so read the world-readable status file. Unparseable fields count 1: more headroom, never less (#660)."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="ascii", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return 0
+    real = threads = None
+    try:
+        for line in text.splitlines():
+            if line.startswith("Uid:"):
+                real = int(line.split()[1])
+            elif line.startswith("Threads:"):
+                threads = int(line.split()[1])
+    except (IndexError, ValueError):
+        return 1
+    if real is None:
+        return 1
+    return max(1, threads or 1) if real == uid else 0
+
+
 def _user_procs() -> int:
-    """Tasks (processes AND threads) of this user. RLIMIT_NPROC counts every Linux thread, so counting only
-    processes left less headroom than intended and the approved command's own fork (the grep of 'a | grep b')
-    could fail with EAGAIN, exit 2 (#660)."""
-    uid, n = os.getuid(), 0
-    for d in os.listdir("/proc"):
-        if d.isdigit():
-            try:
-                if os.stat("/proc/" + d).st_uid == uid:
-                    try:
-                        n += max(1, len(os.listdir(f"/proc/{d}/task")))
-                    except OSError:
-                        n += 1
-            except OSError:
-                pass
-    return n
+    """Tasks (processes AND threads) of this user's real uid. RLIMIT_NPROC counts every Linux thread, so counting
+    only processes (or only those whose /proc dir the user owns) left less headroom than intended and the approved
+    command's own fork (the grep of 'a | grep b') could fail with EAGAIN: sh exit 2 (#660)."""
+    uid = os.getuid()
+    return sum(_tasks_of(d, uid) for d in os.listdir("/proc") if d.isdigit())
 
 
 def apply(lim: dict) -> tuple[list, list]:

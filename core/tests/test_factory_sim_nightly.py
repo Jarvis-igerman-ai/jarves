@@ -97,3 +97,31 @@ def test_deep_nesting_and_string_ok(tmp_path):
     assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
     f.write_text('{"at": 1.0, "ok": "false"}')
     assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
+
+
+def test_nightly_hung_scenario_times_out_and_records_failure(tmp_path, monkeypatch):
+    """JAR-403 (#757): a stalled scenario must not hang the nightly run; it is recorded as a failure."""
+    import subprocess
+    filed = []
+    monkeypatch.setattr(factory_sim, "file_issue", lambda failing, tail: filed.append(failing))
+
+    def hang(cmd, **kw):
+        assert kw.get("timeout"), "pytest subprocess must have a timeout"
+        raise subprocess.TimeoutExpired(cmd, kw["timeout"], output="PASSED t.py::test_sim_a\n")
+    monkeypatch.setattr(factory_sim.subprocess, "run", hang)
+    assert factory_sim.main(["--nightly", "--home", str(tmp_path)]) == 1
+    data = json.loads((tmp_path / "factory_sim_last.json").read_text())
+    assert data["ok"] is False and "timeout" in data["failed"]
+    assert filed and "timeout" in filed[0]
+
+
+def test_nightly_nonzero_pytest_exit_is_failure_even_if_scenarios_passed(tmp_path, monkeypatch):
+    """JAR-403 (#757): the gate checks pytest's exit code, not only the parsed PASS lines."""
+    import subprocess
+    filed = []
+    monkeypatch.setattr(factory_sim, "file_issue", lambda failing, tail: filed.append(failing))
+    monkeypatch.setattr(factory_sim.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+        cmd, 3, "PASSED t.py::test_sim_a\nINTERNALERROR boom\n", ""))
+    assert factory_sim.main(["--nightly", "--home", str(tmp_path)]) == 1
+    data = json.loads((tmp_path / "factory_sim_last.json").read_text())
+    assert data["ok"] is False and filed

@@ -1,0 +1,1 @@
+- Fixed: project tasks may no longer change .github/ (CI workflows), and protected paths such as .claude/ or .mcp.json are refused in any letter case (JAR-317).

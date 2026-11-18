@@ -334,3 +334,18 @@ def test_jarves_checks_has_no_duplicate_job_keys_and_browser_retry_fails_closed(
     doc = yaml.load((ROOT / ".github" / "workflows" / "jarves-checks.yml").read_text(encoding="utf-8"), Loader=Strict)
     runs = " ".join(s.get("run", "") for s in doc["jobs"]["browser"]["steps"])
     assert "ci_flake.py failed-files --any" in runs and "python3 - <<" not in runs and "first-junit.xml" in runs
+
+
+def test_changelog_fragment_only_change_skips_the_heavy_matrix():
+    """#873: a push that only adds/fixes changelog.d fragments started the whole ~16-job matrix (Windows shards,
+    real browser, installer) on the 20 shared runners. A fragment is checked by test_changelog_parts on the Linux
+    shard, so it runs like a guides-only change: Linux core shards only; code next to it still gets everything."""
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    for event in ("pull_request", "merge_group"):
+        only = ci_plan.classify(["changelog.d/2026-11-18-x.md"], event)
+        assert only["code"] and not any(v for k, v in only.items() if k != "code"), only
+        with_docs = ci_plan.classify(["changelog.d/2026-11-18-x.md", "docs/zz_unreferenced_note.md"], event)
+        assert with_docs["code"] and not with_docs["full"]
+        assert ci_plan.classify(["changelog.d/2026-11-18-x.md", "core/src/jarves/cli.py"], event)["full"]
+    assert not ci_plan.CHANGELOG.match("changelog.d/sub/x.md") and not ci_plan.CHANGELOG.match("changelog.d/x.py")

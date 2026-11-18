@@ -1,0 +1,1 @@
+- Fixed: opentelemetry-api is locked at 1.45.2, which fixes a slow traceparent parsing denial of service (GHSA-mf5v-w3w3-f6cg, #480).
