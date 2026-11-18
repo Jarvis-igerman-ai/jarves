@@ -141,6 +141,8 @@ def _run_publish_guard(guard, **env):
     import os
     import shutil
     import subprocess
+    if os.name == "nt":
+        pytest.skip("guard script runs on the Linux runner; the Linux CI run is the source of truth (WSL bash differs)")
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("bash not available")
@@ -160,6 +162,12 @@ def test_release_secrets_step_refuses_outside_a_tag_ref():
     guard = steps[secret_steps[0] - 1]
     assert guard.get("id") == "publish_guard" and "secrets." not in str(guard)
     assert "DRY_RUN != 'true'" in guard["if"]
+    # the workflow itself supplies every input the guard reads (GITHUB_REF is a runner default)
+    assert guard["env"]["REF_TYPE"] == "${{ github.ref_type }}"
+    assert "TAG" not in guard["env"] and job["env"]["TAG"].startswith("${{ github.ref_type == 'tag' && github.ref_name")
+    assert "DRY_RUN" in job["env"]
+    for name in ("$REF_TYPE", "$TAG", "$GITHUB_REF", "$ENV_NAME"):
+        assert name in guard["run"]
     real = {"DRY_RUN": "false", "TAG": "v4.5.0"}
     ok = _run_publish_guard(guard, **real, REF_TYPE="tag", GITHUB_REF="refs/tags/v4.5.0",
                             ENV_NAME="stable-release")

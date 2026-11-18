@@ -103,6 +103,10 @@ jobs:
         id: publish_guard
         if: ${{ env.DRY_RUN != 'true' }}
         env:
+          # REF_TYPE is explicit here; TAG is the job-level TAG the gate checked (pinned by test_ci_workflows).
+          REF_TYPE: ${{ github.ref_type }}
+          # drift check only: the same expression as jobs.stable.environment (no context exposes the environment the
+          # job really got); the real protection is the owner's environment-scoped secrets and tag deployment rule
           ENV_NAME: ${{ (github.ref_type == 'tag' && (github.event_name == 'push' || github.event.inputs.dry_run == 'false')) && 'stable-release' || '' }}
         run: |
           # a branch named like a tag (refs/heads/v4.5.0) or any non-tag ref never reaches the step holding the secrets
