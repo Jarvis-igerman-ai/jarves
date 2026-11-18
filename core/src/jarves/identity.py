@@ -85,6 +85,7 @@ class Identity:
         self.home, self.cfg, self.memory = home, cfg, memory
         self.path = home / FILE
         self.defaults = {"display_name": cfg.assistant_name, "spoken_name": cfg.assistant_name_spoken}
+        self.on_rename: list = []      # JAR-196: callables(names) that hold their own copy of the name (the chat brain)
 
     # --- storage
     def _read(self) -> dict:
@@ -165,7 +166,14 @@ class Identity:
         self._change(by, **f)
         logs.info("identity", "IDENTITY_RENAMED", "assistant name changed", by=by, fields=sorted(f))
         self.apply_to_config()
-        return self.names()
+        n = self.names()
+        for cb in self.on_rename:
+            try:
+                cb(n)
+            except Exception as e:     # noqa: BLE001 - a listener bug must not undo a saved rename; logged, not hidden
+                logs.warn("identity", "IDENTITY_RENAME_LISTENER_FAILED", "a component kept the old name until restart",
+                          error=type(e).__name__)
+        return n
 
     def set_wake(self, model: str, phrase: str | None = None, threshold: float | None = None, *,
                  by: str = "user", only_in: Path | None = None) -> dict:
