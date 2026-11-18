@@ -9,13 +9,15 @@ dashboard can (5 tries a minute, 5 wrong tries cancel the code). Honest limit: w
 equivalent to issuing a code (anyone can encrypt a code to the public key and write unlock.json), so an agent that
 can write there or runs code as the owner's OS user can still make one; closing that needs an OS consent prompt.
 One dashboard per home is the normal case (web-check); a second one on another port takes the key over, so codes
-for the first fail closed. Windows: 0o600 sets no owner-only ACL (the files hold no secret). The CLI refuses agent
+for the first fail closed, and if the second later stops cleanly it withdraws its key, so the first gives no codes
+until it is restarted (restarting the remaining dashboard publishes its key again). Windows: 0o600 sets no owner-only ACL (the files hold no secret). The CLI refuses agent
 environments and non-terminals."""
 from __future__ import annotations
 
 import hashlib
 import hmac
 import http.client
+import ipaddress
 import json
 import os
 import secrets
@@ -85,10 +87,18 @@ def _pub_lock(home: Path):
     return exclusive(Path(home) / PUB_LOCK, wait_s=PUB_LOCK_WAIT_S)
 
 
-def publish(home: Path, key: ServerKey, port: int) -> None:
-    """Publish under the home's key lock; OSError (lock busy, read-only home) is the caller's to report."""
+def publish(home: Path, key: ServerKey, port: int, host: str = "127.0.0.1") -> None:
+    """Publish the bound address under the home's key lock; OSError (lock busy, read-only home) is the caller's."""
     with _pub_lock(home):
-        _write(home, PUB_FILE, {"pub": key.pub.hex(), "port": int(port)})
+        _write(home, PUB_FILE, {"pub": key.pub.hex(), "host": str(host), "port": int(port)})
+
+
+def _loopback(host: object) -> str:
+    """The published bind host, accepted only as a loopback IP literal (never a name or a remote address)."""
+    ip = ipaddress.ip_address(host)  # ValueError for a name, junk or a non-string
+    if not ip.is_loopback:
+        raise ValueError("the unlock key host is not a loopback address")
+    return f"[{ip}]" if ip.version == 6 else str(ip)
 
 
 def withdraw(home: Path, key: ServerKey) -> None:
@@ -103,12 +113,12 @@ def withdraw(home: Path, key: ServerKey) -> None:
         pass  # missing, damaged or lock busy: nothing of ours is safe to withdraw
 
 
-def _serves_key(port: int, pub: bytes, timeout: float = 2.0) -> bool:
+def _serves_key(host: str, port: int, pub: bytes, timeout: float = 2.0) -> bool:
     """True only when the listener on the port is a workflow dashboard that holds this public key (not just any
     program that took over a crashed dashboard's port). Direct loopback request, never through a proxy."""
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with opener.open(f"http://127.0.0.1:{int(port)}/health", timeout=timeout) as response:
+        with opener.open(f"http://{host}:{int(port)}/health", timeout=timeout) as response:
             body = json.loads(response.read(4096))
     except (OSError, ValueError, http.client.HTTPException):
         return False
@@ -120,6 +130,7 @@ def issue(home: Path, *, now: float | None = None) -> str:
     try:
         published = _read(home, PUB_FILE)
         pub, port = bytes.fromhex(published["pub"]), int(published["port"])
+        host = _loopback(published.get("host", "127.0.0.1"))  # older dashboards published no host: they bound 127.0.0.1
         eph_private = X25519PrivateKey.generate()
         eph = eph_private.public_key().public_bytes_raw()
         shared = eph_private.exchange(X25519PublicKey.from_public_bytes(pub))
@@ -131,7 +142,7 @@ def issue(home: Path, *, now: float | None = None) -> str:
         raise UnlockUnavailable(f"the dashboard unlock key is unreadable ({type(exc).__name__}); restart the dashboard") from None
     except (ValueError, KeyError, TypeError) as exc:
         raise UnlockUnavailable(f"the dashboard unlock key is damaged ({type(exc).__name__}); restart the dashboard") from None
-    if not _serves_key(port, pub):
+    if not _serves_key(host, port, pub):
         raise UnlockUnavailable(f"no dashboard is running on port {port} with the published unlock key; "
                                 "start it with: jarvis workflow supervise")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt

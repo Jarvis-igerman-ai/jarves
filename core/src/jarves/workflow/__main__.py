@@ -11,7 +11,8 @@ from pathlib import Path
 
 from .store import Store
 
-OPEN_UNLOCK_RETRY_S = 1.0  # `open` may start the dashboard just before asking it for an unlock code (#750)
+OPEN_UNLOCK_WAIT_S = 10.0  # `open` may start the dashboard just before asking it for an unlock code (#750)
+OPEN_UNLOCK_POLL_S = 0.5
 
 
 def default_profile() -> Path:
@@ -269,11 +270,15 @@ def main(argv=None) -> int:
             return rc
         from . import unlock
         try:
-            try:
-                code = unlock.issue(home)
-            except unlock.UnlockUnavailable:  # a just-started dashboard may not answer /health yet: one short retry
-                time.sleep(OPEN_UNLOCK_RETRY_S)
-                code = unlock.issue(home)
+            deadline = time.monotonic() + OPEN_UNLOCK_WAIT_S
+            while True:  # a cold-started dashboard may not answer /health yet: poll until the deadline
+                try:
+                    code = unlock.issue(home)
+                    break
+                except unlock.UnlockUnavailable:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(OPEN_UNLOCK_POLL_S)
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)
         except unlock.UnlockUnavailable as exc:
             print(f"No unlock code yet: {exc}", file=sys.stderr)

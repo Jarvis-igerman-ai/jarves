@@ -195,7 +195,7 @@ class Server(ThreadingHTTPServer):
         # After the exclusive bind, before listen: a listening dashboard has always published its key, and a
         # second server that cannot bind never replaces the live one's key.
         try:
-            unlock.publish(self.home, self.unlock_key, self.server_address[1])
+            unlock.publish(self.home, self.unlock_key, self.server_address[1], self.server_address[0])
             self.unlock_published = True
         except OSError as exc:  # read-only home or a Windows sharing violation: start read-only, never block startup
             logging.getLogger(__name__).warning("could not publish the unlock key (%s); answers stay locked until the "

@@ -220,7 +220,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
         self.assertEqual(set(record), {"eph", "tag", "expires"})       # main stored {salt, hash}: scrypt, checkable offline
-        files = "".join(p.read_text(encoding="ascii") for p in self.home.iterdir() if p.name.startswith("unlock"))
+        files = "".join((self.home / name).read_text(encoding="ascii") for name in (unlock.FILE, unlock.PUB_FILE))
         self.assertNotIn(self.server.unlock_key._private.private_bytes_raw().hex(), files)
         self.assertFalse(unlock.consume(self.home, shown, key=None))   # no key, no check
         self.assertFalse(unlock.consume(self.home, shown, key=unlock.ServerKey()))  # any other key cannot verify it
@@ -334,18 +334,38 @@ class UnlockTests(unittest.TestCase):
         unlock.withdraw(self.home, self.server.unlock_key)             # lock free and still ours: withdrawn
         self.assertFalse((self.home / unlock.PUB_FILE).exists())
 
-    def test_750_open_retries_once_while_a_new_dashboard_starts(self):
-        # Review R3: `open` may start the dashboard just before asking it for a code.
+    def test_750_open_polls_until_a_cold_dashboard_answers_or_the_deadline(self):
+        # Review R2: a cold start can take longer than one short retry; poll with a deadline (fake clock, no sleep).
         argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open",
                 "--port", str(self.server.server_port)]
-        for side, expected in (([unlock.UnlockUnavailable("starting"), "4321"], "4321"),
-                               ([unlock.UnlockUnavailable("a"), unlock.UnlockUnavailable("still down")], "No unlock code yet: still down")):
+        down = unlock.UnlockUnavailable("starting")
+        polls_in_wait = int(cli.OPEN_UNLOCK_WAIT_S / cli.OPEN_UNLOCK_POLL_S)
+        for side, expected, sleeps in (([down] * 5 + ["4321"], "4321", 5),          # 2.5 s cold start: still a code
+                                       ([down] * 1000, "No unlock code yet: starting", polls_in_wait)):
+            clock = [0.0]
             err = io.StringIO()
-            with patch.object(cli, "owner_only_guard", return_value="terminal"), patch.object(cli.time, "sleep") as sleep, \
+            with patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                    patch.object(cli.time, "monotonic", side_effect=lambda: clock[0]), \
+                    patch.object(cli.time, "sleep", side_effect=lambda s: clock.__setitem__(0, clock[0] + s)) as sleep, \
                     patch.object(unlock, "issue", side_effect=side), redirect_stdout(io.StringIO()), redirect_stderr(err):
                 self.assertEqual(cli.main(argv), 0)
-            sleep.assert_called_once_with(cli.OPEN_UNLOCK_RETRY_S)
+            self.assertEqual(sleep.call_count, sleeps)
             self.assertIn(expected, err.getvalue())
+
+    def test_750_issue_probes_the_published_bound_host_and_only_loopback(self):
+        # Review R1: probe the address the dashboard bound (published next to the port), never a remote host.
+        published = json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
+        self.assertEqual(published["host"], self.server.server_address[0])
+        seen = []
+        with patch.object(unlock, "_serves_key", side_effect=lambda host, port, pub: seen.append(host) or True):
+            unlock.publish(self.home, self.server.unlock_key, self.server.server_port, "::1")
+            unlock.issue(self.home)
+            self.assertEqual(seen, ["[::1]"])
+            for bad in ("10.0.0.5", "localhost", 7):
+                unlock.publish(self.home, self.server.unlock_key, self.server.server_port, bad)
+                with self.assertRaisesRegex(unlock.UnlockUnavailable, "damaged"):
+                    unlock.issue(self.home)
+            self.assertEqual(seen, ["[::1]"])
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
