@@ -19,6 +19,7 @@ from pathlib import Path
 from . import clilang, logs
 from . import wa_namesearch as wns
 from . import whatsapp_archive as arc
+from . import whatsapp_collect as wcol
 from . import whatsapp_bridge as wab
 from . import whatsapp_bridge_install as wbi
 from . import whatsapp_policy as pol
@@ -315,7 +316,7 @@ def search(home: Path, query: str, *, who: str = "", since: str = "", until: str
 
 # ---------------------------------------------------------------------- CLI
 ACTIONS = ("status", "start", "stop", "install", "setup", "link", "unlink", "mode", "allow", "remove", "scope", "inbox", "find", "send", "kill",
-           "purge", "retention", "audit", "search", "archive")
+           "purge", "retention", "audit", "search", "archive", "collect")
 
 
 def add_cli(sub) -> None:
@@ -326,7 +327,10 @@ def add_cli(sub) -> None:
     w.add_argument("action", choices=ACTIONS)
     w.add_argument("args", nargs="*", help="mode: off|read|send; allow/remove: read|send <contact>; send: <contact> "
                                           "<text>; retention: <days>|year|forever; inbox: [contact]; search: <words>; archive: on|off|status|sync|wipe")
-    w.add_argument("--from", dest="from_who", default="", help="search: only the chat with this contact")
+    w.add_argument("--from", dest="from_who", action="append", default=None,
+                   help="search: only the chat with this contact; collect: this contact (repeat for more)")
+    w.add_argument("--chat", default="", help="collect: only this chat")
+    w.add_argument("--format", dest="fmt", choices=["csv", "md"], default="csv", help="collect: csv (+ summary) or md")
     w.add_argument("--since", default="", help="search: from this date (2026-09-01) or ago (30d, 2w, 3m, 1y)")
     w.add_argument("--until", default="", help="search: up to this date (inclusive)")
     w.add_argument("--phone", default="", help="link: get an 8-character pairing code for this number instead of a QR")
@@ -551,6 +555,48 @@ def _archive_cli(home: Path, cfg, a, args: list[str]) -> int:
     return 0
 
 
+CHAT_CAP = 500
+
+
+def _collect_cli(home: Path, cfg, a, args: list[str]) -> int:
+    """`jarvis whatsapp collect TOPIC`: archive only (all time by default); the bridge's chat list is the read gate."""
+    if not args:
+        print("usage: jarvis whatsapp collect TOPIC [--from C ...] [--chat C] [--since DATE] [--format csv|md]",
+              file=sys.stderr)
+        return 2
+    if not _arch_enabled(cfg, home):
+        print("WA_ARCHIVE_OFF: " + clilang.fmt("האיסוף עובד מהארכיון: jarvis whatsapp archive on",
+                                               "collect reads the archive: jarvis whatsapp archive on"))
+        return 1
+    try:
+        since = arc.parse_when(a.since, time.time())
+    except arc.DateError:
+        print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
+        return 2
+    chats = BridgeClient(home).chats(None, CHAT_CAP)
+    names = {c["id"]: pol.clean_text(c.get("name") or "")[0][:40] for c in chats}
+    chats_full = len(chats) >= CHAT_CAP                  # chats past the cap are treated as unreadable: say so
+
+    def one(who: str) -> str:
+        hits = wab.resolve(chats, who, wab.contacts_book(home))
+        if len(hits) != 1:
+            raise BridgeError("WA_AMBIGUOUS" if hits else "WA_UNKNOWN_CONTACT", "", 404)
+        return hits[0]["id"]
+    contacts = {cid: names.get(cid, "") for cid in map(one, a.from_who or [])}
+    topic = " ".join(args)
+    rep = wcol.collect(arc.get(home), topic, names=names, contacts=contacts or None,
+                       chat=one(a.chat) if a.chat.strip() else None, since=since)
+    paths = wcol.write_report(home, rep, topic, stamp=time.strftime("%Y%m%d-%H%M%S"), fmt=a.fmt)
+    if a.json:
+        _print({k: rep[k] for k in ("uncertain", "truncated")} | {"totals": wcol.totals_view(rep), "rows": len(rep["rows"]), "chats_full": chats_full,
+                                                                          "files": [str(p) for p in paths]}, True)
+    else:
+        print(wcol.summary(rep, topic) + "\n".join(str(p) for p in paths))
+        if chats_full:
+            print(clilang.fmt(f"אזהרה: נקראו רק {CHAT_CAP} צ'אטים ראשונים.", f"Warning: only the first {CHAT_CAP} chats were read."))
+    return 0
+
+
 def cmd_whatsapp(a, cfg, home) -> int:
     logs.setup(home / "logs", cfg.log.level, console=False, privacy=cfg.log.privacy)
     home = Path(home)
@@ -721,7 +767,7 @@ def cmd_whatsapp(a, cfg, home) -> int:
                       file=sys.stderr)
                 return 2
             try:
-                res = search(home, " ".join(args), who=a.from_who, since=a.since, until=a.until, limit=a.limit,
+                res = search(home, " ".join(args), who=(a.from_who or [""])[-1], since=a.since, until=a.until, limit=a.limit,
                              archive_on=_cli_features(cfg, home).enabled(arc.FEATURE))
             except arc.DateError:
                 print(f"WA_BAD_DATE: {clilang.fmt(wab.HE['WA_BAD_DATE'], 'use a date like 2026-09-01, or 30d / 2w / 3m / 1y')}")
@@ -742,6 +788,8 @@ def cmd_whatsapp(a, cfg, home) -> int:
             return 0
         if a.action == "archive":
             return _archive_cli(home, cfg, a, args)
+        if a.action == "collect":
+            return _collect_cli(home, cfg, a, args)
         if a.action == "audit":
             _print(admin(home).call("GET", "/audit", params={"limit": a.limit}), a.json)
             return 0

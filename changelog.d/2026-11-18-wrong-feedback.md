@@ -1,0 +1,1 @@
+- Added: core of 'Jarvis, that was wrong' feedback, slice 1, not reachable yet (no switch, CLI, voice or dashboard): saves the last exchange, redacted, with its time as a local case and counts a user_correction for the weekly report (JAR-230).
