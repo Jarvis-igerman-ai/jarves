@@ -49,15 +49,20 @@ def _m(path: str, patterns) -> bool:
     return any(fnmatch.fnmatchcase(path, p) for p in patterns)
 
 
+def _signoff(path: str) -> bool:
+    """#543: case-insensitive, so docs/reviews/manual_test_*.md (same file on Windows/macOS) is never plain docs."""
+    return _m(path.lower(), tuple(p.lower() for p in SIGNOFF_DOCS))
+
+
 def is_high_risk(path: str) -> bool:
-    return _m(path, HIGH_RISK) or _m(path, SIGNOFF_DOCS)
+    return _m(path, HIGH_RISK) or _signoff(path)
 
 
 def is_docs(path: str) -> bool:
     name = path.rsplit("/", 1)[-1].lower()
     if name in ("claude.md", "agents.md") or path.startswith(".claude/"):
         return False                      # instruction files steer agents: never "just docs"
-    if _m(path, SIGNOFF_DOCS):
+    if _signoff(path):
         return False                      # #543: owner sign-off sheets are never "just docs" for any caller
     return path.startswith("docs/") or name.endswith(".md") or name.startswith("changelog") or name == "doc_map.md"
 

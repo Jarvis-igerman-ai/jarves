@@ -3,6 +3,7 @@ tools/release_gate.py decisions. Offline, temp dirs, no git, no network."""
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import sys
 from datetime import datetime, timedelta, timezone
@@ -485,10 +486,16 @@ def test_gate_tag_signature_by_owner_key(tmp_path):
     assert any("missing or empty" in p for p in probs(tmp_path, "v4.1.0", signers, run=_Run()))
     signers.write_text("owner ssh-ed25519 AAAA\n", encoding="utf-8")
     ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
+    v = sys.executable                                               # an existing file stands in for ssh-keygen here
+    probs = functools.partial(gate.tag_signature_problems, verifier=v)
     assert probs(tmp_path, "v4.1.0", signers, run=ok) == []
     cmd = ok.calls[0]
     assert f"gpg.ssh.allowedSignersFile={signers}" in cmd and cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"]
-    assert "gpg.minTrustLevel=fully" in cmd and "gpg.ssh.program=/usr/bin/ssh-keygen" in cmd     # absolute: no PATH lookup
+    assert "gpg.minTrustLevel=fully" in cmd and f"gpg.ssh.program={v}" in cmd
+    assert gate.SSH_KEYGEN == "/usr/bin/ssh-keygen"                  # default verifier is absolute: no PATH lookup
+    absent = gate.tag_signature_problems(tmp_path, "v4.1.0", signers, run=ok, verifier=str(tmp_path / "no-keygen"))
+    assert len(absent) == 1 and "verifier" in absent[0] and "ubuntu release runner" in absent[0]
+    assert "not signed by the owner" not in absent[0] and len(ok.calls) == 1         # refused before running git
     stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
     assert any("not signed by the owner" in p for p in probs(tmp_path, "v4.1.0", signers, run=_Run(0, stranger)))
     bad = probs(tmp_path, "v4.1.0", signers, run=_Run(1, "error: no signature found\n" + "x" * 900))
@@ -522,6 +529,10 @@ def test_gate_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, caps
     tag_if, set_if = run.index('if [ "$REF_TYPE" = "tag" ]; then'), run.index('if [ -n "$ALLOWED_SIGNERS" ]; then')
     export = next(i for i, ln in enumerate(run) if "JARVES_ALLOWED_SIGNERS_FILE=" in ln)
     assert tag_if < set_if < export and run[export + 1] == "fi"          # tag ref only; no empty file exported
+    job = next(j for j in doc["jobs"].values() if step in j.get("steps", []))      # GITHUB_ENV reaches later steps of
+    names = [s.get("name", "") for s in job["steps"]]                              # the SAME job only
+    gate_i = next(i for i, s in enumerate(job["steps"]) if "release_gate.py" in s.get("run", ""))
+    assert names.index(step["name"]) < gate_i                                      # the gate reads it afterwards
 
 
 @pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); deselected elsewhere

@@ -210,7 +210,7 @@ SSH_KEYGEN = "/usr/bin/ssh-keygen"     # the release gate runs on ubuntu-24.04 (
 GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
 
 
-def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.run) -> list[str]:
+def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.run, verifier: str = SSH_KEYGEN) -> list[str]:
     """#605: the tag's 'Rows hash' line is authentic only when the tag is SSH-signed by a key in the owner's allowed
     signers (repository variable RELEASE_ALLOWED_SIGNERS, outside the repo, so a docs-only commit cannot add a key).
     Missing list, bad tag, failed git or a bad/unlisted signature refuse (never pass blind)."""
@@ -223,9 +223,12 @@ def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.ru
         return [f"sign-off: the owner allowed-signers file {p.name} is missing or empty; cannot verify the tag signature"]
     if not TAG_RE.match(tag):
         return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
+    if not Path(verifier).is_file():     # e.g. a local run on Windows/macOS: say so, not "not signed by the owner"
+        return [f"sign-off: signature verifier {verifier} not found; the tag signature check runs on the ubuntu release "
+                "runner (release.yml); refused"]
     # full trust (a listed principal) plus the "Good ... signature for <principal>" line: a good signature by an
     # unlisted key never passes; the verifier is an absolute path, so neither git config nor PATH can redirect it.
-    cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={SSH_KEYGEN}", "-c", "gpg.minTrustLevel=fully",
+    cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", "gpg.minTrustLevel=fully",
            "-c", f"gpg.ssh.allowedSignersFile={p}", "verify-tag", f"refs/tags/{tag}"]
     try:
         r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60)
