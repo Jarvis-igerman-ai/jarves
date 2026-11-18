@@ -154,7 +154,9 @@ class CloseDeadTests(unittest.TestCase):
         store.dead_blocked(apply=True)
         with self.assertRaises(ValueError):
             store.transition("x", {"state": "verified"})
-        self.assertEqual(store.transition("x", {"state": "queued"})["state"], "queued")  # explicit reopen
+        reopened = store.transition("x", {"state": "queued"})  # explicit reopen
+        self.assertEqual(reopened["state"], "queued")
+        self.assertNotIn("closed_reason", reopened)  # a reopened task no longer reads as closed
 
     def test_cancelled_task_cannot_take_an_owner_question(self):
         store, clock = self.build()

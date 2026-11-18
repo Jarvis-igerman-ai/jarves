@@ -1200,6 +1200,8 @@ class Store:
                 raise ValueError("cancelled is set only by the dead-blocked sweep (close-dead --apply)")
             if task["state"] == "cancelled" and state not in {"cancelled", "queued", "blocked"}:
                 raise ValueError("reopen a cancelled task before changing its state")
+            if task["state"] == "cancelled" and state != "cancelled":
+                task.pop("closed_reason", None)  # reopened: the sweep's closing note no longer applies
             if self._unanswered(db, task["id"]) and state not in {"waiting_owner", "blocked"}:
                 raise ValueError("task has unanswered owner questions")
             held = self._has_locks(db, task["id"])
