@@ -520,8 +520,50 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
-def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+def signature(findings: list[dict], complete: bool, refused: dict[str, str] | None = None) -> str:
+    """Findings, plus the refused sources when there are any (#480); no refusals keeps the old signature."""
+    raw = ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
+    if refused:
+        raw += "|" + ",".join(f"{k}:{v}" for k, v in sorted(refused.items()))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
+RUN_SOURCES = ("main_ci", "nightly", "codeql_run")             # workflow runs, read through the Actions API
+_REFUSED = ("http_401", "http_403", "http_404")
+
+
+def refused_sources(coverage: object) -> dict[str, str]:
+    """{source: "http_401" | "http_403" | "http_404"} for the sources GitHub refused; anything else is ignored."""
+    if not isinstance(coverage, dict):
+        return {}
+    return {k: v.removeprefix("incomplete:") for k, v in coverage.items()
+            if isinstance(k, str) and isinstance(v, str) and v.startswith("incomplete:")
+            and v.removeprefix("incomplete:") in _REFUSED}
+
+
+def owner_actions(coverage: object, refused: dict[str, str] | None = None) -> list[str]:
+    """One line per kind of refusal, naming what the owner can do (#480). Never names a token value or its source.
+    `refused` = the dict the signature already used (run_scan passes it), so the body and signature cannot drift."""
+    refused = refused_sources(coverage) if refused is None else refused
+    other = [k for k, r in refused.items() if r != "http_401"]
+    groups = [([k for k, r in refused.items() if r == "http_401"],
+               "the scan's GitHub token is missing, expired or invalid; set a valid token."),
+              ([k for k in other if k in ALERT_SOURCES],
+               "the feature is off for this repository (turn it on in the repository's security settings) "
+               "or the scan's token cannot read it (give it read access)."),
+              ([k for k in other if k in RUN_SOURCES and refused[k] == "http_403"],
+               "give the scan's token read access to Actions."),
+              ([k for k in other if k in RUN_SOURCES and refused[k] == "http_404"],
+               "check that the workflow exists on main, or give the scan's token read access to Actions."),
+              ([k for k in other if k not in ALERT_SOURCES + RUN_SOURCES],
+               "the scan's token cannot read it (give it read access).")]
+    lines = []
+    for keys, text in groups:
+        if keys:
+            codes = "/".join(sorted({refused[k].removeprefix("http_") for k in keys}))
+            lines.append(f"Owner action (HTTP {codes}: {', '.join(sorted(keys))}): {text}")
+    return lines
 
 
 def _complete(coverage: dict) -> bool:
@@ -529,10 +571,11 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
-def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
+def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str,
+                 refused: dict[str, str] | None = None) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
-             "This is ONE tracker; it is updated only when the set of findings changes.", ""]
+             "This is ONE tracker; it is updated only when the findings, coverage completeness or refused sources change.", ""]
     if findings:
         by = {s: sum(f["severity"] == s for f in findings) for s in ("P1", "P2", "P3")}
         lines += [f"**Open findings: {len(findings)}** (P1 {by['P1']}, P2 {by['P2']}, P3 {by['P3']})", "",
@@ -550,6 +593,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+        lines += owner_actions(coverage, refused)
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
@@ -621,7 +665,8 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete)
+    refused = refused_sources(coverage)
+    sig = signature(findings, complete, refused)
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))
@@ -635,7 +680,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         issue = {"status": "dry_run"}
     elif report:
         try:
-            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind), sig, bool(findings), sleep)
+            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind, refused), sig, bool(findings), sleep)
         except Offline as e:
             return _fail(home, state, entry, result, now, "offline", str(e))
     result["issue"] = issue
