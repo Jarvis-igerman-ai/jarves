@@ -28,6 +28,7 @@ UNTRUSTED = "Agent text (untrusted): handoffs and replies are what a coding agen
 REPLACED = "replaced by a newer plan"
 STOPPED = "stopped by the owner"
 _WINDOWS = os.name == "nt"
+_run = subprocess.run                     # seam for the taskkill call (tests patch this, not subprocess.run)
 _NOT_STOPPED = ("unknown", "failed")       # _kill_pid outcomes where the stored process may still run (#1098)
 AGENT_WORDS = {"קלוד": "claude", "קלאוד": "claude", "claude-code": "claude", "קודקס": "codex", "אופנקוד": "opencode",
                "אופן-קוד": "opencode", "open-code": "opencode", "אופנראוטר": "openrouter", "open-router": "openrouter"}
@@ -1335,7 +1336,7 @@ def _kill_tree(pid: int) -> str | None:
     """Kill the process tree of `pid`. None when the kill was accepted, else a short reason (never raises)."""
     try:
         if _WINDOWS:
-            r = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, text=True,
+            r = _run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, text=True,
                                creationflags=gitops._NOWIN, timeout=30)
             return None if r.returncode == 0 else f"taskkill exit {r.returncode}: {(r.stderr or r.stdout).strip()}"
         os.killpg(os.getpgid(pid), signal.SIGKILL)

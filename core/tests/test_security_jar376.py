@@ -18,7 +18,8 @@ def test_1096_github_workflows_are_protected():
 
 @pytest.mark.parametrize("path", [".GitHub/workflows/x.yml", ".Claude/settings.json", ".GIT/config", "sub/OpenCode.JSON",
                                   ".githooks\\pre-commit", "./.mcp.json", "./.github/workflows/x.yml",
-                                  "src/../.github/workflows/x.yml"])
+                                  "src/../.github/workflows/x.yml", "../.github/workflows/x.yml", "..", "/etc/passwd",
+                                  "C:/x.py", "src/../../x.py"])
 def test_1097_protected_check_ignores_case_and_separators(path):
     prot, _ = gitops.violations([path], ["*"])
     assert prot == [path]
@@ -39,7 +40,8 @@ def test_1099_key_and_token_shaped_text_is_sensitive(text):
 @pytest.mark.parametrize("text", ["secret-ish title", "plan a secret party", "I like jazz in the morning", "call me Igal", "prefer short answers",
                                   "wake me at seven on weekdays", "internationalization matters",
                                   "אני מפתח תוכנה", "תזכיר לי איפה מפתחות הבית", "I like board games with tokens",
-                                  "my uncle was a pallbearer"])
+                                  "my uncle was a pallbearer",
+                                  "access keyboard shortcuts", "a private keyboard"])
 def test_1099_ordinary_preferences_are_not_sensitive(text):
     assert not looks_sensitive(text)
 
@@ -204,7 +206,7 @@ def test_1098_windows_taskkill_failure_is_not_stopped(pm, monkeypatch):
     calls = []
     monkeypatch.setattr(service, "_WINDOWS", True)
     monkeypatch.setattr(engine, "proc_token", lambda pid: "T1")
-    monkeypatch.setattr(service.subprocess, "run", lambda argv, **k: calls.append(argv) or
+    monkeypatch.setattr(service, "_run", lambda argv, **k: calls.append(argv) or
                         subprocess.CompletedProcess(argv, 1, "", "Access is denied."))
     tid = _running_task(pm, 4242, "T1")
     r = pm.call("stop_agent", project="demo")
@@ -244,3 +246,14 @@ def test_1098_proc_token_reaped_during_read_is_gone(monkeypatch):
     monkeypatch.setattr(engine.Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(ProcessLookupError())
                         if self.name == "stat" and "self" not in self.parts else real(self, *a, **k))
     assert engine.proc_token(4242) == ""
+
+
+def test_1098_proc_token_bad_ctypes_argument_is_unreadable(monkeypatch):
+    """A ctypes.ArgumentError while reading identity must not escape into the stage start: it is UNREADABLE."""
+    import ctypes
+    from jarves.projectmgr import engine
+    def boom(self):
+        raise ctypes.ArgumentError("bad handle")
+    monkeypatch.setattr(engine.os, "name", "posix")
+    monkeypatch.setattr(engine.Path, "exists", boom)
+    assert engine.proc_token(4242) == engine.UNREADABLE

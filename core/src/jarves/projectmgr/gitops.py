@@ -178,8 +178,11 @@ def in_scope(path: str, scope: list[str]) -> bool:
 
 def is_protected(path: str) -> bool:
     """True for a file an agent may never change, in any letter case and with either slash; `./` and `..` segments
-    are normalised first (`src/../.github/x` is `.github/x`)."""
+    are normalised first (`src/../.github/x` is `.github/x`);
+    a path that leaves the repository (`../x`, `/x`, `C:x`) counts as protected too."""
     p = posixpath.normpath(path.replace("\\", "/").casefold())
+    if p == ".." or p.startswith(("../", "/")) or re.match(r"[a-z]:", p):   # escapes the repo: never allowed
+        return True
     return p.startswith(PROTECTED) or p.split("/")[-1] in PROTECTED_NAMES
 
 

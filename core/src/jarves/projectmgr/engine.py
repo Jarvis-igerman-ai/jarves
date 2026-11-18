@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+from ctypes import ArgumentError
 from pathlib import Path
 
 from .. import logs
@@ -37,6 +38,9 @@ def proc_token(pid: int) -> str:
             k = ctypes.WinDLL("kernel32", use_last_error=True)
             k.OpenProcess.restype = wintypes.HANDLE
             k.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+            k.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+            k.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+            k.CloseHandle.argtypes = (wintypes.HANDLE,)
             h = k.OpenProcess(0x1000, False, int(pid))             # PROCESS_QUERY_LIMITED_INFORMATION
             if not h:
                 return "" if ctypes.get_last_error() == 87 else UNREADABLE   # 87 = no such process
@@ -56,7 +60,7 @@ def proc_token(pid: int) -> str:
         return " ".join(r.stdout.split()) if r.stdout.strip() or r.returncode == 1 else UNREADABLE   # ps: 1 = no such pid
     except (FileNotFoundError, ProcessLookupError):                    # reaped between check and read (ENOENT/ESRCH)
         return "" if os.name != "nt" and Path("/proc/self/stat").exists() else UNREADABLE
-    except (OSError, IndexError, ValueError, subprocess.SubprocessError, AttributeError):
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError, AttributeError, ArgumentError):
         return UNREADABLE
 
 
