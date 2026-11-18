@@ -124,9 +124,11 @@ def issue(home: Path, *, now: float | None = None) -> str:
         shared = eph_private.exchange(X25519PublicKey.from_public_bytes(pub))
     except FileNotFoundError:
         raise UnlockUnavailable("no dashboard is running; start it with: jarvis workflow supervise") from None
-    except PermissionError:  # e.g. Windows: the dashboard is replacing the file right now
-        raise UnlockUnavailable("the unlock key file is busy; try again in a moment") from None
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except OSError as exc:
+        if getattr(exc, "winerror", None) in (32, 33):  # Windows sharing/lock violation: the dashboard is replacing it
+            raise UnlockUnavailable("the unlock key file is busy; try again in a moment") from None
+        raise UnlockUnavailable(f"the dashboard unlock key is unreadable ({type(exc).__name__}); restart the dashboard") from None
+    except (ValueError, KeyError, TypeError) as exc:
         raise UnlockUnavailable(f"the dashboard unlock key is damaged ({type(exc).__name__}); restart the dashboard") from None
     if not _serves_key(port, pub):
         raise UnlockUnavailable(f"no dashboard is running on port {port} with the published unlock key; "

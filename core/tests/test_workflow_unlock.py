@@ -1,5 +1,4 @@
 """#750: the private link alone is read-only; owner answers need the terminal code (unlock)."""
-import hashlib
 import io
 import json
 import os
@@ -223,10 +222,9 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(set(record), {"eph", "tag", "expires"})       # main stored {salt, hash}: scrypt, checkable offline
         files = "".join(p.read_text(encoding="ascii") for p in self.home.iterdir() if p.name.startswith("unlock"))
         self.assertNotIn(self.server.unlock_key._private.private_bytes_raw().hex(), files)
-        for derived in (shown, hashlib.sha256(shown.encode()).hexdigest(),     # no plain or unkeyed digest of the code
-                        hashlib.scrypt(shown.encode(), salt=b"", n=2 ** 14, r=8, p=1, dklen=32).hex()):
-            self.assertNotIn(f'"{derived}"', files)
         self.assertFalse(unlock.consume(self.home, shown, key=None))   # no key, no check
+        self.assertFalse(unlock.consume(self.home, shown, key=unlock.ServerKey()))  # any other key cannot verify it
+        self.assertTrue((self.home / unlock.FILE).exists())            # and the record survives for the real holder
         self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
 
     def test_750_damaged_key_or_record_fails_closed(self):
@@ -294,8 +292,13 @@ class UnlockTests(unittest.TestCase):
         self.assertIn("could not publish the unlock key (PermissionError)", logs.output[0])
 
     def test_750_a_busy_key_file_says_try_again(self):
-        with patch.object(unlock, "_read", side_effect=PermissionError(13, "sharing violation")):
+        busy = PermissionError(13, "sharing violation")
+        busy.winerror = 32                                             # Windows ERROR_SHARING_VIOLATION: transient
+        with patch.object(unlock, "_read", side_effect=busy):
             with self.assertRaisesRegex(unlock.UnlockUnavailable, "busy; try again"):
+                unlock.issue(self.home)
+        with patch.object(unlock, "_read", side_effect=PermissionError(13, "denied")):  # POSIX EACCES: not transient
+            with self.assertRaisesRegex(unlock.UnlockUnavailable, r"unreadable \(PermissionError\)"):
                 unlock.issue(self.home)
 
     def test_750_no_code_when_the_listener_does_not_hold_the_published_key(self):
