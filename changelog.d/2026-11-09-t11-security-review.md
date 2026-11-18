@@ -1,0 +1,1 @@
+- Added: security review T11 of goal_plans, continuity, devstatus, projectmgr and preferences (docs/reviews); P1/P2 linked to #1096-#1099, P3 notes and the missing council findings tracked in #1254.
