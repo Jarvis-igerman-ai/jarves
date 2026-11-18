@@ -438,6 +438,16 @@ def test_probe_error_timer_restarts_after_recovery_and_each_version_gets_a_notic
     assert [n["version"] for n in stuck] == [NEW, "3.0.0.2"] and r.launched == []
 
 
+def test_probe_stuck_timer_ignores_ticks_that_never_probed(home, server, keys):
+    """#1100 review R3: a long 'later' (no busy check) must not count toward the day-long probe_stuck timer."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    assert r.tick() == "busy" and "probe_error_since" in r.au.state()
+    r.au.answer("later")
+    assert r.tick(3600) == "snoozed" and "probe_error_since" not in r.au.state()
+    assert r.tick(auto_update.LATER_S) == "busy" and "probe_stuck" not in kinds(r) and r.launched == []
+
 
 def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
     """#1100 review R1/R2: a forced manual update skips busy(), so the notice and the guide say to check approvals."""
@@ -447,6 +457,11 @@ def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
     guide = tomllib.loads((Path(auto_update.__file__).parent / "guides/data/auto_update.toml").read_text("utf-8"))
     row = [p for p in guide["problems"] if "probe_stuck" in p["en"]]
     assert len(row) == 1 and "no approval is waiting" in row[0]["fix_en"] and "אין אישור שממתין" in row[0]["fix_he"]
+    for text in (en, he, row[0]["fix_en"], row[0]["fix_he"]):  # R2: one real command, same in notice and guide
+        assert "jarvis update install" in text and "Updates" in text
+    cli_src = (Path(auto_update.__file__).parent / "cli.py").read_text("utf-8")
+    assert 'choices=["check", "install", "status", "auto"]' in cli_src   # `jarvis update install` exists
+
 
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:

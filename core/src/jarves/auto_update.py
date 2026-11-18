@@ -339,15 +339,13 @@ class AutoUpdater:
             return "announced"
         forced = bool(st.get("now_requested"))
         if not forced:
-            if float(st.get("snooze_until") or 0) > now:
+            held = ("snoozed" if float(st.get("snooze_until") or 0) > now else
+                    "waiting_grace" if now - float(st["announced_ts"]) < NOTICE_GRACE_S else
+                    "backoff" if float(st.get("next_try") or 0) > now else "")
+            if held:                                       # no probe ran: the probe_stuck timer must not count this
+                st.pop("probe_error_since", None)
                 _save(self.home, st)
-                return "snoozed"
-            if now - float(st["announced_ts"]) < NOTICE_GRACE_S:
-                _save(self.home, st)
-                return "waiting_grace"
-            if float(st.get("next_try") or 0) > now:
-                _save(self.home, st)
-                return "backoff"
+                return held
             reasons = list(self.busy() or [])
             st["busy"] = reasons
             self._watch_probe_error(st, "probe_error" in reasons, now, ver, disp)
@@ -487,11 +485,11 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                  "after your OK."))
     if kind == "probe_stuck":
         return (("העדכון האוטומטי תקוע", f"גרסה {display} ממתינה כבר יותר מיום כי בדיקת 'האם ג'רביס בשימוש' נכשלת, "
-                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates, אחרי שבדקת שאין אישור שממתין לך; אם זה חוזר, "
+                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates או עם jarvis update install, אחרי שבדקת שאין אישור שממתין לך; אם זה חוזר, "
                  "דווח עם jarvis report."),
                 ("Auto-update is stuck", f"Version {display} has waited over a day because the 'is JARVES in use' check "
                  "keeps failing, so I do not install (to stay safe). The current version works. You can update by "
-                 "hand on the Updates page after checking that no approval is waiting for you; if it repeats, "
+                 "hand on the Updates page or with jarvis update install after checking that no approval is waiting for you; if it repeats, "
                  "report it with jarvis report."))
     if kind in ("rolled_back", "rollback_failed"):
         prev = x.get("prev") or ""
