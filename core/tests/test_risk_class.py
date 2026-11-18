@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import integration_branch as ib  # noqa: E402
 import risk_class as rc  # noqa: E402
 
 WF = Path(__file__).resolve().parents[2] / ".github" / "workflows"
@@ -96,9 +97,6 @@ def test_automerge_only_turns_on_auto_merge_for_the_native_queue():
 ])
 def test_signoff_sheet_and_release_docs_never_automerge(path):
     """#543: the owner sign-off sheet is not 'just docs'; a docs-only PR must not edit it unreviewed."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-    import integration_branch as ib  # noqa: PLC0415
-
     assert rc.is_high_risk(path) and not rc.is_docs(path)
     assert cls([path]) is None and cls([path, "docs/NOW.md"]) is None
     assert rc.classify([path])[1] == f"high-risk path: {path}"
