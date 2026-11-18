@@ -53,6 +53,13 @@ class TasksTest {
     }
 
     @Test
+    fun aNullTitleIsEmptyNotTheWordNull() {
+        val body = """{"plans":[{"id":1,"title":null,"state":"done","steps":[]}]}"""
+        val p = (CompanionClient("pc:1", PlansRec(body = body)).plans("t") as Plans.Listed).plans.single()
+        assertEquals("", p.title)
+    }
+
+    @Test
     fun plansSwitchedOffOnThePcAreReportedNotHidden() {
         val r = CompanionClient("pc:1", PlansRec(body = """{"enabled":false,"plans":[]}""")).plans("t") as Plans.Listed
         assertEquals(false, r.enabled)

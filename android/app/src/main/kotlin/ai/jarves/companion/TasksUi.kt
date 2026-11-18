@@ -51,7 +51,7 @@ fun parsePlans(body: String): Plans.Listed? = try {
         val n = steps?.length() ?: 0
         val done = (0 until n).count { steps!!.optJSONObject(it)?.optString("status") == "done" }
         TaskPlan(
-            o.getInt("id"), o.optString("title", "").take(300), o.optString("state", ""),
+            o.getInt("id"), (if (o.isNull("title")) "" else o.optString("title", "")).take(300), o.optString("state", ""),
             o.optInt("progress", 0).coerceIn(0, 100), done, n, o.optBoolean("needs_pc", false),
         )
     }
