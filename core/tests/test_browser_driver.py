@@ -231,6 +231,8 @@ def _pid_alive(pid: int) -> bool:
     try:                                                            # a killed child nobody reaped yet is a zombie: dead
         with open(f"/proc/{pid}/stat", encoding="ascii") as f:
             return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (FileNotFoundError, ProcessLookupError):               # reaped between kill(0) and open: dead (JAR-518)
+        return False
     except (OSError, IndexError):
         return True
 
@@ -256,8 +258,9 @@ def test_a_hung_page_cannot_keep_the_browser_alive_after_stop(world, monkeypatch
     end = time.time() + 10
     while time.time() < end and _pid_alive(pid):
         time.sleep(0.3)
+    alive = _pid_alive(pid)                                             # decide before release: releasing lets the loop reap it (JAR-518)
     release.set()
-    assert not _pid_alive(pid)                                          # the abandoned driver's whole process tree was killed
+    assert not alive                                                    # the abandoned driver's whole process tree was killed
 
 
 def _swallow(fn, *a):
