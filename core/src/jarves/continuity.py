@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
     cost INTEGER NOT NULL DEFAULT 0);
 """
 
+RESEND_UNAVAILABLE = ("Not kept: privacy mode is on, so this answer was not stored. Please ask again. / "
+                      "התשובה לא נשמרה כי מצב פרטיות פועל. שאלו שוב.")
+
+
+def _at_rest(kind: str, body: dict) -> str:
+    """The ledger copy of an answer. Privacy on (#206 F13): a chat reply's words are not kept at rest; a resend served
+    from the ledger (after a PC restart) gets an explicit RESEND_UNAVAILABLE reply instead of the words."""
+    if kind == "chat" and logs.privacy() and isinstance(body, dict) and isinstance(body.get("reply"), str):
+        body = {**body, "reply": RESEND_UNAVAILABLE, "code": "RESEND_UNAVAILABLE"}
+    return json.dumps(body)
+
 
 class Continuity:
     def __init__(self, home: Path, *, clock: Callable[[], float] = time.time,
@@ -115,14 +126,14 @@ class Continuity:
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), _at_rest(kind, body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+                (device, cid, kind, int(status), _at_rest(kind, body), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:

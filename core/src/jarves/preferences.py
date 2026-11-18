@@ -42,7 +42,10 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    # #1099: key/token words (English and Hebrew) and key-shaped strings: 20+ ASCII letters/digits/_- with a digit
+    r"\b(?:api|access|secret|private|auth|bearer)[\s_-]*(?:key|token)s?\b|מפתח(?:ות)?\s+(?:ה)?API|טוקן|"
+    r"(?<![\w.-])(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{20,}", re.I)
 
 
 def looks_sensitive(text: str) -> bool:

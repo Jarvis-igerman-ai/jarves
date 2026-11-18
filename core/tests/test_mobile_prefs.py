@@ -94,7 +94,8 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
     assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
-    assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
+    assert [x["text"] for x in pc["items"]] == ["Play jazz while cooking"]               # #206 H2: the edit awaits a confirm
+    assert [x["text"] for x in pc["proposed"]] == ["I like very short answers in the morning"]
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True
     assert op(srv, tok, op="decline", pref=b)[1]["ok"] is True
     _, v = call(srv, "GET", "/api/m/prefs", tok)
@@ -173,3 +174,10 @@ def test_prefs_js_is_served_csp_safe_and_translated():
     assert re.search(r"[֐-׿]", js)
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert '/m/prefs.js' in html and 'id="prefsRoot"' in html and 'id="tabbtn-prefs"' in html
+
+
+def test_206_h2_a_phone_edit_needs_a_new_confirm(srv, prefs):
+    p, a, _ = prefs
+    tok, _ = pair(srv)
+    st, out = op(srv, tok, op="edit", pref=a, text="I like very short answers at dawn")
+    assert st == 200 and out["state"] == "proposed" and p.get(a)["state"] == "proposed"   # new words: not in the prompt yet

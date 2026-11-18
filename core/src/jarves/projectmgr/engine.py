@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .. import logs
 from ..orchestrator.envelope import clean, summary
+from ..workflow import webchild
 from . import cards, debate as debatemod, gitops, pipeline as pl
 
 STAGE_RUNS_PER_STAGE = 3                  # a task may run at most 3 x (active stages) stages in total (no ping-pong)
@@ -267,6 +268,7 @@ class StageEngine:
     def _run_agent(self, p, t, r, card, wt, model, team, cancel, read_only=False):
         def on_start(pid_: int) -> None:
             self.db.update_task(t["id"], pid=pid_)
+            self._set_job(t, pid_started=webchild.started_at(pid_))   # #1098: a later kill checks it is still this process
         res = r.run(card, str(wt), model=model, check_argv=p["check_cmd"], on_start=on_start, cancel=cancel,
                     timeout=min(14400, self.cfg.task_timeout_s * (3 if team else 1)), team=team, read_only=read_only)
         self._cost(res)

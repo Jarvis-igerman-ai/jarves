@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -177,7 +178,9 @@ def in_scope(path: str, scope: list[str]) -> bool:
 
 def is_protected(path: str) -> bool:
     """True for a file an agent may never change, in any letter case and with either slash."""
-    p = path.replace("\\", "/").casefold()
+    p = posixpath.normpath(path.replace("\\", "/").casefold())
+    if p == ".." or p.startswith(("../", "/")) or p[1:2] == ":":     # JAR-376: `./`, `x/..` or a path out of the repo
+        return True
     return p.startswith(PROTECTED) or p.split("/")[-1] in PROTECTED_NAMES
 
 

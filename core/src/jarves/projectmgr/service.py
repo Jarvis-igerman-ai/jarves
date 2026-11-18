@@ -99,11 +99,14 @@ class Manager(StageEngine):
         a task that was interrupted max_attempts times fails instead of looping."""
         for p in self.db.projects():
             for t in self.db.tasks(p["id"], ("running", "review")):
-                if t["pid"]:
-                    _kill_pid(t["pid"])
+                job = self._job(t)
+                if t["pid"] and _kill_pid(t["pid"], job.pop("pid_started", None)) == "unknown":
+                    why = f"the previous run may still be running (process {t['pid']}): stop it, then retry {t['seq']}"
+                    self.db.update_task(t["id"], status="blocked", reason=why, job=job)   # pid kept for a later check
+                    self.db.event(t["id"], "manager", "blocked", why)
+                    continue
                 stages = self._stages(p, t)
                 kind = stages[t["stage"]]["kind"] if t["stage"] < len(stages) else "work"
-                job = self._job(t)
                 n = int(job.get("interrupts") or 0) + 1
                 if t["attempts"] >= self.cfg.max_attempts and kind in pl.CODE_KINDS or n > self.cfg.max_attempts + 1:
                     self.db.update_task(t["id"], status="failed", pid=0, reason="interrupted too many times")
@@ -1003,8 +1006,12 @@ class Manager(StageEngine):
             ev = self._cancel.get(t["id"])
             if ev is not None:
                 ev.set()
-            elif t["pid"]:
-                _kill_pid(t["pid"])
+            elif t["pid"] and _kill_pid(t["pid"], self._job(t).get("pid_started")) == "unknown":
+                self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED}, but process {t['pid']} could not be "
+                                    f"identified and was not killed: check it, then retry {t['seq']}")
+                self.db.event(t["id"], "owner", "stopped", "stopped by the owner; process not identified, not killed")
+                done.append(f"#{t['seq']} (process not confirmed stopped)")
+                continue
             self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED} (retry {t['seq']} to continue)", pid=0)
             self.db.event(t["id"], "owner", "stopped", "stopped by the owner")
             done.append(f"#{t['seq']}")
@@ -1296,7 +1303,28 @@ def _read_brief(root: Path) -> str:
     return ""
 
 
-def _kill_pid(pid: int) -> None:
+def _kill_pid(pid: int, started) -> str:
+    """#1098: kill a stored pid only while it is still the same process (start time recorded at launch).
+    'gone': no such process, or the pid now belongs to another program; 'unknown': alive but no usable record (not
+    killed); 'killed'."""
+    now = _started_at(pid)
+    if now is None:
+        return "gone"
+    if not isinstance(started, (int, float)) or isinstance(started, bool):
+        logs.warn("projects", "PID_UNIDENTIFIED", "a stored pid is alive but has no identity record: not killed", pid=pid)
+        return "unknown"
+    if now != started:
+        return "gone"
+    _kill_tree(pid)
+    return "killed"
+
+
+def _started_at(pid: int):
+    from ..workflow import webchild
+    return webchild.started_at(pid)
+
+
+def _kill_tree(pid: int) -> None:
     try:
         import os
         import signal
