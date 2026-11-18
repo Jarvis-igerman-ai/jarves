@@ -312,6 +312,14 @@ def find_token(env_only: bool = False) -> str:
         return ""
 
 
+def _rate_limited(headers: object) -> bool:
+    """GitHub sends 403 for primary (x-ratelimit-remaining: 0) and secondary (retry-after) rate limits."""
+    get = getattr(headers, "get", None)
+    if not callable(get):
+        return False
+    return str(get("x-ratelimit-remaining") or "").strip() == "0" or bool(get("retry-after"))
+
+
 def http_client(token: str, repo: str = REPO) -> Callable:
     """client(method, path, payload=None) -> (status, json-or-None). Raises Offline when GitHub is unreachable."""
     def call(method: str, path: str, payload: dict | None = None):
@@ -325,6 +333,8 @@ def http_client(token: str, repo: str = REPO) -> Callable:
                 code, body = r.status, r.read()
         except urllib.error.HTTPError as e:
             code, body = e.code, e.read() if hasattr(e, "read") else b""
+            if code == 403 and _rate_limited(e.headers):
+                code = 429                                 # a rate limit is transient, not a refusal (#480)
         except (urllib.error.URLError, OSError, TimeoutError) as e:
             raise Offline(type(e).__name__) from None
         try:
@@ -552,8 +562,10 @@ def owner_actions(coverage: object, refused: dict[str, str] | None = None) -> li
               ([k for k in other if k in ALERT_SOURCES],
                "the feature is off for this repository (turn it on in the repository's security settings) "
                "or the scan's token cannot read it (give it read access)."),
-              ([k for k in other if k in RUN_SOURCES],
-               "give the scan's token read access to Actions and check that the workflow exists."),
+              ([k for k in other if k in RUN_SOURCES and refused[k] == "http_403"],
+               "give the scan's token read access to Actions."),
+              ([k for k in other if k in RUN_SOURCES and refused[k] == "http_404"],
+               "check that the workflow exists on main, or give the scan's token read access to Actions."),
               ([k for k in other if k not in ALERT_SOURCES + RUN_SOURCES],
                "the scan's token cannot read it (give it read access).")]
     lines = []

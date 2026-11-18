@@ -176,8 +176,7 @@ def test_issue_480_mixed_refusals_from_the_real_collectors_name_the_owner_action
         "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
         "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
         "in the repository's security settings) or the scan's token cannot read it (give it read access).",
-        "Owner action (HTTP 403: codeql_run): give the scan's token read access to Actions and check that the workflow "
-        "exists."]
+        "Owner action (HTTP 403: codeql_run): give the scan's token read access to Actions."]
     assert set(ss.ALERT_SOURCES) | set(ss.RUN_SOURCES) <= set(r["coverage"])      # names match the real collectors
     for frag in gh.deny:                                                          # each deny fragment hit a real request
         assert any(m == "GET" and frag in path for m, path, _ in gh.calls), frag
@@ -188,6 +187,9 @@ def test_issue_480_no_refusal_or_malformed_coverage_adds_no_owner_action():
                              "boundary": "incomplete:not_run", "main_ci": "incomplete:http_503"}) == []
     assert ss.owner_actions({"x": None, "dependabot": 403, 7: ["incomplete:http_403"]}) == []
     assert ss.owner_actions("not a dict") == []
+    assert ss.owner_actions({"main_ci": "incomplete:http_404"}) == [
+        "Owner action (HTTP 404: main_ci): check that the workflow exists on main, or give the scan's token read access "
+        "to Actions."]
     assert ss.owner_actions({"future_source": "incomplete:http_403"}) == [
         "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
     assert "Owner action" not in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light")
@@ -207,8 +209,30 @@ def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(h
     gh = FakeGitHub(access=False)
     gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{live_sig} -->"}]
     assert scan(None, gh)["issue"]["status"] == "updated"
-    assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
+    assert [ln for ln in gh.issues[0]["body"].splitlines() if ln.startswith("Owner action")] == [
+        "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning): the feature is off for this repository "
+        "(turn it on in the repository's security settings) or the scan's token cannot read it (give it read access)."]
     assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+
+
+@pytest.mark.parametrize("headers,code", [({"x-ratelimit-remaining": "0"}, 429), ({"Retry-After": "60"}, 429),
+                                          ({"x-ratelimit-remaining": "41"}, 403), ({}, 403)])
+def test_issue_480_a_rate_limit_403_is_not_a_refusal(monkeypatch, headers, code):
+    import email.message
+    import io
+    import urllib.error
+    msg = email.message.Message()
+    for k, v in headers.items():
+        msg[k] = v
+
+    def deny(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", msg, io.BytesIO(b""))
+    monkeypatch.setattr(ss.urllib.request, "urlopen", deny)
+    assert ss.http_client("t")("GET", "/dependabot/alerts") == (code, None)
+    cov = ss.run_collectors("light", ss.http_client("t"), VER, now=T0, sleep=lambda s: None,
+                            boundary=lambda: {"failed": False})["coverage"]
+    assert ss.refused_sources(cov) == ({} if code == 429 else {k: "http_403" for k in ss.ALERT_SOURCES + ss.RUN_SOURCES
+                                                               if k in cov})
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):
