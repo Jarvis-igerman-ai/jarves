@@ -74,7 +74,7 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
         create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
                   "--label", "showstopper", "--label", "P1"]
         made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
-        if made.returncode != 0:                # a renamed area label must not stop the showstopper issue
+        if made.returncode != 0 and "label" in (made.stderr or "").lower():   # only a missing area label retries
             print("issue create with the area label failed; retrying without it")
             made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:

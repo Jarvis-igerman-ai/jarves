@@ -714,7 +714,7 @@ class Store:
                     continue
                 for name in task["resources"]:
                     db.execute("INSERT INTO workflow_resources VALUES (?,?)", (name, task["id"]))
-                task.update(state="running", agent_id=agent_id, blocker="", updated_at=self.clock())
+                task.update(state="running", agent_id=agent_id, blocker="", updated_at=self.clock(), progress_at=self.clock())
                 if task["implementation"] == "planned":
                     task["implementation"] = "in_progress"
                 agent.update(status="running", task_id=task["id"], heartbeat_at=self.clock(), progress_at=self.clock())
@@ -1172,6 +1172,8 @@ class Store:
                     row["passed"] = False
             previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
+            if state == "running":
+                task["progress_at"] = self.clock()          # worker progress for the verdict (#796)
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
             elif state != "blocked":
@@ -1191,7 +1193,7 @@ class Store:
             if not matches:
                 raise ValueError("unknown acceptance criterion")
             matches[0].update(passed=passed, evidence=evidence, checked_at=self.clock(), code_revision=task.get("code_revision", ""))
-            task["updated_at"] = self.clock()
+            task["updated_at"] = task["progress_at"] = self.clock()
             if not passed and task["state"] in {"verified", "done"}:
                 task.update(state="review", blocker="Acceptance regression")
             self._put(db, "task", task)

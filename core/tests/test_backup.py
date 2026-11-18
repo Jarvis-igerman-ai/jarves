@@ -235,7 +235,7 @@ def test_retention_7_daily_4_weekly(profile):
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
     assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 5     # #1016: was 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10    # #1016: user-made backups keep the old count
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
@@ -331,23 +331,15 @@ def test_1016_restore_source_outside_retention_survives_the_checkpoint_prune(pro
     assert old.is_file()
 
 
-def test_1016_first_prune_logs_once_what_the_new_defaults_removed(profile, monkeypatch):
-    bdir = profile / "backups"
-    bdir.mkdir()
-    start = datetime(2026, 11, 9, 3, 0)
-    for i in range(8):
-        (bdir / f"jarves-backup-{start - timedelta(minutes=i):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
-    for i in range(4):
-        (bdir / f"jarves-backup-{start - timedelta(hours=i):%Y%m%d-%H%M%S}-pre-migration.zip").write_bytes(b"x")
-    backup._save_state(profile, {"last_auto": 123.0})
+def test_1016_install_backup_is_one_checkpoint_not_a_manual_backup(profile, monkeypatch):
+    import argparse
+    from jarves import install_latest, updates
     seen = []
-    monkeypatch.setattr(backup.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f)))
-    backup.prune(profile)
-    assert backup.read_state(profile)["last_auto"] == 123.0     # the notice flag merges; due() keeps its timestamp
-    assert seen == [("BACKUP_RETENTION_LOWERED", {"removed": 3 + 2})]
-    (bdir / f"jarves-backup-{start - timedelta(days=1):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
-    backup.prune(profile)                               # later prunes are ordinary retention: no second notice
-    assert len(seen) == 1
+    monkeypatch.setattr(backup, "checkpoint", lambda home, reason="": seen.append(("pre-migration", reason)))
+    monkeypatch.setattr(backup, "create", lambda home, kind="manual", **k: seen.append((kind, "")))
+    monkeypatch.setattr(updates, "UpdateChecker", lambda home, cfg=None, channel=None: type("U", (), {"channel": "beta"})())
+    install_latest.real_deps(argparse.Namespace(), None, profile).backup_now()
+    assert seen == [("pre-migration", "before install")]     # pruned with the checkpoints, not kept with manual ones
 
 
 def test_auto_backup_due_daily_and_switchable(profile):

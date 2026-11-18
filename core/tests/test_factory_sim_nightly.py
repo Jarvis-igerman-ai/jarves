@@ -82,6 +82,29 @@ def test_issue_is_filed_without_the_area_label_when_that_label_is_missing(monkey
     assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
 
 
+def test_issue_create_is_not_retried_after_a_non_label_failure(monkeypatch, capsys):
+    """#897 review: an auth/network failure (or a create that half-succeeded) must not file a second issue."""
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        create = cmd[2] == "create"
+        return subprocess.CompletedProcess(cmd, int(create), "[]", "HTTP 401: Bad credentials" if create else "")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "FAILED a::b")
+    assert len([c for c in calls if c[2] == "create"]) == 1
+    assert "issue create failed: HTTP 401" in capsys.readouterr().out
+
+
+def test_factory_sim_alerts_are_read_only_by_the_factory_console():
+    """#897 review: the always-on factory_sim_missing alert must never reach the end-user Core dashboard."""
+    src = Path(__file__).resolve().parents[1] / "src" / "jarves"
+    users = sorted(p.relative_to(src).as_posix() for p in src.rglob("*.py")
+                   if "factory_sim_alerts(" in p.read_text(encoding="utf-8"))
+    assert users == ["workflow/autopilot_watch.py", "workflow/server.py"]
+
+
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out

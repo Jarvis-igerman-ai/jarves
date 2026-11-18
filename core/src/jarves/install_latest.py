@@ -529,7 +529,7 @@ def real_deps(a, cfg, home: Path) -> Deps:
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
-                backup_now=lambda: backup.create(home, "manual"),
+                backup_now=lambda: backup.checkpoint(home, "before install"),   # #1016: bounded like checkpoints, not manual
                 check=check, prepare=lambda ch: checker(ch).prepare_install(approved=True),
                 core_running=running,
                 detect_running=lambda up_: runmarks.detect_running(home, core_up=up_),

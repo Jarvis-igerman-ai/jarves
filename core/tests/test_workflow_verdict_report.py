@@ -166,11 +166,14 @@ class VerdictTests(Base):
         self.task()
         with self.store._tx() as db:              # claimed by a worker whose agent record no longer exists
             task = self.store._get(db, "task", "t1")
-            task.update(state="running", agent_id="gone", updated_at=self.now[0])
+            task.update(state="running", agent_id="gone", progress_at=self.now[0])
             self.store._put(db, "task", task)
         self.assertEqual((self.kind()[0], self.kind()[1]["detail"]["active"]), ("working", 1))
         self.advance(obs.ACTIVE_FRESH_S + 1)
         self.alive()
+        self.store.update_metadata("t1", {"mapping_note": "synced"})   # a non-progress write must not revive it (R5)
+        with self.store._tx() as db:
+            self.assertEqual(self.store._get(db, "task", "t1")["state"], "running")
         self.assertEqual(self.kind()[1]["detail"]["active"], 0)
 
     def test_nothing_queued(self):
