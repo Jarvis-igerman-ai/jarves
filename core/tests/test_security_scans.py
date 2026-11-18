@@ -179,6 +179,8 @@ def test_issue_480_mixed_refusals_from_the_real_collectors_name_the_owner_action
         "Owner action (HTTP 403: codeql_run): give the scan's token read access to Actions and check that the workflow "
         "exists."]
     assert set(ss.ALERT_SOURCES) | set(ss.RUN_SOURCES) <= set(r["coverage"])      # names match the real collectors
+    for frag in gh.deny:                                                          # each deny fragment hit a real request
+        assert any(m == "GET" and frag in path for m, path, _ in gh.calls), frag
 
 
 def test_issue_480_no_refusal_or_malformed_coverage_adds_no_owner_action():

@@ -573,7 +573,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  refused: dict[str, str] | None = None) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
-             "This is ONE tracker; it is updated only when the findings or the refused sources change.", ""]
+             "This is ONE tracker; it is updated only when the findings, coverage completeness or refused sources change.", ""]
     if findings:
         by = {s: sum(f["severity"] == s for f in findings) for s in ("P1", "P2", "P3")}
         lines += [f"**Open findings: {len(findings)}** (P1 {by['P1']}, P2 {by['P2']}, P3 {by['P3']})", "",
