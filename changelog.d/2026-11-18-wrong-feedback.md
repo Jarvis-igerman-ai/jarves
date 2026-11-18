@@ -1,0 +1,1 @@
+- Added: 'Jarvis, that was wrong' feedback, slice 1 (beta, off): jarvis feedback wrong saves the last exchange, redacted, as a local case with its time, and counts a user_correction for the weekly report (JAR-230).

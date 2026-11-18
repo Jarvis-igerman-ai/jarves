@@ -1,0 +1,4 @@
+{
+ "unit tests only (test_wrong_feedback.py); not run on the owner's PC": "בדיקות יחידה בלבד (test_wrong_feedback.py); לא הורץ במחשב של הבעלים",
+ "'Jarvis, that was wrong' (jarvis feedback wrong) saves the last exchange, redacted, as a local feedback case the factory can turn into a regression test; nothing leaves the PC": "\"ג׳רוויס, זה היה לא נכון\" (jarvis feedback wrong) שומר את השיחה האחרונה, מושחרת, כמשוב מקומי שאפשר להפוך לבדיקה; שום דבר לא יוצא מהמחשב"
+}
