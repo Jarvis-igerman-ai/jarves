@@ -24,7 +24,8 @@ class FakeGitHub:
     """Records every call; serves canned alert lists and workflow runs; keeps issues in memory."""
 
     def __init__(self, code_scanning=(), dependabot=(), secrets=(), checks="success", nightly="success", codeql="success",
-                 access=True):
+                 access=True, deny=None):
+        self.deny = dict(deny or {})                     # {path fragment: refused HTTP code}
         self.code_scanning, self.dependabot, self.secrets = list(code_scanning), list(dependabot), list(secrets)
         self.runs = {"jarves-checks.yml": checks, "nightly.yml": nightly, "codeql.yml": codeql}
         self.access, self.issues, self.calls, self.fail = access, [], [], None
@@ -34,6 +35,9 @@ class FakeGitHub:
         if self.fail:
             raise self.fail
         if method == "GET":
+            for frag, code in self.deny.items():
+                if frag in path:
+                    return code, None
             if "/code-scanning/alerts" in path:
                 return (200, self.code_scanning) if self.access else (403, None)
             if "/dependabot/alerts" in path:
@@ -159,6 +163,43 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     scan(home, gh, now=day(1))
     assert "INCOMPLETE" in gh.issues[0]["body"] and "No open findings" in gh.issues[0]["body"]
     assert "never read as zero" in gh.issues[0]["body"]
+
+
+# ====================================================================== #480: refused sources name the owner action
+def test_issue_480_mixed_refusals_from_the_real_collectors_name_the_owner_action():
+    gh = FakeGitHub(deny={"/dependabot/": 403, "/secret-scanning/": 404, "/nightly.yml/": 401, "/codeql.yml/": 403})
+    r = ss.run_collectors("full", gh, VER, now=T0, sleep=lambda s: None, boundary=lambda: {"failed": False})
+    assert ss.refused_sources(r["coverage"]) == {"dependabot": "http_403", "secret_scanning": "http_404",
+                                                 "nightly": "http_401", "codeql_run": "http_403"}
+    acts = [ln for ln in ss.tracker_body([], r["coverage"], 0, "s", "full").splitlines() if ln.startswith("Owner action")]
+    assert acts == [
+        "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
+        "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
+        "in the repository's security settings) or the scan's token cannot read it (give it read access).",
+        "Owner action (HTTP 403: codeql_run): give the scan's token read access to Actions and check that the workflow "
+        "exists."]
+    assert set(ss.ALERT_SOURCES) | set(ss.RUN_SOURCES) <= set(r["coverage"])      # names match the real collectors
+
+
+def test_issue_480_no_refusal_or_malformed_coverage_adds_no_owner_action():
+    assert ss.owner_actions({"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry",
+                             "boundary": "incomplete:not_run", "main_ci": "incomplete:http_503"}) == []
+    assert ss.owner_actions({"x": None, "dependabot": 403, 7: ["incomplete:http_403"]}) == []
+    assert ss.owner_actions("not a dict") == []
+    assert ss.owner_actions({"future_source": "incomplete:http_403"}) == [
+        "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
+    assert "Owner action" not in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light")
+
+
+def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
+    live_sig = "6490f068a3c2e39a"                       # the live #480 signature = sha256("i|")[:16], no refusals
+    assert ss.signature([], False) == ss.signature([], False, {}) == live_sig
+    assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_404"})
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{live_sig} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"
+    assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):
