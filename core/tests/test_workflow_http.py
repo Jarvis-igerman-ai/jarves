@@ -156,6 +156,14 @@ class WorkflowHTTPTests(unittest.TestCase):
         self.assertEqual(self.request("/api/tasks/scope/transition", {"state": "done", "delivery": "beta"})[0], 400)
         self.assertFalse(self.server.store.snapshot()["tasks"][0]["execution_allowed"])
 
+    def test_web_cannot_send_worker_progress_fields(self):
+        """#796: code_revision/checkpoint on a running update count as worker progress; the web must not send them."""
+        self.server.store.create_task({"id": "prog", "title": "Progress"})
+        self.login()
+        for extra in ({"code_revision": "abc"}, {"checkpoint": "x"}):
+            self.assertEqual(self.request("/api/tasks/prog/transition", {"state": "running", **extra})[0], 400)
+        self.assertFalse(self.server.store.snapshot()["tasks"][0].get("progress_at"))
+
     def test_sse_initial_revision_and_event_type(self):
         self.login()
         req = urllib.request.Request(self.server.origin + "/api/events", headers={"Cookie": self.cookie})

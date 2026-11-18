@@ -1173,7 +1173,10 @@ class Store:
             previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
             if state == "running" and ("code_revision" in data or "checkpoint" in data):
-                task["progress_at"] = self.clock()          # worker-only fields: real progress for the verdict (#796)
+                # Worker-only fields: real progress for the verdict (#796). Only the worker CLI
+                # (`workflow transition`) sends them with state=running; the dashboard route rejects
+                # them (test_web_cannot_send_worker_progress_fields) and autopilot sends queued/blocked.
+                task["progress_at"] = self.clock()
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
             elif state != "blocked":

@@ -290,10 +290,9 @@ def check_disk(c: Ctx) -> tuple[str, str, str]:
     try:
         used = sum(int(b.get("size") or 0) for b in backup.list_backups(c.home))
     except (OSError, ValueError, TypeError, AttributeError) as exc:    # the disk verdict still stands
-        return status, f"{detail or ''}; backup size unknown ({type(exc).__name__})", fix
-    detail = detail or ""
+        return status, "; ".join(x for x in (detail, f"backup size unknown ({type(exc).__name__})") if x), fix
     if used > backup.BACKUP_BUDGET_BYTES:          # #1016: backups filled the owner's disk
-        detail += f"; backups use {used / 1e9:.1f} GB (budget {backup.BACKUP_BUDGET_BYTES / 1e9:.1f} GB)"
+        detail = "; ".join(x for x in (detail, f"backups use {used / 1e9:.1f} GB (budget {backup.BACKUP_BUDGET_BYTES / 1e9:.1f} GB)") if x)
         fix = "; ".join(x for x in (fix, "Keep fewer backups: jarvis backup settings --manual 3 --checkpoints 1, "
                                          "then jarvis backup prune") if x)
         status = WARN if status == PASS else status

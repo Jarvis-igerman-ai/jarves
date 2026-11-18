@@ -75,6 +75,11 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
                   "--label", "showstopper", "--label", "P1"]
         made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
         if made.returncode != 0 and "label" in (made.stderr or "").lower():   # only a missing area label retries
+            again = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open", "--search",
+                                    title + " in:title", "--json", "number"], capture_output=True, text=True, timeout=60)
+            if again.returncode != 0 or again.stdout.strip() not in ("", "[]"):
+                print("issue create with the area label failed and the issue may exist; not retrying")
+                return
             print("issue create with the area label failed; retrying without it")
             made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:

@@ -82,6 +82,24 @@ def test_issue_is_filed_without_the_area_label_when_that_label_is_missing(monkey
     assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
 
 
+def test_label_retry_is_skipped_when_the_failed_create_made_the_issue(monkeypatch, capsys):
+    """#897 review: re-check the title before the retry so a half-successful create is not duplicated."""
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[2] == "create":
+            return subprocess.CompletedProcess(cmd, 1, "", "could not add label: 'testing' not found")
+        listed = sum(c[2] == "list" for c in calls) > 1      # the issue exists after the first create
+        return subprocess.CompletedProcess(cmd, 0, '[{"number": 7}]' if listed else "[]", "")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "FAILED a::b")
+    assert len([c for c in calls if c[2] == "create"]) == 1
+    assert "Factory nightly simulation failed: x in:title" in calls[-1]
+    assert "not retrying" in capsys.readouterr().out
+
+
 def test_issue_create_is_not_retried_after_a_non_label_failure(monkeypatch, capsys):
     """#897 review: an auth/network failure (or a create that half-succeeded) must not file a second issue."""
     import subprocess

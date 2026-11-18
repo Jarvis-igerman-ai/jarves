@@ -309,6 +309,8 @@ def test_1016_doctor_disk_check_survives_unreadable_backup_sizes(profile, monkey
     monkeypatch.setattr(backup, "list_backups", lambda home: [{"size": "x"}])
     status, detail, _ = selftest.check_disk(ctx)
     assert status == base[0] and "backup size unknown (ValueError)" in detail
+    monkeypatch.setattr(selftest, "_preflight", lambda c, name: (selftest.PASS, "", ""))
+    assert selftest.check_disk(ctx)[1] == "backup size unknown (ValueError)"   # no leading "; "
 
 
 def test_1016_no_space_aborts_restore_before_touching_data(profile, monkeypatch):
