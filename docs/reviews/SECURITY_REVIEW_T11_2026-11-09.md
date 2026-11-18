@@ -8,7 +8,7 @@ Not read in full: `projectmgr/{engine,pipeline,surfaces,cards,debate,plan}.py` a
 these modules. Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md`, the V6 review. No secrets are included.
 Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) arrived truncated (1 of 12). The other
 11 findings are not on GitHub and are **not reflected here** (UNVERIFIED whether covered). Recovering them, and filing
-the P3 items, is tracked in the follow-up issue linked from the PR for this report.
+the P3 items, is tracked in [#1323](https://github.com/Jarvis-igerman-ai/jarves/issues/1323).
 Disclosure: this repo is public. #1-#2 are fixed on main; #3-#4 are stated in public issues #1098/#1099.
 
 Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness needing a fix; P3 hardening.
@@ -86,4 +86,4 @@ One issue per defect (AGENTS.md rule 8):
 - P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Open; not fixed by this report-only PR.
 - P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Open; not fixed by this report-only PR.
 - PR #1108 (JAR-376), which proposed fixes for all four, was closed without merging.
-- P3 #5-#10: hardening notes, no issue each; recorded here and in the follow-up issue linked from this report's PR.
+- P3 #5-#10: hardening notes, no issue each; recorded here and in [#1323](https://github.com/Jarvis-igerman-ai/jarves/issues/1323).
