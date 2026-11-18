@@ -3,6 +3,7 @@ through the SAME signed path (signed manifest, SHA256 + size), notices before/af
 respected, and nothing ever runs a real installer. Fake release server on loopback, fake clock, fake launcher."""
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from release_fakes import BASE, FakeReleaseServer, Keys, installer_bytes, manifest, seed_legacy, snapshot
@@ -436,6 +437,16 @@ def test_probe_error_timer_restarts_after_recovery_and_each_version_gets_a_notic
     stuck = [n for n in r.notices if n["kind"] == "probe_stuck"]
     assert [n["version"] for n in stuck] == [NEW, "3.0.0.2"] and r.launched == []
 
+
+
+def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
+    """#1100 review R1/R2: a forced manual update skips busy(), so the notice and the guide say to check approvals."""
+    (_, he), (_, en) = auto_update._notice_text("probe_stuck", "3.0.0.1")
+    assert "no approval is waiting" in en and "אין אישור שממתין" in he
+    import tomllib
+    guide = tomllib.loads((Path(auto_update.__file__).parent / "guides/data/auto_update.toml").read_text("utf-8"))
+    row = [p for p in guide["problems"] if "probe_stuck" in p["en"]]
+    assert len(row) == 1 and "no approval is waiting" in row[0]["fix_en"] and "אין אישור שממתין" in row[0]["fix_he"]
 
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:

@@ -53,6 +53,12 @@ fix_he = "זה תקין: הוא מחכה לרגע שקט (או לרבע השעה
 fix_en = "That is normal: it waits for a quiet moment (or the quarter hour after the notice, or you postponed it). jarvis update auto status shows what holds it back. To install right away: jarvis update auto now."
 
 [[problems]]
+he = "ההודעה אומרת שהעדכון האוטומטי תקוע (probe_stuck)"
+en = "The notice says auto-update is stuck (probe_stuck)"
+fix_he = "בדיקת 'האם ג'רביס בשימוש' נכשלת כבר יותר מיום, ולכן העדכון לא מותקן לבד (אולי ממתין אישור). הגרסה הנוכחית עובדת. בדקו שאין אישור שממתין לכם, ואז עדכנו ידנית: jarvis update install. אם זה חוזר: jarvis report."
+fix_en = "The 'is JARVES in use' check has failed for over a day, so the update does not install by itself (an approval may be waiting). The current version works. Check that no approval is waiting for you, then update by hand: jarvis update install. If it repeats: jarvis report."
+
+[[problems]]
 he = "ההודעה אומרת שהעדכון האוטומטי הפסיק לנסות"
 en = "The notice says automatic updates stopped trying"
 fix_he = "ההתקנה נכשלה כמה פעמים (קוד כמו UPDATE_CHECKSUM_MISMATCH או UPDATE_OFFLINE). שום דבר לא השתנה והגרסה הנוכחית עובדת. נסו שוב עם jarvis update auto now, או עדכנו ידנית: jarvis update install."

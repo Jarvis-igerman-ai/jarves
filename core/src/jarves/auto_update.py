@@ -487,11 +487,12 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                  "after your OK."))
     if kind == "probe_stuck":
         return (("העדכון האוטומטי תקוע", f"גרסה {display} ממתינה כבר יותר מיום כי בדיקת 'האם ג'רביס בשימוש' נכשלת, "
-                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates; אם זה חוזר, "
+                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates, אחרי שבדקת שאין אישור שממתין לך; אם זה חוזר, "
                  "דווח עם jarvis report."),
                 ("Auto-update is stuck", f"Version {display} has waited over a day because the 'is JARVES in use' check "
                  "keeps failing, so I do not install (to stay safe). The current version works. You can update by "
-                 "hand on the Updates page; if it repeats, report it with jarvis report."))
+                 "hand on the Updates page after checking that no approval is waiting for you; if it repeats, "
+                 "report it with jarvis report."))
     if kind in ("rolled_back", "rollback_failed"):
         prev = x.get("prev") or ""
         if kind == "rolled_back":
