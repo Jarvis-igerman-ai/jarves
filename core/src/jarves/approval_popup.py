@@ -314,18 +314,18 @@ _TCL_TRANSIENT = ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
                   "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable")
 
 
-def new_tk_root(tk, tries: int = 5):
+def new_tk_root(tk):
     """Windows: Tcl's init scripts are read now and then with a failure ("couldn't read file ...auto.tcl",
-    'invalid command name "tcl_findLibrary"'): retry those transient errors a few times. Shared with the hidden-mode
-    listening dot (#520), so both Tk users recover the same way. Any other TclError is raised at once."""
-    for attempt in range(tries):
+    'invalid command name "tcl_findLibrary"'): retry those transient errors (5 tries in all). Shared with the
+    hidden-mode listening dot (#520), so both Tk users recover the same way. Any other TclError is raised at once."""
+    for attempt in range(4):
         try:
             return tk.Tk()
         except tk.TclError as e:
-            if attempt == tries - 1 or not any(k in str(e) for k in _TCL_TRANSIENT):
+            if not any(k in str(e) for k in _TCL_TRANSIENT):
                 raise
             time.sleep(0.25 * (attempt + 1))
-    raise ValueError("tries must be >= 1")
+    return tk.Tk()                    # the 5th try: its error is raised to the caller
 
 
 def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | None = None,

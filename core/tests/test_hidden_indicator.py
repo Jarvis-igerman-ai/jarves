@@ -195,3 +195,6 @@ def test_dot_retries_a_transient_tcl_init_error(monkeypatch):
     fake.Tk = mock.Mock(side_effect=TclError("no display name and no $DISPLAY"))     # not transient: no retry
     indicator.TkDotBackend()._run()
     assert fake.Tk.call_count == 1 and logged == ["DOT_UNAVAILABLE"]
+    fake.Tk = mock.Mock(side_effect=TclError("couldn't read file auto.tcl"))      # transient every time: 5 tries
+    indicator.TkDotBackend()._run()
+    assert fake.Tk.call_count == 5 and logged == ["DOT_UNAVAILABLE"] * 2
