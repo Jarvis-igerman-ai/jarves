@@ -153,3 +153,4 @@ def test_cmd_release_run_goes_through_cmd_run(tmp_path, monkeypatch, capsys):
     assert release_cmd.cmd_release(ns, None, tmp_path) == 0
     out = capsys.readouterr().out
     assert "git tag -s v5.0.0" in out and so.load(tmp_path, V).signed
+    assert f'Rows hash: {so.load(tmp_path, V).rows_hash}"' in out                # #605: the real hash, not a placeholder

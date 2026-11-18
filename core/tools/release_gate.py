@@ -211,10 +211,12 @@ SSH_KEYGEN = "/usr/bin/ssh-keygen"     # absolute: neither git config nor PATH c
 GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
 
 
-def tag_signature_problems(root: Path, tag: str, signers: str, run=subprocess.run, verifier: str = SSH_KEYGEN) -> list[str]:
+def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=subprocess.run,
+                           verifier: str = SSH_KEYGEN) -> list[str]:
     """#605: the tag's 'Rows hash' line is authentic only when the tag is SSH-signed by a key in the owner's
-    allowed-signers lines (repository variable RELEASE_ALLOWED_SIGNERS, outside the repo, so editing the sheet or
-    the repo cannot add a key). Bad tag, missing verifier, failed git or a bad/unlisted signature refuse."""
+    allowed-signers lines (`stable-release` environment variable RELEASE_ALLOWED_SIGNERS, outside the repo) AND the
+    signed tag points at the gated commit `sha`. Bad tag, missing verifier, failed git, a bad/unlisted signature or a
+    tag on another commit refuse."""
     if not TAG_RE.match(tag):
         return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
     if not Path(verifier).is_file():
@@ -225,14 +227,21 @@ def tag_signature_problems(root: Path, tag: str, signers: str, run=subprocess.ru
         # full trust plus a "Good ... signature for <principal>" line: a good signature by an unlisted key never passes
         cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", "gpg.minTrustLevel=fully",
                "-c", f"gpg.ssh.allowedSignersFile={listed}", "verify-tag", f"refs/tags/{tag}"]
+        env = {**os.environ, "LC_ALL": "C", "LANG": "C"}       # GOOD_SIG_RE reads the untranslated wording
         try:
-            r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60)
+            r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60, env=env)
+            target = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=root,
+                         capture_output=True, text=True, timeout=60, env=env)
         except (OSError, subprocess.SubprocessError) as e:
             return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
     if r.returncode != 0 or not GOOD_SIG_RE.search(r.stderr or ""):
         why = " ".join((r.stderr or "").split())[:300]
         return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag: {why}); "
                 "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]
+    got = (target.stdout or "").strip().lower()
+    if target.returncode != 0 or got != sha.strip().lower():
+        return [f"sign-off: the signed tag {tag} points at {got[:12] or 'nothing'}, not at the gated commit "
+                f"{sha.strip()[:12]}; its rows hash does not belong to this commit"]
     return []
 
 
@@ -370,9 +379,9 @@ def main(argv: list[str] | None = None) -> int:
                         expect_rows_hash=a.expect_rows_hash)
     signers = os.environ.get("JARVES_ALLOWED_SIGNERS", "").strip()
     if signers:
-        problems += tag_signature_problems(root, a.tag, signers)
+        problems += tag_signature_problems(root, a.tag, signers, a.sha)
     elif a.require_rows_hash:              # a real publish: the out-of-band hash must be authentic (fail closed, #605)
-        problems.append("sign-off: no owner allowed-signers list (repository variable RELEASE_ALLOWED_SIGNERS), so the "
+        problems.append("sign-off: no owner allowed-signers list (stable-release environment variable RELEASE_ALLOWED_SIGNERS), so the "
                         "tag signature cannot be verified; see docs/RELEASING.md")
     else:
         print("note: no owner allowed-signers list (RELEASE_ALLOWED_SIGNERS); tag signature not checked; a real publish "

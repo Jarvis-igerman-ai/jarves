@@ -183,11 +183,18 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
    repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
-5. **Owner-signed stable tags (#605, required for a real publish).** Settings, Secrets and variables, Actions, Variables:
-   add `RELEASE_ALLOWED_SIGNERS` with your SSH `allowed_signers` line (`you@example namespaces="git" ssh-ed25519 AAAA...`).
+5. **Owner-signed stable tags (#605, required for a real publish).** Settings, Environments, `stable-release`,
+   Environment variables: add `RELEASE_ALLOWED_SIGNERS` with your SSH `allowed_signers` line
+   (`you@example namespaces="git" ssh-ed25519 AAAA...`). Do NOT create a repository variable of that name
+   (`gh variable list` must not show it): without the environment variable, a repository one would be used instead.
    Sign with SSH (`git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/id_ed25519.pub`) and tag
-   with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. On a tag ref the gate runs `git verify-tag` against that list and
-   refuses an unsigned tag or a key not on the list; a real publish without the variable is refused, a dry run prints a note.
+   with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. On a real publish the release job runs in `stable-release` and the gate
+   runs `git verify-tag` against that list; it refuses an unsigned tag, a key not on the list, a signed tag on a commit
+   other than the gated one, or a missing variable. A tag dry run has no environment, so it only prints a note.
+   This check is only as strong as who can edit that variable: anyone with admin rights on the repository (including an
+   agent using your login or a token with Administration or Environments write) can add a key. Confirm: agent tokens are
+   fine-grained without Administration, Environments or Variables write, and an agent session's
+   `gh variable set X --env stable-release --body y` is refused.
 6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
 

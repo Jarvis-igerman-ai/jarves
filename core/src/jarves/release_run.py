@@ -56,9 +56,10 @@ def refusals(checks: list[rf.Check], sheet: so.Sheet | None, sheet_error: str = 
     return out
 
 
-def next_commands(version: str, sheet_rel: str, evidence_rel: str) -> list[str]:
+def next_commands(version: str, sheet_rel: str, evidence_rel: str, rows_hash: str | None = None) -> list[str]:
     """Exact commands for the owner/agent to run by hand. Nothing here is executed."""
     tag = f"v{version}"
+    rows = rows_hash or "<hash printed by signoff --finish>"
     return [
         "1. docs PR (sheet + evidence), then wait for it to merge:",
         f"     git fetch jarves && git switch -c release-{version} jarves/main",
@@ -72,7 +73,7 @@ def next_commands(version: str, sheet_rel: str, evidence_rel: str) -> list[str]:
         "     git fetch jarves && git rev-parse jarves/main",
         f"     python core/tools/release_gate.py --tag {tag} --sha <that sha> --candidate-dir dist",
         "3. tag the signed commit (never move, force or delete a tag), then watch release.yml and latest.json:",
-        f"     git tag -s {tag} -m \"Rows hash: <hash printed by signoff --finish>\" <that sha>   # owner key (#605)",
+        f"     git tag -s {tag} -m \"Rows hash: {rows}\" <that sha>   # owner key (#605)",
         f"     git push jarves {tag}",
         f"     gh run list --repo {rf.REPO} --workflow release.yml --limit 3",
     ]
@@ -139,7 +140,7 @@ def run(root: Path, version: str, *, approved_by: str | None = None, dry_run: bo
         return r
     r.say(clilang.fmt(f"מוכן: אפשר לתייג v{version}, בפקודות הבאות. הפקודה הזו לא מתייגת ולא דוחפת.",
                       f"READY to tag v{version}. This command does not tag or push; run these yourself:"))
-    r.lines += ["  " + x for x in next_commands(version, sheet_rel, evidence_rel)]
+    r.lines += ["  " + x for x in next_commands(version, sheet_rel, evidence_rel, sheet.rows_hash)]
     r.code = 0
     return r
 
