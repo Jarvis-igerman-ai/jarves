@@ -1,4 +1,5 @@
-"""Regression tests for #1096 #1097 #1098 #1099 #206 (JAR-376). Hermetic: no real process is started or killed."""
+"""Regression tests for #1096 #1097 #1098 #1099 #206 (JAR-376). Hermetic and clock-free; one #1098 test starts and
+kills its own short-lived child process (no network, no other process is touched)."""
 from __future__ import annotations
 
 import pytest
@@ -26,7 +27,24 @@ def procs(monkeypatch):
     live, killed = {}, []
     monkeypatch.setattr(service, "_started_at", lambda pid: live.get(pid))
     monkeypatch.setattr(service, "_kill_tree", killed.append)
+    monkeypatch.setattr(service, "_exists_unreadable", lambda pid: False)
     return live, killed
+
+
+def test_1098_an_alive_but_unreadable_pid_is_unknown_not_gone(procs, monkeypatch):
+    live, killed = procs
+    monkeypatch.setattr(service, "_exists_unreadable", lambda pid: pid == 42)   # e.g. access denied on a live pid
+    assert service._kill_pid(42, 5.0) == "unknown" and killed == []
+
+
+def test_1098_exists_unreadable_on_real_pids():
+    import os
+    import subprocess
+    import sys
+    assert service._exists_unreadable(os.getpid()) is False   # readable: started_at would have answered
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(10)
+    assert service._exists_unreadable(child.pid) is False     # reaped: gone
 
 
 @pytest.mark.parametrize("now,stored,want", [(None, 5.0, "gone"), (6.0, 5.0, "gone"), (5.0, None, "unknown"),
@@ -162,7 +180,8 @@ def test_1099_key_and_token_shaped_text_is_sensitive(text):
 @pytest.mark.parametrize("text", ["I like jazz in the morning", "prefer short answers", "access keyboard shortcuts",
                                   "a private keyboard", "plan a secret party", "internationalization matters",
                                   "Python3.12-compatible-code", "wake me at seven on weekdays", "2024-annual-review-plan",
-                                  "read-the-2025-roadmap-notes-first"])
+                                  "read-the-2025-roadmap-notes-first", "תשובות עד 500 טוקנים",
+                                  "MyProject2024RoadmapNotes"])
 def test_1099_ordinary_preferences_are_not_sensitive(text):
     assert not looks_sensitive(text)
 
@@ -208,3 +227,19 @@ def test_206_f13_store_also_drops_expired_ledger_rows(tmp_path):
     now[0] += continuity.LEDGER_TTL_S + 1
     c.store("phone1", "new", "chat", 200, {"ok": True, "reply": "x"})
     assert [r["cid"] for r in c._rows("SELECT cid FROM ledger")] == ["new"]
+
+
+def test_206_f13_privacy_on_scrubs_older_replies_without_a_new_chat(tmp_path, monkeypatch):
+    from jarves import continuity, logs
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    c = continuity.Continuity(tmp_path)
+    c.store("phone1", "old", "chat", 200, {"ok": True, "reply": "your bank PIN reminder"})
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    assert c.seen("phone1", "old")["reply"] == continuity.RESEND_UNAVAILABLE          # seen() alone scrubs
+    c2 = tmp_path / "b"
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    continuity.Continuity(c2).store("phone1", "old", "chat", 200, {"ok": True, "reply": "your bank PIN reminder"})
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    continuity.Continuity(c2)                                                         # startup alone scrubs
+    for home in (tmp_path, c2):                                 # secure_delete: the old bytes are not left in the file
+        assert b"bank PIN" not in (home / continuity.DB_FILE).read_bytes()

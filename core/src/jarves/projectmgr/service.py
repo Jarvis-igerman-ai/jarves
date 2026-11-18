@@ -1004,9 +1004,10 @@ class Manager(StageEngine):
         done = []
         for t in sel:
             ev = self._cancel.get(t["id"])
+            job = self._job(t)                                # R2: bound on its own line, never via a walrus
             if ev is not None:
                 ev.set()
-            elif t["pid"] and _kill_pid(t["pid"], (job := self._job(t)).get("pid_started")) == "unknown":
+            elif t["pid"] and _kill_pid(t["pid"], job.get("pid_started")) == "unknown":
                 self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED}, but process {t['pid']} could not be "
                                     f"identified and was not killed: check it, then retry {t['seq']}")
                 self.db.event(t["id"], "owner", "stopped", "stopped by the owner; process not identified, not killed")
@@ -1312,6 +1313,9 @@ def _kill_pid(pid: int, started) -> str:
     killed); 'killed'."""
     now = _started_at(pid)
     if now is None:
+        if _exists_unreadable(pid):       # R3: alive but its start time cannot be read (permissions, no /proc): not "gone"
+            logs.warn("projects", "PID_UNREADABLE", "a stored pid is alive but unreadable: not killed", pid=pid)
+            return "unknown"
         return "gone"
     if not isinstance(started, (int, float)) or isinstance(started, bool):
         logs.warn("projects", "PID_UNIDENTIFIED", "a stored pid is alive but has no identity record: not killed", pid=pid)
@@ -1325,6 +1329,26 @@ def _kill_pid(pid: int, started) -> str:
 def _started_at(pid: int):
     from ..workflow import webchild
     return webchild.started_at(pid)
+
+
+def _exists_unreadable(pid: int) -> bool:
+    """True when `pid` exists although `_started_at` could not read it; False when it is gone (or a zombie)."""
+    import os
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        h = k32.OpenProcess(0x1000, False, int(pid))          # PROCESS_QUERY_LIMITED_INFORMATION
+        if h:
+            k32.CloseHandle(h)
+            return False                                       # readable: started_at's None means it has exited
+        return ctypes.get_last_error() == 5                    # ERROR_ACCESS_DENIED: it exists
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return not Path(f"/proc/{int(pid)}/stat").is_file()       # zombie: /proc readable, it is gone; no /proc: unknown
 
 
 def _kill_tree(pid: int) -> None:

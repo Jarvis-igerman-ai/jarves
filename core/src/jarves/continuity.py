@@ -89,11 +89,21 @@ class Continuity:
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
+        self._scrub()                                          # #206 F13: privacy on at startup scrubs older rows too
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         cx.row_factory = sqlite3.Row
+        cx.execute("PRAGMA secure_delete=ON")                 # #206 F13: scrubbed/deleted words are zeroed, not left in free pages
         return cx
+
+    def _scrub(self) -> None:
+        """Privacy on (#206 F13): chat rows kept before privacy was switched on lose their reply words. Runs on every
+        ledger access (startup, execute, store, seen), so no older reply is served or kept once privacy is on."""
+        if logs.privacy():
+            self._x("UPDATE ledger SET body=json_set(body, '$.reply', ?, '$.code', 'RESEND_UNAVAILABLE') WHERE kind='chat' "
+                    "AND json_valid(body) AND json_type(body, '$.reply')='text' AND json_extract(body, '$.reply')<>?",
+                    (RESEND_UNAVAILABLE, RESEND_UNAVAILABLE))
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:
@@ -114,6 +124,7 @@ class Continuity:
             st, body = fn()
             return st, body, False
         with self._lock:
+            self._scrub()
             hit = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
             if hit and now - hit[0]["ts"] <= LEDGER_TTL_S:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
@@ -135,10 +146,7 @@ class Continuity:
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
                 (device, cid, kind, int(status), _at_rest(kind, body), self.clock()))
         self._x("DELETE FROM ledger WHERE ts < ?", (self.clock() - LEDGER_TTL_S,))   # same TTL as execute()
-        if kind == "chat" and logs.privacy():                 # R4: rows kept before privacy was switched on lose their words
-            self._x("UPDATE ledger SET body=json_set(body, '$.reply', ?, '$.code', 'RESEND_UNAVAILABLE') WHERE kind='chat' "
-                    "AND json_valid(body) AND json_type(body, '$.reply')='text' AND json_extract(body, '$.reply')<>?",
-                    (RESEND_UNAVAILABLE, RESEND_UNAVAILABLE))
+        self._scrub()
 
     @staticmethod
     def stale(age_s) -> bool:
@@ -151,6 +159,7 @@ class Continuity:
             return False
 
     def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
+        self._scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
             return json.loads(r[0]["body"])

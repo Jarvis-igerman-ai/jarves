@@ -74,7 +74,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             return 200, {"ok": p.reaffirm(pid, by=by), "pref": pid}
         if op == "edit":
             r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: new words, new confirm
-            return 200, {"ok": True, "pref": pid, "state": (r or {}).get("state", "proposed")}
+            return 200, {"ok": True, "pref": pid, "state": r["state"]}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}

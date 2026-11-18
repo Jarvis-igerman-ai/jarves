@@ -43,10 +43,11 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
-    # #1099: key/token words (English and Hebrew) and key-shaped strings: 20+ ASCII letters/digits/_- with a digit
-    # (an uppercase letter is required, so `2024-annual-review-plan` passes; 32+ lowercase hex/alnum without separators also counts)
+    # #1099: key/token words (English and Hebrew; final-nun 'טוקן' never matches plural 'טוקנים') and key-shaped strings: 20+ ASCII
+    # letters/digits/_- with an uppercase letter and two separate digit runs (`MyProject2024RoadmapNotes` passes);
+    # 32+ lowercase hex/alnum without separators also counts
     r"(?<![A-Za-z0-9])(?:api|access|secret|private|auth|bearer)[\s_-]*(?:key|token)s?\b|מפתח(?:ות)?\s+(?:ה)?API|טוקן|"
-    r"(?<![\w.-])(?=[A-Za-z0-9_-]*\d)(?-i:(?=[A-Za-z0-9_-]*[A-Z]))[A-Za-z0-9_-]{20,}|"
+    r"(?<![\w.-])(?=[A-Za-z0-9_-]*\d[A-Za-z_-]+\d)(?-i:(?=[A-Za-z0-9_-]*[A-Z]))[A-Za-z0-9_-]{20,}|"
     r"(?<![\w.-])(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{32,}", re.I)
 
 
