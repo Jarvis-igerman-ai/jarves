@@ -42,7 +42,7 @@ def test_malformed_result_file_gives_200_with_warning(server, tmp_path, body):
     assert any(k.startswith("factory_sim_") for k in kinds), kinds
 
 
-def test_missing_result_file_gives_200(server):
+def test_missing_result_file_gives_200_with_missing_alert(server):
     status, state = _state(server)
     assert status == 200
-    assert not [a for a in state["alerts"] if a["kind"].startswith("factory_sim_")]
+    assert [a["kind"] for a in state["alerts"] if a["kind"].startswith("factory_sim_")] == ["factory_sim_missing"]
