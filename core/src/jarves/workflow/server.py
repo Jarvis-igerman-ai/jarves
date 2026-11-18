@@ -156,7 +156,8 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_wrong = ("", 0)             # (code eph key, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_key = unlock.ServerKey()     # private half only in memory: the home holds no offline oracle (#750)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -188,8 +189,15 @@ class Server(ThreadingHTTPServer):
         except OSError:
             pass  # persistence is a convenience; the live session still works in memory
 
+    def server_activate(self) -> None:
+        # After the exclusive bind, before listen: a listening dashboard has always published its key, and a
+        # second server that cannot bind never replaces the live one's key.
+        unlock.publish(self.home, self.unlock_key, self.server_address[1])
+        super().server_activate()
+
     def server_close(self) -> None:
         self.stopping.set()
+        unlock.withdraw(self.home, self.unlock_key)
         super().server_close()
         self.store.close()
 
@@ -465,10 +473,10 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code, key=self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
                 prev_salt, n = self.server.unlock_wrong
                 n = (n if prev_salt == salt else 0) + 1

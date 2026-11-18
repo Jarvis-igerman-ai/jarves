@@ -244,7 +244,12 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {unlock.issue(home)}")
+        try:
+            code = unlock.issue(home)
+        except unlock.UnlockUnavailable as exc:
+            print(json.dumps({"error": f"no unlock code: {exc}"}, ensure_ascii=False), file=sys.stderr)
+            return 2
+        print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {code}")
         return 0
     if a.action == "open":
         # One step (#789): open the login in the default browser and print nothing secret.
@@ -257,6 +262,8 @@ def main(argv=None) -> int:
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass
+        except unlock.UnlockUnavailable as exc:
+            print(f"No unlock code yet: {exc}", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

@@ -148,7 +148,7 @@ class UnlockTests(unittest.TestCase):
     def test_code_expiry_attempt_limit_and_no_token_leak(self):
         self.login()
         code = unlock.issue(self.home, now=1.0)          # issued long ago
-        self.assertFalse(unlock.consume(self.home, code))
+        self.assertFalse(unlock.consume(self.home, code, key=self.server.unlock_key))
         self.assertFalse((self.home / unlock.FILE).exists())
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
@@ -215,6 +215,54 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
         self.assertNotIn(self.server.token, out.getvalue())
+
+    def test_750_files_in_the_home_are_no_offline_oracle_for_the_code(self):
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+        shown = unlock.issue(self.home)
+        record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
+        self.assertEqual(set(record), {"eph", "tag", "expires"})       # main stored {salt, hash}: scrypt, checkable offline
+        files = {p.name: p.read_text(encoding="ascii") for p in self.home.iterdir() if p.name.startswith("unlock")}
+        self.assertNotIn(self.server.unlock_key._private.private_bytes_raw().hex(), "".join(files.values()))
+        # A file reader holds pub and eph, but ECDH needs one of the two private keys: its own key gives a wrong tag.
+        pub, eph = bytes.fromhex(json.loads(files[unlock.PUB_FILE])["pub"]), bytes.fromhex(record["eph"])
+        guess = X25519PrivateKey.generate().exchange(X25519PublicKey.from_public_bytes(pub))
+        self.assertNotEqual(unlock._tag(guess, pub, eph, shown).hex(), record["tag"])
+        self.assertFalse(unlock.consume(self.home, shown, key=None))   # no key, no check
+        self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
+
+    def test_750_damaged_key_or_record_fails_closed(self):
+        (self.home / unlock.FILE).write_text("[1]", encoding="ascii")  # not an object
+        self.assertFalse(unlock.consume(self.home, "1234", key=self.server.unlock_key))
+        (self.home / unlock.PUB_FILE).write_text('{"pub": "00", "port": 1}', encoding="ascii")
+        with self.assertRaisesRegex(unlock.UnlockUnavailable, "damaged"):
+            unlock.issue(self.home)
+
+    def test_750_a_second_dashboard_that_cannot_bind_keeps_the_live_key(self):
+        before = (self.home / unlock.PUB_FILE).read_text(encoding="ascii")
+        with self.assertRaises(OSError):
+            Server(self.home, self.server.server_port)
+        self.assertEqual((self.home / unlock.PUB_FILE).read_text(encoding="ascii"), before)
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+
+    def test_750_cli_gives_no_code_without_a_running_dashboard(self):
+        stale = (self.home / unlock.PUB_FILE).read_text(encoding="ascii")
+        self.server.shutdown()
+        self.server.server_close()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())      # a clean stop withdraws its own key
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        for pub in (None, stale):                                      # nothing published; a crashed server's key
+            if pub:
+                (self.home / unlock.PUB_FILE).write_text(pub, encoding="ascii")
+            err = io.StringIO()
+            with patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(argv), 2)
+            self.assertIn("no dashboard is running", err.getvalue())
+            self.assertFalse((self.home / unlock.FILE).exists())
+        self.server = Server(self.home, 0)                             # a new dashboard republishes; tearDown stops it
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.assertNotEqual((self.home / unlock.PUB_FILE).read_text(encoding="ascii"), stale)
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
