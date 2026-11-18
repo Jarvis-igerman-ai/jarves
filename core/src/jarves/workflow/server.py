@@ -168,6 +168,8 @@ class Server(ThreadingHTTPServer):
             self.unlock_key = unlock.server_key(self.home)
             self.server_activate()
         except BaseException:
+            if hasattr(self, "unlock_key"):  # listen() failed after the key was written: its private half dies here
+                unlock.release_key(self.home, self.unlock_key)
             self.socket.close()
             raise
         self.origin = f"http://127.0.0.1:{self.server_port}"

@@ -244,10 +244,16 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
+        from .opener import listening
         try:
+            if not listening(a.port):  # a stale unlock.pub after a crash: no server could accept the code (#750)
+                raise FileNotFoundError(f"no dashboard server answers on port {a.port}")
             code = unlock.issue(home)
-        except (OSError, ValueError) as exc:  # no unlock.pub = the dashboard server is not running (#750)
+        except (FileNotFoundError, ValueError) as exc:  # server not running, or unlock.pub missing/damaged (#750)
             print(json.dumps({"error": f"start the dashboard first ('jarvis workflow open'): {exc}"}, ensure_ascii=False), file=sys.stderr)
+            return 1
+        except OSError as exc:  # e.g. unlock.json not writable: report the real cause
+            print(json.dumps({"error": f"could not create the unlock code: {exc}"}, ensure_ascii=False), file=sys.stderr)
             return 1
         print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {code}")
         return 0

@@ -73,7 +73,7 @@ def issue(home: Path, *, now: float | None = None) -> str:
         raise ValueError(f"{PUB} is damaged; restart the dashboard server") from exc
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     eph = X25519PrivateKey.generate()  # discarded after this call: nobody but the server can rebuild the secret
-    expires = (now or time.time()) + CODE_TTL_S
+    expires = float((now or time.time()) + CODE_TTL_S)  # consume() rebuilds the MAC from float(record['expires'])
     record = {"salt": eph.public_key().public_bytes_raw().hex(), "hash": _mac(eph.exchange(server_pub), raw, expires).hex(),
               "expires": expires}
     path = Path(home) / FILE

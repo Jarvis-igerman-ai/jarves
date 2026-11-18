@@ -3,6 +3,7 @@ import hmac
 import io
 import json
 import os
+import shutil
 import socket
 import tempfile
 import threading
@@ -13,9 +14,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from jarves.workflow import __main__ as cli
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
+from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
 from jarves.workflow.server import Server
 
@@ -137,7 +138,7 @@ class UnlockTests(unittest.TestCase):
         autopilot.save(self.home, policy)
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
-            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]), 0)
         self.assertIn("unlocked for 6 hours", out.getvalue())
         self.assertNotIn("0 days", out.getvalue())
 
@@ -196,8 +197,8 @@ class UnlockTests(unittest.TestCase):
         # to test the 10 000 codes offline; only the running server's in-memory key can check one.
         shown = unlock.issue(self.home)
         copy = Path(self.temp.name + "-agent-copy")
-        __import__("shutil").copytree(self.home, copy, ignore=lambda d, names: [n for n in names if n.startswith("workflow.db")])
-        self.addCleanup(__import__("shutil").rmtree, copy, True)
+        shutil.copytree(self.home, copy, ignore=lambda d, names: [n for n in names if n.startswith("workflow.db")])
+        self.addCleanup(shutil.rmtree, copy, True)
         self.assertFalse(unlock.consume(copy, shown))
         self.assertFalse(unlock.consume(copy, shown, key=X25519PrivateKey.generate()))  # any other private key fails
         record = json.loads((copy / unlock.FILE).read_text(encoding="ascii"))
@@ -215,7 +216,7 @@ class UnlockTests(unittest.TestCase):
         err = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), \
                 redirect_stdout(io.StringIO()), redirect_stderr(err):
-            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 1)
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]), 1)
         self.assertIn("start the dashboard first", err.getvalue())
         self.assertFalse((self.home / unlock.FILE).exists())
         (self.home / unlock.PUB).write_text("not a key", encoding="ascii")
@@ -259,12 +260,47 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
+    def unlock_cli(self, port):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                redirect_stdout(out), redirect_stderr(err):
+            rc = cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(port), "unlock"])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_750_unlock_refuses_a_stale_key_after_a_crash(self):
+        with socket.socket() as probe:                                  # unlock.pub is on disk, but nothing listens
+            probe.bind(("127.0.0.1", 0))
+            free = probe.getsockname()[1]
+        rc, out, err = self.unlock_cli(free)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("start the dashboard first", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_750_unlock_reports_a_write_error_as_it_is(self):
+        with patch.object(unlock, "issue", side_effect=PermissionError("unlock.json: access denied")):
+            rc, _, err = self.unlock_cli(self.server.server_port)
+        self.assertEqual(rc, 1)
+        self.assertIn("could not create the unlock code", err)
+        self.assertIn("access denied", err)
+        self.assertNotIn("start the dashboard first", err)
+
+    def test_750_integer_issue_time_still_checks(self):
+        shown = unlock.issue(self.home, now=1000)
+        self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key, now=1001))
+
+    def test_750_failed_listen_removes_the_key_it_wrote(self):
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        with patch.object(Server, "server_activate", side_effect=OSError("listen failed")), self.assertRaises(OSError):
+            Server(Path(other.name), 0)
+        self.assertFalse((Path(other.name) / unlock.PUB).exists())
+
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
         self.assertEqual(self.request("/api/unlock", {"code": "1234"})[0], 401)
 
     def test_cli_unlock_refuses_agents_and_non_terminals_and_open_prints_no_code(self):
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         out, err = io.StringIO(), io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": "1"}), redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(cli.main(argv), 3)
@@ -279,7 +315,7 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())
 
     def test_cli_unlock_in_terminal_shows_code_that_the_server_accepts(self):
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
             self.assertEqual(cli.main(argv), 0)
