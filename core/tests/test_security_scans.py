@@ -239,6 +239,17 @@ def test_issue_480_non_http_gap_change_rewrites_the_tracker(home):
     assert "boundary (" not in gh.issues[0]["body"]
 
 
+def test_issue_480_light_and_full_scans_alternating_keep_the_tracker(home):
+    """Skipped sources count as complete and differ between light and full scans: they never rewrite (R2 of #1263)."""
+    gh = DenyGitHub(alerts=403)
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"                  # light: local_diagnostics skipped
+    assert scan(None, gh, kind="full", now=day(1))["issue"]["status"] == "unchanged"   # full: + boundary skipped
+    assert scan(None, gh, now=day(2))["issue"]["status"] == "unchanged"
+    fine = {"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry"}
+    assert ss.signature([], True, ss.coverage_gaps(fine, skipped=False)) == hashlib.sha256(b"c|").hexdigest()[:16]
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)

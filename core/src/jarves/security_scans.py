@@ -535,13 +535,16 @@ def http_failures(coverage: dict) -> dict[str, str]:
     return out
 
 
-def coverage_gaps(coverage: dict) -> dict[str, str]:
-    """{source: coverage} for every source not read completely: the tracker's "Sources not fully read" line."""
-    return {str(k): str(v) for k, v in coverage.items() if str(v).split(":")[0] != "complete"}
+def coverage_gaps(coverage: dict, skipped: bool = True) -> dict[str, str]:
+    """{source: coverage} for every source not read completely: the tracker's "Sources not fully read" line.
+    skipped=False drops skipped:* sources (they count as complete), so the signature does not flip between the
+    light and full scans, whose skipped sets differ."""
+    drop = ("complete",) if skipped else ("complete", "skipped")
+    return {str(k): str(v) for k, v in coverage.items() if str(v).split(":")[0] not in drop}
 
 
 def signature(findings: list[dict], complete: bool, failures: dict[str, str] | None = None) -> str:
-    """Findings plus coverage gaps (#480): any change in the unread sources or their reasons (HTTP code or not)
+    """Findings plus incomplete sources (#480): any change in them or their reasons (HTTP code or not)
     rewrites the tracker once, so its gap, owner-action and retry lines are never stale. No gaps keeps the
     pre-#480 value."""
     raw = ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
@@ -672,7 +675,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete, coverage_gaps(coverage))
+    sig = signature(findings, complete, coverage_gaps(coverage, skipped=False))
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))
