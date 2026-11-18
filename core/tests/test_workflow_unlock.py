@@ -230,6 +230,8 @@ class UnlockTests(unittest.TestCase):
     def test_750_damaged_key_or_record_fails_closed(self):
         (self.home / unlock.FILE).write_text("[1]", encoding="ascii")  # not an object
         self.assertFalse(unlock.consume(self.home, "1234", key=self.server.unlock_key))
+        (self.home / unlock.FILE).write_text(json.dumps({"eph": "00" * 32, "tag": "00" * 32, "expires": 9e9}), encoding="ascii")
+        self.assertFalse(unlock.consume(self.home, "1234", key=self.server.unlock_key))  # low-order eph: ValueError, closed
         (self.home / unlock.PUB_FILE).write_text('{"pub": "00", "port": 1}', encoding="ascii")
         with self.assertRaisesRegex(unlock.UnlockUnavailable, "damaged"):
             unlock.issue(self.home)
@@ -241,6 +243,19 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual((self.home / unlock.PUB_FILE).read_text(encoding="ascii"), before)
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
+
+    def test_750_a_second_dashboard_on_another_port_takes_the_key_over(self):
+        second = Server(self.home, 0)                                  # republishes: new codes go to its key
+        thread = threading.Thread(target=second.serve_forever, daemon=True)
+        thread.start()
+        try:
+            self.assertIn(second.unlock_key.pub.hex(), (self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
+            self.login()
+            self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 403)  # first: closed
+        finally:
+            second.shutdown()
+            thread.join(5)
+            second.server_close()
 
     def test_750_cli_gives_no_code_without_a_running_dashboard(self):
         stale = (self.home / unlock.PUB_FILE).read_text(encoding="ascii")
