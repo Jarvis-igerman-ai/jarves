@@ -566,7 +566,8 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
 
 
 def _reusable_installer_checkpoint(home: Path, max_age_s: float = 6 * 3600) -> Path | None:
-    """The installer's verified pre-migration checkpoint, when it is the newest backup, recent, and no Core has run on
+    """The installer's pre-migration checkpoint (packaging/installer_state.py calls checkpoint(), and create() verifies
+    the archive when it writes it; here only its manifest is read), when it is the newest backup, recent, and no Core has run on
     this data since: a second pre-migration backup would only repeat it (#1016). Database times cannot tell, because
     the installer migrates right after its checkpoint; a running Core rewrites health.json, so a newer health.json
     means a Core (e.g. the old one after a rollback) changed the data. The archive name holds whole seconds, so a

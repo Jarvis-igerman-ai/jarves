@@ -159,6 +159,32 @@ class VerdictTests(Base):
             self.assertEqual(self.store._get(db, "task", "t1")["state"], "running")
         self.assertEqual(self.kind()[1]["detail"]["active"], 0)
 
+    def _claimed_then_quiet(self):
+        self.alive()
+        self.store.create_task({"id": "t1", "title": "Task t1", "lane": "bugs", "acceptance": [{"label": "works"}]})
+        self.store.register_agent({"id": "w1", "label": "w1", "lane": "bugs", "provider": "claude-native"})
+        self.store.observe_agent("w1", "running")
+        self.store.claim("w1")
+        self.advance(obs.ACTIVE_FRESH_S + 60)
+        self.alive()
+
+    def test_metadata_sync_on_a_stalled_task_is_not_progress(self):
+        """#796 review R2: a GitHub metadata sync bumps updated_at, but it is not worker progress."""
+        self._claimed_then_quiet()
+        self.store.update_metadata("t1", {"mapping_note": "synced"})
+        self.assertEqual(self.kind()[1]["detail"]["active"], 0)
+
+    def test_a_live_worker_without_task_id_is_not_counted_twice(self):
+        """#796 review R1: a live running worker whose record lost task_id counts once, not again via its task."""
+        self._claimed_then_quiet()
+        self.store.observe_agent("w1", "running")
+        with self.store._tx() as db:
+            agent = self.store._get(db, "agent", "w1")
+            agent.update(task_id=None, status="running", heartbeat_at=self.now[0])
+            self.store._put(db, "agent", agent)
+        self.store.record_check("t1", "C1", "test passed")
+        self.assertEqual(self.kind()[1]["detail"]["active"], 1)
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()

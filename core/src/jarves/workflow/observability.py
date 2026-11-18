@@ -629,6 +629,13 @@ def read_usage(store, now: float) -> dict | None:
         return None
 
 
+def _evidence_at(task: dict) -> float:
+    """Newest acceptance-evidence time of a task (0 when none or malformed)."""
+    rows = task.get("acceptance") if isinstance(task.get("acceptance"), list) else []
+    times = [r.get("checked_at") for r in rows if isinstance(r, dict)]
+    return max((x for x in times if isinstance(x, (int, float))), default=0)
+
+
 def verdict(store, now: float | None = None) -> dict:
     """The ONE answer to 'is the factory working'. Derived from layers, incidents, running tasks and queued work."""
     now = store.clock() if now is None else now
@@ -647,12 +654,14 @@ def verdict(store, now: float | None = None) -> dict:
     live = [a for a in agents if a.get("status") != "offline"
             and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S
             and (a.get("task_id") in running or a.get("status") == "running")]
-    # A running task that recorded progress recently counts too, while its worker's own heartbeat is quiet (#796 item 2);
-    # an offline worker's task does not (that is a stall, not work).
+    # A running task that recorded acceptance evidence recently counts too, while its worker's own heartbeat is quiet
+    # (#796 item 2). Keyed on evidence time, not updated_at: metadata sync also bumps updated_at. An offline worker's
+    # task does not count (a stall), nor does a task whose worker is already counted as live (no double count).
     offline = {a["id"] for a in agents if a.get("status") == "offline"}
     held = {a.get("task_id") for a in live}
+    live_ids = {a.get("id") for a in live}
     quiet = [{"task_id": t["id"]} for t in tasks if t["state"] == "running" and t["id"] not in held
-             and t.get("agent_id") not in offline and t.get("updated_at", 0) > now - ACTIVE_FRESH_S]
+             and t.get("agent_id") not in offline | live_ids and _evidence_at(t) > now - ACTIVE_FRESH_S]
     active = len(live) + len(quiet)
     running_by_lane: dict[str, int] = {}
     for a in live + quiet:

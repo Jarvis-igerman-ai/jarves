@@ -420,3 +420,15 @@ def test_cli_sets_manual_and_checkpoint_retention(profile, capsys):
     backup.add_cli(parser.add_subparsers(dest="cmd"))
     assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--manual", "3", "--checkpoints", "2"]), None, profile) == 0
     assert (backup.get_settings(profile)["manual"], backup.get_settings(profile)["checkpoints"]) == (3, 2)
+
+
+@pytest.mark.parametrize("note, age_s", [("schema 3->4; version 1 -> 2", 60),       # Core's own checkpoint
+                                         ("schema 3->4; installer upgrade", 7 * 3600),  # older than max_age_s
+                                         ("schema 3->4; installer upgrade", -60)])      # dated in the future
+def test_installer_checkpoint_reuse_refused(profile, monkeypatch, note, age_s):
+    """#1016 review R4: only a recent, not-future checkpoint with the installer note is reused."""
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    backup.checkpoint(profile, note)
+    clock[0] += age_s
+    assert backup._reusable_installer_checkpoint(profile) is None
