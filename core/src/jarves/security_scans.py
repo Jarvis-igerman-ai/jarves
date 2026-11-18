@@ -550,12 +550,14 @@ def marked_refused(body: object) -> dict[str, str]:
 
 
 def carry_refused(coverage: dict, previous: dict[str, str]) -> dict[str, str]:
-    """Refused now, plus a previous refusal for a source that only failed transiently this pass (an HTTP code that
-    is not a refusal, e.g. 5xx or 429): a 5xx between two refusals must not rewrite the tracker twice (#480)."""
+    """Refused now, plus a previous refusal for a source not read this pass: it failed transiently (an HTTP code
+    that is not a refusal, e.g. 5xx or 429) or it is not part of this scan (codeql_run runs in full scans only).
+    A 5xx between two refusals, or a light scan between two full ones, must not rewrite the tracker (#480).
+    Only a source read completely, or refused with another code, changes its recorded refusal."""
     now = refused_sources(coverage)
     for k, code in previous.items():
         v = coverage.get(k)
-        if k not in now and code in _REFUSED and isinstance(v, str) and v.startswith("incomplete:http_"):
+        if k not in now and code in _REFUSED and (v is None or (isinstance(v, str) and v.startswith("incomplete:http_"))):
             now[k] = code
     return dict(sorted(now.items()))
 
@@ -612,6 +614,9 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
         lines += owner_actions(refused)
+        carried = sorted(k for k, r in refused.items() if coverage.get(k) != f"incomplete:{r}")
+        if carried:
+            lines.append(f"Refusal last seen in an earlier scan, not read as refused this time: {', '.join(carried)}.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- refused:{','.join(f'{k}={v}' for k, v in sorted(refused.items()))} -->",
               f"<!-- sig:{sig} -->"]

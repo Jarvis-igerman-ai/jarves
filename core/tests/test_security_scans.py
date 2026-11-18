@@ -219,6 +219,7 @@ def test_issue_480_a_5xx_between_two_refusals_rewrites_the_tracker_at_most_once(
     first = gh.issues[0]["body"]
     gh.deny = {"/dependabot/": 503}
     assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    assert "last seen in an earlier scan" not in gh.issues[0]["body"]                   # unchanged: body not rewritten
     gh.deny = {"/dependabot/": 403}
     assert scan(None, gh, now=day(2))["issue"]["status"] == "unchanged"
     assert [c[0] for c in gh.writes()] == ["PATCH"] and gh.issues[0]["body"] == first
@@ -242,8 +243,8 @@ def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(h
 
 @pytest.mark.parametrize("headers", [{"x-ratelimit-remaining": "0"}, {"Retry-After": "60"}, {}])
 def test_issue_480_a_rate_limited_403_keeps_the_refusal_and_the_signature(monkeypatch, headers):
-    """R1/R2: http_client never rewrites a 403, so a rate-limited pass on an already-refused source does not
-    change the signature (no tracker churn) and the tracker's PATCH/POST see the real status."""
+    """Guards existing behaviour this PR relies on: http_client and _get neither rewrite nor retry a 403 (GET or the
+    tracker's PATCH), so a rate-limited 403 on an already-refused source is still http_403 (no signature change)."""
     import email.message
     import io
     import urllib.error
@@ -515,3 +516,24 @@ def test_codeql_44_state_and_settings_files_never_store_a_planted_secret(tmp_pat
         blob = (tmp_path / name).read_text(encoding="utf-8")
         assert SECRET not in blob and "A1b2C3d4E5f6G7h8" not in blob
     assert "tracker_url" in (tmp_path / ss.STATE_FILE).read_text(encoding="utf-8")
+
+
+def test_issue_480_a_refusal_carries_over_a_source_this_scan_does_not_read_and_says_last_seen(home):
+    """A full scan records codeql_run as refused; a light scan (no codeql_run) keeps it, so neither the light scan
+    nor the next full one rewrites the tracker. A carried refusal is shown as last seen, not as read this time."""
+    gh = FakeGitHub(deny={"/codeql.yml/": 403})
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:x -->"}]
+    full = {"kind": "full", "boundary": lambda: {"failed": False}}
+    assert scan(None, gh, **full)["issue"]["status"] == "updated"
+    gh.deny = {"/codeql.yml/": 403, "/dependabot/": 503}                    # light: no codeql_run; still incomplete
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    gh.deny = {"/codeql.yml/": 403}
+    assert scan(None, gh, now=day(2), **full)["issue"]["status"] == "unchanged"
+    assert [c[0] for c in gh.writes()] == ["PATCH"] and "last seen" not in gh.issues[0]["body"]
+    cov = {"dependabot": "incomplete:http_503", "main_ci": "complete"}
+    refused = ss.carry_refused(cov, {"codeql_run": "http_403", "dependabot": "http_403"})
+    assert refused == {"codeql_run": "http_403", "dependabot": "http_403"}
+    body = ss.tracker_body([], cov, 0, "s", "light", refused)
+    assert "Refusal last seen in an earlier scan, not read as refused this time: codeql_run, dependabot." in body
+    assert ss.carry_refused({"codeql_run": "complete"}, {"codeql_run": "http_403"}) == {}   # read completely: dropped
+    assert ss.carry_refused({"codeql_run": "incomplete:http_404"}, {"codeql_run": "http_403"}) == {"codeql_run": "http_404"}
