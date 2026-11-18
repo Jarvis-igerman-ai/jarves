@@ -347,7 +347,7 @@ def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
 
     Reads <home>/factory_sim_last.json written by core/tools/factory_sim.py --nightly. No file = a
     factory_sim_missing alert, so an uninstalled schedule is visible (#897). Only the factory workflow console
-    (jarves.workflow.server /api/state) reads these alerts; the end-user Core dashboard never does (pinned by a test).
+    (jarves.workflow.server /api/state) reads these alerts; the end-user Core dashboard never does.
     """
     try:
         return _factory_sim_alerts(home, now)

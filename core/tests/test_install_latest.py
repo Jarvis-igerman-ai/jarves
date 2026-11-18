@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 from datetime import datetime, timezone
+import dataclasses
 from pathlib import Path
 
 from jarves import install_latest as il
@@ -423,3 +424,36 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
     f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks
+
+
+def _real_backup_now(home, monkeypatch):
+    """The real install backup (backup.checkpoint on a tmp profile); only the update checker is faked."""
+    import argparse
+    import sqlite3
+    from jarves import updates
+    home.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(home / "memory.db").close()
+    monkeypatch.setattr(updates, "UpdateChecker", lambda h, cfg=None, channel=None: type("U", (), {"channel": "beta"})())
+    return il.real_deps(argparse.Namespace(), None, home).backup_now
+
+
+def test_1016_install_backup_is_one_real_pre_migration_checkpoint(tmp_path, monkeypatch):
+    from jarves import backup
+    home = tmp_path / "home"
+    f = Fake(tmp=home)
+    rep = il.run(dataclasses.replace(f.deps(), backup_now=_real_backup_now(home, monkeypatch)))
+    made = sorted(p.name for p in (home / "backups").glob("*.zip"))
+    assert rep.ok and len(made) == 1 and made[0].endswith("-pre-migration.zip")
+    assert [b["kind"] for b in backup.list_backups(home)] == ["pre-migration"]
+
+
+def test_1016_no_disk_space_for_the_install_backup_stops_the_install(tmp_path, monkeypatch):
+    from jarves import backup
+    home = tmp_path / "home"
+    backup_now = _real_backup_now(home, monkeypatch)
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": 0})())
+    f = Fake(tmp=home)
+    rep = il.run(dataclasses.replace(f.deps(), backup_now=backup_now))
+    assert not rep.ok and rep.stopped_at == "backup" and "BACKUP_NO_SPACE" in rep.render()
+    assert "prepare" not in f.calls and "stop" not in f.calls
+    assert not list((home / "backups").glob("*.zip")) and not list((home / "backups").glob("*.partial"))

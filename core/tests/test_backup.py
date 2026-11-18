@@ -331,17 +331,6 @@ def test_1016_restore_source_outside_retention_survives_the_checkpoint_prune(pro
     assert old.is_file()
 
 
-def test_1016_install_backup_is_one_checkpoint_not_a_manual_backup(profile, monkeypatch):
-    import argparse
-    from jarves import install_latest, updates
-    seen = []
-    monkeypatch.setattr(backup, "checkpoint", lambda home, reason="": seen.append(("pre-migration", reason)))
-    monkeypatch.setattr(backup, "create", lambda home, kind="manual", **k: seen.append((kind, "")))
-    monkeypatch.setattr(updates, "UpdateChecker", lambda home, cfg=None, channel=None: type("U", (), {"channel": "beta"})())
-    install_latest.real_deps(argparse.Namespace(), None, profile).backup_now()
-    assert seen == [("pre-migration", "before install")]     # pruned with the checkpoints, not kept with manual ones
-
-
 def test_auto_backup_due_daily_and_switchable(profile):
     assert backup.due(profile)
     assert backup.maybe_auto(profile) is not None

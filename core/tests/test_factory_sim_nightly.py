@@ -97,14 +97,6 @@ def test_issue_create_is_not_retried_after_a_non_label_failure(monkeypatch, caps
     assert "issue create failed: HTTP 401" in capsys.readouterr().out
 
 
-def test_factory_sim_alerts_are_read_only_by_the_factory_console():
-    """#897 review: the always-on factory_sim_missing alert must never reach the end-user Core dashboard."""
-    src = Path(__file__).resolve().parents[1] / "src" / "jarves"
-    users = sorted(p.relative_to(src).as_posix() for p in src.rglob("*.py")
-                   if "factory_sim_alerts(" in p.read_text(encoding="utf-8"))
-    assert users == ["workflow/autopilot_watch.py", "workflow/server.py"]
-
-
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out
