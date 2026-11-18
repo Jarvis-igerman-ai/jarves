@@ -89,7 +89,7 @@ def test_main_bad_input_exits_2(tmp_path, capsys):
     assert not (tmp_path / "demo.json").exists()
 
 
-@pytest.mark.parametrize("bad", [["--pr", "0"], ["--what", "a\nb"], ["--title", "a b"]])
+@pytest.mark.parametrize("bad", [["--pr", "0"], ["--what", "a\nb"], ["--title", "a\u2028b"]])
 def test_main_validates_fields_before_writing_images(tmp_path, monkeypatch, bad):
     monkeypatch.setattr(cli_demo, "capture_help", lambda g, run=None: "usage\n")
     args = {"--pr": "9", "--title": "T", "--what": "W"}
@@ -103,7 +103,8 @@ def test_svg_strips_osc_and_string_payloads():
     assert "SECRET" not in svg and "usage end" in svg
 
 
-@pytest.mark.parametrize("sep", [" ", " ", "\x0b", "\x0c", "\x85", "\x1c", "\x00"])
-def test_one_line_rejects_every_line_break_and_control(sep):
+@pytest.mark.parametrize("sep", ["\u2028", "\u2029", "\x0b", "\x0c", "\x85", "\x1c", "\x00"])
+def test_one_line_rejects_every_line_break_and_control(tmp_path, sep):
     with pytest.raises(ValueError, match="what_changed"):
-        cli_demo.write_demo(Path("."), pr=7, title="T", what_changed=f"a{sep}b", files=[])
+        cli_demo.write_demo(tmp_path, pr=7, title="T", what_changed=f"a{sep}b", files=[])
+    assert not (tmp_path / "demo.json").exists()
