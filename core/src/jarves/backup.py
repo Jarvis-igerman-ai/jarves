@@ -15,7 +15,8 @@ restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt 
 
 Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 2 each (#1016: each install adds checkpoints of hundreds of MB; the install backup is one). Only automatic backups are thinned by the day/week rule.
+pre-restore checkpoints the last 5 each (#1016: the install backup is a checkpoint too, so one install's
+snapshot, installer and migration checkpoints all fit). Only automatic backups are thinned by the day/week rule.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,7 +60,7 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 2, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 SPACE_MARGIN_BYTES = 200 * 1024 * 1024     # free space kept beyond twice the newest backup (#1016)
 BACKUP_BUDGET_BYTES = 3 * 10 ** 9           # doctor warns when all backups together use more (#1016)

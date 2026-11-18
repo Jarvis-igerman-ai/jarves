@@ -1172,8 +1172,8 @@ class Store:
                     row["passed"] = False
             previous_state = task["state"]
             task.update(state=state, updated_at=self.clock())
-            if state == "running":
-                task["progress_at"] = self.clock()          # worker progress for the verdict (#796)
+            if state == "running" and ("code_revision" in data or "checkpoint" in data):
+                task["progress_at"] = self.clock()          # worker-only fields: real progress for the verdict (#796)
             if "blocker" in data:
                 task["blocker"] = _text(data["blocker"], "blocker", maximum=2000, empty=True)
             elif state != "blocked":

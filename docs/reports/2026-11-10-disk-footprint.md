@@ -12,7 +12,7 @@ Earlier 60-day run: **25 archives, 50.1 MB, 2.00 MB each** (auto=10, manual=6, p
 | Source | Where | Bound today | Worst case |
 |---|---|---|---|
 | Backups `backups/*.zip` | `backup.py` `prune()` | count only: 7 daily + 4 weekly (overlap) + 10 manual + 5 + 5 checkpoints, min 1 per kind | ~31 x data size; **no byte cap** |
-| Update 18 Nov 2026 (#1016, PR #1303) | `backup.py` | checkpoints now 2 + 2 (manual stays 10); the install backup is a checkpoint, not manual; free-space check before each backup; doctor warns above 3 GB | ~25 x data size |
+| Update 18 Nov 2026 (#1016, PR #1303) | `backup.py` | the install backup is a checkpoint, not manual (manual 10 and checkpoints 5 + 5 unchanged; `--manual`/`--checkpoints` lower them); free-space check before each backup; doctor warns above 3 GB | ~26 x data size (installs no longer add manual backups) |
 | Pilot recordings | `browser_recording.py` | 7 days and 500 MB total | 500 MB (the largest single bound; never in backups) |
 | Logs `logs/jarves.log*` | `logs.py` `setup()` | 1 MB x (1 + 5 rotated); `crash.txt` + 1 older at 1 MB | ~8 MB |
 | Updates `updates/` | `updates.py` `keep_previous()` | new + one previous installer | 2 x installer size (installer size UNVERIFIED) |

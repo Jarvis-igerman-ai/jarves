@@ -128,6 +128,20 @@ def test_no_space_for_the_checkpoint_refuses_to_migrate(home, monkeypatch):
     assert snapshot(home) == want and not (home / migrations.MARKER).exists()
 
 
+def test_1016_install_snapshot_survives_the_install_checkpoints_and_migration(home, monkeypatch):
+    """#1303 review R1: the real install backup, the installer's checkpoint, then the real migration: the
+    "before install" archive (the pre-update rollback point) is still there afterwards."""
+    import argparse
+    from jarves import install_latest, updates
+    monkeypatch.setattr(updates, "UpdateChecker", lambda h, cfg=None, channel=None: type("U", (), {"channel": "beta"})())
+    snap = install_latest.real_deps(argparse.Namespace(), None, home).backup_now()
+    backup.checkpoint(home, "schema 1->3; installer upgrade")          # packaging/installer_state.py
+    migrations.run(home)                                               # its own checkpoint, then the steps
+    kept = [b["name"] for b in backup.list_backups(home)]
+    assert snap.is_file() and snap.name in kept and len(kept) == 3
+    assert migrations.current(home) == migrations.LATEST
+
+
 def test_a_failing_step_keeps_the_last_good_schema_and_points_at_the_backup(home, monkeypatch):
     def boom(h):
         raise RuntimeError("step broke")

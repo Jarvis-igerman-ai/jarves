@@ -172,6 +172,7 @@ class VerdictTests(Base):
         self.advance(obs.ACTIVE_FRESH_S + 1)
         self.alive()
         self.store.update_metadata("t1", {"mapping_note": "synced"})   # a non-progress write must not revive it (R5)
+        self.store.transition("t1", {"state": "running", "implementation": "in_progress"})   # dashboard-style update
         with self.store._tx() as db:
             self.assertEqual(self.store._get(db, "task", "t1")["state"], "running")
         self.assertEqual(self.kind()[1]["detail"]["active"], 0)

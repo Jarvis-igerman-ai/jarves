@@ -1,6 +1,6 @@
 """JAR-158: disk-footprint measurement of the backups folder after a simulated 40-day life (hermetic, clock-injected).
 
-Not a size gate on real data: it pins the worst-case backup COUNT (7 daily + 4 weekly + 10 manual + 2+2 checkpoints, #1016) and
+Not a size gate on real data: it pins the worst-case backup COUNT (7 daily + 4 weekly + 10 manual + 5+5 checkpoints, #1016) and
 reports the measured MB so docs/reports/2026-11-10-disk-footprint.md stays checkable. Run with `-s` to see the numbers.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def test_backup_folder_is_bounded_by_count_after_120_days(tmp_path):
     print(f"\nJAR-158 measured: {len(items)} archives, {total / MB:.1f} MB total, {one / MB:.2f} MB each; "
           + ", ".join(f"{k}={len(v)}" for k, v in by_kind.items()))
     assert len(by_kind["manual"]) <= 10
-    assert len(by_kind["pre-migration"]) <= 2 and len(by_kind["pre-restore"]) <= 2
+    assert len(by_kind["pre-migration"]) <= 5 and len(by_kind["pre-restore"]) <= 5
     assert len(by_kind["auto"]) <= 7 + 4
     assert total <= len(items) * one * 1.05              # no hidden growth beyond count x size
     assert not list(backup.backup_dir(home).glob("*.partial"))

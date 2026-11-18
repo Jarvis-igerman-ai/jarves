@@ -647,8 +647,9 @@ def verdict(store, now: float | None = None) -> dict:
     live = [a for a in agents if a.get("status") != "offline"
             and max(a.get("heartbeat_at", 0), a.get("progress_at", 0)) > now - ACTIVE_FRESH_S
             and (a.get("task_id") in running or a.get("status") == "running")]
-    # A running task with fresh worker progress (claim, running transition, acceptance check; not a metadata or
-    # supervisor write) counts even when its worker's hooks went quiet, unless the worker is offline (#796).
+    # A running task with fresh worker progress (claim, a running update with a code revision or checkpoint, acceptance
+    # check; not a metadata, dashboard or supervisor write) counts even when its worker's hooks went quiet, unless the
+    # worker is offline (#796).
     offline = {a["id"] for a in agents if a.get("status") == "offline"}
     held = {a.get("task_id") for a in live}
     task_only = [{"task_id": t["id"]} for t in tasks if t["state"] == "running" and t["id"] not in held

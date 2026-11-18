@@ -243,15 +243,15 @@ def test_retention_7_daily_4_weekly(profile):
         backup.set_settings(profile, {"daily": 0})
 
 
-def test_1016_fewer_checkpoints_kept_and_cli_sets_manual_and_checkpoints(profile, capsys):
+def test_1016_existing_checkpoints_kept_and_cli_sets_manual_and_checkpoints(profile, capsys):
     import argparse
     bdir = profile / "backups"
     bdir.mkdir()
     start = datetime(2026, 11, 9, 3, 0)
-    for i in range(6):                          # three beta installs, two pre-migration backups each
+    for i in range(5):                          # an existing profile: the old default kept 5 checkpoints
         (bdir / f"jarves-backup-{start - timedelta(hours=i):%Y%m%d-%H%M%S}-pre-migration.zip").write_bytes(b"x")
-    backup.prune(profile)
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "pre-migration"]) == 2
+    backup.prune(profile)                       # an update deletes none of them (#1303 review R2)
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "pre-migration"]) == 5
     parser = argparse.ArgumentParser()
     backup.add_cli(parser.add_subparsers(dest="cmd"))
     args = parser.parse_args(["backup", "settings", "--manual", "3", "--checkpoints", "1"])
