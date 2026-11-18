@@ -386,6 +386,26 @@ def test_core_busy_reads_the_core_state():
     assert set(auto_update.core_busy(c)) == {"voice_session", "listening", "pending_approval", "chat_turn", "quiet_hours"}
 
 
+def test_busy_probe_error_defers_the_restart(home, server, keys):
+    """JAR-316: an approval probe that raises must not read as 'nothing pending' (fail closed, not open)."""
+    class Appr:
+        def has_pending(self):
+            raise RuntimeError("approval store unreadable")
+
+    class Core:
+        live, listening, stopping = None, False, False
+        approvals = Appr()
+        chat = type("C", (), {"turns": {}})()
+        ops = type("O", (), {"alerts": type("E", (), {"quiet_now": lambda s: False, "paused": lambda s: False})()})()
+    assert auto_update.core_busy(Core()) == ["approval_probe_failed"]
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys)
+    r.au.busy = lambda: auto_update.core_busy(Core())
+    r.ready()
+    assert r.tick() == "busy" and r.launched == []
+    assert r.au.status()["busy"] == ["approval_probe_failed"]
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()

@@ -1,0 +1,1 @@
+- Fixed: automatic update no longer restarts JARVES when the pending-approval check itself fails; it reports `approval_probe_failed` as busy and defers the install until the check works and nothing is pending (JAR-316).
