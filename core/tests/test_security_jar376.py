@@ -1,6 +1,7 @@
 """Regression tests for #1096 #1097 #1098 #1099 (JAR-376)."""
 from __future__ import annotations
 
+import gc
 import subprocess
 import sys
 
@@ -226,4 +227,20 @@ def test_1098_proc_token_of_a_missing_pid_is_gone():
     from jarves.projectmgr import engine
     p = subprocess.Popen([sys.executable, "-c", "pass"])
     p.wait(10)
-    assert engine.proc_token(p.pid) == ""                                         # reaped: gone, not UNREADABLE
+    pid = p.pid
+    del p                                                                         # Windows: release the process handle,
+    gc.collect()                                                                  # else the exited process object lives on
+    assert engine.proc_token(pid) == ""                                         # reaped: gone, not UNREADABLE
+
+
+def test_1098_proc_token_reaped_during_read_is_gone(monkeypatch):
+    """Linux: /proc/<pid>/stat can raise ESRCH (ProcessLookupError) if the process is reaped mid-read: gone, not UNREADABLE."""
+    from pathlib import Path
+    from jarves.projectmgr import engine
+    if engine.os.name == "nt":
+        pytest.skip("the /proc path is not used on Windows")
+    real = Path.read_text
+    monkeypatch.setattr(engine.Path, "exists", lambda self: True)
+    monkeypatch.setattr(engine.Path, "read_text", lambda self, *a, **k: (_ for _ in ()).throw(ProcessLookupError())
+                        if self.name == "stat" and "self" not in self.parts else real(self, *a, **k))
+    assert engine.proc_token(4242) == ""

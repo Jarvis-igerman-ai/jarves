@@ -41,6 +41,9 @@ def proc_token(pid: int) -> str:
             if not h:
                 return "" if ctypes.get_last_error() == 87 else UNREADABLE   # 87 = no such process
             try:
+                code = wintypes.DWORD()
+                if k.GetExitCodeProcess(h, ctypes.byref(code)) and code.value != 259:   # 259 = STILL_ACTIVE
+                    return ""                         # exited; the object lives on only while someone holds a handle
                 ft = [wintypes.FILETIME() for _ in range(4)]
                 ok = k.GetProcessTimes(h, *[ctypes.byref(f) for f in ft])
                 return f"{ft[0].dwHighDateTime}:{ft[0].dwLowDateTime}" if ok else UNREADABLE
@@ -51,7 +54,7 @@ def proc_token(pid: int) -> str:
             return stat.read_text().rsplit(")", 1)[1].split()[19] if stat.exists() else ""   # field 22: start time
         r = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True, text=True, timeout=5)
         return " ".join(r.stdout.split()) if r.stdout.strip() or r.returncode == 1 else UNREADABLE   # ps: 1 = no such pid
-    except FileNotFoundError:                                          # /proc entry vanished between check and read
+    except (FileNotFoundError, ProcessLookupError):                    # reaped between check and read (ENOENT/ESRCH)
         return "" if os.name != "nt" and Path("/proc/self/stat").exists() else UNREADABLE
     except (OSError, IndexError, ValueError, subprocess.SubprocessError, AttributeError):
         return UNREADABLE
