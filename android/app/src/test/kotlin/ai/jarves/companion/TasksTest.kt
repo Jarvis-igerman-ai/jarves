@@ -144,6 +144,14 @@ class TasksTest {
     }
 
     @Test
+    fun hebrewStepCountUsesOnlyTheCurrentCldrCategories() {
+        // CLDR 42+ has one/two/other for Hebrew; a "many" item is never chosen and lint flags it (UnusedQuantity).
+        val he = java.io.File("src/main/res/values-he/strings.xml").readText()
+        val line = Regex("""<plurals name="task_line">(.*?)</plurals>""", RegexOption.DOT_MATCHES_ALL).find(he)!!.groupValues[1]
+        assertEquals(listOf("one", "two", "other"), Regex("""quantity="([a-z]+)"""").findAll(line).map { it.groupValues[1] }.toList())
+    }
+
+    @Test
     fun noReadWithoutTheScopeAndNoneAfterARefusalUntilTheScopeComesBack() = runTest {
         val pc = PlansRec(status = 403)
         var reads = 0
