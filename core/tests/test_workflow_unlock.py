@@ -148,7 +148,7 @@ class UnlockTests(unittest.TestCase):
     def test_code_expiry_attempt_limit_and_no_token_leak(self):
         self.login()
         code = unlock.issue(self.home, now=1.0)          # issued long ago
-        self.assertFalse(unlock.consume(self.home, code))
+        self.assertFalse(unlock.consume(self.home, code, key=self.server.unlock_key))
         self.assertFalse((self.home / unlock.FILE).exists())
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
@@ -186,6 +186,32 @@ class UnlockTests(unittest.TestCase):
         [t.join(10) for t in threads]
         self.assertEqual(sorted(results), [200, 403])
         self.assertEqual(len(self.server.unlocked), 1)
+
+    def test_750_home_files_alone_cannot_check_a_code_offline(self):
+        # #750: an agent that reads every file in the workflow home (access.token, unlock.json, ...) must not be able
+        # to test the 10 000 codes offline; only the running server's in-memory key can check one.
+        shown = unlock.issue(self.home)
+        copy = Path(self.temp.name + "-agent-copy")
+        __import__("shutil").copytree(self.home, copy, ignore=lambda d, names: [n for n in names if n.startswith("workflow.db")])
+        self.addCleanup(__import__("shutil").rmtree, copy, True)
+        self.assertFalse(unlock.consume(copy, shown))
+        self.assertTrue((self.home / unlock.FILE).exists())
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_750_code_needs_a_running_server_key(self):
+        (self.home / unlock.PUB).unlink()
+        with self.assertRaises(FileNotFoundError):
+            unlock.issue(self.home)
+        err = io.StringIO()
+        with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 1)
+        self.assertIn("start the dashboard first", err.getvalue())
+        self.assertFalse((self.home / unlock.FILE).exists())
+        (self.home / unlock.PUB).write_text("not a key", encoding="ascii")
+        with self.assertRaises(ValueError):
+            unlock.issue(self.home)
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
