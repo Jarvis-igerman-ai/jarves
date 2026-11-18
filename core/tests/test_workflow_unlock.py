@@ -1,7 +1,9 @@
 """#750: the private link alone is read-only; owner answers need the terminal code (unlock)."""
+import hmac
 import io
 import json
 import os
+import socket
 import tempfile
 import threading
 import unittest
@@ -12,6 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from jarves.workflow import __main__ as cli
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
 from jarves.workflow import autopilot, unlock
 from jarves.workflow.server import Server
 
@@ -195,6 +199,11 @@ class UnlockTests(unittest.TestCase):
         __import__("shutil").copytree(self.home, copy, ignore=lambda d, names: [n for n in names if n.startswith("workflow.db")])
         self.addCleanup(__import__("shutil").rmtree, copy, True)
         self.assertFalse(unlock.consume(copy, shown))
+        self.assertFalse(unlock.consume(copy, shown, key=X25519PrivateKey.generate()))  # any other private key fails
+        record = json.loads((copy / unlock.FILE).read_text(encoding="ascii"))
+        want, expires = bytes.fromhex(record["hash"]), record["expires"]
+        for readable in (bytes.fromhex((copy / unlock.PUB).read_text(encoding="ascii")), bytes.fromhex(record["salt"])):
+            self.assertFalse(hmac.compare_digest(unlock._mac(readable, shown, expires), want))  # not MACed under disk bytes
         self.assertTrue((self.home / unlock.FILE).exists())
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
@@ -212,6 +221,43 @@ class UnlockTests(unittest.TestCase):
         (self.home / unlock.PUB).write_text("not a key", encoding="ascii")
         with self.assertRaises(ValueError):
             unlock.issue(self.home)
+
+    def test_750_stopped_server_removes_its_key_so_unlock_refuses(self):
+        unlock.release_key(self.home, X25519PrivateKey.generate())   # someone else's key: the file stays
+        self.assertTrue((self.home / unlock.PUB).exists())
+        self.server.shutdown()
+        self.server.server_close()
+        self.assertFalse((self.home / unlock.PUB).exists())
+        with self.assertRaises(FileNotFoundError):
+            unlock.issue(self.home)
+
+    def test_750_second_server_warns_and_busy_port_keeps_the_live_key(self):
+        live = (self.home / unlock.PUB).read_text(encoding="ascii")
+        with self.assertRaises(OSError):
+            Server(self.home, self.server.server_port)              # bind fails before any key file is touched
+        self.assertEqual((self.home / unlock.PUB).read_text(encoding="ascii"), live)
+        with self.assertLogs("jarves.workflow.unlock", "WARNING") as logs:
+            other = Server(self.home, 0)
+        self.assertIn("another dashboard server", logs.output[0])
+        self.assertNotEqual((self.home / unlock.PUB).read_text(encoding="ascii"), live)
+        other.server_close()
+        self.assertFalse((self.home / unlock.PUB).exists())          # it removes only its own key
+
+    def test_750_open_shows_a_code_only_for_a_listening_server_and_it_is_accepted(self):
+        def run_open(port):
+            err = io.StringIO()
+            with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                    patch("jarves.workflow.opener.open_dashboard", return_value=0), redirect_stdout(io.StringIO()), redirect_stderr(err):
+                cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open", "--port", str(port)])
+            return err.getvalue()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            free = probe.getsockname()[1]
+        self.assertNotIn("Unlock code", run_open(free))                 # nothing listens there: no stale-key code
+        self.assertFalse((self.home / unlock.FILE).exists())
+        shown = run_open(self.server.server_port).split(": ")[-1].strip()
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)

@@ -259,6 +259,9 @@ def main(argv=None) -> int:
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
             from . import unlock
+            from .opener import listening
+            if not listening(a.port):  # no live server: a code bound to a stale key could never be accepted (#750)
+                raise FileNotFoundError("the dashboard server is not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
             pass

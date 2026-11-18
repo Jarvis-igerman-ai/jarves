@@ -157,11 +157,19 @@ class Server(ThreadingHTTPServer):
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
         self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
-        self.unlock_key = unlock.server_key(self.home)  # private half in memory only: unlock.json can't be checked offline
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
-        super().__init__(("127.0.0.1", port), Handler)
+        super().__init__(("127.0.0.1", port), Handler, bind_and_activate=False)
+        try:
+            self.server_bind()  # a second server on a busy port fails here, before it could replace unlock.pub
+            # Private half in memory only, so unlock.json can't be checked offline (#750). Written before listen():
+            # once the port answers (open's probe), unlock.pub already holds this server's key.
+            self.unlock_key = unlock.server_key(self.home)
+            self.server_activate()
+        except BaseException:
+            self.socket.close()
+            raise
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
 
@@ -191,6 +199,8 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
+        if hasattr(self, "unlock_key"):
+            unlock.release_key(self.home, self.unlock_key)
         super().server_close()
         self.store.close()
 

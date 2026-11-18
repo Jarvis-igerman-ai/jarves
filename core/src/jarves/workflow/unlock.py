@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -37,16 +38,30 @@ def _mac(shared: bytes, code: str, expires: float) -> bytes:
 
 
 def server_key(home: Path) -> X25519PrivateKey:
-    """New per-process key for the dashboard server; only the public half is written (owner-only, atomic)."""
+    """New per-process key for the dashboard server; only the public half is written (owner-only, atomic).
+    A clean stop removes unlock.pub (release_key), so an existing file means another live server or a crash: warn once."""
     key = X25519PrivateKey.generate()
     path = Path(home) / PUB
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        logging.getLogger(__name__).warning("replacing %s of another dashboard server (still running or not stopped "
+                                            "cleanly); unlock codes for that server stop working", PUB)
     tmp = path.with_name(f"{PUB}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="ascii") as f:
         f.write(key.public_key().public_bytes_raw().hex())
     os.replace(tmp, path)
     return key
+
+
+def release_key(home: Path, key: X25519PrivateKey) -> None:
+    """On server stop: remove unlock.pub if it is still ours, so `unlock` says the dashboard is not running (#750)."""
+    path = Path(home) / PUB
+    try:
+        if path.read_text(encoding="ascii").strip() == key.public_key().public_bytes_raw().hex():
+            path.unlink()
+    except (OSError, UnicodeDecodeError):
+        pass  # already gone or replaced by another server: nothing of ours to remove
 
 
 def issue(home: Path, *, now: float | None = None) -> str:
