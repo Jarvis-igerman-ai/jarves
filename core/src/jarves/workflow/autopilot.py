@@ -48,16 +48,21 @@ _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
 # #932/JAR-213: a Bash rule could let a worker rewrite <home>/autopilot.json when it names the file, has no real
-# command word (`Bash(*)`, `Bash(:*)`), starts with an env assignment or a wildcard, or starts with an interpreter,
-# shell, wrapper or file writer in any version/path/.exe form. The first word decides, so no flag order or combined
-# flag (`sed -ni`, `python -B -c`, `bash -lc`) slips through. The one narrow interpreter form kept: `<python> -m pytest`.
+# command word (`Bash(*)`, `Bash(:*)`), starts with an env assignment, wildcard, quote, `$` or backtick, or starts with
+# an interpreter, shell, source builtin, wrapper, file writer or general command runner in any version/path/.exe or
+# backslash-escaped form. The first word decides, so no flag order or combined flag (`sed -ni`, `bash -lc`) slips
+# through. Kept narrow forms: `<python> -m pytest`, git with a fixed subcommand (_GIT_OK), gh pr/issue/run.
 _POLICY_FILE = re.compile(r"(?i)autopilot\.json")
 _WRITER_WORD = re.compile(
-    r"(?:python|py|pypy|perl|ruby|node|nodejs|deno|bun|php|lua|luajit|tclsh|osascript|rscript|"
-    r"(?:ba|z|da|k|c|tc|fi|nu|)sh|cmd|pwsh|env|xargs|find|sudo|doas|su|nohup|timeout|nice|exec|eval|command|busybox|"
-    r"start|sed|gsed|awk|gawk|cp|mv|tee|cat|dd|echo|printf|curl|wget|tar|unzip|install|ln|touch|rsync|scp|truncate|"
-    r"patch|vi|vim|nano|ed)[\d.]*w?(?:\.exe)?")
+    r"(?:python|py|pypy|perl|ruby|node|nodejs|deno|bun|php|lua|luajit|tclsh|osascript|rscript|java|cscript|wscript|"
+    r"(?:ba|z|da|k|c|tc|fi|nu|)sh|cmd|pwsh|wsl|\.|source|env|xargs|find|sudo|doas|su|runas|nohup|timeout|nice|exec|"
+    r"eval|command|busybox|start|script|parallel|watch|setsid|stdbuf|sed|gsed|awk|gawk|cp|mv|tee|cat|dd|echo|printf|"
+    r"curl|wget|tar|unzip|install|ln|touch|rsync|scp|ssh|truncate|patch|vi|vim|nano|ed|"
+    r"make|cmake|ninja|npm|npx|pnpm|yarn|pip|pipx|uv|uvx|poetry|tox|nox|conda|cargo|go|gradle|mvn|dotnet|gem|bundle|"
+    r"rake|composer|docker|podman|git|gh)[\d.]*w?(?:\.exe)?")
 _NARROW_PYTEST = re.compile(r"^-m\s+pytest(?:\s|:|$)")
+_GIT_OK = frozenset({"status", "diff", "log", "show", "branch", "switch", "fetch", "add", "commit", "merge", "worktree"})
+_GH_OK = frozenset({"pr", "issue", "run"})
 
 
 def _could_rewrite_policy(rule: str) -> bool:
@@ -66,13 +71,21 @@ def _could_rewrite_policy(rule: str) -> bool:
     if not rule.startswith("Bash("):
         return False
     words = rule[5:-1].replace(":*", " *").split(None, 1)
-    if not words or "*" in words[0] or "=" in words[0]:
+    if not words or any(c in words[0] for c in "*='\"$`"):
         return True
-    name = re.split(r"[/\\]", words[0])[-1].lower()
-    if not _WRITER_WORD.fullmatch(name):
+    rest = words[1] if len(words) > 1 else ""
+    names = {re.split(r"[/\\]", words[0])[-1].lower(), words[0].replace("\\", "").split("/")[-1].lower()}
+    name = next((n for n in names if _WRITER_WORD.fullmatch(n)), "")
+    if not name:
         return False
-    return not (name.startswith("py") and len(words) > 1 and _NARROW_PYTEST.match(words[1])
-                and not re.search(r"[;&|`<>]", words[1]))
+    if re.search(r"[;&|`<>$'\"]", rest):
+        return True
+    sub = rest.split(None, 1)[0] if rest else ""
+    if name.startswith("git"):     # --upload-pack/--receive-pack/--exec and -c/--config can run any program
+        return sub not in _GIT_OK or bool(re.search(r"(?i)pack\b|pack=|exec|(?:^|\s)-c\b|--config", rest))
+    if name.startswith("gh"):
+        return sub not in _GH_OK
+    return not (name.startswith("py") and _NARROW_PYTEST.match(rest))
 
 
 def _worker_tools(value) -> None:
@@ -80,7 +93,7 @@ def _worker_tools(value) -> None:
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
     if any(_could_rewrite_policy(x) for x in value):
         raise ValueError("worker_allowed_tools: rules that could rewrite autopilot.json (naming it, or a blanket "
-                         "interpreter, shell, wrapper or file-writer command, or a wildcard-only command) cannot be allowed")
+                         "interpreter, shell, wrapper, file-writer or command-runner command, or a wildcard-only command) cannot be allowed")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
