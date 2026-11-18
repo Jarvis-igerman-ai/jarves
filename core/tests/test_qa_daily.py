@@ -96,6 +96,7 @@ def _args(action, dry_run=False):
 @pytest.mark.parametrize("dry", [False, True])
 def test_install_forces_the_beta_channel_and_passes_dry_run(home, monkeypatch, dry):
     from jarves import install_latest
+    monkeypatch.setattr(qa_daily, "_today", lambda: "2026-11-12")           # clock-free (review R5)
     seen = []
     monkeypatch.setattr(install_latest, "cmd_install_latest", lambda a, cfg, h: seen.append(a) or 0)
     assert qa_daily.cmd_qa_daily(_args("install", dry), Config(), home) == 2 and seen == []    # OFF: refused
@@ -493,3 +494,39 @@ def test_a_check_name_from_the_report_is_redacted(home):
                     fail=())
     names = [b["check"] + b["title"] for b in qa_daily.check(deps)["bugs"]]
     assert names and not any("igal@" in n or "abc123" in n for n in names)
+
+
+def test_a_coarse_file_time_still_counts_as_the_childs_record(home):
+    """JAR-232 review #1229 R3: on FAT/exFAT (2 s file times) the child's early-stop record can carry an mtime just
+    below the tick's start time; it was overwritten with 'not started' and then ignored by the report reader."""
+    rec = home / "qa" / "daily" / "2026-11-12" / qa_daily.INSTALL_FILE
+    stop = "FAIL  install-latest  2026-11-12 07:00 UTC\n  [FAIL] backup now: BACKUP_DISK_FULL\n"
+
+    def spawn(_argv):
+        _write(rec, stop, 999.0)                                             # rounded down below started=1000.5
+        raise RuntimeError("child exited 1 at start: ...")
+    r = qa_daily.tick(home, enabled=lambda: True, day=lambda: "2026-11-12", report=lambda _d, _s: None,
+                      spawn=spawn, do_check=lambda _d: None, clock=lambda: 1000.5)
+    assert r == "installing" and rec.read_text(encoding="utf-8") == stop
+    assert qa_daily._report_reader(home, "2026-11-12", 1000.5)() == stop
+
+
+def test_a_failed_end_of_day_write_never_hides_the_check_error(home, monkeypatch):
+    """JAR-232 review #1229 R4: tick.checked failing to write (disk full) replaced do_check's own exception."""
+    spawned, checked, warned = [], [], []
+    _tick(home, "2026-11-13", spawned, checked)                              # installing
+    real = qa_daily.Path.write_text
+
+    def write_text(self, *a, **kw):
+        if self.name == "tick.checked":
+            raise OSError("disk full")
+        return real(self, *a, **kw)
+    monkeypatch.setattr(qa_daily.Path, "write_text", write_text)
+    monkeypatch.setattr(qa_daily.logs, "warn", lambda *a, **kw: warned.append(a[1]))
+
+    def boom(_d):
+        raise ValueError("check broke")
+    with pytest.raises(ValueError):
+        _tick(home, "2026-11-13", spawned, checked, do_check=boom, clock=lambda: 1e10)
+    assert warned == ["QA_DAILY_DONE_WRITE_FAILED"]
+    assert _tick(home, "2026-11-13", spawned, checked, clock=lambda: 1e10) == "checking" and checked == []

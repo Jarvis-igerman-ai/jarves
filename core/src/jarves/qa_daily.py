@@ -136,6 +136,7 @@ def _supported(platform: str | None = None) -> bool:
 
 
 CORRUPT = -1.0
+MTIME_SLACK_S = 2.0                                                   # FAT/exFAT file times are 2 s coarse
 
 
 def _marker_time(path: Path) -> float | None:
@@ -149,7 +150,8 @@ def _marker_time(path: Path) -> float | None:
 
 def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=lambda: [],
          supported=lambda: True) -> str:
-    """One daily step: off | unsupported | done | busy | installing | waiting | checked. Install and check at most
+    """One daily step: off | unsupported | done | busy | installing | spawn_failed | waiting | checking | checked.
+    Install and check at most
     once a day; the silent install (it stops the Core) waits for a quiet moment, like auto_update."""
     if not enabled():
         return "off"
@@ -176,7 +178,7 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
             spawn(["qa-daily", "install"])
         except Exception as e:                                        # the day's draft carries the real cause
             rec = out / INSTALL_FILE
-            if rec.is_file() and rec.stat().st_mtime >= started:      # the child ran and stopped early (exit 1):
+            if rec.is_file() and rec.stat().st_mtime >= started - MTIME_SLACK_S:  # the child stopped early (exit 1):
                 return "installing"                                   # its own record is the result, keep it
             rec.write_text(f"FAIL  install-latest  {d} (not started)\n"
                                             f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
@@ -200,7 +202,10 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
         _write_check_failed(out, d, e)
         raise
     finally:                                                          # a check that raises still ends the day (once)
-        done.write_text(str(clock()), encoding="utf-8")
+        try:                                                          # a failed write must not hide do_check's error
+            done.write_text(str(clock()), encoding="utf-8")
+        except OSError as e:                                          # the claim holds off a re-check for CHECK_STALE_S
+            logs.warn("updates", "QA_DAILY_DONE_WRITE_FAILED", "could not end the day", error_type=type(e).__name__)
     return "checked"
 
 
@@ -253,7 +258,7 @@ def _report_reader(home, day: str, since: float = 0.0):
 
     def read() -> str | None:
         fresh = [(p.stat().st_mtime, -i, str(p)) for i, p in enumerate(paths)       # a tie: our own record
-                 if p.is_file() and p.stat().st_mtime >= since]
+                 if p.is_file() and p.stat().st_mtime >= since - MTIME_SLACK_S]
         return Path(max(fresh)[2]).read_text(encoding="utf-8-sig") if fresh else None
     return read
 
