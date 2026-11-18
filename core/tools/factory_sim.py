@@ -57,6 +57,22 @@ def _summary(tail: str, limit: int = 600) -> str:
     return text[:limit]
 
 
+def _open_issue_titled(repo: str, title: str):
+    """True/False if an open issue has exactly this title; None if unknown. Plain listing, not search (no index lag)."""
+    import json
+    listed = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "200",
+                             "--json", "number,title"], capture_output=True, text=True, timeout=60)
+    if listed.returncode != 0:
+        return None
+    try:
+        issues = json.loads(listed.stdout or "[]")
+    except ValueError:
+        return None
+    if not isinstance(issues, list):
+        return None
+    return any(isinstance(i, dict) and i.get("title") == title for i in issues)
+
+
 def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves") -> None:
     title = "Factory nightly simulation failed: " + ", ".join(failing)[:120]
     try:
@@ -71,9 +87,15 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1", "--label", "testing"],
-                              capture_output=True, text=True, timeout=60)
+        create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
+                  "--label", "showstopper", "--label", "P1"]
+        made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
+        if made.returncode != 0 and "label" in (made.stderr or "").lower():   # only a missing area label retries
+            if _open_issue_titled(repo, title) is not False:
+                print("issue create with the area label failed and the issue may exist; not retrying")
+                return
+            print("issue create with the area label failed; retrying without it")
+            made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:

@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import factory_sim  # noqa: E402
 from jarves.workflow.autopilot_watch import factory_sim_alerts  # noqa: E402
@@ -66,6 +68,49 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert "FAILED core/tests/t.py::x" in body
     labels = [calls[1][i + 1] for i, part in enumerate(calls[1]) if part == "--label"]
     assert labels == ["showstopper", "P1", "testing"]   # #897: an area label ("testing" exists in the repo)
+
+
+def _fake_gh(calls, create_err, listed_stdout="[]", listed_rc=0):
+    import subprocess
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[2] == "create":
+            failed = "testing" in cmd and create_err
+            return subprocess.CompletedProcess(cmd, 1 if failed else 0, "", create_err if failed else "")
+        if "--search" in cmd:                       # the first duplicate check: nothing open
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+        return subprocess.CompletedProcess(cmd, listed_rc, listed_stdout, "")
+    return fake_run
+
+
+def test_issue_is_filed_without_the_area_label_when_that_label_is_missing(monkeypatch):
+    """#897 review R1: a renamed/deleted area label must not stop the nightly-failure issue."""
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, "could not add label: 'testing' not found"))
+    factory_sim.file_issue(["x"], "FAILED a::b")
+    creates = [c for c in calls if c[2] == "create"]
+    assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
+
+
+@pytest.mark.parametrize("listed_stdout,listed_rc", [
+    ('[{"number": 7, "title": "Factory nightly simulation failed: x"}]', 0),   # half-successful create
+    ("", 1), ("{not json", 0), ('{"a": 1}', 0)])                                # unknown: do not risk a duplicate
+def test_label_retry_is_skipped_when_the_issue_may_exist(monkeypatch, capsys, listed_stdout, listed_rc):
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run",
+                        _fake_gh(calls, "could not add label: 'testing' not found", listed_stdout, listed_rc))
+    factory_sim.file_issue(["x"], "FAILED a::b")
+    assert len([c for c in calls if c[2] == "create"]) == 1
+    assert "not retrying" in capsys.readouterr().out
+
+
+def test_issue_create_is_not_retried_after_a_non_label_failure(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, "HTTP 401: Bad credentials"))
+    factory_sim.file_issue(["x"], "FAILED a::b")
+    assert len([c for c in calls if c[2] == "create"]) == 1
+    assert "issue create failed: HTTP 401" in capsys.readouterr().out
 
 
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
