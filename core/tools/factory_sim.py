@@ -71,9 +71,12 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1", "--label", "testing"],
-                              capture_output=True, text=True, timeout=60)
+        create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
+                  "--label", "showstopper", "--label", "P1"]
+        made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
+        if made.returncode != 0:                # a renamed area label must not stop the showstopper issue
+            print("issue create with the area label failed; retrying without it")
+            made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:

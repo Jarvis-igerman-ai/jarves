@@ -293,6 +293,24 @@ def _no_space(monkeypatch):
     monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": 0})())
 
 
+def test_1016_no_space_auto_backup_returns_none_and_reports_degraded(profile, monkeypatch):
+    _no_space(monkeypatch)
+    seen = []
+    health = type("H", (), {"set": lambda self, *a: seen.append(a)})()
+    assert backup.maybe_auto(profile, health) is None
+    assert seen[0][:2] == ("backup", "degraded") and "--checkpoints 1" in seen[0][3]
+    assert backup.list_backups(profile) == []
+
+
+def test_1016_doctor_disk_check_survives_unreadable_backup_sizes(profile, monkeypatch):
+    from jarves import selftest
+    ctx = selftest.Ctx(home=profile, disk_free_gb=lambda p: 100.0)
+    base = selftest._preflight(ctx, "_disk")
+    monkeypatch.setattr(backup, "list_backups", lambda home: [{"size": "x"}])
+    status, detail, _ = selftest.check_disk(ctx)
+    assert status == base[0] and "backup size unknown (ValueError)" in detail
+
+
 def test_1016_no_space_aborts_restore_before_touching_data(profile, monkeypatch):
     p = backup.create(profile, "manual")
     (profile / "workspace" / "SOUL.md").write_text("# SOUL v2", encoding="utf-8")

@@ -160,6 +160,19 @@ class VerdictTests(Base):
         kind, v = self.kind()
         self.assertEqual((kind, v["detail"]["active"]), ("stopped", 0))
 
+    def test_running_task_with_a_missing_worker_counts_only_inside_the_window(self):
+        """#796: a running task whose worker record is gone counts for ACTIVE_FRESH_S after its last update, then not."""
+        self.alive()
+        self.task()
+        with self.store._tx() as db:              # claimed by a worker whose agent record no longer exists
+            task = self.store._get(db, "task", "t1")
+            task.update(state="running", agent_id="gone", updated_at=self.now[0])
+            self.store._put(db, "task", task)
+        self.assertEqual((self.kind()[0], self.kind()[1]["detail"]["active"]), ("working", 1))
+        self.advance(obs.ACTIVE_FRESH_S + 1)
+        self.alive()
+        self.assertEqual(self.kind()[1]["detail"]["active"], 0)
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()

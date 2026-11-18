@@ -287,7 +287,7 @@ def _ensure_space(home: Path, out_dir: Path, protect: tuple[str, ...] = ()) -> N
     logs.warn("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=need)
     raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free // 2**20} MB free, "
                       f"{need // 2**20} MB needed)", "free disk space or keep fewer backups: "
-                      "jarvis backup settings --manual 3 --checkpoints 2")
+                      "jarvis backup settings --manual 3 --checkpoints 1")
 
 
 def _unlink(p: Path) -> None:
