@@ -416,6 +416,27 @@ def test_persistent_probe_error_tells_the_owner_once(home, server, keys):
     assert kinds(r).count("probe_stuck") == 1
 
 
+def test_probe_error_timer_restarts_after_recovery_and_each_version_gets_a_notice(home, server, keys):
+    """#1100 follow-up: a probe that recovers restarts the day-long timer; a new version gets its own notice."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    r.tick(auto_update.PROBE_STUCK_S - 600)
+    r.busy = ["pending_approval"]                              # probes readable again (still busy, so no install)
+    assert r.tick(300) == "busy" and "probe_error_since" not in r.au.state()
+    r.busy = ["probe_error"]
+    assert r.tick(600) == "busy" and r.tick(auto_update.PROBE_STUCK_S - 60) == "busy"
+    assert "probe_stuck" not in kinds(r)                       # without the reset this would have fired already
+    r.tick(120)
+    assert kinds(r).count("probe_stuck") == 1
+    server.publish(keys, "3.0.0.2")                            # a newer release while still stuck
+    r.tick(auto_update.LATER_S + 1)
+    r.clock.t += NOTICE_GRACE_S + 1
+    r.tick()
+    stuck = [n for n in r.notices if n["kind"] == "probe_stuck"]
+    assert [n["version"] for n in stuck] == [NEW, "3.0.0.2"] and r.launched == []
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()
