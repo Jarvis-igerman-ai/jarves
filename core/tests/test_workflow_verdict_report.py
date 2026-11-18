@@ -124,6 +124,41 @@ class VerdictTests(Base):
         self.store.observe_agent("w2", "idle")               # an idle unclaimed agent is not a running worker
         self.assertEqual(self.kind()[1]["detail"]["active"], 1)
 
+    def test_running_tasks_count_without_a_fresh_agent(self):
+        """#796 item 4: 2 running native tasks + 169 queued read as working, not idle_with_work."""
+        self.alive()
+        for i in range(171):
+            self.task(f"t{i}")
+        for ident in ("w1", "w2"):
+            self.store.register_agent({"id": ident, "label": ident, "lane": "bugs", "provider": "claude-native"})
+            self.store.claim(ident)
+        self.advance(obs.ACTIVE_FRESH_S + 1)      # hooks went quiet, but the workers still record progress on their tasks
+        self.alive()
+        for ident in ("t0", "t1"):
+            self.store.transition(ident, {"state": "running", "code_revision": "abc123"})
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"], v["detail"]["running_by_lane"], v["detail"]["ready"]),
+                         ("working", 2, {"bugs": 2}, 169))
+        self.assertEqual(v["reason"], "2 worker(s) active")
+        self.advance(obs.ACTIVE_FRESH_S + 1)      # a running task untouched past the window is not a live worker
+        self.alive()
+        self.assertEqual(self.kind()[0], "idle_with_work")
+
+    def test_running_task_of_an_offline_worker_is_not_working(self):
+        """#796: a fresh running task whose claiming worker went offline does not count."""
+        self.alive()
+        self.task()
+        self.store.register_agent({"id": "w1", "label": "W1", "lane": "bugs", "provider": "claude-native"})
+        self.store.observe_agent("w1", "running")
+        self.store.claim("w1")
+        with self.store._tx() as db:              # the supervisor marked the worker offline; its task stays claimed
+            agent = self.store._get(db, "agent", "w1")
+            agent["status"] = "offline"
+            self.store._put(db, "agent", agent)
+            self.assertEqual(self.store._get(db, "task", "t1")["agent_id"], "w1")
+        kind, v = self.kind()
+        self.assertEqual((kind, v["detail"]["active"]), ("stopped", 0))
+
     def test_nothing_queued(self):
         self.alive()
         kind, v = self.kind()
