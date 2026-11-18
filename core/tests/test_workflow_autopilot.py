@@ -125,3 +125,27 @@ class AutopilotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkerAllowListPolicyFileTests(unittest.TestCase):
+    """#932/JAR-213: the owner's worker_allowed_tools override can never let a worker rewrite autopilot.json."""
+
+    BASE = {k: v for k, v in autopilot.DEFAULTS.items()}
+
+    def check(self, rules):
+        return autopilot.validate({**json.loads(json.dumps(self.BASE)), "worker_allowed_tools": rules})
+
+    def test_commands_that_can_rewrite_the_policy_file_are_rejected(self):
+        for rule in ("Bash(python:*)", "Bash(python3 *)", "Bash(py:*)", "Bash(C:/py/python.exe:*)",
+                     "Bash(python -c:*)", "Bash(node -e:*)", "Bash(perl:*)", "Bash(sed:*)", "Bash(sed -i:*)",
+                     "Bash(awk:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(tee:*)", "Bash(cat:*)", "Bash(echo:*)",
+                     "Bash(bash -c:*)", "Bash(sh:*)", "Bash(python fix.py autopilot.json)",
+                     "Bash(cat x > C:/h/autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)"):
+            with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
+                self.check(["Bash(ls:*)", rule])
+
+    def test_narrow_rules_stay_allowed(self):
+        for rules in (["Bash(python -m pytest:*)"], ["Bash(C:/py/python.exe -m pytest:*)", "Read"],
+                      ["Bash(git diff:*)", "Bash(grep:*)", "Bash(sedona-report:*)"]):
+            with self.subTest(rules=rules):
+                self.assertEqual(self.check(rules)["worker_allowed_tools"], rules)

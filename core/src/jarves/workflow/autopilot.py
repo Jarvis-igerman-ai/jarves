@@ -47,11 +47,20 @@ OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "we
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
+# #932/JAR-213: a rule naming the policy file, or a blanket interpreter/shell/file-writer prefix (`Bash(python:*)`,
+# `Bash(sed -i:*)`, `Bash(bash -c:*)`), would let a worker rewrite <home>/autopilot.json. Narrow forms such as
+# `Bash(python -m pytest:*)` stay allowed.
+_POLICY_WRITER = re.compile(
+    r"(?i)autopilot\.json|^Bash\(\s*(?:[^\s()]*[/\\])?(?:python3?|py|node|perl|ruby|sed|awk|cp|mv|tee|cat|dd|echo|"
+    r"printf|bash|sh|cmd|pwsh)(?:\.exe)?(?:\s*:?\*|\s+-[cei]\b)")
 
 
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
+    if any(_POLICY_WRITER.search(x) for x in value):
+        raise ValueError("worker_allowed_tools: rules that could rewrite autopilot.json (naming it, or a blanket "
+                         "interpreter, shell or file-writer prefix) cannot be allowed")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
