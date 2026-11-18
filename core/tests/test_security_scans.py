@@ -183,23 +183,48 @@ def test_issue_480_mixed_refusals_from_the_real_collectors_name_the_owner_action
 
 
 def test_issue_480_no_refusal_or_malformed_coverage_adds_no_owner_action():
-    assert ss.owner_actions({"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry",
-                             "boundary": "incomplete:not_run", "main_ci": "incomplete:http_503"}) == []
-    assert ss.owner_actions({"x": None, "dependabot": 403, 7: ["incomplete:http_403"]}) == []
-    assert ss.owner_actions("not a dict") == []
-    assert ss.owner_actions({"main_ci": "incomplete:http_404"}) == [
+    def acts(cov):
+        return ss.owner_actions(ss.refused_sources(cov))
+    assert acts({"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry",
+                 "boundary": "incomplete:not_run", "main_ci": "incomplete:http_503"}) == []
+    assert acts({"x": None, "dependabot": 403, 7: ["incomplete:http_403"]}) == []
+    assert acts("not a dict") == []
+    assert acts({"main_ci": "incomplete:http_404"}) == [
         "Owner action (HTTP 404: main_ci): check that the workflow exists on main, or give the scan's token read access "
         "to Actions."]
-    assert ss.owner_actions({"future_source": "incomplete:http_403"}) == [
+    assert acts({"future_source": "incomplete:http_403"}) == [
         "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
     assert "Owner action" not in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light")
 
 
 def test_issue_480_tracker_body_uses_the_refused_dict_the_signature_used():
     cov = {"dependabot": "incomplete:http_403"}
-    assert ss.owner_actions(cov, refused={}) == []                                 # the passed dict wins, no re-derivation
     body = ss.tracker_body([], cov, 0, "s", "light", refused={"dependabot": "http_401"})
     assert "Owner action (HTTP 401: dependabot)" in body and "HTTP 403" not in body.split("Owner action")[1]
+    assert "<!-- refused:dependabot=http_401 -->" in body and ss.marked_refused(body) == {"dependabot": "http_401"}
+    assert "Owner action" not in ss.tracker_body([], cov, 0, "s", "light", refused={})
+
+
+def test_issue_480_refused_marker_is_read_strictly():
+    assert ss.marked_refused(None) == ss.marked_refused("no marker") == ss.marked_refused("<!-- refused: -->") == {}
+    assert ss.marked_refused("<!-- refused:dependabot=http_503 -->") == {}             # only refusal codes are carried
+    assert ss.marked_refused("<!-- refused:a_b=http_403,c=http_404 -->") == {"a_b": "http_403", "c": "http_404"}
+
+
+def test_issue_480_a_5xx_between_two_refusals_rewrites_the_tracker_at_most_once(home):
+    """R3: refused -> 5xx (after the bounded retries) -> refused. The 5xx pass keeps the recorded refusal."""
+    gh = FakeGitHub(deny={"/dependabot/": 403})
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:x -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"                               # the one rewrite
+    first = gh.issues[0]["body"]
+    gh.deny = {"/dependabot/": 503}
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    gh.deny = {"/dependabot/": 403}
+    assert scan(None, gh, now=day(2))["issue"]["status"] == "unchanged"
+    assert [c[0] for c in gh.writes()] == ["PATCH"] and gh.issues[0]["body"] == first
+    gh.deny = {}                                                                         # read completely: a real change
+    assert scan(None, gh, now=day(3))["issue"]["status"] == "updated"
+    assert "Owner action" not in gh.issues[0]["body"] and ss.marked_refused(gh.issues[0]["body"]) == {}
 
 
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
@@ -237,9 +262,7 @@ def test_issue_480_a_rate_limited_403_keeps_the_refusal_and_the_signature(monkey
     sleeps = []
     assert ss._get(client, "/dependabot/alerts", sleeps.append) == (403, None) and sleeps == []   # 403: not retried
     cov = ss.run_collectors("light", client, VER, now=T0, sleep=lambda s: None, boundary=lambda: {"failed": False})["coverage"]
-    refused = ss.refused_sources(cov)
-    assert refused == {k: "http_403" for k in ss.ALERT_SOURCES + ss.RUN_SOURCES if k in cov}
-    assert ss.signature([], False, refused) == ss.signature([], False, {k: "http_403" for k in refused})
+    assert ss.refused_sources(cov) == {k: "http_403" for k in ss.ALERT_SOURCES + ss.RUN_SOURCES if k in cov}
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

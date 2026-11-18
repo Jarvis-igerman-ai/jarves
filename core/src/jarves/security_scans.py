@@ -50,6 +50,7 @@ API_BASE = "https://api.github.com"                     # tests inject a fake cl
 TRACKER_MARKER = "<!-- jarves-security-scans:v1 -->"
 TRACKER_TITLE = "[Security] JARVES recurring scan summary"
 _SIG = re.compile(r"<!-- sig:([0-9a-f]{16}) -->")
+_REFUSED_MARK = re.compile(r"<!-- refused:([a-z_]+=http_40[134](?:,[a-z_]+=http_40[134])*)? -->")
 MAX_HISTORY = 30
 MAX_LISTING = 100                                       # a full page of issues = lookup not certain: fail closed
 RECURRING_MIN = 3                                       # a local issue seen this often counts as recurring
@@ -542,10 +543,26 @@ def refused_sources(coverage: object) -> dict[str, str]:
             and v.removeprefix("incomplete:") in _REFUSED}
 
 
-def owner_actions(coverage: object, refused: dict[str, str] | None = None) -> list[str]:
-    """One line per kind of refusal, naming what the owner can do (#480). Never names a token value or its source.
-    `refused` = the dict the signature already used (run_scan passes it), so the body and signature cannot drift."""
-    refused = refused_sources(coverage) if refused is None else refused
+def marked_refused(body: object) -> dict[str, str]:
+    """The refusals a previous tracker body recorded in its `<!-- refused: -->` marker; {} when absent or malformed."""
+    m = _REFUSED_MARK.search(body) if isinstance(body, str) else None
+    return dict(p.split("=", 1) for p in m.group(1).split(",")) if m and m.group(1) else {}
+
+
+def carry_refused(coverage: dict, previous: dict[str, str]) -> dict[str, str]:
+    """Refused now, plus a previous refusal for a source that only failed transiently this pass (an HTTP code that
+    is not a refusal, e.g. 5xx or 429): a 5xx between two refusals must not rewrite the tracker twice (#480)."""
+    now = refused_sources(coverage)
+    for k, code in previous.items():
+        v = coverage.get(k)
+        if k not in now and code in _REFUSED and isinstance(v, str) and v.startswith("incomplete:http_"):
+            now[k] = code
+    return dict(sorted(now.items()))
+
+
+def owner_actions(refused: dict[str, str]) -> list[str]:
+    """One line per kind of refusal in `refused` (from refused_sources), naming what the owner can do (#480).
+    Never names a token value or its source."""
     other = [k for k, r in refused.items() if r != "http_401"]
     groups = [([k for k, r in refused.items() if r == "http_401"],
                "the scan's GitHub token is missing, expired or invalid; set a valid token."),
@@ -591,15 +608,19 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
+    refused = refused_sources(coverage) if refused is None else refused
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-        lines += owner_actions(coverage, refused)
+        lines += owner_actions(refused)
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
-              TRACKER_MARKER, f"<!-- sig:{sig} -->"]
+              TRACKER_MARKER, f"<!-- refused:{','.join(f'{k}={v}' for k, v in sorted(refused.items()))} -->",
+              f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
 
 
-def update_tracker(client, body: str, sig: str, have_findings: bool, sleep) -> dict:
+def update_tracker(client, body: str, sig: str, have_findings: bool, sleep,
+                   rebuild: Callable[[str], tuple[str, str]] | None = None) -> dict:
+    """`rebuild(old_body) -> (body, sig)` lets the caller fold in what the existing tracker recorded (#480)."""
     code, listing = _get(client, f"/issues?labels={LABEL}&state=all&per_page=100", sleep)
     if code != 200 or not isinstance(listing, list) or len(listing) >= MAX_LISTING:
         return {"status": "lookup_unavailable"}
@@ -608,9 +629,11 @@ def update_tracker(client, body: str, sig: str, have_findings: bool, sleep) -> d
         return {"status": "duplicate_trackers"}
     if trackers:
         t = trackers[0]
+        if rebuild is not None:
+            body, sig = rebuild(str(t.get("body") or ""))
         m = _SIG.search(str(t.get("body") or ""))
         if m and m.group(1) == sig:
-            return {"status": "unchanged", "url": str(t.get("html_url") or "")}
+            return {"status": "unchanged", "url": str(t.get("html_url") or ""), "sig": sig}
         if t.get("state") == "closed":
             return {"status": "tracker_closed"}          # the owner's decision: never reopened here
         if not isinstance(t.get("number"), int):
@@ -627,7 +650,7 @@ def update_tracker(client, body: str, sig: str, have_findings: bool, sleep) -> d
     url = str(out.get("html_url") or url)
     if not url.startswith(f"https://github.com/{REPO}/issues/"):
         return {"status": "invalid_response"}
-    return {"status": op, "url": url}
+    return {"status": op, "url": url, "sig": sig}
 
 
 # ---------------------------------------------------------------------- one scan
@@ -680,7 +703,14 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         issue = {"status": "dry_run"}
     elif report:
         try:
-            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind, refused), sig, bool(findings), sleep)
+            def rebuild(old: str) -> tuple[str, str]:
+                r = carry_refused(coverage, marked_refused(old))
+                s = signature(findings, complete, r)
+                return tracker_body(findings, coverage, resolved, s, kind, r), s
+            issue = update_tracker(client, tracker_body(findings, coverage, resolved, sig, kind, refused), sig, bool(findings),
+                                   sleep, rebuild)
+            sig = issue.pop("sig", sig)                  # the signature actually written (after any carry-forward)
+            result["signature"] = sig
         except Offline as e:
             return _fail(home, state, entry, result, now, "offline", str(e))
     result["issue"] = issue
