@@ -62,7 +62,7 @@ SQLITE_MAGIC = b"SQLite format 3\x00"
 DEFAULTS = {"daily": 7, "weekly": 4, "manual": 5, "checkpoints": 2, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 SPACE_MARGIN_BYTES = 200 * 1024 * 1024     # free space kept beyond twice the newest backup (#1016)
-BACKUP_BUDGET_BYTES = 3 * 1024 ** 3        # doctor warns when all backups together use more (#1016)
+BACKUP_BUDGET_BYTES = 3 * 10 ** 9           # doctor warns when all backups together use more (#1016)
 _lock = threading.Lock()
 
 
@@ -206,8 +206,10 @@ def backup_dir(home: Path) -> Path:
     return Path(home) / BACKUP_DIR
 
 
-def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None) -> Path:
-    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left)."""
+def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None,
+           protect: tuple[str, ...] = ()) -> Path:
+    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left).
+    `protect`: archive names its prunes must keep (the restore source)."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     home = Path(home)
@@ -215,7 +217,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
     now = time.time() if now is None else now
     out_dir = backup_dir(home)
     out_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_space(home, out_dir)
+    _ensure_space(home, out_dir, protect)
     stamp = datetime.fromtimestamp(now).strftime("%Y%m%d-%H%M%S")
     final = out_dir / f"jarves-backup-{stamp}-{kind}.zip"
     n = 1
@@ -265,11 +267,11 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                 kind=kind)
     logs.info("backup", "BACKUP_DONE", "backup written", backup=final.name, kind=kind, files=len(files), excluded=len(skipped),
               bytes=final.stat().st_size)
-    prune(home)
+    prune(home, protect)
     return final
 
 
-def _ensure_space(home: Path, out_dir: Path) -> None:
+def _ensure_space(home: Path, out_dir: Path, protect: tuple[str, ...] = ()) -> None:
     """#1016: a backup needs twice the newest backup's size plus a margin free; prune by retention first, then refuse."""
     items = list_backups(home)
     need = 2 * (items[0]["size"] if items else 0) + SPACE_MARGIN_BYTES
@@ -281,7 +283,7 @@ def _ensure_space(home: Path, out_dir: Path) -> None:
         if free >= need:
             return
         if attempt == 1:
-            prune(home)
+            prune(home, protect)
     logs.warn("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=need)
     raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free // 2**20} MB free, "
                       f"{need // 2**20} MB needed)", "free disk space or keep fewer backups: "
@@ -386,11 +388,11 @@ def list_backups(home: Path) -> list[dict]:
     return out
 
 
-def prune(home: Path) -> list[str]:
-    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind."""
+def prune(home: Path, protect: tuple[str, ...] = ()) -> list[str]:
+    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind or a `protect` name."""
     s = get_settings(home)
     items = list_backups(home)
-    keep: set[str] = set()
+    keep: set[str] = set(protect)
     autos = [b for b in items if b["kind"] == "auto"]
     days, weeks = {}, {}
     for b in autos:                                           # newest first
@@ -415,6 +417,11 @@ def prune(home: Path) -> list[str]:
             _unlink(p)
     if gone:
         logs.info("backup", "BACKUP_PRUNED", "old backups removed", removed=len(gone))
+    if read_state(home).get("retention_defaults") != 2:     # #1016: say once what the lower defaults removed
+        lowered = sum(1 for b in items if b["name"] in gone and b["kind"] != "auto")
+        if lowered:
+            logs.warn("backup", "BACKUP_RETENTION_LOWERED", "lower backup retention removed old archives", removed=lowered)
+        _save_state(home, {"retention_defaults": 2})
     return gone
 
 
@@ -482,7 +489,7 @@ def restore(path: Path, target: Path, *, force: bool = False, checkpoint_first: 
                           "stop it first (`jarvis stop`), then restore again")
     pre = None
     if checkpoint_first and target.is_dir() and any(target.glob("*.db")):
-        pre = create(target, "pre-restore", note=f"before restoring {path.name}")
+        pre = create(target, "pre-restore", note=f"before restoring {path.name}", protect=(path.name,))
     man = res["manifest"]
     try:
         done = _extract(path, target, man)

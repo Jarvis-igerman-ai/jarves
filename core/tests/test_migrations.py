@@ -118,6 +118,16 @@ def test_backup_failure_refuses_to_migrate_and_changes_nothing(home):
     assert snapshot(home) == want and not (home / migrations.MARKER).exists()
 
 
+def test_no_space_for_the_checkpoint_refuses_to_migrate(home, monkeypatch):
+    """#1016: BACKUP_NO_SPACE from the real checkpoint aborts the migration; nothing changes."""
+    want = snapshot(home)
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": 0})())
+    with pytest.raises(migrations.MigrationError) as e:
+        migrations.run(home)
+    assert e.value.code == "MIGRATION_BACKUP_FAILED" and "BACKUP_NO_SPACE" in e.value.message
+    assert snapshot(home) == want and not (home / migrations.MARKER).exists()
+
+
 def test_a_failing_step_keeps_the_last_good_schema_and_points_at_the_backup(home, monkeypatch):
     def boom(h):
         raise RuntimeError("step broke")

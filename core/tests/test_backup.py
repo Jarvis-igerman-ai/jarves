@@ -266,7 +266,7 @@ def test_1016_low_disk_prunes_first_then_refuses(profile, monkeypatch):
     size = first.stat().st_size
     backup.set_settings(profile, {"manual": 0})
     pruned = []
-    monkeypatch.setattr(backup, "prune", lambda home: pruned.append(home) or [])
+    monkeypatch.setattr(backup, "prune", lambda home, protect=(): pruned.append(home) or [])
     free = {"bytes": size}                      # less than twice the newest backup: not enough room
     monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": free["bytes"]})())
     with pytest.raises(backup.BackupError) as e:
@@ -287,6 +287,47 @@ def test_1016_doctor_warns_when_backups_exceed_the_budget(profile, monkeypatch):
     monkeypatch.setattr(backup, "BACKUP_BUDGET_BYTES", 1024)
     status, detail, fix = selftest.check_disk(ctx)
     assert status == selftest.WARN and "backups use" in detail and "jarvis backup settings" in fix
+
+
+def _no_space(monkeypatch):
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": 0})())
+
+
+def test_1016_no_space_aborts_restore_before_touching_data(profile, monkeypatch):
+    p = backup.create(profile, "manual")
+    (profile / "workspace" / "SOUL.md").write_text("# SOUL v2", encoding="utf-8")
+    _no_space(monkeypatch)
+    with pytest.raises(backup.BackupError) as e:
+        backup.restore(p, profile)
+    assert e.value.code == "BACKUP_NO_SPACE"
+    assert (profile / "workspace" / "SOUL.md").read_text(encoding="utf-8") == "# SOUL v2"
+    assert not any(b["kind"] == "pre-restore" for b in backup.list_backups(profile))
+
+
+def test_1016_restore_source_outside_retention_survives_the_checkpoint_prune(profile):
+    t = datetime(2026, 11, 9, 3, 0).timestamp()
+    old = backup.create(profile, "manual", now=t)
+    backup.create(profile, "manual", now=t + 60)
+    backup.set_settings(profile, {"manual": 1})         # the source is now outside retention
+    assert backup.restore(old, profile)["ok"]
+    assert old.is_file()
+
+
+def test_1016_first_prune_logs_once_what_the_new_defaults_removed(profile, monkeypatch):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    start = datetime(2026, 11, 9, 3, 0)
+    for i in range(8):
+        (bdir / f"jarves-backup-{start - timedelta(minutes=i):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
+    for i in range(4):
+        (bdir / f"jarves-backup-{start - timedelta(hours=i):%Y%m%d-%H%M%S}-pre-migration.zip").write_bytes(b"x")
+    seen = []
+    monkeypatch.setattr(backup.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f)))
+    backup.prune(profile)
+    assert seen == [("BACKUP_RETENTION_LOWERED", {"removed": 3 + 2})]
+    (bdir / f"jarves-backup-{start - timedelta(days=1):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
+    backup.prune(profile)                               # later prunes are ordinary retention: no second notice
+    assert len(seen) == 1
 
 
 def test_auto_backup_due_daily_and_switchable(profile):
