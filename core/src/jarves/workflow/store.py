@@ -403,6 +403,8 @@ class Store:
     def _ready(db, task):
         if not task.get("execution_allowed", True) or task["state"] != "queued" or Store._unanswered(db, task["id"]):
             return False
+        if task.get("source_closed"):
+            return False  # every linked issue closed (e.g. by the owner): not ready anywhere (#855)
         if task.get("implementation") == "merged":
             return False  # already on main: needs installed-product QA, not another implementer (#855)
         for ident in task["depends_on"]:
@@ -586,11 +588,13 @@ class Store:
         except Exception:  # noqa: BLE001  incl. RecursionError from a deeply nested policy file: never break Stop
             return default
 
-    def _continue_slot(self, db, agent_id, worker_limit):
-        """Take one slot of the shared per-hour Stop-continuation cap; False when the cap is spent."""
+    def _continue_slot(self, db, agent_id, worker_limit, kind="native_continue"):
+        """Take one slot of a per-hour Stop-continuation cap; False when the cap is spent.
+
+        Monitor notes use their own budget (kind) so they never spend the ready-work slots (#858)."""
         busy = sum(1 for a in self._all(db, "agent") if a.get("task_id") and a.get("status") == "running")
         cap = 12 if busy < worker_limit else 2
-        key = "native_continue:" + _id(agent_id)
+        key = kind + ":" + _id(agent_id)
         row = db.execute("SELECT value FROM workflow_meta WHERE key=?", (key,)).fetchone()
         times = [ts for ts in (json.loads(row[0]) if row else []) if self.clock() - ts < 3600]
         if len(times) >= cap:
@@ -610,8 +614,7 @@ class Store:
         if worker_limit is None:
             worker_limit = self._worker_limit()
         with self._tx() as db:
-            # source_closed: every linked GitHub issue is closed (e.g. by the owner); no Stop nudge for it (#855/#858).
-            ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t) and not t.get("source_closed")]
+            ready = [t["id"] for t in self._all(db, "task") if self._ready(db, t)]
             # A task announced within ANNOUNCE_COOLDOWN_S is probably delegated but not yet claimed (#855).
             row = db.execute("SELECT value FROM workflow_meta WHERE key='announced_ready'").fetchone()
             seen = {k: v for k, v in (json.loads(row[0]) if row else {}).items() if self.clock() - v < ANNOUNCE_COOLDOWN_S}
@@ -920,7 +923,7 @@ class Store:
             self._set_meta(db, "manager_notes", notes)
 
     def take_manager_notes_capped(self, agent_id, worker_limit=None):
-        """Notes that may block a Stop with no ready work: counted in manager_continue's per-hour cap.
+        """Notes that may block a Stop with no ready work: a separate per-hour cap of the same size.
 
         When the cap is spent the notes stay queued (not lost) for a later Stop."""
         if worker_limit is None:
@@ -928,7 +931,7 @@ class Store:
         with self._tx() as db:
             row = db.execute("SELECT value FROM workflow_meta WHERE key='manager_notes'").fetchone()
             notes = json.loads(row[0]) if row else []
-            if not notes or not self._continue_slot(db, agent_id, worker_limit):
+            if not notes or not self._continue_slot(db, agent_id, worker_limit, kind="native_notes"):
                 return []
             self._set_meta(db, "manager_notes", [])
             return notes

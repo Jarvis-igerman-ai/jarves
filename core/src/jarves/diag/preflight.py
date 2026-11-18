@@ -18,7 +18,6 @@ import os
 import shutil
 import socket
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
