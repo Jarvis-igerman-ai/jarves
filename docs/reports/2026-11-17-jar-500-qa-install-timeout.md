@@ -26,6 +26,12 @@ Date: 17 Nov 2026. Ticket: JAR-500 (Factory 2, source owner). No product code ch
   - `jarvis install-latest`, if the harness calls it: setup wait up to
     `SETUP_WAIT_S = 1200` s and report wait up to 1500 s
     (`core/src/jarves/install_latest.py`).
+- Silent-install steps checked for a wait with no limit (18 Nov, code reading only); none found:
+  `jarvis setup --answers` with no `/SETUPANSWERS=` exits 0 at once (`cli.py` cmd_setup);
+  a scripted setup skips ChatGPT, Google, connect, tour and browser sign-ins (`setup_wizard.py`);
+  add-on prepare uses `timeout=300` (uv sync) and `timeout=20` (SFace download) (`feature_setup.py`);
+  `jarvis stop` uses `open_timeout=3`; retaining the old program makes 10 tries, 1 s apart; the PowerShell
+  lock and process waits loop until a deadline (`jarves.iss`).
 - `packaging/installer_job.ps1` is a CI-only build helper. It never runs an
   installer, so it is not involved.
 
