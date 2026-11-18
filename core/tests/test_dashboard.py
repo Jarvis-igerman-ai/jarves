@@ -24,6 +24,8 @@ def dash(home, monkeypatch):
     diagnose.run(st, Config(), st.ingest_log(FIXTURE))
     with st._lock:      # the fixture log is dated 19 Oct: keep its issues "just seen" so the 14-day auto-expiry never depends on today's date
         st._db.execute("UPDATE issues SET last_seen = ?", (time.time(),))
+        # same for the 30-day tool-stats window: shift the tool calls so they stay recent (order and gaps kept)
+        st._db.execute("UPDATE tool_calls SET ts = ts + ?", (time.time() - 1792454400.0,))
         st._db.commit()
     st.close()
     (home / "health.json").write_text(json.dumps({"ts": 0, "core": "stopped", "components": {
