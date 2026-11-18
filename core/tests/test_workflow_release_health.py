@@ -18,9 +18,13 @@ def pr(n, hours, **kw):
     return {"number": n, "updated_at": iso(hours), "head_sha": "abcdef012345", "labels": [], **kw}
 
 
+def kinds(source):
+    return sorted(f["kind"] for f in release_health(source, NOW))
+
+
 class ReleaseHealthTests(unittest.TestCase):
     def kinds(self, source):
-        return sorted(f["kind"] for f in release_health(source, NOW))
+        return kinds(source)
 
     def test_red_main(self):
         self.assertEqual(self.kinds({"sha": "a" * 40, "ci_state": "failure"}), ["main_not_green"])
@@ -136,46 +140,80 @@ class SyncFieldTests(unittest.TestCase):
         self.assertEqual(state([{"id": True, "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
         self.assertEqual(state([], [flake]), "failure")  # no gate run seen: unchanged all-checks rule
 
-    def test_beta_job_failure_is_reported_separately(self):
-        """JAR-406: main_ci_state ignores the beta job, so its failure is surfaced on its own."""
+    def test_beta_state_of_the_newest_beta_run(self):
+        """JAR-406: main_ci_state ignores the beta job, so the beta run is judged on its own."""
         from jarves.workflow import sync
 
-        def failed(runs):
+        def state(runs):
             def get(path):
                 self.assertIn("?check_name=beta&", path)
                 return {"check_runs": runs}
-            return sync.beta_job_failed(get, "s")
+            return sync.beta_state(get, "s")
 
-        def run(i, conclusion, name="beta"):
-            return {"id": i, "name": name, "status": "completed", "conclusion": conclusion}
-        self.assertTrue(failed([run(1, "failure")]))
-        self.assertFalse(failed([run(1, "failure"), run(2, "success")]))    # a passing re-run clears it
-        self.assertFalse(failed([run(1, "failure", name="beta-docs")]))     # exact job name only
-        self.assertFalse(failed([]))
-        self.assertFalse(failed(None))
+        def run(i, conclusion, status="completed", name="beta"):
+            return {"id": i, "name": name, "status": status, "conclusion": conclusion}
+        self.assertEqual(state([run(1, "failure")]), "failure")
+        self.assertEqual(state([run(1, "failure"), run(2, "success")]), "success")   # a passing re-run decides
+        self.assertEqual(state([run(1, None, "in_progress")]), "pending")
+        self.assertEqual(state([run(1, None, "queued")]), "pending")
+        self.assertEqual(state([run(1, "cancelled")]), "unknown")
+        self.assertEqual(state([run(1, "skipped")]), "none")                         # beta publish off
+        self.assertEqual(state([run(1, "skipped"), run(2, None, "in_progress")]), "pending")
+        self.assertEqual(state([run(1, "failure", name="beta-docs")]), "none")        # exact job name only
+        self.assertEqual(state([]), "none")
+        self.assertEqual(state(None), "unknown")
+        for exc in (OSError("down"), TypeError("bad"), KeyError("x"), AttributeError("y")):
+            def boom(path, exc=exc):
+                raise exc
+            self.assertEqual(sync.beta_state(boom, "s"), "unknown")   # never breaks collect
 
-        def boom(path):
-            raise OSError("down")
-        self.assertFalse(sync.beta_job_failed(boom, "s"))                    # unknown raises nothing
-        self.assertEqual(ReleaseHealthTests().kinds({"sha": "c" * 40, "ci_state": "success", "beta_failed": True}),
-                         ["beta_failed"])
-        self.assertEqual(ReleaseHealthTests().kinds({"sha": "c" * 40, "beta_failed": True, "error": "x"}), [])
+    def test_failed_beta_raises_release_alert(self):
+        self.assertEqual(kinds({"sha": "c" * 40, "beta_state": "failure"}), ["beta_failed"])
+        self.assertEqual(kinds({"sha": "c" * 40, "beta_state": "failure", "error": "x"}), [])
+        for st in ("pending", "unknown", "none", "success"):
+            self.assertEqual(kinds({"sha": "c" * 40, "beta_state": st}), [])
 
-    def test_failed_beta_job_opens_no_beta_verify_task(self):
+    def test_beta_verify_task_only_for_a_finished_or_absent_beta(self):
         from jarves.workflow import autopilot_loop
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "w.db")
             self.addCleanup(store.close)
             src = {"sha": "d" * 40, "synced_at": 1, "open_prs": [], "open_issues": [], "ci_green": True}
 
-            def betas():
+            def betas(**extra):
+                store.set_source({**src, **extra})
                 out = autopilot_loop._watch(store, Path(tmp), {"enabled": True, "kill": False},
                                             stop=lambda *a: None, notify=lambda *a: None)
                 return [o for o in out if o["action"] == "beta_verify_task"]
-            store.set_source({**src, "beta_failed": True})
-            self.assertEqual(betas(), [])
-            store.set_source({**src, "beta_failed": False})               # re-run passed: same sha gets its task
-            self.assertEqual(len(betas()), 1)
+            for st in ("failure", "pending", "unknown"):
+                self.assertEqual(betas(beta_state=st), [], st)
+            self.assertEqual(betas(), [])                                    # old source without the field
+            self.assertEqual(len(betas(beta_state="success")), 1)           # same sha, once the beta passed
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "w.db")
+            self.addCleanup(store.close)
+            store.set_source({**src, "beta_state": "none"})                  # beta publish off: no beta run
+            out = autopilot_loop._watch(store, Path(tmp), {"enabled": True, "kill": False},
+                                        stop=lambda *a: None, notify=lambda *a: None)
+            self.assertEqual(len([o for o in out if o["action"] == "beta_verify_task"]), 1)
+
+    def test_collect_reads_beta_only_on_a_green_main(self):
+        from jarves.workflow import sync
+        gate = {"id": 1, "name": sync.REQUIRED_CHECK, "status": "completed", "conclusion": "success"}
+        paths = []
+
+        def get(path):
+            paths.append(path)
+            if "/branches/main" in path:
+                return {"commit": {"sha": "m" * 40, "commit": {}}}
+            if "check_name=beta" in path:
+                return {"check_runs": [{"id": 2, "name": "beta", "status": "in_progress", "conclusion": None}]}
+            if "check-runs" in path:
+                return {"check_runs": [gate]}
+            return []
+        snap = sync.collect(get)
+        self.assertEqual((snap["ci_state"], snap["beta_state"]), ("success", "pending"))
+        self.assertEqual(sum("check-runs" in p for p in paths), 2)          # gate + beta, no all-checks read
 
     def test_collect_carries_draft_auto_merge_and_ci_state(self):
         from jarves.workflow import sync
@@ -195,7 +233,7 @@ class SyncFieldTests(unittest.TestCase):
         self.assertTrue(p["auto_merge"])
         self.assertEqual(snap["ci_state"], "pending")
         self.assertFalse(snap["ci_green"])
-        self.assertFalse(snap["beta_failed"])
+        self.assertEqual(snap["beta_state"], "unknown")                 # not green: beta never read
 
 
 if __name__ == "__main__":

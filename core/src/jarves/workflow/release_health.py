@@ -41,7 +41,7 @@ def release_health(source: dict, now: float) -> list[dict]:
             # in the merge queue can look unqueued here, so this is a hint to check, not proof.
             out.append({"kind": "pr_stuck", "key": key,
                         "summary": f"PR #{n} idle for {int(age // 3600)} h with no auto-merge set (merge-queue entries are not visible here; check)"})
-    if sha and source.get("beta_failed") and not source.get("error"):
+    if sha and source.get("beta_state") == "failure" and not source.get("error"):
         out.append({"kind": "beta_failed", "key": sha[:8],
                     "summary": f"beta publish job failed on main {sha[:8]}; no beta-verify task until a re-run passes"})
     beta = source.get("latest_beta")

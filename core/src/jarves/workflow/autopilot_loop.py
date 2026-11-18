@@ -384,9 +384,10 @@ def _watch(store, profile_home, policy, stop, notify) -> list[dict]:
             out.append({"action": "manual_test_item", "task_id": name})
         for name in watch.gate_questions_step(store):
             out.append({"action": "gate_question", "task_id": name})
-        # ci_green comes from sync (main check-runs, read-only). A failed beta job means no beta to
-        # verify; the sha stays unrecorded so a passing re-run still gets its task (JAR-406).
-        if source.get("ci_green") and source.get("sha") and not source.get("beta_failed"):
+        # ci_green comes from sync (main check-runs, read-only). A beta that is running, cancelled,
+        # failed or unknown has nothing to verify yet; the sha stays unrecorded so a later passing
+        # run still gets its task. "none" = no beta run on the sha (JAR-406).
+        if source.get("ci_green") and source.get("sha") and source.get("beta_state") in ("success", "none"):
             import datetime
             day = datetime.datetime.fromtimestamp(store.clock(), datetime.timezone.utc).strftime("%Y-%m-%d")
             for name in watch.beta_step(store, policy, source["sha"], True, day,
