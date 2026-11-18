@@ -73,8 +73,11 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         if op == "reaffirm":
             return 200, {"ok": p.reaffirm(pid, by=by), "pref": pid}
         if op == "edit":
-            r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: new words, new confirm
-            return 200, {"ok": True, "pref": pid, "state": (r or {}).get("state", "proposed")}
+            p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)       # #206 H2: new words, new confirm
+            cur = p.get(pid)                                                       # the state as stored, not assumed
+            if not isinstance(cur, dict) or not cur.get("state"):
+                return 404, {"error": "no such preference"}
+            return 200, {"ok": True, "pref": pid, "state": cur["state"]}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}
