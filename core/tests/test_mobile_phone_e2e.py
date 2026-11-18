@@ -625,6 +625,34 @@ def test_phone_polish_halo_focus_ring_and_no_echo_of_drawer_commands(browser, ph
     assert page.errors == []
 
 
+@pytest.mark.parametrize("lang,locale", [("en", "en-US"), ("he", "he-IL")])
+def test_every_page_tab_label_is_fully_visible_at_390px(browser, phone, lang, locale):
+    """JAR-8 (#344): the English 'Approvals' tab (with its count badge) was clipped in the tab row. Every visible tab,
+    its label and badge must sit fully inside the tab list and the drawer panel, in English and Hebrew (RTL)."""
+    p = phone()
+    page = new_page(browser, locale=locale)
+    ui_pair(page, p)
+    p.ask("Send test message")
+    page.wait_for_selector("#apprCount:not([hidden])", state="attached", timeout=12000)  # the badge makes the Approvals tab the widest
+    page.tap("#menuBtn")
+    page.wait_for_selector("#drawer:not([hidden])")
+    page.wait_for_timeout(400)                                          # the slide-in animation has finished
+    bad = page.evaluate("""(() => { const out = [], nav = document.querySelector('#drawer .tabs'),
+        panel = document.querySelector('#drawer .drawer-panel'), n = nav.getBoundingClientRect(),
+        d = panel.getBoundingClientRect(), vw = document.documentElement.clientWidth;
+      if (nav.scrollWidth > nav.clientWidth + 1) out.push('tab list scrolls sideways');
+      for (const b of nav.querySelectorAll('[role=tab]:not([hidden])')) {
+        for (const e of [b, ...b.querySelectorAll('span:not([hidden])')]) {
+          const r = e.getBoundingClientRect();
+          if (r.left < Math.max(n.left, d.left, 0) - 1 || r.right > Math.min(n.right, d.right, vw) + 1
+              || e.scrollWidth > e.clientWidth + 1) out.push(b.dataset.tab + ':' + (e.id || e.dataset.t || 'button'));
+        } }
+      return out; })()""")
+    assert bad == []
+    assert page.evaluate("document.documentElement.dir") == ("rtl" if lang == "he" else "ltr")
+    assert page.errors == []
+
+
 # ------------------------------------------------------------------ V5 G5 (#185): mic / cloud-audio indicator, notice stop / snooze
 TRACKS = """(() => { const g = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices); window.__tracks = [];
   navigator.mediaDevices.getUserMedia = async (c) => { const s = await g(c); s.getTracks().forEach((t) => window.__tracks.push(t)); return s; }; })()"""

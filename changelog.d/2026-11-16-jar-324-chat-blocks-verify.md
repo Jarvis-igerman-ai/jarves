@@ -1,0 +1,1 @@
+- Added: a check report showing that checklists, cards, tables and choice buttons are drawn in the browser chat on main, with browser tests; the short form block and a voice test are still open (JAR-324).

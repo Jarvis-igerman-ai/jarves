@@ -541,9 +541,7 @@ class AgentBrain:
         logs.info("ai", "AI_REPLY", "agent replied", model_calls=len(raw), used_today=self.budget.used("ai_requests"),
                   duration_s=round(time.monotonic() - t0, 2), model=self.cfg.text_model, web_searches=searches,
                   **usage_fields(tokens))
-        answer = str(res.final_output or "").strip()
-        line = sources_line(cited, hebrew_label=bool(_HEBREW.search(answer)))
-        return f"{answer}\n\n{line}" if answer and line else answer
+        return with_sources(str(res.final_output or "").strip(), cited)
 
 
 def cited_urls(resp: Any) -> list[str]:
@@ -555,6 +553,12 @@ def cited_urls(resp: Any) -> list[str]:
 
 
 _HEBREW = re.compile("[\u0590-\u05ff]")
+
+
+def with_sources(answer: str, urls: list[str]) -> str:
+    """The answer plus a "Sources:" line (Hebrew label for a Hebrew answer); both AI routes use this (JAR-322)."""
+    line = sources_line(urls, hebrew_label=bool(_HEBREW.search(answer)))
+    return f"{answer}\n\n{line}" if answer and line else answer
 
 
 def sources_line(urls: list[str], limit: int = 3, *, hebrew_label: bool = False) -> str:

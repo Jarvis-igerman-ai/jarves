@@ -1,0 +1,1 @@
+- Added: monthly best-in-class scout (`core/tools/best_in_class_scout.py`, registry `docs/decisions/best_in_class.toml`): reports registry/code drift, overdue checks and, with `--online`, newer, missing or deprecated models and libraries from official OpenAI docs and PyPI (JAR-233).

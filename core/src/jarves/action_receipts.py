@@ -17,6 +17,7 @@ from typing import Callable
 from . import clilang, features as feat, logs
 from .approvals import append_audit
 from .channels_common import targets
+from .drive_mode import _file_lock
 
 FEATURE = "action_receipts"
 RECEIPT_FILE = "receipts/tool_receipts.jsonl"
@@ -24,6 +25,27 @@ KEEP = 100                                   # receipts kept in memory
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,60}$")
 _SAFE_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")        # result codes are UPPER_SNAKE; anything else is dropped
 ORIGINS = ("model", "user")
+LOCK_WAIT_S = 1.0                            # cross-process lock wait; on timeout the receipt is dropped (never the call)
+TAIL_BYTES = 8192                            # how much of the file end is read to find the last sequence
+
+
+def _last_seq(path: Path) -> int:
+    """The last valid `seq` in the file's tail (0 when none), so a new process or restart continues it (#1107)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, f.seek(0, 2) - TAIL_BYTES))
+            tail = f.read()
+    except OSError:
+        return 0
+    for raw in reversed(tail.splitlines()):
+        try:
+            row = json.loads(raw.decode("utf-8"))
+        except ValueError:                             # UnicodeDecodeError and JSONDecodeError are ValueErrors
+            continue
+        seq = row.get("seq") if isinstance(row, dict) else None
+        if isinstance(seq, int) and not isinstance(seq, bool) and seq > 0:
+            return seq
+    return 0
 
 
 class ReceiptLog:
@@ -39,15 +61,16 @@ class ReceiptLog:
         try:
             if not self.enabled():
                 return None
-            with self._lock:
-                self.seq += 1
+            path = self.home / RECEIPT_FILE
+            with self._lock, _file_lock(path, wait_s=LOCK_WAIT_S):     # Core and a text session share the file (#1107)
+                self.seq = max(self.seq, _last_seq(path) or _last_seq(path.with_suffix(".1.jsonl"))) + 1
                 rec = {"seq": self.seq, "ts": self.wall(),
                        "tool": tool if _SAFE_NAME.match(str(tool)) else "other",   # a model-chosen name never reaches the file
                        "ok": bool(ok), "code": code if _SAFE_CODE.match(str(code or "")) else "",
                        "origin": origin if origin in ORIGINS else "other", "ms": max(0, int(ms))}
                 self.receipts.append(rec)
                 del self.receipts[:-KEEP]
-                append_audit(self.home / RECEIPT_FILE, dict(rec))
+                append_audit(path, dict(rec))
             return rec
         except Exception:                                  # noqa: BLE001  a receipt problem never changes a tool result
             logs.warn("receipts", "RECEIPT_FAILED", "could not write a tool receipt")
@@ -63,13 +86,13 @@ def attach(registry, features, home) -> ReceiptLog:
 
 def read(home: Path, limit: int = 20) -> list[dict]:
     try:
-        lines = (Path(home) / RECEIPT_FILE).read_text(encoding="utf-8").splitlines()[-max(1, int(limit)):]
-    except (OSError, UnicodeDecodeError):
+        lines = (Path(home) / RECEIPT_FILE).read_bytes().splitlines()[-max(1, int(limit)):]
+    except OSError:
         return []
     out = []
     for line in lines:
         try:
-            row = json.loads(line)
+            row = json.loads(line.decode("utf-8"))     # line by line: one bad byte skips one line, not all (#1107)
         except ValueError:
             continue
         if isinstance(row, dict):

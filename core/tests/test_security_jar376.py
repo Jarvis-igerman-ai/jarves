@@ -17,7 +17,7 @@ def test_1096_github_workflows_are_protected():
 
 
 @pytest.mark.parametrize("path", [".GitHub/workflows/x.yml", ".Claude/settings.json", ".GIT/config", "sub/OpenCode.JSON",
-                                  ".githooks\\pre-commit", "./.mcp.json"])
+                                  ".githooks\\pre-commit", "./.mcp.json", "./.github/workflows/x.yml"])
 def test_1097_protected_check_ignores_case_and_separators(path):
     prot, _ = gitops.violations([path], ["*"])
     assert prot == [path]
