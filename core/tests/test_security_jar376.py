@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import subprocess
 import sys
-import time
 
 import pytest
 
@@ -17,7 +16,8 @@ def test_1096_github_workflows_are_protected():
 
 
 @pytest.mark.parametrize("path", [".GitHub/workflows/x.yml", ".Claude/settings.json", ".GIT/config", "sub/OpenCode.JSON",
-                                  ".githooks\\pre-commit", "./.mcp.json", "./.github/workflows/x.yml"])
+                                  ".githooks\\pre-commit", "./.mcp.json", "./.github/workflows/x.yml",
+                                  "src/../.github/workflows/x.yml"])
 def test_1097_protected_check_ignores_case_and_separators(path):
     prot, _ = gitops.violations([path], ["*"])
     assert prot == [path]
@@ -37,12 +37,13 @@ def test_1099_key_and_token_shaped_text_is_sensitive(text):
 
 @pytest.mark.parametrize("text", ["secret-ish title", "plan a secret party", "I like jazz in the morning", "call me Igal", "prefer short answers",
                                   "wake me at seven on weekdays", "internationalization matters",
-                                  "אני מפתח תוכנה", "תזכיר לי איפה מפתחות הבית", "I like board games with tokens"])
+                                  "אני מפתח תוכנה", "תזכיר לי איפה מפתחות הבית", "I like board games with tokens",
+                                  "my uncle was a pallbearer"])
 def test_1099_ordinary_preferences_are_not_sensitive(text):
     assert not looks_sensitive(text)
 
 
-def test_1098_recovery_kills_only_the_same_process(tmp_path):
+def test_1098_recovery_kills_only_the_same_process():
     from jarves.projectmgr import engine
     from jarves.projectmgr.service import _kill_pid
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
@@ -51,7 +52,6 @@ def test_1098_recovery_kills_only_the_same_process(tmp_path):
         assert tok
         assert _kill_pid(p.pid, "999999") == "reused"     # a recycled pid (different start) is left alone
         assert _kill_pid(p.pid, "") == "unknown"          # no stored identity: never kill blind
-        time.sleep(0.2)
         assert p.poll() is None
         assert _kill_pid(p.pid, tok) == "killed"          # the same process: stopped
         assert p.wait(5) is not None
@@ -195,3 +195,35 @@ def test_206_h2_phone_edit_reports_the_stored_state():
         mob = SimpleNamespace(bridge=None, _prefs=P(after))
         st, body = mobile_prefs.action(mob, {"op": "edit", "pref": 1, "text": "short answers"}, "dev")
         assert (st, body.get("state")) == want
+
+
+def test_1098_windows_taskkill_failure_is_not_stopped(pm, monkeypatch):
+    """taskkill exits non-zero (access denied) while the same process still runs: Stop must not claim it stopped."""
+    from jarves.projectmgr import engine, service
+    calls = []
+    monkeypatch.setattr(service, "_WINDOWS", True)
+    monkeypatch.setattr(engine, "proc_token", lambda pid: "T1")
+    monkeypatch.setattr(service.subprocess, "run", lambda argv, **k: calls.append(argv) or
+                        subprocess.CompletedProcess(argv, 1, "", "Access is denied."))
+    tid = _running_task(pm, 4242, "T1")
+    r = pm.call("stop_agent", project="demo")
+    assert calls and calls[0][0] == "taskkill"
+    assert r["ok"] is False and r["code"] == "NOT_STOPPED" and r["stopped"] == []
+    assert "stop_unverified" in [e["kind"] for e in pm.db.events(tid)]
+    seq = iter(["T1", ""])
+    monkeypatch.setattr(engine, "proc_token", lambda pid: next(seq))              # taskkill failed, but it is gone now
+    assert service._kill_pid(4242, "T1") == "gone"
+
+
+def test_1098_unreadable_identity_is_unknown_not_gone(monkeypatch):
+    from jarves.projectmgr import engine, service
+    monkeypatch.setattr(engine, "proc_token", lambda pid: engine.UNREADABLE)
+    assert service._kill_pid(4242, "T1") == "unknown"
+    assert service._kill_pid(4242, engine.UNREADABLE) == "unknown"
+
+
+def test_1098_proc_token_of_a_missing_pid_is_gone():
+    from jarves.projectmgr import engine
+    p = subprocess.Popen([sys.executable, "-c", "pass"])
+    p.wait(10)
+    assert engine.proc_token(p.pid) == ""                                         # reaped: gone, not UNREADABLE

@@ -23,9 +23,13 @@ from . import cards, debate as debatemod, gitops, pipeline as pl
 STAGE_RUNS_PER_STAGE = 3                  # a task may run at most 3 x (active stages) stages in total (no ping-pong)
 
 
+UNREADABLE = "?"                          # proc_token: the process exists but its identity cannot be read
+
+
 def proc_token(pid: int) -> str:
-    """Identity of a live process: its start time (#1098). '' when it is gone or cannot be read; a stored pid is killed
-    only when this still matches, so a pid the OS reused for another program is never touched."""
+    """Identity of a live process: its start time (#1098). '' when it is gone, UNREADABLE when it exists but cannot be
+    read; a stored pid is killed only when this still matches, so a pid the OS reused for another program is never
+    touched."""
     try:
         if os.name == "nt":
             import ctypes
@@ -35,20 +39,22 @@ def proc_token(pid: int) -> str:
             k.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
             h = k.OpenProcess(0x1000, False, int(pid))             # PROCESS_QUERY_LIMITED_INFORMATION
             if not h:
-                return ""
+                return "" if ctypes.get_last_error() == 87 else UNREADABLE   # 87 = no such process
             try:
                 ft = [wintypes.FILETIME() for _ in range(4)]
                 ok = k.GetProcessTimes(h, *[ctypes.byref(f) for f in ft])
-                return f"{ft[0].dwHighDateTime}:{ft[0].dwLowDateTime}" if ok else ""
+                return f"{ft[0].dwHighDateTime}:{ft[0].dwLowDateTime}" if ok else UNREADABLE
             finally:
                 k.CloseHandle(h)
-        stat = Path(f"/proc/{int(pid)}/stat")
-        if stat.exists():
-            return stat.read_text().rsplit(")", 1)[1].split()[19]   # field 22: start time since boot
+        if Path("/proc/self/stat").exists():
+            stat = Path(f"/proc/{int(pid)}/stat")
+            return stat.read_text().rsplit(")", 1)[1].split()[19] if stat.exists() else ""   # field 22: start time
         r = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True, text=True, timeout=5)
-        return " ".join(r.stdout.split())
+        return " ".join(r.stdout.split()) if r.stdout.strip() or r.returncode == 1 else UNREADABLE   # ps: 1 = no such pid
+    except FileNotFoundError:                                          # /proc entry vanished between check and read
+        return "" if os.name != "nt" and Path("/proc/self/stat").exists() else UNREADABLE
     except (OSError, IndexError, ValueError, subprocess.SubprocessError, AttributeError):
-        return ""
+        return UNREADABLE
 
 
 class StageEngine:

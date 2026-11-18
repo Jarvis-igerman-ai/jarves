@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -176,10 +177,9 @@ def in_scope(path: str, scope: list[str]) -> bool:
 
 
 def is_protected(path: str) -> bool:
-    """True for a file an agent may never change, in any letter case and with either slash; `./` prefixes ignored."""
-    p = path.replace("\\", "/").casefold()
-    while p.startswith("./"):
-        p = p[2:]
+    """True for a file an agent may never change, in any letter case and with either slash; `./` and `..` segments
+    are normalised first (`src/../.github/x` is `.github/x`)."""
+    p = posixpath.normpath(path.replace("\\", "/").casefold())
     return p.startswith(PROTECTED) or p.split("/")[-1] in PROTECTED_NAMES
 
 
