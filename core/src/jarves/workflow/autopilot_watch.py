@@ -345,8 +345,8 @@ FACTORY_SIM_STALE_S = 36 * 3600
 def factory_sim_alerts(home, now: float | None = None) -> list[dict]:
     """Dashboard alerts from the nightly factory simulation result (#757): a failing scenario, or no run for 36 h.
 
-    Reads <home>/factory_sim_last.json written by core/tools/factory_sim.py --nightly. No file = no alert
-    (the schedule is not installed yet; absence is not a failure).
+    Reads <home>/factory_sim_last.json written by core/tools/factory_sim.py --nightly. No file = a
+    factory_sim_missing alert, so an uninstalled schedule is visible (#897).
     """
     try:
         return _factory_sim_alerts(home, now)
@@ -362,7 +362,8 @@ def _factory_sim_alerts(home, now):
     from pathlib import Path
     path = Path(home) / "factory_sim_last.json"
     if not path.exists():
-        return []
+        return [{"kind": "factory_sim_missing", "summary": "Nightly factory simulation has never run: install the"
+                 " schedule (python core/tools/factory_sim.py --schedule-command)", "task_id": None, "agent_id": None}]
     data = json.loads(path.read_text(encoding="utf-8"))
     at = float(data.get("at") or 0)
     if data.get("ok") is not True:
