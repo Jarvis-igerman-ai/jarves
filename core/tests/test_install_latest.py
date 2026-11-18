@@ -13,7 +13,8 @@ NOW = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
 
 
 class Fake:
-    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False):
+    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False, versions=None):
+        self.versions = list(versions or [])                # what the running Core reports, one value per ask
         self.tmp, self.launch_error, self.installer_exits, self.spawn = tmp, launch_error, installer_exits, spawn
         self.calls: list = []
         self.available, self.error, self.core, self.wait_end = available, error, core, wait
@@ -63,6 +64,10 @@ class Fake:
         def publish(pid):
             self.calls.append(f"pid={pid}")
 
+        def core_version():
+            self.calls.append("core_version")
+            return self.versions.pop(0) if self.versions else "4.5.1-beta.9"
+
         return il.Deps(
             home=self.tmp, start_core=rec("start_core"), wait_installer=wait_installer,
             spawn_finisher=spawn if self.spawn else None, publish_pid=publish,
@@ -73,15 +78,15 @@ class Fake:
             record_was_running=rec("record"), stop_core=rec("stop"),
             launch=launch,
             wait=lambda c: self.wait_end, run_cli=run_cli, rollback=rec("rollback", {}),
-            now=lambda: NOW)
+            core_version=core_version, now=lambda: NOW)
 
 
 def test_happy_path_order_and_report(tmp_path):
     f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
-    assert f.calls[:9] == ["backup", "prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
-                           "wait_installer", "cli:update status"]
+    assert f.calls[:10] == ["backup", "prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
+                           "wait_installer", "core_version", "cli:update status"]
     assert [c for c in f.calls if c.startswith("cli:")] == ["cli:features", "cli:update status", "cli:doctor",
                                                             "cli:selftest", "cli:speedtest", "cli:status --brief",
                                                             "cli:features"]
@@ -423,3 +428,52 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
     f = Fake(tmp=tmp_path, cli={"features": (1, "boom")})
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and ("features diff", True, "not compared (no feature list before)") in rep.checks
+
+
+def test_silent_install_restarts_the_core_on_the_new_version(tmp_path):
+    # setup did not bring the Core back (no ready mark in time): finish starts it from the new program and checks it
+    f = Fake(tmp=tmp_path, wait="timeout", versions=[None, "4.5.1-beta.9"])
+    rep = il.run(f.deps())
+    assert rep.ok and not rep.rolled_back and "rollback" not in f.calls
+    assert f.calls.index("launch restart=True") < f.calls.index("start_core") < f.calls.index("cli:update status")
+    assert ("Core on the new version", True, "restarted on 4.5.1-beta.9") in rep.checks
+    g = Fake(tmp=tmp_path, versions=["4.5.0"])            # the OLD Core still answers: stop it, start the new one
+    assert il.run(g.deps()).ok and g.calls.index("start_core") > g.calls.index("launch restart=True")
+    assert g.calls.count("stop") == 2
+
+
+def test_core_that_does_not_come_back_on_the_new_version_rolls_back(tmp_path):
+    f = Fake(tmp=tmp_path, wait="timeout", versions=[None, None])
+    rep = il.run(f.deps())
+    assert not rep.ok and rep.rolled_back and "start_core" in f.calls
+    assert ("Core on the new version", False, "after restart: not running") in rep.checks
+    g = Fake(tmp=tmp_path, versions=["4.5.0", "4.5.0"])
+    assert not il.run(g.deps()).ok and "rollback" in g.calls
+    h = Fake(tmp=tmp_path)
+    d = h.deps()
+    d.start_core = lambda: (_ for _ in ()).throw(OSError("spawn"))
+    h.versions = [None]
+    rep = il.run(d)
+    assert not rep.ok and ("Core on the new version", False, "restart failed: OSError") in rep.checks
+
+
+def test_core_already_on_the_new_version_is_not_restarted(tmp_path):
+    f = Fake(tmp=tmp_path)
+    rep = il.run(f.deps())
+    assert rep.ok and "start_core" not in f.calls and f.calls.count("stop") == 1
+    assert ("Core on the new version", True, "4.5.1-beta.9") in rep.checks
+    g = Fake(tmp=tmp_path, core=False)                     # the Core was not running: it is not started
+    assert il.run(g.deps()).ok and "core_version" not in g.calls and "start_core" not in g.calls
+
+
+def test_real_core_version_and_start_core_wiring(tmp_path, monkeypatch):
+    from jarves import cli
+    from jarves.config import Config
+    seen = []
+    monkeypatch.setattr(cli, "cmd_start", lambda a, cfg, home: seen.append(a.wait) or 0)
+    replies = iter([{"version": "4.5.1"}, None, ["not", "a", "dict"]])
+    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: next(replies))
+    d = il.real_deps(argparse.Namespace(), Config(), tmp_path)
+    d.start_core()
+    assert seen and seen[0] > 0                            # cmd_start reads a.wait: it must be there
+    assert [d.core_version(), d.core_version(), d.core_version()] == ["4.5.1", None, None]
