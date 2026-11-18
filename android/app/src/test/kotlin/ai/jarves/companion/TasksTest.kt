@@ -125,12 +125,22 @@ class TasksTest {
     }
 
     @Test
-    fun eachStatusTickIsANewLinkSoTheCardReadsAgain() {
+    fun eachStatusAnswerIsADistinctLinkValue() {
+        // Only the value inequality is checked here; that LaunchedEffect(session.token, link) re-runs on it is Compose behaviour, not tested on the JVM.
         fun info(t: Double) = """{"api":1,"api_min":1,"core_version":"4","server_time":$t,"pc":{"state":"online","core":"running"},"scopes":["tasks"]}"""
         val a = CompanionClient("pc:1", PlansRec(body = info(1.0))).check("t")
         val b = CompanionClient("pc:1", PlansRec(body = info(11.0))).check("t")
         assertTrue(a is Link.Online)
         assertNotEquals(a, b)                                // the PC sends time.time() per answer (mobile_companion.py)
+    }
+
+    @Test
+    fun everyTaskStringIncludingTheUntitledPlaceholderExistsInEnglishAndHebrew() {
+        fun names(dir: String) = Regex("""<(?:string|plurals) name="(task_[a-z_]+)"""")
+            .findAll(java.io.File("src/main/res/$dir/strings.xml").readText()).map { it.groupValues[1] }.toSet()
+        val en = names("values")
+        assertTrue("task_untitled" in en)
+        assertEquals(en, names("values-he"))
     }
 
     @Test

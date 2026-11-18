@@ -132,7 +132,7 @@ fun TasksCard(session: Session, link: Link.Online, model: TasksModel) {
             Text(stringResource(R.string.task_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             when (val l = st) {
                 is Plans.Listed -> if (!l.enabled) Text(stringResource(R.string.task_off)) else if (l.plans.isEmpty()) Text(stringResource(R.string.task_none)) else l.plans.forEach { p ->
-                    Text(p.title.ifBlank { "…" }, style = MaterialTheme.typography.bodyLarge)
+                    Text(p.title.ifBlank { stringResource(R.string.task_untitled) }, style = MaterialTheme.typography.bodyLarge)
                     Text(
                         pluralStringResource(R.plurals.task_line, p.steps, stringResource(taskStateText(p.state)), p.stepsDone, p.steps, p.progress),
                         style = MaterialTheme.typography.bodyMedium,

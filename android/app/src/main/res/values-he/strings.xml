@@ -107,6 +107,7 @@
     <string name="task_loading">קוראים את המשימות…</string>
     <string name="task_off">המשימות כבויות במחשב.</string>
     <string name="task_none">אין משימות כרגע.</string>
+    <string name="task_untitled">משימה ללא שם</string>
     <string name="task_unreachable">לא הצלחנו לקרוא את המשימות. הן מתרעננות לבד.</string>
     <plurals name="task_line">
         <item quantity="one">%1$s · %2$d מתוך %3$d צעד הושלם · %4$d%%</item>
