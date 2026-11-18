@@ -477,3 +477,43 @@ def test_real_core_version_and_start_core_wiring(tmp_path, monkeypatch):
     d.start_core()
     assert seen and seen[0] > 0                            # cmd_start reads a.wait: it must be there
     assert [d.core_version(), d.core_version(), d.core_version()] == ["4.5.1", None, None]
+
+
+def test_core_version_with_no_core_is_none_so_the_core_is_still_started(tmp_path, monkeypatch):
+    import socket
+    from jarves import cli
+    from jarves.config import Config
+    cfg = Config()
+    with socket.socket() as so:                            # a local port nothing listens on: the connection is refused
+        so.bind(("127.0.0.1", 0))
+        cfg.link.port = so.getsockname()[1]
+    (tmp_path / "link_token").write_text("t", encoding="utf-8")
+    real = il.real_deps(argparse.Namespace(), cfg, tmp_path)
+    assert real.core_version() is None                    # the real _ws_call, refused: None, not an exception
+
+    answers = iter([ConnectionRefusedError("refused"), {"version": "4.5.1-beta.9"}])
+
+    def ws(*a, **k):                                       # raises before the restart, answers after it
+        x = next(answers)
+        if isinstance(x, Exception):
+            raise x
+        return x
+    monkeypatch.setattr(cli, "_ws_call", ws)
+    f = Fake(tmp=tmp_path, wait="timeout")
+    d = f.deps()
+    d.core_version = real.core_version
+    rep = il.run(d)
+    assert rep.ok and "start_core" in f.calls and ("Core on the new version", True, "restarted on 4.5.1-beta.9") in rep.checks
+
+
+def test_real_start_core_reaches_the_spawn_with_its_namespace(tmp_path, monkeypatch):
+    import time
+    from jarves import cli
+    from jarves.config import Config
+    spawned, t = [], [0.0]
+    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: None)                  # the Core is down
+    monkeypatch.setattr(cli, "_background_spawn", lambda home, show: spawned.append(show))
+    monkeypatch.setattr(time, "sleep", lambda s: t.__setitem__(0, t[0] + 100))
+    monkeypatch.setattr(time, "monotonic", lambda: t[0])
+    il.real_deps(argparse.Namespace(), Config(), tmp_path).start_core()          # the real cmd_start: no AttributeError
+    assert spawned == [False]

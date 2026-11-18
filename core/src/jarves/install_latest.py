@@ -10,7 +10,8 @@ Two phases, because setup force-stops every process that runs from {app}\\python
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
     waits for the setup PROCESS to exit and starts phase two.
   finish (`install-latest --finish STATE`, started by the waiter from the NEW program, never while setup runs): waits for
-    the new Core when it ran and, if the Core is gone or still the old version, starts it again on the new one; then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
+    the new Core when it ran and, if the Core is gone or still the old version, starts it again on the new one; then
+    runs version check, doctor, selftest and status in fresh processes, rolls back by itself
     when a check fails, writes the ONE short report to <home>/updates/install-latest-report.txt and prints it.
   `jarvis install-latest --report` prints the last report again (the first process is gone after setup stopped it).
 
@@ -545,10 +546,13 @@ def real_deps(a, cfg, home: Path) -> Deps:
             proc.pop("p", None)                           # the waiter owns the wait from here on
 
     def start_core() -> None:
-        cli.cmd_start(argparse.Namespace(show=False, wait=60.0), cfg, home)   # cmd_start reads a.wait
+        cli.cmd_start(argparse.Namespace(show=False, wait=90), cfg, home)   # the `jarvis start` defaults
 
     def core_version() -> str | None:
-        st = cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+        try:                                              # _ws_call returns None when no Core answers; guard anyway
+            st = cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
+        except OSError:                                   # refused / timed out: no Core, so it gets started
+            return None
         return str(st["version"]) if isinstance(st, dict) and st.get("version") else None
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
