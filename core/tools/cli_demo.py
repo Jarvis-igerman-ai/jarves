@@ -21,7 +21,8 @@ from xml.sax.saxutils import escape
 
 MAX_LINES, MAX_COLS, MAX_WHAT = 60, 120, 200
 GROUP_RE = re.compile(r"[a-z][a-z0-9-]{0,29}")
-ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-_]")
+# CSI; OSC/DCS/SOS/PM/APC strings with their payload (to BEL or ST); any other 2-byte escape
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[\]PX^_][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-_]")
 CHILD_TIMEOUT = 60
 
 
@@ -62,16 +63,20 @@ def capture_help(group: str, run=subprocess.run) -> str:
 
 
 def _one_line(name: str, v, limit: int) -> str:
-    if not isinstance(v, str) or not v.strip() or "\n" in v or "\r" in v or len(v) > limit:
+    if not isinstance(v, str) or not v.strip() or not v.isprintable() or len(v) > limit:  # no line break/control
         raise ValueError(f"{name} must be one non-empty line of at most {limit} characters")
     return v.strip()
 
 
-def write_demo(out: Path, pr, title, what_changed, files) -> Path:
+def demo_fields(pr, title, what_changed) -> dict:
     if not isinstance(pr, int) or isinstance(pr, bool) or pr <= 0:
         raise ValueError("pr must be a positive integer")
-    data = {"pr": pr, "title": _one_line("title", title, 300),
+    return {"pr": pr, "title": _one_line("title", title, 300),
             "what_changed": _one_line("what_changed", what_changed, MAX_WHAT), "files": []}
+
+
+def write_demo(out: Path, pr, title, what_changed, files) -> Path:
+    data = demo_fields(pr, title, what_changed)
     for f in files:
         if not isinstance(f, str) or Path(f).name != f or not (out / f).is_file():
             raise ValueError(f"file must be an existing plain name inside the demo folder: {str(f)[:80]!r}")
@@ -99,6 +104,7 @@ def main(argv=None) -> int:
         groups = a.group if a.group is not None else [""]
         for g in groups:  # validate every name before writing anything
             check_group(g)
+        demo_fields(a.pr, a.title, a.what)  # ... and every demo.json field
         a.out.mkdir(parents=True, exist_ok=True)
         files = []
         for g in groups:
