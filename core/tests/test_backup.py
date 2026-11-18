@@ -432,3 +432,19 @@ def test_installer_checkpoint_reuse_refused(profile, monkeypatch, note, age_s):
     backup.checkpoint(profile, note)
     clock[0] += age_s
     assert backup._reusable_installer_checkpoint(profile) is None
+
+
+def test_checkpoints_zero_still_keeps_the_newest_rollback_point(profile, monkeypatch, capsys):
+    """#1016 review R2: `backup settings --checkpoints 0` then prune keeps one pre-migration backup (prune clamps to 1)."""
+    import argparse
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    made = []
+    for _ in range(3):
+        made.append(backup.checkpoint(profile, "migration"))
+        clock[0] += 10
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--checkpoints", "0"]), None, profile) == 0
+    backup.prune(profile)
+    assert [b["name"] for b in backup.list_backups(profile)] == [made[-1].name]

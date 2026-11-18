@@ -126,7 +126,7 @@ class VerdictTests(Base):
 
     def test_running_tasks_count_while_their_worker_heartbeat_is_quiet(self):
         """#796 item 4: 2 running native tasks + 169 queued read as working with 2 running, even when the workers'
-        own heartbeat is older than the freshness window but their tasks just recorded progress."""
+        own heartbeat is older than the freshness window but their tasks just recorded acceptance evidence."""
         self.alive()
         for i in range(171):
             self.store.create_task({"id": f"t{i}", "title": f"Task {i}", "lane": "bugs", "acceptance": [{"label": "works"}]})
@@ -143,7 +143,7 @@ class VerdictTests(Base):
         self.assertEqual((kind, v["detail"]["active"], v["detail"]["running_by_lane"], v["detail"]["ready"]),
                          ("working", 2, {"bugs": 2}, 169))
 
-    def test_offline_worker_task_does_not_count_even_with_fresh_progress(self):
+    def test_offline_worker_task_does_not_count_even_with_fresh_evidence(self):
         """#796 review R2: a task whose claiming worker (task.agent_id) went offline is a stall, not work."""
         self.alive()
         self.store.create_task({"id": "t1", "title": "Task t1", "lane": "bugs", "acceptance": [{"label": "works"}]})
@@ -154,7 +154,7 @@ class VerdictTests(Base):
             agent = self.store._get(db, "agent", "w1")
             agent["status"] = "offline"
             self.store._put(db, "agent", agent)
-        self.store.record_check("t1", "C1", "test passed")  # fresh updated_at on the running task
+        self.store.record_check("t1", "C1", "test passed")  # fresh acceptance evidence on the running task
         with self.store._tx() as db:
             self.assertEqual(self.store._get(db, "task", "t1")["state"], "running")
         self.assertEqual(self.kind()[1]["detail"]["active"], 0)
