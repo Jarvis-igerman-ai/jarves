@@ -1,0 +1,43 @@
+order = 28
+category = "everyday"
+pages = ["whatsapp"]
+features = []
+aliases = ["איסוף הודעות וואטסאפ", "דוח תשלומים מוואטסאפ", "whatsapp collect", "collect payment messages"]
+links = ["whatsapp_archive", "whatsapp_bridge"]
+error_codes = ["WA_ARCHIVE_OFF", "WA_BAD_DATE", "WA_AMBIGUOUS", "WA_UNKNOWN_CONTACT"]
+title_he = "איסוף הודעות וואטסאפ לפי נושא לדוח (בטא)"
+title_en = "Collect WhatsApp messages on a topic into a report (beta)"
+what_he = "אוסף מהארכיון כל הודעה על נושא, למשל תשלומים, גם עם מילים נרדפות (תשלום, שילמתי, העברה, ביט, פייבוקס, שח). אפשר לבחור אנשי קשר, ואז נכנסות גם הודעות בצ'אטים אחרים שמזכירים אותם. לכל הודעה: תאריך, צ'אט, שולח, סכום בשקלים, אמצעי תשלום וציטוט קצר. שורה בלי סכום ודאי מסומנת כלא ודאית. התוצאה נשמרת בתיקיית הדוחות כקובץ CSV וסיכום קצר בעברית."
+what_en = "Gathers every archived message on a topic, for example payments, including synonyms (payment, paid, transfer, Bit, PayBox, NIS in Hebrew). You can pick contacts; messages in other chats that mention them are included. Each message gets date, chat, sender, amount in ILS, payment method and a short quote. A row without a sure amount is flagged uncertain. The result is saved in the reports folder as a CSV file and a short Hebrew summary."
+test_he = "jarvis whatsapp collect payment מדפיס סיכום ושמות קבצים בתיקיית הדוחות."
+test_en = "jarvis whatsapp collect payment prints a summary and the file names in the reports folder."
+cost_he = "חינם. הכל מקומי, לפי כללים, בלי מודל AI."
+cost_en = "Free. Everything is local and rule-based, with no AI model."
+privacy_he = "קורא רק את הארכיון המוצפן ורק צ'אטים קריאים. טקסט ההודעות נחשב לא אמין ולא מופעל. קובץ הדוח במחשב הזה אינו מוצפן: שמרו אותו במקום בטוח ומחקו כשסיימתם."
+privacy_en = "Reads only the encrypted archive and only readable chats. Message text is untrusted and never acted on. The report file on this computer is not encrypted: keep it somewhere safe and delete it when done."
+
+[[steps]]
+he = "הארכיון חייב להיות פעיל (המדריך \"ארכיון וואטסאפ\"): jarvis whatsapp archive status."
+en = "The archive must be on (the \"WhatsApp archive\" guide): jarvis whatsapp archive status."
+action = "command:jarvis whatsapp archive status"
+
+[[steps]]
+he = "איסוף: jarvis whatsapp collect payment --from \"דנה\" --from \"בוב\" (אפשר גם --chat, --since 2026-01-01 ו---format md). ברירת המחדל: כל הזמן."
+en = "Collect: jarvis whatsapp collect payment --from \"Dana\" --from \"Bob\" (also --chat, --since 2026-01-01 and --format md). Default: all time."
+action = "command:jarvis whatsapp collect payment"
+
+[[steps]]
+he = "פתחו את קובץ ה-CSV מתיקיית הדוחות ובדקו קודם את השורות שמסומנות כלא ודאיות. לכיבוי: פשוט לא מריצים את הפקודה."
+en = "Open the CSV from the reports folder and check the rows flagged uncertain first. To turn it off: just do not run the command."
+
+[[problems]]
+he = "כתוב שהארכיון כבוי"
+en = "It says the archive is off"
+fix_he = "האיסוף קורא רק את הארכיון: jarvis whatsapp archive on."
+fix_en = "Collect reads only the archive: jarvis whatsapp archive on."
+
+[[problems]]
+he = "חסרות הודעות שבהן מופיע רק סכום"
+en = "Messages with only an amount are missing"
+fix_he = "החיפוש לפי מילים; הודעה עם מספר בלבד בלי מילה מהרשימה או סימן שקל במילים לא נמצאת. חפשו גם בעצמכם: jarvis whatsapp search."
+fix_en = "Search is by words; a message with only a number and no listed word or shekel word is not found. Also search yourself: jarvis whatsapp search."

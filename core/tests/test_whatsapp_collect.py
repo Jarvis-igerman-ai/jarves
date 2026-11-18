@@ -8,6 +8,7 @@ import pytest
 
 from jarves import whatsapp_archive as arc
 from jarves import whatsapp_collect as wc
+from whatsapp_fixtures import bridge, clock  # noqa: F401
 
 DANA, BOB, SPOUSE = "d@s.whatsapp.net", "b@s.whatsapp.net", "s@s.whatsapp.net"
 NAMES = {DANA: "דנה כהן", BOB: "בוב", SPOUSE: "בית"}
@@ -68,3 +69,23 @@ def test_bad_topic_and_format_are_refused(archive):
         wc.collect(archive, "  ", names=NAMES)
     with pytest.raises(ValueError):
         wc.write_report(archive.home, {"rows": [], "totals": {}, "uncertain": 0}, "x", stamp="s", fmt="xlsx")
+
+
+def test_cli_collect_needs_the_archive_and_writes_the_report(bridge, home, capsys):
+    from jarves import cli
+    from jarves.config import Config
+    from jarves.features import Features
+    from whatsapp_fixtures import BOB as FB, DANA as FD
+    a = arc.Archive(home, use_dpapi=False, clock=lambda: T0)
+    arc._REG[str(home.resolve())] = a
+    try:
+        assert cli.main(["whatsapp", "collect", "payment"]) == 1 and "WA_ARCHIVE_OFF" in capsys.readouterr().out
+        Features(Config(), home).set(arc.FEATURE, True, by="test")
+        a.add([m("c1", FD, "שילמתי 300 ₪", T0, me=True), m("c2", FB, "תשלום 50 שח", T0 + 1)])
+        assert cli.main(["whatsapp", "collect", "payment", "--from", "דנה כהן", "--json"]) == 0
+        out = capsys.readouterr().out
+        assert '"rows": 1' in out and '"דנה כהן": 300.0' in out and (home / "reports").is_dir()
+        assert cli.main(["whatsapp", "collect", "payment", "--since", "banana"]) == 2
+    finally:
+        a.close()
+        arc._REG.pop(str(home.resolve()), None)
