@@ -386,27 +386,55 @@ def test_core_busy_reads_the_core_state():
     assert set(auto_update.core_busy(c)) == {"voice_session", "listening", "pending_approval", "chat_turn", "quiet_hours"}
 
 
-def test_busy_probe_error_defers_the_restart(home, server, keys):
-    """JAR-316: an approval probe that raises must not read as 'nothing pending' (fail closed, not open)."""
-    class Appr:
-        def has_pending(self):
-            raise RuntimeError("approval store unreadable")
+class _ProbeAppr:
+    def __init__(self):
+        self.raise_ = True
 
+    def has_pending(self):
+        if self.raise_:
+            raise RuntimeError("approval store unreadable")
+        return False
+
+
+def _probe_core(appr):
     class Core:
         live, listening, stopping = None, False, False
-        approvals = Appr()
+        approvals = appr
         chat = type("C", (), {"turns": {}})()
         ops = type("O", (), {"alerts": type("E", (), {"quiet_now": lambda s: False, "paused": lambda s: False})()})()
-    assert auto_update.core_busy(Core()) == ["approval_probe_failed"]
+    return Core()
+
+
+def test_busy_probe_error_defers_the_restart(home, server, keys):
+    """JAR-316: an approval probe that raises must not read as 'nothing pending' (fail closed, not open)."""
+    appr = _ProbeAppr()
+    core = _probe_core(appr)
+    assert auto_update.core_busy(core) == ["approval_probe_failed"]
     server.publish(keys, NEW)
     r = Rig(home, server, keys)
-    r.au.busy = lambda: auto_update.core_busy(Core())
+    r.au.busy = lambda: auto_update.core_busy(core)
     r.ready()
     assert r.tick() == "busy" and r.launched == []
     assert r.au.status()["busy"] == ["approval_probe_failed"]
-    Appr.has_pending = lambda self: False               # the probe works again and nothing is pending
-    assert auto_update.core_busy(Core()) == []
+    appr.raise_ = False                                  # the probe works again and nothing is pending
+    assert auto_update.core_busy(core) == []
     assert r.tick(60) == "installing" and len(r.launched) == 1
+
+
+def test_busy_probe_error_is_logged_once_per_outage(monkeypatch):
+    warned = []
+    monkeypatch.setattr(auto_update.logs, "warn", lambda *a, **k: warned.append((a[1], k.get("where"))))
+    monkeypatch.setattr(auto_update, "_failing", set())
+    appr = _ProbeAppr()
+    core = _probe_core(appr)
+    auto_update.core_busy(core)
+    auto_update.core_busy(core)                          # the same outage: no second warning
+    assert warned == [("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")]
+    appr.raise_ = False
+    assert auto_update.core_busy(core) == []             # recovery re-arms the warning
+    appr.raise_ = True
+    assert auto_update.core_busy(core) == ["approval_probe_failed"]
+    assert len(warned) == 2
 
 
 def test_dashboard_api_switch_answer_and_channel(home):
