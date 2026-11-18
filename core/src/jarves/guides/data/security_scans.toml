@@ -46,6 +46,12 @@ fix_he = "אין לה הרשאה לקרוא מקור אחד (למשל התראו
 fix_en = "It is not allowed to read one source (for example Dependabot or secret alerts). That does not mean there are no findings. Run locally with your own login (gh auth login with the security_events scope) or give the token security-events: read."
 
 [[problems]]
+he = "ב-Issue יש שורת Owner action או Retry note"
+en = "The issue shows an Owner action or a Retry note line"
+fix_he = "שורת Owner action אומרת מה לעשות כש-GitHub סירב לקרוא מקור: HTTP 401 - להגדיר טוקן תקין; 403/404 בהתראות - להדליק את התכונה או לתת לטוקן הרשאת קריאה; 403/404 בהרצות workflow - לתת לטוקן הרשאת קריאה ל-Actions. שורת Retry note (למשל HTTP 429 או 503) לא דורשת פעולה: הסריקה הבאה מנסה שוב. היא תמונת מצב מהעדכון האחרון של ה-Issue, כי ה-Issue מתעדכן רק כשהממצאים או המקורות המסורבים משתנים. למצב עדכני: jarvis scans status."
+fix_en = "An Owner action line says what to do when GitHub refused to read a source: HTTP 401 - set a valid token; 403/404 on alerts - turn the feature on or give the token read access; 403/404 on workflow runs - give the token Actions read access. A Retry note line (for example HTTP 429 or 503) needs no action: the next scan retries. It is a snapshot from the last rewrite of the issue, because the issue is rewritten only when the findings or the refused sources change. For the current state: jarvis scans status."
+
+[[problems]]
 he = "הסריקה אומרת offline או failed ולא רצה"
 en = "The scan says offline or failed"
 fix_he = "אין רשת או ש-GitHub לא ענה. שום דבר לא נכתב. היא תנסה שוב לבד אחרי חצי שעה, ואז אחרי שעתיים ואז אחרי שש שעות. לניסיון מיידי: jarvis scans run."

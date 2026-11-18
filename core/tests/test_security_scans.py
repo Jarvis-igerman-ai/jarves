@@ -256,6 +256,18 @@ def test_issue_480_other_http_failures_get_a_retry_line_without_changing_the_sig
     assert ss.signature([], False, ss.refused_sources(cov)) == LIVE_480_SIG   # transient codes do not flap the tracker
 
 
+def test_issue_480_any_refusal_reaches_the_owner_action_branch():
+    """Pins the coupling: owner lines are written only for incomplete coverage, so every refusal must make it incomplete."""
+    for src in ss.ALERT_SOURCES + ss.RUN_SOURCES + ("future_source",):
+        for code in (401, 403, 404):
+            cov = {"code_scanning": "complete", "local_diagnostics": "skipped:no_local_registry",
+                   src: f"incomplete:http_{code}"}
+            assert ss.refused_sources(cov) == {src: f"http_{code}"}
+            body = ss.tracker_body([], cov, 0, "s", "full")
+            assert "never read as zero" in body
+            assert any(ln.startswith(f"Owner action (HTTP {code}: {src})") for ln in body.splitlines())
+
+
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
     old_sig = LIVE_480_SIG
     gh = FakeGitHub(access=False)
