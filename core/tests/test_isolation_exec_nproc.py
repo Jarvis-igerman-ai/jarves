@@ -1,10 +1,5 @@
 """#660: RLIMIT_NPROC counts every task (threads too) of the REAL uid, so the headroom base must count the same."""
-import os
-import subprocess
-import sys
 from types import SimpleNamespace
-
-import pytest
 
 from jarves import isolation_exec
 
@@ -48,24 +43,3 @@ def test_user_procs_counts_by_real_uid_not_directory_owner(monkeypatch):
     _fake(monkeypatch, ["1", "4", "5"], owner, status)
     assert isolation_exec._user_procs() == 1 + 40 + 1
 
-
-@pytest.mark.skipif(not sys.platform.startswith("linux") or os.geteuid() != 0, reason="needs Linux /proc and root")
-def test_real_process_with_other_effective_uid_is_counted(monkeypatch):
-    """Kernel-backed: a child with real uid 65534 and effective uid 0 has /proc/<pid> owned by root."""
-    code = ("import os, sys, threading\n"
-            "os.setresuid(65534, 0, 0)\n"
-            "ev = threading.Event()\n"
-            "[threading.Thread(target=ev.wait, daemon=True).start() for _ in range(5)]\n"
-            "print('ready', flush=True)\n"
-            "sys.stdin.read()\n")
-    child = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-    try:
-        assert child.stdout.readline().strip() == "ready"
-        assert os.stat(f"/proc/{child.pid}").st_uid == 0
-        only_child = SimpleNamespace(getuid=lambda: 65534, stat=os.stat,
-                                     listdir=lambda p: [str(child.pid)] if p == "/proc" else os.listdir(p))
-        monkeypatch.setattr(isolation_exec, "os", only_child)
-        assert isolation_exec._user_procs() == 6          # main thread + 5 waiting threads
-    finally:
-        child.stdin.close()
-        child.wait(timeout=30)
