@@ -857,6 +857,9 @@ async def run_collect(home: Path, client, *, topic: str, contacts: list[str], ch
         name = names.get(one["id"], "")
         people.append(wcol.Contact(name or who, set(one.get("alias_ids") or [one["id"]]),
                                    wcol.mention_words(who, name)))
+    # reading ends READ_DEADLINE_S into the shared budget at the latest (listing chats counts), so an in-flight read
+    # and the model keep COLLECT_BUDGET_S - READ_DEADLINE_S
+    read_s = max(0.0, deadline - clock() - (wcol.COLLECT_BUDGET_S - wcol.READ_DEADLINE_S))
     only = None
     if chat.strip():
         one = _collect_resolve(chats, chat, book)
@@ -866,7 +869,8 @@ async def run_collect(home: Path, client, *, topic: str, contacts: list[str], ch
     try:
         msgs = await asyncio.to_thread(wcol.gather, client, archive, terms=wcol.terms_for(topic), contacts=people,
                                        readable=set(names), since=t0, until=t1, cap_messages=CAP_MESSAGES,
-                                       money=wcol.topic_key(topic) == "payment", chat=only, canon=canon)
+                                       money=wcol.topic_key(topic) == "payment", chat=only, canon=canon,
+                                       clock=clock, deadline_s=read_s)
     except whatsapp_archive.StoreLocked:
         raise BridgeError("WA_STORE_LOCKED", "", 423) from None
     if len(raw) >= CAP_MESSAGES:                              # more chats than one list holds: say so

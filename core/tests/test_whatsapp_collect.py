@@ -566,13 +566,48 @@ async def test_a_slow_model_stops_at_the_deadline_and_the_files_are_still_writte
     assert warned == ["WA_COLLECT_MODEL_DEADLINE"]  # one warning per run, not per batch
 
 
-async def test_a_hanging_model_batch_is_cut_at_the_deadline():
+async def test_a_batch_cut_at_the_deadline_counts_as_deadline_and_a_model_timeout_before_it_as_failed(monkeypatch):
+    warned = []
+    monkeypatch.setattr(wcol.logs, "warn", lambda *a, **kw: warned.append(a[1]))
     rows = [wcol.rule_row(m("שילמתי 100 שקל", mid="1", from_me=True), "chat", "אבי", "אבי")]
+    clk, seen = _Clock(), []
 
-    async def hangs(items, topic):
-        await asyncio.sleep(3600)
-    kept, st = await wcol.model_pass(rows, ["x"], "תשלום", hangs, clock=lambda: 0.0, deadline=0.01)
-    assert len(kept) == 1 and kept[0].uncertain and st["failed_batches"] == 1
+    async def cut(aw, timeout):  # fake wait_for: the batch runs past its deadline (no real clock)
+        seen.append(timeout)
+        aw.close()
+        clk.t += timeout
+        raise TimeoutError
+    kept, st = await wcol.model_pass(rows, ["x"], "תשלום", lambda i, t: _never(), clock=clk, deadline=5.0,
+                                     wait=cut)
+    assert seen == [5.0] and kept[0].uncertain and st["deadline_batches"] == 1 and st["failed_batches"] == 0
+    assert warned == []  # collect() logs WA_COLLECT_MODEL_DEADLINE once; no WA_COLLECT_MODEL_FAILED here
+
+    async def own_timeout(items, topic):  # the model's own network timeout, well before the deadline
+        raise TimeoutError
+    kept, st = await wcol.model_pass(rows, ["x"], "תשלום", own_timeout, clock=_Clock(), deadline=5.0)
+    assert st["failed_batches"] == 1 and st["deadline_batches"] == 0 and warned == ["WA_COLLECT_MODEL_FAILED"]
+
+
+async def _never():
+    await asyncio.Event().wait()
+
+
+async def test_reading_gets_only_what_is_left_of_the_shared_budget(home, monkeypatch):
+    clk, got = _Clock(), {}
+
+    class Slow:
+        def chats(self, *a):  # listing chats "takes" 100 s of the shared budget
+            clk.t += 100.0
+            return []
+
+    def fake_gather(*a, **kw):
+        got.update(kw)
+        return wcol.Candidates()
+    monkeypatch.setattr(wcol, "gather", fake_gather)
+    await wab.run_collect(home, Slow(), topic="תשלום", contacts=[], now=T0, clock=clk)
+    # reading always stops READ_DEADLINE_S into the budget at the latest (165 - 120 = 45 s stay for an in-flight read
+    # and the model), so 100 s of listing leaves 20 s of reading, on the same clock
+    assert got["deadline_s"] == 20.0 and got["clock"] is clk
 
 
 def test_answer_and_summary_label_payee_names_as_from_messages():

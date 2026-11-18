@@ -312,9 +312,9 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
 
 async def model_pass(rows: list[Row], texts: list[str], topic: str, model: ModelFn | None, *,
                      clock: Callable[[], float] = time.monotonic,
-                     deadline: float | None = None) -> tuple[list[Row], dict]:
+                     deadline: float | None = None, wait=asyncio.wait_for) -> tuple[list[Row], dict]:
     """Batches of MODEL_BATCH; a failed batch keeps its rule rows, flagged. At `deadline` (a `clock()` time) no batch
-    starts and a running one is cut: rows flagged "no model check", counted in `deadline_batches`."""
+    starts and a running one is cut (`wait`): rows flagged "no model check", counted in `deadline_batches`."""
     stats = {"model": model is not None, "batches": 0, "failed_batches": 0, "dropped_off_topic": 0,
              "deadline_batches": 0}
     if model is None:
@@ -335,7 +335,17 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
                  for i, r in enumerate(part)]
         stats["batches"] += 1
         try:
-            answer = await asyncio.wait_for(model(items, topic), timeout=left)
+            answer = await wait(model(items, topic), timeout=left)
+        except TimeoutError as e:  # cut at the deadline, or the model's own timeout before it
+            if left is not None and deadline - clock() <= 0:
+                stats["deadline_batches"] += 1  # collect() logs WA_COLLECT_MODEL_DEADLINE once per run
+                for r in part:
+                    r.flag("no model check")
+                keep += part
+                continue
+            logs.warn("whatsapp", "WA_COLLECT_MODEL_FAILED", "WhatsApp collect model batch failed",
+                      error_type=type(e).__name__)
+            answer = None
         except Exception as e:  # budget, network, bad JSON: rule rows stay
             logs.warn("whatsapp", "WA_COLLECT_MODEL_FAILED", "WhatsApp collect model batch failed",
                       error_type=type(e).__name__)
