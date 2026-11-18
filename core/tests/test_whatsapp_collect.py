@@ -106,7 +106,7 @@ async def test_model_labels_are_validated_and_never_acted_on():
         return [{"i": 0, "relevant": True, "payee": "אבי", "amount_ils": "450", "method": "Bit", "what_for": "תיקון",
                  "sure": True},
                 {"i": 1, "relevant": False, "sure": True},                           # off topic: dropped
-                {"i": 2, "relevant": True, "payee": "=HYPERLINK(1)", "amount_ils": "lots", "sure": False},
+                {"i": 2, "relevant": True, "payee": "=HYPERLINK(1)", "amount_ils": None, "sure": False},
                 {"i": "3", "relevant": True}]                                        # bad index: row kept, flagged
     kept, st = await wcol.model_pass(rows, [r.quote for r in rows], "תשלום", fake_model)
     assert len(seen) == 1 and st["dropped_off_topic"] == 1 and len(kept) == 3
@@ -601,3 +601,121 @@ async def test_the_tool_gives_the_model_pass_a_deadline_inside_its_timeout(bridg
 def test_the_collect_budget_leaves_room_to_write_inside_the_tool_timeout(home):
     tool = next(t for t in wab.WhatsAppBridgeSkill(home).tools() if t.name == "whatsapp_collect")
     assert wcol.READ_DEADLINE_S < wcol.COLLECT_BUDGET_S <= tool.timeout_s - 10
+
+
+# ---------------------------------------------------------------------- council round (JAR-273)
+def test_payment_collect_over_many_chats_reads_each_chat_once_and_fits_the_read_cap():
+    chats = [f"9725000{i:05d}@s.whatsapp.net" for i in range(150)]                  # invented
+    msgs = [m(f"₪{i + 1}", mid=f"a{i}", chat=c, ts=T0 - i) for i, c in enumerate(chats)]
+
+    class Arch(_PagedArchive):
+        def __init__(self, ms):
+            super().__init__(ms)
+            self.searches, self.limits, self.chats = 0, set(), 0
+
+        def search(self, q, **kw):
+            self.searches += 1
+            return super().search(q, **kw)
+
+        def chat_messages(self, cid, **kw):
+            self.limits.add(kw.get("limit"))
+            self.chats += 1
+            return super().chat_messages(cid, **kw)
+    arch, avi = Arch(msgs), wcol.Contact("אבי", {chats[0]}, wcol.mention_words("אבי"))
+    got = wcol.gather(_ChatBridge(msgs), arch, terms=wcol.terms_for("תשלום"), contacts=[avi], readable=set(chats),
+                      money=True)
+    assert not got.truncated and len(got) == 1                         # every chat read, nothing cut; Avi's row found
+    assert arch.chats == 150 and arch.searches == 0 and arch.limits == {wcol.ARCHIVE_CHAT_PAGE}  # full reads cover the word searches
+    one = wcol.gather(_ChatBridge(msgs), Arch(msgs), terms=["שיפוץ"], contacts=[], readable=set(chats))
+    assert one.truncated == []                                         # not money: the word searches still run
+
+
+def test_a_non_numeric_model_amount_is_invalid_and_keeps_the_local_row():
+    row = wcol.rule_row(m("העברתי 450 ש\"ח", mid="1", from_me=True), "chat", "אבי", "אבי")
+    assert row.amount == 450.0
+    for bad in ("lots", "NaN", "inf", "-5"):
+        r = wcol.rule_row(m("העברתי 450 ש\"ח", mid="1", from_me=True), "chat", "אבי", "אבי")
+        assert wcol.apply_model(r, {"relevant": True, "sure": True, "payee": "מישהו", "amount_ils": bad}) is True
+        assert (r.amount, r.payee, r.uncertain) == (450.0, row.payee, True) and "model answer invalid" in r.why_unsure
+    assert wcol.valid_answer({"relevant": True, "sure": True, "amount_ils": "1,200"})
+
+
+class _FakeBudget:
+    def __init__(self, log):
+        self.log = log
+
+    def reserve(self, what):
+        import contextlib
+
+        @contextlib.contextmanager
+        def cm():
+            self.log.append(("reserve", what))
+            yield
+        return cm()
+
+
+def _fake_openai(log, outputs, reject_reasoning=False):
+    import types
+
+    class BadRequestError(Exception):
+        pass
+
+    class Responses:
+        async def create(self, **kw):
+            log.append(("create", kw))
+            if reject_reasoning and "reasoning" in kw:
+                raise BadRequestError("Unsupported parameter: 'reasoning'")
+            return types.SimpleNamespace(output_text=outputs.pop(0))
+
+    class AsyncOpenAI:
+        def __init__(self, timeout):
+            self.responses = Responses()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            log.append(("closed",))
+    mod = types.ModuleType("openai")
+    mod.AsyncOpenAI, mod.BadRequestError = AsyncOpenAI, BadRequestError
+    return mod
+
+
+async def test_openai_model_reserves_first_never_stores_wraps_untrusted_and_parses_safely(monkeypatch):
+    import sys
+    log = []
+    outs = ["```json\n{\"rows\": [{\"i\": 0, \"relevant\": true, \"sure\": true}, 5, \"x\"]}\n```", "no json here",
+            "{broken"]
+    monkeypatch.setitem(sys.modules, "openai", _fake_openai(log, outs))
+    run = wcol.openai_model("model-x", _FakeBudget(log))
+    items = [{"i": 0, "date": "2026-01-01", "chat": "c", "sender": "s", "text": "שילמתי 5 שקל"}]
+    assert await run(items, "תשלום") == [{"i": 0, "relevant": True, "sure": True}]   # non-dict rows dropped
+    assert [e[0] for e in log] == ["reserve", "create", "closed"]                    # reserve BEFORE the paid call
+    kw = log[1][1]
+    assert kw["store"] is False and kw["model"] == "model-x" and kw["instructions"] == wcol.MODEL_INSTRUCTIONS
+    assert json.loads(kw["input"]) == {"topic": "תשלום", "untrusted_messages": items}
+    assert await run(items, "תשלום") == []                                            # garbage: no rows
+    with pytest.raises(ValueError):                                                   # model_pass flags the batch
+        await run(items, "תשלום")
+
+
+async def test_openai_model_drops_reasoning_once_a_model_rejects_it(monkeypatch):
+    import sys
+    log = []
+    monkeypatch.setitem(sys.modules, "openai", _fake_openai(log, ["{\"rows\": []}", "{\"rows\": []}"], True))
+    run = wcol.openai_model("model-x", _FakeBudget(log))
+    assert await run([], "תשלום") == [] and await run([], "תשלום") == []
+    creates = [e[1] for e in log if e[0] == "create"]
+    assert ["reasoning" in c for c in creates] == [True, False, False]               # retried once, then remembered
+    assert [e[0] for e in log].count("reserve") == 2                                 # one reservation per batch
+
+
+async def test_collect_is_not_offered_or_run_while_its_feature_is_off(bridge, home, clock):
+    from jarves.config import Config
+    _seed(bridge, clock())
+    f = feat.Features(Config(), home)
+    assert not f.active(wcol.FEATURE)                                  # off by default
+    reg = make_reg(home, clock)
+    reg.gate = f.gate
+    r = await reg.call("whatsapp_collect", {"topic": "תשלומים", "contacts": ["אבי"]})
+    assert not r.ok and not (home / "reports").exists()                # refused before anything is read or written

@@ -273,13 +273,14 @@ def _num(v) -> float | None:
 
 def valid_answer(got: dict) -> bool:
     """The strict shape of one model row: relevant and sure are real booleans, text fields are strings (or absent),
-    amount_ils is a number, a numeric string or null. Anything else is not merged."""
+    amount_ils is null or converts to a finite amount in the permitted range (`_num`): "lots", "NaN", "inf" or a
+    negative amount make the whole answer invalid. Anything else is not merged."""
     if not isinstance(got.get("relevant"), bool) or not isinstance(got.get("sure"), bool):
         return False
     if any(got.get(k) is not None and not isinstance(got[k], str) for k in ("payee", "method", "what_for")):
         return False
     amt = got.get("amount_ils")
-    return amt is None or (isinstance(amt, (int, float, str)) and not isinstance(amt, bool))
+    return amt is None or (isinstance(amt, (int, float, str)) and not isinstance(amt, bool) and _num(amt) is not None)
 
 
 def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bool:
@@ -641,14 +642,24 @@ def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
 
 
 def openai_model(model_id: str, budget, *, timeout_s: float = 30.0) -> ModelFn:
-    """One Responses request per batch, reserved from the shared Budget first (raises BudgetExceeded)."""
+    """One Responses request per batch, reserved from the shared Budget first (raises BudgetExceeded); never stored,
+    the client is closed after each batch. A model that rejects the `reasoning` parameter is asked again once
+    without it (inside the same reservation), and later batches leave it out."""
+    opts = {"reasoning": {"effort": "none"}}
+
     async def run(items: list[dict], topic: str) -> list[dict]:
         import openai
-        client = openai.AsyncOpenAI(timeout=timeout_s)
         payload = json.dumps({"topic": topic, "untrusted_messages": items}, ensure_ascii=False)
+        kw = dict(model=model_id, instructions=MODEL_INSTRUCTIONS, input=payload, max_output_tokens=2500, store=False)
         with budget.reserve("ai_requests"):
-            r = await client.responses.create(model=model_id, instructions=MODEL_INSTRUCTIONS, input=payload,
-                                              max_output_tokens=2500, reasoning={"effort": "none"}, store=False)
+            async with openai.AsyncOpenAI(timeout=timeout_s) as client:
+                try:
+                    r = await client.responses.create(**kw, **opts)
+                except openai.BadRequestError as e:
+                    if not opts or "reasoning" not in str(e):
+                        raise
+                    opts.clear()
+                    r = await client.responses.create(**kw)
         raw = (getattr(r, "output_text", "") or "").strip()
         raw = raw[raw.find("{"): raw.rfind("}") + 1] if "{" in raw else "{}"
         rows = json.loads(raw).get("rows", [])
@@ -669,6 +680,7 @@ class Candidates(list):
 
 
 ARCHIVE_PAGE = 200                                          # the archive search returns at most 200 per call
+ARCHIVE_CHAT_PAGE = 2000                                    # one chat read in full, page by page (its default limit)
 
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
@@ -726,6 +738,9 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
     full_read = sorted(readable) if money else ids          # chats read in full (not only by search words)
     if chat is not None:                                    # one chat asked for: read only its ids
         full_read = [i for i in sorted(readable) if (canon or {}).get(i, i) == chat]
+    # every chat `scope` can accept is read in full anyway: the word searches would only return a subset of it
+    if set(full_read) >= {i for i in readable if chat is None or (canon or {}).get(i, i) == chat}:
+        words = []
     if archive is not None:
         for w in words:
             offset = 0
@@ -740,12 +755,12 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         for cid in full_read:
             offset = 0
             while cid in readable and not bound():
-                page = archive.chat_messages(cid, since=since, until=until, limit=ARCHIVE_PAGE, offset=offset)
+                page = archive.chat_messages(cid, since=since, until=until, limit=ARCHIVE_CHAT_PAGE, offset=offset)
                 reads["archive"] += 1
                 add(page, "archive", False)
-                if len(page) < ARCHIVE_PAGE:
+                if len(page) < ARCHIVE_CHAT_PAGE:
                     break
-                offset += ARCHIVE_PAGE
+                offset += ARCHIVE_CHAT_PAGE
     sweep = money
     for w in words:
         if bound():
