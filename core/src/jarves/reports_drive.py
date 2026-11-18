@@ -198,7 +198,31 @@ def after_report(home: Path, path: Path, *, features, client=None) -> dict | Non
     Blocking (file copy or HTTP + asyncio.run for the token): an async writer calls it via asyncio.to_thread."""
     if features is None or not features.active(FEATURE):
         return None
-    return _send(home, path, client)
+    if not _tracked(home, path):
+        return _send(home, path, client)
+    with _SYNC_LOCK:                            # a report in <home>/reports/ is recorded: the next sync skips it
+        key, m = _sent_key(home), _mtime(path)
+        r = _send(home, path, client)
+        if "error" not in r and m is not None:
+            save(home, **{key: {**_sent(home, key), path.name: m}})
+    return r
+
+
+def _mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
+
+
+def _sent_key(home: Path) -> str:
+    """Sent reports are remembered per mode: after a switch to `signin`, folder copies still go through the API."""
+    return "sent_" + load(home)["mode"]
+
+
+def _sent(home: Path, key: str) -> dict:
+    d = _raw(home).get(key)
+    return dict(d) if isinstance(d, dict) else {}
 
 
 def sync(home: Path, *, client=None) -> list[dict]:
@@ -231,18 +255,20 @@ def _folder_missing(home: Path) -> bool:
 def _sync(home: Path, client) -> list[dict]:
     if _folder_missing(home):
         return []
-    before = _raw(home).get("sent")
-    sent = dict(before) if isinstance(before, dict) else {}
+    key = _sent_key(home)
+    before = _raw(home).get(key)
+    sent = _sent(home, key)
     out = []
     folder = Path(home) / "reports"
     for f in sorted(folder.iterdir()) if folder.is_dir() else []:
         if f.name.startswith(".") or f.name.lower().endswith(SKIP_SUFFIXES):
             continue
-        if f.is_file() and sent.get(f.name) != f.stat().st_mtime:
+        m = _mtime(f)                           # read before the send: a rewrite during the upload is sent again
+        if f.is_file() and m is not None and sent.get(f.name) != m:
             r = _send(home, f, client)
             out.append(r)
             if r and "error" not in r:
-                sent[f.name] = f.stat().st_mtime
+                sent[f.name] = m
                 _WARNED.discard("RECONNECT")
                 _WARNED.discard("SEND_FAILED:" + f.name)
             elif r.get("reconnect"):            # every other file would fail the same way: stop, warn once
@@ -252,7 +278,7 @@ def _sync(home: Path, client) -> list[dict]:
             elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
     if sent != before:                          # nothing new: the settings file is not rewritten
-        save(home, sent=sent)
+        save(home, **{key: sent})
     return out
 
 

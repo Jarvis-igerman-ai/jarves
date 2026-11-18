@@ -30,8 +30,8 @@ he = "אפשרות א (מומלצת): jarvis reports drive folder ונתיב ה�
 en = "Option A (recommended): jarvis reports drive folder and the path of your Google Drive folder on the PC. Reports go into a JARVES reports subfolder, so your own files are never overwritten."
 
 [[steps]]
-he = "אפשרות ב: jarvis reports drive signin. הדפדפן נפתח, אתם מתחברים ומאשרים. דוח מעל 5MB לא מועלה כך; השתמשו באפשרות א. לכיבוי: jarvis features off reports_drive."
-en = "Option B: jarvis reports drive signin. Your browser opens, you sign in and allow. A report over 5 MB is not uploaded this way; use option A. To turn off: jarvis features off reports_drive."
+he = "אפשרות ב: jarvis reports drive signin. הדפדפן נפתח, אתם מתחברים ומאשרים. דוח מעל 5MB לא מועלה כך; השתמשו באפשרות א. אחרי מעבר בין אפשרות א ל-ב (או חזרה) כל הדוחות בתיקייה נשלחים שוב בדרך החדשה. עדכון של CSV שכבר הועלה כגיליון לא נבדק עדיין מול גוגל דרייב אמיתי. לכיבוי: jarvis features off reports_drive."
+en = "Option B: jarvis reports drive signin. Your browser opens, you sign in and allow. A report over 5 MB is not uploaded this way; use option A. After a switch between option A and B (or back), every report in the folder is sent again the new way. Updating a CSV that was already uploaded as a Sheet is not yet checked against the real Google Drive. To turn off: jarvis features off reports_drive."
 
 [[steps]]
 he = "לשליחה ידנית של דוח אחד: jarvis reports drive upload ושם הקובץ."

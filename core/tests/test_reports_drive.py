@@ -458,7 +458,7 @@ def test_sync_skips_hidden_and_temp_files_still_being_written(tmp_path):
     rd.save(tmp_path, mode="api")
     folder = tmp_path / "reports"
     folder.mkdir()
-    for n in (".x.csv", "wa.csv.tmp", "wa.csv.part", "wa.csv.partial", "ok.md"):
+    for n in (".x.csv", "wa.csv.tmp", "wa.csv.part", "wa.csv.partial", "wa.csv.crdownload", "wa.csv~", "ok.md"):
         (folder / n).write_bytes(b"1")
     fake = FakeDrive()
     rd.sync(tmp_path, client=fake)
@@ -491,3 +491,48 @@ def test_a_sync_with_nothing_new_does_not_rewrite_the_settings(tmp_path, monkeyp
     monkeypatch.setattr(rd, "save", lambda home, **kw: writes.append(kw))
     rd.sync(tmp_path, client=FakeDrive())
     assert writes == []
+
+
+def test_a_report_rewritten_during_its_own_upload_is_sent_again_with_the_new_bytes(tmp_path):
+    import os
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    rep = folder / "a.md"
+    rep.write_bytes(b"old")
+
+    class Rewrite(FakeDrive):                    # a second job rewrites a.md while its old bytes are uploading
+        def upload(self, name, data, *a, **kw):
+            if data == b"old":
+                rep.write_bytes(b"new")
+                os.utime(rep, (rep.stat().st_atime, rep.stat().st_mtime + 5))
+                assert rd.sync(tmp_path, client=self) == []
+            return super().upload(name, data, *a, **kw)
+    fake = Rewrite()
+    rd.sync(tmp_path, client=fake)
+    assert [(s[0], s[1]) for s in fake.sent] == [("a.md", b"old"), ("a.md", b"new")]
+
+
+def test_switching_from_folder_to_signin_sends_the_copied_reports_through_the_api(tmp_path):
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    rd.save(tmp_path, folder=str(drive), mode="folder")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "a.md").write_bytes(b"1")
+    rd.sync(tmp_path)
+    assert (drive / rd.SUBDIR / "a.md").read_bytes() == b"1"
+    rd.save(tmp_path, mode="api")                # what `signin` stores
+    fake = FakeDrive()
+    rd.sync(tmp_path, client=fake)
+    assert [s[0] for s in fake.sent] == ["a.md"]
+
+
+def test_a_report_sent_by_after_report_is_not_sent_again_by_the_next_sync(tmp_path):
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    rep = tmp_path / "reports" / "a.md"
+    rep.write_bytes(b"1")
+    fake = FakeDrive()
+    assert rd.after_report(tmp_path, rep, features=ON, client=fake)["id"] == "f1"
+    rd.sync(tmp_path, client=fake)
+    assert [s[0] for s in fake.sent] == ["a.md"]
