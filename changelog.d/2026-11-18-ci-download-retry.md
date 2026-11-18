@@ -1,0 +1,1 @@
+- Fixed: CI tool downloads (Blender, FreeCAD, Godot) now fail fast on HTTP errors and retry transient failures instead of piping a bad response into tar (red main 44272296783, #1301, JAR-535).
