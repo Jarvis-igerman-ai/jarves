@@ -110,7 +110,7 @@ jobs:
           ENV_NAME: ${{ (github.ref_type == 'tag' && (github.event_name == 'push' || github.event.inputs.dry_run == 'false')) && 'stable-release' || '' }}
         run: |
           # a branch named like a tag (refs/heads/v4.5.0) or any non-tag ref never reaches the step holding the secrets
-          [ "$REF_TYPE" = "tag" ] && [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error::a real release runs only on the tag ref refs/tags/$TAG (this run: $GITHUB_REF)"; exit 1; }
+          [ "$REF_TYPE" = "tag" ] && [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error::a real release runs only on the tag ref refs/tags/$TAG (this run: ref $GITHUB_REF, ref type ${REF_TYPE:-unset})"; exit 1; }
           [ "$ENV_NAME" = "stable-release" ] || { echo "::error::a real release runs only inside the protected environment stable-release"; exit 1; }
       - name: Publish the stable release (signed latest.json, newest 3 kept)
         if: ${{ env.DRY_RUN != 'true' && github.ref_type == 'tag' }}

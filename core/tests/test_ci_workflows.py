@@ -177,4 +177,6 @@ def test_release_secrets_step_refuses_outside_a_tag_ref():
                 {"REF_TYPE": "tag", "GITHUB_REF": "refs/tags/v4.5.0", "ENV_NAME": ""}):
         r = _run_publish_guard(guard, **real, **bad)
         assert r.returncode != 0 and "::error::" in r.stdout, bad
+        if bad["REF_TYPE"] == "branch":
+            assert "ref type branch" in r.stdout and "refs/heads/v4.5.0" in r.stdout
     assert guard["env"]["ENV_NAME"] == job["environment"]
