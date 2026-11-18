@@ -1902,9 +1902,14 @@ def cmd_update(a, cfg, home) -> int:
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
     if a.action == "auto":
         return _update_auto(a, cfg, home)
+    as_json = getattr(a, "json", False)
+    if as_json and (a.action not in ("check", "status") or getattr(a, "rollback", False)):
+        print("--json works only with `update check` or `update status`")
+        return 2
     u = UpdateChecker(home, cfg=cfg)
-    print(version_line(home) + f"; update channel {u.channel}")
-    if a.action == "status":
+    if not as_json:
+        print(version_line(home) + f"; update channel {u.channel}")
+    if a.action == "status" and not as_json:
         from . import update_progress as up
         from .updates import build_info
         ps = up.read(home, build_info()["version"])
@@ -1919,6 +1924,10 @@ def cmd_update(a, cfg, home) -> int:
         return 1
     else:
         s = u.check(force=True)
+    if as_json:  # one machine-readable line (JAR-456): offline/failed checks carry "error" and exit 1
+        print(json.dumps({"current": s.get("current"), "available": bool(s["available"]), "error": s["error"],
+                          "latest": (s.get("latest") or {}).get("version"), "checked_at": s.get("checked_at")}))
+        return 1 if s["error"] else 0
     if s["error"]:
         print(f"Update check unavailable: {s['error']}")
         return 1
@@ -2381,6 +2390,7 @@ def main(argv: list[str] | None = None) -> int:
                                                               "from before the update")
     up.add_argument("--keep-data", action="store_true", help="rollback: reinstall the program only, keep current data")
     up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
+    up.add_argument("--json", action="store_true", help="check / status: print one JSON line (available, error, latest)")
     for entry in ext:
         if entry[0] == "late":
             entry[1].add_cli(sub)
