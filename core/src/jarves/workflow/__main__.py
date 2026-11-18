@@ -6,9 +6,12 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .store import Store
+
+OPEN_UNLOCK_RETRY_S = 1.0  # `open` may start the dashboard just before asking it for an unlock code (#750)
 
 
 def default_profile() -> Path:
@@ -266,7 +269,12 @@ def main(argv=None) -> int:
             return rc
         from . import unlock
         try:
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+            try:
+                code = unlock.issue(home)
+            except unlock.UnlockUnavailable:  # a just-started dashboard may not answer /health yet: one short retry
+                time.sleep(OPEN_UNLOCK_RETRY_S)
+                code = unlock.issue(home)
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)
         except unlock.UnlockUnavailable as exc:
             print(f"No unlock code yet: {exc}", file=sys.stderr)
         except OSError as exc:  # a failed write is not the agent/terminal refusal above: say so, never stay silent

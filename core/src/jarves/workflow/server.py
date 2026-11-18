@@ -157,6 +157,7 @@ class Server(ThreadingHTTPServer):
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
         self.unlock_wrong = ("", 0)             # (code eph key, wrong tries over ALL sessions); 5 cancel the code
+        # Set before super().__init__: a failed bind calls server_close(), which withdraws by this key (#750).
         self.unlock_key = unlock.ServerKey()     # private half only in memory: the home holds no offline oracle (#750)
         self.unlock_published = False
         self.streams = threading.BoundedSemaphore(8)
@@ -482,17 +483,17 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
+                eph = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+                eph = ""
             if not (isinstance(code, str) and unlock.consume(self.server.home, code, key=self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
-                prev_salt, n = self.server.unlock_wrong
-                n = (n if prev_salt == salt else 0) + 1
+                prev_eph, n = self.server.unlock_wrong
+                n = (n if prev_eph == eph else 0) + 1
                 if n >= 5:
                     path.unlink(missing_ok=True)
                     n = 0
-                self.server.unlock_wrong = (salt, n)
+                self.server.unlock_wrong = (eph, n)
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = ("", 0)

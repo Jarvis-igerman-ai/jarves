@@ -31,6 +31,8 @@ CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 PUB_FILE = "unlock_pub.json"
+PUB_LOCK = "unlock_pub.lock"
+PUB_LOCK_WAIT_S = 2.0  # publish and withdraw are short; a stuck holder must not block a dashboard start or stop
 
 
 class UnlockUnavailable(RuntimeError):
@@ -77,17 +79,27 @@ def _read(home: Path, name: str) -> dict:
     return record
 
 
+def _pub_lock(home: Path):
+    from .control import exclusive  # kernel lock, released on a crash; lazy import keeps this module light
+    return exclusive(Path(home) / PUB_LOCK, wait_s=PUB_LOCK_WAIT_S)
+
+
 def publish(home: Path, key: ServerKey, port: int) -> None:
-    _write(home, PUB_FILE, {"pub": key.pub.hex(), "port": int(port)})
+    """Publish under the home's key lock; OSError (lock busy, read-only home) is the caller's to report."""
+    with _pub_lock(home):
+        _write(home, PUB_FILE, {"pub": key.pub.hex(), "port": int(port)})
 
 
 def withdraw(home: Path, key: ServerKey) -> None:
-    """Remove the published key only if it is still this dashboard's own."""
+    """Remove the published key only if it is still this dashboard's own: compare and unlink under the same lock as
+    publish, so a stopping dashboard never deletes a newer dashboard's key. If the lock is busy the key is left in
+    place; issue() then probes the port and fails cleanly, so a stale key is harmless."""
     try:
-        if _read(home, PUB_FILE).get("pub") == key.pub.hex():
-            (Path(home) / PUB_FILE).unlink(missing_ok=True)
+        with _pub_lock(home):
+            if _read(home, PUB_FILE).get("pub") == key.pub.hex():
+                (Path(home) / PUB_FILE).unlink(missing_ok=True)
     except (OSError, ValueError):
-        pass  # missing or damaged: nothing of ours to withdraw
+        pass  # missing, damaged or lock busy: nothing of ours is safe to withdraw
 
 
 def _serves_key(port: int, pub: bytes, timeout: float = 2.0) -> bool:

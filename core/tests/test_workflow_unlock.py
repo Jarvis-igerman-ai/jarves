@@ -305,6 +305,30 @@ class UnlockTests(unittest.TestCase):
             unlock.issue(self.home)
         self.assertFalse((self.home / unlock.FILE).exists())
 
+    def test_750_withdraw_compares_and_unlinks_under_the_publish_lock(self):
+        # Review R1: while another dashboard holds the key lock (mid-publish), a stopping one must not unlink.
+        from jarves.workflow.control import exclusive
+        with patch.object(unlock, "PUB_LOCK_WAIT_S", 0.0), exclusive(self.home / unlock.PUB_LOCK):
+            unlock.withdraw(self.home, self.server.unlock_key)
+            self.assertTrue((self.home / unlock.PUB_FILE).exists())
+            with self.assertRaises(OSError):
+                unlock.publish(self.home, unlock.ServerKey(), 1)
+        unlock.withdraw(self.home, self.server.unlock_key)             # lock free and still ours: withdrawn
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())
+
+    def test_750_open_retries_once_while_a_new_dashboard_starts(self):
+        # Review R3: `open` may start the dashboard just before asking it for a code.
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open",
+                "--port", str(self.server.server_port)]
+        for side, expected in (([unlock.UnlockUnavailable("starting"), "4321"], "4321"),
+                               ([unlock.UnlockUnavailable("a"), unlock.UnlockUnavailable("still down")], "No unlock code yet: still down")):
+            err = io.StringIO()
+            with patch.object(cli, "owner_only_guard", return_value="terminal"), patch.object(cli.time, "sleep") as sleep, \
+                    patch.object(unlock, "issue", side_effect=side), redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(argv), 0)
+            sleep.assert_called_once_with(cli.OPEN_UNLOCK_RETRY_S)
+            self.assertIn(expected, err.getvalue())
+
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
         html = (Path(cli.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
