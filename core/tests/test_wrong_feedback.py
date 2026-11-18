@@ -81,3 +81,47 @@ def test_report_saves_the_exchange_time_counts_a_correction_and_deletes(home):
 def test_a_corrupt_line_in_the_cases_file_is_skipped(home):
     wf.path(home).write_text('not json\n[1]\n{"id": "FB-0000abcd"}\n', encoding="utf-8")
     assert [c["id"] for c in wf.cases(home)] == ["FB-0000abcd"]
+
+
+def test_exchange_time_from_the_real_store_writer(home):
+    """Review #1286 R2: turns written by Store.record_typed (not raw SQL) give the right exchange_at."""
+    st = Store(home / "store.db")
+    st.record_typed("q", "a", datetime(2026, 11, 15, 9, 30).timestamp())
+    st.commit()
+    st.close()
+    assert wf.make_case(wf.last_exchange(home), via="cli")["exchange_at"] == "2026-11-15T09:30"
+
+
+def test_cases_are_capped_and_saved_uses_the_given_clock(home, monkeypatch):
+    """Review #1286 R3 (MAX_CASES trim) and R4 (report_wrong forwards now=)."""
+    monkeypatch.setattr(wf, "MAX_CASES", 2)
+    _history(home, [(1, "user", "q"), (2, "assistant", "a")])
+    ids = [wf.report_wrong(home, via="cli", now=NOW)["case"]["id"] for _ in range(3)]
+    assert [c["id"] for c in wf.cases(home)] == ids[1:]
+    assert {c["saved"] for c in wf.cases(home)} == {"2026-11-18T12:00:00"}
+
+
+def test_tool_names_are_sanitised_deduplicated_and_capped():
+    """Review #1286 R3: odd tool names become "other", at most 5 kept."""
+    tools = ["web_search", "rm -rf /", "a1", "a2", "web_search", "a3", "a4", "a5"]
+    assert wf.make_case({"tools": tools}, via="cli")["tools"] == ["web_search", "other", "a1", "a2", "a3"]
+
+
+def test_failure_log_off_writes_no_correction(home):
+    """Review #1286 R3."""
+    _history(home, [(1, "user", "q"), (2, "assistant", "a")])
+    assert wf.report_wrong(home, via="cli", failure_log_on=False)["ok"]
+    assert not fl.path(home).exists()
+
+
+def test_a_failed_write_leaves_no_temp_file(home, monkeypatch):
+    """Review #1286 R6: disk full while writing keeps the target and removes the temp file."""
+    real = wf.Path.write_text
+
+    def full(self, *a, **k):
+        real(self, "partial", encoding="utf-8")             # part of the temp file reached the disk
+        raise OSError("disk full")
+    monkeypatch.setattr(wf.Path, "write_text", full)
+    with pytest.raises(OSError):
+        wf._write(wf.path(home), [{"id": "FB-0000abcd"}])
+    assert list(home.glob("feedback_wrong.jsonl*.tmp")) == []

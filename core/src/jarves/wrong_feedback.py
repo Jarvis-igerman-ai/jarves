@@ -108,8 +108,11 @@ def _read(p: Path) -> list[dict]:
 
 def _write(p: Path, rows: list[dict]) -> None:
     tmp = p.with_name(f"{p.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
-    os.replace(tmp, p)                      # atomic: a crash never leaves a truncated file
+    try:
+        tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+        os.replace(tmp, p)                  # atomic: a crash never leaves a truncated file
+    finally:
+        tmp.unlink(missing_ok=True)         # a failed write (disk full) leaves no temp file behind
 
 
 def cases(home) -> list[dict]:
@@ -125,13 +128,14 @@ def delete(home, cid: str) -> bool:
     return found
 
 
-def report_wrong(home, *, via: str, note: str = "", failure_log_on: bool = False, privacy: bool = True) -> dict:
+def report_wrong(home, *, via: str, note: str = "", failure_log_on: bool = False, privacy: bool = True,
+                 now: datetime | None = None) -> dict:
     ex = last_exchange(home)
     if ex is None:
         return {"ok": False, "code": "FEEDBACK_NO_EXCHANGE"}
-    case, p = make_case(ex, via=via, note=note, privacy=privacy), path(home)
+    case, p = make_case(ex, via=via, note=note, privacy=privacy, now=now), path(home)
     with _LOCK, _file_lock(p):              # one writer at a time, across threads and processes
         _write(p, (_read(p) + [case])[-MAX_CASES:])
-    failure_log.record(home, "user_correction", on=failure_log_on)
+    failure_log.record(home, "user_correction", on=failure_log_on, now=now)
     logs.info("wrong_feedback", "FEEDBACK_SAVED", "a 'that was wrong' case was saved", item=case["id"], via=via)
     return {"ok": True, "code": "FEEDBACK_SAVED", "case": case}
