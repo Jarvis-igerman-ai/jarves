@@ -155,7 +155,8 @@ class VerdictTests(Base):
             agent = self.store._get(db, "agent", "w1")
             agent["status"] = "offline"
             self.store._put(db, "agent", agent)
-            self.assertEqual(self.store._get(db, "task", "t1")["agent_id"], "w1")
+            task = self.store._get(db, "task", "t1")
+            self.assertEqual((task["state"], task["agent_id"]), ("running", "w1"))   # claim makes it running
         kind, v = self.kind()
         self.assertEqual((kind, v["detail"]["active"]), ("stopped", 0))
 

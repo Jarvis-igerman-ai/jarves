@@ -321,9 +321,11 @@ def test_1016_first_prune_logs_once_what_the_new_defaults_removed(profile, monke
         (bdir / f"jarves-backup-{start - timedelta(minutes=i):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
     for i in range(4):
         (bdir / f"jarves-backup-{start - timedelta(hours=i):%Y%m%d-%H%M%S}-pre-migration.zip").write_bytes(b"x")
+    backup._save_state(profile, {"last_auto": 123.0})
     seen = []
     monkeypatch.setattr(backup.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f)))
     backup.prune(profile)
+    assert backup.read_state(profile)["last_auto"] == 123.0     # the notice flag merges; due() keeps its timestamp
     assert seen == [("BACKUP_RETENTION_LOWERED", {"removed": 3 + 2})]
     (bdir / f"jarves-backup-{start - timedelta(days=1):%Y%m%d-%H%M%S}-manual.zip").write_bytes(b"x")
     backup.prune(profile)                               # later prunes are ordinary retention: no second notice
