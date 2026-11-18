@@ -465,3 +465,88 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
     env_line = next(ln for ln in wf.splitlines() if ln.strip().startswith("environment:"))
     assert "github.ref_type == 'tag'" in env_line and "dry_run == 'false'" in env_line
     assert "JARVES_EXPECT_ROWS_HASH" in wf and "JARVES_REQUIRE_ROWS_HASH=1" in wf and "git fetch --force origin" in wf
+
+
+class _Run:
+    def __init__(self, code=0, err=""):
+        self.code, self.err, self.calls, self.listed = code, err, [], None
+
+    def __call__(self, cmd, **kw):
+        import subprocess
+        self.calls.append(cmd)
+        f = next(c.split("=", 1)[1] for c in cmd if c.startswith("gpg.ssh.allowedSignersFile="))
+        self.listed = Path(f).read_text(encoding="utf-8")       # the owner's lines reach git through a temp file
+        return subprocess.CompletedProcess(cmd, self.code, "", self.err)
+
+
+def test_605_tag_signature_by_owner_key(tmp_path):
+    """#605: the tag's 'Rows hash' is authentic only when the tag is signed by a key in the owner's allowed-signers
+    lines (kept outside the repo). A bad tag name, missing verifier, git error or bad/unlisted signature refuse."""
+    v, lines = sys.executable, "owner ssh-ed25519 AAAA"          # an existing file stands in for ssh-keygen here
+    ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
+    assert gate.tag_signature_problems(tmp_path, "v4.1.0", lines, run=ok, verifier=v) == []
+    cmd = ok.calls[0]
+    assert cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"] and ok.listed == lines + "\n"
+    assert "gpg.minTrustLevel=fully" in cmd and f"gpg.ssh.program={v}" in cmd and gate.SSH_KEYGEN == "/usr/bin/ssh-keygen"
+    absent = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, run=ok, verifier=str(tmp_path / "none"))
+    assert len(absent) == 1 and "verifier" in absent[0] and len(ok.calls) == 1        # refused before running git
+    stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
+    for run in (_Run(0, stranger), _Run(1, "error: no signature found\n" + "x" * 900)):
+        bad = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, run=run, verifier=v)
+        assert len(bad) == 1 and "not signed by the owner" in bad[0] and len(bad[0]) < 500
+    assert "not a stable tag" in gate.tag_signature_problems(tmp_path, "main;rm", lines, run=ok, verifier=v)[0]
+
+    def boom(cmd, **kw):
+        raise FileNotFoundError("git")
+    assert "cannot verify" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, run=boom, verifier=v)[0]
+
+
+def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsys):
+    """#605: a real publish refuses without the owner's signers list (fail closed); with it the gate checks the tag;
+    the workflow passes the owner-only variable to the gate step, on a tag ref only."""
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    seen = []
+    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s: seen.append(s) or ["sign-off: SIGFAIL"])
+    argv = ["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)]
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "  ")                             # blank = unset
+    assert gate.main(argv + ["--require-rows-hash"]) == 1
+    assert "sign-off: no owner allowed-signers list" in capsys.readouterr().out and seen == []
+    gate.main(argv)                                                                # dry run: a note, not silence
+    out = capsys.readouterr().out
+    assert "tag signature not checked" in out and "no owner allowed-signers list (repository" not in out
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "owner ssh-ed25519 AAAA")
+    assert gate.main(argv) == 1 and "SIGFAIL" in capsys.readouterr().out and seen == ["owner ssh-ed25519 AAAA"]
+    import yaml
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    step = next(s for j in doc["jobs"].values() for s in j.get("steps", []) if "release_gate.py" in s.get("run", ""))
+    assert step["env"]["JARVES_ALLOWED_SIGNERS"] == "${{ github.ref_type == 'tag' && vars.RELEASE_ALLOWED_SIGNERS || '' }}"
+
+
+@pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); CI Core shards run it
+def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
+    """#605: with real git + ssh-keygen a tag signed by the owner's listed key passes; a good signature by an
+    unlisted key (git verify-tag can exit 0 with "No principal matched") is refused."""
+    import subprocess
+    for k, val in (("HOME", str(tmp_path)), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_GLOBAL", str(tmp_path / "gc"))):
+        monkeypatch.setenv(k, val)                                   # no runner/user git config leaks in
+
+    def sh(*cmd, cwd=tmp_path):
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+        assert r.returncode == 0, f"{cmd[:2]}: {r.stderr[-400:]}"
+    for who in ("owner", "stranger"):
+        sh(gate.SSH_KEYGEN, "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(tmp_path / who))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ("git", "-c", "user.name=o", "-c", "user.email=o@x")
+    sh("git", "init", "-q", cwd=repo)
+    sh(*git, "commit", "-q", "--allow-empty", "-m", "c", cwd=repo)
+    for who, tag in (("owner", "v4.1.0"), ("stranger", "v4.1.1")):
+        sh(*git, "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={gate.SSH_KEYGEN}", "-c",
+           f"user.signingkey={tmp_path / who}", "tag", "-s", tag, "-m", "Rows hash: " + "a" * 64, cwd=repo)
+    sh("git", "tag", "v4.1.2", cwd=repo)                                          # lightweight: no signature
+    lines = 'owner namespaces="git" ' + (tmp_path / "owner.pub").read_text(encoding="utf-8")
+    assert gate.tag_signature_problems(repo, "v4.1.0", lines) == []
+    for tag in ("v4.1.1", "v4.1.2"):
+        bad = gate.tag_signature_problems(repo, tag, lines)
+        assert len(bad) == 1 and "not signed by the owner" in bad[0], bad

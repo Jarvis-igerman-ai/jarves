@@ -72,7 +72,7 @@ def next_commands(version: str, sheet_rel: str, evidence_rel: str) -> list[str]:
         "     git fetch jarves && git rev-parse jarves/main",
         f"     python core/tools/release_gate.py --tag {tag} --sha <that sha> --candidate-dir dist",
         "3. tag the signed commit (never move, force or delete a tag), then watch release.yml and latest.json:",
-        f"     git tag -a {tag} -m \"JARVES {version}\" <that sha>",
+        f"     git tag -s {tag} -m \"Rows hash: <hash printed by signoff --finish>\" <that sha>   # owner key (#605)",
         f"     git push jarves {tag}",
         f"     gh run list --repo {rf.REPO} --workflow release.yml --limit 3",
     ]

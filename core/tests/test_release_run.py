@@ -59,7 +59,7 @@ def test_approved_signs_records_approval_and_prints_commands_only(tmp_path):
     ev = (tmp_path / "docs" / "release" / f"EVIDENCE_{V}.md").read_text(encoding="utf-8")
     assert "Approved by owner in chat: OK sign it, chat 2026-10-27 08:55 UTC" in ev and "2026-10-27 09:00 UTC" in ev
     out = text(res)
-    assert "git tag -a v5.0.0" in out and "release_gate.py --tag v5.0.0" in out and "gh pr create" in out
+    assert "git tag -s v5.0.0" in out and "release_gate.py --tag v5.0.0" in out and "gh pr create" in out
     assert "does not tag or push" in out
     # a second run does not sign again
     again = go(tmp_path, approved_by="OK sign it, chat 2026-10-27 08:55 UTC")
@@ -111,7 +111,7 @@ def test_dry_run_changes_nothing(tmp_path):
     make_sheet(tmp_path)
     before = (tmp_path / "docs" / "reviews" / f"MANUAL_TEST_{V}.md").read_bytes()
     res = go(tmp_path, approved_by="chat approval now", dry_run=True)
-    assert res.code == 0 and "DRY RUN" in text(res) and "git tag -a v5.0.0" in text(res)
+    assert res.code == 0 and "DRY RUN" in text(res) and "git tag -s v5.0.0" in text(res)
     assert (tmp_path / "docs" / "reviews" / f"MANUAL_TEST_{V}.md").read_bytes() == before
     assert not (tmp_path / "docs" / "release").exists()
 
@@ -152,4 +152,4 @@ def test_cmd_release_run_goes_through_cmd_run(tmp_path, monkeypatch, capsys):
     ns.approved_by_owner = "chat approval 2026-10-27 09:00 UTC"
     assert release_cmd.cmd_release(ns, None, tmp_path) == 0
     out = capsys.readouterr().out
-    assert "git tag -a v5.0.0" in out and so.load(tmp_path, V).signed
+    assert "git tag -s v5.0.0" in out and so.load(tmp_path, V).signed
