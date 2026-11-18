@@ -59,9 +59,14 @@ def save(home: Path, **kw) -> dict:
     with file_lock(path):
         raw = _raw(home)
         add = kw.pop("ids_add", None) or {}     # re-read under the lock: a concurrent writer's ids are kept
+        prune = kw.pop("prune", False)
         d = {**raw, **load(home), **kw}
         if add:
             d["ids"] = {**(raw.get("ids") if isinstance(raw.get("ids"), dict) else {}), **add}
+        if prune:                               # a deleted report leaves no entry behind: the file stays small
+            for k in ("ids", "sent_folder", "sent_api"):
+                if isinstance(d.get(k), dict):
+                    d[k] = {n: v for n, v in d[k].items() if (Path(home) / "reports" / n).is_file()}
         fd, tmp = tempfile.mkstemp(dir=home, prefix=FILE, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -156,6 +161,7 @@ def upload(home: Path, path: Path, *, client=None) -> dict:
 RECONNECT = ("GOOGLE_AUTH_EXPIRED", "GOOGLE_NOT_CONNECTED", "GOOGLE_SCOPE_MISSING", "GOOGLE_NO_REFRESH_TOKEN")
 
 
+AUTH = ("authError", "insufficientPermissions")    # a 403 that a new sign-in fixes; a file-level refusal does not
 BUSY = ("rateLimitExceeded", "userRateLimitExceeded", "storageQuotaExceeded", "dailyLimitExceeded")
 
 
@@ -170,14 +176,14 @@ def _drive_reasons(resp) -> set[str]:
 def needs_reconnect(e: Exception) -> bool:
     resp = getattr(e, "response", None)
     status = getattr(resp, "status_code", None)
-    if status == 403 and _drive_reasons(resp) & set(BUSY):      # a full Drive or a rate limit is not a sign-in problem
-        return False
-    return status in (401, 403) or getattr(e, "code", None) in RECONNECT
+    if status == 403:                           # only an auth or scope refusal stops the sync and asks to sign in
+        return bool(_drive_reasons(resp) & set(AUTH))
+    return status == 401 or getattr(e, "code", None) in RECONNECT
 
 
 def reason(e: Exception) -> str:
     """One plain sentence for the owner: a missing or refused sign-in says how to reconnect."""
-    if getattr(getattr(e, "response", None), "status_code", None) == 403 and not needs_reconnect(e):
+    if getattr(getattr(e, "response", None), "status_code", None) == 403 and _drive_reasons(e.response) & set(BUSY):
         return clilang.fmt("גוגל דרייב מלא או עמוס כרגע: הדוח יישלח בהמשך",
                            "Google Drive is full or busy right now: the report is sent later")
     if needs_reconnect(e):
@@ -257,9 +263,9 @@ def _sync(home: Path, client) -> list[dict]:
         return []
     key = _sent_key(home)
     before = _raw(home).get(key)
-    sent = _sent(home, key)
-    out = []
     folder = Path(home) / "reports"
+    sent = {n: m for n, m in _sent(home, key).items() if (folder / n).is_file()}
+    out = []
     for f in sorted(folder.iterdir()) if folder.is_dir() else []:
         if f.name.startswith(".") or f.name.lower().endswith(SKIP_SUFFIXES):
             continue
@@ -278,7 +284,7 @@ def _sync(home: Path, client) -> list[dict]:
             elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
                 logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
     if sent != before:                          # nothing new: the settings file is not rewritten
-        save(home, **{key: sent})
+        save(home, prune=True, **{key: sent})
     return out
 
 

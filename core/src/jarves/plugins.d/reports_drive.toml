@@ -1,2 +1,4 @@
+# Import-only, like failure_log and conversation_eval: importing the module registers the reports_drive row on the
+# dashboard Features page and in the setup wizard. No routes and no addon entry point; the loaders only import.
 dashboard = ["jarves.reports_drive"]
 addons = ["jarves.reports_drive"]

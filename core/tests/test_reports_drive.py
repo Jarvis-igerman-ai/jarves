@@ -536,3 +536,53 @@ def test_a_report_sent_by_after_report_is_not_sent_again_by_the_next_sync(tmp_pa
     assert rd.after_report(tmp_path, rep, features=ON, client=fake)["id"] == "f1"
     rd.sync(tmp_path, client=fake)
     assert [s[0] for s in fake.sent] == ["a.md"]
+
+
+def test_a_broken_reports_drive_import_never_breaks_job_finishing_and_warns_once(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import jarves
+    from jarves import scheduler as S
+    warned = []
+    monkeypatch.setattr(S.logs, "warn", lambda *a, **kw: warned.append((a[1], kw)))
+    monkeypatch.delattr(jarves, "reports_drive")
+    monkeypatch.setitem(sys.modules, "jarves.reports_drive", None)      # the import itself fails
+    s = SimpleNamespace(features=ON)
+    S.Scheduler._reports_to_drive(s)
+    S.Scheduler._reports_to_drive(s)
+    assert warned == [("REPORTS_DRIVE_HOOK_FAILED", {"error": "ModuleNotFoundError"})]
+
+
+def test_deleted_reports_are_pruned_from_the_settings(tmp_path):
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    (folder / "a.md").write_bytes(b"1")
+    (folder / "b.md").write_bytes(b"1")
+    rd.sync(tmp_path, client=FakeDrive())
+    assert set(rd._raw(tmp_path)["ids"]) == {"a.md", "b.md"}
+    (folder / "b.md").unlink()
+    rd.sync(tmp_path, client=FakeDrive())
+    raw = rd._raw(tmp_path)
+    assert set(raw["sent_api"]) == {"a.md"} and set(raw["ids"]) == {"a.md"}
+
+
+def test_a_file_level_403_fails_that_file_only_and_does_not_ask_to_sign_in(tmp_path):
+    e = _http(403, "insufficientFilePermissions")
+    assert not rd.needs_reconnect(e) and "signin" not in rd.reason(e) and "busy" not in rd.reason(e)
+    assert rd.needs_reconnect(_http(403, "authError")) and rd.needs_reconnect(_http(403, "insufficientPermissions"))
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    (folder / "a.md").write_bytes(b"1")
+    (folder / "b.md").write_bytes(b"1")
+
+    class OneRefused(FakeDrive):
+        def upload(self, name, *a, **kw):
+            if name == "a.md":
+                raise e
+            return super().upload(name, *a, **kw)
+    fake = OneRefused()
+    rd.sync(tmp_path, client=fake)
+    assert [s[0] for s in fake.sent] == ["b.md"]

@@ -900,6 +900,16 @@ class Scheduler:
             raise JobFailed(res.code, res.message)
         return ("partial" if res.data.get("partial") else "ok"), res.message, [{"type": "tool", "name": job["tool"]}]
 
+    def _reports_to_drive(self) -> None:
+        """JAR-274 hook. A broken reports_drive module (even its import) never breaks job finishing; warns once."""
+        try:
+            from . import reports_drive
+            reports_drive.on_job_finished(self.features)
+        except Exception as e:
+            if not getattr(self, "_drive_hook_warned", False):
+                self._drive_hook_warned = True
+                logs.warn("scheduler", "REPORTS_DRIVE_HOOK_FAILED", "reports to Drive hook failed", error=type(e).__name__)
+
     def _finish(self, job: dict, run: dict, result, err: JobFailed | None) -> None:
         now = self.clock()
         tz = self.tz(job["tz"])
@@ -922,8 +932,7 @@ class Scheduler:
         level = logs.info if err is None else logs.warn
         level("scheduler", f"JOB_{state.upper()}", "job run finished", state=state, job=job["id"], run=run["id"],
               report=rid, late=late, attempts=run["attempts"], error_code=None if err is None else err.code)
-        from . import reports_drive                      # JAR-274: new report files to Google Drive when switched on
-        reports_drive.on_job_finished(self.features)
+        self._reports_to_drive()                         # JAR-274: new report files to Google Drive when switched on
         delivery = _j(job["delivery"], ["report"])
         self.poke()                                  # the loop delivers the alert now, not at the next poll
         if err is not None:

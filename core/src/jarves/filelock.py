@@ -1,4 +1,5 @@
-"""One exclusive cross-process file lock shared by modules that merge a settings/state file (issue #300)."""
+"""A public exclusive cross-process file lock for modules that merge a settings/state file (first user: reports_drive).
+Same pattern as the private drive_mode._file_lock (issue #300); moving drive_mode onto this helper is a separate change."""
 from __future__ import annotations
 
 import contextlib
