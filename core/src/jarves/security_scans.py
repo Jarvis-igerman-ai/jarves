@@ -535,9 +535,15 @@ def http_failures(coverage: dict) -> dict[str, str]:
     return out
 
 
+def coverage_gaps(coverage: dict) -> dict[str, str]:
+    """{source: coverage} for every source not read completely: the tracker's "Sources not fully read" line."""
+    return {str(k): str(v) for k, v in coverage.items() if str(v).split(":")[0] != "complete"}
+
+
 def signature(findings: list[dict], complete: bool, failures: dict[str, str] | None = None) -> str:
-    """Findings plus HTTP failures (#480): any change in the failed sources or their codes rewrites the tracker
-    once, so its owner-action and retry lines are never stale. No failures keeps the pre-#480 value."""
+    """Findings plus coverage gaps (#480): any change in the unread sources or their reasons (HTTP code or not)
+    rewrites the tracker once, so its gap, owner-action and retry lines are never stale. No gaps keeps the
+    pre-#480 value."""
     raw = ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
     if failures:
         raw += "|" + ",".join(f"{k}:{v}" for k, v in sorted(failures.items()))
@@ -589,7 +595,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     else:
         lines.append("**No open findings in the sources that were read completely.**")
     lines += ["", f"Resolved since the previous scan (source read completely): {resolved}", ""]
-    gaps = {k: v for k, v in coverage.items() if v.split(":")[0] not in ("complete",)}
+    gaps = coverage_gaps(coverage)
     lines.append(f"Coverage: {'complete' if _complete(coverage) else 'INCOMPLETE'} (scan: {kind}). "
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
@@ -666,7 +672,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete, http_failures(coverage))
+    sig = signature(findings, complete, coverage_gaps(coverage))
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))

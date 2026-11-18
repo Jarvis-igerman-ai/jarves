@@ -227,6 +227,18 @@ def test_issue_480_tracker_follows_the_failures_and_is_never_stale(home):
     assert "Retry note" not in gh.issues[0]["body"]
 
 
+def test_issue_480_non_http_gap_change_rewrites_the_tracker(home):
+    """A gap whose reason is not an HTTP code (boundary not run) still rewrites the tracker (R1 of #1263)."""
+    gh = DenyGitHub(alerts=403)
+    ok, not_run = (lambda: {"failed": False}), (lambda: {"not_run": True})
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}"}]
+    assert scan(None, gh, kind="full", boundary=ok)["issue"]["status"] == "updated"
+    assert scan(None, gh, kind="full", boundary=not_run, now=day(1))["issue"]["status"] == "updated"
+    assert "boundary (incomplete:not_run)" in gh.issues[0]["body"]
+    assert scan(None, gh, kind="full", boundary=ok, now=day(2))["issue"]["status"] == "updated"
+    assert "boundary (" not in gh.issues[0]["body"]
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)
