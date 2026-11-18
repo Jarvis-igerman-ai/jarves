@@ -42,3 +42,42 @@ def test_json_is_rejected_for_other_update_actions(tmp_path, monkeypatch, capsys
     for action in (["install"], ["auto", "status"], ["check", "--rollback"]):
         assert cli.main(["update", *action, "--json"]) == 2
         assert "--json" in capsys.readouterr().out
+
+
+def test_json_with_channel_is_rejected_before_the_channel_changes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "linux")
+    calls = []
+    monkeypatch.setattr(updates, "set_channel", lambda *a, **k: calls.append(a) or "beta")
+    for action in ("check", "status"):
+        assert cli.main(["update", action, "--channel", "beta", "--json"]) == 2
+        out = capsys.readouterr().out
+        assert "--json" in out and "Update channel" not in out
+    assert calls == []  # rejected before any mutation
+
+
+def test_check_json_reports_all_fields_from_the_check(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(features.Features, "enabled", lambda self, name: True)
+    st = {"current": "1.0", "available": True, "error": None, "latest": {"version": "1.1"}, "checked_at": "t1"}
+    monkeypatch.setattr(updates.UpdateChecker, "check", lambda self, force=False: st)
+    assert cli.main(["update", "check", "--json"]) == 0
+    assert _line(capsys) == {"current": "1.0", "available": True, "error": None, "latest": "1.1", "checked_at": "t1"}
+
+
+def test_check_json_with_the_feature_off_is_still_one_json_line(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(features.Features, "enabled", lambda self, name: False)
+    assert cli.main(["update", "check", "--json"]) == 1
+    line = _line(capsys)
+    assert line["available"] is False and "switched off" in line["error"]
+
+
+def test_status_json_on_a_fresh_home_uses_the_real_empty_cache(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("JARVES_HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert cli.main(["update", "status", "--json"]) == 0
+    line = _line(capsys)
+    assert (line["available"], line["error"], line["latest"], line["checked_at"]) == (False, None, None, None)

@@ -1892,6 +1892,12 @@ def cmd_update(a, cfg, home) -> int:
     """jarvis update [check | install | status]: notify + ask approval (D16); never installs on its own."""
     from .features import Features
     from .updates import UpdateChecker, UpdateError, launch_installer, set_channel, version_line
+    as_json = getattr(a, "json", False)  # validated before any change, so --json never mutates or mixes output
+    if as_json and (a.action not in ("check", "status") or getattr(a, "rollback", False)
+                    or getattr(a, "channel", None)):
+        print(clilang.fmt("--json עובד רק עם `update check` או `update status` (בלי --channel).",
+                          "--json works only with `update check` or `update status` (without --channel)."))
+        return 2
     if getattr(a, "channel", None):
         try:
             ch = set_channel(home, cfg, a.channel)
@@ -1900,11 +1906,6 @@ def cmd_update(a, cfg, home) -> int:
             return 1
         print(clilang.fmt(f"ערוץ העדכונים: {'בטא (כל בנייה ירוקה של main)' if ch == 'beta' else 'יציב'}.",
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
-    as_json = getattr(a, "json", False)
-    if as_json and (a.action not in ("check", "status") or getattr(a, "rollback", False)):
-        print(clilang.fmt("--json עובד רק עם `update check` או `update status`.",
-                          "--json works only with `update check` or `update status`."))
-        return 2
     if a.action == "auto":
         return _update_auto(a, cfg, home)
     u = UpdateChecker(home, cfg=cfg)
@@ -1921,14 +1922,20 @@ def cmd_update(a, cfg, home) -> int:
     if a.action == "status":
         s = u.status()
     elif not Features(cfg, home).enabled("update_check"):
-        print("The update check is switched off. Turn it on with: jarvis features on update_check")
-        return 1
+        if as_json:
+            s = {"available": False, "error": "update_check is switched off"}
+        else:
+            print("The update check is switched off. Turn it on with: jarvis features on update_check")
+            return 1
     else:
         s = u.check(force=True)
-    if as_json:  # one machine-readable line (JAR-456): offline/failed checks carry "error" and exit 1
-        print(json.dumps({"current": s.get("current"), "available": bool(s["available"]), "error": s["error"],
-                          "latest": (s.get("latest") or {}).get("version"), "checked_at": s.get("checked_at")}))
-        return 1 if s["error"] else 0
+    if as_json:  # one machine-readable line (JAR-456): offline/failed/off checks carry "error" and exit 1
+        s = s if isinstance(s, dict) else {"error": "no update status"}
+        latest = s.get("latest") if isinstance(s.get("latest"), dict) else {}
+        print(json.dumps({"current": s.get("current"), "available": bool(s.get("available")),
+                          "error": s.get("error"), "latest": latest.get("version"),
+                          "checked_at": s.get("checked_at")}))
+        return 1 if s.get("error") else 0
     if s["error"]:
         print(f"Update check unavailable: {s['error']}")
         return 1
@@ -2391,7 +2398,7 @@ def main(argv: list[str] | None = None) -> int:
                                                               "from before the update")
     up.add_argument("--keep-data", action="store_true", help="rollback: reinstall the program only, keep current data")
     up.add_argument("--window", action="store_true", help="rollback: show the setup window instead of running silently")
-    up.add_argument("--json", action="store_true", help="check / status: print one JSON line (available, error, latest)")
+    up.add_argument("--json", action="store_true", help="check / status: print one JSON line (current, available, error, latest, checked_at)")
     for entry in ext:
         if entry[0] == "late":
             entry[1].add_cli(sub)
