@@ -1,5 +1,6 @@
 """Autopilot part 1: policy, version order, bug label scope and the work list. Hermetic, no network, no workers."""
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,8 +126,8 @@ class AutopilotTests(unittest.TestCase):
 
 class WorkerAllowListPolicyFileTests(unittest.TestCase):
     """#932/JAR-213: the owner's worker_allowed_tools override must not let a worker rewrite autopilot.json.
-    A wildcard (`*`, `:*`) lets the worker add any option at run time, so only tools with no file-writing option may
-    take one; git, gh and pytest are allowed only as fixed commands without options, interpreters by bare name only."""
+    Only bare read-only tools are allowed: git, gh and pytest take write options at run time or run worker-written code
+    (conftest.py, hooks, repository config), fixed or wildcard (PR #1308 review R2)."""
 
     def check(self, rules):
         return autopilot.validate({**json.loads(json.dumps(autopilot.DEFAULTS)), "worker_allowed_tools": rules})
@@ -152,15 +153,26 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
                      "Bash(./python -m pytest)", "Bash(/tmp/python -m pytest)", "Bash(C:/py/python.exe -m pytest)",
                      # R4: gh run download / gh pr checkout write files
                      "Bash(gh:*)", "Bash(gh run:*)", "Bash(gh run download)", "Bash(gh pr checkout)",
-                     "Bash(gh alias set)", "Bash(gh pr view --json x)"):
+                     "Bash(gh alias set)", "Bash(gh pr view --json x)",
+                     # PR #1308 review R2: fixed pytest/git/gh commands run worker-written code too
+                     "Bash(python -m pytest)", "Bash(python3 -m pytest core/tests/test_x.py)", "Bash(py -m pytest)",
+                     "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(git show)", "Bash(git branch)",
+                     "Bash(gh pr view)", "Bash(gh run list)"):
             with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
                 self.check(["Bash(ls:*)", rule])
 
     def test_narrow_rules_stay_allowed(self):
         rules = ["Bash(ls:*)", "Bash(grep -rn:*)", "Bash(wc *)", "Bash(head:*)", "Bash(ls -la)", "Read", "Grep", "Glob",
-                 "Bash(python -m pytest)", "Bash(python3 -m pytest core/tests/test_x.py)", "Bash(py -m pytest)",
-                 "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(gh pr view)", "Bash(gh run list)"]
+                 "Bash(diff -u:*)"]
         self.assertEqual(self.check(rules)["worker_allowed_tools"], rules)
+
+    def test_refusal_names_the_specific_reason(self):
+        for rule, reason in (("Bash(ls autopilot.json)", "names autopilot.json"),
+                             ("Bash(ls:* > y)", "only plain characters"), ('Bash("python":*)', "only plain characters"),
+                             ("Bash(sed -i:*)", "bare read-only tool"), ("Bash(python -m pytest)", "bare read-only tool"),
+                             ("Bash(./ls:*)", "bare read-only tool"), ("Bash(git status)", "bare read-only tool")):
+            with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, re.escape(rule) + ".*" + reason):
+                self.check([rule])
 
 
 if __name__ == "__main__":
