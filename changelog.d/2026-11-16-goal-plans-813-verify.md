@@ -1,0 +1,1 @@
+- Added: a verification report showing that the goal plan cancel race (#813) is fixed on main: skip and runner writes use compare-and-set, and each case has a regression test (JAR-130).

@@ -45,17 +45,34 @@ HEBREW_STYLE = ("Speak natural, clear Israeli Hebrew, warmly and at a calm pace,
                 "Pronounce names exactly as written. Read only the given text.")
 
 
+# https://developers.openai.com/api/docs/deprecations (as reported in #1224, scout run 2026-11-17): deprecated
+# 2026-10-01, shutdown 2027-01-14, replacement gpt-realtime-2.1-mini (voice.speech_model). This is a denylist of
+# known retired ids only: any other model name is still sent to /v1/audio/speech as configured.
+RETIRED_SPEECH_MODELS = frozenset({"gpt-4o-mini-tts", "gpt-4o-mini-tts-2025-03-20", "gpt-4o-mini-tts-2025-12-15"})
+
+
 class OpenAISpeechTTS:
     """OpenAI /v1/audio/speech: a dedicated TTS model (not a conversation model)."""
     name = "openai-tts"
     quality = "cloud"
     langs = ("he", "en")
 
-    def __init__(self, model: str = "gpt-4o-mini-tts", voice: str = "marin", timeout_s: float = 60) -> None:
+    def __init__(self, model: str = "", voice: str = "marin", timeout_s: float = 60) -> None:
         self.model, self.voice, self.timeout = model, voice, timeout_s
+
+    def _model_problem(self) -> tuple[str, str]:
+        """("", "") when usable, else (error code, reason)."""
+        if not self.model.strip():
+            return "TTS_MODEL_OFF", "off (voice.speech_http_model is empty; the realtime speaker is used)"
+        if self.model.strip().lower() in RETIRED_SPEECH_MODELS:
+            return "TTS_MODEL_RETIRED", f"{self.model.strip()} is retired by OpenAI; clear voice.speech_http_model"
+        return "", ""
 
     def check(self) -> tuple[bool, str]:
         import os
+        code, problem = self._model_problem()
+        if code:
+            return False, problem
         if not os.environ.get("OPENAI_API_KEY", "").strip():
             return False, "OPENAI_API_KEY not set (run: jarvis key)"
         return True, f"{self.model} voice {self.voice}"
@@ -64,6 +81,9 @@ class OpenAISpeechTTS:
         import os
         import httpx
         from .. import pronounce
+        code, problem = self._model_problem()
+        if code:
+            raise TTSUnavailable(code, problem, "the realtime speaker (voice.speech_model) speaks instead")
         text = pronounce.apply(text)             # user pronunciation dictionary (PRONUNCIATIONS.md)
         body = {"model": self.model, "voice": self.voice, "input": text, "response_format": "pcm"}
         if text_lang(text) == "he":

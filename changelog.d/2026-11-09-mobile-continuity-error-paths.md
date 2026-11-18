@@ -1,0 +1,1 @@
+- Fixed: phone goal/snooze and the dashboard continuity op no longer crash (HTTP 500) on an Infinity number or a non-object body; they answer 400, or clamp snooze minutes. Snooze with NaN minutes now uses the 1-minute minimum instead of storing a NaN deadline.

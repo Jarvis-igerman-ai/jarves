@@ -1,0 +1,1 @@
+- Added: edge-case tests (empty, malformed, huge input) for ui_blocks and triage; no behavior change.
