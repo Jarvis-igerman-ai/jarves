@@ -76,9 +76,56 @@ def test_1098_unidentified_live_pid_blocks_instead_of_killing(env, procs):  # no
     assert killed == [] and t["status"] == "blocked" and "4242" in t["reason"] and t["pid"] == 4242
 
 
+def test_1098_launch_records_the_process_identity(env, monkeypatch):  # noqa: F811
+    import threading
+    from jarves.projectmgr import runners
+    from jarves.workflow import webchild
+    m, repo, _ = env
+    open_project(m, repo)
+    monkeypatch.setattr(webchild, "started_at", lambda pid: {4242: 111.0}.get(pid))
+    tid = _running(m, 0, {"keep": 1})
+    seen = {}
+
+    class Runner:
+        def run(self, card, wt, **kw):
+            kw["on_start"](4242)
+            seen.update(m.db.task(tid))                      # while the agent runs
+            return runners.Result(ok=True, text="done")
+    t = m.db.task(tid)
+    assert m._run_agent(m.db.project(1), t, Runner(), "card", str(repo), "", False, threading.Event()).ok
+    assert seen["pid"] == 4242 and seen["job"] == {"keep": 1, "pid_started": 111.0}
+
+
+@pytest.mark.parametrize("now,want_kill,want_pid", [(111.0, [4242], 0), (999.0, [], 0), (None, [], 0)])
+def test_1098_stop_kills_only_its_own_process(env, procs, now, want_kill, want_pid):  # noqa: F811
+    m, repo, _ = env
+    open_project(m, repo)
+    live, killed = procs
+    if now is not None:
+        live[4242] = now
+    tid = _running(m, 4242, {"pid_started": 111.0})
+    assert m.call("stop_agent", project="demo")["ok"]
+    t = m.db.task(tid)
+    assert killed == want_kill and t["status"] == "blocked" and t["pid"] == want_pid
+    assert "pid_started" not in t["job"] and "retry" in t["reason"]
+
+
+def test_1098_stop_does_not_kill_an_unidentified_process(env, procs):  # noqa: F811
+    m, repo, _ = env
+    open_project(m, repo)
+    live, killed = procs
+    live[4242] = 111.0
+    tid = _running(m, 4242, {})
+    r = m.call("stop_agent", project="demo")
+    t = m.db.task(tid)
+    assert killed == [] and t["status"] == "blocked" and t["pid"] == 4242 and "not killed" in t["reason"]
+    assert "not confirmed stopped" in r["text"]
+
+
 # ---------------------------------------------------------------- #1099: key/token-shaped text is never learned
 @pytest.mark.parametrize("text", ["my key is sk-proj-abcdEFGH1234ijklMNOP5678", "ghp_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5",
-                                  "AKIAIOSFODNN7EXAMPLE1", "remember my api key", "the api_token is in the drawer",
+                                  "AKIAIOSFODNN7EXAMPLE1", "remember my api key", "set my_api_key now",
+                                  "3f9a1c0e7b2d4a6f8e1c3b5d7a9f0e2c4b6d8a1f", "the api_token is in the drawer",
                                   "use secret key from the box", "access-token please", "מפתח API שלי", "מפתחות API",
                                   "הטוקן שלי"])
 def test_1099_key_and_token_shaped_text_is_sensitive(text):
@@ -87,7 +134,8 @@ def test_1099_key_and_token_shaped_text_is_sensitive(text):
 
 @pytest.mark.parametrize("text", ["I like jazz in the morning", "prefer short answers", "access keyboard shortcuts",
                                   "a private keyboard", "plan a secret party", "internationalization matters",
-                                  "Python3.12-compatible-code", "wake me at seven on weekdays"])
+                                  "Python3.12-compatible-code", "wake me at seven on weekdays", "2024-annual-review-plan",
+                                  "read-the-2025-roadmap-notes-first"])
 def test_1099_ordinary_preferences_are_not_sensitive(text):
     assert not looks_sensitive(text)
 
@@ -107,8 +155,19 @@ def test_206_f13_privacy_keeps_no_reply_words_at_rest(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- #206 H3 / H4: the guides state the exposure
 def test_206_h3_h4_guides_state_the_exposure():
-    from pathlib import Path
-    import jarves
-    data = Path(jarves.__file__).parent / "guides" / "data"
-    assert "status permission sees this strip" in (data / "mobile_access.toml").read_text(encoding="utf-8")
-    assert "not in a sandbox" in (data / "project_manager.toml").read_text(encoding="utf-8")
+    from jarves import guides
+    assert "status permission sees this strip" in guides.help_text(guides.find("mobile_access"))  # what `jarvis guide` shows
+    assert "not in a sandbox" in guides.help_text(guides.find("project_manager"))
+
+
+def test_206_f13_switching_privacy_on_scrubs_older_chat_replies(tmp_path, monkeypatch):
+    from jarves import continuity, logs
+    c = continuity.Continuity(tmp_path)
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    c.store("phone1", "old", "chat", 200, {"ok": True, "reply": "your bank PIN reminder"})
+    c.store("phone1", "p", "pref", 200, {"ok": True, "pref": 3})
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    c.store("phone1", "new", "chat", 200, {"ok": True, "reply": "x"})
+    assert c.seen("phone1", "old")["reply"] == continuity.RESEND_UNAVAILABLE
+    assert c.seen("phone1", "p") == {"ok": True, "pref": 3}
+    assert not any("bank" in r["body"] for r in c._rows("SELECT body FROM ledger"))

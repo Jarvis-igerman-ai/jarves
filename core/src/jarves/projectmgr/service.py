@@ -1006,12 +1006,15 @@ class Manager(StageEngine):
             ev = self._cancel.get(t["id"])
             if ev is not None:
                 ev.set()
-            elif t["pid"] and _kill_pid(t["pid"], self._job(t).get("pid_started")) == "unknown":
+            elif t["pid"] and _kill_pid(t["pid"], (job := self._job(t)).get("pid_started")) == "unknown":
                 self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED}, but process {t['pid']} could not be "
                                     f"identified and was not killed: check it, then retry {t['seq']}")
                 self.db.event(t["id"], "owner", "stopped", "stopped by the owner; process not identified, not killed")
                 done.append(f"#{t['seq']} (process not confirmed stopped)")
                 continue
+            if t["pid"] and ev is None:
+                job.pop("pid_started", None)                  # R2: the cleared pid takes its identity record with it
+                self.db.update_task(t["id"], job=job)
             self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED} (retry {t['seq']} to continue)", pid=0)
             self.db.event(t["id"], "owner", "stopped", "stopped by the owner")
             done.append(f"#{t['seq']}")

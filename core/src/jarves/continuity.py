@@ -134,6 +134,10 @@ class Continuity:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
                 (device, cid, kind, int(status), _at_rest(kind, body), self.clock()))
+        if kind == "chat" and logs.privacy():                 # R4: rows kept before privacy was switched on lose their words
+            self._x("UPDATE ledger SET body=json_set(body, '$.reply', ?, '$.code', 'RESEND_UNAVAILABLE') WHERE kind='chat' "
+                    "AND json_valid(body) AND json_type(body, '$.reply')='text' AND json_extract(body, '$.reply')<>?",
+                    (RESEND_UNAVAILABLE, RESEND_UNAVAILABLE))
 
     @staticmethod
     def stale(age_s) -> bool:
