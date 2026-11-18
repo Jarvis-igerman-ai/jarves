@@ -41,6 +41,7 @@ NOTICE_GRACE_S = 15 * 60                 # between the "before" notice and the e
 LATER_S = 24 * 3600                      # "later" = ask again after a day
 BACKOFF_S = (3600, 4 * 3600, 12 * 3600)  # wait after failure 1, 2, 3
 GIVE_UP_AFTER = 3                        # failures per version, then stop and tell the owner once
+PROBE_STUCK_S = 24 * 3600                # probe_error this long: tell the owner once (it may never clear by itself)
 TICK_S = 600                             # how often the Core looks (the update check itself is cached for a day)
 
 CHOICES = ("now", "later", "off")
@@ -349,6 +350,7 @@ class AutoUpdater:
                 return "backoff"
             reasons = list(self.busy() or [])
             st["busy"] = reasons
+            self._watch_probe_error(st, "probe_error" in reasons, now, ver, disp)
             if reasons:
                 _save(self.home, st)
                 return "busy"
@@ -356,6 +358,16 @@ class AutoUpdater:
             return "backoff"
         st["busy"] = []
         return self._install(st, chk, ver, disp)
+
+    def _watch_probe_error(self, st: dict, failing: bool, now: float, ver: str, disp: str) -> None:
+        """#1100 follow-up: a broken busy probe keeps the update waiting forever; say so once per version."""
+        if not failing:
+            st.pop("probe_error_since", None)
+            return
+        since = float(st.setdefault("probe_error_since", now))
+        if now - since >= PROBE_STUCK_S and st.get("probe_stuck_noticed") != ver:
+            st["probe_stuck_noticed"] = ver
+            self._emit(st, "probe_stuck", ver, disp)
 
     # ------------------------------------------------------------------ install (the existing signed path)
     def _install(self, st: dict, chk: updates.UpdateChecker, ver: str, disp: str) -> str:
@@ -473,6 +485,13 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                  "alone (it would not start on that data). To go back: jarvis update --rollback (or the Roll back "
                  "button on the Updates page); it also restores the data backup made before the update, and only "
                  "after your OK."))
+    if kind == "probe_stuck":
+        return (("העדכון האוטומטי תקוע", f"גרסה {display} ממתינה כבר יותר מיום כי בדיקת 'האם ג'רביס בשימוש' נכשלת, "
+                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates; אם זה חוזר, "
+                 "דווח עם jarvis report."),
+                ("Auto-update is stuck", f"Version {display} has waited over a day because the 'is JARVES in use' check "
+                 "keeps failing, so I do not install (to stay safe). The current version works. You can update by "
+                 "hand on the Updates page; if it repeats, report it with jarvis report."))
     if kind in ("rolled_back", "rollback_failed"):
         prev = x.get("prev") or ""
         if kind == "rolled_back":

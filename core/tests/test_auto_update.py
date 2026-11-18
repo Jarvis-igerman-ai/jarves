@@ -405,6 +405,17 @@ def test_busy_probe_error_defers_the_restart(home, server, keys):
     assert r.au.status()["busy"] == ["probe_error"]
 
 
+def test_persistent_probe_error_tells_the_owner_once(home, server, keys):
+    """#1100 follow-up: probe_error that never clears raises one 'probe_stuck' notice, not silence or spam."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    assert r.tick() == "busy" and "probe_stuck" not in kinds(r)
+    assert r.tick(auto_update.PROBE_STUCK_S + 1) == "busy" and r.launched == []
+    r.tick(600)
+    assert kinds(r).count("probe_stuck") == 1
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()

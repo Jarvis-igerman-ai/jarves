@@ -1,1 +1,1 @@
-- Fixed: auto-update no longer treats a failing busy probe (approvals, chat, coding agents, quiet hours) as a quiet moment; it reports `probe_error` and waits, so an update restart cannot run during a pending approval (#1100).
+- Fixed: auto-update no longer treats a failing busy probe (approvals, chat, coding agents, quiet hours) as a quiet moment; it reports `probe_error` and waits, so an update restart cannot run during a pending approval; if `probe_error` lasts over a day it tells the owner once per version (#1100).
