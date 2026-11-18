@@ -404,6 +404,9 @@ def test_busy_probe_error_defers_the_restart(home, server, keys):
     r.ready()
     assert r.tick() == "busy" and r.launched == []
     assert r.au.status()["busy"] == ["approval_probe_failed"]
+    Appr.has_pending = lambda self: False               # the probe works again and nothing is pending
+    assert auto_update.core_busy(Core()) == []
+    assert r.tick(60) == "installing" and len(r.launched) == 1
 
 
 def test_dashboard_api_switch_answer_and_channel(home):
