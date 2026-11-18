@@ -158,6 +158,7 @@ class Server(ThreadingHTTPServer):
         self.unlock_attempts: list[float] = []
         self.unlock_wrong = ("", 0)             # (code eph key, wrong tries over ALL sessions); 5 cancel the code
         self.unlock_key = unlock.ServerKey()     # private half only in memory: the home holds no offline oracle (#750)
+        self.unlock_published = False
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -192,7 +193,12 @@ class Server(ThreadingHTTPServer):
     def server_activate(self) -> None:
         # After the exclusive bind, before listen: a listening dashboard has always published its key, and a
         # second server that cannot bind never replaces the live one's key.
-        unlock.publish(self.home, self.unlock_key, self.server_address[1])
+        try:
+            unlock.publish(self.home, self.unlock_key, self.server_address[1])
+            self.unlock_published = True
+        except OSError as exc:  # read-only home or a Windows sharing violation: start read-only, never block startup
+            logging.getLogger(__name__).warning("could not publish the unlock key (%s); answers stay locked until the "
+                                                "dashboard restarts", type(exc).__name__)
         super().server_activate()
 
     def server_close(self) -> None:
@@ -270,7 +276,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/health":
-            self._json(200, {"ok": True, "service": "jarves-workflow"})
+            body = {"ok": True, "service": "jarves-workflow"}
+            if self.server.unlock_published:  # public key only: lets `unlock` confirm it talks to the key holder
+                body["unlock_pub"] = self.server.unlock_key.pub.hex()
+            self._json(200, body)
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                  "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),

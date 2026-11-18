@@ -14,18 +14,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import secrets
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-
-from .opener import listening
 
 CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
@@ -90,6 +90,18 @@ def withdraw(home: Path, key: ServerKey) -> None:
         pass  # missing or damaged: nothing of ours to withdraw
 
 
+def _serves_key(port: int, pub: bytes, timeout: float = 2.0) -> bool:
+    """True only when the listener on the port is a workflow dashboard that holds this public key (not just any
+    program that took over a crashed dashboard's port). Direct loopback request, never through a proxy."""
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{int(port)}/health", timeout=timeout) as response:
+            body = json.loads(response.read(4096))
+    except (OSError, ValueError, http.client.HTTPException):
+        return False
+    return isinstance(body, dict) and body.get("unlock_pub") == pub.hex()
+
+
 def issue(home: Path, *, now: float | None = None) -> str:
     """Make a new code (replaces any older one) for the running dashboard; shown in the owner's terminal only."""
     try:
@@ -100,10 +112,13 @@ def issue(home: Path, *, now: float | None = None) -> str:
         shared = eph_private.exchange(X25519PublicKey.from_public_bytes(pub))
     except FileNotFoundError:
         raise UnlockUnavailable("no dashboard is running; start it with: jarvis workflow supervise") from None
+    except PermissionError:  # e.g. Windows: the dashboard is replacing the file right now
+        raise UnlockUnavailable("the unlock key file is busy; try again in a moment") from None
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise UnlockUnavailable(f"the dashboard unlock key is damaged ({type(exc).__name__}); restart the dashboard") from None
-    if not listening(port):
-        raise UnlockUnavailable(f"no dashboard is running on port {port}; start it with: jarvis workflow supervise")
+    if not _serves_key(port, pub):
+        raise UnlockUnavailable(f"no dashboard is running on port {port} with the published unlock key; "
+                                "start it with: jarvis workflow supervise")
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     _write(home, FILE, {"eph": eph.hex(), "tag": _tag(shared, pub, eph, raw).hex(),
                         "expires": (now or time.time()) + CODE_TTL_S})

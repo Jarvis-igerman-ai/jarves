@@ -1,4 +1,5 @@
 """#750: the private link alone is read-only; owner answers need the terminal code (unlock)."""
+import hashlib
 import io
 import json
 import os
@@ -217,16 +218,14 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, out.getvalue())
 
     def test_750_files_in_the_home_are_no_offline_oracle_for_the_code(self):
-        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
         shown = unlock.issue(self.home)
         record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
         self.assertEqual(set(record), {"eph", "tag", "expires"})       # main stored {salt, hash}: scrypt, checkable offline
-        files = {p.name: p.read_text(encoding="ascii") for p in self.home.iterdir() if p.name.startswith("unlock")}
-        self.assertNotIn(self.server.unlock_key._private.private_bytes_raw().hex(), "".join(files.values()))
-        # A file reader holds pub and eph, but ECDH needs one of the two private keys: its own key gives a wrong tag.
-        pub, eph = bytes.fromhex(json.loads(files[unlock.PUB_FILE])["pub"]), bytes.fromhex(record["eph"])
-        guess = X25519PrivateKey.generate().exchange(X25519PublicKey.from_public_bytes(pub))
-        self.assertNotEqual(unlock._tag(guess, pub, eph, shown).hex(), record["tag"])
+        files = "".join(p.read_text(encoding="ascii") for p in self.home.iterdir() if p.name.startswith("unlock"))
+        self.assertNotIn(self.server.unlock_key._private.private_bytes_raw().hex(), files)
+        for derived in (shown, hashlib.sha256(shown.encode()).hexdigest(),     # no plain or unkeyed digest of the code
+                        hashlib.scrypt(shown.encode(), salt=b"", n=2 ** 14, r=8, p=1, dklen=32).hex()):
+            self.assertNotIn(f'"{derived}"', files)
         self.assertFalse(unlock.consume(self.home, shown, key=None))   # no key, no check
         self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
 
@@ -277,6 +276,34 @@ class UnlockTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()), redirect_stderr(err):
                 self.assertEqual(cli.main(home + ["open", "--no-open", "--port", str(self.server.server_port)]), 0)
             self.assertIn("No unlock code yet: could not save it (PermissionError)", err.getvalue())
+
+    def test_750_a_failed_key_publish_still_starts_the_dashboard_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(unlock, "publish", side_effect=PermissionError(13, "ro")), \
+                self.assertLogs("jarves.workflow.server", "WARNING") as logs:
+            server = Server(Path(tmp), 0)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                with self.assertRaisesRegex(unlock.UnlockUnavailable, "no dashboard is running"):
+                    unlock.issue(Path(tmp))
+            finally:
+                server.shutdown()
+                thread.join(5)
+                server.server_close()
+        self.assertEqual(len(logs.records), 1)
+        self.assertIn("could not publish the unlock key (PermissionError)", logs.output[0])
+
+    def test_750_a_busy_key_file_says_try_again(self):
+        with patch.object(unlock, "_read", side_effect=PermissionError(13, "sharing violation")):
+            with self.assertRaisesRegex(unlock.UnlockUnavailable, "busy; try again"):
+                unlock.issue(self.home)
+
+    def test_750_no_code_when_the_listener_does_not_hold_the_published_key(self):
+        # A crashed dashboard's port now answered by something else: here a live dashboard with another key.
+        unlock.publish(self.home, unlock.ServerKey(), self.server.server_port)
+        with self.assertRaisesRegex(unlock.UnlockUnavailable, "no dashboard is running on port"):
+            unlock.issue(self.home)
+        self.assertFalse((self.home / unlock.FILE).exists())
 
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
