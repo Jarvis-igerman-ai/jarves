@@ -165,7 +165,7 @@ class Server(ThreadingHTTPServer):
             self.server_bind()  # a second server on a busy port fails here, before it could replace unlock.pub
             # Private half in memory only, so unlock.json can't be checked offline (#750). Written before listen():
             # once the port answers (open's probe), unlock.pub already holds this server's key.
-            self.unlock_key = unlock.server_key(self.home)
+            self.unlock_key = unlock.server_key(self.home, self.server_port)
             self.server_activate()
         except BaseException:
             if hasattr(self, "unlock_key"):  # listen() failed after the key was written: its private half dies here

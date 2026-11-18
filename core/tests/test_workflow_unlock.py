@@ -203,7 +203,7 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse(unlock.consume(copy, shown, key=X25519PrivateKey.generate()))  # any other private key fails
         record = json.loads((copy / unlock.FILE).read_text(encoding="ascii"))
         want, expires = bytes.fromhex(record["hash"]), record["expires"]
-        for readable in (bytes.fromhex((copy / unlock.PUB).read_text(encoding="ascii")), bytes.fromhex(record["salt"])):
+        for readable in (bytes.fromhex((copy / unlock.PUB).read_text(encoding="ascii").split()[0]), bytes.fromhex(record["salt"])):
             self.assertFalse(hmac.compare_digest(unlock._mac(readable, shown, expires), want))  # not MACed under disk bytes
         self.assertTrue((self.home / unlock.FILE).exists())
         self.login()
@@ -283,6 +283,36 @@ class UnlockTests(unittest.TestCase):
         self.assertIn("could not create the unlock code", err)
         self.assertIn("access denied", err)
         self.assertNotIn("start the dashboard first", err)
+
+    def test_750_key_of_a_server_on_another_port_is_refused(self):
+        with socket.socket() as other:                                 # something else answers on this port
+            other.bind(("127.0.0.1", 0))
+            other.listen()
+            rc, out, err = self.unlock_cli(other.getsockname()[1])
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(f"on port {self.server.server_port}, not", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_750_unlock_without_port_uses_the_server_default(self):
+        with patch("jarves.workflow.opener.listening", return_value=True) as probe, \
+                patch.object(unlock, "issue", return_value="1234") as made, patch.object(cli, "owner_only_guard"), \
+                redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
+        probe.assert_called_once_with(8188)
+        self.assertEqual(made.call_args.kwargs["port"], 8188)
+
+    def test_750_open_reports_a_write_error_instead_of_hiding_it(self):
+        err = io.StringIO()
+        with patch.object(cli, "owner_only_guard"), patch("jarves.workflow.opener.open_dashboard", return_value=0), \
+                patch.object(unlock, "issue", side_effect=PermissionError("unlock.json: access denied")), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open", "--port", str(self.server.server_port)])
+        self.assertIn("No unlock code: unlock.json: access denied", err.getvalue())
+
+    def test_750_failed_key_write_leaves_no_tmp_file(self):
+        with patch.object(unlock.os, "replace", side_effect=PermissionError("sharing violation")), self.assertRaises(PermissionError):
+            unlock.server_key(self.home, 1)
+        self.assertEqual([p.name for p in self.home.glob("*.tmp")], [])
 
     def test_750_integer_issue_time_still_checks(self):
         shown = unlock.issue(self.home, now=1000)

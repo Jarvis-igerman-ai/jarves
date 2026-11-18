@@ -248,7 +248,7 @@ def main(argv=None) -> int:
         try:
             if not listening(a.port):  # a stale unlock.pub after a crash: no server could accept the code (#750)
                 raise FileNotFoundError(f"no dashboard server answers on port {a.port}")
-            code = unlock.issue(home)
+            code = unlock.issue(home, port=a.port)
         except (FileNotFoundError, ValueError) as exc:  # server not running, or unlock.pub missing/damaged (#750)
             print(json.dumps({"error": f"start the dashboard first ('jarvis workflow open'): {exc}"}, ensure_ascii=False), file=sys.stderr)
             return 1
@@ -264,14 +264,15 @@ def main(argv=None) -> int:
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            from . import unlock
-            from .opener import listening
+        except PermissionError:
+            return rc  # agent or non-terminal: no code (only the guard's refusal is silent)
+        from . import unlock
+        from .opener import listening
+        try:
             if not listening(a.port):  # no live server: a code bound to a stale key could never be accepted (#750)
                 raise FileNotFoundError("the dashboard server is not running")
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
-        except PermissionError:
-            pass
-        except (OSError, ValueError) as exc:  # dashboard server did not start: no key to bind a code to (#750)
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home, port=a.port)}", file=sys.stderr)
+        except (OSError, ValueError) as exc:  # no server/key, or unlock.json not writable: say why (#750)
             print(f"No unlock code: {exc}", file=sys.stderr)
         return rc
     if a.action == "web-check":
