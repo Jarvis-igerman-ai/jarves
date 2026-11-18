@@ -132,34 +132,57 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
     def check(self, rules):
         return autopilot.validate({**json.loads(json.dumps(autopilot.DEFAULTS)), "worker_allowed_tools": rules})
 
+    NAMES_FILE = ("Bash(python fix.py autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)")
+    NOT_PLAIN = ("Bash(*)", "Bash(:*)", "Bash( *)", "Bash(py*:*)", "Bash(FOO=1 python:*)", 'Bash("python":*)',
+                 "Bash(p\\ython:*)", "Bash($SHELL:*)", "Bash({sed,-i}:*)", "Bash(pyt[h]on:*)", "Bash(~/x:*)",
+                 "Bash(ls; python -c x)", "Bash(ls:* > y)", "Bash(python -m pytest; python -c x)",
+                 # PR #1248 R1/R2: run-time write options, R3: a worker-made interpreter path
+                 "Bash(git diff --output=x)", "Bash(git -c core.pager=x diff)", "Bash(python -m pytest --junitxml=x)",
+                 "Bash(python -m pytest --basetemp=h)", "Bash(python -m pytest -o cache_dir=h)",
+                 "Bash(C:/py/python.exe -m pytest)")
+    NOT_READ_ONLY = (
+        "Bash(python:*)", "Bash(python3 *)", "Bash(py:*)", "Bash(python -c:*)", "Bash(node -e:*)", "Bash(perl:*)",
+        "Bash(sed:*)", "Bash(sed -i:*)", "Bash(awk:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(tee:*)", "Bash(cat:*)",
+        "Bash(echo:*)", "Bash(bash -c:*)", "Bash(sh:*)", "Bash(env:*)", "Bash(xargs:*)", "Bash(find:*)", "Bash(sort:*)",
+        "Bash(npm:*)", "Bash(make:*)", "Bash(touch:*)", "Bash(.:*)", "Bash(source:*)", "Bash(./ls:*)",
+        "Bash(/tmp/grep:*)", "Bash(./python -m pytest)", "Bash(/tmp/python -m pytest)", "Bash(python -m pip)",
+        "Bash(python -c x)",
+        # PR #1248 R1/R2/R4 and PR #1308 R2: git, gh and pytest take write options or run worker-written code
+        "Bash(git:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show *)", "Bash(git status:*)",
+        "Bash(git rebase)", "Bash(python -m pytest:*)", "Bash(gh:*)", "Bash(gh run:*)", "Bash(gh run download)",
+        "Bash(gh pr checkout)", "Bash(gh alias set)", "Bash(gh pr view --json x)", "Bash(python -m pytest)",
+        "Bash(python3 -m pytest core/tests/test_x.py)", "Bash(py -m pytest)", "Bash(git status)", "Bash(git diff)",
+        "Bash(git log)", "Bash(git show)", "Bash(git branch)", "Bash(gh pr view)", "Bash(gh run list)")
+
     def test_commands_that_can_rewrite_the_policy_file_are_rejected(self):
-        for rule in ("Bash(python:*)", "Bash(python3 *)", "Bash(py:*)", "Bash(python -c:*)", "Bash(node -e:*)",
-                     "Bash(perl:*)", "Bash(sed:*)", "Bash(sed -i:*)", "Bash(awk:*)", "Bash(cp:*)", "Bash(mv:*)",
-                     "Bash(tee:*)", "Bash(cat:*)", "Bash(echo:*)", "Bash(bash -c:*)", "Bash(sh:*)", "Bash(env:*)",
-                     "Bash(xargs:*)", "Bash(find:*)", "Bash(sort:*)", "Bash(npm:*)", "Bash(make:*)", "Bash(touch:*)",
-                     "Bash(python fix.py autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)", "Bash(*)",
-                     "Bash(:*)", "Bash( *)", "Bash(py*:*)", "Bash(FOO=1 python:*)", 'Bash("python":*)',
-                     "Bash(p\\ython:*)", "Bash($SHELL:*)", "Bash(.:*)", "Bash(source:*)", "Bash({sed,-i}:*)",
-                     "Bash(pyt[h]on:*)", "Bash(~/x:*)", "Bash(./ls:*)", "Bash(/tmp/grep:*)", "Bash(ls; python -c x)",
-                     "Bash(ls:* > y)", "Bash(python -m pytest; python -c x)",
-                     # PR #1248 review R1: git log/show/diff take --output=<path> at run time
-                     "Bash(git:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show *)", "Bash(git status:*)",
-                     "Bash(git diff --output=x)", "Bash(git -c core.pager=x diff)", "Bash(git rebase)",
-                     # R2: pytest --junitxml/--basetemp/-o write or delete any path at run time
-                     "Bash(python -m pytest:*)", "Bash(python -m pytest --junitxml=x)",
-                     "Bash(python -m pytest --basetemp=h)", "Bash(python -m pytest -o cache_dir=h)",
-                     "Bash(python -m pip)", "Bash(python -c x)",
-                     # R3: a worker-made interpreter path must not stand in for python
-                     "Bash(./python -m pytest)", "Bash(/tmp/python -m pytest)", "Bash(C:/py/python.exe -m pytest)",
-                     # R4: gh run download / gh pr checkout write files
-                     "Bash(gh:*)", "Bash(gh run:*)", "Bash(gh run download)", "Bash(gh pr checkout)",
-                     "Bash(gh alias set)", "Bash(gh pr view --json x)",
-                     # PR #1308 review R2: fixed pytest/git/gh commands run worker-written code too
-                     "Bash(python -m pytest)", "Bash(python3 -m pytest core/tests/test_x.py)", "Bash(py -m pytest)",
-                     "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(git show)", "Bash(git branch)",
-                     "Bash(gh pr view)", "Bash(gh run list)"):
-            with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
-                self.check(["Bash(ls:*)", rule])
+        # PR #1308 R2: each group asserts its own reason, so a rule refused for the wrong reason fails the test.
+        for rules, reason in ((self.NAMES_FILE, "the rule names autopilot.json"),
+                              (self.NOT_PLAIN, "only plain characters are allowed"),
+                              (self.NOT_READ_ONLY, "the command must be a bare read-only tool")):
+            for rule in rules:
+                with self.subTest(rule=rule), self.assertRaisesRegex(
+                        ValueError, re.escape(f"{rule} is not allowed, it could rewrite autopilot.json: {reason}")):
+                    self.check(["Bash(ls:*)", rule])
+
+    def test_hard_stop_and_bypass_rules_keep_their_own_message(self):
+        # PR #1308 R1: the rewrite check must not mask the hard-stop or bypass reason.
+        for rule in ("Bash(git push)", "Bash(rm -rf x)", "Bash(gh release create)"):
+            with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, re.escape("hard stops (push, tag")):
+                self.check([rule])
+        with self.assertRaisesRegex(ValueError, re.escape("no duplicates and no bypass flags")):
+            self.check(["Bash(python --dangerously-x)"])
+
+    def test_live_file_with_a_refused_rule_fails_closed_and_names_it(self):
+        # PR #1308 R3: an existing override holding a now-refused rule keeps autopilot off; the error names the rule.
+        with tempfile.TemporaryDirectory() as tmp:
+            policy = {**json.loads(json.dumps(autopilot.DEFAULTS)), "enabled": True,
+                      "worker_allowed_tools": ["Bash(ls:*)", "Bash(git status)"]}
+            autopilot.policy_path(Path(tmp)).write_text(json.dumps(policy), encoding="utf-8")
+            loaded, error = autopilot.load(Path(tmp))
+        self.assertFalse(loaded["enabled"])
+        self.assertNotIn("worker_allowed_tools", loaded)
+        self.assertIn("autopilot stays off", error)
+        self.assertIn("Bash(git status) is not allowed", error)
 
     def test_narrow_rules_stay_allowed(self):
         rules = ["Bash(ls:*)", "Bash(grep -rn:*)", "Bash(wc *)", "Bash(head:*)", "Bash(ls -la)", "Read", "Grep", "Glob",

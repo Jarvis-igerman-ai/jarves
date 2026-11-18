@@ -45,7 +45,7 @@ def _strings(value, name, limit=20):
 OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "weekly_token_budget",
                  "focus_enabled", "focus_pr_high", "focus_green_high", "focus_showstopper_high")       # absent = the built-in narrow list (orchestrator.claude.WORKER_ALLOWED_TOOLS)
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
-_HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
+_HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|\brm\b|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
 # #932/JAR-213: a worker must not be able to rewrite <home>/autopilot.json through its Bash allow list. A rule naming
 # the file is refused. Every other Bash rule must start with a bare read-only tool from _READ_ONLY, written in plain
@@ -79,15 +79,15 @@ def _policy_rewrite_reason(rule: str) -> str:
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
-    for rule in value:
-        reason = _policy_rewrite_reason(rule)
-        if reason:
-            raise ValueError(f"worker_allowed_tools: {rule} could rewrite autopilot.json: {reason}; "
-                             "remove the worker_allowed_tools override to use the built-in default list")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
         raise ValueError("worker_allowed_tools: no duplicates and no bypass flags")
+    for rule in value:  # after the hard-stop/bypass checks, so those rules keep their own message (PR #1308 R1)
+        reason = _policy_rewrite_reason(rule)
+        if reason:
+            raise ValueError(f"worker_allowed_tools: {rule} is not allowed, it could rewrite autopilot.json: {reason}; "
+                             "remove the worker_allowed_tools override to use the built-in default list")
 
 
 def validate(policy: dict) -> dict:
