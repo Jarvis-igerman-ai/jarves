@@ -1,18 +1,10 @@
-"""WhatsApp collect (JAR-273, beta, off by default): gather every message on one topic into a report the owner can file.
+"""WhatsApp collect (JAR-273, beta, off): every message on one topic into a report the owner can file.
 
-Owner example: "collect all payment messages to/from <A> or <B> from WhatsApp, I need to file them". Pipeline:
-1. candidates come from the encrypted archive (when on) and the bridge's own window, through the SAME read gate as
-   whatsapp_search (readable chats only); `select` keeps the messages on the topic (Hebrew folding + prefix letters +
-   topic synonyms, and for payments any amount in shekels) that are in a chosen contact's chat OR mention the contact
-   in another chat (for example a chat with the spouse);
-2. each kept message becomes a row (date, chat, sender, payee, amount ILS, method, what for, short quote). An optional
-   model pass fills the fields; message text is UNTRUSTED DATA: the model only labels it, its answer is validated
-   field by field and nothing ever acts on it. Without a model the local rules fill what they can;
-3. rows are de-duplicated, sorted by date and totalled per payee; unsure rows are flagged, never hidden;
-4. CSV + XLSX + a short Hebrew summary go to <home>/reports/. Spreadsheet cells that would start a formula are
-   neutralised (message text is third-party input).
-Logs carry counts only, never text, names or numbers. This module is pure (no bridge import): the caller fetches.
-"""
+Candidates (archive + bridge, same read gate as whatsapp_search) -> `select` (topic words with Hebrew folding, shekel
+amounts for payments; a contact's chat or a mention in another chat) -> rows, optionally labelled by a model (message
+text is UNTRUSTED: only labelled, answers validated, never acted on) -> dedup, sort, totals per payee (unsure rows
+flagged) -> CSV + XLSX + Hebrew summary in <home>/reports/ (formula cells neutralised). Logs carry counts only.
+Pure module (no bridge import): the caller fetches."""
 from __future__ import annotations
 
 import csv
@@ -33,16 +25,16 @@ from . import logs
 from .whatsapp_archive import fold, stems
 
 FEATURE = "whatsapp_collect"
-MAX_CANDIDATES = 5000           # messages read per run (archive + bridge), before the topic filter
-MAX_READS = 400                 # archive pages + bridge chat reads per run (each reads up to 200/500 messages)
-READ_DEADLINE_S = 120.0         # reading stops after this; below the tool's 180 s timeout, so a report is still written
-MAX_ROWS = 400                  # rows in one report (the newest are kept; older ones are reported as cut)
-MODEL_BATCH = 25                # messages per model request
-COLLECT_BUDGET_S = 165.0        # read + model pass end by this (from the start); 15 s left of the 180 s tool timeout to write
+MAX_CANDIDATES = 5000  # per run, before the topic filter
+MAX_READS = 400  # archive pages + bridge reads per run
+READ_DEADLINE_S = 120.0  # reading stops here
+MAX_ROWS = 400  # newest kept; the rest reported as cut
+MODEL_BATCH = 25  # messages per model request
+COLLECT_BUDGET_S = 165.0  # read + model end; 15 s of the 180 s timeout to write
 QUOTE_CHARS = 120
 FIELD_CHARS = 60
 FORMATS = ("csv", "xlsx", "md")
-TZ = ZoneInfo("Asia/Jerusalem")  # row dates, the forward check and file stamps never depend on the machine's zone
+TZ = ZoneInfo("Asia/Jerusalem")  # dates never follow the machine zone
 
 # Topic -> search words (folded forms are what count). Short words (3 letters or fewer) match whole words only, so
 # "ביט" (Bit) never matches "ביטוח" (insurance) or "ביטול" (cancel). Longer words also match as a word start.
@@ -69,7 +61,7 @@ _CELL_DANGER = ("=", "+", "-", "@", "\t", "\r")
 _XML_BAD = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 
 
-# ---------------------------------------------------------------------- topic words
+# --- topic words
 def topic_key(topic: str) -> str | None:
     t = set(fold(topic).split())
     for key, names in TOPIC_ALIASES.items():
@@ -118,7 +110,7 @@ def amounts(text: str) -> list[float]:
     return out
 
 
-# ---------------------------------------------------------------------- choose the messages
+# --- choose the messages
 @dataclass
 class Contact:
     """A contact the owner named: the chat ids that are theirs and the words that mention them elsewhere."""
@@ -191,7 +183,7 @@ def select(messages: Iterable[dict], *, terms: list[str], contacts: list[Contact
     return out
 
 
-# ---------------------------------------------------------------------- rows
+# --- rows
 @dataclass
 class Row:
     ts: float
@@ -207,7 +199,7 @@ class Row:
     uncertain: bool = False
     why_unsure: list[str] = field(default_factory=list)
     _key: str = ""
-    _full: str = ""                                         # the whole folded text (the forward check), never shown
+    _full: str = ""  # the whole folded text (the forward check), never shown
 
     def flag(self, why: str) -> None:
         self.uncertain = True
@@ -272,9 +264,8 @@ def _num(v) -> float | None:
 
 
 def valid_answer(got: dict) -> bool:
-    """The strict shape of one model row: relevant and sure are real booleans, text fields are strings (or absent),
-    amount_ils is null or converts to a finite amount in the permitted range (`_num`): "lots", "NaN", "inf" or a
-    negative amount make the whole answer invalid. Anything else is not merged."""
+    """One model row: relevant/sure are booleans, text fields strings or absent, amount_ils null or a permitted
+    finite amount (`_num`; "lots", "NaN", "inf", negative = invalid). Anything else is not merged."""
     if not isinstance(got.get("relevant"), bool) or not isinstance(got.get("sure"), bool):
         return False
     if any(got.get(k) is not None and not isinstance(got[k], str) for k in ("payee", "method", "what_for")):
@@ -284,9 +275,8 @@ def valid_answer(got: dict) -> bool:
 
 
 def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bool:
-    """Merge one validated model answer into a rule row. Returns False when the model says it is off topic. The model
-    reads untrusted text, so it can never hide a row whose text states an amount: that row stays, flagged. An answer
-    that fails `valid_answer` changes nothing: the local row stays, flagged."""
+    """Merge a model answer into a rule row; False = off topic. A row whose text states an amount is never hidden
+    (kept, flagged); an answer failing `valid_answer` changes nothing but the flag."""
     if not valid_answer(got):
         row.flag("model answer invalid")
         return True
@@ -298,7 +288,7 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
     local = row.amount
     row.why_unsure = [w for w in row.why_unsure if w not in ("payee guessed", "no amount")]
     if amt is not None:
-        if local is None:                                   # the text states no amount: the model's is a guess
+        if local is None:  # the text states no amount: the model's is a guess
             row.why_unsure.append("amount not in text")
         elif abs(local - amt) > 0.005 and amt not in amounts(row.quote):
             row.flag("amount differs from the text")
@@ -323,9 +313,8 @@ def apply_model(row: Row, got: dict, *, clean: Callable[[str], str] = str) -> bo
 async def model_pass(rows: list[Row], texts: list[str], topic: str, model: ModelFn | None, *,
                      clock: Callable[[], float] = time.monotonic,
                      deadline: float | None = None) -> tuple[list[Row], dict]:
-    """Batches of MODEL_BATCH through `model`; a failed batch keeps its rule rows (flagged). Returns kept rows + stats.
-    At `deadline` (a `clock()` time) no new batch starts and a running one is cut: those rows stay rule rows, flagged
-    "no model check" (counted in `deadline_batches`), so the report is still written inside the tool timeout."""
+    """Batches of MODEL_BATCH; a failed batch keeps its rule rows, flagged. At `deadline` (a `clock()` time) no batch
+    starts and a running one is cut: rows flagged "no model check", counted in `deadline_batches`."""
     stats = {"model": model is not None, "batches": 0, "failed_batches": 0, "dropped_off_topic": 0,
              "deadline_batches": 0}
     if model is None:
@@ -347,7 +336,7 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
         stats["batches"] += 1
         try:
             answer = await asyncio.wait_for(model(items, topic), timeout=left)
-        except Exception as e:                                   # budget, network, bad JSON: rule rows stay
+        except Exception as e:  # budget, network, bad JSON: rule rows stay
             logs.warn("whatsapp", "WA_COLLECT_MODEL_FAILED", "WhatsApp collect model batch failed",
                       error_type=type(e).__name__)
             answer = None
@@ -371,12 +360,11 @@ async def model_pass(rows: list[Row], texts: list[str], topic: str, model: Model
 
 
 def dedup(rows: list[Row]) -> tuple[list[Row], int]:
-    """One row per message; the same WHOLE text with the same amount and payee on the same day in ANOTHER chat (a
-    forward) counts once. Two identical messages in one chat are two payments and both stay; texts that only share
-    their start (the shown quote) are different messages and both stay."""
+    """One row per message; the same whole text, amount and payee on the same day in ANOTHER chat (a forward) counts
+    once. Identical messages in one chat, or texts sharing only their start, all stay."""
     out: list[Row] = []
     seen: set[str] = set()
-    content: dict[str, str] = {}                            # day + full text + amount + payee -> first chat id
+    content: dict[str, str] = {}  # day + full text + amount + payee -> first chat id
     for r in sorted(rows, key=lambda r: (r.ts, r._key)):
         f = r._full or " ".join(fold(r.quote).split())
         ck = f"{r.date}|{f}|{r.amount}|{' '.join(fold(r.payee).split())}" if len(f) >= 15 else ""
@@ -402,7 +390,7 @@ def totals(rows: list[Row]) -> list[dict]:
     return sorted(groups.values(), key=lambda g: (-g["total_ils"], g["payee"]))
 
 
-# ---------------------------------------------------------------------- the report files
+# --- the report files
 COLUMNS = (("date", "תאריך"), ("chat", "צ'אט"), ("sender", "שולח"), ("payee", "מקבל התשלום"), ("amount_ils", "סכום ₪"),
            ("method", "אמצעי"), ("what_for", "עבור"), ("quote", "ציטוט קצר"), ("found_by", "נמצא לפי"),
            ("uncertain", "לבדוק"))
@@ -430,7 +418,7 @@ def to_csv(rows: list[Row]) -> bytes:
     w = csv.writer(buf, lineterminator="\r\n")
     w.writerow([he for _, he in COLUMNS])
     w.writerows(table(rows))
-    return buf.getvalue().encode("utf-8-sig")              # BOM: Excel opens Hebrew correctly
+    return buf.getvalue().encode("utf-8-sig")  # BOM: Excel opens Hebrew correctly
 
 
 def _xcell(ref: str, v) -> str:
@@ -550,7 +538,7 @@ def write_report(home: Path, topic: str, rows: list[Row], sums: list[dict], *, f
     out_dir = Path(home) / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.fromtimestamp(now if now is not None else time.time(), TZ).strftime("%Y%m%d-%H%M%S")
-    for n in range(1, 1000):                                # a second run in the same second never overwrites
+    for n in range(1, 1000):  # a second run in the same second never overwrites
         base = out_dir / (f"whatsapp-collect-{slug(topic)}-{stamp}" + (f"-{n}" if n > 1 else ""))
         paths = [base.with_suffix("." + f) for f in fmts]
         if not any(p.exists() for p in paths):
@@ -559,12 +547,12 @@ def write_report(home: Path, topic: str, rows: list[Row], sums: list[dict], *, f
               ".md": lambda: summary_he(topic, rows, sums, cut=cut, dupes=dupes, model=model,
                                         files=[p.name for p in paths], truncated=truncated).encode("utf-8")}
     for p in paths:
-        with open(p, "xb") as f:                            # exclusive create: fails rather than overwrite
+        with open(p, "xb") as f:  # exclusive create: fails rather than overwrite
             f.write(bodies[p.suffix]())
     return paths
 
 
-# ---------------------------------------------------------------------- one run
+# --- one run
 @dataclass
 class Result:
     rows: list[Row]
@@ -590,20 +578,19 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
                   clean: Callable[[str], str] = str, now: float | None = None,
                   canon: dict[str, str] | None = None, clock: Callable[[], float] = time.monotonic,
                   deadline: float | None = None) -> Result:
-    """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names` maps chat id -> display name; `canon`
-    maps every alias id of one person (old phone chat + new LID chat) to ONE chat id, so the chat filter, the
-    same-message check and the forward check treat them as one chat."""
+    """Select -> rows -> model pass -> dedup/sort -> totals -> files. `names`: chat id -> name; `canon`: every alias
+    id of one person (phone + LID chat) -> ONE chat id for the chat filter, same-message and forward checks."""
     truncated = list(getattr(messages, "truncated", []))
     msgs = list(messages)
     if canon:
         msgs = [dict(x, chat=canon.get(str(x.get("chat", "")), x.get("chat"))) for x in msgs]
         chat = canon.get(chat, chat) if chat is not None else None
         contacts = [Contact(c.label, c.ids | {canon[i] for i in c.ids if i in canon}, c.words) for c in contacts]
-    once: dict[tuple[str, str], dict] = {}                  # each message once BEFORE the bound (alias ids merged)
+    once: dict[tuple[str, str], dict] = {}  # each message once BEFORE the bound (alias ids merged)
     for x in msgs:
         once.setdefault((str(x.get("chat", "")), str(x.get("id", ""))), x)
     msgs = list(once.values())
-    if len(msgs) > MAX_CANDIDATES:                          # backstop for direct callers; gather() already bounds
+    if len(msgs) > MAX_CANDIDATES:  # backstop for direct callers; gather() already bounds
         msgs, truncated = msgs[:MAX_CANDIDATES], truncated + ["candidates"]
     picked = select(msgs, terms=terms_for(topic), contacts=contacts, chat=chat, money=topic_key(topic) == "payment",
                     since=since, until=until)
@@ -629,7 +616,7 @@ async def collect(home: Path, topic: str, messages: Iterable[dict], *, names: di
 
 
 def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
-    """The short Hebrew chat answer: counts and totals; payee names come from messages (untrusted) and say so; rows cut by MAX_ROWS and a cut read are always said."""
+    """Hebrew chat answer: counts, totals, payee names labelled as from messages; cuts are always said."""
     cut = " לא כל ההודעות נקראו, ייתכן שחסרות." if c.get("retrieval_truncated") else ""
     if not c.get("rows"):
         return "לא מצאתי הודעות על הנושא הזה." + cut
@@ -642,9 +629,8 @@ def answer_he(c: dict, totals_: list[dict], files: list[Path]) -> str:
 
 
 def openai_model(model_id: str, budget, *, timeout_s: float = 30.0) -> ModelFn:
-    """One Responses request per batch, reserved from the shared Budget first (raises BudgetExceeded); never stored,
-    the client is closed after each batch. A model that rejects the `reasoning` parameter is asked again once
-    without it (inside the same reservation), and later batches leave it out."""
+    """One stored-nothing Responses request per batch, Budget reserved first; client closed per batch. A rejected
+    `reasoning` parameter is retried once without it (same reservation) and then left out."""
     opts = {"reasoning": {"effort": "none"}}
 
     async def run(items: list[dict], topic: str) -> list[dict]:
@@ -679,8 +665,8 @@ class Candidates(list):
     truncated: list[str]
 
 
-ARCHIVE_PAGE = 200                                          # the archive search returns at most 200 per call
-ARCHIVE_CHAT_PAGE = 2000                                    # one chat read in full, page by page (its default limit)
+ARCHIVE_PAGE = 200  # the archive search returns at most 200 per call
+ARCHIVE_CHAT_PAGE = 2000  # one chat read in full, page by page (its default limit)
 
 
 def gather(client, archive, *, terms: list[str], contacts: list[Contact], readable: set[str],
@@ -688,17 +674,11 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
            money: bool = False, chat: str | None = None, canon: dict[str, str] | None = None,
            clock: Callable[[], float] = time.monotonic, max_reads: int | None = None,
            deadline_s: float | None = None) -> Candidates:
-    """Candidate messages through the existing read paths (sync; run it in a thread from the Core):
-    the archive (when on) by every topic word and contact word, page by page, plus each contact chat in full, and the
-    bridge's own window by the same words plus each contact chat's latest messages. For the payment topic (`money`)
-    every readable chat is read in full in both sources, because an amount alone ('₪200') is on topic but no search
-    word finds it. The bridge /search has no paging: when one word fills a page, every readable chat is read in full
-    instead (the bridge keeps a short window). `readable` (the chat ids the
-    bridge lists now) is the live read gate: nothing outside it is returned. Messages are de-duplicated by identity
-    BEFORE the MAX_CANDIDATES bound, and only messages inside the request (`scope`: dates, chat, topic, contacts)
-    count toward it, so full chat reads and unrelated matches can never crowd out the requested ones; any source that
-    may hold more is named in `truncated`. Reading also stops after MAX_READS reads or READ_DEADLINE_S seconds
-    ("reads" / "time" in `truncated`), so the caller still writes a report inside its own timeout."""
+    """Candidates (sync; run in a thread): archive and bridge by every topic/contact word plus each contact chat in
+    full; for payments (`money`, an amount alone has no word) every readable chat in full, and then no word search.
+    A full bridge search page also triggers full chat reads (no paging there). `readable` is the live read gate.
+    Only in-request messages (`scope`), each once, count toward MAX_CANDIDATES; reading stops at MAX_READS or
+    READ_DEADLINE_S. Every cut source or reason is named in `truncated`."""
     out = Candidates()
     out.truncated = []
     started, reads = clock(), {"archive": 0, "bridge": 0}
@@ -723,7 +703,7 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
         if full and source not in out.truncated:
             out.truncated.append(source)
 
-    def bound() -> bool:                                    # more reads would be cut: say so and stop reading
+    def bound() -> bool:  # more reads would be cut: say so and stop reading
         for why, hit in (("candidates", len(out) >= MAX_CANDIDATES),
                          ("reads", reads["archive"] + reads["bridge"] >= limit_reads),
                          ("time", clock() - started >= limit_s)):
@@ -735,10 +715,10 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
 
     words = list(dict.fromkeys(terms + [w for c in contacts for w in c.words]))
     ids = [i for c in contacts for i in sorted(c.ids)]
-    full_read = sorted(readable) if money else ids          # chats read in full (not only by search words)
-    if chat is not None:                                    # one chat asked for: read only its ids
+    full_read = sorted(readable) if money else ids  # chats read in full (not only by search words)
+    if chat is not None:  # one chat asked for: read only its ids
         full_read = [i for i in sorted(readable) if (canon or {}).get(i, i) == chat]
-    # every chat `scope` can accept is read in full anyway: the word searches would only return a subset of it
+    # full reads cover every acceptable chat: words add nothing
     if set(full_read) >= {i for i in readable if chat is None or (canon or {}).get(i, i) == chat}:
         words = []
     if archive is not None:
@@ -777,6 +757,6 @@ def gather(client, archive, *, terms: list[str], contacts: list[Contact], readab
             reads["bridge"] += 1
             add(page, "bridge", len(page) >= cap_messages)
     logs.info("whatsapp", "WA_COLLECT_READ", "WhatsApp collect read pass (counts only)", found=len(out),
-              pages=reads["archive"], count=reads["bridge"],             # archive pages, bridge reads
+              pages=reads["archive"], count=reads["bridge"],  # archive pages, bridge reads
               took_ms=round((clock() - started) * 1000))
     return out
