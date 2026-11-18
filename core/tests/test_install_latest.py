@@ -13,8 +13,9 @@ NOW = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
 
 
 class Fake:
-    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False, versions=None):
-        self.versions = list(versions or [])                # what the running Core reports, one value per ask
+    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False, waits=None, after=None):
+        self.waits = list(waits or [])                      # wait() results after the first one (the restart)
+        self.after = after                                  # does a Core answer after setup? None: same as before
         self.tmp, self.launch_error, self.installer_exits, self.spawn = tmp, launch_error, installer_exits, spawn
         self.calls: list = []
         self.available, self.error, self.core, self.wait_end = available, error, core, wait
@@ -64,9 +65,12 @@ class Fake:
         def publish(pid):
             self.calls.append(f"pid={pid}")
 
-        def core_version():
-            self.calls.append("core_version")
-            return self.versions.pop(0) if self.versions else "4.5.1-beta.9"
+        def wait(core_ran):
+            self.calls.append("wait")
+            return self.waits.pop(0) if "start_core" in self.calls and self.waits else self.wait_end
+
+        def core_running():
+            return self.core if self.after is None or not any(c.startswith("launch") for c in self.calls) else self.after
 
         return il.Deps(
             home=self.tmp, start_core=rec("start_core"), wait_installer=wait_installer,
@@ -74,11 +78,10 @@ class Fake:
             channel=self.channel, set_channel=rec("set_channel"), backup_now=backup,
             check=lambda ch: {"error": self.error, "available": self.available, "current": "4.5.0",
                               "latest": {"version": "4.5.1", "display": "4.5.1-beta.9"}},
-            prepare=prepare, core_running=lambda: self.core, detect_running=lambda up: {"core": up},
+            prepare=prepare, core_running=core_running, detect_running=lambda up: {"core": up},
             record_was_running=rec("record"), stop_core=rec("stop"),
             launch=launch,
-            wait=lambda c: self.wait_end, run_cli=run_cli, rollback=rec("rollback", {}),
-            core_version=core_version, now=lambda: NOW)
+            wait=wait, run_cli=run_cli, rollback=rec("rollback", {}), now=lambda: NOW)
 
 
 def test_happy_path_order_and_report(tmp_path):
@@ -86,7 +89,7 @@ def test_happy_path_order_and_report(tmp_path):
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
     assert f.calls[:10] == ["backup", "prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
-                           "wait_installer", "core_version", "cli:update status"]
+                           "wait_installer", "wait", "cli:update status"]
     assert [c for c in f.calls if c.startswith("cli:")] == ["cli:features", "cli:update status", "cli:doctor",
                                                             "cli:selftest", "cli:speedtest", "cli:status --brief",
                                                             "cli:features"]
@@ -431,79 +434,43 @@ def test_features_snapshot_failure_does_not_block_install(tmp_path):
 
 
 def test_silent_install_restarts_the_core_on_the_new_version(tmp_path):
-    # setup did not bring the Core back (no ready mark in time): finish starts it from the new program and checks it
-    f = Fake(tmp=tmp_path, wait="timeout", versions=[None, "4.5.1-beta.9"])
+    # setup did not bring the Core back (no ready mark in time): finish starts it from the new program and waits again
+    f = Fake(tmp=tmp_path, wait="timeout", waits=["done"], after=False)
     rep = il.run(f.deps())
-    assert rep.ok and not rep.rolled_back and "rollback" not in f.calls
+    assert rep.ok and not rep.rolled_back and "rollback" not in f.calls and f.calls.count("stop") == 1
     assert f.calls.index("launch restart=True") < f.calls.index("start_core") < f.calls.index("cli:update status")
-    assert ("Core on the new version", True, "restarted on 4.5.1-beta.9") in rep.checks
-    g = Fake(tmp=tmp_path, versions=["4.5.0"])            # the OLD Core still answers: stop it, start the new one
-    assert il.run(g.deps()).ok and g.calls.index("start_core") > g.calls.index("launch restart=True")
-    assert g.calls.count("stop") == 2
+    assert ("Core restarted on the new version", True, "started again; the new Core reported ready") in rep.checks
+    assert ("silent install", True, "setup finished and the Core runs the new version") in rep.checks
+    g = Fake(tmp=tmp_path, wait="timeout", waits=["done"], after=True)   # a Core answers but never became ready
+    assert il.run(g.deps()).ok and g.calls.count("stop") == 2
+    assert g.calls.index("launch restart=True") < g.calls.index("start_core")
 
 
 def test_core_that_does_not_come_back_on_the_new_version_rolls_back(tmp_path):
-    f = Fake(tmp=tmp_path, wait="timeout", versions=[None, None])
+    f = Fake(tmp=tmp_path, wait="timeout", waits=["timeout"], after=False)
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and "start_core" in f.calls
-    assert ("Core on the new version", False, "after restart: not running") in rep.checks
-    g = Fake(tmp=tmp_path, versions=["4.5.0", "4.5.0"])
-    assert not il.run(g.deps()).ok and "rollback" in g.calls
-    h = Fake(tmp=tmp_path)
+    assert ("Core restarted on the new version", False,
+            "started again, but the new version gave no ready mark (timeout)") in rep.checks
+    h = Fake(tmp=tmp_path, wait="timeout", after=False)
     d = h.deps()
     d.start_core = lambda: (_ for _ in ()).throw(OSError("spawn"))
-    h.versions = [None]
     rep = il.run(d)
-    assert not rep.ok and ("Core on the new version", False, "restart failed: OSError") in rep.checks
+    assert not rep.ok and rep.rolled_back
+    assert ("Core restarted on the new version", False, "restart failed: OSError") in rep.checks
 
 
 def test_core_already_on_the_new_version_is_not_restarted(tmp_path):
-    f = Fake(tmp=tmp_path)
+    f = Fake(tmp=tmp_path)                                 # wait() 'done' = the new Core's own ready mark
     rep = il.run(f.deps())
-    assert rep.ok and "start_core" not in f.calls and f.calls.count("stop") == 1
-    assert ("Core on the new version", True, "4.5.1-beta.9") in rep.checks
+    assert rep.ok and "start_core" not in f.calls and f.calls.count("stop") == 1 and f.calls.count("wait") == 1
+    assert ("Core restarted on the new version", True, "the new Core reported ready") in rep.checks
     g = Fake(tmp=tmp_path, core=False)                     # the Core was not running: it is not started
-    assert il.run(g.deps()).ok and "core_version" not in g.calls and "start_core" not in g.calls
-
-
-def test_real_core_version_and_start_core_wiring(tmp_path, monkeypatch):
-    from jarves import cli
-    from jarves.config import Config
-    seen = []
-    monkeypatch.setattr(cli, "cmd_start", lambda a, cfg, home: seen.append(a.wait) or 0)
-    replies = iter([{"version": "4.5.1"}, None, ["not", "a", "dict"]])
-    monkeypatch.setattr(cli, "_ws_call", lambda *a, **k: next(replies))
-    d = il.real_deps(argparse.Namespace(), Config(), tmp_path)
-    d.start_core()
-    assert seen and seen[0] > 0                            # cmd_start reads a.wait: it must be there
-    assert [d.core_version(), d.core_version(), d.core_version()] == ["4.5.1", None, None]
-
-
-def test_core_version_with_no_core_is_none_so_the_core_is_still_started(tmp_path, monkeypatch):
-    import socket
-    from jarves import cli
-    from jarves.config import Config
-    cfg = Config()
-    with socket.socket() as so:                            # a local port nothing listens on: the connection is refused
-        so.bind(("127.0.0.1", 0))
-        cfg.link.port = so.getsockname()[1]
-    (tmp_path / "link_token").write_text("t", encoding="utf-8")
-    real = il.real_deps(argparse.Namespace(), cfg, tmp_path)
-    assert real.core_version() is None                    # the real _ws_call, refused: None, not an exception
-
-    answers = iter([ConnectionRefusedError("refused"), {"version": "4.5.1-beta.9"}])
-
-    def ws(*a, **k):                                       # raises before the restart, answers after it
-        x = next(answers)
-        if isinstance(x, Exception):
-            raise x
-        return x
-    monkeypatch.setattr(cli, "_ws_call", ws)
-    f = Fake(tmp=tmp_path, wait="timeout")
-    d = f.deps()
-    d.core_version = real.core_version
-    rep = il.run(d)
-    assert rep.ok and "start_core" in f.calls and ("Core on the new version", True, "restarted on 4.5.1-beta.9") in rep.checks
+    rep = il.run(g.deps())
+    assert rep.ok and "start_core" not in g.calls and "wait" not in g.calls
+    assert "Core restarted on the new version" not in [c[0] for c in rep.checks]
+    h = Fake(tmp=tmp_path, wait="failed")                  # setup failed: no restart, the existing rollback
+    assert not il.run(h.deps()).ok and "start_core" not in h.calls and "rollback" in h.calls
 
 
 def test_real_start_core_reaches_the_spawn_with_its_namespace(tmp_path, monkeypatch):

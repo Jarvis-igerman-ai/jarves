@@ -10,7 +10,7 @@ Two phases, because setup force-stops every process that runs from {app}\\python
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
     waits for the setup PROCESS to exit and starts phase two.
   finish (`install-latest --finish STATE`, started by the waiter from the NEW program, never while setup runs): waits for
-    the new Core when it ran and, if the Core is gone or still the old version, starts it again on the new one; then
+    the new Core when it ran and, without its ready mark in time, starts the Core again from the new program; then
     runs version check, doctor, selftest and status in fresh processes, rolls back by itself
     when a check fails, writes the ONE short report to <home>/updates/install-latest-report.txt and prints it.
   `jarvis install-latest --report` prints the last report again (the first process is gone after setup stopped it).
@@ -64,7 +64,6 @@ class Deps:
     wait: Callable[[bool], str]                               # (core_ran) -> 'done' | 'failed' | 'timeout'
     run_cli: Callable[[list[str]], tuple[int, str]]           # the NEW program, fresh process: (exit code, output)
     rollback: Callable[[], dict]
-    core_version: Callable[[], str | None] = lambda: None     # version the running Core reports; None = no answer
     spawn_finisher: Callable[[Path], None] | None = None      # (state file) start the waiter; None: finish in this process
     publish_pid: Callable[[int | None], None] = lambda pid: None   # tell the waiter the setup pid (None = cancelled)
     now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
@@ -342,22 +341,24 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     return finish(deps, state)
 
 
-def _core_on_new_version(deps: Deps, rep: Report, shown) -> bool:
-    """The Core ran before setup, so it must run the NEW version afterwards. Setup's /RESTARTJARVES normally does that;
-    when the Core is gone or the old process still answers, it is started again from the new program and re-checked."""
-    name = "Core on the new version"
+def _core_on_new_version(deps: Deps, rep: Report, end: str) -> bool:
+    """The Core ran before setup, so the NEW version must run afterwards. The proof is the new Core's own CORE_READY
+    mark (updates.mark_healthy writes it only when its build version is the target; `wait` reads it as 'done'). The
+    status reply's `version` is the package constant, not the build, so it is not compared. Setup's /RESTARTJARVES
+    normally brings the Core back; without a ready mark in time, a Core that still answers is stopped, the Core is
+    started again from this (new) program and the mark is awaited once more."""
+    name = "Core restarted on the new version"
+    if end == "done":
+        return rep.add(name, True, "the new Core reported ready")
     try:
-        v = deps.core_version()
-        if v and _has_version(v, shown):
-            return rep.add(name, True, v)
-        if v is not None:
-            deps.stop_core()                              # the old version still runs
+        if deps.core_running():
+            deps.stop_core()                              # it answers but never became ready (stuck or still the old one)
         deps.start_core()
-        v = deps.core_version()
+        again = deps.wait(True)
     except Exception as e:                                # noqa: BLE001  (a failed restart is a failed check, no traceback)
         return rep.add(name, False, f"restart failed: {type(e).__name__}")
-    ok = bool(v) and _has_version(v, shown)
-    return rep.add(name, ok, f"restarted on {v}" if ok else f"after restart: {v or 'not running'}")
+    return rep.add(name, again == "done", "started again; the new Core reported ready" if again == "done"
+                   else f"started again, but the new version gave no ready mark ({again})")
 
 
 def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
@@ -373,7 +374,7 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         _save_report(deps, rep)
         return rep
     end = deps.wait(core_up) if core_up else "done"
-    on_new = core_up and end in ("done", "timeout") and _core_on_new_version(deps, rep, shown)
+    on_new = core_up and end in ("done", "timeout") and _core_on_new_version(deps, rep, end)
     install_ok = rep.add("silent install", on_new or not core_up,      # not core_up: end is always "done"
                          "setup or health check failed" if end == "failed" else
                          "setup finished" + ("" if not core_up else " and the Core runs the new version" if on_new
@@ -546,14 +547,8 @@ def real_deps(a, cfg, home: Path) -> Deps:
             proc.pop("p", None)                           # the waiter owns the wait from here on
 
     def start_core() -> None:
-        cli.cmd_start(argparse.Namespace(show=False, wait=90), cfg, home)   # the `jarvis start` defaults
+        cli.cmd_start(argparse.Namespace(show=False, wait=90), cfg, home)   # the `jarvis start` defaults (cli.main)
 
-    def core_version() -> str | None:
-        try:                                              # _ws_call returns None when no Core answers; guard anyway
-            st = cli._ws_call(home, cfg.link.port, {"type": "status.request", "payload": {}}, "status")
-        except OSError:                                   # refused / timed out: no Core, so it gets started
-            return None
-        return str(st["version"]) if isinstance(st, dict) and st.get("version") else None
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
@@ -567,7 +562,6 @@ def real_deps(a, cfg, home: Path) -> Deps:
                 wait=lambda core_ran: up.watch(home, lambda _l: None, timeout_s=420.0),
                 run_cli=_cli_subprocess,
                 rollback=lambda: rollback(home, approved=True, restore_data=True, silent=True, port=cfg.link.port),
-                core_version=core_version,
                 spawn_finisher=spawn if is_installed_build() else None, publish_pid=publish_pid)
 
 
