@@ -123,10 +123,6 @@ class AutopilotTests(unittest.TestCase):
         json.dumps(view)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class WorkerAllowListPolicyFileTests(unittest.TestCase):
     """#932/JAR-213: the owner's worker_allowed_tools override can never let a worker rewrite autopilot.json."""
 
@@ -140,7 +136,16 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
                      "Bash(python -c:*)", "Bash(node -e:*)", "Bash(perl:*)", "Bash(sed:*)", "Bash(sed -i:*)",
                      "Bash(awk:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(tee:*)", "Bash(cat:*)", "Bash(echo:*)",
                      "Bash(bash -c:*)", "Bash(sh:*)", "Bash(python fix.py autopilot.json)",
-                     "Bash(cat x > C:/h/autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)"):
+                     "Bash(cat x > C:/h/autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)",
+                     # review R1-R3: wildcard-only, versioned/sibling interpreters, wrappers, multi/combined flags
+                     "Bash(*)", "Bash(:*)", "Bash( *)", "Bash(py*:*)", "Bash(FOO=1 python:*)",
+                     "Bash(python3.11:*)", "Bash(python3.12 *)", "Bash(pythonw:*)", "Bash(C:/Py/PYTHON3.EXE:*)",
+                     "Bash(env:*)", "Bash(xargs:*)", "Bash(find:*)", "Bash(sudo:*)", "Bash(zsh:*)", "Bash(dash -c:*)",
+                     "Bash(ksh:*)", "Bash(php:*)", "Bash(lua:*)", "Bash(curl:*)", "Bash(wget:*)", "Bash(tar:*)",
+                     "Bash(install:*)", "Bash(ln:*)", "Bash(touch:*)", "Bash(sed -n -i:*)", "Bash(sed -E -i:*)",
+                     "Bash(sed -ni:*)", "Bash(python -B -c:*)", "Bash(python -u -c:*)", "Bash(bash -lc:*)",
+                     "Bash(python -m pip:*)", "Bash(py -3 -c:*)",
+                     "Bash(python -m pytest; python -c x)", "Bash(python -m pytest x > y)"):
             with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
                 self.check(["Bash(ls:*)", rule])
 
@@ -149,3 +154,7 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
                       ["Bash(git diff:*)", "Bash(grep:*)", "Bash(sedona-report:*)"]):
             with self.subTest(rules=rules):
                 self.assertEqual(self.check(rules)["worker_allowed_tools"], rules)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -47,20 +47,40 @@ OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "we
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
-# #932/JAR-213: a rule naming the policy file, or a blanket interpreter/shell/file-writer prefix (`Bash(python:*)`,
-# `Bash(sed -i:*)`, `Bash(bash -c:*)`), would let a worker rewrite <home>/autopilot.json. Narrow forms such as
-# `Bash(python -m pytest:*)` stay allowed.
-_POLICY_WRITER = re.compile(
-    r"(?i)autopilot\.json|^Bash\(\s*(?:[^\s()]*[/\\])?(?:python3?|py|node|perl|ruby|sed|awk|cp|mv|tee|cat|dd|echo|"
-    r"printf|bash|sh|cmd|pwsh)(?:\.exe)?(?:\s*:?\*|\s+-[cei]\b)")
+# #932/JAR-213: a Bash rule could let a worker rewrite <home>/autopilot.json when it names the file, has no real
+# command word (`Bash(*)`, `Bash(:*)`), starts with an env assignment or a wildcard, or starts with an interpreter,
+# shell, wrapper or file writer in any version/path/.exe form. The first word decides, so no flag order or combined
+# flag (`sed -ni`, `python -B -c`, `bash -lc`) slips through. The one narrow interpreter form kept: `<python> -m pytest`.
+_POLICY_FILE = re.compile(r"(?i)autopilot\.json")
+_WRITER_WORD = re.compile(
+    r"(?:python|py|pypy|perl|ruby|node|nodejs|deno|bun|php|lua|luajit|tclsh|osascript|rscript|"
+    r"(?:ba|z|da|k|c|tc|fi|nu|)sh|cmd|pwsh|env|xargs|find|sudo|doas|su|nohup|timeout|nice|exec|eval|command|busybox|"
+    r"start|sed|gsed|awk|gawk|cp|mv|tee|cat|dd|echo|printf|curl|wget|tar|unzip|install|ln|touch|rsync|scp|truncate|"
+    r"patch|vi|vim|nano|ed)[\d.]*w?(?:\.exe)?")
+_NARROW_PYTEST = re.compile(r"^-m\s+pytest(?:\s|:|$)")
+
+
+def _could_rewrite_policy(rule: str) -> bool:
+    if _POLICY_FILE.search(rule):
+        return True
+    if not rule.startswith("Bash("):
+        return False
+    words = rule[5:-1].replace(":*", " *").split(None, 1)
+    if not words or "*" in words[0] or "=" in words[0]:
+        return True
+    name = re.split(r"[/\\]", words[0])[-1].lower()
+    if not _WRITER_WORD.fullmatch(name):
+        return False
+    return not (name.startswith("py") and len(words) > 1 and _NARROW_PYTEST.match(words[1])
+                and not re.search(r"[;&|`<>]", words[1]))
 
 
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
-    if any(_POLICY_WRITER.search(x) for x in value):
+    if any(_could_rewrite_policy(x) for x in value):
         raise ValueError("worker_allowed_tools: rules that could rewrite autopilot.json (naming it, or a blanket "
-                         "interpreter, shell or file-writer prefix) cannot be allowed")
+                         "interpreter, shell, wrapper or file-writer command, or a wildcard-only command) cannot be allowed")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):

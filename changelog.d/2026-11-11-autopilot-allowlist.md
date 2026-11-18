@@ -1,1 +1,0 @@
-- Fixed: the autopilot policy now refuses a `worker_allowed_tools` override that names `autopilot.json` or allows a blanket interpreter, shell or file-writer prefix (for example `Bash(python:*)`, `Bash(sed -i:*)`, `Bash(bash -c:*)`), so the owner's own allow list can no longer let a worker rewrite the policy file; narrow rules such as `Bash(python -m pytest:*)` still work. (#932)
