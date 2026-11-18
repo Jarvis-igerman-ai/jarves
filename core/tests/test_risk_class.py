@@ -97,3 +97,7 @@ def test_signoff_sheet_and_release_docs_never_automerge():
         c, why = rc.classify([f, "docs/NOW.md"])
         assert c is None and why == f"high-risk path: {f}", f
     assert cls(["docs/reviews/OTHER_REVIEW.md"]) == "docs"                       # ordinary review notes stay docs
+    f = "docs/reviews/MANUAL_TEST_4.6.0.md"                                       # every direct caller sees it too
+    assert rc.is_high_risk(f) and not rc.is_docs(f)
+    import integration_branch as ib
+    assert ib.tier_of([f], []) == "R"

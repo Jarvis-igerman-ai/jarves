@@ -488,7 +488,7 @@ def test_gate_tag_signature_by_owner_key(tmp_path):
     assert probs(tmp_path, "v4.1.0", signers, run=ok) == []
     cmd = ok.calls[0]
     assert f"gpg.ssh.allowedSignersFile={signers}" in cmd and cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"]
-    assert "gpg.minTrustLevel=fully" in cmd and "gpg.ssh.program=ssh-keygen" in cmd
+    assert "gpg.minTrustLevel=fully" in cmd and "gpg.ssh.program=/usr/bin/ssh-keygen" in cmd     # absolute: no PATH lookup
     stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
     assert any("not signed by the owner" in p for p in probs(tmp_path, "v4.1.0", signers, run=_Run(0, stranger)))
     bad = probs(tmp_path, "v4.1.0", signers, run=_Run(1, "error: no signature found\n" + "x" * 900))
@@ -514,10 +514,14 @@ def test_gate_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, caps
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS_FILE", str(tmp_path / "absent"))
     rc = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
     assert rc == 1 and "allowed-signers file absent is missing or empty" in capsys.readouterr().out
-    wf = (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    assert "vars.RELEASE_ALLOWED_SIGNERS" in wf and "JARVES_ALLOWED_SIGNERS_FILE=" in wf
-    assert wf.index("JARVES_ALLOWED_SIGNERS_FILE=") > wf.index('if [ "$REF_TYPE" = "tag" ]')
-    assert wf.index('if [ -n "$ALLOWED_SIGNERS" ]') < wf.index("JARVES_ALLOWED_SIGNERS_FILE=")   # no empty file exported
+    import yaml
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    step = next(s for job in doc["jobs"].values() for s in job.get("steps", []) if s.get("name", "").startswith("Rows hash recorded"))
+    assert step["env"]["ALLOWED_SIGNERS"] == "${{ vars.RELEASE_ALLOWED_SIGNERS }}"
+    run = [ln.strip() for ln in step["run"].splitlines() if not ln.strip().startswith("#")]
+    tag_if, set_if = run.index('if [ "$REF_TYPE" = "tag" ]; then'), run.index('if [ -n "$ALLOWED_SIGNERS" ]; then')
+    export = next(i for i, ln in enumerate(run) if "JARVES_ALLOWED_SIGNERS_FILE=" in ln)
+    assert tag_if < set_if < export and run[export + 1] == "fi"          # tag ref only; no empty file exported
 
 
 @pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); deselected elsewhere

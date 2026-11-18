@@ -206,6 +206,7 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+SSH_KEYGEN = "/usr/bin/ssh-keygen"     # the release gate runs on ubuntu-24.04 (release.yml)
 GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
 
 
@@ -223,8 +224,8 @@ def tag_signature_problems(root: Path, tag: str, signers_file, run=subprocess.ru
     if not TAG_RE.match(tag):
         return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
     # full trust (a listed principal) plus the "Good ... signature for <principal>" line: a good signature by an
-    # unlisted key never passes; the verifier program is pinned so runner config cannot redirect it.
-    cmd = ["git", "-c", "gpg.format=ssh", "-c", "gpg.ssh.program=ssh-keygen", "-c", "gpg.minTrustLevel=fully",
+    # unlisted key never passes; the verifier is an absolute path, so neither git config nor PATH can redirect it.
+    cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={SSH_KEYGEN}", "-c", "gpg.minTrustLevel=fully",
            "-c", f"gpg.ssh.allowedSignersFile={p}", "verify-tag", f"refs/tags/{tag}"]
     try:
         r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60)

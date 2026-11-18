@@ -187,7 +187,8 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    add `RELEASE_ALLOWED_SIGNERS` with your SSH `allowed_signers` line (`you@example namespaces="git" ssh-ed25519 AAAA...`).
    Sign with SSH once: `git config --global gpg.format ssh` and `git config --global user.signingkey ~/.ssh/id_ed25519.pub`,
    then tag with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. The gate runs `git verify-tag` against that list and
-   refuses an unsigned tag, a key not on the list, or a missing variable. Sign-off sheets and `docs/release/` never get
+   refuses an unsigned tag, a key not on the list, or a missing variable. Once the variable exists, a dry run on an
+   unsigned or lightweight tag fails as well (without it, a dry run only prints a note). Sign-off sheets and `docs/release/` never get
    an automerge class (`core/tools/risk_class.py`, #543); a real publish in Actions also refuses outside a tag ref (#544).
 6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.

@@ -50,13 +50,15 @@ def _m(path: str, patterns) -> bool:
 
 
 def is_high_risk(path: str) -> bool:
-    return _m(path, HIGH_RISK)
+    return _m(path, HIGH_RISK) or _m(path, SIGNOFF_DOCS)
 
 
 def is_docs(path: str) -> bool:
     name = path.rsplit("/", 1)[-1].lower()
     if name in ("claude.md", "agents.md") or path.startswith(".claude/"):
         return False                      # instruction files steer agents: never "just docs"
+    if _m(path, SIGNOFF_DOCS):
+        return False                      # #543: owner sign-off sheets are never "just docs" for any caller
     return path.startswith("docs/") or name.endswith(".md") or name.startswith("changelog") or name == "doc_map.md"
 
 
@@ -80,7 +82,7 @@ def classify(files, lines: int = 0, labels=frozenset(), author: str = "", mode: 
         return None, "dependabot PRs are handled by dependabot-automerge.yml"
     if not files:
         return None, "no changed files"
-    risky = [f for f in files if (is_high_risk(f) and not is_docs(f)) or _m(f, SIGNOFF_DOCS)]
+    risky = [f for f in files if is_high_risk(f) and not is_docs(f)]
     if risky:
         return None, f"high-risk path: {risky[0]}"
     if all(is_docs(f) for f in files):

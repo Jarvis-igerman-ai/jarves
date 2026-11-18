@@ -91,7 +91,8 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
-            # unset variable: no file; a real release is then refused by the gate (--require-rows-hash), a dry run notes it
+            # unset variable: no file; a real release is then refused by the gate (--require-rows-hash), a dry run notes it.
+            # variable set: every tag run verifies the signature, so a dry run on an unsigned/lightweight tag FAILS too
             if [ -n "$ALLOWED_SIGNERS" ]; then
               printf '%s\n' "$ALLOWED_SIGNERS" > "$RUNNER_TEMP/allowed_signers"
               echo "JARVES_ALLOWED_SIGNERS_FILE=$RUNNER_TEMP/allowed_signers" >> "$GITHUB_ENV"
