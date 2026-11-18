@@ -499,6 +499,11 @@ def collect_boundary(runner: Callable[[], dict] | None, version: str) -> dict:
     return {"coverage": "complete", "reason": "", "findings": [f for f in fs if f]}
 
 
+# The run_collectors() keys by API family (#480 owner actions); test_security_scans pins them to run_collectors.
+ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
+RUN_SOURCES = ("main_ci", "nightly", "codeql_run")                # workflow runs, read through the Actions API
+
+
 def run_collectors(kind: str, client, version: str, *, home=None, state=None, now: datetime, sleep=time.sleep,
                    boundary: Callable[[], dict] | None = None) -> dict:
     steps = [("code_scanning", lambda: collect_code_scanning(client, version, sleep)),
@@ -528,8 +533,6 @@ def signature(findings: list[dict], complete: bool, refused: dict[str, str] | No
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
-RUN_SOURCES = ("main_ci", "nightly", "codeql_run")                # workflow runs, read through the Actions API
 _REFUSED = ("http_401", "http_403", "http_404")
 
 
