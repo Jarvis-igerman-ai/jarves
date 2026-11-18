@@ -818,7 +818,7 @@ class Store:
             task = self._get(db, "task", _id(data.get("task_id")))
             if task.get("quarantined"):
                 raise ValueError("quarantined task requires explicit recovery before asking")
-            if task["state"] in {"verified", "done"}:
+            if task["state"] in {"verified", "done", "cancelled"}:
                 raise ValueError("completed task cannot wait for a question")
             if db.execute("SELECT 1 FROM workflow_records WHERE kind='question' AND id=?", (ident,)).fetchone():
                 raise ValueError("question already exists")
@@ -1133,7 +1133,7 @@ class Store:
             question = self._get(db, "question", _id(question_id))
             if question["status"] != "answered":
                 raise ValueError("only an answered question can be reopened")
-            if self._get(db, "task", question["task_id"])["state"] in {"verified", "done"}:
+            if self._get(db, "task", question["task_id"])["state"] in {"verified", "done", "cancelled"}:
                 raise ValueError("completed task cannot wait for a question")
             view = question_view(question)
             history = list(question.get("history", []))

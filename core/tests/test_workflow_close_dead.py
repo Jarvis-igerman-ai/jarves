@@ -97,7 +97,6 @@ class CloseDeadTests(unittest.TestCase):
         for source in ({"error": "GitHub sync unavailable"}, {"truncated": True}, {"synced_at": 1.0}, {"open_prs": []}):
             with tempfile.TemporaryDirectory() as tmp:
                 store, clock = make(tmp)
-                self.addCleanup(lambda: None)
                 clock.now = 4000.0
                 dead_task(store, "gone", 5)
                 clock.now = 6000.0
@@ -156,6 +155,21 @@ class CloseDeadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.transition("x", {"state": "verified"})
         self.assertEqual(store.transition("x", {"state": "queued"})["state"], "queued")  # explicit reopen
+
+    def test_cancelled_task_cannot_take_an_owner_question(self):
+        store, clock = self.build()
+        self._stamp(store, clock)
+        dead_task(store, "x", 5)
+        store.ask({"id": "q1", "task_id": "x", "title": "Keep?", "blocks": False})
+        store.answer("q1", "yes")
+        store.confirm("q1", channel="dashboard")
+        clock.now = 6000.0
+        store.dead_blocked(apply=True)
+        with self.assertRaisesRegex(ValueError, "completed task"):
+            store.ask({"id": "q2", "task_id": "x", "title": "Still?"})
+        with self.assertRaisesRegex(ValueError, "completed task"):
+            store.reopen("q1")
+        self.assertEqual({t["id"]: t["state"] for t in store.snapshot()["tasks"]}["x"], "cancelled")
 
     def test_snapshot_reports_closable_count(self):
         store, clock = self.build()
