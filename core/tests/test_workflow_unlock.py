@@ -376,6 +376,34 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual((self.home / unlock.PUB).read_text(encoding="ascii"), live)
         self.assertEqual([p.name for p in self.home.glob(unlock.PUB + ".*")], [])
 
+    def test_750_release_retries_a_busy_rename_once_then_warns(self):
+        # Review #1304 @36b95648 R2: a Windows sharing violation on rename must not silently leave our key behind.
+        real, calls = os.rename, []
+
+        def busy_once(src, dst):
+            calls.append(src)
+            if len(calls) == 1:
+                raise PermissionError("sharing violation")
+            return real(src, dst)
+        with patch.object(unlock.os, "rename", busy_once), patch.object(unlock.time, "sleep"):
+            unlock.release_key(self.home, self.server.unlock_key)
+        self.assertEqual(len(calls), 2)
+        self.assertFalse((self.home / unlock.PUB).exists())
+        with patch.object(unlock.os, "rename", side_effect=PermissionError("sharing violation")), \
+                patch.object(unlock.time, "sleep"), self.assertLogs("jarves.workflow.unlock", "WARNING") as logs:
+            unlock.release_key(self.home / "none", self.server.unlock_key)
+        self.assertIn("could not remove unlock.pub on stop", logs.output[0])
+
+    def test_750_failed_cleanup_keeps_the_start_error_and_closes_the_store(self):
+        # Review #1304 @36b95648 R4: release_key raising during cleanup must not hide the listen error or leak the store.
+        closed, real = [], Store.close
+        with patch.object(Store, "close", lambda s: (closed.append(s), real(s))), \
+                patch.object(Server, "server_activate", side_effect=OSError("listen failed")), \
+                patch.object(server_mod.unlock, "release_key", side_effect=PermissionError("sharing violation")), \
+                self.assertLogs("jarves.workflow.server", "WARNING"), self.assertRaisesRegex(OSError, "listen failed"):
+            Server(self.home / "other", 0)
+        self.assertEqual(len(closed), 1)
+
     def test_750_issue_rereads_unlock_pub_moved_away_for_a_moment(self):
         # Review #1304 R3: another server's release_key renames unlock.pub away briefly; issue() must not fail then.
         real, calls = unlock._read_pub, []
@@ -397,7 +425,8 @@ class UnlockTests(unittest.TestCase):
         import tomllib
         core = Path(__file__).resolve().parents[1]
         deps = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
-        self.assertTrue(any(d.split(">")[0].split("=")[0].strip() == "cryptography" for d in deps))
+        from packaging.requirements import Requirement
+        self.assertIn("cryptography", {Requirement(d).name for d in deps})
         lock = tomllib.loads((core / "uv.lock").read_text(encoding="utf-8"))
         self.assertTrue(any(p["name"] == "cryptography" and p.get("version") for p in lock["package"]))
 

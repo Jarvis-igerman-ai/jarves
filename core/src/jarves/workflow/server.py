@@ -170,7 +170,10 @@ class Server(ThreadingHTTPServer):
             self.server_activate()
         except BaseException:
             if hasattr(self, "unlock_key"):  # listen() failed after the key was written: its private half dies here
-                unlock.release_key(self.home, self.unlock_key)
+                try:
+                    unlock.release_key(self.home, self.unlock_key)
+                except OSError as exc:  # keep the bind/listen error and still close the socket and store
+                    logging.getLogger(__name__).warning("could not remove %s after a failed start: %s", unlock.PUB, exc)
             self.socket.close()
             if own_store:  # else workflow.db stays open and Windows cannot remove the home (WinError 32)
                 self.store.close()

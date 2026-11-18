@@ -73,10 +73,17 @@ def release_key(home: Path, key: X25519PrivateKey) -> None:
     The file is renamed away first (atomic), so a key another server writes meanwhile is never the one removed."""
     path = Path(home) / PUB
     held = path.with_name(f"{PUB}.{os.getpid()}.{secrets.token_hex(4)}.release")
-    try:
-        os.rename(path, held)  # atomic: a key another server writes from now on lands in a new unlock.pub
-    except OSError:
-        return  # already gone: nothing of ours to remove
+    for attempt in (1, 2):
+        try:
+            os.rename(path, held)  # atomic: a key another server writes from now on lands in a new unlock.pub
+            break
+        except FileNotFoundError:
+            return  # already gone: nothing of ours to remove
+        except OSError as exc:  # e.g. a Windows sharing violation while issue() reads the file: try once more
+            if attempt == 2:
+                logging.getLogger(__name__).warning("could not remove %s on stop: %s", PUB, exc)
+                return
+            time.sleep(_RELEASE_GAP_S)
     try:
         ours = _read_pub(home, held.name)[0] == key.public_key().public_bytes_raw().hex()
     except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
