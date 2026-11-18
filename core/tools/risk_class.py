@@ -51,7 +51,10 @@ def _m(path: str, patterns) -> bool:
 
 
 def is_signoff(path: str) -> bool:
-    return _m(path.lower(), SIGNOFF_DOCS)
+    norm = path.replace("\\", "/").lower()
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return _m(norm, SIGNOFF_DOCS)
 
 
 def is_high_risk(path: str) -> bool:
