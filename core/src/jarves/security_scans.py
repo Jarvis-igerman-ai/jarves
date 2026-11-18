@@ -520,8 +520,52 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
-def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+# run_collectors() keys by API family, for the #480 owner-action lines; tests pin them to run_collectors.
+ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
+RUN_SOURCES = ("main_ci", "nightly", "codeql_run")        # workflow runs, read through the Actions API
+
+
+def http_failures(coverage: dict) -> dict[str, str]:
+    """{source: "http_NNN"} for every source whose coverage is incomplete:http_NNN; malformed values are ignored."""
+    out = {}
+    for k, v in coverage.items():
+        reason = v.removeprefix("incomplete:") if isinstance(v, str) and v.startswith("incomplete:") else ""
+        if re.fullmatch(r"http_\d{3}", reason):
+            out[str(k)] = reason
+    return out
+
+
+def signature(findings: list[dict], complete: bool, failures: dict[str, str] | None = None) -> str:
+    """Findings plus HTTP failures (#480): any change in the failed sources or their codes rewrites the tracker
+    once, so its owner-action and retry lines are never stale. No failures keeps the pre-#480 value."""
+    raw = ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
+    if failures:
+        raw += "|" + ",".join(f"{k}:{v}" for k, v in sorted(failures.items()))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def owner_actions(coverage: dict) -> list[str]:
+    """One line per kind of HTTP failure, saying what the owner can do (#480). Never names a token or its source."""
+    fails = {k: int(r[5:]) for k, r in http_failures(coverage).items()}
+    denied = {k for k, c in fails.items() if c in (403, 404)}
+    groups = [
+        ({k for k, c in fails.items() if c == 401},
+         "Owner action", "the scan's GitHub token is missing, expired or invalid; set a valid token."),
+        (denied & set(ALERT_SOURCES), "Owner action", "the feature is off for this repository (turn it on in the "
+         "repository's security settings) or the scan's token cannot read it (give it read access)."),
+        (denied & set(RUN_SOURCES), "Owner action",
+         "give the scan's token read access to Actions and check that the workflow exists."),
+        (denied - set(ALERT_SOURCES + RUN_SOURCES), "Owner action", "the scan's token cannot read it (give it read access)."),
+        ({k for k, c in fails.items() if c == 429 or 500 <= c <= 599}, "Retry note",
+         "GitHub rate-limited or failed this read; no owner action is needed, the next scan retries."),
+        ({k for k, c in fails.items() if c not in (401, 403, 404, 429) and not 500 <= c <= 599}, "Unexpected HTTP",
+         "GitHub answered this read with an unexpected code; check the scan log and GitHub's status.")]
+    lines = []
+    for keys, label, text in groups:
+        if keys:
+            codes = "/".join(sorted({str(fails[k]) for k in keys}))
+            lines.append(f"{label} (HTTP {codes}: {', '.join(sorted(keys))}): {text}")
+    return lines
 
 
 def _complete(coverage: dict) -> bool:
@@ -532,7 +576,7 @@ def _complete(coverage: dict) -> bool:
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
-             "This is ONE tracker; it is updated only when the set of findings changes.", ""]
+             "This is ONE tracker; it is updated only when the findings or the failed sources change.", ""]
     if findings:
         by = {s: sum(f["severity"] == s for f in findings) for s in ("P1", "P2", "P3")}
         lines += [f"**Open findings: {len(findings)}** (P1 {by['P1']}, P2 {by['P2']}, P3 {by['P3']})", "",
@@ -550,6 +594,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+        lines += owner_actions(coverage)
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
@@ -621,7 +666,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete)
+    sig = signature(findings, complete, http_failures(coverage))
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))

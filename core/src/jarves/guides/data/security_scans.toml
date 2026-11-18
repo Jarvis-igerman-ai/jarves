@@ -46,6 +46,12 @@ fix_he = "אין לה הרשאה לקרוא מקור אחד (למשל התראו
 fix_en = "It is not allowed to read one source (for example Dependabot or secret alerts). That does not mean there are no findings. Run locally with your own login (gh auth login with the security_events scope) or give the token security-events: read."
 
 [[problems]]
+he = "ב-Issue יש שורת Owner action, Retry note או Unexpected HTTP"
+en = "The issue shows an Owner action, Retry note or Unexpected HTTP line"
+fix_he = "GitHub סירב לקרוא מקור. HTTP 401: להגדיר טוקן תקין. 403/404 בהתראות: להדליק את התכונה בהגדרות האבטחה של המאגר או לתת לטוקן הרשאת קריאה. 403/404 בהרצות workflow: לתת לטוקן הרשאת קריאה ל-Actions ולבדוק שה-workflow קיים. 403/404 במקור אחר: לתת לטוקן הרשאת קריאה. Retry note (429 או 5xx): אין צורך לעשות כלום, הסריקה הבאה מנסה שוב. Unexpected HTTP (קוד אחר, למשל 410 או 422): לבדוק את יומן הסריקה ואת מצב GitHub. ה-Issue מתעדכן בכל שינוי במקורות שנכשלו או בקודים שלהם, כך שהשורות משקפות את הסריקה האחרונה."
+fix_en = "GitHub refused to read a source. HTTP 401: set a valid token. 403/404 on alerts: turn the feature on in the repository's security settings or give the token read access. 403/404 on workflow runs: give the token Actions read access and check that the workflow exists. 403/404 on another source: give the token read access. Retry note (429 or 5xx): nothing to do, the next scan retries. Unexpected HTTP (any other code, for example 410 or 422): check the scan log and GitHub's status. The issue is rewritten whenever the failed sources or their codes change, so these lines match the latest scan."
+
+[[problems]]
 he = "הסריקה אומרת offline או failed ולא רצה"
 en = "The scan says offline or failed"
 fix_he = "אין רשת או ש-GitHub לא ענה. שום דבר לא נכתב. היא תנסה שוב לבד אחרי חצי שעה, ואז אחרי שעתיים ואז אחרי שש שעות. לניסיון מיידי: jarvis scans run."

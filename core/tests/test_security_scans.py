@@ -3,6 +3,7 @@ sleeping. Covers dedupe, timezone / DST, offline, failure / retry, quiet hours a
 synthetic finding creates exactly ONE non-sensitive issue."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -159,6 +160,71 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     scan(home, gh, now=day(1))
     assert "INCOMPLETE" in gh.issues[0]["body"] and "No open findings" in gh.issues[0]["body"]
     assert "never read as zero" in gh.issues[0]["body"]
+
+
+class DenyGitHub(FakeGitHub):
+    """Alert listings answer `alerts`, workflow runs answer `runs` (an HTTP code, or None for the normal answer)."""
+
+    def __init__(self, alerts=None, runs=None, **kw):
+        super().__init__(**kw)
+        self.deny_alerts, self.deny_runs = alerts, runs
+
+    def __call__(self, method, path, payload=None):
+        if method == "GET" and self.deny_runs and "/actions/workflows/" in path:
+            return self.deny_runs, None
+        if method == "GET" and self.deny_alerts and "/alerts?" in path:
+            return self.deny_alerts, None
+        return super().__call__(method, path, payload)
+
+
+def test_issue_480_every_http_failure_gets_the_right_owner_line():
+    cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
+           "main_ci": "incomplete:http_403", "nightly": "incomplete:http_401", "future": "incomplete:http_404",
+           "codeql_run": "incomplete:http_503", "boundary": "incomplete:http_429", "x410": "incomplete:http_410",
+           "x422": "incomplete:http_422", "local_diagnostics": "skipped:no_local_registry", "bad": "incomplete:http_5xx"}
+    acts = [ln for ln in ss.tracker_body([], cov, 0, "s", "full").splitlines()
+            if ln.startswith(("Owner action", "Retry note", "Unexpected HTTP"))]
+    assert acts == [
+        "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
+        "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
+        "in the repository's security settings) or the scan's token cannot read it (give it read access).",
+        "Owner action (HTTP 403: main_ci): give the scan's token read access to Actions and check that the workflow exists.",
+        "Owner action (HTTP 404: future): the scan's token cannot read it (give it read access).",
+        "Retry note (HTTP 429/503: boundary, codeql_run): GitHub rate-limited or failed this read; no owner action is "
+        "needed, the next scan retries.",
+        "Unexpected HTTP (HTTP 410/422: x410, x422): GitHub answered this read with an unexpected code; check the scan "
+        "log and GitHub's status."]                                   # 410/422 are not called retryable (R2)
+    assert ss.owner_actions({"code_scanning": "complete"}) == []
+    assert ss.owner_actions({"a": None, "b": 403, 7: "skipped:http_404", "c": "complete:http_401"}) == []   # malformed
+
+
+@pytest.mark.parametrize("alerts,runs,want", [(401, 401, {401: "ALERT_SOURCES RUN_SOURCES"}),
+                                              (404, 403, {404: "ALERT_SOURCES", 403: "RUN_SOURCES"}),
+                                              (None, 403, {403: "RUN_SOURCES"})])
+def test_issue_480_real_collectors_feed_the_owner_lines(alerts, runs, want):
+    """The source names come from run_collectors itself, so a renamed collector cannot fall to the generic line."""
+    want = {c: sum((getattr(ss, n) for n in names.split()), ()) for c, names in want.items()}
+    r = ss.run_collectors("full", DenyGitHub(alerts, runs), VER, now=T0, sleep=lambda s: None,
+                          boundary=lambda: {"failed": False})
+    assert ss.http_failures(r["coverage"]) == {k: f"http_{c}" for c, ks in want.items() for k in ks}
+    acts = ss.owner_actions(r["coverage"])
+    assert len(acts) == len(want) and all(a.startswith("Owner action (HTTP ") for a in acts)
+
+
+def test_issue_480_tracker_follows_the_failures_and_is_never_stale(home):
+    gh = DenyGitHub(alerts=403)
+    old = hashlib.sha256(b"i|").hexdigest()[:16]                   # the live #480 sig: pre-#480 formula, no findings
+    assert ss.signature([], False) == ss.signature([], False, {}) == old
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"
+    assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    gh.deny_alerts = 429                                            # a new transient failure shows up (R1)
+    assert scan(None, gh, now=day(2))["issue"]["status"] == "updated"
+    assert "Retry note (HTTP 429: " in gh.issues[0]["body"] and "Owner action" not in gh.issues[0]["body"]
+    gh.deny_alerts = None                                           # and leaves once it clears (R1)
+    assert scan(None, gh, now=day(3))["issue"]["status"] == "updated"
+    assert "Retry note" not in gh.issues[0]["body"]
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):
