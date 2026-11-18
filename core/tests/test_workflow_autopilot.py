@@ -123,5 +123,45 @@ class AutopilotTests(unittest.TestCase):
         json.dumps(view)
 
 
+class WorkerAllowListPolicyFileTests(unittest.TestCase):
+    """#932/JAR-213: the owner's worker_allowed_tools override must not let a worker rewrite autopilot.json.
+    A wildcard (`*`, `:*`) lets the worker add any option at run time, so only tools with no file-writing option may
+    take one; git, gh and pytest are allowed only as fixed commands without options, interpreters by bare name only."""
+
+    def check(self, rules):
+        return autopilot.validate({**json.loads(json.dumps(autopilot.DEFAULTS)), "worker_allowed_tools": rules})
+
+    def test_commands_that_can_rewrite_the_policy_file_are_rejected(self):
+        for rule in ("Bash(python:*)", "Bash(python3 *)", "Bash(py:*)", "Bash(python -c:*)", "Bash(node -e:*)",
+                     "Bash(perl:*)", "Bash(sed:*)", "Bash(sed -i:*)", "Bash(awk:*)", "Bash(cp:*)", "Bash(mv:*)",
+                     "Bash(tee:*)", "Bash(cat:*)", "Bash(echo:*)", "Bash(bash -c:*)", "Bash(sh:*)", "Bash(env:*)",
+                     "Bash(xargs:*)", "Bash(find:*)", "Bash(sort:*)", "Bash(npm:*)", "Bash(make:*)", "Bash(touch:*)",
+                     "Bash(python fix.py autopilot.json)", "Bash(sed -i s/a/b/ AUTOPILOT.JSON)", "Bash(*)",
+                     "Bash(:*)", "Bash( *)", "Bash(py*:*)", "Bash(FOO=1 python:*)", 'Bash("python":*)',
+                     "Bash(p\\ython:*)", "Bash($SHELL:*)", "Bash(.:*)", "Bash(source:*)", "Bash({sed,-i}:*)",
+                     "Bash(pyt[h]on:*)", "Bash(~/x:*)", "Bash(./ls:*)", "Bash(/tmp/grep:*)", "Bash(ls; python -c x)",
+                     "Bash(ls:* > y)", "Bash(python -m pytest; python -c x)",
+                     # PR #1248 review R1: git log/show/diff take --output=<path> at run time
+                     "Bash(git:*)", "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show *)", "Bash(git status:*)",
+                     "Bash(git diff --output=x)", "Bash(git -c core.pager=x diff)", "Bash(git rebase)",
+                     # R2: pytest --junitxml/--basetemp/-o write or delete any path at run time
+                     "Bash(python -m pytest:*)", "Bash(python -m pytest --junitxml=x)",
+                     "Bash(python -m pytest --basetemp=h)", "Bash(python -m pytest -o cache_dir=h)",
+                     "Bash(python -m pip)", "Bash(python -c x)",
+                     # R3: a worker-made interpreter path must not stand in for python
+                     "Bash(./python -m pytest)", "Bash(/tmp/python -m pytest)", "Bash(C:/py/python.exe -m pytest)",
+                     # R4: gh run download / gh pr checkout write files
+                     "Bash(gh:*)", "Bash(gh run:*)", "Bash(gh run download)", "Bash(gh pr checkout)",
+                     "Bash(gh alias set)", "Bash(gh pr view --json x)"):
+            with self.subTest(rule=rule), self.assertRaisesRegex(ValueError, "autopilot.json"):
+                self.check(["Bash(ls:*)", rule])
+
+    def test_narrow_rules_stay_allowed(self):
+        rules = ["Bash(ls:*)", "Bash(grep -rn:*)", "Bash(wc *)", "Bash(head:*)", "Bash(ls -la)", "Read", "Grep", "Glob",
+                 "Bash(python -m pytest)", "Bash(python3 -m pytest core/tests/test_x.py)", "Bash(py -m pytest)",
+                 "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(gh pr view)", "Bash(gh run list)"]
+        self.assertEqual(self.check(rules)["worker_allowed_tools"], rules)
+
+
 if __name__ == "__main__":
     unittest.main()

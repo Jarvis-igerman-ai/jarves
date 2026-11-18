@@ -47,11 +47,50 @@ OPTIONAL_KEYS = ("worker_allowed_tools", "usage_slow_pct", "usage_stop_pct", "we
 _TOOL_RULE = re.compile(r"^(Bash\([^()\n]{1,60}\)|Read|Grep|Glob)$")
 _HARD_STOP = re.compile(r"(?i)git\s+(push|tag)|gh\s+release|rm|hotfix|powershell")
 _BYPASS = ("dangerously", "bypass", "skip-permissions")
+# #932/JAR-213: a worker must not be able to rewrite <home>/autopilot.json through its Bash allow list. A rule naming
+# the file is refused. A wildcard (`*`, `:*`) lets the worker add any option at run time (git log/diff/show --output,
+# pytest --junitxml/--basetemp/-o, gh run download), so only the bare read-only tools in _READ_ONLY, which have no
+# file-writing option, may take one. git, gh and `<python> -m pytest` are allowed only as fixed commands: plain words,
+# no option other than `-m pytest`, a read subcommand, and the interpreter by bare name (a worker-made file at a path
+# cannot stand in for it). Accepted residual: a fixed pytest/git command still runs code a worker writes into the
+# repository (conftest.py, tests, git hooks, repository config).
+_POLICY_FILE = re.compile(r"(?i)autopilot\.json")
+_PLAIN = re.compile(r"[A-Za-z0-9_./-]+")
+_READ_ONLY = frozenset({"ls", "grep", "egrep", "fgrep", "head", "tail", "wc", "pwd", "stat", "du", "df", "diff", "cmp",
+                        "comm", "basename", "dirname", "realpath", "which", "uname", "whoami"})
+_PYTHON = re.compile(r"python3?(?:\.\d+)?|py")
+_GIT_READ = frozenset({"status", "diff", "log", "show", "branch"})
+_GH_READ = {"pr": {"list", "view", "status", "checks", "diff"}, "issue": {"list", "view", "status"},
+            "run": {"list", "view"}}
+
+
+def _could_rewrite_policy(rule: str) -> bool:
+    if _POLICY_FILE.search(rule):
+        return True
+    if not rule.startswith("Bash("):
+        return False
+    body = rule[5:-1]
+    wild = body.endswith(":*") or body.endswith(" *")
+    words = (body[:-2] if wild else body).split()
+    if not words or not all(_PLAIN.fullmatch(w) for w in words):
+        return True
+    if words[0] in _READ_ONLY:
+        return False
+    if wild or any(w.startswith("-") for w in words if w != "-m"):
+        return True
+    if words[0] == "git":
+        return len(words) != 2 or words[1] not in _GIT_READ
+    if words[0] == "gh":
+        return len(words) != 3 or words[2] not in _GH_READ.get(words[1], ())
+    return not (_PYTHON.fullmatch(words[0]) and words[1:3] == ["-m", "pytest"] and "-m" not in words[3:])
 
 
 def _worker_tools(value) -> None:
     if not isinstance(value, list) or not 1 <= len(value) <= 40 or not all(isinstance(x, str) and _TOOL_RULE.match(x) for x in value):
         raise ValueError("worker_allowed_tools must be a short list (1..40) of short rules like Bash(ls:*)")
+    if any(_could_rewrite_policy(x) for x in value):
+        raise ValueError("worker_allowed_tools: rules that could rewrite autopilot.json cannot be allowed (a wildcard "
+                         "only on bare read-only tools; git, gh and <python> -m pytest only as fixed read commands)")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):
