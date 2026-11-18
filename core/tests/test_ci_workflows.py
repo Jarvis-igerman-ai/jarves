@@ -135,3 +135,38 @@ def test_automerge_enqueue_survives_risk_class_exit_1():
     run = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))["jobs"]["enqueue"]["steps"][-1]["run"]
     assert "set +e" in run
     assert re.search(r"risk_class\.py[^\n]*2>&1\) \|\| true", run)
+
+
+def _run_publish_guard(guard, **env):
+    import os
+    import shutil
+    import subprocess
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("bash not available")
+    full = {"PATH": os.environ.get("PATH", ""), **env}
+    return subprocess.run([bash, "-e", "-c", guard["run"]], env=full, capture_output=True, text=True, timeout=30)
+
+
+def test_release_secrets_step_refuses_outside_a_tag_ref():
+    """#544: the step holding RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY runs only on a real tag ref, and a guard
+    right before it fails the run when a real publish is attempted from a branch (or a branch named like a tag)."""
+    _doc, job = _release()
+    steps = job["steps"]
+    secret_steps = [i for i, s in enumerate(steps) if "secrets." in str(s)]
+    assert len(secret_steps) == 1
+    publish = steps[secret_steps[0]]
+    assert "github.ref_type == 'tag'" in publish["if"] and "DRY_RUN != 'true'" in publish["if"]
+    guard = steps[secret_steps[0] - 1]
+    assert guard.get("id") == "publish_guard" and "secrets." not in str(guard)
+    assert "DRY_RUN != 'true'" in guard["if"]
+    real = {"DRY_RUN": "false", "TAG": "v4.5.0"}
+    ok = _run_publish_guard(guard, **real, REF_TYPE="tag", GITHUB_REF="refs/tags/v4.5.0",
+                            ENV_NAME="stable-release")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    for bad in ({"REF_TYPE": "branch", "GITHUB_REF": "refs/heads/v4.5.0", "ENV_NAME": ""},
+                {"REF_TYPE": "tag", "GITHUB_REF": "refs/tags/v4.5.1", "ENV_NAME": "stable-release"},
+                {"REF_TYPE": "tag", "GITHUB_REF": "refs/tags/v4.5.0", "ENV_NAME": ""}):
+        r = _run_publish_guard(guard, **real, **bad)
+        assert r.returncode != 0 and "::error::" in r.stdout, bad
+    assert guard["env"]["ENV_NAME"] == job["environment"]
