@@ -442,3 +442,37 @@ async def test_plan_tool_call_assembled_from_streamed_items(tmp_path):
     assert await b.reply("מה השעה?") == "השעה עכשיו שבע."
     out = [i for i in srv.bodies[1]["input"] if i.get("type") == "function_call_output"]
     assert out and out[0]["call_id"] == "c1"
+
+
+def cited_msg(text, *urls):
+    return {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text, "annotations": [
+        {"type": "url_citation", "url": u, "title": "t", "start_index": 0, "end_index": 1} for u in urls]}]}
+
+
+async def test_plan_web_answer_names_its_sources_but_history_does_not(tmp_path):
+    """JAR-322: the ChatGPT-plan route ends a web-search answer with the same "Sources:" line as the API-key route."""
+    srv = ResponsesServer([
+        (200, sse(item_done(0, {"type": "web_search_call", "id": "ws1", "status": "completed"}),
+                  item_done(1, cited_msg("בתל אביב 24 מעלות.", "https://www.example.com/a", "https://other.org/b",
+                                         "https://example.com/c")), completed_empty())),
+        (200, sse(completed([cited_msg("It is sunny.", "https://news.example.net/x")]))),
+        (200, sse(completed([msg("בכיף")]))),
+    ])
+    b, _ = brain_with(tmp_path, srv, chatgpt_model="gpt-6-luna")
+    text = await b.reply("מה מזג האוויר בתל אביב?")
+    assert text == "בתל אביב 24 מעלות.\n\nמקורות: example.com, other.org"
+    pieces: list[str] = []                 # R1: this route never streams, so callers show the returned text (with the line)
+    assert await b.reply("Weather?", on_delta=pieces.append) == "It is sunny.\n\nSources: news.example.net"
+    assert pieces == []
+    assert await b.reply("תודה") == "בכיף"                                  # no citation: nothing added
+    assert "מקורות" not in json.dumps(srv.bodies[2]["input"], ensure_ascii=False)
+
+
+def test_both_routes_share_the_sources_helper():
+    """JAR-322 review: one public helper picks the label and format, so the plan and API routes cannot drift."""
+    import jarves.chatgpt_brain as cb
+    from jarves.brain import with_sources
+    assert cb.with_sources is with_sources
+    assert with_sources("שלום", ["https://www.a.com/x"]) == "שלום\n\nמקורות: a.com"
+    assert with_sources("Hi", ["https://a.com/x"]) == "Hi\n\nSources: a.com"
+    assert with_sources("Hi", []) == "Hi" and with_sources("", ["https://a.com"]) == ""

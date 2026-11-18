@@ -1,0 +1,1 @@
+- Added: closure evidence report for issues #898 #813 #831 #603 #519 #520 (fix commit, regression tests, passing run); #520 still has an unproven part (JAR-11).
