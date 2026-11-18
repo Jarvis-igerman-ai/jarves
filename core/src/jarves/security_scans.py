@@ -550,14 +550,14 @@ def marked_refused(body: object) -> dict[str, str]:
 
 
 def carry_refused(coverage: dict, previous: dict[str, str]) -> dict[str, str]:
-    """Refused now, plus a previous refusal for a source not read this pass: it failed transiently (an HTTP code
-    that is not a refusal, e.g. 5xx or 429) or it is not part of this scan (codeql_run runs in full scans only).
-    A 5xx between two refusals, or a light scan between two full ones, must not rewrite the tracker (#480).
-    Only a source read completely, or refused with another code, changes its recorded refusal."""
+    """Refused now, plus a previous refusal for a source not read this pass: any `incomplete:` gap that is not itself
+    a refusal (5xx, 429, not_run, offline, timeout) or a source not part of this scan (codeql_run runs in full scans
+    only). A transient gap between two refusals, or a light scan between two full ones, must not rewrite the tracker
+    (#480). Only a source read completely (or skipped), or refused with another code, changes its recorded refusal."""
     now = refused_sources(coverage)
     for k, code in previous.items():
         v = coverage.get(k)
-        if k not in now and code in _REFUSED and (v is None or (isinstance(v, str) and v.startswith("incomplete:http_"))):
+        if k not in now and code in _REFUSED and (v is None or (isinstance(v, str) and v.startswith("incomplete:"))):
             now[k] = code
     return dict(sorted(now.items()))
 
@@ -613,10 +613,12 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
     refused = refused_sources(coverage) if refused is None else refused
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-        lines += owner_actions(refused)
-        carried = sorted(k for k, r in refused.items() if coverage.get(k) != f"incomplete:{r}")
-        if carried:
-            lines.append(f"Refusal last seen in an earlier scan, not read as refused this time: {', '.join(carried)}.")
+    # Shown whenever a refusal is recorded, so the body always agrees with the marker. Coverage completeness stays
+    # about what THIS pass read: a carried refusal (a source not read now) is reported, not counted as a gap.
+    lines += owner_actions(refused)
+    carried = sorted(k for k, r in refused.items() if coverage.get(k) != f"incomplete:{r}")
+    if carried:
+        lines.append(f"Refusal last seen in an earlier scan, not read as refused this time: {', '.join(carried)}.")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- refused:{','.join(f'{k}={v}' for k, v in sorted(refused.items()))} -->",
               f"<!-- sig:{sig} -->"]

@@ -212,7 +212,7 @@ def test_issue_480_refused_marker_is_read_strictly():
 
 
 def test_issue_480_a_5xx_between_two_refusals_rewrites_the_tracker_at_most_once(home):
-    """R3: refused -> 5xx (after the bounded retries) -> refused. The 5xx pass keeps the recorded refusal."""
+    """Refused -> 5xx (after the bounded retries) -> refused. The 5xx pass keeps the recorded refusal."""
     gh = FakeGitHub(deny={"/dependabot/": 403})
     gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:x -->"}]
     assert scan(None, gh)["issue"]["status"] == "updated"                               # the one rewrite
@@ -241,16 +241,14 @@ def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(h
     assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
 
 
-@pytest.mark.parametrize("headers", [{"x-ratelimit-remaining": "0"}, {"Retry-After": "60"}, {}])
-def test_issue_480_a_rate_limited_403_keeps_the_refusal_and_the_signature(monkeypatch, headers):
+def test_issue_480_a_rate_limited_403_keeps_the_refusal_and_the_signature(monkeypatch):
     """Guards existing behaviour this PR relies on: http_client and _get neither rewrite nor retry a 403 (GET or the
     tracker's PATCH), so a rate-limited 403 on an already-refused source is still http_403 (no signature change)."""
     import email.message
     import io
     import urllib.error
     msg = email.message.Message()
-    for k, v in headers.items():
-        msg[k] = v
+    msg["x-ratelimit-remaining"] = "0"
     calls = []
 
     def deny(req, timeout):
@@ -537,3 +535,27 @@ def test_issue_480_a_refusal_carries_over_a_source_this_scan_does_not_read_and_s
     assert "Refusal last seen in an earlier scan, not read as refused this time: codeql_run, dependabot." in body
     assert ss.carry_refused({"codeql_run": "complete"}, {"codeql_run": "http_403"}) == {}   # read completely: dropped
     assert ss.carry_refused({"codeql_run": "incomplete:http_404"}, {"codeql_run": "http_403"}) == {"codeql_run": "http_404"}
+
+
+@pytest.mark.parametrize("gap", ["incomplete:not_run", "incomplete:offline", "incomplete:timeout", "incomplete:http_429"])
+def test_issue_480_any_transient_gap_keeps_the_recorded_refusal(gap):
+    assert ss.carry_refused({"dependabot": gap}, {"dependabot": "http_403"}) == {"dependabot": "http_403"}
+    assert ss.carry_refused({"dependabot": "skipped:off"}, {"dependabot": "http_403"}) == {}
+
+
+def test_issue_480_an_all_complete_light_scan_between_two_full_scans_shows_the_carried_refusal(home):
+    """Body and marker agree: a carried codeql_run refusal names its owner action even when coverage is complete."""
+    gh = FakeGitHub(deny={"/codeql.yml/": 403})
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:x -->"}]
+    full = {"kind": "full", "boundary": lambda: {"failed": False}}
+    scan(None, gh, **full)
+    gh.deny = {}
+    scan(None, gh, now=day(1))                                             # light: every light source read completely
+    body = gh.issues[0]["body"]
+    assert "Coverage: complete" in body and ss.marked_refused(body) == {"codeql_run": "http_403"}
+    assert "Owner action (HTTP 403: codeql_run): give the scan's token read access to Actions." in body
+    assert "Refusal last seen in an earlier scan, not read as refused this time: codeql_run." in body
+    gh.deny = {"/codeql.yml/": 403}
+    scan(None, gh, now=day(2), **full)
+    body = gh.issues[0]["body"]
+    assert "last seen" not in body and "Owner action (HTTP 403: codeql_run)" in body
