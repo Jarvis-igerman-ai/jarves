@@ -13,6 +13,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 
+// Gradle runs unit tests from android/app by default; also accept the repo root or android/ as the working directory.
+private fun res(path: String): java.io.File =
+    listOf("src/main/res", "app/src/main/res", "android/app/src/main/res").map { java.io.File(it, path) }.firstOrNull { it.isFile }
+        ?: throw java.io.FileNotFoundException("android/app/src/main/res/$path from ${java.io.File(".").absolutePath}")
+
 private class PlansRec(val status: Int = 200, val body: String = "{}", val boom: Boolean = false) : Transport {
     var method = ""; var url = ""
     override fun send(method: String, url: String, headers: Map<String, String>, body: String?): Response {
@@ -137,7 +142,7 @@ class TasksTest {
     @Test
     fun everyTaskStringIncludingTheUntitledPlaceholderExistsInEnglishAndHebrew() {
         fun names(dir: String) = Regex("""<(?:string|plurals) name="(task_[a-z_]+)"""")
-            .findAll(java.io.File("src/main/res/$dir/strings.xml").readText()).map { it.groupValues[1] }.toSet()
+            .findAll(res("$dir/strings.xml").readText()).map { it.groupValues[1] }.toSet()
         val en = names("values")
         assertTrue("task_untitled" in en)
         assertEquals(en, names("values-he"))
@@ -146,7 +151,7 @@ class TasksTest {
     @Test
     fun hebrewStepCountUsesOnlyTheCurrentCldrCategories() {
         // CLDR 42+ has one/two/other for Hebrew; a "many" item is never chosen and lint flags it (UnusedQuantity).
-        val he = java.io.File("src/main/res/values-he/strings.xml").readText()
+        val he = res("values-he/strings.xml").readText()
         val line = Regex("""<plurals name="task_line">(.*?)</plurals>""", RegexOption.DOT_MATCHES_ALL).find(he)!!.groupValues[1]
         assertEquals(listOf("one", "two", "other"), Regex("""quantity="([a-z]+)"""").findAll(line).map { it.groupValues[1] }.toList())
     }

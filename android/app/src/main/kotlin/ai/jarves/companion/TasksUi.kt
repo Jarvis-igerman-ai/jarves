@@ -88,7 +88,7 @@ class TasksModel(
     private var token: String? = null
     private var load: Job? = null
 
-    /** One visible-screen status tick: no read without the `tasks` scope (and a later grant starts fresh); after a 403/401 no more reads until the scope list or pairing changes. */
+    /** One visible-screen status tick: no read without the `tasks` scope (and a later grant starts fresh); after a 403/401 no more reads until the tasks scope is withdrawn and granted again, or the pairing changes. */
     fun tick(s: Session, scopes: List<String>) {
         if ("tasks" !in scopes) {
             load?.cancel()
