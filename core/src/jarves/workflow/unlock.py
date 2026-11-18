@@ -7,7 +7,7 @@ secret with the running server's key: its private half is never written to disk 
 and port are in unlock.pub.
 An agent that reads every file in the workflow home therefore cannot test the 10 000 codes offline; online it gets 5
 tries in total. Short expiry, single use. Honest limit: a same-user process that WRITES unlock.pub or unlock.json, or
-reads the server process memory, can still plant or check a code (needs OS-level separation, not files). The CLI refuses agent environments and non-terminals
+reads the server process memory, can still plant or check a code (needs OS-level separation, not files; tracked in #1313). The CLI refuses agent environments and non-terminals
 (owner_only_guard)."""
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
 PUB = "unlock.pub"     # public half of the server's in-memory key; written by the server at start
+_RELEASE_GAP_S = 0.05  # issue() re-reads a missing unlock.pub once after this pause (release_key's rename gap)
 
 
 def normalize(code: str) -> str:
@@ -80,20 +81,32 @@ def release_key(home: Path, key: X25519PrivateKey) -> None:
         ours = _read_pub(home, held.name)[0] == key.public_key().public_bytes_raw().hex()
     except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
         ours = False
-    try:
-        if not ours:  # another server's key: put it back unless an even newer one was written meanwhile
+    if not ours:  # another server's key: put it back unless an even newer one was written meanwhile
+        try:
             os.link(held, path)
-    except OSError:
-        pass  # FileExistsError: a newer key is live and wins, like server_key's replace
+        except FileExistsError:
+            pass  # a newer key is live and wins, like server_key's replace
+        except OSError as exc:  # no hard links here (or denied): move it back instead of deleting a live key
+            logging.getLogger(__name__).warning("could not link %s back (%s); moving it back instead", PUB, exc)
+            if not path.exists():
+                try:
+                    os.replace(held, path)
+                except OSError as err:
+                    logging.getLogger(__name__).warning("could not restore %s of another server: %s", PUB, err)
     held.unlink(missing_ok=True)
 
 
 def issue(home: Path, *, port: int | None = None, now: float | None = None) -> str:
     """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
     FileNotFoundError: the dashboard server is not running (no unlock.pub, or its key belongs to a server on another
-    port than `port`); ValueError: unlock.pub is damaged."""
+    port than `port`); ValueError: unlock.pub is damaged. A missing unlock.pub is read once more after a short pause:
+    another server's release_key moves the file away for a moment while it checks whose key it is."""
     try:
-        pub_hex, pub_port = _read_pub(home)
+        try:
+            pub_hex, pub_port = _read_pub(home)
+        except FileNotFoundError:
+            time.sleep(_RELEASE_GAP_S)
+            pub_hex, pub_port = _read_pub(home)
         server_pub = X25519PublicKey.from_public_bytes(bytes.fromhex(pub_hex))
     except ValueError as exc:  # UnicodeDecodeError is a ValueError
         raise ValueError(f"{PUB} is damaged; restart the dashboard server") from exc

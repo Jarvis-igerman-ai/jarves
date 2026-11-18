@@ -366,6 +366,41 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual((self.home / "race" / unlock.PUB).read_text(encoding="ascii"), theirs)
         self.assertEqual(sorted(p.name for p in (self.home / "race").iterdir()), [unlock.PUB])
 
+    def test_750_release_without_hard_links_moves_the_other_key_back(self):
+        # Review #1304 R2: a failed os.link (no hard links, denied) must not delete the live server's key.
+        live = (self.home / unlock.PUB).read_text(encoding="ascii")
+        with patch.object(unlock.os, "link", side_effect=PermissionError("no hard links")), \
+                self.assertLogs("jarves.workflow.unlock", "WARNING") as logs:
+            unlock.release_key(self.home, X25519PrivateKey.generate())
+        self.assertIn("moving it back", logs.output[0])
+        self.assertEqual((self.home / unlock.PUB).read_text(encoding="ascii"), live)
+        self.assertEqual([p.name for p in self.home.glob(unlock.PUB + ".*")], [])
+
+    def test_750_issue_rereads_unlock_pub_moved_away_for_a_moment(self):
+        # Review #1304 R3: another server's release_key renames unlock.pub away briefly; issue() must not fail then.
+        real, calls = unlock._read_pub, []
+
+        def gap_once(home, name=unlock.PUB):
+            calls.append(name)
+            if len(calls) == 1:
+                raise FileNotFoundError(name)
+            return real(home, name)
+        with patch.object(unlock, "_read_pub", gap_once), patch.object(unlock.time, "sleep") as pause:
+            shown = unlock.issue(self.home, port=self.server.server_port)
+        self.assertEqual(len(calls), 2)
+        pause.assert_called_once_with(unlock._RELEASE_GAP_S)
+        self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
+
+    def test_750_cryptography_is_a_locked_runtime_dependency(self):
+        # Review #1304 R1: unlock imports cryptography at module level, so it must be a base (non-extra) dependency
+        # and pinned in uv.lock, which packaging/build_windows.ps1 bundles into the installer.
+        import tomllib
+        core = Path(__file__).resolve().parents[1]
+        deps = tomllib.loads((core / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+        self.assertTrue(any(d.split(">")[0].split("=")[0].strip() == "cryptography" for d in deps))
+        lock = tomllib.loads((core / "uv.lock").read_text(encoding="utf-8"))
+        self.assertTrue(any(p["name"] == "cryptography" and p.get("version") for p in lock["package"]))
+
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
         self.assertEqual(self.request("/api/unlock", {"code": "1234"})[0], 401)
