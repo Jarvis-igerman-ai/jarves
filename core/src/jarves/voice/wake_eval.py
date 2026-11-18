@@ -49,7 +49,9 @@ TV_HE = ["ועכשיו נחזור לכותרות של הערב", "מחר צפו�
 # bare "Jarvis" is reported on its own (calling a name without "hey" is a product choice, not a clear false wake)
 BARE = {"Jarvis"}
 
-OPENAI_TTS_MODEL = "gpt-4o-mini-tts"             # newest /v1/audio/speech model listed for this account, 2026-10-20
+# gpt-4o-mini-tts is retired (shutdown 14 Jan 2027, #1224); OpenAI names only a realtime successor,
+# so --openai samples are off until a supported speech model is set here. "" = off.
+OPENAI_TTS_MODEL = ""
 OPENAI_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse",
                  "marin", "cedar"]
 OPENAI_EVAL_VOICES = {"echo", "nova", "sage", "cedar", "ballad"}   # held out (never used for any training)
@@ -133,6 +135,9 @@ def openai_clips(items: list[tuple[str, str]], kind: str, cache: Path, voices: l
                 out.append(Clip(text, f"openai:{v}{'+' + acc if acc else ''}", _read_wav(p), kind))
             else:
                 todo.append((v, text, acc, p))
+    if todo and not OPENAI_TTS_MODEL:
+        raise RuntimeError("--openai samples are off: gpt-4o-mini-tts is retired and no supported OpenAI speech "
+                           "model is set (#1224); run without --openai")
     if todo and not key:
         raise RuntimeError("OPENAI_API_KEY is not set (jarvis key): needed for --openai samples")
 
