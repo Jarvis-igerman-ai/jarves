@@ -58,19 +58,26 @@ def _summary(tail: str, limit: int = 600) -> str:
 
 
 def _open_issue_titled(repo: str, title: str):
-    """True/False if an open issue has exactly this title; None if unknown. Plain listing, not search (no index lag)."""
+    """True/False if an open issue has exactly this title; None if unknown (then the caller files nothing).
+
+    Two lookups: a plain listing (no search-index lag, but only the newest 200 open issues) and an exact-title
+    search (covers older issues, may lag). Either one finding the title means it exists.
+    """
     import json
-    listed = subprocess.run(["gh", "issue", "list", "--repo", repo, "--state", "open", "--limit", "200",
-                             "--json", "number,title"], capture_output=True, text=True, timeout=60)
-    if listed.returncode != 0:
-        return None
-    try:
-        issues = json.loads(listed.stdout or "[]")
-    except ValueError:
-        return None
-    if not isinstance(issues, list):
-        return None
-    return any(isinstance(i, dict) and i.get("title") == title for i in issues)
+    base = ["gh", "issue", "list", "--repo", repo, "--state", "open", "--json", "number,title"]
+    found = False
+    for extra in (["--limit", "200"], ["--search", f'"{title}" in:title']):
+        res = subprocess.run(base + extra, capture_output=True, text=True, timeout=60)
+        if res.returncode != 0:
+            return None
+        try:
+            issues = json.loads(res.stdout or "[]")
+        except ValueError:
+            return None
+        if not isinstance(issues, list):
+            return None
+        found = found or any(isinstance(i, dict) and i.get("title") == title for i in issues)
+    return found
 
 
 def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves") -> None:

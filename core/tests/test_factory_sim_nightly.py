@@ -70,7 +70,7 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert labels == ["showstopper", "P1", "testing"]   # #897: an area label ("testing" exists in the repo)
 
 
-def _fake_gh(calls, create_err, listed_stdout="[]", listed_rc=0):
+def _fake_gh(calls, create_err, listed_stdout="[]", listed_rc=0, searched_stdout="[]"):
     import subprocess
 
     def fake_run(cmd, **kw):
@@ -79,7 +79,8 @@ def _fake_gh(calls, create_err, listed_stdout="[]", listed_rc=0):
             failed = "testing" in cmd and create_err
             return subprocess.CompletedProcess(cmd, 1 if failed else 0, "", create_err if failed else "")
         if "--search" in cmd:                       # the first duplicate check: nothing open
-            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+            exact = cmd[cmd.index("--search") + 1].startswith('"')
+            return subprocess.CompletedProcess(cmd, 0, searched_stdout if exact else "[]", "")
         return subprocess.CompletedProcess(cmd, listed_rc, listed_stdout, "")
     return fake_run
 
@@ -93,13 +94,15 @@ def test_issue_is_filed_without_the_area_label_when_that_label_is_missing(monkey
     assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
 
 
-@pytest.mark.parametrize("listed_stdout,listed_rc", [
-    ('[{"number": 7, "title": "Factory nightly simulation failed: x"}]', 0),   # half-successful create
-    ("", 1), ("{not json", 0), ('{"a": 1}', 0)])                                # unknown: do not risk a duplicate
-def test_label_retry_is_skipped_when_the_issue_may_exist(monkeypatch, capsys, listed_stdout, listed_rc):
+@pytest.mark.parametrize("listed_stdout,listed_rc,searched_stdout", [
+    ('[{"number": 7, "title": "Factory nightly simulation failed: x"}]', 0, "[]"),   # half-successful create
+    ("", 1, "[]"), ("{not json", 0, "[]"), ('{"a": 1}', 0, "[]"),                                # unknown: do not risk a duplicate
+    ("[]", 0, '[{"number": 3, "title": "Factory nightly simulation failed: x"}]')])  # R2: beyond the 200 listed
+def test_label_retry_is_skipped_when_the_issue_may_exist(monkeypatch, capsys, listed_stdout, listed_rc,
+                                                         searched_stdout):
     calls = []
-    monkeypatch.setattr(factory_sim.subprocess, "run",
-                        _fake_gh(calls, "could not add label: 'testing' not found", listed_stdout, listed_rc))
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(
+        calls, "could not add label: 'testing' not found", listed_stdout, listed_rc, searched_stdout))
     factory_sim.file_issue(["x"], "FAILED a::b")
     assert len([c for c in calls if c[2] == "create"]) == 1
     assert "not retrying" in capsys.readouterr().out
