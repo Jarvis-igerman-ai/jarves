@@ -110,14 +110,14 @@ class SyncFieldTests(unittest.TestCase):
         from jarves.workflow import sync
         gate = sync.REQUIRED_CHECK
 
-        def state(gate_runs, others=(), total=None):
+        def state(gate_runs, others=(), total=None, gate_total=None):
             every = list(gate_runs) + list(others)
             paths = []
 
             def get(path):
                 paths.append(path)
                 if "check_name=" in path:
-                    return {"total_count": len(gate_runs), "check_runs": list(gate_runs)}
+                    return {"total_count": gate_total or len(gate_runs), "check_runs": list(gate_runs)}
                 return {"total_count": total or len(every), "check_runs": every}
             result = sync.main_ci_state(get, "s")
             # The full quoted gate name is asked first; the unfiltered list only as a fallback.
@@ -139,15 +139,17 @@ class SyncFieldTests(unittest.TestCase):
         self.assertEqual(state([{"id": "x", "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
         self.assertEqual(state([{"id": True, "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
         self.assertEqual(state([], [flake]), "failure")  # no gate run seen: unchanged all-checks rule
+        self.assertEqual(state([run(5, "success")], gate_total=101), "unknown")  # gate list truncated
+        self.assertEqual(state([run(5, "skipped")]), "unknown")                  # skipped gate is not green
 
     def test_beta_state_of_the_newest_beta_run(self):
         """JAR-406: main_ci_state ignores the beta job, so the beta run is judged on its own."""
         from jarves.workflow import sync
 
-        def state(runs):
+        def state(runs, total=None):
             def get(path):
                 self.assertIn("?check_name=beta&", path)
-                return {"check_runs": runs}
+                return {"check_runs": runs} if runs is None or total is None else {"total_count": total, "check_runs": runs}
             return sync.beta_state(get, "s")
 
         def run(i, conclusion, status="completed", name="beta"):
@@ -159,8 +161,12 @@ class SyncFieldTests(unittest.TestCase):
         self.assertEqual(state([run(1, "cancelled")]), "unknown")
         self.assertEqual(state([run(1, "skipped")]), "none")                         # beta publish off
         self.assertEqual(state([run(1, "skipped"), run(2, None, "in_progress")]), "pending")
-        self.assertEqual(state([run(1, "failure", name="beta-docs")]), "none")        # exact job name only
-        self.assertEqual(state([]), "none")
+        # No beta run yet: package.yml starts only after the gate passed, so it may still come (JAR-406 R1).
+        self.assertEqual(state([run(1, "failure", name="beta-docs")]), "pending")     # exact job name only
+        self.assertEqual(state([]), "pending")
+        self.assertEqual(state([{"id": "x", "name": "beta", "status": "completed", "conclusion": "success"},
+                                run(2, "skipped")]), "unknown")                       # bad id before skipped
+        self.assertEqual(state([run(2, "skipped")], total=101), "unknown")            # beta list truncated
         self.assertEqual(state(None), "unknown")
         for exc in (OSError("down"), TypeError("bad"), KeyError("x"), AttributeError("y")):
             def boom(path, exc=exc):
@@ -192,7 +198,7 @@ class SyncFieldTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "w.db")
             self.addCleanup(store.close)
-            store.set_source({**src, "beta_state": "none"})                  # beta publish off: no beta run
+            store.set_source({**src, "beta_state": "none"})                  # beta publish off: beta run skipped
             out = autopilot_loop._watch(store, Path(tmp), {"enabled": True, "kill": False},
                                         stop=lambda *a: None, notify=lambda *a: None)
             self.assertEqual(len([o for o in out if o["action"] == "beta_verify_task"]), 1)

@@ -75,8 +75,16 @@ BETA_JOB = "beta"  # package.yml beta publish job; judged separately from main's
 _BAD = ("failure", "timed_out", "startup_failure")
 
 
-def _gate_state(runs: list, name: str = REQUIRED_CHECK) -> str | None:
-    """State from the newest run of check `name`; None when it has no run here."""
+def _gate_state(data, name: str = REQUIRED_CHECK) -> str | None:
+    """State from the newest run of check `name` in a check-runs reply; None when it has no run.
+
+    unknown = not a list, more than one page (total_count above the rows), a non-int id, or an odd
+    conclusion. A skipped newest run is returned as "skipped" for the caller to judge."""
+    runs = data.get("check_runs") if isinstance(data, dict) else None
+    if not isinstance(runs, list):
+        return "unknown"
+    if int(data.get("total_count") or 0) > len(runs):
+        return "unknown"
     gate = [r for r in runs if isinstance(r, dict) and r.get("name") == name]
     if not gate:
         return None
@@ -86,7 +94,7 @@ def _gate_state(runs: list, name: str = REQUIRED_CHECK) -> str | None:
     if newest.get("status") != "completed":
         return "pending"
     c = newest.get("conclusion")
-    return "success" if c == "success" else "failure" if c in _BAD else "unknown"
+    return "success" if c == "success" else "failure" if c in _BAD else "skipped" if c == "skipped" else "unknown"
 
 
 def main_ci_state(get, sha: str) -> str:
@@ -100,9 +108,9 @@ def main_ci_state(get, sha: str) -> str:
     """
     try:
         gated = get(f"/repos/{REPO}/commits/{sha}/check-runs?check_name={quote(REQUIRED_CHECK)}&per_page=100")
-        state = _gate_state(gated.get("check_runs") or [] if isinstance(gated, dict) else [])
+        state = _gate_state(gated if isinstance(gated, dict) and gated.get("check_runs") else {"check_runs": []})
         if state is not None:
-            return state
+            return "unknown" if state == "skipped" else state
         data = get(f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100")
         runs = data.get("check_runs") if isinstance(data, dict) else None
         if not runs or int(data.get("total_count", 0)) > len(runs):
@@ -121,18 +129,13 @@ def beta_state(get, sha: str) -> str:
     """State of the newest `beta` publish run on this sha: success | failure | pending | unknown | none.
 
     main_ci_state ignores this job (JAR-406), so it is judged here: the autopilot opens a
-    beta-verify task only on success or none (no beta run, or a skipped one: beta publish off);
-    a running, cancelled or failed beta, or a fetch error, opens nothing. A later run decides."""
+    beta-verify task only on success or none (newest beta run skipped: beta publish off).
+    package.yml starts only after the gate passed, so no beta run yet is pending, not none.
+    A running, cancelled or failed beta, or a fetch error, opens nothing. A later run decides."""
     try:
         data = get(f"/repos/{REPO}/commits/{sha}/check-runs?check_name={quote(BETA_JOB)}&per_page=100")
-        runs = data.get("check_runs") if isinstance(data, dict) else None
-        if not isinstance(runs, list):
-            return "unknown"
-        newest = max((r for r in runs if isinstance(r, dict) and r.get("name") == BETA_JOB
-                      and type(r.get("id")) is int), key=lambda r: r["id"], default=None)
-        if newest and newest.get("status") == "completed" and newest.get("conclusion") == "skipped":
-            return "none"  # beta publish switched off (job `if:` false): no beta was expected
-        return _gate_state(runs, BETA_JOB) or "none"
+        state = _gate_state(data, BETA_JOB)
+        return "pending" if state is None else "none" if state == "skipped" else state
     except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
         return "unknown"
 
