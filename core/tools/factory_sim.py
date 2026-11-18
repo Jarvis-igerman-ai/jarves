@@ -58,6 +58,7 @@ def _summary(tail: str, limit: int = 600) -> str:
              if re.match(r"^(FAILED|ERROR) |^=+ .*(passed|failed|error)", ln.strip())]
     text = "\n".join(lines[-5:]) or "(see local run for details)"
     text = re.sub(r"(?<![\w.])[A-Za-z]:[\\/][^\s:]*|\\\\[^\s:]+|(?<![\w.])(?<!:/)/(?:[\w.-]+/)+[\w.-]*", "<path>", text)
+    text = re.sub(r"(?<![\w.])(?:~[\\/]|/(?:home|Users|root)\b)[^\s:]*", "<path>", text)   # /root, /home/bob, ~/x
     text = re.sub(r"\b(sk-|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|AKIA|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
     return text[:limit]
 

@@ -28,6 +28,7 @@ checkpoint(home, reason) (before a migration/update: raises if it cannot be veri
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -59,6 +60,7 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
+INSTALLER_NOTE = "installer upgrade"  # literal in packaging/installer_state.py (it runs under the OLD jarves, so it cannot import this)
 DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
@@ -590,7 +592,7 @@ def _reusable_installer_checkpoint(home: Path, max_age_s: float = 6 * 3600) -> P
         note = str(read_manifest(path).get("note", ""))
     except (OSError, ValueError, KeyError, zipfile.BadZipFile):
         return None
-    return path if note.endswith("installer upgrade") else None
+    return path if note.endswith(INSTALLER_NOTE) else None
 
 
 def _dbs_unchanged_since(home: Path, ts: float) -> bool:
@@ -736,14 +738,25 @@ def dashboard_routes(register_route) -> None:
 
 
 # ---------------------------------------------------------------------- CLI
+def _count(v: str) -> int:
+    """argparse type for retention counts: a whole number of 0 or more (#1016 review R2)."""
+    try:
+        n = int(v)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a whole number")
+    if n < 0:
+        raise argparse.ArgumentTypeError("must be 0 or more")
+    return n
+
+
 def add_cli(sub) -> None:
     b = sub.add_parser("backup", help="local backups: now / list / verify NAME / test NAME / prune / settings")
     b.add_argument("action", nargs="?", default="now", choices=["now", "list", "verify", "test", "prune", "settings"])
     b.add_argument("name", nargs="?")
-    b.add_argument("--daily", type=int)
-    b.add_argument("--weekly", type=int)
-    b.add_argument("--manual", type=int, help="how many manual backups to keep")
-    b.add_argument("--checkpoints", type=int, help="how many pre-migration / pre-restore backups to keep")
+    b.add_argument("--daily", type=_count)
+    b.add_argument("--weekly", type=_count)
+    b.add_argument("--manual", type=_count, help="how many manual backups to keep (0 still keeps the newest)")
+    b.add_argument("--checkpoints", type=_count, help="how many pre-migration / pre-restore backups to keep (0 still keeps the newest)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")

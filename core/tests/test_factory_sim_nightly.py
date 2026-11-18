@@ -122,6 +122,13 @@ def test_summary_keeps_urls_readable():
     assert "https://github.com/a/b" in out and "/home/bob" not in out
 
 
+def test_summary_redacts_single_segment_and_tilde_home_paths():
+    """#897 review R4 (round 3): `/root`, `/home/bob`, `/Users/x` and `~/...` never reach the public body."""
+    out = factory_sim._summary("FAILED /root - x\nERROR /home/bob - y\nFAILED /Users/ann: z\nERROR ~/jarves/t.py - w")
+    assert not any(s in out for s in ("/root", "/home/bob", "/Users/ann", "~/jarves")), out
+    assert factory_sim._summary("FAILED core/tests/t.py::x - root cause")[:22] == "FAILED core/tests/t.py"
+
+
 def test_auto_issue_has_an_area_label_and_redacts_ghr_and_posix_paths(monkeypatch):
     """#897: the auto-issue carries an area label; ghr_ tokens and POSIX/UNC paths never reach the public body."""
     import subprocess

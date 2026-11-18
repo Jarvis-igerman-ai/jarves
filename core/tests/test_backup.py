@@ -448,3 +448,31 @@ def test_checkpoints_zero_still_keeps_the_newest_rollback_point(profile, monkeyp
     assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--checkpoints", "0"]), None, profile) == 0
     backup.prune(profile)
     assert [b["name"] for b in backup.list_backups(profile)] == [made[-1].name]
+
+
+@pytest.mark.parametrize("flag", ["--daily", "--weekly", "--manual", "--checkpoints"])
+def test_cli_rejects_negative_retention_and_leaves_settings_unchanged(profile, capsys, flag):
+    """#1016 review R2 (round 3): a negative count is refused at the CLI (exit 2), nothing is stored."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    with pytest.raises(SystemExit) as e:
+        parser.parse_args(["backup", "settings", flag, "-1"])
+    assert e.value.code == 2 and "must be 0 or more" in capsys.readouterr().err
+    assert backup.get_settings(profile) == backup.DEFAULTS
+
+
+def test_manual_zero_still_keeps_the_newest_manual_backup(profile, monkeypatch):
+    """#1016 review R2 (round 3): `--manual 0` then prune never deletes every manual backup (prune clamps to 1)."""
+    import argparse
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    made = []
+    for _ in range(3):
+        made.append(backup.create(profile, "manual", now=clock[0]))
+        clock[0] += 10
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--manual", "0"]), None, profile) == 0
+    backup.prune(profile)
+    assert [b["name"] for b in backup.list_backups(profile)] == [made[-1].name]

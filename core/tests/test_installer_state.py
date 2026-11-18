@@ -444,3 +444,14 @@ def test_wait_for_exit_polls_until_the_launcher_is_gone():
     assert installer.wait_for_exit(123, alive=lambda p: next(seq), sleep=slept.append) is True and len(slept) == 2
     assert installer.wait_for_exit(123, 0.0, alive=lambda p: True, sleep=lambda s: None) is False
     assert installer._pid_alive(0) is False
+
+
+def test_installer_checkpoint_note_is_the_one_the_core_reuses(tmp_path):
+    """#1016 review R1: the note is written by the installer's own prepare(), so a wording change cannot silently
+    disable the reuse (the Core would take a second pre-migration backup again)."""
+    home, state = tmp_path / "home", tmp_path / "state.json"
+    seed.seed(home)
+    result = installer.prepare(home, state)
+    archive = Path(result["backups"][0]["backup"])
+    assert backup.read_manifest(archive)["note"].endswith(backup.INSTALLER_NOTE)
+    assert backup._reusable_installer_checkpoint(Path(result["backups"][0]["home"])) == archive
