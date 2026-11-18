@@ -133,7 +133,7 @@ def test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st):
     turns = st.rows("SELECT * FROM turns")
     assert turns and all(t["text"] is None and t["chars"] > 0 for t in turns)
     assert "אינטל" not in json.dumps(st.rows("SELECT * FROM events"), ensure_ascii=False)
-    diagnose.run(st, Config())
+    diagnose.run(st, Config(), days=3650)            # clock-free: the Oct 19 fixture stays inside the window
     iss = _issues(st)
     assert "early_response" in iss                   # timing rules still work
     assert not any(k.startswith(("filler", "user_", "backend_stall")) for k in iss)
