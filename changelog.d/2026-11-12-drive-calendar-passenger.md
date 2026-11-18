@@ -1,0 +1,1 @@
+- Added: a regression test pinning that drive-mode calendar reads with a passenger present are deferred and never return event titles; the behaviour itself already shipped for #831 (JAR-258).

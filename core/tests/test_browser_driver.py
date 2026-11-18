@@ -472,3 +472,16 @@ def test_only_the_assistant_is_filmed_never_the_owner_in_control():
     d.session_ref = lambda: None
     d._rec_tick()
     assert d.recorder.calls[-1] is False
+
+
+def test_a_driver_reaped_after_the_kill_probe_counts_as_dead(monkeypatch):
+    """JAR-523 (nightly 44065078703): the killed node driver can be reaped between `kill(pid, 0)` and reading
+    /proc/<pid>/stat; that vanished entry must read as dead, not alive."""
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child.kill()
+    child.wait()                                                        # reaped: /proc/<pid> is gone
+    real_kill = os.kill
+    monkeypatch.setattr(os, "kill", lambda p, s: None if (p, s) == (child.pid, 0) else real_kill(p, s))   # the probe ran just before the reap
+    assert not _pid_alive(child.pid)
