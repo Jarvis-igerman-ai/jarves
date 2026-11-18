@@ -109,7 +109,7 @@ class Manager(StageEngine):
                 kind = stages[t["stage"]]["kind"] if t["stage"] < len(stages) else "work"
                 n = int(job.get("interrupts") or 0) + 1
                 if t["attempts"] >= self.cfg.max_attempts and kind in pl.CODE_KINDS or n > self.cfg.max_attempts + 1:
-                    self.db.update_task(t["id"], status="failed", pid=0, reason="interrupted too many times")
+                    self.db.update_task(t["id"], status="failed", pid=0, reason="interrupted too many times", job=job)
                     self.db.event(t["id"], "manager", "failed", "interrupted too many times")
                     continue
                 job["interrupts"] = n
@@ -1316,7 +1316,7 @@ def _kill_pid(pid: int, started) -> str:
     if not isinstance(started, (int, float)) or isinstance(started, bool):
         logs.warn("projects", "PID_UNIDENTIFIED", "a stored pid is alive but has no identity record: not killed", pid=pid)
         return "unknown"
-    if now != started:
+    if now != started:          # exact: Linux /proc start ticks and Windows FILETIME/1e7 are fixed per process
         return "gone"
     _kill_tree(pid)
     return "killed"

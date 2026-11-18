@@ -181,3 +181,8 @@ def test_206_h2_a_phone_edit_needs_a_new_confirm(srv, prefs):
     tok, _ = pair(srv)
     st, out = op(srv, tok, op="edit", pref=a, text="I like very short answers at dawn")
     assert st == 200 and out["state"] == "proposed" and p.get(a)["state"] == "proposed"   # new words: not in the prompt yet
+
+
+def test_206_h2_editing_a_missing_pref_is_a_404_not_a_500(srv, prefs):
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=99999, text="anything harmless")[0] == 404

@@ -122,6 +122,33 @@ def test_1098_stop_does_not_kill_an_unidentified_process(env, procs):  # noqa: F
     assert "not confirmed stopped" in r["text"]
 
 
+def test_1098_a_real_child_reads_the_same_start_time_and_is_killed():
+    import subprocess
+    import sys
+    from jarves.workflow import webchild
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if sys.platform == "win32" else {"start_new_session": True}
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], **kw)
+    try:
+        import json
+        started = json.loads(json.dumps(webchild.started_at(child.pid)))     # as stored in the job JSON
+        assert started is not None and webchild.started_at(child.pid) == started
+        assert service._kill_pid(child.pid, started) == "killed"
+        assert child.wait(10) is not None
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(10)
+
+
+def test_1098_too_many_interrupts_drops_the_identity_record(env, procs):  # noqa: F811
+    m, repo, _ = env
+    open_project(m, repo)
+    tid = _running(m, 4242, {"pid_started": 111.0, "interrupts": 9})
+    m._recover()
+    t = m.db.task(tid)
+    assert t["status"] == "failed" and "pid_started" not in t["job"]
+
+
 # ---------------------------------------------------------------- #1099: key/token-shaped text is never learned
 @pytest.mark.parametrize("text", ["my key is sk-proj-abcdEFGH1234ijklMNOP5678", "ghp_aB3dE5fG7hI9jK1lM3nO5pQ7rS9tU1vW3xY5",
                                   "AKIAIOSFODNN7EXAMPLE1", "remember my api key", "set my_api_key now",
@@ -171,3 +198,13 @@ def test_206_f13_switching_privacy_on_scrubs_older_chat_replies(tmp_path, monkey
     assert c.seen("phone1", "old")["reply"] == continuity.RESEND_UNAVAILABLE
     assert c.seen("phone1", "p") == {"ok": True, "pref": 3}
     assert not any("bank" in r["body"] for r in c._rows("SELECT body FROM ledger"))
+
+
+def test_206_f13_store_also_drops_expired_ledger_rows(tmp_path):
+    from jarves import continuity
+    now = [1000.0]
+    c = continuity.Continuity(tmp_path, clock=lambda: now[0])
+    c.store("phone1", "old", "chat", 200, {"ok": True, "reply": "old words"})
+    now[0] += continuity.LEDGER_TTL_S + 1
+    c.store("phone1", "new", "chat", 200, {"ok": True, "reply": "x"})
+    assert [r["cid"] for r in c._rows("SELECT cid FROM ledger")] == ["new"]
