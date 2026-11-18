@@ -285,7 +285,18 @@ def check_limits(c: Ctx) -> tuple[str, str, str]:
 
 
 def check_disk(c: Ctx) -> tuple[str, str, str]:
-    return _preflight(c, "_disk")
+    from . import backup
+    status, detail, fix = _preflight(c, "_disk")
+    try:
+        used = sum(b["size"] for b in backup.list_backups(c.home))
+    except OSError:
+        return status, detail, fix
+    if used > backup.BACKUP_BUDGET_BYTES:          # #1016: backups filled the owner's disk
+        detail += f"; backups use {used / 1e9:.1f} GB (budget {backup.BACKUP_BUDGET_BYTES / 1e9:.1f} GB)"
+        fix = "; ".join(x for x in (fix, "Keep fewer backups: jarvis backup settings --manual 3 --checkpoints 2, "
+                                         "then jarvis backup prune") if x)
+        status = WARN if status == PASS else status
+    return status, detail, fix
 
 
 def check_version(c: Ctx) -> tuple[str, str, str]:

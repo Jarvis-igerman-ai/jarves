@@ -235,12 +235,58 @@ def test_retention_7_daily_4_weekly(profile):
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
     assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 5     # #1016: was 10
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
     with pytest.raises(ValueError):
         backup.set_settings(profile, {"daily": 0})
+
+
+def test_1016_fewer_checkpoints_kept_and_cli_sets_manual_and_checkpoints(profile, capsys):
+    import argparse
+    bdir = profile / "backups"
+    bdir.mkdir()
+    start = datetime(2026, 11, 9, 3, 0)
+    for i in range(6):                          # three beta installs, two pre-migration backups each
+        (bdir / f"jarves-backup-{start - timedelta(hours=i):%Y%m%d-%H%M%S}-pre-migration.zip").write_bytes(b"x")
+    backup.prune(profile)
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "pre-migration"]) == 2
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    args = parser.parse_args(["backup", "settings", "--manual", "3", "--checkpoints", "1"])
+    assert backup.cmd_backup(args, None, profile) == 0
+    assert (backup.get_settings(profile)["manual"], backup.get_settings(profile)["checkpoints"]) == (3, 1)
+    backup.prune(profile)
+    assert len(backup.list_backups(profile)) == 1
+
+
+def test_1016_low_disk_prunes_first_then_refuses(profile, monkeypatch):
+    first = backup.create(profile, "manual")
+    size = first.stat().st_size
+    backup.set_settings(profile, {"manual": 0})
+    pruned = []
+    monkeypatch.setattr(backup, "prune", lambda home: pruned.append(home) or [])
+    free = {"bytes": size}                      # less than twice the newest backup: not enough room
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": free["bytes"]})())
+    with pytest.raises(backup.BackupError) as e:
+        backup.create(profile, "manual")
+    assert e.value.code == "BACKUP_NO_SPACE" and pruned == [profile]
+    assert [b["name"] for b in backup.list_backups(profile)] == [first.name]
+    free["bytes"] = 10 * size + backup.SPACE_MARGIN_BYTES
+    assert backup.create(profile, "manual").is_file()
+
+
+def test_1016_doctor_warns_when_backups_exceed_the_budget(profile, monkeypatch):
+    from jarves import selftest
+    bdir = profile / "backups"
+    bdir.mkdir()
+    (bdir / "jarves-backup-20261109-030000-manual.zip").write_bytes(b"x" * 2048)
+    ctx = selftest.Ctx(home=profile, disk_free_gb=lambda p: 100.0)
+    assert selftest.check_disk(ctx)[0] == selftest.PASS
+    monkeypatch.setattr(backup, "BACKUP_BUDGET_BYTES", 1024)
+    status, detail, fix = selftest.check_disk(ctx)
+    assert status == selftest.WARN and "backups use" in detail and "jarvis backup settings" in fix
 
 
 def test_auto_backup_due_daily_and_switchable(profile):

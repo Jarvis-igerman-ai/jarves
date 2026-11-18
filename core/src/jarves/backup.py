@@ -14,8 +14,8 @@ biometric: left out unless backup.include_faces is on. So an archive can be shar
 restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt login`, `jarvis google login`).
 
 Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
-7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 5; pre-migration /
+pre-restore checkpoints the last 2 each (#1016: each install adds checkpoints of hundreds of MB). Only automatic backups are thinned by the day/week rule.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,8 +59,10 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 7, "weekly": 4, "manual": 5, "checkpoints": 2, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
+SPACE_MARGIN_BYTES = 200 * 1024 * 1024     # free space kept beyond twice the newest backup (#1016)
+BACKUP_BUDGET_BYTES = 3 * 1024 ** 3        # doctor warns when all backups together use more (#1016)
 _lock = threading.Lock()
 
 
@@ -213,6 +215,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
     now = time.time() if now is None else now
     out_dir = backup_dir(home)
     out_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_space(home, out_dir)
     stamp = datetime.fromtimestamp(now).strftime("%Y%m%d-%H%M%S")
     final = out_dir / f"jarves-backup-{stamp}-{kind}.zip"
     n = 1
@@ -264,6 +267,25 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
               bytes=final.stat().st_size)
     prune(home)
     return final
+
+
+def _ensure_space(home: Path, out_dir: Path) -> None:
+    """#1016: a backup needs twice the newest backup's size plus a margin free; prune by retention first, then refuse."""
+    items = list_backups(home)
+    need = 2 * (items[0]["size"] if items else 0) + SPACE_MARGIN_BYTES
+    for attempt in (1, 2):
+        try:
+            free = shutil.disk_usage(out_dir).free
+        except OSError:
+            return                              # unknown: try the write; a full disk still fails closed in create()
+        if free >= need:
+            return
+        if attempt == 1:
+            prune(home)
+    logs.warn("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=need)
+    raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free // 2**20} MB free, "
+                      f"{need // 2**20} MB needed)", "free disk space or keep fewer backups: "
+                      "jarvis backup settings --manual 3 --checkpoints 2")
 
 
 def _unlink(p: Path) -> None:
@@ -693,6 +715,8 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="pre-migration and pre-restore backups to keep (each)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +763,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly), ("manual", a.manual),
+                                               ("checkpoints", a.checkpoints)) if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
