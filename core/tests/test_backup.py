@@ -365,3 +365,58 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+def test_install_then_core_start_makes_one_backup_not_two(profile, monkeypatch):
+    """#1016: the installer's verified checkpoint is reused at the next Core start instead of a second backup."""
+    clock = [2_000_000_000.0]                                          # fixed fake clock, later than any real file time
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    assert backup.startup_checkpoint(profile) == installer
+    assert len(backup.list_backups(profile)) == 1 and backup.read_state(profile)["version"] == "9.9.9"
+    clock[0] += 2
+    backup.create(profile, "manual")                                  # the Core ran and backed up since
+    monkeypatch.setattr(backup, "__version__", "9.9.10")
+    assert backup.startup_checkpoint(profile) != installer and len(backup.list_backups(profile)) == 3
+
+
+def test_installer_checkpoint_is_not_reused_after_a_core_ran_on_the_data(profile, monkeypatch):
+    """#1016 review R2: a rolled-back upgrade ran the old Core (it rewrote health.json) after the installer's
+    checkpoint, so that checkpoint misses data and the new version's first start takes its own."""
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    (profile / "health.json").write_text("{}", encoding="utf-8")
+    os.utime(profile / "health.json", (clock[0] + 3600, clock[0] + 3600))   # the old Core ran an hour later
+    clock[0] += 2 * 3600
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    p = backup.startup_checkpoint(profile)
+    assert p is not None and p != installer and len(backup.list_backups(profile)) == 2
+
+
+def test_installer_checkpoint_is_not_reused_after_a_database_write_past_the_migration(profile, monkeypatch):
+    """#1016 review R5: a database written after the installer's migration (schema.json stamp), e.g. by a CLI command
+    while the Core was stopped, is missing from the checkpoint; a write inside the migration window is not."""
+    clock = [2_000_000_000.0]
+    monkeypatch.setattr(backup.time, "time", lambda: clock[0])
+    installer = backup.checkpoint(profile, "schema 3->4; installer upgrade")
+    db = next(profile.glob("*.db"))
+    (profile / "schema.json").write_text('{"schema": 4}', encoding="utf-8")
+    os.utime(profile / "schema.json", (clock[0] + 60, clock[0] + 60))     # the installer's migration ended
+    os.utime(db, (clock[0] + 59, clock[0] + 59))                          # written by that migration
+    clock[0] += 600
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    assert backup._reusable_installer_checkpoint(profile) == installer
+    os.utime(db, (clock[0] - 60, clock[0] - 60))                          # a later write the checkpoint lacks
+    p = backup.startup_checkpoint(profile)
+    assert p is not None and p != installer and len(backup.list_backups(profile)) == 2
+
+
+def test_cli_sets_manual_and_checkpoint_retention(profile, capsys):
+    """#1016: manual and pre-migration retention are settable from the CLI, not only daily/weekly."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    backup.add_cli(parser.add_subparsers(dest="cmd"))
+    assert backup.cmd_backup(parser.parse_args(["backup", "settings", "--manual", "3", "--checkpoints", "2"]), None, profile) == 0
+    assert (backup.get_settings(profile)["manual"], backup.get_settings(profile)["checkpoints"]) == (3, 2)

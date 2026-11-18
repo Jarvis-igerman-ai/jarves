@@ -64,7 +64,8 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert "FAILED core/tests/t.py::x" in body
 
 
-def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
+def test_schedule_command_is_0300_daily_and_installs_nothing(capsys, monkeypatch):
+    monkeypatch.setattr(factory_sim, "__file__", "/repo/core/tools/factory_sim.py")   # also when run from a worktree
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out
     assert "/ST 03:00" in out and "--nightly" in out and "DAILY" in out
@@ -97,6 +98,38 @@ def test_deep_nesting_and_string_ok(tmp_path):
     assert factory_sim_alerts(tmp_path)[0]["kind"] == "factory_sim_unreadable"
     f.write_text('{"at": 1.0, "ok": "false"}')
     assert factory_sim_alerts(tmp_path, now=1000.0)[0]["kind"] == "factory_sim_failed"
+
+
+def test_schedule_command_refuses_an_ephemeral_worktree_path():
+    """#897: printed from .claude/worktrees/... it would point the nightly task at a checkout that goes away."""
+    tmp = Path("C:/work/jarves-main/.claude/worktrees/agent-1/core/tools/factory_sim.py")
+    assert factory_sim.schedule_command(tmp).startswith("refused:")
+    assert factory_sim.schedule_command(Path("C:/work/jarves-main/core/tools/factory_sim.py")).startswith("schtasks ")
+    assert factory_sim.schedule_command(Path("/srv/worktrees/jarves/core/tools/factory_sim.py")).startswith("schtasks ")
+
+
+def test_main_schedule_command_exits_1_when_refused(monkeypatch, capsys):
+    """#897 review R4: --schedule-command from an agent worktree exits 1 with a generic hint, no machine path."""
+    monkeypatch.setattr(factory_sim, "__file__", "/x/.claude/worktrees/agent-1/core/tools/factory_sim.py")
+    assert factory_sim.main(["--schedule-command"]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("refused:") and "C:\\work" not in out
+
+
+def test_summary_keeps_urls_readable():
+    """#897 review R3: a URL is not rewritten into 'https:/<path>'; a bare POSIX path still is."""
+    out = factory_sim._summary("FAILED see https://github.com/a/b and /home/bob/t.py - x")
+    assert "https://github.com/a/b" in out and "/home/bob" not in out
+
+
+def test_auto_issue_has_an_area_label_and_redacts_ghr_and_posix_paths(monkeypatch):
+    """#897: the auto-issue carries an area label; ghr_ tokens and POSIX/UNC paths never reach the public body."""
+    import subprocess
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "[]", ""))
+    factory_sim.file_issue(["x"], "FAILED /home/bob/t.py::x \\\\srv\\share\\a.py ghr_ABCDEFGHIJKL - boom")
+    body = calls[1][calls[1].index("--body") + 1]
+    assert "testing" in calls[1] and "/home/bob" not in body and "\\\\srv" not in body and "ghr_ABC" not in body
 
 
 def test_nightly_hung_scenario_times_out_and_records_failure(tmp_path, monkeypatch):

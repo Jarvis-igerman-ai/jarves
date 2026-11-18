@@ -41,3 +41,9 @@ he = "אחרי שחזור הוא לא מחובר לגוגל"
 en = "After a restore Google is not connected"
 fix_he = "זה בכוונה: מפתחות לא נשמרים בגיבוי. הריצו jarvis key ו-jarvis google start."
 fix_en = "On purpose: keys are not backed up. Run jarvis key and jarvis google start."
+
+[[problems]]
+he = "הגיבויים תופסים יותר מדי מקום בדיסק"
+en = "Backups take too much disk space"
+fix_he = "קבעו כמה לשמור מכל סוג: jarvis backup settings --daily 3 --weekly 2 --manual 3 --checkpoints 2, ואז jarvis backup prune מוחק את העודפים."
+fix_en = "Set how many of each kind to keep: jarvis backup settings --daily 3 --weekly 2 --manual 3 --checkpoints 2, then jarvis backup prune removes the extra ones."

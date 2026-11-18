@@ -27,10 +27,15 @@ def default_home() -> Path:
     return Path(os.environ.get("JARVES_WORKFLOW_HOME") or (Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "jarves" / "workflow"))
 
 
-def schedule_command() -> str:
-    """Daily 03:00 in the PC's local (Israel) time; the owner or manager runs it once."""
+def schedule_command(here: Path | None = None) -> str:
+    """Daily 03:00 in the PC's local (Israel) time; the owner or manager runs it once. Never from an agent worktree:
+    that checkout is temporary, so the nightly task would point at a file that goes away (#897)."""
+    here = here or Path(__file__).resolve()
+    parts = [x.lower() for x in here.parts]
+    if any(a == ".claude" and b == "worktrees" for a, b in zip(parts, parts[1:])):
+        return "refused: this is a temporary agent worktree (.claude/worktrees); print the command from the main checkout"
     return ('schtasks /Create /SC DAILY /ST 03:00 /TN "JARVES factory sim" /F /TR '
-            f'"\\"{sys.executable}\\" \\"{Path(__file__).resolve()}\\" --nightly"')
+            f'"\\"{sys.executable}\\" \\"{here}\\" --nightly"')
 
 
 def record(home: str, results: list, failed: int, tail: str) -> None:
@@ -52,8 +57,8 @@ def _summary(tail: str, limit: int = 600) -> str:
     lines = [ln.strip() for ln in (tail or "").splitlines()
              if re.match(r"^(FAILED|ERROR) |^=+ .*(passed|failed|error)", ln.strip())]
     text = "\n".join(lines[-5:]) or "(see local run for details)"
-    text = re.sub(r"[A-Za-z]:[\\/][^\s:]*", "<path>", text)
-    text = re.sub(r"\b(sk-|ghp_|gho_|ghs_|ghu_|github_pat_|AKIA|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
+    text = re.sub(r"(?<![\w.])[A-Za-z]:[\\/][^\s:]*|\\\\[^\s:]+|(?<![\w.])(?<!:/)/(?:[\w.-]+/)+[\w.-]*", "<path>", text)
+    text = re.sub(r"\b(sk-|ghp_|gho_|ghs_|ghu_|ghr_|github_pat_|AKIA|xox[bp]-)[A-Za-z0-9_-]{8,}", "<redacted>", text)
     return text[:limit]
 
 
@@ -72,7 +77,7 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
         made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1"],
+                               "--label", "showstopper", "--label", "P1", "--label", "testing"],
                               capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
@@ -91,8 +96,9 @@ def main(argv=None) -> int:
                         help="print the Windows Task Scheduler command for the 03:00 nightly run and exit (installs nothing)")
     args = parser.parse_args(argv)
     if args.schedule_command:
-        print(schedule_command())
-        return 0
+        cmd = schedule_command()
+        print(cmd)
+        return 1 if cmd.startswith("refused:") else 0
     cmd = [sys.executable, "-m", "pytest", str(TEST), "-rA", "-s", "-p", "no:cacheprovider", "--tb=short",
            "-o", f"pythonpath={(ROOT / 'core' / 'src').as_posix()}"]
     if args.k:
