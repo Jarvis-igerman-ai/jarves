@@ -439,7 +439,7 @@ def test_silent_install_restarts_the_core_on_the_new_version(tmp_path):
     rep = il.run(f.deps())
     assert rep.ok and not rep.rolled_back and "rollback" not in f.calls and f.calls.count("stop") == 1
     assert f.calls.index("launch restart=True") < f.calls.index("start_core") < f.calls.index("cli:update status")
-    assert ("Core restarted on the new version", True, "started again; the new Core reported ready") in rep.checks
+    assert ("Core on the new version", True, "started again; the new Core reported ready") in rep.checks
     assert ("silent install", True, "setup finished and the Core runs the new version") in rep.checks
     g = Fake(tmp=tmp_path, wait="timeout", waits=["done"], after=True)   # a Core answers but never became ready
     assert il.run(g.deps()).ok and g.calls.count("stop") == 2
@@ -450,25 +450,28 @@ def test_core_that_does_not_come_back_on_the_new_version_rolls_back(tmp_path):
     f = Fake(tmp=tmp_path, wait="timeout", waits=["timeout"], after=False)
     rep = il.run(f.deps())
     assert not rep.ok and rep.rolled_back and "start_core" in f.calls
-    assert ("Core restarted on the new version", False,
+    assert ("Core on the new version", False,
             "started again, but the new version gave no ready mark (timeout)") in rep.checks
     h = Fake(tmp=tmp_path, wait="timeout", after=False)
     d = h.deps()
     d.start_core = lambda: (_ for _ in ()).throw(OSError("spawn"))
     rep = il.run(d)
     assert not rep.ok and rep.rolled_back
-    assert ("Core restarted on the new version", False, "restart failed: OSError") in rep.checks
+    assert ("Core on the new version", False, "restart failed: OSError") in rep.checks
+    g = Fake(tmp=tmp_path, wait="timeout", waits=["timeout"], after=True)   # the restarted Core still runs
+    assert not il.run(g.deps()).ok and "rollback" in g.calls
+    assert g.calls.index("start_core") < len(g.calls) - 1 - g.calls[::-1].index("stop") < g.calls.index("rollback")
 
 
 def test_core_already_on_the_new_version_is_not_restarted(tmp_path):
     f = Fake(tmp=tmp_path)                                 # wait() 'done' = the new Core's own ready mark
     rep = il.run(f.deps())
     assert rep.ok and "start_core" not in f.calls and f.calls.count("stop") == 1 and f.calls.count("wait") == 1
-    assert ("Core restarted on the new version", True, "the new Core reported ready") in rep.checks
+    assert ("Core on the new version", True, "the new Core reported ready") in rep.checks
     g = Fake(tmp=tmp_path, core=False)                     # the Core was not running: it is not started
     rep = il.run(g.deps())
     assert rep.ok and "start_core" not in g.calls and "wait" not in g.calls
-    assert "Core restarted on the new version" not in [c[0] for c in rep.checks]
+    assert "Core on the new version" not in [c[0] for c in rep.checks]
     h = Fake(tmp=tmp_path, wait="failed")                  # setup failed: no restart, the existing rollback
     assert not il.run(h.deps()).ok and "start_core" not in h.calls and "rollback" in h.calls
 

@@ -346,8 +346,10 @@ def _core_on_new_version(deps: Deps, rep: Report, end: str) -> bool:
     mark (updates.mark_healthy writes it only when its build version is the target; `wait` reads it as 'done'). The
     status reply's `version` is the package constant, not the build, so it is not compared. Setup's /RESTARTJARVES
     normally brings the Core back; without a ready mark in time, a Core that still answers is stopped, the Core is
-    started again from this (new) program and the mark is awaited once more."""
-    name = "Core restarted on the new version"
+    started again from this (new) program and the mark is awaited once more. Worst case on that path: the first
+    `wait` (updates.watch, 420 s in real_deps) + `jarvis start` (90 s) + a second `wait` (420 s), about 16 minutes;
+    the report says which step ended it. If the restart fails, the rollback in `finish` stops a running Core first."""
+    name = "Core on the new version"
     if end == "done":
         return rep.add(name, True, "the new Core reported ready")
     try:
@@ -548,7 +550,6 @@ def real_deps(a, cfg, home: Path) -> Deps:
 
     def start_core() -> None:
         cli.cmd_start(argparse.Namespace(show=False, wait=90), cfg, home)   # the `jarvis start` defaults (cli.main)
-
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
