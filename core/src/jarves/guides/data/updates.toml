@@ -49,6 +49,11 @@ en = "To update: press Install update, or jarvis update install. The signature, 
 action = "command:jarvis update install"
 
 [[steps]]
+he = "לסקריפטים: jarvis update check --json (או update status --json) מדפיס שורת JSON אחת עם available, error ו-latest. בדיקה שנכשלה או בלי רשת יוצאת עם קוד 1. זה רק בודק, לא מתקין."
+en = "For scripts: jarvis update check --json (or update status --json) prints one JSON line with available, error and latest. A failed or offline check exits 1. It only checks; it never installs."
+action = "command:jarvis update check --json"
+
+[[steps]]
 he = "אם הגרסה החדשה לא עולה: jarvis update --rollback (או הכפתור בעמוד Updates). הנתונים מלפני העדכון משוחזרים; מה ששונה אחרי העדכון נשמר בגיבוי ביטחון."
 en = "If the new version does not start: jarvis update --rollback (or the button on the Updates page). Your data from before the update is restored; what changed after it is kept in a safety backup."
 action = "command:jarvis update --rollback"

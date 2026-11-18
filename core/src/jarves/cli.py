@@ -1902,7 +1902,8 @@ def cmd_update(a, cfg, home) -> int:
                           f"Update channel: {'beta (every green main build)' if ch == 'beta' else 'stable'}."))
     as_json = getattr(a, "json", False)
     if as_json and (a.action not in ("check", "status") or getattr(a, "rollback", False)):
-        print("--json works only with `update check` or `update status`")
+        print(clilang.fmt("--json עובד רק עם `update check` או `update status`.",
+                          "--json works only with `update check` or `update status`."))
         return 2
     if a.action == "auto":
         return _update_auto(a, cfg, home)

@@ -148,8 +148,6 @@ class StewardTests(Base):
         task = self.state("beta-verify-2026-10-31")
         self.assertEqual(task["resources"], ["owner-pc"])
         self.assertEqual(task["lane"], "release")
-        # JAR-456: the daily beta task is the caller of the record writer
-        self.assertIn("core/tools/beta_daily.py run", task["acceptance"][-1]["label"])
 
     def test_manual_test_owner_item(self):
         self.task("phone", required_validation="device")

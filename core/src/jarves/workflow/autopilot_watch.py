@@ -233,10 +233,6 @@ BETA_STEPS = ("backup now", "update install --channel beta --yes --silent", "doc
               "status", "features diff")
 
 
-BETA_RECORDS = ("python core/tools/beta_daily.py run --home <workflow home> wrote the install, S01-S05 and demo "
-                "records (JAR-456); attach its `check` JSON as evidence")
-
-
 def beta_step(store: Store, policy: dict, main_sha: str, ci_green: bool, day: str, *, contains_p01_fix=False) -> list[str]:
     """One beta-verify task per day (plus one per beta that carries a P0/P1 fix), only for a new green main SHA."""
     if policy.get("kill") or not policy.get("enabled") or not ci_green or not main_sha:
@@ -260,8 +256,7 @@ def beta_step(store: Store, policy: dict, main_sha: str, ci_green: bool, day: st
         "scope": {"model": (policy.get("lanes") or {}).get("steward", {}).get("model", "claude-haiku-5-5"),
                   "kind": "beta_verify", "steps": list(BETA_STEPS), "main_sha": main_sha},
         "acceptance": [{"id": f"C{i + 1}", "label": f"jarvis {s} succeeded, silent, backup first"}
-                       for i, s in enumerate(BETA_STEPS)]
-        + [{"id": f"C{len(BETA_STEPS) + 1}", "label": BETA_RECORDS}]})
+                       for i, s in enumerate(BETA_STEPS)]})
     return [ident] if made else []
 
 
