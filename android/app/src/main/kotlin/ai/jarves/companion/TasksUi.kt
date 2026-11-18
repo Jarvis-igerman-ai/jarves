@@ -92,6 +92,7 @@ class TasksModel(
     fun tick(s: Session, scopes: List<String>) {
         if ("tasks" !in scopes) {
             load?.cancel()
+            // Keep `token` (unlike refresh): with state null the card counts as visible, so the next grant reads again.
             _state.value = null
             return
         }
