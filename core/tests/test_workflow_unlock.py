@@ -264,6 +264,20 @@ class UnlockTests(unittest.TestCase):
         self.thread.start()
         self.assertNotEqual((self.home / unlock.PUB_FILE).read_text(encoding="ascii"), stale)
 
+    def test_750_a_failed_code_write_is_reported_not_silent(self):
+        # Windows: os.replace can raise PermissionError while the dashboard reads unlock.json (review R2).
+        home = ["--home", str(self.home), "--profile-home", str(self.home)]
+        with patch.object(cli, "owner_only_guard", return_value="terminal"), \
+                patch.object(unlock, "_write", side_effect=PermissionError(13, "locked")):
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(home + ["unlock"]), 2)
+            self.assertIn("run jarvis workflow unlock again", json.loads(err.getvalue())["error"])
+            err = io.StringIO()
+            with redirect_stdout(io.StringIO()), redirect_stderr(err):
+                self.assertEqual(cli.main(home + ["open", "--no-open", "--port", str(self.server.server_port)]), 0)
+            self.assertIn("No unlock code yet: could not save it (PermissionError)", err.getvalue())
+
     def test_dashboard_has_unlock_control_in_both_locales(self):
         js = (Path(cli.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
         html = (Path(cli.__file__).parent / "static" / "index.html").read_text(encoding="utf-8")

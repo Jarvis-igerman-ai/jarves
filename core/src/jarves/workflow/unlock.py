@@ -5,8 +5,9 @@ window needs an unlock code that is shown only in the owner's own terminal (`wor
 in a terminal). Nothing in the workflow home can check a code offline: each dashboard makes an X25519 key whose
 private half lives only in its memory and publishes the public half (unlock_pub.json). `issue` stores only an
 ephemeral public key and HMAC(HKDF(ECDH), code), so a file reader cannot test the 10,000 codes; only the running
-dashboard can (5 tries a minute, 5 wrong tries cancel the code). Honest limit: an agent that runs code as the owner's
-OS user can still call issue() itself; closing that needs an OS consent prompt. One dashboard per home is the normal
+dashboard can (5 tries a minute, 5 wrong tries cancel the code). Honest limit: write access to the workflow home is
+equivalent to issuing a code (anyone can encrypt a code to the public key and write unlock.json), so an agent that
+can write there or runs code as the owner's OS user can still make one; closing that needs an OS consent prompt. One dashboard per home is the normal
 case (web-check); a second one on another port takes the key over, so codes for the first fail closed. Windows: 0o600
 sets no owner-only ACL (the files hold no secret). The CLI refuses agent environments and non-terminals."""
 from __future__ import annotations

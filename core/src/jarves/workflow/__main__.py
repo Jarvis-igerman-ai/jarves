@@ -249,6 +249,10 @@ def main(argv=None) -> int:
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": f"no unlock code: {exc}"}, ensure_ascii=False), file=sys.stderr)
             return 2
+        except OSError as exc:  # e.g. Windows: the dashboard has unlock.json open while os.replace runs
+            print(json.dumps({"error": f"could not save the unlock code ({type(exc).__name__}); run jarvis workflow unlock again"},
+                             ensure_ascii=False), file=sys.stderr)
+            return 2
         print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {code}")
         return 0
     if a.action == "open":
@@ -258,12 +262,15 @@ def main(argv=None) -> int:
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token)
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            from . import unlock
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except PermissionError:
-            pass
+            return rc
+        from . import unlock
+        try:
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
         except unlock.UnlockUnavailable as exc:
             print(f"No unlock code yet: {exc}", file=sys.stderr)
+        except OSError as exc:  # a failed write is not the agent/terminal refusal above: say so, never stay silent
+            print(f"No unlock code yet: could not save it ({type(exc).__name__}); run jarvis workflow unlock again", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.
