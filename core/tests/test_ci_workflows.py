@@ -157,6 +157,8 @@ def test_release_secrets_step_refuses_outside_a_tag_ref():
     steps = job["steps"]
     secret_steps = [i for i, s in enumerate(steps) if "secrets." in str(s)]
     assert len(secret_steps) == 1
+    # job- and workflow-level env reach every step, so a secret there would bypass the tag-ref gate
+    assert "secrets." not in str(job.get("env", {})) and "secrets." not in str(_doc.get("env", {}))
     publish = steps[secret_steps[0]]
     assert "github.ref_type == 'tag'" in publish["if"] and "DRY_RUN != 'true'" in publish["if"]
     guard = steps[secret_steps[0] - 1]
@@ -168,6 +170,7 @@ def test_release_secrets_step_refuses_outside_a_tag_ref():
     assert "DRY_RUN" in job["env"]
     for name in ("$REF_TYPE", "$TAG", "$GITHUB_REF", "$ENV_NAME"):
         assert name in guard["run"]
+    assert guard["env"]["ENV_NAME"] == job["environment"]
     real = {"DRY_RUN": "false", "TAG": "v4.5.0"}
     ok = _run_publish_guard(guard, **real, REF_TYPE="tag", GITHUB_REF="refs/tags/v4.5.0",
                             ENV_NAME="stable-release")
@@ -179,4 +182,3 @@ def test_release_secrets_step_refuses_outside_a_tag_ref():
         assert r.returncode != 0 and "::error::" in r.stdout, bad
         if bad["REF_TYPE"] == "branch":
             assert "ref type branch" in r.stdout and "refs/heads/v4.5.0" in r.stdout
-    assert guard["env"]["ENV_NAME"] == job["environment"]
