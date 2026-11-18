@@ -101,6 +101,33 @@ class SyncFieldTests(unittest.TestCase):
         self.assertEqual(sync.latest_beta(lambda p: rel), {"tag": "b1", "published_at": "2026-11-01T00:00:00Z"})
         self.assertIsNone(sync.latest_beta(boom))
 
+    def test_main_state_follows_newest_required_gate(self):
+        """JAR-406: a nightly/beta job or a superseded failed attempt on the main sha is not a red main."""
+        from jarves.workflow import sync
+        gate = sync.REQUIRED_CHECK
+
+        def state(gate_runs, others=(), total=None):
+            every = list(gate_runs) + list(others)
+            def get(path):
+                if "check_name=" in path:
+                    self.assertIn("check_name=CI%20result", path)
+                    return {"total_count": len(gate_runs), "check_runs": list(gate_runs)}
+                return {"total_count": total or len(every), "check_runs": every}
+            return sync.main_ci_state(get, "s")
+
+        def run(i, conclusion, status="completed", name=gate):
+            return {"id": i, "name": name, "status": status, "conclusion": conclusion}
+        flake = run(9, "failure", name="Flake detector (3x suite, Linux)")   # main 85aa2aae, 17 Nov
+        beta = run(8, "failure", name="beta")                                  # main f4390920 / 5e2e365d
+        self.assertEqual(state([run(2, "success")], [flake, beta]), "success")
+        self.assertEqual(state([run(1, "failure"), run(5, "success")]), "success")      # re-run passed
+        self.assertEqual(state([run(5, "failure"), run(1, "success")]), "failure")      # newest failed
+        self.assertEqual(state([run(1, "success"), run(5, None, "in_progress")]), "pending")
+        self.assertEqual(state([run(5, "cancelled")]), "unknown")
+        self.assertEqual(state([run(5, "success")], total=178), "success")  # main fef9ae06: >100 checks
+        self.assertEqual(state([{"id": "x", "name": gate, "status": "completed", "conclusion": "success"}]), "unknown")
+        self.assertEqual(state([], [flake]), "failure")  # no gate run seen: unchanged all-checks rule
+
     def test_collect_carries_draft_auto_merge_and_ci_state(self):
         from jarves.workflow import sync
 

@@ -1,0 +1,1 @@
+- Fixed: the workflow sync now judges main's CI state by the newest run of the required jarves-checks gate, so a failed nightly Flake detector or `beta` job on the main commit, or a failed attempt that a later run superseded, no longer reports main as red (JAR-406). With no gate run, the previous all-checks rule still applies.

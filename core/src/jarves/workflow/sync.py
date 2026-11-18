@@ -7,7 +7,7 @@ import re
 import urllib.error
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 REPO = "Jarvis-igerman-ai/jarves"
 PLAN = Path(__file__).with_name("version_plan.json")
@@ -70,18 +70,43 @@ def pr_files(get, number: int, sha: str) -> list[str]:
     return names
 
 
+REQUIRED_CHECK = "CI result (single required check)"  # the one jarves-checks gate main must pass
+_BAD = ("failure", "timed_out", "startup_failure")
+
+
+def _gate_state(runs: list) -> str | None:
+    """State from the newest run of the required gate; None when the gate has no run here."""
+    gate = [r for r in runs if isinstance(r, dict) and r.get("name") == REQUIRED_CHECK]
+    if not gate:
+        return None
+    if not all(isinstance(r.get("id"), int) for r in gate):
+        return "unknown"
+    newest = max(gate, key=lambda r: r["id"])
+    if newest.get("status") != "completed":
+        return "pending"
+    c = newest.get("conclusion")
+    return "success" if c == "success" else "failure" if c in _BAD else "unknown"
+
+
 def main_ci_state(get, sha: str) -> str:
     """Read-only three-way state of the main commit checks: success | failure | pending | unknown.
 
+    The newest run of the required jarves-checks gate decides (JAR-406). A nightly or beta job on
+    the same sha, or a failed attempt that a later run superseded, does not make main red.
+    With no gate run, the older rule applies to every check run on the commit:
     failure = a completed run failed. pending = runs still queued/in progress and none failed.
     unknown = fetch error, no runs, more than one page of runs, or odd conclusions (e.g. cancelled).
     """
     try:
+        gated = get(f"/repos/{REPO}/commits/{sha}/check-runs?check_name={quote(REQUIRED_CHECK)}&per_page=100")
+        state = _gate_state(gated.get("check_runs") or [] if isinstance(gated, dict) else [])
+        if state is not None:
+            return state
         data = get(f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100")
         runs = data.get("check_runs") if isinstance(data, dict) else None
         if not runs or int(data.get("total_count", 0)) > len(runs):
             return "unknown"
-        if any(r.get("status") == "completed" and r.get("conclusion") in ("failure", "timed_out", "startup_failure") for r in runs):
+        if any(r.get("status") == "completed" and r.get("conclusion") in _BAD for r in runs):
             return "failure"
         if any(r.get("status") != "completed" for r in runs):
             return "pending"
