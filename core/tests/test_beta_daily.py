@@ -208,5 +208,15 @@ def test_cli_update_check_json(tmp_path, monkeypatch, capsys):
         assert cli.main(["update", "check", "--json"]) == code
         line = json.loads(capsys.readouterr().out.strip())
         assert (line["available"], line["error"]) == (False, st["error"]) and bd._newest(json.dumps(line)) is (code == 0)
-    for action in (["install"], ["auto", "status"]):  # --json is never silently ignored (R4)
+    for action in (["install"], ["auto", "status"]):  # --json is never silently ignored
         assert cli.main(["update", *action, "--json"]) == 2
+
+
+def test_later_newer_available_record_supersedes_an_earlier_ok_install(tmp_path):
+    bd.run_daily(tmp_path, runner(), now=NOW - 3600)
+    bd.run_daily(tmp_path, runner(newer=True), now=NOW)  # a newer beta shipped after the good install
+    assert bd.check(tmp_path, now=NOW)["newest_beta_installed_age_h"] is None
+    bd.run_daily(tmp_path, runner(fail=("check",)), now=NOW + 60)  # a failed/offline check proves nothing new
+    bd.run_daily(tmp_path / "b", runner(), now=NOW)
+    bd.run_daily(tmp_path / "b", runner(fail=("check",)), now=NOW + 60)
+    assert bd.check(tmp_path / "b", now=NOW + 60)["newest_beta_installed_age_h"] == 0.0

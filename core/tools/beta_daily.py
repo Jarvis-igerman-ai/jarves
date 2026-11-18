@@ -114,7 +114,8 @@ def run_daily(home, run, now: float | None = None, clock=time.monotonic, budget_
     stamp = f"{int(now)}-{uuid.uuid4().hex[:8]}"  # unique: two runs in one second never overwrite each other
     rc, out = run(["jarvis", *INSTALL])
     newest = rc == 0 and _newest(out)
-    install = {"at": now, "ok": newest, "rc": rc, "tail": _tail(out), "installer": "jarvis update auto (owner switch)"}
+    newer = rc == 0 and _newest(out, want_available=True)  # a newer beta shipped: supersedes older ok records
+    install = {"at": now, "ok": newest, "newer_available": newer, "rc": rc, "tail": _tail(out), "installer": "jarvis update auto (owner switch)"}
     _write(folder, f"install-{stamp}.json", json.dumps(install))
     if not newest:
         return {"install": install}
@@ -146,13 +147,13 @@ def run_daily(home, run, now: float | None = None, clock=time.monotonic, budget_
     return {"install": install, "scenarios": scenarios}
 
 
-def _newest(out: str) -> bool:
-    """The last line of `update check --json` says no error and nothing newer; anything else is not newest."""
+def _newest(out: str, want_available: bool = False) -> bool:
+    """The last line of `update check --json` has no error and `available` == want_available."""
     try:
         data = json.loads((out.strip().splitlines() or [""])[-1])
     except ValueError:
         return False
-    return isinstance(data, dict) and data.get("error") is None and data.get("available") is False
+    return isinstance(data, dict) and data.get("error") is None and data.get("available") is want_available
 
 
 def _load(path: Path):
@@ -169,17 +170,20 @@ def _load(path: Path):
 def check(home, now: float | None = None) -> dict:
     now = time.time() if now is None else now
     folder = Path(home) / "beta_records"
-    last_ok, scen, demos, installed, not_passing, bad = None, None, 0, 0, 0, 0
+    last_ok, last_newer, scen, demos, installed, not_passing, bad = None, None, None, 0, 0, 0, 0
     fresh = lambda at, hours: 0 <= now - at <= hours * 3600  # noqa: E731
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         data = _load(path)
         rows = data.get("scenarios") if data else None
         if data is None or (path.name.startswith("scenarios-") and not (isinstance(rows, list) and rows)):
             bad += 1
-        elif path.name.startswith("install-") and data.get("ok") is True:
+        elif path.name.startswith("install-"):
             if data["at"] > now:
                 continue  # clock-skewed record: it must not hide a stale install
-            last_ok = max(last_ok or data["at"], data["at"])
+            if data.get("ok") is True:
+                last_ok = max(last_ok or data["at"], data["at"])
+            elif data.get("newer_available") is True:
+                last_newer = max(last_newer or data["at"], data["at"])
         elif path.name.startswith("scenarios-"):
             if fresh(data["at"], MAX_INSTALL_AGE_H) and (scen is None or data["at"] >= scen["at"]):
                 scen = data
@@ -194,6 +198,8 @@ def check(home, now: float | None = None) -> dict:
     if scen:
         rows = scen["scenarios"]
         pct = round(100.0 * sum(isinstance(r, dict) and r.get("result") == "PASS" for r in rows) / len(rows), 1)
+    if last_ok is not None and last_newer is not None and last_newer > last_ok:
+        last_ok = None  # the good install was followed by a check that found a newer beta
     hours = None if last_ok is None else (now - last_ok) / 3600
     ok = (hours is not None and 0 <= hours < MAX_INSTALL_AGE_H and pct is not None  # unrounded age
           and installed > 0)  # source-test demos alone never make the installed beta look healthy
