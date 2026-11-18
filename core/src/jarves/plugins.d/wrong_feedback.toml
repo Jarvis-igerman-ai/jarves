@@ -1,4 +1,0 @@
-# dashboard/addons: importing the module registers the Features row (no routes yet); cli: `jarvis feedback`.
-dashboard = ["jarves.wrong_feedback"]
-addons = ["jarves.wrong_feedback"]
-cli = ["jarves.wrong_feedback"]
