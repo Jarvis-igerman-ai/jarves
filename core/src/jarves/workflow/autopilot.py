@@ -50,7 +50,8 @@ _BYPASS = ("dangerously", "bypass", "skip-permissions")
 # #932/JAR-213: a worker must not be able to rewrite <home>/autopilot.json through its Bash allow list. A rule naming
 # the file is refused. Every other Bash rule must start with a bare read-only tool from _READ_ONLY, written in plain
 # characters: these tools have no option that writes a file and run no code from the repository, so a run-time
-# wildcard is safe on them. git, gh, interpreters and pytest are refused in any form, fixed or wildcard: they accept
+# wildcard is safe on them, provided Claude Code's prefix matcher refuses redirection and compound commands at run time
+# (UNVERIFIED, tracked in #1316). git, gh, interpreters and pytest are refused in any form, fixed or wildcard: they accept
 # write options at run time (git --output, pytest --junitxml/--basetemp, gh run download) and/or run code a worker can
 # write into the repository (conftest.py, git hooks and repository config). Workers that need them use the built-in
 # default list (no override).
@@ -81,7 +82,8 @@ def _worker_tools(value) -> None:
     for rule in value:
         reason = _policy_rewrite_reason(rule)
         if reason:
-            raise ValueError(f"worker_allowed_tools: {rule} could rewrite autopilot.json: {reason}")
+            raise ValueError(f"worker_allowed_tools: {rule} could rewrite autopilot.json: {reason}; "
+                             "remove the worker_allowed_tools override to use the built-in default list")
     if any(_HARD_STOP.search(x) for x in value):
         raise ValueError("worker_allowed_tools: hard stops (push, tag, release, rm, hotfix, powershell) cannot be allowed")
     if len(set(value)) != len(value) or any(w in x.lower() for x in value for w in _BYPASS):

@@ -165,6 +165,13 @@ class WorkerAllowListPolicyFileTests(unittest.TestCase):
         rules = ["Bash(ls:*)", "Bash(grep -rn:*)", "Bash(wc *)", "Bash(head:*)", "Bash(ls -la)", "Read", "Grep", "Glob",
                  "Bash(diff -u:*)"]
         self.assertEqual(self.check(rules)["worker_allowed_tools"], rules)
+        for tool in sorted(autopilot._READ_ONLY):     # review R3: no hard-stop/bypass check collides with a member
+            with self.subTest(tool=tool):
+                self.check([f"Bash({tool}:*)", f"Bash({tool})"])
+
+    def test_refusal_tells_the_owner_how_to_recover(self):
+        with self.assertRaisesRegex(ValueError, "remove the worker_allowed_tools override to use the built-in default"):
+            self.check(["Bash(git status)"])
 
     def test_refusal_names_the_specific_reason(self):
         for rule, reason in (("Bash(ls autopilot.json)", "names autopilot.json"),
