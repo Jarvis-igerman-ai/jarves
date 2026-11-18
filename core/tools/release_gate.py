@@ -207,7 +207,8 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
-SSH_KEYGEN = "/usr/bin/ssh-keygen"     # absolute: neither git config nor PATH can redirect the verifier (ubuntu runner)
+SSH_KEYGEN = "/usr/bin/ssh-keygen"     # absolute SSH verifier: git config and PATH cannot redirect it (ubuntu runner)
+NO_VERIFIER = "/nonexistent"          # OpenPGP/x509 verifiers point nowhere: a gpg/gpgsm-signed tag always fails
 GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
 
 
@@ -225,7 +226,8 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
         listed = Path(d) / "allowed_signers"
         listed.write_text(signers.strip() + "\n", encoding="utf-8")
         # full trust plus a "Good ... signature for <principal>" line: a good signature by an unlisted key never passes
-        cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", "gpg.minTrustLevel=fully",
+        cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", f"gpg.openpgp.program={NO_VERIFIER}",
+               "-c", f"gpg.x509.program={NO_VERIFIER}", "-c", "gpg.minTrustLevel=fully",
                "-c", f"gpg.ssh.allowedSignersFile={listed}", "verify-tag", f"refs/tags/{tag}"]
         env = {**os.environ, "LC_ALL": "C", "LANG": "C"}       # GOOD_SIG_RE reads the untranslated wording
         try:

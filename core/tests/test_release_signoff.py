@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -492,6 +493,7 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     assert ok.calls[1][-1] == "refs/tags/v4.1.0^{commit}" and all(e.get("LC_ALL") == "C" for e in ok.envs)
     assert cmd[-2:] == ["verify-tag", "refs/tags/v4.1.0"] and ok.listed == lines + "\n"
     assert "gpg.minTrustLevel=fully" in cmd and f"gpg.ssh.program={v}" in cmd and gate.SSH_KEYGEN == "/usr/bin/ssh-keygen"
+    assert "gpg.openpgp.program=/nonexistent" in cmd and "gpg.x509.program=/nonexistent" in cmd   # only SSH verifies
     absent = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=ok, verifier=str(tmp_path / "none"))
     assert len(absent) == 1 and "verifier" in absent[0] and len(ok.calls) == 2        # refused before running git
     stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
@@ -562,5 +564,12 @@ def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
     for tag in ("v4.1.1", "v4.1.2"):
         bad = gate.tag_signature_problems(repo, tag, lines, head)
         assert len(bad) == 1 and "not signed by the owner" in bad[0], bad
+    import yaml                                     # the workflow's own extraction still reads the signed tag message
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    run = next(s["run"] for j in doc["jobs"].values() for s in j.get("steps", []) if "Rows hash: [0-9a-f]{64}" in s.get("run", ""))
+    extract = next(ln.strip() for ln in run.splitlines() if ln.strip().startswith("h=$(git for-each-ref"))
+    out = subprocess.run(["bash", "-c", extract + '; printf %s "$h"'], cwd=repo, capture_output=True, text=True,
+                         env={**os.environ, "TAG": "v4.1.0"})
+    assert out.returncode == 0 and out.stdout == "a" * 64, out
     moved = gate.tag_signature_problems(repo, "v4.1.3", lines, head)
     assert len(moved) == 1 and "not at the gated commit" in moved[0], moved
