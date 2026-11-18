@@ -1,6 +1,6 @@
 """JAR-273 slice 1: `jarvis whatsapp collect TOPIC`: every archived message on a topic (Hebrew folding + topic synonyms,
 plus messages in other chats that MENTION the chosen contacts) as rows: date, chat, sender, amount ILS, method,
-short quote. Deduplicated, sorted by date, totalled per chat and direction (paid by me / received); rows without a sure
+short quote. Deduplicated, sorted by date, totalled per chat id and sender side (sent by me / by them: who wrote it, not who paid); rows without a sure
 amount are flagged. Every search is paged until the archive is exhausted (`truncated` if a cap stops it). Saved under
 <home>/reports/ as CSV + a short Hebrew summary. Local and rule-based: no model, message text is only data."""
 from __future__ import annotations
@@ -10,10 +10,10 @@ import io
 import os
 import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from .whatsapp_archive import fold, index_text
-from .whatsapp_bridge import _ymd
 from .whatsapp_policy import clean_text
 
 SYNONYMS = {"payment": ("תשלום", "שילמתי", "שילמת", "שולם", "העברה", "העברתי", "ביט", "פייבוקס", "שח", "שקל",
@@ -24,7 +24,7 @@ _NUM = r"(?<![\d,.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?![\d,])"   # "12,5
 _CUR = r"(?:₪|ש\"ח|ש״ח|שח|שקלים|שקל|nis|ils)(?![א-תA-Za-z])"
 _SURE = (re.compile(_NUM + r"\s*" + _CUR, re.I), re.compile(r"(?:₪|nis|ils)\s*" + _NUM, re.I))
 _ANY = re.compile(_NUM)
-COLUMNS = ("date", "chat", "sender", "direction", "amount_ils", "method", "quote", "uncertain")
+COLUMNS = ("date", "chat", "sender", "side", "amount_ils", "method", "quote", "uncertain")
 PAGE, MAX_PAGES = 200, 50                    # the archive returns at most 200 per query; 10,000 per word at most
 
 
@@ -54,8 +54,8 @@ def row(m: dict, names: dict[str, str]) -> dict:
     amount, sure = _amount(text)
     sender = "אני" if m.get("from_me") else (clean_text(str(m.get("sender_name") or ""))[0][:40]
                                               if str(m.get("chat", "")).endswith("@g.us") else chat)
-    return {"id": m.get("id"), "chat_id": m.get("chat"), "ts": float(m.get("ts") or 0), "date": _ymd(m.get("ts") or 0),
-            "chat": chat, "sender": sender, "direction": "paid" if m.get("from_me") else "received", "amount_ils": amount, "quote": text[:80], "uncertain": not sure,
+    return {"id": m.get("id"), "chat_id": m.get("chat"), "ts": float(m.get("ts") or 0), "date": _date(m.get("ts") or 0),
+            "chat": chat, "sender": sender, "side": "by_me" if m.get("from_me") else "by_them", "amount_ils": amount, "quote": text[:80], "uncertain": not sure,
             "method": next((name for name, words in METHODS if toks & {fold(w).strip() for w in words}), "")}
 
 
@@ -85,18 +85,34 @@ def collect(archive, topic: str, *, names: dict[str, str], contacts: dict[str, s
         found = {k: m for k, m in found.items() if m.get("chat") in contacts
                  or firsts & set(index_text(str(m.get("text") or "")).split())}
     rows = sorted((row(m, names) for m in found.values()), key=lambda r: (r["ts"], str(r["id"])))
-    totals: dict[str, dict[str, float]] = {"paid": {}, "received": {}}
+    totals: dict[str, dict[str, float]] = {"by_me": {}, "by_them": {}}       # keyed by chat id, never by name
     for r in rows:
         if not r["uncertain"]:
-            side = totals[r["direction"]]
-            side[r["chat"]] = side.get(r["chat"], 0.0) + r["amount_ils"]
-    return {"rows": rows, "totals": {k: dict(sorted(v.items())) for k, v in totals.items()},
+            side = totals[r["side"]]
+            side[r["chat_id"]] = side.get(r["chat_id"], 0.0) + r["amount_ils"]
+    return {"rows": rows, "totals": {k: dict(sorted(v.items())) for k, v in totals.items()}, "names": dict(names),
             "uncertain": sum(r["uncertain"] for r in rows), "truncated": truncated, "untrusted": True}
+
+
+_INVISIBLE = "\u200e\u200f\u200b\u200c\u200d\u2060\ufeff\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
+
+
+def _date(ts) -> str:
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d")
+    except (OSError, ValueError, OverflowError, TypeError):
+        return ""
+
+
+def totals_view(rep: dict) -> list[dict]:
+    """The totals as rows with the chat name added for display; two chats with one name stay two rows."""
+    return [{"side": side, "chat_id": cid, "chat": rep.get("names", {}).get(cid, ""), "amount_ils": v}
+            for side, by in rep["totals"].items() for cid, v in by.items()]
 
 
 def _cell(v) -> str:
     s = "" if v is None else str(v)
-    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s       # a spreadsheet never runs message text
+    return "'" + s if s.lstrip(_INVISIBLE)[:1] in ("=", "+", "-", "@", "\t", "\r") else s       # a spreadsheet never runs message text
 
 
 def _money(v: float) -> str:
@@ -118,9 +134,10 @@ def summary(rep: dict, topic: str) -> str:
     lines = [f"# איסוף וואטסאפ: {topic}", "", f"{len(rep['rows'])} הודעות, לא ודאי: {rep['uncertain']}"]
     if rep.get("truncated"):
         lines.append("אזהרה: החיפוש נעצר במגבלה, ייתכן שחסרות הודעות (truncated)")
-    for side, title in (("paid", "שילמתי"), ("received", "קיבלתי")):
-        lines += ["", f"## {title}, לפי צ'אט (₪, רק שורות ודאיות)"]
-        lines += [f"- {k}: {_money(v)}" for k, v in rep["totals"].get(side, {}).items()]
+    view = totals_view(rep)
+    for side, title in (("by_me", "סכומים בהודעות שאני שלחתי"), ("by_them", "סכומים בהודעות שהם שלחו")):
+        lines += ["", f"## {title}, לפי צ'אט (₪, רק סכומים ודאיים; מי שילם בפועל לא נבדק)"]
+        lines += [f"- {t['chat']}: {_money(t['amount_ils'])}" for t in view if t["side"] == side]
     return "\n".join(lines) + "\n"
 
 

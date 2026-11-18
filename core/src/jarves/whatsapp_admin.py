@@ -588,7 +588,7 @@ def _collect_cli(home: Path, cfg, a, args: list[str]) -> int:
                        chat=one(a.chat) if a.chat.strip() else None, since=since)
     paths = wcol.write_report(home, rep, topic, stamp=time.strftime("%Y%m%d-%H%M%S"), fmt=a.fmt)
     if a.json:
-        _print({k: rep[k] for k in ("totals", "uncertain", "truncated")} | {"rows": len(rep["rows"]), "chats_full": chats_full,
+        _print({k: rep[k] for k in ("uncertain", "truncated")} | {"totals": wcol.totals_view(rep), "rows": len(rep["rows"]), "chats_full": chats_full,
                                                                           "files": [str(p) for p in paths]}, True)
     else:
         print(wcol.summary(rep, topic) + "\n".join(str(p) for p in paths))
