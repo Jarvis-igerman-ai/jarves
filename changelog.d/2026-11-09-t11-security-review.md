@@ -1,0 +1,1 @@
+- Added: security review T11 of goal_plans, continuity, devstatus, projectmgr and preferences (docs/reviews), line references re-checked on main d6e1c58 (JAR-382).
