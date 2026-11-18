@@ -78,9 +78,12 @@ def _fake_gh(calls, create_err, listed_stdout="[]", listed_rc=0, searched_stdout
         if cmd[2] == "create":
             failed = "testing" in cmd and create_err
             return subprocess.CompletedProcess(cmd, 1 if failed else 0, "", create_err if failed else "")
-        if "--search" in cmd:                       # the first duplicate check: nothing open
-            exact = cmd[cmd.index("--search") + 1].startswith('"')
-            return subprocess.CompletedProcess(cmd, 0, searched_stdout if exact else "[]", "")
+        search = cmd[cmd.index("--search") + 1] if "--search" in cmd else None
+        if search == "Factory nightly simulation failed in:title":   # the first duplicate check: nothing open
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+        if search == '"Factory nightly simulation failed: x" in:title':   # exact-title lookup
+            return subprocess.CompletedProcess(cmd, 0, searched_stdout, "")
+        assert search is None and cmd[cmd.index("--limit") + 1] == "200", cmd   # the plain 200-issue listing
         return subprocess.CompletedProcess(cmd, listed_rc, listed_stdout, "")
     return fake_run
 
