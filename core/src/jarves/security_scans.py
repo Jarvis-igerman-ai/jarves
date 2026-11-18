@@ -520,8 +520,56 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
-def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+def signature(findings: list[dict], complete: bool, refused: dict[str, str] | None = None) -> str:
+    """Findings, plus the refused sources when there are any (#480): a new refusal code rewrites the owner action once."""
+    raw = ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
+    if refused:
+        raw += "|" + ",".join(f"{k}:{v}" for k, v in sorted(refused.items()))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+ALERT_SOURCES = ("code_scanning", "dependabot", "secret_scanning")
+RUN_SOURCES = ("main_ci", "nightly", "codeql_run")                # workflow runs, read through the Actions API
+_REFUSED = ("http_401", "http_403", "http_404")
+
+
+def _http_reasons(coverage: dict) -> dict[str, str]:
+    """{source: "http_<3 digits>"} for every source whose coverage is incomplete:http_NNN; other values are ignored."""
+    out = {}
+    for k, v in coverage.items():
+        reason = v.removeprefix("incomplete:") if isinstance(v, str) and v.startswith("incomplete:") else ""
+        if re.fullmatch(r"http_\d{3}", reason):
+            out[str(k)] = reason
+    return out
+
+
+def refused_sources(coverage: dict) -> dict[str, str]:
+    """{source: "http_401" | "http_403" | "http_404"} for the sources GitHub refused; other values are ignored."""
+    return {k: r for k, r in _http_reasons(coverage).items() if r in _REFUSED}
+
+
+def owner_actions(coverage: dict) -> list[str]:
+    """One line per kind of refusal, naming what the owner can do (#480). Never names a token value or its source."""
+    refused = refused_sources(coverage)
+    other = {k: r for k, r in _http_reasons(coverage).items() if r not in _REFUSED}
+    groups = [
+        ([k for k, r in refused.items() if r == "http_401"],
+         "the scan's GitHub token is missing, expired or invalid; set a valid token."),
+        ([k for k, r in refused.items() if r != "http_401" and k in ALERT_SOURCES],
+         "the feature is off for this repository (turn it on in the repository's security settings) "
+         "or the scan's token cannot read it (give it read access)."),
+        ([k for k, r in refused.items() if r != "http_401" and k in RUN_SOURCES],
+         "give the scan's token read access to Actions and check that the workflow exists."),
+        ([k for k, r in refused.items() if r != "http_401" and k not in ALERT_SOURCES + RUN_SOURCES],
+         "the scan's token cannot read it (give it read access)."),
+        (list(other), "none yet; GitHub failed or rate-limited this read and the next scan retries. "
+                      "If it repeats, check GitHub's status.")]
+    lines = []
+    for keys, text in groups:
+        if keys:
+            codes = "/".join(sorted({{**refused, **other}[k].removeprefix("http_") for k in keys}))
+            lines.append(f"Owner action (HTTP {codes}: {', '.join(sorted(keys))}): {text}")
+    return lines
 
 
 def _complete(coverage: dict) -> bool:
@@ -532,7 +580,7 @@ def _complete(coverage: dict) -> bool:
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
-             "This is ONE tracker; it is updated only when the set of findings changes.", ""]
+             "This is ONE tracker; it is updated only when the findings or the refused sources change.", ""]
     if findings:
         by = {s: sum(f["severity"] == s for f in findings) for s in ("P1", "P2", "P3")}
         lines += [f"**Open findings: {len(findings)}** (P1 {by['P1']}, P2 {by['P2']}, P3 {by['P3']})", "",
@@ -550,6 +598,7 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+        lines += owner_actions(coverage)
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
@@ -621,7 +670,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete)
+    sig = signature(findings, complete, refused_sources(coverage))
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))

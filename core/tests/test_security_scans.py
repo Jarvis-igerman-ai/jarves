@@ -3,6 +3,7 @@ sleeping. Covers dedupe, timezone / DST, offline, failure / retry, quiet hours a
 synthetic finding creates exactly ONE non-sensitive issue."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,8 @@ class FakeGitHub:
     """Records every call; serves canned alert lists and workflow runs; keeps issues in memory."""
 
     def __init__(self, code_scanning=(), dependabot=(), secrets=(), checks="success", nightly="success", codeql="success",
-                 access=True):
+                 access=True, runs_access=True, deny=403):
+        self.runs_access, self.deny = runs_access, deny
         self.code_scanning, self.dependabot, self.secrets = list(code_scanning), list(dependabot), list(secrets)
         self.runs = {"jarves-checks.yml": checks, "nightly.yml": nightly, "codeql.yml": codeql}
         self.access, self.issues, self.calls, self.fail = access, [], [], None
@@ -35,13 +37,15 @@ class FakeGitHub:
             raise self.fail
         if method == "GET":
             if "/code-scanning/alerts" in path:
-                return (200, self.code_scanning) if self.access else (403, None)
+                return (200, self.code_scanning) if self.access else (self.deny, None)
             if "/dependabot/alerts" in path:
-                return (200, self.dependabot) if self.access else (403, None)
+                return (200, self.dependabot) if self.access else (self.deny, None)
             if "/secret-scanning/alerts" in path:
-                return (200, self.secrets) if self.access else (403, None)
+                return (200, self.secrets) if self.access else (self.deny, None)
             if "/actions/workflows/" in path:
                 wf = path.split("/actions/workflows/")[1].split("/")[0]
+                if not self.runs_access:
+                    return self.deny, None
                 return 200, {"workflow_runs": [{"conclusion": self.runs[wf], "created_at": "2026-10-23T00:00:00Z"}]}
             if path.startswith("/issues?"):
                 return 200, [dict(i) for i in self.issues]
@@ -159,6 +163,109 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     scan(home, gh, now=day(1))
     assert "INCOMPLETE" in gh.issues[0]["body"] and "No open findings" in gh.issues[0]["body"]
     assert "never read as zero" in gh.issues[0]["body"]
+
+
+def test_issue_480_refused_sources_name_the_owner_action():
+    cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
+           "main_ci": "incomplete:http_403", "codeql_run": "incomplete:http_404", "nightly": "incomplete:http_401",
+           "future_source": "incomplete:http_403", "local_diagnostics": "skipped:no_local_registry",
+           "boundary": "incomplete:not_run"}
+    body = ss.tracker_body([], cov, 0, "s", "full")
+    acts = [ln for ln in body.splitlines() if ln.startswith("Owner action")]
+    assert acts == [
+        "Owner action (HTTP 401: nightly): the scan's GitHub token is missing, expired or invalid; set a valid token.",
+        "Owner action (HTTP 403/404: dependabot, secret_scanning): the feature is off for this repository (turn it on "
+        "in the repository's security settings) or the scan's token cannot read it (give it read access).",
+        "Owner action (HTTP 403/404: codeql_run, main_ci): give the scan's token read access to Actions and check that the "
+        "workflow exists.",
+        "Owner action (HTTP 403: future_source): the scan's token cannot read it (give it read access)."]
+    assert not [ln for ln in ss.tracker_body([], {"code_scanning": "complete"}, 0, "s", "light").splitlines()
+                if ln.startswith("Owner action")]
+    assert ss.owner_actions({"x": None, "dependabot": 403}) == []        # malformed coverage values add nothing
+    assert ss.refused_sources({"code_scanning": "complete:http_403", "dependabot": "skipped:http_404"}) == {}
+
+
+# Re-derivable without the live issue: it is sha256("i|")[:16], the pre-#480 formula for incomplete coverage, no findings.
+LIVE_480_SIG = "6490f068a3c2e39a"
+
+
+def test_issue_480_actions_refusals_from_the_real_collectors_get_the_actions_line():
+    """The source names come from run_collectors itself, so a renamed collector cannot fall to the generic line."""
+    r = ss.run_collectors("full", FakeGitHub(runs_access=False), VER, now=T0, sleep=lambda s: None,
+                          boundary=lambda: {"failed": False})
+    run_keys = sorted(k for k, v in r["coverage"].items() if v == "incomplete:http_403")
+    assert run_keys == sorted(ss.RUN_SOURCES)
+    assert set(ss.ALERT_SOURCES) <= set(r["coverage"])
+    assert ss.owner_actions(r["coverage"]) == [
+        f"Owner action (HTTP 403: {', '.join(run_keys)}): give the scan's token read access to Actions and check that "
+        "the workflow exists."]
+
+
+@pytest.mark.parametrize("code,alert_text,run_text", [
+    (401, "the scan's GitHub token is missing, expired or invalid; set a valid token.", None),
+    (404, "the feature is off for this repository (turn it on in the repository's security settings) "
+          "or the scan's token cannot read it (give it read access).",
+     "give the scan's token read access to Actions and check that the workflow exists.")])
+def test_issue_480_collector_401_and_404_reach_the_owner_action_line(code, alert_text, run_text):
+    r = ss.run_collectors("full", FakeGitHub(access=False, runs_access=False, deny=code), VER, now=T0,
+                          sleep=lambda s: None, boundary=lambda: {"failed": False})
+    refused = ss.refused_sources(r["coverage"])
+    assert sorted(refused) == sorted(ss.ALERT_SOURCES + ss.RUN_SOURCES)
+    assert set(refused.values()) == {f"http_{code}"}
+    body = ss.tracker_body([], r["coverage"], 0, "s", "full")
+    assert "never read as zero" in body                        # refusals always reach the owner-action branch
+    acts = [ln for ln in body.splitlines() if ln.startswith("Owner action")]
+    alerts, runs = ", ".join(sorted(ss.ALERT_SOURCES)), ", ".join(sorted(ss.RUN_SOURCES))
+    if run_text is None:                                       # 401 groups every source under one token line
+        assert acts == [f"Owner action (HTTP {code}: {', '.join(sorted(refused))}): {alert_text}"]
+    else:
+        assert acts == [f"Owner action (HTTP {code}: {alerts}): {alert_text}",
+                        f"Owner action (HTTP {code}: {runs}): {run_text}"]
+
+
+class MixedDenyGitHub(FakeGitHub):
+    """Alert sources answer 401, workflow runs answer 403: one scan mixes both codes."""
+
+    def __call__(self, method, path, payload=None):
+        if method == "GET" and "/actions/workflows/" in path:
+            return 403, None
+        return super().__call__(method, path, payload)
+
+
+def test_issue_480_collector_mixed_401_and_403_get_separate_owner_lines():
+    r = ss.run_collectors("full", MixedDenyGitHub(access=False, deny=401), VER, now=T0, sleep=lambda s: None,
+                          boundary=lambda: {"failed": False})
+    refused = ss.refused_sources(r["coverage"])
+    assert {k: refused[k] for k in ss.ALERT_SOURCES} == dict.fromkeys(ss.ALERT_SOURCES, "http_401")
+    assert {k: refused[k] for k in ss.RUN_SOURCES} == dict.fromkeys(ss.RUN_SOURCES, "http_403")
+    assert ss.owner_actions(r["coverage"]) == [
+        f"Owner action (HTTP 401: {', '.join(sorted(ss.ALERT_SOURCES))}): the scan's GitHub token is missing, "
+        "expired or invalid; set a valid token.",
+        f"Owner action (HTTP 403: {', '.join(sorted(ss.RUN_SOURCES))}): give the scan's token read access to Actions "
+        "and check that the workflow exists."]
+
+
+def test_issue_480_other_http_failures_get_a_retry_line_without_changing_the_signature():
+    cov = {"dependabot": "incomplete:http_429", "main_ci": "incomplete:http_503", "nightly": "incomplete:http_5xx"}
+    assert ss.refused_sources(cov) == {}
+    assert ss.owner_actions(cov) == [
+        "Owner action (HTTP 429/503: dependabot, main_ci): none yet; GitHub failed or rate-limited this read and the "
+        "next scan retries. If it repeats, check GitHub's status."]          # malformed http_5xx adds nothing
+    assert ss.signature([], False, ss.refused_sources(cov)) == LIVE_480_SIG   # transient codes do not flap the tracker
+
+
+def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
+    old_sig = LIVE_480_SIG
+    gh = FakeGitHub(access=False)
+    gh.issues = [{"number": 1, "state": "open", "html_url": ISSUE_URL, "body": f"old {ss.TRACKER_MARKER}\n<!-- sig:{old_sig} -->"}]
+    assert scan(None, gh)["issue"]["status"] == "updated"
+    assert "Owner action (HTTP 403: code_scanning, dependabot, secret_scanning)" in gh.issues[0]["body"]
+    assert scan(None, gh, now=day(1))["issue"]["status"] == "unchanged"
+    assert hashlib.sha256(b"i|").hexdigest()[:16] == LIVE_480_SIG                        # re-derivable without the live issue
+    assert ss.signature([], False) == ss.signature([], False, {}) == LIVE_480_SIG    # no refusals: old signature kept
+    assert ss.signature([], True) == ss.signature([], True, {})
+    assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_401"})
+    assert ss.signature([], False, {"dependabot": "http_403"}) != ss.signature([], False, {"dependabot": "http_404"})  # same action text
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):
