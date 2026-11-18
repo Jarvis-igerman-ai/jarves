@@ -88,6 +88,17 @@ class TasksModel(
     private var token: String? = null
     private var load: Job? = null
 
+    /** One visible-screen status tick: no read without the `tasks` scope (and a later grant starts fresh); after a 403/401 no more reads until the scope list or pairing changes. */
+    fun tick(s: Session, scopes: List<String>) {
+        if ("tasks" !in scopes) {
+            load?.cancel()
+            _state.value = null
+            return
+        }
+        if (token == s.token && !tasksCardVisible(scopes, _state.value)) return
+        refresh(s)
+    }
+
     /** Read once per visible-screen status tick; a read never changes anything on the PC. A newer read replaces an older one; a new pairing starts empty. */
     fun refresh(s: Session) {
         if (token != s.token) {
@@ -111,8 +122,8 @@ class TasksModel(
 /** The PC's tasks, read-only. Approving, skipping and deleting a step stay on the computer. Shown only when the PC lists the tasks scope for this phone. */
 @Composable
 fun TasksCard(session: Session, link: Link.Online, model: TasksModel) {
-    // Without the scope nothing is read. Each status tick is a new Link.Online: the PC's server_time changes per answer.
-    if (tasksCardVisible(link.info.scopes, null)) LaunchedEffect(session.token, link) { model.refresh(session) }
+    // Each status tick is a new Link.Online (the PC's server_time changes per answer); tick() decides whether to read.
+    LaunchedEffect(session.token, link) { model.tick(session, link.info.scopes) }
     val st by model.state.collectAsStateWithLifecycle()
     if (!tasksCardVisible(link.info.scopes, st)) return
     Card(Modifier.fillMaxWidth()) {

@@ -61,5 +61,5 @@ fix_en = "Today the app asks the computer only while it is on screen. Later, on 
 [[problems]]
 he = "כרטיס המשימות לא מופיע באפליקציה"
 en = "The Tasks card does not show in the app"
-fix_he = "כרטיס המשימות (לקריאה בלבד) מופיע רק כשלטלפון יש הרשאת \"tasks\", שכבויה כברירת מחדל. סמנו אותה תחת \"הרשאות נוספות\" ליד הטלפון בעמוד הטלפון במחשב, או: jarvis phone scopes <מזהה> --grant tasks. אישור, דילוג ומחיקה של צעדים נעשים רק במחשב."
-fix_en = "The read-only Tasks card shows only when the phone has the \"tasks\" permission, which is off by default. Tick it under \"Extra permissions\" next to the phone on the Phone page on the computer, or run: jarvis phone scopes <id> --grant tasks. Approving, skipping and deleting steps are done on the computer only."
+fix_he = "כרטיס המשימות (לקריאה בלבד) מופיע רק כשלטלפון יש הרשאת \"tasks\", שכבויה כברירת מחדל. סמנו אותה בעמוד \"אפליקציית טלפון\" במחשב, תחת \"הרשאות נוספות (כבויות כברירת מחדל)\" ליד הטלפון, או: jarvis phone scopes <מזהה> --grant tasks. אישור, דילוג ומחיקה של צעדים נעשים רק במחשב."
+fix_en = "The read-only Tasks card shows only when the phone has the \"tasks\" permission, which is off by default. Tick it on the computer's \"Phone app\" page, under \"Extra permissions (off by default)\" next to the phone, or run: jarvis phone scopes <id> --grant tasks. Approving, skipping and deleting steps are done on the computer only."

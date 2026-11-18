@@ -132,4 +132,23 @@ class TasksTest {
         assertTrue(a is Link.Online)
         assertNotEquals(a, b)                                // the PC sends time.time() per answer (mobile_companion.py)
     }
+
+    @Test
+    fun noReadWithoutTheScopeAndNoneAfterARefusalUntilTheScopeComesBack() = runTest {
+        val pc = PlansRec(status = 403)
+        var reads = 0
+        val m = TasksModel(this, StandardTestDispatcher(testScheduler)) { reads++; CompanionClient(it.base, pc) }
+        m.tick(session, listOf("chat")); advanceUntilIdle()
+        assertEquals(0, reads)
+        m.tick(session, listOf("tasks")); advanceUntilIdle()
+        assertEquals(Plans.NotAllowed, m.state.value)
+        m.tick(session, listOf("tasks")); advanceUntilIdle()
+        assertEquals(1, reads)                               // refused: the next tick sends nothing
+        m.tick(session, listOf("chat")); advanceUntilIdle()
+        assertNull(m.state.value)                            // scope gone: forgotten
+        m.tick(session, listOf("tasks")); advanceUntilIdle()
+        assertEquals(2, reads)                               // granted again: one fresh read
+        m.tick(session.copy(token = "new"), listOf("tasks")); advanceUntilIdle()
+        assertEquals(3, reads)                               // a new pairing reads despite the old refusal
+    }
 }
