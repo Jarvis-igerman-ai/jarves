@@ -25,8 +25,8 @@ class FakeGitHub:
     """Records every call; serves canned alert lists and workflow runs; keeps issues in memory."""
 
     def __init__(self, code_scanning=(), dependabot=(), secrets=(), checks="success", nightly="success", codeql="success",
-                 access=True, runs_access=True):
-        self.runs_access = runs_access
+                 access=True, runs_access=True, deny=403):
+        self.runs_access, self.deny = runs_access, deny
         self.code_scanning, self.dependabot, self.secrets = list(code_scanning), list(dependabot), list(secrets)
         self.runs = {"jarves-checks.yml": checks, "nightly.yml": nightly, "codeql.yml": codeql}
         self.access, self.issues, self.calls, self.fail = access, [], [], None
@@ -37,15 +37,15 @@ class FakeGitHub:
             raise self.fail
         if method == "GET":
             if "/code-scanning/alerts" in path:
-                return (200, self.code_scanning) if self.access else (403, None)
+                return (200, self.code_scanning) if self.access else (self.deny, None)
             if "/dependabot/alerts" in path:
-                return (200, self.dependabot) if self.access else (403, None)
+                return (200, self.dependabot) if self.access else (self.deny, None)
             if "/secret-scanning/alerts" in path:
-                return (200, self.secrets) if self.access else (403, None)
+                return (200, self.secrets) if self.access else (self.deny, None)
             if "/actions/workflows/" in path:
                 wf = path.split("/actions/workflows/")[1].split("/")[0]
                 if not self.runs_access:
-                    return 403, None
+                    return self.deny, None
                 return 200, {"workflow_runs": [{"conclusion": self.runs[wf], "created_at": "2026-10-23T00:00:00Z"}]}
             if path.startswith("/issues?"):
                 return 200, [dict(i) for i in self.issues]
@@ -199,6 +199,27 @@ def test_issue_480_actions_refusals_from_the_real_collectors_get_the_actions_lin
     assert ss.owner_actions(r["coverage"]) == [
         f"Owner action (HTTP 403: {', '.join(run_keys)}): give the scan's token read access to Actions and check that "
         "the workflow exists."]
+
+
+@pytest.mark.parametrize("code,alert_text,run_text", [
+    (401, "the scan's GitHub token is missing, expired or invalid; set a valid token.", None),
+    (404, "the feature is off for this repository (turn it on in the repository's security settings) "
+          "or the scan's token cannot read it (give it read access).",
+     "give the scan's token read access to Actions and check that the workflow exists.")])
+def test_issue_480_collector_401_and_404_reach_the_owner_action_line(code, alert_text, run_text):
+    r = ss.run_collectors("full", FakeGitHub(access=False, runs_access=False, deny=code), VER, now=T0,
+                          sleep=lambda s: None, boundary=lambda: {"failed": False})
+    refused = ss.refused_sources(r["coverage"])
+    assert sorted(refused) == sorted(ss._ALERT_SOURCES + ss._RUN_SOURCES)
+    assert set(refused.values()) == {f"http_{code}"}
+    assert not ss._complete(r["coverage"])                     # refusals always reach the owner-action branch
+    acts = [ln for ln in ss.tracker_body([], r["coverage"], 0, "s", "full").splitlines() if ln.startswith("Owner action")]
+    alerts, runs = ", ".join(sorted(ss._ALERT_SOURCES)), ", ".join(sorted(ss._RUN_SOURCES))
+    if run_text is None:                                       # 401 groups every source under one token line
+        assert acts == [f"Owner action (HTTP {code}: {', '.join(sorted(refused))}): {alert_text}"]
+    else:
+        assert acts == [f"Owner action (HTTP {code}: {alerts}): {alert_text}",
+                        f"Owner action (HTTP {code}: {runs}): {run_text}"]
 
 
 def test_issue_480_the_live_tracker_is_rewritten_once_when_the_refusals_change(home):
