@@ -244,10 +244,9 @@ def main(argv=None) -> int:
         except PermissionError as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
-        from .opener import listening
         try:
-            if not listening(a.port):  # a stale unlock.pub after a crash: no server could accept the code (#750)
-                raise FileNotFoundError(f"no dashboard server answers on port {a.port}")
+            if not unlock.server_answers(home, a.port):  # stale unlock.pub after a crash, or another program on the port (#750)
+                raise FileNotFoundError(f"no dashboard server with the key in {unlock.PUB} answers on port {a.port}")
             code = unlock.issue(home, port=a.port)
         except (FileNotFoundError, ValueError) as exc:  # server not running, or unlock.pub missing/damaged (#750)
             print(json.dumps({"error": f"start the dashboard first ('jarvis workflow open'): {exc}"}, ensure_ascii=False), file=sys.stderr)
@@ -267,9 +266,8 @@ def main(argv=None) -> int:
         except PermissionError:
             return rc  # agent or non-terminal: no code (only the guard's refusal is silent)
         from . import unlock
-        from .opener import listening
         try:
-            if not listening(a.port):  # no live server: a code bound to a stale key could never be accepted (#750)
+            if not unlock.server_answers(home, a.port):  # no live server with this key: its code could never be accepted (#750)
                 raise FileNotFoundError("the dashboard server is not running")
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home, port=a.port)}", file=sys.stderr)
         except (OSError, ValueError) as exc:  # no server/key, or unlock.json not writable: say why (#750)

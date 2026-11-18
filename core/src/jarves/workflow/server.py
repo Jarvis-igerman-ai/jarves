@@ -207,10 +207,14 @@ class Server(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         self.stopping.set()
-        if hasattr(self, "unlock_key"):
-            unlock.release_key(self.home, self.unlock_key)
-        super().server_close()
-        self.store.close()
+        try:
+            if hasattr(self, "unlock_key"):
+                unlock.release_key(self.home, self.unlock_key)
+        finally:  # a failed key cleanup must never leave the socket or workflow.db open (Windows file locks)
+            try:
+                super().server_close()
+            finally:
+                self.store.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -281,7 +285,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/health":
-            self._json(200, {"ok": True, "service": "jarves-workflow"})
+            pub = self.server.unlock_key.public_key().public_bytes_raw().hex()  # public half only; lets the CLI match unlock.pub (#750)
+            self._json(200, {"ok": True, "service": "jarves-workflow", "unlock_pub": pub})
             return
         files = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"), "/app.js": ("app.js", "text/javascript"),
                  "/today.js": ("today.js", "text/javascript"), "/health.js": ("health.js", "text/javascript"),

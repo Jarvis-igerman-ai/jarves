@@ -292,15 +292,42 @@ class UnlockTests(unittest.TestCase):
             other.listen()
             rc, out, err = self.unlock_cli(other.getsockname()[1])
         self.assertEqual((rc, out), (1, ""))
-        self.assertIn(f"on port {self.server.server_port}, not", err)
+        self.assertIn("start the dashboard first", err)
+        with self.assertRaisesRegex(FileNotFoundError, f"on port {self.server.server_port}, not"):
+            unlock.issue(self.home, port=self.server.server_port + 1)
         self.assertFalse((self.home / unlock.FILE).exists())
 
+    def test_750_unrelated_server_on_the_recorded_port_gets_no_code(self):
+        # Review #1304 @d5fa8845 R3: a crashed dashboard left unlock.pub for port P and another program now serves P.
+        stale = X25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+        (self.home / unlock.PUB).write_text(f"{stale} {self.server.server_port}", encoding="ascii")
+        rc, out, err = self.unlock_cli(self.server.server_port)       # it answers /health, but with another key
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("start the dashboard first", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_750_stop_closes_socket_and_store_when_key_cleanup_fails(self):
+        # Review #1304 @d5fa8845 R1: release_key's last unlink raising must not leave the socket or workflow.db open.
+        other = Server(self.home / "stop", 0)
+        closed, real = [], Store.close
+        with patch.object(Store, "close", lambda s: (closed.append(s), real(s))), \
+                patch.object(Path, "unlink", side_effect=PermissionError("sharing violation")), \
+                self.assertLogs("jarves.workflow.unlock", "WARNING") as logs:
+            other.server_close()
+        self.assertIn("could not remove", logs.output[-1])
+        self.assertEqual(closed, [other.store])
+        self.assertEqual(other.socket.fileno(), -1)
+        with patch.object(server_mod.unlock, "release_key", side_effect=OSError("boom")), \
+                patch.object(Store, "close", lambda s: (closed.append(s), real(s))), self.assertRaises(OSError):
+            Server(self.home / "stop2", 0).server_close()               # an unexpected raise still closes the store
+        self.assertEqual(len(closed), 2)
+
     def test_750_unlock_without_port_uses_the_server_default(self):
-        with patch("jarves.workflow.opener.listening", return_value=True) as probe, \
+        with patch.object(unlock, "server_answers", return_value=True) as probe, \
                 patch.object(unlock, "issue", return_value="1234") as made, patch.object(cli, "owner_only_guard"), \
                 redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
-        probe.assert_called_once_with(8188)
+        probe.assert_called_once_with(self.home, 8188)
         self.assertEqual(made.call_args.kwargs["port"], 8188)
 
     def test_750_open_reports_a_write_error_instead_of_hiding_it(self):

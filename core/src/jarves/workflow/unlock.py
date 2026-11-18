@@ -100,7 +100,28 @@ def release_key(home: Path, key: X25519PrivateKey) -> None:
                     os.replace(held, path)
                 except OSError as err:
                     logging.getLogger(__name__).warning("could not restore %s of another server: %s", PUB, err)
-    held.unlink(missing_ok=True)
+    try:
+        held.unlink(missing_ok=True)
+    except OSError as exc:  # e.g. a Windows sharing violation: the caller must still close its socket and store
+        logging.getLogger(__name__).warning("could not remove %s on stop: %s", held.name, exc)
+
+
+def server_answers(home: Path, port: int, timeout: float = 1.0) -> bool:
+    """True only when the dashboard on 127.0.0.1:port reports the public key that unlock.pub holds (#750): a stale
+    unlock.pub after a crash, with an unrelated program now on that port, must not yield a code nobody can accept."""
+    import http.client
+    try:
+        pub_hex = _read_pub(home)[0]
+        conn = http.client.HTTPConnection("127.0.0.1", int(port), timeout=timeout)
+        try:
+            conn.request("GET", "/health", headers={"Host": f"127.0.0.1:{int(port)}"})
+            resp = conn.getresponse()
+            data = json.loads(resp.read(4096)) if resp.status == 200 else None
+        finally:
+            conn.close()
+    except (OSError, ValueError, http.client.HTTPException):  # no server/file, damaged file, or not our HTTP server
+        return False
+    return isinstance(data, dict) and hmac.compare_digest(str(data.get("unlock_pub", "")), pub_hex)
 
 
 def issue(home: Path, *, port: int | None = None, now: float | None = None) -> str:
