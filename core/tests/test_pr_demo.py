@@ -35,8 +35,8 @@ def test_page_script_maps_to_the_pages_it_registers_and_unknown_detail_pages_are
     assert pr_demo.registered_pages(FAKE["core/src/jarves/dashboard_static/guides.js"]) == ["guides", "guide-for"]
 
 
-def test_detail_only_script_captures_its_seeded_view_or_its_parent_page():
-    FAKE["core/src/jarves/dashboard_static/sess.js"] = "PAGES.session = a; PAGES.mystery = b;"
+def test_detail_only_script_captures_its_seeded_view_or_its_parent_page(monkeypatch):
+    monkeypatch.setitem(FAKE, "core/src/jarves/dashboard_static/sess.js", "PAGES.session = a; PAGES.mystery = b;")
     pl = pr_demo.plan(["core/src/jarves/dashboard_static/agent_detail.js", "core/src/jarves/dashboard_static/sess.js"],
                       read, KNOWN, details={"session": "session/{sid}"})
     assert pl["pages"] == ["agents", "session/{sid}"]                   # parent page, seeded DEMO route
