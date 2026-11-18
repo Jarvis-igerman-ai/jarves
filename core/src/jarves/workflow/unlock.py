@@ -38,9 +38,9 @@ def _mac(shared: bytes, code: str, expires: float) -> bytes:
     return hmac.new(key, f"{normalize(code)}|{expires!r}".encode("utf-8"), "sha256").digest()
 
 
-def _read_pub(home: Path) -> tuple[str, int | None]:
+def _read_pub(home: Path, name: str = PUB) -> tuple[str, int | None]:
     """unlock.pub is '<public key hex> <port>'; OSError if missing, ValueError if damaged."""
-    parts = (Path(home) / PUB).read_text(encoding="ascii").split()
+    parts = (Path(home) / name).read_text(encoding="ascii").split()
     if len(parts) not in (1, 2):
         raise ValueError(f"{PUB} has {len(parts)} fields")
     return parts[0], int(parts[1]) if len(parts) == 2 else None
@@ -68,13 +68,24 @@ def server_key(home: Path, port: int | None = None) -> X25519PrivateKey:
 
 
 def release_key(home: Path, key: X25519PrivateKey) -> None:
-    """On server stop: remove unlock.pub if it is still ours, so `unlock` says the dashboard is not running (#750)."""
+    """On server stop: remove unlock.pub if it is still ours, so `unlock` says the dashboard is not running (#750).
+    The file is renamed away first (atomic), so a key another server writes meanwhile is never the one removed."""
     path = Path(home) / PUB
+    held = path.with_name(f"{PUB}.{os.getpid()}.{secrets.token_hex(4)}.release")
     try:
-        if _read_pub(home)[0] == key.public_key().public_bytes_raw().hex():
-            path.unlink()
+        os.rename(path, held)  # atomic: a key another server writes from now on lands in a new unlock.pub
+    except OSError:
+        return  # already gone: nothing of ours to remove
+    try:
+        ours = _read_pub(home, held.name)[0] == key.public_key().public_bytes_raw().hex()
     except (OSError, ValueError):  # UnicodeDecodeError is a ValueError
-        pass  # already gone or replaced by another server: nothing of ours to remove
+        ours = False
+    try:
+        if not ours:  # another server's key: put it back unless an even newer one was written meanwhile
+            os.link(held, path)
+    except OSError:
+        pass  # FileExistsError: a newer key is live and wins, like server_key's replace
+    held.unlink(missing_ok=True)
 
 
 def issue(home: Path, *, port: int | None = None, now: float | None = None) -> str:

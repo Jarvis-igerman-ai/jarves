@@ -147,6 +147,7 @@ class Server(ThreadingHTTPServer):
         self.home = Path(home)
         self.profile_home = profile_home or self.home.parent
         self.token = access_token(self.home)
+        own_store = store is None
         self.store = store or Store(self.home / "workflow.db")
         self.sessions: dict[str, float] = {}
         self.session_lock = threading.Lock()
@@ -171,6 +172,8 @@ class Server(ThreadingHTTPServer):
             if hasattr(self, "unlock_key"):  # listen() failed after the key was written: its private half dies here
                 unlock.release_key(self.home, self.unlock_key)
             self.socket.close()
+            if own_store:  # else workflow.db stays open and Windows cannot remove the home (WinError 32)
+                self.store.close()
             raise
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"

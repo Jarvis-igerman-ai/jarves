@@ -12,13 +12,15 @@ import urllib.error
 import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
+from jarves.workflow import server as server_mod
 from jarves.workflow.server import Server
+from jarves.workflow.store import Store
 
 
 class UnlockTests(unittest.TestCase):
@@ -324,6 +326,45 @@ class UnlockTests(unittest.TestCase):
         with patch.object(Server, "server_activate", side_effect=OSError("listen failed")), self.assertRaises(OSError):
             Server(Path(other.name), 0)
         self.assertFalse((Path(other.name) / unlock.PUB).exists())
+
+    def test_750_failed_start_closes_the_store_it_opened(self):
+        # Windows CI of #1273: a failed start left workflow.db open, so the home could not be removed (WinError 32).
+        closed = []
+        real = Store.close
+        with patch.object(Store, "close", lambda s: (closed.append(s), real(s))), \
+                patch.object(Server, "server_activate", side_effect=OSError("listen failed")), self.assertRaises(OSError):
+            Server(self.home / "other", 0)
+        self.assertEqual(len(closed), 1)
+
+    def test_750_windows_bind_is_exclusive_so_a_busy_port_cannot_be_shared(self):
+        # Review R1: SO_REUSEADDR on Windows would let a 2nd server bind a busy port and replace unlock.pub.
+        self.assertEqual(Server.allow_reuse_address, os.name != "nt")
+        sock = MagicMock()
+        fake = Server.__new__(Server)
+        fake.socket = sock
+        with patch.object(server_mod.os, "name", "nt"), patch.object(server_mod.socket, "SO_EXCLUSIVEADDRUSE", 4, create=True), \
+                patch("http.server.HTTPServer.server_bind"):
+            Server.server_bind(fake)
+        sock.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 4, 1)
+
+    def test_750_release_does_not_remove_a_key_written_during_the_check(self):
+        # Review R3: another server replacing unlock.pub between release_key's compare and unlink keeps its key.
+        mine = unlock.server_key(self.home / "race", 1)
+        theirs = X25519PrivateKey.generate().public_key().public_bytes_raw().hex() + " 2"
+        real, raced = Path.read_text, []
+
+        def read_then_replace(path, *a, **k):
+            text = real(path, *a, **k)
+            if path.name.startswith(unlock.PUB) and not raced:
+                raced.append(1)
+                (self.home / "race" / "new.tmp").write_text(theirs, encoding="ascii")
+                os.replace(self.home / "race" / "new.tmp", self.home / "race" / unlock.PUB)
+            return text
+        with patch.object(Path, "read_text", read_then_replace):
+            unlock.release_key(self.home / "race", mine)
+        self.assertEqual(raced, [1])
+        self.assertEqual((self.home / "race" / unlock.PUB).read_text(encoding="ascii"), theirs)
+        self.assertEqual(sorted(p.name for p in (self.home / "race").iterdir()), [unlock.PUB])
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
