@@ -561,14 +561,17 @@ def owner_actions(coverage: dict) -> list[str]:
         ([k for k, r in refused.items() if r != "http_401" and k in RUN_SOURCES],
          "give the scan's token read access to Actions and check that the workflow exists."),
         ([k for k, r in refused.items() if r != "http_401" and k not in ALERT_SOURCES + RUN_SOURCES],
-         "the scan's token cannot read it (give it read access)."),
-        (list(other), "none yet; GitHub failed or rate-limited this read and the next scan retries. "
-                      "If it repeats, check GitHub's status.")]
+         "the scan's token cannot read it (give it read access).")]
     lines = []
     for keys, text in groups:
         if keys:
-            codes = "/".join(sorted({{**refused, **other}[k].removeprefix("http_") for k in keys}))
+            codes = "/".join(sorted({refused[k].removeprefix("http_") for k in keys}))
             lines.append(f"Owner action (HTTP {codes}: {', '.join(sorted(keys))}): {text}")
+    if other:      # not in signature(): a snapshot from the last rewrite, so it says so instead of looking live
+        codes = "/".join(sorted({r.removeprefix("http_") for r in other.values()}))
+        lines.append(f"Retry note (HTTP {codes}: {', '.join(sorted(other))}): as of the last rewrite of this tracker, "
+                     "GitHub failed or rate-limited this read; no owner action is needed and the next scan retries. "
+                     "If it repeats, check GitHub's status.")
     return lines
 
 

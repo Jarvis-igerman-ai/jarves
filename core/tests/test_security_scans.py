@@ -249,8 +249,10 @@ def test_issue_480_other_http_failures_get_a_retry_line_without_changing_the_sig
     cov = {"dependabot": "incomplete:http_429", "main_ci": "incomplete:http_503", "nightly": "incomplete:http_5xx"}
     assert ss.refused_sources(cov) == {}
     assert ss.owner_actions(cov) == [
-        "Owner action (HTTP 429/503: dependabot, main_ci): none yet; GitHub failed or rate-limited this read and the "
-        "next scan retries. If it repeats, check GitHub's status."]          # malformed http_5xx adds nothing
+        "Retry note (HTTP 429/503: dependabot, main_ci): as of the last rewrite of this tracker, GitHub failed or "
+        "rate-limited this read; no owner action is needed and the next scan retries. If it repeats, check GitHub's "
+        "status."]                                                    # malformed http_5xx adds nothing
+    assert not [ln for ln in ss.owner_actions(cov) if ln.startswith("Owner action")]   # no fake owner action
     assert ss.signature([], False, ss.refused_sources(cov)) == LIVE_480_SIG   # transient codes do not flap the tracker
 
 
