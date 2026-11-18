@@ -387,7 +387,8 @@ def test_api_skips_a_report_too_big_for_one_upload(tmp_path, monkeypatch):
 
 def test_a_file_that_keeps_failing_warns_once_until_it_is_sent(tmp_path, monkeypatch):
     warned = []
-    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append((a[1], kw.get("file"))))
+    monkeypatch.setattr(rd.logs, "warn", lambda *a, **kw: warned.append((a[1], kw.get("file"))) or kws.append(kw))
+    kws = []
     monkeypatch.setattr(rd, "_WARNED", set())
     monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
     rd.save(tmp_path, mode="api")
@@ -395,13 +396,15 @@ def test_a_file_that_keeps_failing_warns_once_until_it_is_sent(tmp_path, monkeyp
     (tmp_path / "reports" / "big.md").write_bytes(b"12345")
     rd.sync(tmp_path, client=FakeDrive())
     rd.sync(tmp_path, client=FakeDrive())
-    assert warned == [("SEND_FAILED", "big.md")]
+    assert warned == [("SEND_FAILED", rd._tag("big.md"))]
     monkeypatch.setattr(rd, "MAX_UPLOAD", 100)
     rd.sync(tmp_path, client=FakeDrive())
     monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
     (tmp_path / "reports" / "big.md").write_bytes(b"123456")
     rd.sync(tmp_path, client=FakeDrive())
-    assert warned == [("SEND_FAILED", "big.md")] * 2                     # a new outage for that file warns again
+    tag = rd._tag("big.md")                     # no report name (may hold a contact name) in the log
+    assert warned == [("SEND_FAILED", tag)] * 2                          # a new outage for that file warns again
+    assert kws[0]["error"] == "ValueError" and "big" not in json.dumps(kws)
 
 
 def test_drive_ids_merge_under_the_lock_and_a_concurrent_upload_is_not_lost(tmp_path):
@@ -586,3 +589,49 @@ def test_a_file_level_403_fails_that_file_only_and_does_not_ask_to_sign_in(tmp_p
     fake = OneRefused()
     rd.sync(tmp_path, client=fake)
     assert [s[0] for s in fake.sent] == ["b.md"]
+
+
+def test_a_job_that_finishes_during_after_report_still_gets_its_reports_sent(tmp_path):
+    rd.save(tmp_path, mode="api")
+    folder = tmp_path / "reports"
+    folder.mkdir()
+    (folder / "a.md").write_bytes(b"1")
+
+    class JobMeanwhile(FakeDrive):               # a scheduled job finishes while after_report holds the lock
+        def upload(self, name, *a, **kw):
+            if name == "a.md" and not (folder / "b.md").exists():
+                (folder / "b.md").write_bytes(b"2")
+                assert rd.sync(tmp_path, client=self) == []
+            return super().upload(name, *a, **kw)
+    fake = JobMeanwhile()
+    rd.after_report(tmp_path, folder / "a.md", features=ON, client=fake)
+    assert [s[0] for s in fake.sent] == ["a.md", "b.md"]
+
+
+def test_a_folder_sync_removes_old_leftover_temp_copies_only(tmp_path):
+    import os
+    drive = tmp_path / "drive"
+    (drive / rd.SUBDIR).mkdir(parents=True)
+    old = drive / rd.SUBDIR / ".a.md.jarves-1234abcd.part"     # left behind by a process killed mid-copy
+    new = drive / rd.SUBDIR / ".b.md.jarves-5678abcd.part"     # another process is still copying this one
+    mine = drive / rd.SUBDIR / ".owner.part"
+    for f in (old, new, mine):
+        f.write_bytes(b"x")
+    os.utime(old, (1000.0, 1000.0))
+    os.utime(new, (5000.0, 5000.0))
+    os.utime(mine, (1000.0, 1000.0))
+    rd._sweep(drive / rd.SUBDIR, now=5000.0 + 1)
+    assert not old.exists() and new.exists() and mine.exists()
+
+
+def test_a_deleted_failed_report_drops_its_warning_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(rd, "_WARNED", set())
+    monkeypatch.setattr(rd, "MAX_UPLOAD", 4)
+    rd.save(tmp_path, mode="api")
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "big.md").write_bytes(b"12345")
+    rd.sync(tmp_path, client=FakeDrive())
+    assert "SEND_FAILED:big.md" in rd._WARNED
+    (tmp_path / "reports" / "big.md").unlink()
+    rd.sync(tmp_path, client=FakeDrive())
+    assert not [k for k in rd._WARNED if k.startswith("SEND_FAILED:")]

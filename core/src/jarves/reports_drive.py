@@ -6,11 +6,13 @@ Settings in <home>/reports_drive.json; no token here (google_auth keeps it)."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -29,6 +31,7 @@ _RERUN = threading.Event()                      # a job finished while a sync ra
 SKIP_SUFFIXES = (".tmp", ".part", ".partial", ".crdownload", "~")   # a writer may still be writing these
 SUBDIR = "JARVES reports"                       # its own subfolder: never overwrites an owner file in Drive
 MAX_UPLOAD = 5 * 1024 * 1024                    # Google documents uploadType=multipart for files up to 5 MB
+STALE_S = 3600                                  # a temp copy this old was left by a process killed mid-copy
 MIMES = {".csv": "text/csv", ".md": "text/markdown", ".txt": "text/plain", ".json": "application/json"}
 
 feat.register(FEATURE, "דוחות לגוגל דרייב", "Reports to Google Drive", False, stage="beta",
@@ -196,7 +199,23 @@ def _send(home: Path, path: Path, client=None) -> dict:
     try:
         return upload(home, path, client=client)
     except Exception as e:      # a report write must never fail because Drive is unavailable
-        return {"error": reason(e), **({"reconnect": True} if needs_reconnect(e) else {})}
+        return {"error": reason(e), "kind": type(e).__name__, **({"reconnect": True} if needs_reconnect(e) else {})}
+
+
+def _tag(name: str) -> str:
+    """A short hash for logs: a report name (WhatsApp collections) may hold a contact name."""
+    return hashlib.sha256(name.encode("utf-8")).hexdigest()[:10]
+
+
+def _sweep(dest: Path, now: float | None = None) -> None:
+    """Remove our own temp copies left in the Drive folder by a killed process, so Drive never uploads them."""
+    now = time.time() if now is None else now
+    for f in dest.glob(".*.jarves-*.part"):
+        try:
+            if now - f.stat().st_mtime > STALE_S:
+                f.unlink()
+        except OSError:                         # gone already, or Drive holds it: try on the next sync
+            continue
 
 
 def after_report(home: Path, path: Path, *, features, client=None) -> dict | None:
@@ -211,6 +230,8 @@ def after_report(home: Path, path: Path, *, features, client=None) -> dict | Non
         r = _send(home, path, client)
         if "error" not in r and m is not None:
             save(home, **{key: {**_sent(home, key), path.name: m}})
+    if _RERUN.is_set():                         # a job finished while we held the lock: its reports go now
+        sync(home, client=client)
     return r
 
 
@@ -265,6 +286,11 @@ def _sync(home: Path, client) -> list[dict]:
     before = _raw(home).get(key)
     folder = Path(home) / "reports"
     sent = {n: m for n, m in _sent(home, key).items() if (folder / n).is_file()}
+    for k in [k for k in _WARNED if k.startswith("SEND_FAILED:") and not (folder / k[12:]).is_file()]:
+        _WARNED.discard(k)                      # a deleted report keeps no warning key (bounded)
+    st = load(home)
+    if st["mode"] == "folder" and (Path(st["folder"]) / SUBDIR).is_dir():
+        _sweep(Path(st["folder"]) / SUBDIR)
     out = []
     for f in sorted(folder.iterdir()) if folder.is_dir() else []:
         if f.name.startswith(".") or f.name.lower().endswith(SKIP_SUFFIXES):
@@ -282,7 +308,7 @@ def _sync(home: Path, client) -> list[dict]:
                     logs.warn("reports_drive", "RECONNECT", "Google sign-in expired or refused; reports are not sent")
                 break
             elif _first("SEND_FAILED:" + f.name):       # once per file per outage, not every job run
-                logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=f.name, error=r["error"][:200])
+                logs.warn("reports_drive", "SEND_FAILED", "report not sent to Google Drive", file=_tag(f.name), error=r.get("kind", ""))
     if sent != before:                          # nothing new: the settings file is not rewritten
         save(home, prune=True, **{key: sent})
     return out
