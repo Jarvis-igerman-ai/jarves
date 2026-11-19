@@ -18,6 +18,7 @@ from jarves.preferences import looks_sensitive
     "AKIA" + "ABCDEFGHIJKLMNOP",
     "my api keys are in the drawer",                     # plurals (review R5)
     "both secret keys are on the fridge",
+    "auth_token expiry",                                 # names a credential: refused on purpose (review R5)
 ])
 def test_key_or_token_shaped_text_is_sensitive(text):
     assert looks_sensitive(text)
@@ -46,6 +47,7 @@ def test_key_or_token_shaped_text_is_sensitive(text):
     "add a private keyword list",
     "TestV5GoalPlansCancelRace2Handler fails on CI",     # CamelCase identifier with digits (review R6)
     "PlanRunnerV2RetryBackoff3Handler times out",
+    "oauth_token refresh fails",                         # identifier, no word boundary before "auth" (review R5)
 ])
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)

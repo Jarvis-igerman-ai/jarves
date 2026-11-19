@@ -53,24 +53,30 @@ DEFAULT_DAILY = 6
 SNOOZE_MAX_MIN = 24 * 60
 
 
-_TEXT_KEYS = ("reply", "text", "transcript")
+# V5 sec F13: in privacy mode only these string fields rest on disk (codes, states and kinds, never words); every
+# other non-empty string at any depth (reply, text, transcript, title, error, ...) becomes the marker. An allowlist,
+# so a new free-text field in a ledgered body is blanked by default.
+_KEPT_STRINGS = frozenset(("code", "state", "status", "kind", "op"))
 NOT_KEPT = "(answered; the text was not kept: privacy mode)"   # Hebrew: hebrew_parts/2026-11-19-intake-1099-206.json
 
 
+def _blank(v, key=None):
+    if isinstance(v, list):
+        return [_blank(x) for x in v]
+    if isinstance(v, dict):
+        out = {k: _blank(x, k) for k, x in v.items()}
+        if any(x is NOT_KEPT for x in out.values()):
+            out["not_kept"] = True                   # a code, so a client can show the marker in its own language
+        return out
+    if isinstance(v, str) and v.strip() and key not in _KEPT_STRINGS:
+        return NOT_KEPT
+    return v                                         # numbers, booleans, None, empty strings, kept codes
+
+
 def _at_rest(body):
-    """The copy written to disk. Privacy mode on (V5 sec F13): spoken/typed words are replaced by a marker at any
-    depth; ids, codes and status stay so a resend is still recognised and answered once."""
-    if not logs.privacy():
-        return body
-    if isinstance(body, list):
-        return [_at_rest(v) for v in body]
-    if not isinstance(body, dict):
-        return body
-    out = {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else _at_rest(v))
-           for k, v in body.items()}
-    if any(out[k] is NOT_KEPT for k in _TEXT_KEYS if k in out):
-        out["not_kept"] = True                       # a code, so a client can show the marker in its own language
-    return out
+    """The copy written to disk. Privacy mode on: words are replaced by a marker at any depth; ids, numbers, codes
+    and states stay so a resend is still recognised and answered once."""
+    return _blank(body) if logs.privacy() else body
 
 
 SCHEMA = """

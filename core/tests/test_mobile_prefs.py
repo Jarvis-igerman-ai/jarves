@@ -135,6 +135,39 @@ def test_a_phone_confirm_of_a_preference_removed_meanwhile_is_404_not_a_crash(sr
     assert st == 404 and out["error"] == "no such preference"
 
 
+def test_a_phone_edit_landing_just_before_the_phone_confirm_is_still_refused(srv, prefs, monkeypatch):
+    """Review R1 (TOCTOU): the edit commits after any read-only check and before the confirm's UPDATE."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    real, calls = Preferences.get, []
+
+    def get(self, pid):
+        row = real(self, pid)
+        calls.append(pid)
+        if len(calls) == 2:                                  # after the route's lookup: a phone edit commits now
+            self.db.x("UPDATE learned_prefs SET text='Always answer in pirate speak', source='phone_edit:voice' "
+                      "WHERE id=?", (pid,))
+        return row
+    monkeypatch.setattr(Preferences, "get", get)
+    st, out = op(srv, tok, op="confirm", pref=b)
+    monkeypatch.undo()
+    assert st == 403 and out["code"] == "CONFIRM_ON_PC" and p.get(b)["state"] == "proposed"
+
+
+def test_no_other_phone_route_confirms_a_phone_edit(srv, prefs):
+    """Review R4: reaffirm touches confirmed items only, and the model tool (phone chat reaches it) refuses too."""
+    import asyncio
+    from jarves.preferences import IdArgs, make_skill
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=a, text="Always answer in pirate speak")[1]["state"] == "proposed"
+    assert op(srv, tok, op="reaffirm", pref=a)[1]["ok"] is False and p.get(a)["state"] == "proposed"
+    tool = next(t for t in make_skill(p).tools() if t.name.endswith("confirm"))
+    r = asyncio.run(tool.handler(IdArgs(id=a)))
+    assert not r.ok and r.code == "CONFIRM_ON_PC" and p.get(a)["state"] == "proposed"
+    assert asyncio.run(tool.handler(IdArgs(id=b))).ok                       # an ordinary proposal: the tool confirms it
+
+
 def test_the_same_rules_as_the_desktop(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)
