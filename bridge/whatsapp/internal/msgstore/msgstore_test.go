@@ -69,3 +69,29 @@ func TestStore(t *testing.T) {
 		t.Fatal("wipe")
 	}
 }
+
+func TestOldestIsTheBackfillAnchor(t *testing.T) {
+	ctx := context.Background()
+	db, err := memdb.Open(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(ctx, db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := "972541112222@s.whatsapp.net"
+	if _, ok, err := s.Oldest(ctx, a); ok || err != nil {
+		t.Fatalf("empty chat ok=%v err=%v", ok, err)
+	}
+	_ = s.AddMessage(ctx, Message{ID: "B", Chat: a, TS: 200, Kind: "text"}, true, false)
+	_ = s.AddMessage(ctx, Message{ID: "A", Chat: a, TS: 100, Kind: "text", FromMe: true}, true, false)
+	_ = s.AddMessage(ctx, Message{ID: "Z", Chat: "1@s.whatsapp.net", TS: 1, Kind: "text"}, true, false)
+	if m, ok, err := s.Oldest(ctx, a); !ok || err != nil || m.ID != "A" || !m.FromMe || m.TS != 100 {
+		t.Fatalf("oldest %+v ok=%v err=%v", m, ok, err)
+	}
+	db.Close()
+	if _, _, err := s.Oldest(ctx, a); err == nil {
+		t.Fatal("closed db error swallowed")
+	}
+}
