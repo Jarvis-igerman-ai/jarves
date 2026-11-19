@@ -258,17 +258,23 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Bash(jarvis features list:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
     "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
-    "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+    "Bash(git worktree list:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
 )
-# #1311: run-time options of allowed tools that write a file at any path or run a command: git diff/log --output,
-# ruff --output-file/--cache-dir, pytest --junitxml/--basetemp/-o cache_dir/--log-file/--report-log/--cov-report/
-# --html/--rootdir, git rebase --exec/-x, git fetch --upload-pack and gh run download. Checked against the real Claude
-# Code matcher on 19 Nov 2026 (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+# #1311: run-time options of allowed tools that write a file at any path, run a command or reach the network: git
+# diff/log --output, ruff --output-file/-o/--cache-dir and any absolute, `..` or `~` path argument (ruff format/--fix
+# rewrite those files), pytest --junitxml/--basetemp/-o/--override-ini (log_file, cache_dir, also in a `-qo` cluster)/
+# --log-file/--report-log/--cov-report/--html/--rootdir/--debug/--pastebin, git rebase --exec/-x, git fetch
+# --upload-pack and gh run download. Globs are anchored to their tool so `grep -rn cache_dir` still works. The
+# --output/--exec forms were checked against the real Claude Code matcher on 19 Nov 2026; the rest is UNVERIFIED
+# there (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
 WORKER_WRITE_FLAG_DENY: tuple[str, ...] = (
-    "Bash(*--output*)", "Bash(*--junit*)", "Bash(*--basetemp*)", "Bash(*cache_dir*)", "Bash(*--cache-dir*)",
-    "Bash(*--log-file*)", "Bash(*--report-log*)", "Bash(*--result-log*)", "Bash(*--resultlog*)", "Bash(*--cov-report*)",
-    "Bash(*--html*)", "Bash(*--rootdir*)", "Bash(git rebase*--exec*)", "Bash(git rebase*-x*)", "Bash(*--upload-pack*)",
-    "Bash(gh run download*)",
+    "Bash(*--output*)", "Bash(*--junit*)", "Bash(*--basetemp*)", "Bash(*--log-file*)", "Bash(*--report-log*)",
+    "Bash(*--result-log*)", "Bash(*--resultlog*)", "Bash(*--cov-report*)", "Bash(*--rootdir*)", "Bash(*--upload-pack*)",
+    "Bash(pytest* -o*)", "Bash(pytest*--override-ini*)", "Bash(pytest*o log_file*)", "Bash(pytest*olog_file*)",
+    "Bash(pytest*o cache_dir*)", "Bash(pytest*ocache_dir*)", "Bash(pytest*--html*)", "Bash(pytest*--debug*)",
+    "Bash(pytest*--pastebin*)", "Bash(ruff* -o*)", "Bash(ruff*--cache-dir*)", "Bash(ruff* /*)", "Bash(ruff*=/*)",
+    "Bash(ruff*..*)", "Bash(ruff*~*)", "Bash(ruff*:/*)", "Bash(ruff*:\\*)",
+    "Bash(git rebase*--exec*)", "Bash(git rebase* -x*)", "Bash(gh run download*)",
 )
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",

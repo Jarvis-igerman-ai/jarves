@@ -87,10 +87,11 @@ def test_every_console_subcommand_the_worker_is_allowed_is_not_refused():
         assert wf.worker_refusal(["--home", "H", sub]) == "", sub
 
 
-# #1311: the default list must not admit run-time write/exec options. Hermetic model of Claude Code's matcher for the
-# deny side: a deny rule `Bash(pattern)` matches when the glob matches the whole command (deny wins over allow). The
-# real matcher was checked on 19 Nov 2026 (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+# #1311: the default list must not admit run-time write/exec options.
 def _denied(command: str) -> bool:
+    """A model of OUR deny rule set, not of Claude Code: each `Bash(glob)` is fnmatch-ed against the whole command. It
+    says nothing about how the real matcher splits compound commands or handles quoting; that is checked only by the
+    real-matcher run in docs/workflow/WORKER_PERMISSION_MODES.md ("Run-time matcher check"), re-run on matcher changes."""
     import fnmatch
     return any(fnmatch.fnmatchcase(command, r[5:-1]) for r in WORKER_DENY if r.startswith("Bash("))
 
@@ -101,20 +102,30 @@ def _denied(command: str) -> bool:
     "pytest -o cache_dir=/h/cd", "pytest --log-file=/h/l", "pytest --report-log=/h/r", "pytest --cov-report=xml:/h/c.xml",
     "pytest --html=/h/r.html", "pytest --rootdir=/h", "git rebase --exec 'python x.py' main", "git rebase -x 'sh x' main",
     "git fetch --upload-pack='sh x' origin", "gh run download 1 -D /h", "ls /h/autopilot.json",
+    # review of #1349: short and ini spellings, network, outside-path arguments
+    "ruff check . -o /h/x", "ruff check -o/h/x .", "pytest -o log_file=/h/x", "pytest --override-ini=log_file=/h/x",
+    "pytest -qo log_file=/h/x", "pytest -ocache_dir=/h/c", "pytest --debug=/h/x", "pytest --pastebin=all",
+    "git rebase -x'sh x' main", "ruff format /h/x.py", "ruff check --fix ../outside", "ruff format ~/x.py",
+    "ruff check --fix C:/h/x.py", "ruff format C:\\h\\x.py", "ruff check --fix=true --config=/h/r.toml .",
 ])
 def test_default_list_write_and_exec_options_are_denied(command):
     assert _denied(command), command
 
 
 @pytest.mark.parametrize("command", ["pytest -q tests/test_x.py", "git diff HEAD", "git log --oneline -5", "ruff check .",
-                                     "git rebase main", "gh run view 1 --log-failed", "git fetch origin"])
+                                     "git rebase main", "gh run view 1 --log-failed", "git fetch origin",
+                                     "grep -rn cache_dir core/", "git rebase origin/fix-xyz", "grep -rn -- --html docs/",
+                                     "ruff format core/src/jarves/x.py", "ruff check --fix core/tests",
+                                     "pytest -q -k log_file core/tests/test_logs.py", "git worktree list"])
 def test_ordinary_worker_commands_are_not_denied(command):
     assert not _denied(command), command
 
 
-@pytest.mark.parametrize("rule", ["Bash(npm:*)", "Bash(npx:*)", "Bash(jarvis features:*)", "Bash(jarvis doctor:*)"])
+@pytest.mark.parametrize("rule", ["Bash(npm:*)", "Bash(npx:*)", "Bash(jarvis features:*)", "Bash(jarvis doctor:*)",
+                                  "Bash(git worktree:*)"])   # review of #1349: `git worktree add <outside path>`
 def test_default_list_drops_script_runners_and_owner_switches(rule):
-    """npm/npx run any package script; `jarvis features on` installs packages; `jarvis doctor --live` costs money."""
+    """npm/npx run any package script; `jarvis features on` installs packages; `jarvis doctor --live` costs money;
+    `git worktree add` creates a checkout at any path (only `git worktree list` stays)."""
     assert rule not in WORKER_ALLOWED_TOOLS
 
 
