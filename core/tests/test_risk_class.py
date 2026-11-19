@@ -44,6 +44,14 @@ def test_543_signoff_paths_require_tier_r(path, caller):
         assert is_tier_r(files, set())
 
 
+def test_543_steward_cli_reports_signoff_as_high_risk(tmp_path, capsys):
+    """The merge steward runs `risk_class.py --files-from` and matches the words "high-risk path" (#543)."""
+    listing = tmp_path / "files.txt"
+    listing.write_text("docs/reviews/RELEASE_CHECKLIST_4.1.0.md\n", encoding="utf-8")
+    assert rc.main(["--files-from", str(listing)]) == 1
+    assert "high-risk path: docs/reviews/RELEASE_CHECKLIST_4.1.0.md" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("path", [
     "docs/reviews/FINDINGS_LEDGER.md", "docs/release_notes.md",
 ])
