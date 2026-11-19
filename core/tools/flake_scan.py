@@ -8,7 +8,8 @@ A failure counts as a flake when the SAME commit later passed: either a re-run a
 another jarves-checks run on the same head SHA succeeded (nothing in the code changed, so the failure was not the code).
 Failing test names come from the failed jobs' logs (pytest's "____ test_name ____" header plus the "tests/x.py:N:"
 line under it). Each flake gets an issue "Flaky test: <file>::<test>" (labels showstopper, P1, ci) with the failed run,
-the suspect PR and one log line; a later flake of the same test adds a comment, never a second issue. Quarantine itself
+the suspect PR and one log line; a later flake of the same test adds a comment, never a second issue; a
+closed issue absorbs every failure that started before it closed, and each new issue is linked on the tracker (#778). Quarantine itself
 is a one-line entry in core/tests/quarantine.toml (the issue says which). Tests already in the ledger are reported as
 "quarantined". Uses only `gh` (GITHUB_TOKEN with actions: read, issues: write) and the standard library.
 """
@@ -30,6 +31,7 @@ TIMEOUT_FRAME = re.compile(r"tests[\\/]+(test_\w+\.py)\", line \d+ in (test_\w+)
 PREPUSH_FAIL = re.compile(r"^\s*\w+\s+FAIL\s+[\d.]+s\s+tests[\\/]+(test_\w+\.py)::(test_\w+)")
 STAMP = re.compile(r"^[^\t]*\t[^\t]*\t\S+Z ")   # "<job name with spaces>\t<step>\t<timestamp> "
 TITLE = "Flaky test: "
+TRACKER = 778   # the one flaky-tests tracker (owner decision 1 Nov 2026); new flake issues are linked there
 # The repeated DST hour (Israel clocks went back 25 Oct 2026): clock-dependent tests failed for every PR, not as flakes.
 IGNORE_WINDOWS = [("2026-10-24T23:00:00Z", "2026-10-25T00:00:00Z")]
 
@@ -147,6 +149,15 @@ def issue_body(test: str, hits: list[dict]) -> str:
             "Opened by core/tools/flake_scan.py.")
 
 
+def _when(stamp) -> dt.datetime | None:
+    """An ISO time from gh ('...Z' or '+HH:MM') as an aware datetime; None when missing or unreadable."""
+    try:
+        t = dt.datetime.fromisoformat(str(stamp or "").strip())
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
 def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
     quarantined = ledger_ids()
     for test, hits in sorted(found.items()):
@@ -155,19 +166,34 @@ def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
         if not issues:
             continue
         title = TITLE + test
-        known = json.loads(gh("issue", "list", "-R", repo, "--state", "open", "--search", f"\"{title}\" in:title",
-                              "--json", "number,title,body"))
-        mine = [i for i in known if i["title"] == title]
-        if mine:
-            n = mine[0]["number"]
+        known = json.loads(gh("issue", "list", "-R", repo, "--state", "all", "--search", f"\"{title}\" in:title",
+                              "--json", "number,title,state,closedAt"))
+        mine = [i for i in known if i.get("title") == title]
+        live = [i for i in mine if str(i.get("state", "")).upper() == "OPEN"]
+        if live:
+            n = live[0]["number"]
             seen = gh("issue", "view", str(n), "-R", repo, "--comments", "--json", "body,comments")
             new = [h for h in hits if str(h["run"]) not in seen]
             if new:
                 gh("issue", "comment", str(n), "-R", repo, "--body",
                    "Flaked again:\n" + "\n".join(f"- run {h['run']} ({h['branch']}): {h['why']}" for h in new))
-        else:
-            gh("issue", "create", "-R", repo, "--title", title, "--label", "showstopper", "--label", "P1",
-               "--label", "ci", "--body", issue_body(test, hits))
+            continue
+        # #778: a closed issue (fixed, or closed as a duplicate into the tracker) covers every failure before it closed;
+        # only a failure that started later is a new flake, so old runs never re-open it.
+        closes = [t for t in (_when(i.get("closedAt")) for i in mine) if t]
+        if closes:   # with no closed issue there is nothing to compare, so every hit is filed
+            hits = [h for h in hits if (t := _when(h.get("started"))) and t > max(closes)]
+        if not hits:
+            print(f"  already handled by closed issue(s) {', '.join('#%s' % i['number'] for i in mine)}")
+            continue
+        url = gh("issue", "create", "-R", repo, "--title", title, "--label", "showstopper", "--label", "P1",
+                 "--label", "ci", "--body", issue_body(test, hits)).strip()
+        ref = "#" + url.rsplit("/", 1)[-1] if url else "(issue number unknown)"
+        try:   # best effort: the issue exists either way, and the next test still gets its issue
+            gh("issue", "comment", str(TRACKER), "-R", repo, "--body",
+               f"flake_scan: new flaky test `{test}` -> {ref} ({len(hits)} run(s)). Add it to this tracker's checklist.")
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"  warning: tracker #{TRACKER} not updated for {ref}: {e}")
     if not found:
         print("no flakes in the window")
     return 0
