@@ -54,7 +54,7 @@ SNOOZE_MAX_MIN = 24 * 60
 
 
 _TEXT_KEYS = ("reply", "text", "transcript")
-NOT_KEPT = "(answered; the text was not kept: privacy mode)"
+NOT_KEPT = "(answered; the text was not kept: privacy mode)"   # Hebrew: hebrew_parts/2026-11-19-intake-1099-206.json
 
 
 def _at_rest(body):
@@ -66,8 +66,11 @@ def _at_rest(body):
         return [_at_rest(v) for v in body]
     if not isinstance(body, dict):
         return body
-    return {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else _at_rest(v))
-            for k, v in body.items()}
+    out = {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else _at_rest(v))
+           for k, v in body.items()}
+    if any(out[k] is NOT_KEPT for k in _TEXT_KEYS if k in out):
+        out["not_kept"] = True                       # a code, so a client can show the marker in its own language
+    return out
 
 
 SCHEMA = """

@@ -46,9 +46,9 @@ def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
     assert body["reply"] == "another private answer" and not replay      # the live answer is untouched
     rows = c._rows("SELECT body FROM ledger")
     assert len(rows) == 2 and not any("private" in r["body"] for r in rows)
-    assert c.seen("d1", "cid-0001") == {"reply": continuity.NOT_KEPT, "turn": 7}     # a resend shows a marker, not a blank
+    assert c.seen("d1", "cid-0001") == {"reply": continuity.NOT_KEPT, "turn": 7, "not_kept": True}   # marker + code
     c.store("d1", "cid-0003", "plan", 200, {"plan": {"steps": [{"text": "nested private words", "id": 1}]}})
-    assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1}]}}   # review R3
+    assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1, "not_kept": True}]}}
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
 NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
@@ -346,6 +346,18 @@ def test_chat_resend_after_a_pc_restart_is_answered_from_the_ledger(srv, fake):
     st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-aaaaaaaa"})
     assert st == 200 and out["replay"] is True and out["reply"] == "echo: hi"
     assert fake.chats == ["hi"]
+
+
+def test_a_privacy_mode_chat_resend_carries_a_code_and_hebrew_text(srv, fake):
+    """Review R3: the replayed marker is flagged not_kept and also comes in Hebrew."""
+    from jarves import logs
+    tok, dev = pair(srv)
+    logs.set_privacy(True)                                   # restored by the autouse _full_text fixture above
+    assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})[1]["reply"] == "echo: hi"
+    srv.mobile._replies.clear()                                        # the in-memory copy is gone (PC restart)
+    st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})
+    assert st == 200 and out["replay"] is True and out["not_kept"] is True
+    assert out["reply"] == continuity.NOT_KEPT and out["reply_he"] == "(נענה; הטקסט לא נשמר: מצב פרטיות)"
 
 
 def test_a_late_replayed_chat_is_refused_stale(srv, fake):

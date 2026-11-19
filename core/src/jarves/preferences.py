@@ -46,13 +46,16 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # credential words (#1099): API keys, tokens, secrets, private keys (EN + HE)
     # (bare "token"/"secret" are left out: devmanager drafts such as "token refresh fails" must still save)
-    r"api[\s_-]?key\b|access[\s_-]?key\b|secret[\s_-]?key\b|private[\s_-]?key\b|client[\s_-]?secret|"
+    r"api[\s_-]?keys?\b|access[\s_-]?keys?\b|secret[\s_-]?keys?\b|private[\s_-]?keys?\b|client[\s_-]?secrets?|"
     r"(?:api|access|auth|bearer)[\s_-]?token|"
     r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
 # a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
 # ('.', '/' and '-' split the run: paths, URLs, versions, UUIDs and file names are not one key)
 _KEYLIKE = re.compile(r"[A-Za-z0-9_+=]{20,}")
 _ENTROPY_BITS = 3.5               # bits per character; English words and paths stay well below this
+# a code identifier (TestV5GoalPlansCancelRace2Handler) is mostly whole words; a random key is not
+_WORD = re.compile(r"[A-Z]?[a-z]{3,}")
+_WORDY = 0.6
 
 
 def _entropy(s: str) -> float:
@@ -62,13 +65,28 @@ def _entropy(s: str) -> float:
 
 def _keylike(text: str) -> bool:
     """A high-entropy key/token-shaped string: 20+ chars mixing upper case, lower case AND digits, >= 3.5 bits/char.
-    Lower-case-only hex (commit SHAs) is left to the known token shapes so development drafts can quote a SHA."""
+    Lower-case-only hex (commit SHAs) is left to the known token shapes so development drafts can quote a SHA, and a
+    run that is mostly whole words (a CamelCase code identifier) is not a key."""
     for m in _KEYLIKE.finditer(text):
         w = m.group(0)
         if (re.search(r"[A-Z]", w) and re.search(r"[a-z]", w) and re.search(r"\d", w)
-                and _entropy(w) >= _ENTROPY_BITS):
+                and _entropy(w) >= _ENTROPY_BITS
+                and sum(len(x) for x in _WORD.findall(w)) < _WORDY * len(w)):
             return True
     return False
+
+
+PHONE_EDIT = "phone_edit"           # V5 sec H2: wording changed on a phone; only the PC may confirm it
+
+
+def base_source(source: str) -> str:
+    """The original provenance of an item that carries an edit mark ('phone_edit:voice' -> 'voice')."""
+    mark, sep, rest = str(source or "").partition(":")
+    return rest if sep and mark == PHONE_EDIT else str(source or "")
+
+
+def phone_edited(row: dict | None) -> bool:
+    return bool(row) and str(row.get("source", "")).startswith(PHONE_EDIT) and row.get("state") != "confirmed"
 
 
 def looks_sensitive(text: str) -> bool:
@@ -135,8 +153,9 @@ class Preferences:
         r = self.get(pid)
         if not r:
             raise KeyError(pid)
-        now = self.clock()
-        self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", (now, now, pid))
+        now = self.clock()                  # a confirm ends the phone-edit mark: the original provenance comes back
+        self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=?, source=? WHERE id=?",
+                  (now, now, base_source(r["source"]), pid))
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
@@ -155,7 +174,7 @@ class Preferences:
     def edit(self, pid: int, text: str, *, by: str = "user", repropose: bool = False, source: str | None = None) -> dict:
         """Reword an item. `repropose` (the model's edit, V5 sec F2): a confirmed item goes back to 'proposed' so the
         new wording needs a fresh confirm before it can reach the instructions. `source` records who reworded it
-        (the phone sets 'phone_edit', which only the PC may confirm: V5 sec H2)."""
+        (the phone sets PHONE_EDIT, kept as 'phone_edit:<original>' until a confirm: V5 sec H2)."""
         t = _clean(text, MAX_TEXT)
         if not t or looks_sensitive(t):
             raise ValueError("empty or sensitive text: not stored")
@@ -166,13 +185,14 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
+        src = f"{source}:{base_source(cur['source'])}" if source else cur["source"]   # the original stays after ':'
         if repropose and cur["state"] == "confirmed":
             self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=?, "
-                      "source=COALESCE(?, source) WHERE id=?", (t, norm, self.clock(), source, pid))
+                      "source=? WHERE id=?", (t, norm, self.clock(), src, pid))
             logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
             return self._view(self.get(pid))
-        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=?, source=COALESCE(?, source) WHERE id=?",
-                  (t, norm, self.clock(), source, pid))
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=?, source=? WHERE id=?",
+                  (t, norm, self.clock(), src, pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
 
