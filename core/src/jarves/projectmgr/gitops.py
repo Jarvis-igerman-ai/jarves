@@ -111,14 +111,21 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     return wt
 
 
-def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -> tuple[Path, str]:
-    """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
+def rev(cwd: str | Path, ref: str) -> str:
+    """The commit SHA a ref points at now, or "" when there is none."""
+    p = git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+
+def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int, start: str = "") -> tuple[Path, str]:
+    """A fresh worktree on a fresh branch from `start`: the integration commit JARVES recorded (earlier tasks' code is
+    in it). Default: the integration branch name (only for callers without a recorded commit)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "worktree", "add", "-b", br, str(wt), start or integration_branch(pid))
     return wt, br
 
 

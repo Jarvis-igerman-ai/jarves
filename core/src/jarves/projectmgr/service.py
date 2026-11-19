@@ -276,6 +276,7 @@ class Manager(StageEngine):
             pid = self.db.add_project(name, str(root), clean(goal, 600), brief, check or [], runners_ or [],
                                       base_branch=base.strip() or state["branch"])
             gitops.ensure_integration(self.home, str(root), pid, base=start)
+            self.db.update_project(pid, integration_sha=gitops.rev(str(root), gitops.integration_branch(pid)))
         except (ValueError, gitops.GitError, OSError, sqlite3.Error) as e:
             if pid:
                 self.db.delete_project(pid)                       # no half-open project left behind
@@ -912,6 +913,9 @@ class Manager(StageEngine):
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
+            moved = self._int_moved(p)                                  # #1352: never ship a commit JARVES did not merge
+            if moved:
+                return _res(False, "MOVED", moved)
             if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
                                              {"project": p["name"], "branch": st["branch"]}):
                 return _res(False, "NOT_APPROVED", "not merged")

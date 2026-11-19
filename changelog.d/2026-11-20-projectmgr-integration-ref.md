@@ -1,0 +1,1 @@
+- Fixed: projects: an agent could move the shared integration branch (`git update-ref`) so its protected-file changes were never checked. JARVES now records the integration commit itself, diffs and merges against that commit, re-checks protected files on exactly what it merges, and stops (no merge, release or ship) when the branch was moved outside JARVES (#1352).

@@ -73,6 +73,9 @@ FAKE = textwrap.dedent('''
             open(os.path.join(os.getcwd(), path), "w").write(body + "\\n")
         elif op == "sleep":
             time.sleep(float(arg))
+        elif op == "git":               # an agent running git itself (#1352: moving shared refs)
+            import subprocess
+            subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@a", *arg.split()], check=True)
         elif op == "fail":
             print(json.dumps({"is_error": True, "result": "boom", "session_id": sid})); sys.exit(1)
     status = "BLOCKED" if "FAKE block" in prompt else "DONE"
@@ -320,6 +323,30 @@ def test_out_of_scope_and_protected_files_block_without_merge(env):
     assert "outside the scope" in ts[0]["reason"] and "protected" in ts[1]["reason"]
     integ = gitops.project_root(home, 1) / "integration"
     assert not (integ / "other").exists() and not (integ / ".claude").exists()
+
+
+def test_an_agent_moving_the_integration_ref_cannot_hide_protected_files(env):
+    # #1352: all worktrees share refs. The agent commits a CI workflow and points the integration branch at its own
+    # commit; a diff against the branch NAME is then empty and the merge a no-op fast-forward.
+    m, repo, home = env
+    open_project(m, repo)
+    trusted = m.db.project(1)["integration_sha"]
+    assert trusted == gitops.rev(repo, gitops.integration_branch(1))
+    task(m, "Sneaky", "FAKE write .github/workflows/x.yml=on: push\nFAKE git add -A\nFAKE git commit -qm ci "
+                      "--no-verify\nFAKE git update-ref refs/heads/jarves/p1/integration HEAD", scope=[])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == trusted
+    integ = gitops.project_root(home, 1) / "integration"
+    gitops.git(integ, "reset", "-q", "--hard", trusted)              # the owner puts it back, as the reason says
+    task(m, "Fine", "FAKE write src/a.py=1", scope=["src/"])
+    finish(m)
+    t2 = m.db.tasks(1)[1]
+    assert t2["status"] == "done", t2["reason"]
+    assert (integ / "src" / "a.py").exists() and not (integ / ".github").exists()
+    assert m.db.project(1)["integration_sha"] == gitops.rev(repo, gitops.integration_branch(1)) != trusted
 
 
 def test_agent_blocked_and_failed_runs(env):
