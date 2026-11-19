@@ -89,3 +89,45 @@ def test_failures_before_the_last_fix_or_in_the_dst_hour_are_not_reported():
              "b.py::test_dst": [hit("2026-10-24T23:30:00Z")]}
     kept = fs.drop_stale(found, lambda t: "2026-10-23T00:00:00Z")
     assert list(kept) == ["a.py::test_new"]
+
+
+def _fake_gh(issues):
+    """A recording stand-in for `gh`: `issue list` returns `issues`, `issue create` returns the new issue's URL."""
+    calls = []
+
+    def gh(*args):
+        calls.append(args)
+        if args[:2] == ("issue", "list"):
+            return __import__("json").dumps(issues)
+        if args[:2] == ("issue", "create"):
+            return "https://github.com/o/r/issues/901\n"
+        return ""
+    return gh, calls
+
+
+def _hit(started, run=7):
+    return {"run": run, "branch": "b", "prs": [], "why": "re-run attempt 2 green", "line": "l", "started": started}
+
+
+def test_a_duplicate_closed_into_the_tracker_is_not_reopened_by_old_failures(monkeypatch):
+    """#778: a showstopper closed as a duplicate of the tracker came back on the next scan for the SAME old runs."""
+    title = fs.TITLE + "a.py::test_x"
+    gh, calls = _fake_gh([{"number": 707, "title": title, "state": "CLOSED", "closedAt": "2026-11-02T00:00:00Z"}])
+    monkeypatch.setattr(fs, "gh", gh)
+    fs.report("o/r", {"a.py::test_x": [_hit("2026-11-01T10:00:00Z")]}, issues=True)
+    assert [c for c in calls if c[0] == "issue" and c[1] in ("create", "comment")] == []
+    assert "--state" in calls[0] and calls[0][calls[0].index("--state") + 1] == "all"
+
+
+def test_a_new_flake_opens_one_issue_and_updates_the_tracker(monkeypatch):
+    """#778: flake_scan keeps the one flaky-tests tracker current instead of leaving it to hand edits."""
+    title = fs.TITLE + "a.py::test_x"
+    gh, calls = _fake_gh([{"number": 707, "title": title, "state": "CLOSED", "closedAt": "2026-11-02T00:00:00Z"}])
+    monkeypatch.setattr(fs, "gh", gh)
+    fs.report("o/r", {"a.py::test_x": [_hit("2026-11-01T10:00:00Z", 5), _hit("2026-11-03T10:00:00Z", 6)]}, issues=True)
+    creates = [c for c in calls if c[:2] == ("issue", "create")]
+    assert len(creates) == 1
+    body = creates[0][creates[0].index("--body") + 1]
+    assert "run 6 " in body and "run 5 " not in body                        # only failures after the duplicate closed
+    tracker = [c for c in calls if c[:3] == ("issue", "comment", str(fs.TRACKER))]
+    assert len(tracker) == 1 and "#901" in " ".join(tracker[0]) and "a.py::test_x" in " ".join(tracker[0])
