@@ -52,7 +52,8 @@ def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
     assert len(rows) == 2 and not any("private" in r["body"] for r in rows)
     assert c.seen("d1", "cid-0001") == {"reply": continuity.NOT_KEPT, "turn": 7, "not_kept": True}   # marker + code
     c.store("d1", "cid-0003", "plan", 200, {"plan": {"steps": [{"text": "nested private words", "id": 1}]}})
-    assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1, "not_kept": True}]}}
+    assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1, "not_kept": True}]},
+                                        "not_kept": True}         # #1369 R4: flagged at the top for mobile.serve
 
 
 def test_resend_ledger_keeps_only_codes_and_numbers_when_privacy_is_on(tmp_path):
@@ -116,7 +117,22 @@ def test_the_key_decides_what_is_kept_lists_are_always_blanked(tmp_path):
     logs.set_privacy(True)
     c = Continuity(tmp_path)
     c.store("d1", "cid-0011", "pref", 200, {"code": ["A"], "turn_id": "t-1", "status": "ok"})
-    assert c.seen("d1", "cid-0011") == {"code": [continuity.NOT_KEPT], "turn_id": "t-1", "status": "ok"}
+    assert c.seen("d1", "cid-0011") == {"code": [continuity.NOT_KEPT], "turn_id": "t-1", "status": "ok",
+                                        "not_kept": True}
+
+
+def test_free_text_under_a_kept_key_or_as_a_key_is_blanked(tmp_path):
+    """#1369 review R1/R2: a kept key keeps only a code-shaped string; a free-text dict key becomes its position."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.store("d1", "cid-0012", "pref", 200, {"status": "waiting for my sister's visit", "code": "CONFIRM_ON_PC",
+                                            "by_topic": {"my private topic": 2, "jazz": 1}, "kind": "voice.edit"})
+    assert not any(w in r["body"] for r in c._rows("SELECT body FROM ledger") for w in ("sister", "private topic"))
+    assert c.seen("d1", "cid-0012") == {"status": continuity.NOT_KEPT, "code": "CONFIRM_ON_PC",
+                                        "by_topic": {"k0": 2, "jazz": 1}, "kind": "voice.edit", "not_kept": True}
+    c.store("d1", "cid-0013", "plan", 200, {"ok": True, "plan": {"steps": [{"why": "nested words"}]}})
+    assert c.seen("d1", "cid-0013")["not_kept"] is True     # R4: only nested markers, still flagged at the top
 
 
 class Clock:

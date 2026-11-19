@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -55,10 +56,12 @@ SNOOZE_MAX_MIN = 24 * 60
 
 # V5 sec F13: in privacy mode only these string fields (plus ids: id, cid, *_id) rest on disk (codes, states and kinds,
 # never words); every other non-empty string at any depth (reply, text, transcript, title, error, ...) becomes the
-# marker. An allowlist, so a new free-text field in a ledgered body is blanked by default. The key decides: a string
-# directly under a kept key stays, whatever it says; a string inside a list has no key of its own and is always
-# blanked (so {"code": ["A"]} is blanked too; no ledgered body holds a list of codes today).
+# marker. An allowlist, so a new free-text field in a ledgered body is blanked by default. A string under a kept key
+# stays only while it has a code shape (#1369 review R2: free text under "status" is blanked too); a string inside a
+# list has no key of its own and is always blanked. Dict keys are field names: one that is not a code shape (a title
+# or topic used as a key) is replaced by its position, "k0", "k1", ... (review R1).
 _KEPT_STRINGS = frozenset(("code", "state", "status", "kind", "op"))
+_CODE = re.compile(r"[A-Za-z0-9_.:-]{1,40}")
 NOT_KEPT = "(answered; the text was not kept: privacy mode)"   # Hebrew: hebrew_parts/2026-11-19-intake-1099-206.json
 
 
@@ -67,17 +70,38 @@ def _kept(key) -> bool:
     return isinstance(key, str) and (key in _KEPT_STRINGS or key in ("id", "cid") or key.endswith("_id"))
 
 
+def _key(k, i: int):
+    return k if not isinstance(k, str) or _CODE.fullmatch(k) else f"k{i}"
+
+
 def _blank(v, key=None):
     if isinstance(v, list):
         return [_blank(x) for x in v]
     if isinstance(v, dict):
-        out = {k: _blank(x, k) for k, x in v.items()}
+        out = {_key(k, i): _blank(x, k) for i, (k, x) in enumerate(v.items())}
         if any(x is NOT_KEPT for x in out.values()):
             out["not_kept"] = True                   # a code, so a client can show the marker in its own language
         return out
-    if isinstance(v, str) and v.strip() and not _kept(key):
+    if isinstance(v, str) and v.strip() and not (_kept(key) and _CODE.fullmatch(v)):
         return NOT_KEPT
     return v                                         # numbers, booleans, None, empty strings, kept codes
+
+
+def _has_marker(v) -> bool:
+    if isinstance(v, dict):
+        return any(_has_marker(x) for x in v.values())
+    if isinstance(v, list):
+        return any(_has_marker(x) for x in v)
+    return v is NOT_KEPT or v == NOT_KEPT
+
+
+def _blank_body(body):
+    """The stored body: blanked, and flagged not_kept at the top when a marker sits at any depth (review R4), so a
+    replay whose only markers are nested (a plan's steps) still gets the Hebrew marker in mobile.serve."""
+    out = _blank(body)
+    if isinstance(out, dict) and _has_marker(out):
+        out["not_kept"] = True
+    return out
 
 
 SCRUBBED_KEY = "ledger.scrubbed"                     # kv: "1" = privacy on and every ledger row already blanked
@@ -135,14 +159,14 @@ class Continuity:
             self._set(SCRUBBED_KEY, "1")
             for r in self._rows("SELECT device, cid, body FROM ledger"):
                 old = json.loads(r["body"])
-                new = _blank(old)
+                new = _blank_body(old)
                 if new != old:
                     self._x("UPDATE ledger SET body=? WHERE device=? AND cid=?", (json.dumps(new), r["device"], r["cid"]))
 
     def _put(self, device: str, cid: str, kind: str, status: int, body: dict, ts: float) -> None:
         private = logs.privacy()
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(_blank(body) if private else body), ts))
+                (device, cid, kind, int(status), json.dumps(_blank_body(body) if private else body), ts))
         if not private:
             self._set(SCRUBBED_KEY, "0")             # full text on disk again: the next privacy-on use scrubs it
 

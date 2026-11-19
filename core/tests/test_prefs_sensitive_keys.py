@@ -60,3 +60,19 @@ def test_dev_drafts_skip_credential_words_but_not_real_keys():
     assert not looks_sensitive("access token expiry not shown", credential_words=False)
     assert looks_sensitive("key is sk-proj-Ab3dEf9hIjK2mNoPqR7sTuVwXyZ01234", credential_words=False)
     assert looks_sensitive("my password is hunter2", credential_words=False)
+
+
+@pytest.mark.parametrize("text", ["my api key for the bot", "use sk-abcDEF1234567890xyz", "Zq8vX2mK9pLr4TnW7yBc3HdF"])
+def test_goals_and_plans_refuse_key_shaped_text(tmp_path, text):
+    """#1369 review R5: goals and goal plans reuse looks_sensitive, so a key/token-shaped title is not stored."""
+    from jarves import goal_plans, goals
+    from jarves.userdata import open_db
+    db = open_db(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="sensitive"):
+            goals.Goals(db).add(text)
+        with pytest.raises(ValueError, match="sensitive"):
+            goal_plans.PlanStore(db).propose(text, [{"tool": "t", "args": {}, "why": "w"}])
+        assert not db.rows("SELECT id FROM goals") and not db.rows("SELECT id FROM goal_plans")
+    finally:
+        db.close()
