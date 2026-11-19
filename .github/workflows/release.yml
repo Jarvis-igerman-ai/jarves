@@ -99,8 +99,14 @@ jobs:
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}
         run: python3 packaging/release.py public-publish --dir dist --dry-run
-      - name: Publish the stable release (signed latest.json, newest 3 kept)
+      - name: Refuse a real publish outside the tag ref (#544)
+        id: publish_guard
         if: ${{ env.DRY_RUN != 'true' }}
+        run: |
+          # a branch named like a tag (refs/heads/v4.5.0) or any non-tag ref never reaches the step holding the secrets
+          [ "$REF_TYPE" = "tag" ] && [ "$GITHUB_REF" = "refs/tags/$TAG" ] || { echo "::error::a real release runs only on the tag ref refs/tags/$TAG (this run: ${GITHUB_REF:-unset}, ref type ${REF_TYPE:-unset})"; exit 1; }
+      - name: Publish the stable release (signed latest.json, newest 3 kept)
+        if: ${{ env.DRY_RUN != 'true' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v') }}
         env:
           RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           RELEASES_REPO: ${{ vars.RELEASES_REPO }}
