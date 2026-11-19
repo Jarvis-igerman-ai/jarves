@@ -153,7 +153,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
+        self.assertTrue((self.home / unlock.FILE).exists())           # #1265: the code survives; only this session is out
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
         self.server.unlock_attempts.clear()
         unlock.issue(self.home)
@@ -161,7 +161,8 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+    def test_wrong_tries_from_other_sessions_do_not_cancel_the_owner_code(self):
+        # #1265: a token-only holder opening many sessions must not cancel the owner's live code.
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
@@ -170,10 +171,26 @@ class UnlockTests(unittest.TestCase):
             self.login()
             statuses.append(self.request("/api/unlock", {"code": wrong})[0])
         self.assertEqual(statuses, [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        self.assertTrue((self.home / unlock.FILE).exists())           # not cancelled
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit still holds
         self.server.unlock_attempts.clear()
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+        self.cookie = ""
+        self.login()                                                   # the owner's own session
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_five_wrong_tries_lock_only_that_session_out_of_the_code(self):
+        # #1265: the per-code wrong-try cap is per session; a capped session cannot keep guessing.
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
+        self.server.unlock_attempts.clear()
+        status, _, body = self.request("/api/unlock", {"code": shown})
+        self.assertEqual((status, body.get("locked")), (403, True))     # even the right code is refused here
+        self.assertTrue((self.home / unlock.FILE).exists())
+        self.cookie = ""
+        self.login()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()

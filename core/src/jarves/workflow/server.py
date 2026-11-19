@@ -156,7 +156,9 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        # (code salt, {session: wrong tries}); 5 lock that session out of the current code (#1265: not cancel it
+        # for everyone). Cross-session guesses stay bounded by unlock_attempts (5 a minute) and the code expiry.
+        self.unlock_wrong: tuple[str, dict[str, int]] = ("", {})
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -468,17 +470,15 @@ class Handler(BaseHTTPRequestHandler):
                 salt = json.loads(path.read_text(encoding="ascii"))["salt"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
-                # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
-                prev_salt, n = self.server.unlock_wrong
-                n = (n if prev_salt == salt else 0) + 1
-                if n >= 5:
-                    path.unlink(missing_ok=True)
-                    n = 0
-                self.server.unlock_wrong = (salt, n)
+            prev_salt, wrong = self.server.unlock_wrong
+            # #1265: count per session, so token-only callers cannot cancel the owner's live code for everyone.
+            wrong = {k: n for k, n in wrong.items() if k in self.server.sessions} if prev_salt == salt else {}
+            if wrong.get(session, 0) >= 5 or not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+                wrong[session] = min(wrong.get(session, 0) + 1, 5)
+                self.server.unlock_wrong = (salt, wrong)
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
-            self.server.unlock_wrong = ("", 0)
+            self.server.unlock_wrong = ("", {})
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             ttl = owner_unlock_s(self.server.home)
             self.server.unlocked[session] = now + ttl
