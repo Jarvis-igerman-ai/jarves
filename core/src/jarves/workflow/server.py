@@ -197,7 +197,9 @@ class Server(ThreadingHTTPServer):
 
 
 UNLOCK_WRONG_PER_SESSION = 3  # #1265: wrong unlock codes one session may send per code; more are refused, the code stays
-UNLOCK_WRONG_TOTAL = 25       # #1265: wrong codes over all sessions that cancel the code (at most 0.25% of 10,000 guessed)
+UNLOCK_WRONG_TOTAL = 10       # #1265: wrong codes over all sessions that cancel the code (at most 0.1% of 10,000 guessed)
+# A new session needs a login with the token, and _login allows 10 a minute (pinned by test_login_limit_bounds_unlock_sessions),
+# so per-session counts cannot be reset faster than that; UNLOCK_WRONG_TOTAL bounds guesses per code regardless.
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -474,6 +476,7 @@ class Handler(BaseHTTPRequestHandler):
                 salt = json.loads(path.read_text(encoding="ascii"))["salt"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
+            # Counters below are read, mutated in place and stored only inside this `with session_lock` block.
             prev_salt, total, per_session = self.server.unlock_wrong
             if prev_salt != salt:
                 total, per_session = 0, {}

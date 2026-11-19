@@ -183,17 +183,22 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for i in range(server.UNLOCK_WRONG_TOTAL):                     # a fresh session every 3 tries
+        for i in range(10):                                            # review R1: at most 10 (0.1%), fresh session every 3
             if i % server.UNLOCK_WRONG_PER_SESSION == 0:
                 self.cookie = ""
                 self.login()
             self.server.unlock_attempts.clear()
             statuses.append(self.request("/api/unlock", {"code": wrong})[0])
-        self.assertEqual(statuses, [403] * server.UNLOCK_WRONG_TOTAL)
+        self.assertEqual(statuses, [403] * 10)
         self.assertFalse((self.home / unlock.FILE).exists())          # cancelled at the total backstop
         self.cookie = ""
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+
+    def test_login_limit_bounds_unlock_sessions(self):
+        # #1265 relies on this: fresh sessions (fresh per-session unlock tries) cost a token login, 10 a minute.
+        statuses = [self.request("/api/session", {"token": self.server.token})[0] for _ in range(11)]
+        self.assertEqual(statuses, [200] * 10 + [429])
 
     def test_wrong_tries_reset_for_a_new_code(self):
         unlock.issue(self.home)
