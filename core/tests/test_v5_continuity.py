@@ -47,6 +47,8 @@ def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
     rows = c._rows("SELECT body FROM ledger")
     assert len(rows) == 2 and not any("private" in r["body"] for r in rows)
     assert c.seen("d1", "cid-0001") == {"reply": continuity.NOT_KEPT, "turn": 7}     # a resend shows a marker, not a blank
+    c.store("d1", "cid-0003", "plan", 200, {"plan": {"steps": [{"text": "nested private words", "id": 1}]}})
+    assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1}]}}   # review R3
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
 NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()

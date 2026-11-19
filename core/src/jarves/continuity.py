@@ -38,16 +38,6 @@ feat.register(FEATURE, "אותות יזומים", "Proactive signals", False, ap
 DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
-_TEXT_KEYS = ("reply", "text", "transcript")
-NOT_KEPT = "(answered; the text was not kept: privacy mode)"
-
-
-def _at_rest(body):
-    """The copy written to disk. Privacy mode on (V5 sec F13): spoken/typed words are blanked; ids, codes and
-    status stay so a resend is still recognised and answered once."""
-    if not logs.privacy() or not isinstance(body, dict):
-        return body
-    return {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else v) for k, v in body.items()}
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
 SENT_TIMEOUT_S = 15 * 60       # a notice sent to a device that never acknowledged and went silent is re-routed
@@ -61,6 +51,24 @@ DEVICES = ("desktop", "phone")
 DEFAULT_HOURLY = 2
 DEFAULT_DAILY = 6
 SNOOZE_MAX_MIN = 24 * 60
+
+
+_TEXT_KEYS = ("reply", "text", "transcript")
+NOT_KEPT = "(answered; the text was not kept: privacy mode)"
+
+
+def _at_rest(body):
+    """The copy written to disk. Privacy mode on (V5 sec F13): spoken/typed words are replaced by a marker at any
+    depth; ids, codes and status stay so a resend is still recognised and answered once."""
+    if not logs.privacy():
+        return body
+    if isinstance(body, list):
+        return [_at_rest(v) for v in body]
+    if not isinstance(body, dict):
+        return body
+    return {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else _at_rest(v))
+            for k, v in body.items()}
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger (device TEXT NOT NULL, cid TEXT NOT NULL, kind TEXT NOT NULL, status INTEGER NOT NULL,
