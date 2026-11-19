@@ -122,3 +122,20 @@ def test_attach_passenger_reuses_one_connection(tmp_path, monkeypatch):
     gate = dm.attach(reg, SimpleNamespace(active=lambda f: True), tmp_path)
     assert [gate.passenger(), gate.passenger(), gate.passenger()] == ["ask"] * 3
     assert len(opened) == 1
+
+
+def test_whatsapp_send_declares_real_target_for_drive_gate(tmp_path):
+    """JAR-257: the real whatsapp_send Tool declares a target (the draft's number, not the display name), so the
+    drive Gate lets a saved contact through and defers a same-named stranger or an unknown (LID) number."""
+    from jarves import whatsapp_bridge as wb
+    skill = wb.WhatsAppBridgeSkill(tmp_path)
+    tool = next(t for t in skill.tools() if t.name == "whatsapp_send")
+    assert tool.target is not None and tool.recipient is not None
+    gate = _gate(tmp_path, "+972541234567")
+    for draft, known in (({"name": "Dana", "number": "972541234567"}, True),
+                         ({"name": "Dana", "number": "972509999999"}, False),
+                         ({"name": "Dana"}, False)):
+        skill._drafts["d1"] = draft
+        args = SimpleNamespace(draft_id="d1")
+        assert tool.recipient(args) == "Dana"
+        assert gate.known(tool.recipient(args), tool.target(args)) is known

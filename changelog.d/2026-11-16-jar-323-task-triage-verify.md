@@ -1,0 +1,1 @@
+- Added: a check report showing that "tasks from messages" (one card at a time, Add / Edit / Skip, one approval for Any.do) is on main with tests; a real-account test is still open (JAR-323).

@@ -16,7 +16,11 @@ from pathlib import Path
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
 # files an agent may never change: they would widen the permissions of every later task or run code on its own
-PROTECTED = (".claude/", ".codex/", ".opencode/", ".git/", ".githooks/", "opencode.json", ".mcp.json", ".gitmodules")
+# (.github/ holds CI workflows that run with the repository's secrets). Matched case-insensitively (JAR-317): Windows
+# and macOS file systems ignore case, so `.Claude/settings.json` or `.GitHub/workflows/x.yml` is the same file.
+PROTECTED = (".claude/", ".codex/", ".opencode/", ".git/", ".githooks/", ".github/", "opencode.json", ".mcp.json",
+             ".gitmodules")
+PROTECTED_NAMES = ("opencode.json", ".mcp.json")       # protected in any folder
 ENV_KEEP = ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT",
             "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL", "TERM", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
             "CLAUDE_CONFIG_DIR", "CODEX_HOME", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "HOMEDRIVE",
@@ -150,8 +154,11 @@ def commit_all(wt: Path, message: str) -> bool:
 
 
 def changed_files(wt: Path, base: str) -> list[str]:
-    out = git(wt, "diff", "--name-only", f"{base}...HEAD").stdout
-    return [x.strip().replace("\\", "/") for x in out.splitlines() if x.strip()]
+    """Every path the task changed, as plain text. -z: git would otherwise print a non-ASCII name in quotes
+    (octal escapes inside `"..."`), which no PROTECTED prefix matches. --no-renames: a rename lists both
+    sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
+    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
+    return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
 def diffstat(wt: Path, base: str) -> str:
@@ -171,21 +178,38 @@ def in_scope(path: str, scope: list[str]) -> bool:
     return False
 
 
+# a Windows 8.3 short name (`CLAUDE~1`, `GITHUB~1.YML`): a Windows checkout writes `CLAUDE~1/x` into the existing
+# `.claude/` folder, so the name cannot be matched against PROTECTED. Refused in any folder (JAR-574)
+_SHORT_NAME = re.compile(r"^[^.~/]{1,6}~\d+(\.[^./]{0,3})?$")
+
+
+def is_protected(path: str) -> bool:
+    """True for a file an agent may never change, in any letter case and with either slash."""
+    p = path.replace("\\", "/").casefold()
+    parts = p.split("/")
+    return (p.startswith(PROTECTED) or parts[-1] in PROTECTED_NAMES
+            or any(_SHORT_NAME.match(x) for x in parts))
+
+
 def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]]:
     """(protected files touched, files outside the declared scope)."""
-    prot = [f for f in files if f.startswith(PROTECTED) or f.split("/")[-1] in ("opencode.json", ".mcp.json")]
+    prot = [f for f in files if is_protected(f)]
     out = [f for f in files if f not in prot and not in_scope(f, scope)]
     return prot, out
 
 
 def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
-    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason."""
-    p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
-    if p.returncode == 0:
-        return []
-    files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
-    git(wt, "merge", "--abort", check=False)
+    (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
+    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
+    common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
+    root = (Path(wt) / common).resolve() if common else Path(wt)
+    with _repo_lock(root.parent if root.name == ".git" else root):
+        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        if p.returncode == 0:
+            return []
+        files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
+        git(wt, "merge", "--abort", check=False)
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]

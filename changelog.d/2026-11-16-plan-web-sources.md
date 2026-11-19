@@ -1,0 +1,1 @@
+- Fixed: answers from the ChatGPT-plan connection now end with the same "Sources:" line (up to three cited sites) as the API-key connection when JARVES searched the web (JAR-322).

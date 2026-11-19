@@ -1,0 +1,1 @@
+- Added: a deterministic regression test that a browser driver reaped right after the liveness probe counts as dead, pinning the nightly flake fixed by JAR-518 (JAR-523, run 44065078703).

@@ -334,3 +334,62 @@ def test_jarves_checks_has_no_duplicate_job_keys_and_browser_retry_fails_closed(
     doc = yaml.load((ROOT / ".github" / "workflows" / "jarves-checks.yml").read_text(encoding="utf-8"), Loader=Strict)
     runs = " ".join(s.get("run", "") for s in doc["jobs"]["browser"]["steps"])
     assert "ci_flake.py failed-files --any" in runs and "python3 - <<" not in runs and "first-junit.xml" in runs
+
+
+def test_changelog_fragment_only_change_skips_the_heavy_matrix():
+    """#873: a push that only adds/fixes changelog.d fragments started the whole ~16-job matrix (Windows shards,
+    real browser, installer) on the 20 shared runners. A fragment is checked by test_changelog_parts on the Linux
+    shard, so it runs like a guides-only change: Linux core shards only; code next to it still gets everything."""
+    sys.path.insert(0, str(ROOT / "core" / "tools"))
+    import ci_plan
+    for event in ("pull_request", "merge_group"):
+        only = ci_plan.classify(["changelog.d/2026-11-18-x.md"], event)
+        assert only["code"] and not any(v for k, v in only.items() if k != "code"), only
+        with_docs = ci_plan.classify(["changelog.d/2026-11-18-x.md", "docs/zz_unreferenced_note.md"], event)
+        assert with_docs["code"] and not with_docs["full"]
+        assert ci_plan.classify(["changelog.d/2026-11-18-x.md", "core/src/jarves/cli.py"], event)["full"]
+    assert not ci_plan.CHANGELOG.match("changelog.d/sub/x.md") and not ci_plan.CHANGELOG.match("changelog.d/x.py")
+
+
+def _curl_commands(run):
+    """Every curl invocation in a run script, as (command, what its stdout is piped into or '')."""
+    out = []
+    for line in run.splitlines():
+        if "curl " in line:
+            cmd, _, sink = line[line.index("curl "):].partition("|")
+            out.append((cmd, sink.strip()))
+    return out
+
+
+def _download_problem(cmd, sink):
+    """Why one curl download is unsafe, or None: it must fail on HTTP errors, retry, and not stream into an extractor."""
+    flags = cmd.split()
+    short = "".join(x[1:] for x in flags if x.startswith("-") and not x.startswith("--"))
+    if "f" not in short and "--fail" not in flags:
+        return "curl without -f"
+    if "--retry" not in flags:
+        return "curl without --retry"
+    if (sink.split() or [""])[0] in ("tar", "unzip", "sh", "bash"):
+        return f"curl piped into {sink}"
+    return None
+
+
+def test_tool_downloads_fail_fast_retry_and_never_pipe_into_an_extractor():
+    # JAR-554 / JAR-535: run 44272296783 went red because `curl -sSL URL | tar xJ` handed tar a non-archive body.
+    found = 0
+    for f in sorted(WF.glob("*.yml")):
+        for jid, job in load(f.name)["jobs"].items():
+            for step in job.get("steps", []):
+                for cmd, sink in _curl_commands(step.get("run") or ""):
+                    found += 1
+                    assert _download_problem(cmd, sink) is None, f"{f.name}:{jid}: {_download_problem(cmd, sink)}: {cmd}"
+    assert found >= 5   # the FreeCAD, Blender and Godot downloads are really checked
+
+
+def test_curl_guard_catches_the_run_44272296783_line_and_each_unsafe_form():
+    bad = "[ -x b/blender ] || curl -sSL https://download.blender.org/x.tar.xz | tar xJ"
+    assert _curl_commands(bad) == [("curl -sSL https://download.blender.org/x.tar.xz ", "tar xJ")]
+    assert _download_problem(*_curl_commands(bad)[0]) == "curl without -f"
+    assert _download_problem("curl -fsSL -o a.tar.xz https://x", "") == "curl without --retry"
+    assert _download_problem("curl -fsSL --retry 4 https://x ", "tar xJ") == "curl piped into tar xJ"
+    assert _download_problem("curl --fail -sSL --retry 4 https://x ", "sha256sum -c -") is None

@@ -415,8 +415,9 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     assert r.chat.silent_state() == {"on": True, "setting": True, "quiet_hours": False}
     r.chat.submit("quiet please", client="owner", speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t2")
-    assert len(spoken) == 1, spoken                                          # #722: show what spoke if it flakes again
-    assert next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")["spoken"] is False
+    t2 = next(e for e in ev if e["type"] == "reply" and e["turn"] == "t2")
+    assert t2["spoken"] is False
+    assert t2["text"] not in spoken, spoken                                  # #722: the silent reply itself was never spoken
     # a silent turn that asks for approval reaches channels with CHAT_TURN.silent set (face / voice channels refuse it)
     r.chat.submit("send the report", client="owner")
     asked = _wait_pending(r)
@@ -432,8 +433,8 @@ def test_silent_turns_never_speak_ring_or_light_the_face(rig):
     r.chat.set_silent(False)
     code, out = r.chat.submit("phone says hi", client="dev", device=True, speak=True)
     ev, _, _ = collect(owner_poll(r), "reply", "t4")
-    assert len(spoken) == 1, spoken
-    assert next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")["spoken"] is False
+    t4 = next(e for e in ev if e["type"] == "reply" and e["turn"] == "t4")
+    assert t4["spoken"] is False and t4["text"] not in spoken, spoken
     assert chat_engine.COMMANDS and r.chat.state(device=True)["can_speak"] is False
 
 
@@ -652,9 +653,11 @@ def test_dashboard_chat_api_and_feature_switch(rig):
     st, s = owner_req(d, "POST", "/api/chat/silent", {"on": True})
     assert st == 200 and s["silent"]["setting"] is True
     assert owner_req(d, "POST", "/api/chat/silent", {"on": "yes"})[0] == 400
-    from jarves.features import Features
-    time.sleep(1.1)                        # other processes are picked up within a second (features._refresh)
-    Features(r.cfg, r.home).set("web_chat", False)
+    from jarves.features import Features, _ctx_features
+    Features(r.cfg, r.home).set("web_chat", False)  # "another process" writes the switch
+    served = _ctx_features(d.ctx)
+    served._mtime = None                   # same-tick mtime must not hide the write
+    served.poll()                          # what the 1 s refresh does, without waiting for the real clock
     st, body = owner_req(d, "GET", "/api/chat/state")
     assert st == 403 and body["code"] == "CHAT_FEATURE_OFF"
     assert owner_req(d, "POST", "/api/chat/send", {"text": "x"})[1]["code"] == "CHAT_FEATURE_OFF"

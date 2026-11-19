@@ -10,7 +10,8 @@ Two phases, because setup force-stops every process that runs from {app}\\python
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
     waits for the setup PROCESS to exit and starts phase two.
   finish (`install-latest --finish STATE`, started by the waiter from the NEW program, never while setup runs): waits for
-    the new Core when it ran, then runs version check, doctor, selftest and status in fresh processes, rolls back by itself
+    the new Core when it ran and, without its ready mark in time, starts the Core again from the new program; then
+    runs version check, doctor, selftest and status in fresh processes, rolls back by itself
     when a check fails, writes the ONE short report to <home>/updates/install-latest-report.txt and prints it.
   `jarvis install-latest --report` prints the last report again (the first process is gone after setup stopped it).
 
@@ -340,6 +341,28 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     return finish(deps, state)
 
 
+def _core_on_new_version(deps: Deps, rep: Report, end: str) -> bool:
+    """The Core ran before setup, so the NEW version must run afterwards. The proof is the new Core's own CORE_READY
+    mark (updates.mark_healthy writes it only when its build version is the target; `wait` reads it as 'done'). The
+    status reply's `version` is the package constant, not the build, so it is not compared. Setup's /RESTARTJARVES
+    normally brings the Core back; without a ready mark in time, a Core that still answers is stopped, the Core is
+    started again from this (new) program and the mark is awaited once more. Worst case on that path: the first
+    `wait` (updates.watch, 420 s in real_deps) + `jarvis start` (90 s) + a second `wait` (420 s), about 16 minutes;
+    the report says which step ended it. If the restart fails, the rollback in `finish` stops a running Core first."""
+    name = "Core on the new version"
+    if end == "done":
+        return rep.add(name, True, "the new Core reported ready")
+    try:
+        if deps.core_running():
+            deps.stop_core()                              # it answers but never became ready (stuck or still the old one)
+        deps.start_core()
+        again = deps.wait(True)
+    except Exception as e:                                # noqa: BLE001  (a failed restart is a failed check, no traceback)
+        return rep.add(name, False, f"restart failed: {type(e).__name__}")
+    return rep.add(name, again == "done", "started again; the new Core reported ready" if again == "done"
+                   else f"started again, but the new version gave no ready mark ({again})")
+
+
 def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
     """Phase two. Never judges or rolls back while the setup process is still running."""
     from .updates import UpdateError
@@ -353,10 +376,11 @@ def finish(deps: Deps, state: dict, installer_running: bool = False) -> Report:
         _save_report(deps, rep)
         return rep
     end = deps.wait(core_up) if core_up else "done"
-    install_ok = rep.add("silent install", end == "done" or (end == "timeout" and not core_up),
-                         {"done": "setup finished" + (" and the new Core is healthy" if core_up else ""),
-                          "failed": "setup or health check failed",
-                          "timeout": "setup finished but the new Core did not report ready in time"}[end])
+    on_new = core_up and end in ("done", "timeout") and _core_on_new_version(deps, rep, end)
+    install_ok = rep.add("silent install", on_new or not core_up,      # not core_up: end is always "done"
+                         "setup or health check failed" if end == "failed" else
+                         "setup finished" + ("" if not core_up else " and the Core runs the new version" if on_new
+                                             else " but the Core does not run the new version"))
     ok = install_ok
     if install_ok or end == "timeout":                    # a timeout is judged by the checks below
         code, out = deps.run_cli(["update", "status"])
@@ -530,7 +554,7 @@ def real_deps(a, cfg, home: Path) -> Deps:
             proc.pop("p", None)                           # the waiter owns the wait from here on
 
     def start_core() -> None:
-        cli.cmd_start(argparse.Namespace(show=False), cfg, home)
+        cli.cmd_start(argparse.Namespace(show=False, wait=90), cfg, home)   # the `jarvis start` defaults (cli.main)
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),

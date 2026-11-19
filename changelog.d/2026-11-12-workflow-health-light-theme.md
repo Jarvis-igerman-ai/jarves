@@ -1,0 +1,1 @@
+- Fixed: the workflow console Health and Timeline demo-data banner now uses the theme colours, so it is no longer a dark bar in the light theme (JAR-236, #950).

@@ -231,6 +231,8 @@ def _pid_alive(pid: int) -> bool:
     try:                                                            # a killed child nobody reaped yet is a zombie: dead
         with open(f"/proc/{pid}/stat", encoding="ascii") as f:
             return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except (FileNotFoundError, ProcessLookupError):               # reaped between kill(0) and open: dead (JAR-518)
+        return False
     except (OSError, IndexError):
         return True
 
@@ -243,15 +245,22 @@ def test_a_hung_page_cannot_keep_the_browser_alive_after_stop(world, monkeypatch
     pid = d._node_pid
     assert pid and _pid_alive(pid)
     monkeypatch.setattr(bd, "CLOSE_WAIT_S", 1.0)
-    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(40), 1.0), daemon=True).start()
-    time.sleep(0.3)
+    busy, release = threading.Event(), threading.Event()
+
+    def stuck():
+        busy.set()
+        release.wait(40)                                                # a page call that never answers in time
+    threading.Thread(target=lambda: _swallow(d._job, stuck, 1.0), daemon=True).start()
+    assert busy.wait(10)                                                # the worker is inside the stuck call
     t0 = time.time()
     svc.stop()
     assert time.time() - t0 < 10
     end = time.time() + 10
     while time.time() < end and _pid_alive(pid):
         time.sleep(0.3)
-    assert not _pid_alive(pid)                                          # the abandoned driver's whole process tree was killed
+    alive = _pid_alive(pid)                                             # decide before release: releasing lets the loop reap it (JAR-518)
+    release.set()
+    assert not alive                                                    # the abandoned driver's whole process tree was killed
 
 
 def _swallow(fn, *a):
@@ -266,11 +275,17 @@ def test_a_job_that_missed_its_deadline_never_runs_late(world):
     svc.start(url)
     d = svc.driver
     ran = []
-    threading.Thread(target=lambda: _swallow(d._job, lambda: time.sleep(1.5), 5.0), daemon=True).start()
-    time.sleep(0.2)
+    busy, release = threading.Event(), threading.Event()
+
+    def slow():
+        busy.set()
+        release.wait(10)
+    threading.Thread(target=lambda: _swallow(d._job, slow, 15.0), daemon=True).start()
+    assert busy.wait(10)                                                # the worker is inside the slow job
     with pytest.raises(bd.DriverError):
         d._job(lambda: ran.append(1), 0.3)                              # queued behind the slow job, gives up after 0.3 s
-    time.sleep(2.5)
+    release.set()
+    assert d._job(lambda: "next", 10.0) == "next"                       # FIFO: the stale job was dequeued before this ran
     assert ran == []                                                    # the worker skipped it instead of running it late
 
 
@@ -457,3 +472,16 @@ def test_only_the_assistant_is_filmed_never_the_owner_in_control():
     d.session_ref = lambda: None
     d._rec_tick()
     assert d.recorder.calls[-1] is False
+
+
+def test_a_driver_reaped_after_the_kill_probe_counts_as_dead(monkeypatch):
+    """JAR-523 (nightly 44065078703): the killed node driver can be reaped between `kill(pid, 0)` and reading
+    /proc/<pid>/stat; that vanished entry must read as dead, not alive."""
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child.kill()
+    child.wait()                                                        # reaped: /proc/<pid> is gone
+    real_kill = os.kill
+    monkeypatch.setattr(os, "kill", lambda p, s: None if (p, s) == (child.pid, 0) else real_kill(p, s))   # the probe ran just before the reap
+    assert not _pid_alive(child.pid)

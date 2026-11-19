@@ -193,8 +193,10 @@ def test_reachable_set_ignores_dev_and_unreachable(world):
 PIN = lambda sha_hex=sha(BRIDGE_NEW): {"path": "bridge/whatsapp_bridge.exe", "sha256": sha_hex, "version": "0.2.0"}
 
 
-def test_bridge_verified_exe_replaced_with_backup_restart_only_if_running_and_revert(world):
+def test_bridge_verified_exe_replaced_with_backup_restart_only_if_running_and_revert(world, monkeypatch):
     w = world
+    ids = iter(f"20261026-12000{i}" for i in range(10))
+    monkeypatch.setattr(hf, "_now_id", lambda: next(ids))   # fake clock: each apply gets its own hotfix id, no wait
     exe = w.tmp / "built.exe"
     exe.write_bytes(BRIDGE_NEW)
     for running in (False, True):
@@ -209,8 +211,6 @@ def test_bridge_verified_exe_replaced_with_backup_restart_only_if_running_and_re
         hf.revert(w.inst, w.home, f2.hooks())
         assert dest.read_bytes() == BRIDGE_OLD and (dest.parent / "whatsapp_bridge.exe.sha256").read_text().startswith(sha(BRIDGE_OLD))
         assert ("bstart" in f2.calls) == running
-        import time
-        time.sleep(1.1)                                  # next hotfix id (second resolution)
 
 
 def test_bridge_refusals_leave_everything_untouched(world):

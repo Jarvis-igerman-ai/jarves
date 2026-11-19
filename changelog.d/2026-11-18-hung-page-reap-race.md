@@ -1,0 +1,1 @@
+- Fixed: the nightly flake detector no longer fails test_a_hung_page_cannot_keep_the_browser_alive_after_stop when the killed browser driver is reaped mid-check (JAR-518, run 44065078703).

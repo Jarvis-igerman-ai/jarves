@@ -97,7 +97,15 @@ class AlarmReceiver : BroadcastReceiver() {
                 item.id.hashCode(),
                 NotificationCompat.Builder(context, ALARM_CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                    .setContentText(item.text).setAutoCancel(true).build(),
+                    .setContentText(item.text).setAutoCancel(true)
+                    // A locked phone shows only "JARVES", never the owner's reminder text (#1029).
+                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                    .setPublicVersion(
+                        NotificationCompat.Builder(context, ALARM_CHANNEL)
+                            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                            .setContentTitle(context.getString(R.string.app_name)).build(),
+                    )
+                    .build(),
             )
             true
         } catch (e: SecurityException) {

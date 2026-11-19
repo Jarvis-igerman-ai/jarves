@@ -47,7 +47,7 @@ JARVES הוא עוזר קולי שרץ על מחשב ה-Windows שלכם: פני
 
 הקול רץ על GPT-Live. ב**מצב לקוח** JARVES עצמו, ולא מודל הקול בענן, מריץ את בקשת ה"חשיבה" הכבדה, ולכן כל בקשת רקע נספרת מול התקציב לפני שהיא נשלחת והשיחה מסתיימת בגבול.
 
-- הגדרת גבולות: `jarvis budget set --daily-usd 1 --turn-usd 0.05`. בדיקת התקרה: `jarvis budget test-cap`. עלויות: `jarvis cost` ועמוד העלויות. המספרים הם הערכות, והחשבונית של OpenAI היא האמת.
+- הגדרת גבולות: `jarvis budget set --daily-usd 1 --turn-usd 0.05`. בדיקת התקרה: `jarvis budget test-cap`. דקות קול ובקשות AI ליום: לראות עם `jarvis budget limits`, לבדוק בחינם עם `jarvis budget test-limits`. עלויות: `jarvis cost` ועמוד העלויות. המספרים הם הערכות, והחשבונית של OpenAI היא האמת.
 - נמדד עם 10 שאלות חיות: ההמתנה הנוספת במצב לקוח לא הייתה גרועה מברירת המחדל (p95 של 7.7 שניות מול 11.3, וזמן הרקע הוא הדומיננטי).
 - מדריך: `jarvis help client_delegation`. דוח: [SWV4_D_DELEGATION](reviews/SWV4_D_DELEGATION.md).
 
