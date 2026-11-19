@@ -906,7 +906,7 @@ class Core:
             self._greeted = True
             logs.info("core", "GREETING", "saying hello (once per start)", speech="cloud" if (self.cfg.ai.provider == "openai" and self.cfg.ai.connection != "chatgpt") else "local")
             self._run_busy(self.greet())      # busy => the wake mic is closed while JARVES talks (no self-trigger)
-        elif self._wake_face_greeting_on() and getattr(self, "_wake_claim", False):
+        elif self._wake_face_greeting_on() and self._wake_claim:
             self._face_greet_waiting = True   # #520: a wake start holds the greeting; if it fails, _start_live greets
 
     def _wake_face_greeting_on(self) -> bool:
@@ -1543,13 +1543,16 @@ class Core:
                                   registry=self.registry, feats=self.features)
         logs.new_cid()
         self._voice_connecting = True
-        await self.link.broadcast("status", self.snapshot())
-        claimed, started = bool(ack and greeting) and not self._greeted, False
-        if claimed:
-            self._greeted = self._wake_claim = True   # #520: claimed before the await, so a face connecting meanwhile does not greet too
+        claimed, started, cancelled = bool(ack and greeting) and not self._greeted, False, False
+        if claimed:     # #520: claimed before ANY await (status broadcast, start), so a face connecting meanwhile waits
+            self._greeted = self._wake_claim = True
         try:
+            await self.link.broadcast("status", self.snapshot())
             await live.start()
-            started = getattr(live, "running", True) is not False and not self.stopping
+            started = getattr(live, "running", True) is not False and not self.stopping   # LiveSession sets running
+        except asyncio.CancelledError:
+            cancelled = True                        # the task is going away: never greet from it
+            raise
         except BudgetExceeded as e:                 # F1: no unit can be reserved ahead -> no session at all
             if e.kind in limits_mod.SPECS:
                 lv = limits_mod.view(e.kind, e.used, e.limit)
@@ -1568,10 +1571,10 @@ class Core:
             return
         finally:
             if claimed:
-                waiting, self._wake_claim, self._face_greet_waiting = getattr(self, "_face_greet_waiting", False), False, False
+                waiting, self._wake_claim, self._face_greet_waiting = self._face_greet_waiting, False, False
                 if not started:           # #520: the wake session did not start, so its greeting never happened
-                    self._greeted = waiting           # a face connected meanwhile: it gets its start-greeting now
-                    if waiting and not self.stopping:  # never greet during shutdown
+                    self._greeted = waiting and not cancelled   # a face connected meanwhile: it gets its greeting now
+                    if self._greeted and not self.stopping:      # never greet during shutdown or from a cancelled task
                         self._run_busy(self.greet())
             self._voice_connecting = False
             if ack:

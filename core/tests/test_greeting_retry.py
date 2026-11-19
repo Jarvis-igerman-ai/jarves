@@ -166,7 +166,7 @@ async def test_no_speech_cutoff_waits_while_the_greeting_is_pending(monkeypatch)
 
 def _ns(greeting=True, lang="he", drive=False):
     feats = SimpleNamespace(active=lambda fid: drive)
-    return SimpleNamespace(_greeted=False, features=feats,
+    return SimpleNamespace(_greeted=False, _wake_claim=False, _face_greet_waiting=False, features=feats,
                            cfg=SimpleNamespace(voice=SimpleNamespace(greeting=greeting, language=lang)))
 
 
@@ -279,3 +279,51 @@ async def test_face_connecting_during_a_failed_wake_start_still_gets_its_greetin
     await asyncio.sleep(0)
     core.stopping = False
     assert greets == ([] if stopping else [1]) and core._greeted and not core._face_greet_waiting   # no greeting at shutdown
+
+
+async def test_face_connecting_during_the_status_broadcast_does_not_greet_twice(core):
+    greets, real_broadcast, face = [], core.link.broadcast, []
+
+    async def broadcast(t, payload):                # #520: the face arrives while the first status broadcast awaits
+        if not face:
+            face.append(1)
+            await core._face_connected()
+        await real_broadcast(t, payload)
+
+    class Live:
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    core.cfg.voice.activation, core.cfg.voice.greeting = "wake_word", True
+    core.greet = lambda: greets.append(1) or asyncio.sleep(0)
+    core.link.broadcast = broadcast
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    await asyncio.sleep(0)
+    assert face == [1] and greets == [] and core._greeted     # only the wake session greets
+    await core.live.stop()
+
+
+async def test_cancelled_wake_start_does_not_greet_a_waiting_face(core):
+    greets = []
+
+    class Live:
+        async def start(self):
+            await core._face_connected()
+            raise asyncio.CancelledError
+
+        async def stop(self):
+            pass
+
+    core.cfg.voice.activation, core.cfg.voice.greeting = "wake_word", True
+    core.greet = lambda: greets.append(1) or asyncio.sleep(0)
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    with pytest.raises(asyncio.CancelledError):
+        await core._start_live(ack=True, greeting="I'm listening.")
+    await asyncio.sleep(0)
+    assert greets == [] and not core._greeted and not core._wake_claim
