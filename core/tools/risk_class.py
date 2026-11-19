@@ -36,6 +36,9 @@ HIGH_RISK = (
     ".claude/*", "core/src/jarves/workflow/hooks.py", "core/src/jarves/workflow/bootstrap.py",
     "core/tools/workflow_hook.py", "core/tools/workflow_service.ps1",
 )
+# Owner release sign-off (issue #543): matched case-insensitively and never "just docs", so an edited or forged
+# sheet cannot auto-merge through the docs class. Mirrors the owner-only entries in .github/CODEOWNERS.
+SIGNOFF = ("docs/release/*", "docs/reviews/manual_test_*.md", "docs/reviews/release_checklist_*.md")
 BLOCKING_LABELS = {"needs-review", "no-automerge", "do-not-merge", "wip"}
 GUIDES = ("core/src/jarves/guides/data/*.toml",)
 LOCALES = ("core/src/jarves/dashboard_static/locales/*", "core/src/jarves/locales/*", "core/src/jarves/*catalog*.json",
@@ -47,11 +50,26 @@ def _m(path: str, patterns) -> bool:
     return any(fnmatch.fnmatchcase(path, p) for p in patterns)
 
 
+def _norm(path: str) -> str:
+    path = path.replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path
+
+
+def is_signoff(path: str) -> bool:
+    return _m(_norm(path).lower(), SIGNOFF)
+
+
 def is_high_risk(path: str) -> bool:
-    return _m(path, HIGH_RISK)
+    path = _norm(path)
+    return _m(path, HIGH_RISK) or is_signoff(path)
 
 
 def is_docs(path: str) -> bool:
+    if is_signoff(path):
+        return False                      # owner sign-off is release-gate input, not documentation (#543)
+    path = _norm(path)
     name = path.rsplit("/", 1)[-1].lower()
     if name in ("claude.md", "agents.md") or path.startswith(".claude/"):
         return False                      # instruction files steer agents: never "just docs"
@@ -68,7 +86,7 @@ def is_guide_or_locale(path: str) -> bool:
 
 def classify(files, lines: int = 0, labels=frozenset(), author: str = "", mode: str = "true"):
     """(class or None, reason). None = do not label."""
-    files = [f.replace("\\", "/") for f in files if f]
+    files = [_norm(f) for f in files if f]
     labels = {x.lower() for x in labels}
     if mode == "false":
         return None, "ENABLE_AUTOLABEL=false"
