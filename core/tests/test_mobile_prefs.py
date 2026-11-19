@@ -168,6 +168,20 @@ def test_no_other_phone_route_confirms_a_phone_edit(srv, prefs):
     assert asyncio.run(tool.handler(IdArgs(id=b))).ok                       # an ordinary proposal: the tool confirms it
 
 
+def test_lists_show_the_original_provenance_and_a_phone_edit_flag(srv, prefs):
+    """Review R2 (#1369): the stored 'phone_edit:<source>' mark never reaches readers as the provenance."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    origin = p.get(a)["source"]
+    op(srv, tok, op="edit", pref=a, text="Always answer in pirate speak")
+    row = next(r for r in p.items() if r["id"] == a)
+    assert row["source"] == origin and row["phone_edited"] is True
+    _, v = call(srv, "GET", "/api/m/prefs", tok)
+    item = next(r for r in v["proposed"] if r["id"] == a)
+    assert item["source"] == origin and item["phone_edited"] is True
+    assert next(r for r in p.items() if r["id"] == b)["phone_edited"] is False
+
+
 def test_the_same_rules_as_the_desktop(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)

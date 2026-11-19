@@ -104,7 +104,7 @@ class Continuity:
         self.home, self.clock = Path(home), clock
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()                 # reentrant on purpose: execute() holds it and calls _scrub()
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)

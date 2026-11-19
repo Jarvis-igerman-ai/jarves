@@ -117,6 +117,8 @@ class Preferences:
     def _view(self, r: dict) -> dict:
         r = dict(r)
         r.pop("norm", None)
+        mark = str(r.get("source") or "")              # review R2 (#1369): readers get the original provenance and a
+        r["source"], r["phone_edited"] = base_source(mark), mark.startswith(PHONE_EDIT + ":")   # flag, not the mark
         r["stale"] = r["state"] == "confirmed" and (self.clock() - (r["confirmed_at"] or r["updated"])) > STALE_S
         return r
 
