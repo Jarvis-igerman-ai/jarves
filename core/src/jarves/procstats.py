@@ -73,6 +73,23 @@ if sys.platform == "win32":
     def children(pid: int) -> int:
         return sum(1 for _, pp, _ in _procs() if pp == pid)
 
+    def start_marker(pid: int) -> str:
+        """The process creation time (FILETIME ticks) as text, or "" when the pid cannot be opened. With the pid it
+        names one process: a reused pid has a different creation time."""
+        if pid <= 0:
+            return ""
+        h = _k32.OpenProcess(0x1000, False, pid)                # QUERY_LIMITED_INFORMATION
+        if not h:
+            return ""
+        try:
+            c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+            if not _k32.GetProcessTimes(h, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u)):
+                return ""
+            v = (c.dwHighDateTime << 32) | c.dwLowDateTime
+            return str(v) if v else ""
+        finally:
+            _k32.CloseHandle(h)
+
     def target(pid: int) -> int:
         """A uv/venv python.exe on Windows is a launcher that runs the real interpreter as its child: follow it."""
         for _ in range(3):
@@ -84,6 +101,21 @@ if sys.platform == "win32":
 else:
     def target(pid: int) -> int:
         return pid
+
+    def start_marker(pid: int) -> str:
+        """The process start time (clock ticks since boot, plus the boot id) as text, or "" when unknown (no /proc,
+        e.g. macOS): callers must treat "" as "identity not verified"."""
+        if pid <= 0:
+            return ""
+        try:
+            st = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+        except (OSError, IndexError):
+            return ""
+        try:
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        except OSError:
+            boot = ""
+        return f"{boot}:{st[19]}" if len(st) > 19 else ""
 
     def sample(pid: int) -> dict | None:
         try:

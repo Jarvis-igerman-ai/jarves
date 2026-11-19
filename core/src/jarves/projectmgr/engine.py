@@ -14,7 +14,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from .. import logs
+from .. import logs, procstats
 from ..orchestrator.envelope import clean, summary
 from . import cards, debate as debatemod, gitops, pipeline as pl
 
@@ -266,7 +266,7 @@ class StageEngine:
 
     def _run_agent(self, p, t, r, card, wt, model, team, cancel, read_only=False):
         def on_start(pid_: int) -> None:
-            self.db.update_task(t["id"], pid=pid_)
+            self.db.update_task(t["id"], pid=pid_, pid_start=procstats.start_marker(pid_))   # #1098 identity
         res = r.run(card, str(wt), model=model, check_argv=p["check_cmd"], on_start=on_start, cancel=cancel,
                     timeout=min(14400, self.cfg.task_timeout_s * (3 if team else 1)), team=team, read_only=read_only)
         self._cost(res)

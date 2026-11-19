@@ -56,7 +56,7 @@ MIGRATIONS = {
     "tasks": [("mode", "TEXT NOT NULL DEFAULT 'solo'"), ("pipeline", "TEXT NOT NULL DEFAULT '[]'"),
               ("stage", "INTEGER NOT NULL DEFAULT 0"), ("rounds", "INTEGER NOT NULL DEFAULT 0"),
               ("job", "TEXT NOT NULL DEFAULT '{}'"), ("waiting", "TEXT NOT NULL DEFAULT ''"),
-              ("kind", "TEXT NOT NULL DEFAULT 'task'")],
+              ("kind", "TEXT NOT NULL DEFAULT 'task'"), ("pid_start", "TEXT NOT NULL DEFAULT ''")],
     "projects": [("flow", "TEXT NOT NULL DEFAULT ''"), ("github", "TEXT NOT NULL DEFAULT 'off'"),
                  ("release_cmd", "TEXT NOT NULL DEFAULT '[]'"), ("cloud", "TEXT NOT NULL DEFAULT '{}'")],
 }
