@@ -329,3 +329,61 @@ async def test_cancelled_wake_start_does_not_greet_a_waiting_face(core):
         await core._start_live(ack=True, greeting="I'm listening.")
     await asyncio.sleep(0)
     assert greets == [] and not core._greeted and not core._wake_claim
+
+
+async def test_real_realtime_session_start_keeps_the_greeting(core):
+    from test_voice_faults import Rec, make_rt
+    rv, sessions = make_rt(Rec())                   # #520 review: the real SessionLifecycle class, stubbed transport
+    greets = []
+    core.cfg.voice.activation, core.cfg.voice.greeting = "wake_word", True
+    core.greet = lambda: greets.append(1) or asyncio.sleep(0)
+    core._live_factory = lambda *args, **kwargs: rv
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    await core._face_connected()                    # a face connecting later gets no second start-greeting
+    assert core.live is rv and rv.running is True and core._greeted and greets == [] and len(sessions) == 1
+    await rv.stop()
+
+
+async def test_session_without_running_attribute_counts_as_started(core):
+    class Live:                                     # same rule as the "ended during start" check: no attribute = running
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    assert core.live is not None and core._greeted
+    await core.live.stop()
+
+
+async def test_failing_first_status_broadcast_is_a_start_failure_not_a_stuck_connect(core):
+    real_broadcast, calls, errors = core.link.broadcast, [], []
+
+    async def broadcast(t, payload):                # #520 review R2: the first broadcast is inside the start's try
+        calls.append(t)
+        if len(calls) == 1:
+            raise ConnectionResetError("face gone")
+        await real_broadcast(t, payload)
+
+    class Live:
+        running = True
+
+        async def start(self):
+            raise AssertionError("never reached")
+
+        async def stop(self):
+            pass
+
+    async def notify_error(code, *a, **k):
+        errors.append(code)
+
+    core.link.broadcast, core.notify_error = broadcast, notify_error
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    assert errors == ["LIVE_START_FAILED"] and not core._voice_connecting and core.live is None
+    assert not core._greeted and not core._wake_claim

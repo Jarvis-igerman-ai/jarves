@@ -1549,7 +1549,9 @@ class Core:
         try:
             await self.link.broadcast("status", self.snapshot())
             await live.start()
-            started = claimed and live.running is True and not self.stopping   # LiveSession.running: True once started
+            # one predicate with the "ended during start" check below: SessionLifecycle sets running=False in its
+            # init and True in start() (LiveVoice, RealtimeVoice); a session without the attribute counts as running
+            started = claimed and getattr(live, "running", True) is not False and not self.stopping
         except asyncio.CancelledError:
             cancelled = True                        # the task is going away: never greet from it
             raise
