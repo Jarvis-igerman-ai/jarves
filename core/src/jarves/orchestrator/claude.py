@@ -265,9 +265,9 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 # rewrite those files), pytest --junitxml/--basetemp/-o/--override-ini (log_file, cache_dir, also in a `-qo` cluster)/
 # --log-file/--report-log/--cov-report/--html/--rootdir/--debug/--pastebin, git rebase --exec/-x, git fetch
 # --upload-pack and gh run download. Every glob is anchored to its tool so `grep -rn -- --output docs/` still works;
-# pytest globs start with `*pytest*` because the default list also allows `<python> -m pytest:*`. The --output/--exec
-# forms were checked against the real Claude Code matcher on 19 Nov 2026; the rest is UNVERIFIED there
-# (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+# pytest globs start with `*pytest*` because the default list also allows `<python> -m pytest:*`. Only
+# `git rebase*--exec*` and `gh run download*` ran unchanged against the real Claude Code matcher (19 Nov 2026); every
+# other shipped glob, including the anchored --output ones, is UNVERIFIED there (docs/workflow/WORKER_PERMISSION_MODES.md).
 WORKER_WRITE_FLAG_DENY: tuple[str, ...] = (
     "Bash(git*--output*)", "Bash(ruff*--output*)", "Bash(gh*--output*)", "Bash(jarvis*--output*)",
     "Bash(git*--upload-pack*)", "Bash(git rebase*--exec*)", "Bash(git rebase* -x*)", "Bash(gh run download*)",
@@ -276,7 +276,8 @@ WORKER_WRITE_FLAG_DENY: tuple[str, ...] = (
     "Bash(*pytest*--rootdir*)", "Bash(*pytest* -o*)", "Bash(*pytest*--override-ini*)", "Bash(*pytest*o log_file*)",
     "Bash(*pytest*olog_file*)", "Bash(*pytest*o cache_dir*)", "Bash(*pytest*ocache_dir*)", "Bash(*pytest*--html*)",
     "Bash(*pytest*--debug*)", "Bash(*pytest*--pastebin*)",
-    "Bash(ruff* -o*)", "Bash(ruff*--cache-dir*)", "Bash(ruff* /*)", "Bash(ruff*=/*)", "Bash(ruff*..*)", "Bash(ruff*~*)",
+    "Bash(ruff* -o*)", "Bash(ruff*cache-dir*)", "Bash(ruff* /*)", "Bash(ruff*=/*)", "Bash(ruff*..*)", "Bash(ruff*~*)",
+    "Bash(ruff*\"/*)", "Bash(ruff*'/*)",   # quoted absolute paths: Git Bash maps "/c/x" to C:/x
     "Bash(ruff*:/*)", "Bash(ruff*:\\*)",    # `ruff*:\*` for C:\ paths; real-matcher handling of the backslash UNVERIFIED
 )
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.

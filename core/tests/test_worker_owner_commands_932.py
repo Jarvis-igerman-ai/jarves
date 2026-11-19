@@ -111,6 +111,9 @@ def _denied(command: str) -> bool:
     "C:/py/python.exe -m pytest -o log_file=/h/x", "C:/py/python.exe -m pytest --junitxml=/h/j.xml",
     "C:/py/python.exe -m pytest -qo cache_dir=/h/c", "C:/py/python.exe -m pytest --debug=/h/x",
     "C:/py/python.exe -m pytest --basetemp=/h/b", "git -C . diff --output=/h/x", "ruff check --output-file=/h/x .",
+    # review of #1349 @ 757d5217: quoted absolute paths (Git Bash maps /c/... to C:/...) and inline --config cache-dir
+    'ruff format "/c/h/x.py"', "ruff check --fix '/c/x'", "ruff check --config \"cache-dir = '/c/x'\"",
+    "ruff check --config 'cache-dir=\"/c/x\"' .", 'ruff format "C:\\h\\x.py"', "ruff check --fix '../x'",
 ])
 def test_default_list_write_and_exec_options_are_denied(command):
     assert _denied(command), command
@@ -126,6 +129,13 @@ def test_default_list_write_and_exec_options_are_denied(command):
                                      "C:/py/python.exe -m pytest -q core/tests/test_x.py"])
 def test_ordinary_worker_commands_are_not_denied(command):
     assert not _denied(command), command
+
+
+# review of #1349 (R3): harmless commands the deny globs refuse on purpose (fail closed; the worker uses the plain form)
+@pytest.mark.parametrize("command", ["ruff check --output-format=concise .", 'git commit -m "handle pytest -o ini"',
+                                     "grep -rn pytest --html docs/"])
+def test_known_harmless_refusals_stay_refused(command):
+    assert _denied(command), command
 
 
 @pytest.mark.parametrize("rule", ["Bash(npm:*)", "Bash(npx:*)", "Bash(jarvis features:*)", "Bash(jarvis doctor:*)",

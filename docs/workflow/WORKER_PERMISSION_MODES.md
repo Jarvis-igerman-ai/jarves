@@ -36,7 +36,9 @@ default and needs the owner's grant. `autopilot_loop.py` only decides when to st
 
 Checked on 19 Nov 2026 with the real matcher: `claude` 2.1.327, model `claude-haiku-5-5`, `-p --setting-sources
 project` in an empty temp git repo. Allow rules `Bash(ls:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(git rebase:*)`,
-`Bash(pytest:*)`, `Bash(gh run:*)`, plus the new deny rules. The model was told to run each command once, exactly as
+`Bash(pytest:*)`, `Bash(gh run:*)`, plus the FIRST deny set of this PR (unanchored `Bash(*--output*)`, `Bash(*--junit*)`,
+`Bash(*--basetemp*)`, `Bash(*cache_dir*)`). Of the rules that now ship, only `Bash(git rebase*--exec*)` and
+`Bash(gh run download*)` were in that run unchanged; the anchored replacements are UNVERIFIED (list below). The model was told to run each command once, exactly as
 written. After the run the files were listed on disk, and the stand-in `autopilot.json` in a second temp dir stayed `{}`.
 
 | Command (allow rule `Bash(ls:*)` unless noted) | `default` | `acceptEdits` |
@@ -47,9 +49,9 @@ written. After the run the files were listed on disk, and the stand-in `autopilo
 | `ls \| tee f` | refused (tee needs approval) | refused |
 | `ls; echo hi > f`, `ls && echo hi > f` | refused | refused (outside path) |
 | `` ls $(...) ``, ``ls `...` `` | refused ("nested command can't be checked") | refused |
-| `git diff --output=f`, `git log --output=f` | denied by `Bash(*--output*)` | denied |
+| `git diff --output=f`, `git log --output=f` | denied by `Bash(*--output*)` (not shipped; `Bash(git*--output*)` UNVERIFIED) | denied |
 | `git rebase --exec "..." HEAD` | denied by `Bash(git rebase*--exec*)` | - |
-| `pytest --basetemp=`, `-o cache_dir=`, `--junitxml=` | - | denied |
+| `pytest --basetemp=`, `-o cache_dir=`, `--junitxml=` | - | denied by the unanchored rules (not shipped; `*pytest*` forms UNVERIFIED) |
 | `gh run download 1 -D <outside>` | - | denied |
 | `git diff HEAD` | allowed | - |
 
@@ -59,7 +61,9 @@ model of OUR deny rule set (fnmatch on the whole command), not of Claude Code. R
 changes its Bash matcher.
 
 Added after the review of PR #1349, **not yet run against the real matcher (UNVERIFIED)**; only the hermetic model
-covers them. Add them to the next real run: `ruff check . -o <outside>`, `pytest -o log_file=<outside>`,
+covers them. Add them to the next real run: every anchored rule (`git diff --output=<outside>`, `pytest --junitxml=`,
+`--basetemp=`, `-o cache_dir=` again), `ruff format "/c/<outside>/x.py"`, `ruff check --fix '/c/x'`,
+`ruff check --config "cache-dir = '/c/x'"`, `ruff check . -o <outside>`, `pytest -o log_file=<outside>`,
 `pytest -qo log_file=<outside>`, `pytest --override-ini=log_file=<outside>`, `pytest --debug=<outside>`,
 `pytest --pastebin=all`, `ruff format <outside>/x.py`, `ruff check --fix ../x`, `git rebase -x'sh x' main`,
 `<python> -m pytest -o log_file=<outside>`, and `ruff format C:\h\x.py` (the rule `Bash(ruff*:\*)`: if the matcher
@@ -71,7 +75,14 @@ list refuses absolute, `..`, `~` and drive-letter paths after `ruff`.
 
 Residual risk of the deny-glob approach: a glob list cannot list every spelling. Known gaps: a ruff short-option
 cluster with an attached path (`ruff check -eo/abs/x`), pytest ini writers other than `log_file`/`cache_dir` given in a
-`-qo` cluster, and plugin options of pytest plugins installed later. These sit next to the pytest/conftest item below,
+`-qo` cluster, plugin options of pytest plugins installed later, and shell-quoting spellings (`--out""put`, `$'--output'`,
+quotes around part of a path). How the real matcher normalises quoting before it applies globs is UNVERIFIED; the next
+real-matcher run must sample these.
+
+Harmless commands the deny rules refuse on purpose (fail closed, tested in `test_known_harmless_refusals_stay_refused`):
+`ruff check --output-format=...` (`Bash(ruff*--output*)`; use the default format), and any command that names pytest
+before a listed option, for example `git commit -m "handle pytest -o ini"` or `grep -rn pytest --html` (the
+`*pytest*` rules; reword the message or reorder the grep arguments). These sit next to the pytest/conftest item below,
 which already allows arbitrary code; OS isolation is the real fix.
 
 Config-file writers (same owner decision, #1311): under acceptEdits a worker can edit `pyproject.toml`, `ruff.toml`,
