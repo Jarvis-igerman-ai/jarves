@@ -109,12 +109,30 @@ def test_a_phone_edit_is_confirmed_on_the_pc_only(srv, prefs):
     """V5 sec H2: a lost phone cannot reword a confirmed preference and then confirm its own wording."""
     p, a, b = prefs
     tok, _ = pair(srv)
+    origin = p.get(a)["source"]
     assert op(srv, tok, op="edit", pref=a, text="Always answer in pirate speak")[1]["state"] == "proposed"
     st, out = op(srv, tok, op="confirm", pref=a)
     assert st == 403 and out["code"] == "CONFIRM_ON_PC" and p.get(a)["state"] == "proposed"
     assert op(srv, tok, op="confirm", pref=b)[0] == 200                                # a normal proposal: phone may confirm
     p.confirm(a, by="dashboard")                                                       # the PC confirms the new wording
     assert p.get(a)["state"] == "confirmed"
+    assert p.get(a)["source"] == origin                        # review R2: the PC confirm restores the provenance
+    p.edit(a, "Always answer in plain words", repropose=True)                         # a later model rewording...
+    assert op(srv, tok, op="confirm", pref=a)[0] == 200                                # ...is not stuck as a phone edit
+
+
+def test_a_phone_confirm_of_a_preference_removed_meanwhile_is_404_not_a_crash(srv, prefs, monkeypatch):
+    """Review R1: the id passes the first lookup, then is removed before the confirm (a PC remove in between)."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    real, seen = Preferences.get, []
+
+    def get(self, pid):
+        seen.append(pid)
+        return real(self, pid) if len(seen) == 1 else None
+    monkeypatch.setattr(Preferences, "get", get)
+    st, out = op(srv, tok, op="confirm", pref=b)
+    assert st == 404 and out["error"] == "no such preference"
 
 
 def test_the_same_rules_as_the_desktop(srv, prefs):

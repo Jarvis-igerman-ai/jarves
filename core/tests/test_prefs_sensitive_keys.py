@@ -16,6 +16,8 @@ from jarves.preferences import looks_sensitive
     "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2",
     "the code is Zq8vX2mK9pLr4TnW7yBc3HdF",          # random-looking mixed string, no known prefix
     "AKIA" + "ABCDEFGHIJKLMNOP",
+    "my api keys are in the drawer",                     # plurals (review R5)
+    "both secret keys are on the fridge",
 ])
 def test_key_or_token_shaped_text_is_sensitive(text):
     assert looks_sensitive(text)
@@ -42,6 +44,8 @@ def test_key_or_token_shaped_text_is_sensitive(text):
     "see https://github.com/Jarvis-igerman-ai/jarves/pull/1354",
     "access keyboard shortcuts",                         # "key" must end the word (review R5)
     "add a private keyword list",
+    "TestV5GoalPlansCancelRace2Handler fails on CI",     # CamelCase identifier with digits (review R6)
+    "PlanRunnerV2RetryBackoff3Handler times out",
 ])
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)

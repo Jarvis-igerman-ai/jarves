@@ -59,6 +59,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
+    from .preferences import PHONE_EDIT, phone_edited
     p = store(mob)
     if not p.get(pid):
         return 404, {"error": "no such preference"}
@@ -66,7 +67,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     try:
         # answers hold ids and counts only: the command ledger stores them, and text must not rest there (privacy)
         if op == "confirm":
-            if p.get(pid).get("source") == "phone_edit" and p.get(pid)["state"] != "confirmed":
+            if phone_edited(p.get(pid)):                      # None (removed meanwhile): confirm answers 404
                 # V5 sec H2: wording changed on a phone is confirmed on the PC only (a lost phone cannot edit + confirm)
                 return 403, {"error": "this preference was reworded on a phone: confirm it on the computer",
                              "code": "CONFIRM_ON_PC"}
@@ -77,7 +78,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         if op == "reaffirm":
             return 200, {"ok": p.reaffirm(pid, by=by), "pref": pid}
         if op == "edit":
-            r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True, source="phone_edit")  # H2: PC confirms
+            r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True, source=PHONE_EDIT)  # H2: PC confirms
             return 200, {"ok": True, "pref": pid, "state": r["state"]}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored

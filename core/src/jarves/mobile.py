@@ -859,6 +859,10 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if mid:
             again = mob.replay(dev["id"], mid)
             if again is not None:                                # a resend: answer from memory, no second run
+                if again.get("not_kept"):                        # privacy mode kept only the marker: Hebrew too
+                    from .hebrew import he
+                    from .continuity import NOT_KEPT
+                    again = {**again, "reply_he": he(NOT_KEPT) or NOT_KEPT}
                 return done(200, {**again, "replay": True}, replay="yes")
             if mob.cont.stale(d.get("age_s")):                   # queued while offline for too long: never run it late
                 return done(410, {**_err("STALE"), "code": "STALE"})
