@@ -181,7 +181,7 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
             if rec.is_file() and rec.stat().st_mtime >= started - MTIME_SLACK_S:  # the child stopped early (exit 1):
                 return "installing"                                   # its own record is the result, keep it
             rec.write_text(f"FAIL  install-latest  {d} (not started)\n"
-                                            f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
+                           f"  [FAIL] start qa-daily install: {type(e).__name__}: {e}\n", encoding="utf-8")
             return "spawn_failed"
         return "installing"
     since = _marker_time(marker)
@@ -213,6 +213,13 @@ CHECK_CLAIM = "check.claimed"
 CHECK_STALE_S = 4 * 3600.0                                            # > 6 checks x the 300 s CLI timeout, with margin
 
 
+def _claim_time(path: Path) -> float:
+    """The claim's timestamp; an empty or unreadable claim (seen between O_EXCL creation and the write) is
+    judged by its file time, so a claim being written is never taken over at once."""
+    t = _marker_time(path)
+    return path.stat().st_mtime if t is None or t == CORRUPT else t
+
+
 def _claim(path: Path, clock) -> bool:
     """Atomically claim the day's check (O_EXCL). A claim older than CHECK_STALE_S was left by a Core that died
     mid-check: it is renamed away (only one tick wins the rename) and claimed afresh."""
@@ -222,16 +229,17 @@ def _claim(path: Path, clock) -> bool:
                 f.write(str(clock()))
             return True
         except FileExistsError:
-            t = _marker_time(path)
-            if t is not None and t != CORRUPT and clock() - t <= CHECK_STALE_S:
-                return False
+            try:
+                if clock() - _claim_time(path) <= CHECK_STALE_S:
+                    return False
+            except FileNotFoundError:                                 # recovered meanwhile: try to claim again
+                continue
             moved = path.with_name(f"{path.name}.stale-{os.getpid()}-{threading.get_ident()}")
             try:
                 os.replace(path, moved)
             except FileNotFoundError:                                 # another tick recovered it first
                 return False
-            t = _marker_time(moved)
-            if t is not None and t != CORRUPT and clock() - t <= CHECK_STALE_S:
+            if clock() - _claim_time(moved) <= CHECK_STALE_S:
                 return False                                          # moved a fresh claim: its owner checks
             moved.unlink(missing_ok=True)
     return False
@@ -304,8 +312,14 @@ def _spawn_hidden(argv: list[str], log: Path | None = None, wait_s: float = STAR
 def _tick_real(cfg, home, busy=lambda: []) -> str:
     from .install_latest import _cli_subprocess
     day = _today()
-    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day, report=lambda d, since: _report_reader(home, d, since)(),
-                spawn=lambda argv: _spawn_hidden(argv, Path(home) / "qa" / "daily" / day / SPAWN_LOG), busy=busy, supported=_supported, do_check=lambda d: check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d)))
+    out = Path(home) / "qa" / "daily" / day
+
+    def do_check(d: str) -> dict:
+        return check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d))
+    return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day,
+                report=lambda d, since: _report_reader(home, d, since)(),
+                spawn=lambda argv: _spawn_hidden(argv, out / SPAWN_LOG),
+                busy=busy, supported=_supported, do_check=do_check)
 
 
 def start(core, *, first_delay_s: float = 600.0, every_s: float = TICK_S) -> threading.Thread:

@@ -530,3 +530,29 @@ def test_a_failed_end_of_day_write_never_hides_the_check_error(home, monkeypatch
         _tick(home, "2026-11-13", spawned, checked, do_check=boom, clock=lambda: 1e10)
     assert warned == ["QA_DAILY_DONE_WRITE_FAILED"]
     assert _tick(home, "2026-11-13", spawned, checked, clock=lambda: 1e10) == "checking" and checked == []
+
+
+def test_an_empty_claim_being_written_is_not_taken_over(home):
+    """JAR-232 review-restart #1229 (gpt): a claim seen between its exclusive creation and its timestamp write was
+    renamed away at once, so a second tick checked too. An unreadable claim is judged by its file time."""
+    day = home / "qa" / "daily" / "2026-11-12"
+    _write(day / "install.started", "1000.0", 1000)
+    t = 1000.0 + qa_daily.INSTALL_WAIT_S + 10
+    _write(day / "check.claimed", "", t)                                     # just created, not yet written
+    spawned, checked = [], []
+    assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: t + 1) == "checking" and checked == []
+    assert (day / "check.claimed").is_file()
+    assert _tick(home, "2026-11-12", spawned, checked,
+                 clock=lambda: t + 1 + qa_daily.CHECK_STALE_S) == "checked" and checked == ["2026-11-12"]
+
+
+def test_a_claim_recovered_while_read_is_claimed_afresh(home, monkeypatch):
+    path, seen = home / "check.claimed", []
+    path.write_text("", encoding="utf-8")
+
+    def gone(p):                                                              # another tick renamed it meanwhile
+        seen.append(p)
+        p.unlink()
+        raise FileNotFoundError(p)
+    monkeypatch.setattr(qa_daily, "_claim_time", gone)
+    assert qa_daily._claim(path, lambda: 5.0) is True and path.read_text(encoding="utf-8") == "5.0" and seen
