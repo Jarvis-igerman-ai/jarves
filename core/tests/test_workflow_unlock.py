@@ -153,7 +153,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
+        self.assertTrue((self.home / unlock.FILE).exists())           # #1265: one session cannot cancel the code
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
         self.server.unlock_attempts.clear()
         unlock.issue(self.home)
@@ -161,19 +161,46 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+    def wrong_try(self, code):
+        self.server.unlock_attempts.clear()                            # keep the 5-per-minute limit out of the way
+        status, _, data = self.request("/api/unlock", {"code": code})
+        return status, data.get("reason")
+
+    def test_one_session_cannot_cancel_the_owner_code_1265(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the read-only token holder's one window
+        results = [self.wrong_try(wrong) for i in range(6)]
+        self.assertEqual(results, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
+        self.cookie = ""
+        self.login()                                                   # the owner's own window
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for _ in range(5):                                             # a different session for every try
-            self.cookie = ""
-            self.login()
-            statuses.append(self.request("/api/unlock", {"code": wrong})[0])
-        self.assertEqual(statuses, [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        for i in range(10):                                            # new sessions give no extra guesses past 10
+            if i % 3 == 0:
+                self.cookie = ""
+                self.login()
+            statuses.append(self.wrong_try(wrong)[0])
+            self.assertEqual((self.home / unlock.FILE).exists(), i < 9, i)
+        self.assertEqual(statuses, [403] * 10)
+        self.assertEqual(self.wrong_try(shown), (403, None))           # cancelled after 10 in total
+
+    def test_new_code_resets_an_exhausted_session(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        for i in range(3):
+            self.wrong_try(wrong)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))
         self.server.unlock_attempts.clear()
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
 
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
