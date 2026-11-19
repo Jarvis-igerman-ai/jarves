@@ -17,6 +17,12 @@ REPORT = ("FAIL  install-latest  2026-11-12 06:00 UTC\nversion: 4.5.0 -> 4.5.1-b
 
 
 @pytest.fixture(autouse=True)
+def _fresh_process(monkeypatch):
+    monkeypatch.setattr(qa_daily, "_ended", set())
+    monkeypatch.setattr(qa_daily, "_lock_warned", False)
+
+
+@pytest.fixture(autouse=True)
 def _windows(monkeypatch):
     """The installer is Windows only (`_supported`); these tests exercise the Windows path on any host."""
     real = qa_daily._supported
@@ -479,17 +485,6 @@ def test_only_one_of_two_concurrent_ticks_runs_the_check(home):
     assert checked == ["2026-11-12"] and inner == ["checking"]
 
 
-def test_an_interrupted_check_claim_is_recovered(home):
-    day = home / "qa" / "daily" / "2026-11-12"
-    _write(day / "install.started", "1000.0", 1000)
-    t = 1000.0 + qa_daily.INSTALL_WAIT_S + 10
-    _write(day / "check.claimed", str(t), t)                                 # the Core died mid-check
-    spawned, checked = [], []
-    assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: t + 60) == "checking" and checked == []
-    assert _tick(home, "2026-11-12", spawned, checked,
-                 clock=lambda: t + 1 + qa_daily.CHECK_STALE_S) == "checked" and checked == ["2026-11-12"]
-
-
 def test_a_check_name_from_the_report_is_redacted(home):
     deps, _ = _deps(home, report=REPORT.replace("[FAIL] doctor:", "[FAIL] mail igal@example.com token=abc123:"),
                     fail=())
@@ -530,62 +525,81 @@ def test_a_failed_end_of_day_write_never_hides_the_check_error(home, monkeypatch
     with pytest.raises(ValueError):
         _tick(home, "2026-11-13", spawned, checked, do_check=boom, clock=lambda: 1e10)
     assert warned == ["QA_DAILY_DONE_WRITE_FAILED"]
-    assert _tick(home, "2026-11-13", spawned, checked, clock=lambda: 1e10) == "checking" and checked == []
+    assert _tick(home, "2026-11-13", spawned, checked, clock=lambda: 1e10) == "done" and checked == []
 
 
-def test_an_empty_claim_being_written_is_not_taken_over(home):
-    """JAR-232 review-restart #1229 (gpt): a claim seen between its exclusive creation and its timestamp write was
-    renamed away at once, so a second tick checked too. An unreadable claim is judged by its file time."""
-    day = home / "qa" / "daily" / "2026-11-12"
-    _write(day / "install.started", "1000.0", 1000)
-    t = 1000.0 + qa_daily.INSTALL_WAIT_S + 10
-    _write(day / "check.claimed", "", t)                                     # just created, not yet written
+
+def test_a_check_lock_left_by_a_dead_core_is_free_and_a_held_one_waits(home):
+    """JAR-232 review #1362 (gpt): claim recovery renamed a live owner's claim away, so a third tick could check too.
+    The check now holds an OS lock: the OS frees it when a Core dies, and a held one is never taken over."""
+    from jarves.runtime.lock import _try_lock, _unlock
     spawned, checked = [], []
-    assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: t + 1) == "checking" and checked == []
-    assert (day / "check.claimed").is_file()
-    assert _tick(home, "2026-11-12", spawned, checked,
-                 clock=lambda: t + 1 + qa_daily.CHECK_STALE_S) == "checked" and checked == ["2026-11-12"]
+    _tick(home, "2026-11-12", spawned, checked)                              # installing
+    lock = home / "qa" / "daily" / "2026-11-12" / qa_daily.CHECK_LOCK
+    lock.write_text("", encoding="utf-8")                                    # left behind by a dead Core
+    fd = os.open(lock, os.O_RDWR)
+    try:
+        assert _try_lock(fd)                                                 # another live tick is checking
+        assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: 1e10) == "checking" and checked == []
+        _unlock(fd)
+    finally:
+        os.close(fd)
+    assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: 1e10) == "checked" and checked == ["2026-11-12"]
 
 
-def test_a_claim_recovered_while_read_is_claimed_afresh(home, monkeypatch):
-    path, seen = home / "check.claimed", []
-    path.write_text("", encoding="utf-8")
+def test_only_one_of_three_racing_ticks_checks(home, monkeypatch):
+    """Two ticks arrive mid-check and a third passed the tick.checked test before the owner ended the day: only the
+    owner checks."""
+    spawned, checked, inner = [], [], []
+    _tick(home, "2026-11-12", spawned, checked)
+    done = home / "qa" / "daily" / "2026-11-12" / "tick.checked"
+    late = lambda: 1e10                                                      # noqa: E731
 
-    def gone(p):                                                              # another tick renamed it meanwhile
-        seen.append(p)
-        p.unlink()
-        raise FileNotFoundError(p)
-    monkeypatch.setattr(qa_daily, "_claim_time", gone)
-    assert qa_daily._claim(path, lambda: 5.0) is True and path.read_text(encoding="utf-8") == "5.0" and seen
+    def do_check(d):
+        checked.append(d)
+        inner.append(_tick(home, "2026-11-12", spawned, checked, clock=late))
+        inner.append(_tick(home, "2026-11-12", spawned, checked, clock=late))
+    assert _tick(home, "2026-11-12", spawned, checked, do_check=do_check, clock=late) == "checked"
+    done.unlink()                                                            # as seen by the third tick before
+    monkeypatch.setattr(qa_daily, "_ended", set())                           # it locked (another process)
+    from jarves.runtime import lock as rl
+    real = rl._try_lock
 
-
-def test_a_fresh_claim_moved_by_a_racing_tick_is_put_back(home, monkeypatch):
-    """JAR-232 review #1362 R2: B read the stale claim, A replaced it with a fresh one, B moved A's away and left
-    no claim while A checked; a third tick could then check again."""
-    path = home / "check.claimed"
-    path.write_text("1.0", encoding="utf-8")                                 # stale when B reads it
-    real = qa_daily.os.replace
-
-    def replace(src, dst):                                                    # A recovers and claims first
-        if str(dst).endswith(".stale-a"):
-            return real(src, dst)
-        real(src, str(src) + ".stale-a")
-        Path(src).write_text("1e9", encoding="utf-8")                        # A's fresh claim
-        return real(src, dst)
-    monkeypatch.setattr(qa_daily.os, "replace", replace)
-    assert qa_daily._claim(path, lambda: 1e9 + 1) is False
-    assert path.read_text(encoding="utf-8") == "1e9" and not list(home.glob("check.claimed.stale-[0-9]*"))
+    def try_lock(fd):                                                        # the owner ends the day just now
+        done.write_text("1", encoding="utf-8")
+        return real(fd)
+    monkeypatch.setattr(rl, "_try_lock", try_lock)
+    assert _tick(home, "2026-11-12", spawned, checked, clock=late) == "done"
+    assert checked == ["2026-11-12"] and inner == ["checking", "checking"]
 
 
-def test_an_unreadable_claim_time_waits_and_warns_once(home, monkeypatch):
-    """JAR-232 review #1362 R3: a stat PermissionError escaped _claim and failed every hourly tick."""
-    path, warned = home / "check.claimed", []
-    path.write_text("", encoding="utf-8")
-
-    def denied(_p):
-        raise PermissionError("denied")
-    monkeypatch.setattr(qa_daily, "_claim_time", denied)
-    monkeypatch.setattr(qa_daily, "_claim_warned", False, raising=False)
+def test_an_unopenable_check_lock_waits_and_warns_once(home, monkeypatch):
+    spawned, checked, warned = [], [], []
+    _tick(home, "2026-11-12", spawned, checked)
+    (home / "qa" / "daily" / "2026-11-12" / qa_daily.CHECK_LOCK).mkdir()    # os.open fails (not a file)
     monkeypatch.setattr(qa_daily.logs, "warn", lambda *a, **kw: warned.append(a[1]))
-    assert qa_daily._claim(path, lambda: 5.0) is False and qa_daily._claim(path, lambda: 5.0) is False
-    assert warned == ["QA_DAILY_CLAIM_UNREADABLE"] and path.is_file()
+    for _ in range(2):
+        assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: 1e10) == "checking"
+    assert checked == [] and warned == ["QA_DAILY_LOCK_FAILED"]
+
+
+def test_core_thread_ticks_and_stops(home, monkeypatch):
+    """The Core wiring: start() ticks after first_delay_s, logs a real step, survives a failing tick and stops."""
+    import threading
+    calls, infos, warns, two = [], [], [], threading.Event()
+
+    def tick_real(cfg, h, busy):
+        calls.append(h)
+        if len(calls) >= 2:
+            two.set()
+            raise RuntimeError("boom")
+        return "installing"
+    monkeypatch.setattr(qa_daily, "_tick_real", tick_real)
+    monkeypatch.setattr(qa_daily.logs, "info", lambda *a, **kw: infos.append(a[1]))
+    monkeypatch.setattr(qa_daily.logs, "warn", lambda *a, **kw: warns.append(a[1]))
+    t = qa_daily.start(types.SimpleNamespace(cfg=None, home=home), first_delay_s=0.0, every_s=0.0)
+    assert two.wait(5)
+    t.stop.set()
+    t.join(5)
+    assert not t.is_alive() and calls[0] == home
+    assert infos[0] == "QA_DAILY_TICK" and warns[0] == "QA_DAILY_TICK_FAILED"

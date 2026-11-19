@@ -194,86 +194,55 @@ def tick(home, *, enabled, day, report, spawn, do_check, clock=time.time, busy=l
     final = text.startswith(("PASS", "FAIL")) and _of_day(text.splitlines()[0], d)
     if not final and clock() - since <= INSTALL_WAIT_S:
         return "waiting"
-    if not _claim(out / CHECK_CLAIM, clock):                          # another tick (Core or manual run) checks
-        return "checking"
-    try:
-        do_check(d)                                                   # never reported: check writes the P1 draft
-    except Exception as e:                                            # status must show this day, not the one before
-        _write_check_failed(out, d, e)
-        raise
-    finally:                                                          # a check that raises still ends the day (once)
-        try:                                                          # a failed write must not hide do_check's error
-            done.write_text(str(clock()), encoding="utf-8")
-        except OSError as e:                                          # the claim holds off a re-check for CHECK_STALE_S
-            logs.warn("updates", "QA_DAILY_DONE_WRITE_FAILED", "could not end the day", error_type=type(e).__name__)
+    with _check_lock(out / CHECK_LOCK) as held:                       # another tick (Core or manual run) checks
+        if not held:
+            return "checking"
+        if done.is_file() or str(done) in _ended:                     # it ended the day while we waited for the lock
+            return "done"
+        try:
+            do_check(d)                                               # never reported: check writes the P1 draft
+        except Exception as e:                                        # status must show this day, not the one before
+            _write_check_failed(out, d, e)
+            raise
+        finally:                                                      # a check that raises still ends the day (once)
+            _ended.add(str(done))                                     # this process never re-checks the day
+            try:                                                      # a failed write must not hide do_check's error
+                done.write_text(str(clock()), encoding="utf-8")
+            except OSError as e:
+                logs.warn("updates", "QA_DAILY_DONE_WRITE_FAILED", "could not end the day",
+                          error_type=type(e).__name__)
     return "checked"
 
 
-CHECK_CLAIM = "check.claimed"
-CHECK_STALE_S = 4 * 3600.0                                            # > 6 checks x the 300 s CLI timeout, with margin
+CHECK_LOCK = "check.lock"
+_ended: set[str] = set()
+_lock_warned = False
 
 
-def _claim_time(path: Path) -> float:
-    """The claim's timestamp; an empty or unreadable claim (seen between O_EXCL creation and the write) is
-    judged by its file time, so a claim being written is never taken over at once."""
-    t = _marker_time(path)
-    return path.stat().st_mtime if t is None or t == CORRUPT else t
-
-
-def _claim(path: Path, clock) -> bool:
-    """Atomically claim the day's check (O_EXCL). A claim older than CHECK_STALE_S was left by a Core that died
-    mid-check: it is renamed away (only one tick wins the rename) and claimed afresh."""
-    for _ in range(2):
-        try:
-            with open(path, "x", encoding="utf-8") as f:
-                f.write(str(clock()))
-            return True
-        except FileExistsError:
-            try:
-                if clock() - _claim_time(path) <= CHECK_STALE_S:
-                    return False
-            except FileNotFoundError:                                 # recovered meanwhile: try to claim again
-                continue
-            except OSError as e:                                      # e.g. access denied: not claimable now
-                _warn_claim_once(e)
-                return False
-            moved = path.with_name(f"{path.name}.stale-{os.getpid()}-{threading.get_ident()}")
-            try:
-                os.replace(path, moved)
-            except FileNotFoundError:                                 # another tick recovered it first
-                return False
-            try:
-                fresh = clock() - _claim_time(moved) <= CHECK_STALE_S
-            except OSError as e:
-                _warn_claim_once(e)
-                fresh = True
-            if fresh:                                                 # moved a racing tick's fresh claim: put it
-                _put_back(moved, path)                                # back, its owner is still checking
-                return False
-            moved.unlink(missing_ok=True)
-    return False
-
-
-_claim_warned = False
-
-
-def _warn_claim_once(e: OSError) -> None:
-    global _claim_warned
-    if not _claim_warned:                                             # once per Core run, not every hourly tick
-        _claim_warned = True
-        logs.warn("updates", "QA_DAILY_CLAIM_UNREADABLE", "cannot read the daily check claim", error_type=type(e).__name__)
-
-
-def _put_back(moved: Path, path: Path) -> None:
-    """Restore a fresh claim moved aside by mistake, never over a newer claim (link fails if `path` exists)."""
+@contextlib.contextmanager
+def _check_lock(path: Path):
+    """Yield True while this tick holds the day's check lock: an OS file lock (runtime/lock.py), so it is never
+    removed while held and the OS frees it when a Core dies mid-check. The file itself stays."""
+    global _lock_warned
+    from .runtime.lock import _try_lock, _unlock
     try:
-        os.link(moved, path)
-    except FileExistsError:
-        pass
-    except OSError:                                                   # no hard links (e.g. FAT): best effort
-        if not path.exists():
-            os.replace(moved, path)
-    moved.unlink(missing_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    except OSError as e:                                              # e.g. access denied: not checkable now
+        if not _lock_warned:                                          # once per Core run, not every hourly tick
+            _lock_warned = True
+            logs.warn("updates", "QA_DAILY_LOCK_FAILED", "cannot open the daily check lock",
+                      error_type=type(e).__name__)
+        yield False
+        return
+    try:
+        held = _try_lock(fd)
+        try:
+            yield held
+        finally:
+            if held:
+                _unlock(fd)
+    finally:
+        os.close(fd)
 
 
 def _write_check_failed(out: Path, d: str, e: Exception) -> None:
@@ -324,6 +293,7 @@ def _spawn_hidden(argv: list[str], log: Path | None = None, wait_s: float = STAR
     """Start detached and hidden; its output goes to `log`. A child that exits non-zero at once (e.g. Python
     cannot import jarves) raises with that output, so tick records a start failure, not a missing report."""
     from .install_latest import cli_argv
+    # DETACHED_PROCESS already means no console; CREATE_NO_WINDOW is a harmless fallback (ignored with it)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
     sink = open(log, "wb") if log else subprocess.DEVNULL
     try:
