@@ -192,6 +192,24 @@ class UnlockTests(unittest.TestCase):
         self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
+    def test_new_code_resets_per_session_counts_and_dead_sessions_are_dropped(self):
+        # #1265 review R2: a capped session is accepted again with a newly issued code; dead sessions leave the counter.
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        dead = self.login()
+        self.request("/api/unlock", {"code": wrong})
+        self.cookie = ""
+        capped = self.login()
+        self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(4)], [403] * 4)
+        self.server.unlock_attempts.clear()
+        with self.server.session_lock:
+            self.server.sessions.pop(dead)
+        self.assertEqual(self.request("/api/unlock", {"code": wrong})[0], 403)  # 5th wrong try caps this session
+        self.assertEqual(self.server.unlock_wrong[1], {capped: 5})            # the dead session's count is gone
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)  # capped for this code
+        fresh = unlock.issue(self.home)                                       # new salt
+        self.assertEqual(self.request("/api/unlock", {"code": fresh})[0], 200)
+
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
         shown = unlock.issue(self.home)
