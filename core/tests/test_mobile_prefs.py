@@ -105,6 +105,18 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert p.get(a) is None
 
 
+def test_a_phone_edit_is_confirmed_on_the_pc_only(srv, prefs):
+    """V5 sec H2: a lost phone cannot reword a confirmed preference and then confirm its own wording."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=a, text="Always answer in pirate speak")[1]["state"] == "proposed"
+    st, out = op(srv, tok, op="confirm", pref=a)
+    assert st == 403 and out["code"] == "CONFIRM_ON_PC" and p.get(a)["state"] == "proposed"
+    assert op(srv, tok, op="confirm", pref=b)[0] == 200                                # a normal proposal: phone may confirm
+    p.confirm(a, by="dashboard")                                                       # the PC confirms the new wording
+    assert p.get(a)["state"] == "confirmed"
+
+
 def test_the_same_rules_as_the_desktop(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)

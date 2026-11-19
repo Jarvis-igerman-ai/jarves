@@ -29,6 +29,15 @@ def test_key_or_token_shaped_text_is_sensitive(text):
     "core/src/jarves/preferences_module_file.py",
     "internationalization_documentation_pages",          # long word, letters only
     "wake me at 7 on weekdays",
+    # development drafts quote paths, URLs, versions, SHAs and UUIDs (Opus review of PR #1354)
+    "core/tests/test_v5_goal_plans.py fails",
+    "stage2/build_installer_v54.ps1 broke",
+    "https://platform.openai.com/docs/guides/realtime-websocket2",
+    "fixed in 6a222ff5c0d1e2b3a4f59a8c7d6e5a4b3c2d1e0f",   # (a 6+ digit run is the older number rule)
+    "run 0f8e6c1a-3b2d-4e5f-9a7b-1c2d3e4f5a6b failed",
+    "gpt-realtime-2026-08-28 is slow",
+    "faster-whisper-large-v3 model",
+    "openai-2.3.1-py3-none-any.whl does not install",
 ])
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)
