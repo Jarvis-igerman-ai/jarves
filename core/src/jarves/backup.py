@@ -17,8 +17,8 @@ Retention (adjustable, memory.db settings `backup.*`, `jarvis backup settings --
 --checkpoints`): automatic backups keep the newest per day for the last 3 days that have one and the newest per ISO
 week for the last 2 weeks; manual ones the last 3; pre-migration / pre-restore checkpoints the last 2 each. Only
 automatic backups are thinned by the day/week rule. Issue #1016 (each install wrote 2-3 archives and filled the
-disk): checkpoint() reuses a verified backup under an hour old when no data file changed since it, so the install's
-`backup now`, the installer checkpoint and the first-start checkpoint are one archive; create() checks free disk
+disk): checkpoint() reuses a verified pre-migration checkpoint under an hour old when no data file changed since
+it, so the installer checkpoint and the first-start checkpoint are one archive; create() checks free disk
 space first, prunes when short and refuses with BACKUP_NO_SPACE before writing anything.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
@@ -229,6 +229,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
     take, skipped = plan(home, settings)
     _ensure_space(home, out_dir, sum(_size(p) for p, _ in take))
     files = []
+    seen = 0.0          # #1016: newest data mtime this archive really holds (each file stat'ed as it is copied)
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
             with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
@@ -236,9 +237,11 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                     try:
                         if _is_sqlite(p):
                             snap = Path(work) / f"{len(files)}.db"
-                            _sqlite_copy(p, snap)
+                            _sqlite_copy(p, snap)      # after the copy: it touches the WAL itself
+                            seen = max(seen, p.stat().st_mtime, _mtime(p.with_name(p.name + "-wal"), missing=0.0))
                             src, typ = snap, "sqlite"
                         else:
+                            seen = max(seen, p.stat().st_mtime)                 # before reading it
                             src, typ = p, "file"
                         files.append({"name": rel, "type": typ, "size": src.stat().st_size, "sha256": _sha256(src)})
                         z.write(src, "data/" + rel)
@@ -251,7 +254,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                             "created_text": datetime.fromtimestamp(now).isoformat(timespec="seconds"), "kind": kind,
                             "note": note[:200], "platform": sys.platform, "machine": platform.machine(),
                             "files": files, "excluded": skipped, "contains_credentials": False,
-                            "data_mtime": _data_mtime(home)}            # #1016: after the snapshot touched the WAL
+                            "data_mtime": seen}
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
             res = verify(tmp)
             if not res["ok"]:
@@ -565,8 +568,9 @@ def restore_test(path: Path) -> dict:
 # ---------------------------------------------------------------------- checkpoints and automatic backups
 def checkpoint(home: Path, reason: str = "migration") -> Path:
     """Before a database migration or update: a verified pre-migration backup. Raises BackupError on failure, so
-    the caller can refuse to migrate and show recovery guidance. #1016: reuses a fresh, verified backup of the
-    same unchanged data (e.g. the install's `backup now`) instead of writing another 200-600 MB archive."""
+    the caller can refuse to migrate and show recovery guidance. #1016: reuses the newest backup when it is a
+    pre-migration checkpoint under REUSE_S old that still verifies and no data changed since (the installer's
+    checkpoint becomes the first-start one) instead of writing another 200-600 MB archive."""
     fresh = _reusable(home)
     if fresh is not None:
         logs.info("backup", "BACKUP_REUSED", "unchanged data: reusing a fresh backup as checkpoint",
@@ -581,18 +585,18 @@ def _data_mtime(home: Path) -> float:
     return max((_mtime(p) for p in [q for q, _ in plan(home)[0]] + list(home.glob("*-wal"))), default=0.0)
 
 
-def _mtime(p: Path) -> float:
+def _mtime(p: Path, missing: float = float("inf")) -> float:
     try:
         return p.stat().st_mtime
     except OSError:
-        return float("inf")                                   # cannot tell: treat as changed
+        return missing                                        # default: cannot tell, treat as changed
 
 
 def _reusable(home: Path) -> Path | None:
     home = Path(home)
     items = list_backups(home)
-    if not items:
-        return None
+    if not items or items[0]["kind"] != "pre-migration":
+        return None             # only a checkpoint: a manual/auto archive follows other retention and may be pruned
     path = backup_dir(home) / items[0]["name"]
     try:
         man = read_manifest(path)

@@ -371,11 +371,11 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
 
 # ---------------------------------------------------------------------- issue #1016: backups filled the disk
 def test_install_reuses_a_fresh_backup_instead_of_two_more_issue_1016(profile):
-    first = backup.create(profile, "manual")                           # `jarvis install-latest`: backup now
-    import glob; print("DBG", sorted(x.name for x in profile.iterdir()), [ (p, p.stat().st_mtime - backup.read_manifest(first)["created"]) for p in profile.glob("*-wal")])
-    assert backup.checkpoint(profile, "installer upgrade") == first    # installer: data unchanged -> same archive
-    assert backup.startup_checkpoint(profile) == first                 # first Core start of the new version
-    assert len(backup.list_backups(profile)) == 1
+    manual = backup.create(profile, "manual")                          # `jarvis install-latest`: backup now
+    first = backup.checkpoint(profile, "installer upgrade")            # a manual archive is never reused (R5)
+    assert first != manual and "pre-migration" in first.name
+    assert backup.startup_checkpoint(profile) == first                 # first Core start: data unchanged -> same
+    assert len(backup.list_backups(profile)) == 2
     later = time.time() + 5
     os.utime(profile / "memory.db", (later, later))                    # the data changed after that backup
     again = backup.checkpoint(profile, "next migration")
@@ -414,3 +414,37 @@ def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
     assert e.value.code == "BACKUP_NO_SPACE" and "free" in e.value.action
     assert len(backup.list_backups(profile)) == 3                      # pruned to the retention before refusing
     assert not list(bdir.glob("*.partial"))
+
+
+@pytest.mark.parametrize("case", ["too_old", "no_data_mtime", "fails_verify"])
+def test_checkpoint_refuses_unsafe_reuse_issue_1016(profile, monkeypatch, case):
+    first = backup.checkpoint(profile, "installer upgrade")
+    if case == "too_old":
+        monkeypatch.setattr(backup, "REUSE_S", -1)
+    elif case == "no_data_mtime":                                     # an archive from before this fix
+        real = backup.read_manifest
+        monkeypatch.setattr(backup, "read_manifest",
+                            lambda p: {k: v for k, v in real(p).items() if k != "data_mtime"})
+    else:
+        real_verify = backup.verify
+        monkeypatch.setattr(backup, "verify", lambda p: {"ok": False, "errors": ["damaged"], "files": 0}
+                            if p == first else real_verify(p))
+    again = backup.checkpoint(profile, "next migration")
+    assert again != first and "pre-migration" in again.name
+
+
+def test_write_after_the_snapshot_blocks_reuse_issue_1016(profile, monkeypatch):
+    take = [rel for _, rel in backup.plan(profile)[0]]
+    assert take[-1] != "memory.db"                                      # memory.db is copied before the last file
+    real, calls = zipfile.ZipFile.write, []
+
+    def write(self, src, arc=None, *a, **k):                            # a commit lands while the last file zips
+        calls.append(arc)
+        if len(calls) == len(take):
+            later = time.time() + 5
+            os.utime(profile / "memory.db", (later, later))
+        return real(self, src, arc, *a, **k)
+    monkeypatch.setattr(zipfile.ZipFile, "write", write)
+    first = backup.checkpoint(profile, "installer upgrade")
+    monkeypatch.setattr(zipfile.ZipFile, "write", real)
+    assert backup.checkpoint(profile, "first start") != first          # that write is not in the archive
