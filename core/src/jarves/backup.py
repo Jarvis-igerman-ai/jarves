@@ -104,8 +104,9 @@ def set_settings(home: Path, changes: dict) -> dict:
                 n = int(v)
             except (TypeError, ValueError):
                 raise ValueError(f"{k} must be a whole number")
-            if not 0 <= n <= 365 or (k == "daily" and n < 1):
-                raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
+            low = 0 if k == "weekly" else 1      # #1016: 0 checkpoints would let prune() eat the one just written
+            if not low <= n <= 365:
+                raise ValueError(f"{k} must be between {low} and 365")
             clean[k] = n
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
@@ -227,7 +228,8 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
-    _ensure_space(home, out_dir, sum(_size(p) for p, _ in take))
+    dbs = sum(_size(p) + _size(p.with_name(p.name + "-wal")) for p, _ in take if _is_sqlite(p))
+    _ensure_space(home, out_dir, sum(_size(p) for p, _ in take), dbs)
     files = []
     seen = 0.0          # #1016: newest data mtime this archive really holds (each file stat'ed as it is copied)
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
@@ -284,18 +286,38 @@ def _size(p: Path) -> int:
         return 0
 
 
-def _ensure_space(home: Path, out_dir: Path, need: int) -> None:
-    """#1016: the archive is at most the data size; when the disk is short, prune first, then refuse."""
-    need += FREE_RESERVE
-    if shutil.disk_usage(out_dir).free >= need:
+def _ensure_space(home: Path, out_dir: Path, archive: int, snapshots: int) -> None:
+    """#1016: the archive is at most the data size, and each SQLite snapshot (db + WAL folded in) is written to the
+    temp dir while it grows; when a disk is short, prune first, then refuse."""
+    tmp = Path(tempfile.gettempdir())
+    same = _device(tmp) == _device(out_dir)
+    needs = {out_dir: archive + (snapshots if same else 0) + FREE_RESERVE}
+    if not same:
+        needs[tmp] = snapshots + FREE_RESERVE
+
+    def short() -> tuple[int, int] | None:
+        for d, need in needs.items():
+            free = shutil.disk_usage(d).free
+            if free < need:
+                return free, need
+        return None
+    if short() is None:
         return
     prune(home)
-    free = shutil.disk_usage(out_dir).free
-    if free < need:
+    gap = short()
+    if gap is not None:
+        free, need = gap
         logs.error("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=free, size=need)
         raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free // 2**20} MB free, "
                           f"{need // 2**20} MB needed)", "free some disk space or lower `jarvis backup settings` "
                           "--manual/--checkpoints, then try again")
+
+
+def _device(p: Path) -> int | None:
+    try:
+        return p.stat().st_dev
+    except OSError:
+        return None
 
 
 def _unlink(p: Path) -> None:
@@ -573,16 +595,20 @@ def checkpoint(home: Path, reason: str = "migration") -> Path:
     checkpoint becomes the first-start one) instead of writing another 200-600 MB archive."""
     fresh = _reusable(home)
     if fresh is not None:
+        man = read_manifest(fresh)
         logs.info("backup", "BACKUP_REUSED", "unchanged data: reusing a fresh backup as checkpoint",
-                  backup=fresh.name, reason=reason[:80])
+                  backup=fresh.name, reason=reason[:80], note=str(man.get("note", ""))[:80],
+                  age_s=round(time.time() - man["created"]))
         return fresh
     return create(home, "pre-migration", note=reason)
 
 
-def _data_mtime(home: Path) -> float:
-    """Newest modification time of everything a backup would hold, SQLite WAL files included."""
-    home = Path(home)
-    return max((_mtime(p) for p in [q for q, _ in plan(home)[0]] + list(home.glob("*-wal"))), default=0.0)
+def _data_state(home: Path) -> tuple[float, set[str]]:
+    """Newest modification time of everything a backup would hold (each file and its SQLite `-wal`, the same rule
+    as create()) and the set of archive names, so an added, removed or WAL-only change is seen."""
+    take = plan(Path(home))[0]
+    newest = max((max(_mtime(p), _mtime(p.with_name(p.name + "-wal"), missing=0.0)) for p, _ in take), default=0.0)
+    return newest, {rel for _, rel in take}
 
 
 def _mtime(p: Path, missing: float = float("inf")) -> float:
@@ -605,9 +631,12 @@ def _reusable(home: Path) -> Path | None:
     created = man.get("created") if isinstance(man, dict) else None
     if not isinstance(created, (int, float)) or not 0 <= time.time() - created <= REUSE_S:
         return None
-    seen = man.get("data_mtime")
-    if not isinstance(seen, (int, float)) or _data_mtime(home) > seen:
-        return None                                           # data changed since (or an older archive format)
+    seen, files = man.get("data_mtime"), man.get("files")
+    if not isinstance(seen, (int, float)) or not isinstance(files, list):
+        return None                                           # an older archive format
+    newest, names = _data_state(home)
+    if newest > seen or names != {f.get("name") for f in files if isinstance(f, dict)}:
+        return None                                           # data changed, or a file was added/removed/unreadable
     return path if verify(path)["ok"] else None
 
 

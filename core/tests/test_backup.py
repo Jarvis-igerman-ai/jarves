@@ -448,3 +448,70 @@ def test_write_after_the_snapshot_blocks_reuse_issue_1016(profile, monkeypatch):
     first = backup.checkpoint(profile, "installer upgrade")
     monkeypatch.setattr(zipfile.ZipFile, "write", real)
     assert backup.checkpoint(profile, "first start") != first          # that write is not in the archive
+
+
+@pytest.mark.parametrize("change", ["top_wal", "subfolder_wal", "added_old_file", "removed_file"])
+def test_unseen_data_change_blocks_reuse_issue_1016(profile, change):
+    sub = profile / "workspace" / "jobs.db"
+    for target in (sub, profile / "memory.db"):                       # WAL mode (persistent) before the checkpoint
+        db = sqlite3.connect(target)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE IF NOT EXISTS t (x)")
+        db.commit()
+        db.close()
+    first = backup.checkpoint(profile, "installer upgrade")
+    writer = None
+    if change in ("top_wal", "subfolder_wal"):                        # a WAL-only commit: the db file keeps its mtime
+        target = profile / "memory.db" if change == "top_wal" else sub
+        writer = sqlite3.connect(target)                              # stays open, so nothing checkpoints the WAL
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        before = target.stat().st_mtime
+        writer.execute("CREATE TABLE IF NOT EXISTS w (x)")
+        writer.execute("INSERT INTO w VALUES (1)")
+        writer.commit()
+        wal = target.with_name(target.name + "-wal")
+        assert target.stat().st_mtime == before and wal.is_file()
+    elif change == "added_old_file":                                  # moved in with an old mtime kept
+        (profile / "notes" / "old.md").write_text("x", encoding="utf-8")
+        os.utime(profile / "notes" / "old.md", (400_000_000, 400_000_000))
+    else:
+        (profile / "notes" / "shopping.md").unlink()
+    try:
+        assert backup.checkpoint(profile, "first start") != first
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+def test_retention_below_one_is_refused_issue_1016(profile, capsys):
+    from jarves import cli
+    assert cli.main(["backup", "settings", "--checkpoints", "0"]) == 1
+    assert "between 1 and 365" in capsys.readouterr().out
+    for k in ("manual", "checkpoints"):
+        with pytest.raises(ValueError):
+            backup.set_settings(profile, {k: 0})
+    assert backup.get_settings(profile)["checkpoints"] == backup.DEFAULTS["checkpoints"]
+
+
+def test_low_disk_prune_frees_enough_then_backup_succeeds_issue_1016(profile, monkeypatch):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    for i in range(5):
+        (bdir / f"jarves-backup-2026110{i + 1}-030000-manual.zip").write_bytes(b"x")
+    real = backup.shutil.disk_usage
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {
+        "free": 1024 if len(list(bdir.glob("*.zip"))) > 3 else real(p).free})())
+    p = backup.create(profile, "manual")
+    assert backup.verify(p)["ok"] and len(backup.list_backups(profile)) == 3
+
+
+def test_space_check_counts_sqlite_snapshots_issue_1016(profile, monkeypatch):
+    take = backup.plan(profile)[0]
+    archive = sum(p.stat().st_size for p, _ in take)
+    assert any(backup._is_sqlite(p) for p, _ in take)
+    monkeypatch.setattr(backup, "_device", lambda p: 1)               # temp dir on the same disk as the backups
+    monkeypatch.setattr(backup.shutil, "disk_usage",
+                        lambda p: type("U", (), {"free": archive + backup.FREE_RESERVE + 1})())
+    with pytest.raises(backup.BackupError) as e:                       # enough for the zip, not for zip + snapshots
+        backup.create(profile, "manual")
+    assert e.value.code == "BACKUP_NO_SPACE"
