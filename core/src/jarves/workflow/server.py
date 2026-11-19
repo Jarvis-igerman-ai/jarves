@@ -478,8 +478,9 @@ class Handler(BaseHTTPRequestHandler):
             wrong = self.server.unlock_wrong
             if wrong["by_session"].get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
                 # No further guess from this session; the code stays live for the owner's other window.
-                self._json(403, {"error": "too many wrong codes in this window; run 'jarvis workflow unlock' in your own "
-                                 "terminal for a new code", "locked": True, "reason": "session_exhausted"})
+                self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
+                                 "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
+                                 "reason": "session_exhausted"})
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
                 wrong["by_session"][session] = wrong["by_session"].get(session, 0) + 1
