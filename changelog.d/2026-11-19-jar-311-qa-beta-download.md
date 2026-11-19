@@ -1,0 +1,1 @@
+- Added: JAR-311 investigation report for the failed QA download of beta 4.0.1-beta.402 (docs only, no behaviour change; root cause UNVERIFIED).
