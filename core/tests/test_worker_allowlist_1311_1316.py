@@ -22,7 +22,12 @@ def test_1311_default_list_passes_the_same_check_as_the_override():
 @pytest.mark.parametrize("rule", ["Bash(ls:*)", "Bash(ls *)", "Bash(ls > ~/autopilot.json)", "Bash(ls >> a)",
                                   "Bash(ls | tee a)", "Bash(ls; python -c x)", "Bash(ls && rm x)", "Bash(ls $(id))",
                                   "Bash(ls `id`)", "Bash(git diff --output=a)", "Bash(pytest)", "Bash(npm test)",
-                                  "Bash(git commit -m x)", "Bash(python x.py)", "Edit", "Write", "Bash(tee a)"])
+                                  "Bash(git commit -m x)", "Bash(python x.py)", "Edit", "Write", "Bash(tee a)",
+                                  # review of #1334: arguments after a read-only command are not trusted
+                                  "Bash(git branch -D main)", "Bash(git branch -f main HEAD)", "Bash(git branch -m a b)",
+                                  "Bash(git branch x)", "Bash(git diff --outp=f)", "Bash(git log --out=f)",
+                                  "Bash(git diff --ext-d)", "Bash(gh pr view --web)", "Bash(gh pr view 1 -w)",
+                                  "Bash(gh issue list --web=true)", "Bash(gh pr list -R other/repo)"])
 def test_1316_wildcard_redirection_compound_and_writers_are_refused(rule):
     assert claude.worker_rule_problem(rule) != ""
 

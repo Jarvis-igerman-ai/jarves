@@ -261,11 +261,12 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Bash(gh pr view)", "Bash(gh pr list)", "Bash(gh pr checks)", "Bash(gh issue list)", "Bash(gh run list)",
 )
 _READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob"})
-_READ_ONLY_COMMANDS = ("ls", "wc", "git status", "git diff", "git log", "git show", "git branch", "jarvis status",
-                       "jarvis doctor", "jarvis features", "gh pr view", "gh pr list", "gh pr checks", "gh pr diff",
-                       "gh issue view", "gh issue list", "gh run view", "gh run list")
+# Complete commands, matched exactly: no argument tail is trusted (`git branch -D`, `gh pr view --web`, `git diff --outp=f`).
+_READ_ONLY_COMMANDS = frozenset({"ls", "git status", "git diff", "git diff --stat", "git diff --cached", "git log",
+                                 "git log --oneline", "git show", "git branch", "git branch --show-current",
+                                 "jarvis status", "jarvis doctor", "jarvis features", "gh pr view", "gh pr list",
+                                 "gh pr checks", "gh pr diff", "gh issue list", "gh run list"})
 _SHELL_META = re.compile(r"[*?;&|<>$`(){}\\\n'\"]")
-_WRITE_OPTION = re.compile(r"(?i)(^|\s)(-o|--output|--ext-diff|--textconv)(\s|=|$)")
 
 
 def worker_rule_problem(rule: object) -> str:
@@ -279,10 +280,8 @@ def worker_rule_problem(rule: object) -> str:
     cmd = rule[len("Bash("):-1]
     if ":" in cmd or _SHELL_META.search(cmd):
         return "wildcard, redirection, compound command or substitution"
-    if _WRITE_OPTION.search(cmd):
-        return "option that writes a file or runs a configured command"
-    if not any(cmd == c or cmd.startswith(c + " ") for c in _READ_ONLY_COMMANDS):
-        return "not a read-only command"
+    if cmd not in _READ_ONLY_COMMANDS:
+        return "not one of the exact read-only commands (arguments are not accepted)"
     return ""
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
