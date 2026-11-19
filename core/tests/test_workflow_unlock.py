@@ -168,10 +168,11 @@ class UnlockTests(unittest.TestCase):
         wrong = "0000" if shown != "0000" else "1111"
         self.login()                                                   # the token-only caller
         statuses = []
-        for _ in range(6):
+        for i in range(6):                                             # tries 0-4 wrong, try 5 the right code
             self.server.unlock_attempts.clear()                        # not the rate limit under test
-            statuses.append(self.request("/api/unlock", {"code": shown if _ == 5 else wrong})[0])
-        self.assertEqual(statuses, [403] * 6)                          # even the right code: no 4th guess here
+            status, _headers, body = self.request("/api/unlock", {"code": shown if i == 5 else wrong})
+            statuses.append((status, body.get("reason")))
+        self.assertEqual(statuses, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)  # no 4th guess here
         self.assertTrue((self.home / unlock.FILE).exists())           # the owner's code survives
         self.cookie = ""
         owner = self.login()                                           # the owner's own window
