@@ -47,7 +47,8 @@ _SENSITIVE = re.compile(
     # credential words (#1099): API keys, tokens, secrets, private keys (EN + HE)
     # (bare "token"/"secret" are left out: devmanager drafts such as "token refresh fails" must still save)
     r"api[\s_-]?keys?\b|access[\s_-]?keys?\b|secret[\s_-]?keys?\b|private[\s_-]?keys?\b|client[\s_-]?secrets?|"
-    r"(?:api|access|auth|bearer)[\s_-]?token|"
+    r"\b(?:api|access|auth|bearer)[\s_-]?token|"   # "oauth_token" (an identifier) is not a credential word
+    
     r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
 # a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
 # ('.', '/' and '-' split the run: paths, URLs, versions, UUIDs and file names are not one key)
@@ -85,8 +86,8 @@ def base_source(source: str) -> str:
     return rest if sep and mark == PHONE_EDIT else str(source or "")
 
 
-def phone_edited(row: dict | None) -> bool:
-    return bool(row) and str(row.get("source", "")).startswith(PHONE_EDIT) and row.get("state") != "confirmed"
+class PhoneEditNeedsPC(PermissionError):
+    """A confirm from a phone-reachable route of an item whose wording was changed on a phone (V5 sec H2)."""
 
 
 def looks_sensitive(text: str) -> bool:
@@ -149,13 +150,22 @@ class Preferences:
             r["status"] = "confirmed"
         return r
 
-    def confirm(self, pid: int, *, by: str = "user") -> dict:
-        r = self.get(pid)
-        if not r:
+    def confirm(self, pid: int, *, by: str = "user", refuse_phone_edit: bool = False) -> dict:
+        """`refuse_phone_edit` (every route a phone can reach, V5 sec H2): wording changed on a phone is confirmed on
+        the PC only. The check is part of the one UPDATE, so an edit landing just before cannot slip through."""
+        if not self.get(pid):
             raise KeyError(pid)
         now = self.clock()                  # a confirm ends the phone-edit mark: the original provenance comes back
-        self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=?, source=? WHERE id=?",
-                  (now, now, base_source(r["source"]), pid))
+        sql = ("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=?, source=CASE WHEN "
+               f"substr(source, 1, {len(PHONE_EDIT) + 1})='{PHONE_EDIT}:' THEN substr(source, {len(PHONE_EDIT) + 2}) "
+               "ELSE source END WHERE id=?")
+        if refuse_phone_edit:
+            sql += f" AND substr(source, 1, {len(PHONE_EDIT)})<>'{PHONE_EDIT}'"
+        if not self.db.x(sql, (now, now, pid)).rowcount:
+            if not self.get(pid):
+                raise KeyError(pid)                                     # removed meanwhile
+            logs.info("prefs", "PREF_CONFIRM_ON_PC", "a phone-edited preference must be confirmed on the PC", id=pid, by=by)
+            raise PhoneEditNeedsPC(pid)
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
@@ -320,7 +330,13 @@ def make_skill(prefs: Preferences):
             async def confirm(a: IdArgs):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                r = prefs.confirm(a.id, by="voice")
+                try:     # phone chat reaches this tool too (core_bridge -> Brain), so it never confirms a phone edit
+                    r = prefs.confirm(a.id, by="voice", refuse_phone_edit=True)
+                except KeyError:
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except PhoneEditNeedsPC:
+                    return ToolResult(False, "this preference was reworded on a phone: the owner confirms it on the "
+                                      "computer screen", code="CONFIRM_ON_PC")
                 msg = "remembered"
                 if r["conflicts"]:
                     msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])

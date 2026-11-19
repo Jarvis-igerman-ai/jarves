@@ -59,7 +59,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
-    from .preferences import PHONE_EDIT, phone_edited
+    from .preferences import PHONE_EDIT, PhoneEditNeedsPC
     p = store(mob)
     if not p.get(pid):
         return 404, {"error": "no such preference"}
@@ -67,11 +67,11 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     try:
         # answers hold ids and counts only: the command ledger stores them, and text must not rest there (privacy)
         if op == "confirm":
-            if phone_edited(p.get(pid)):                      # None (removed meanwhile): confirm answers 404
-                # V5 sec H2: wording changed on a phone is confirmed on the PC only (a lost phone cannot edit + confirm)
+            try:      # V5 sec H2: one atomic UPDATE refuses wording changed on a phone (a lost phone cannot edit + confirm)
+                r = p.confirm(pid, by=by, refuse_phone_edit=True)
+            except PhoneEditNeedsPC:
                 return 403, {"error": "this preference was reworded on a phone: confirm it on the computer",
                              "code": "CONFIRM_ON_PC"}
-            r = p.confirm(pid, by=by)
             return 200, {"ok": True, "pref": pid, "state": "confirmed", "conflicts": len(r["conflicts"])}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by=by), "pref": pid}

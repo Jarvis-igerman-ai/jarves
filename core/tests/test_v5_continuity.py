@@ -50,6 +50,25 @@ def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
     c.store("d1", "cid-0003", "plan", 200, {"plan": {"steps": [{"text": "nested private words", "id": 1}]}})
     assert c.seen("d1", "cid-0003") == {"plan": {"steps": [{"text": continuity.NOT_KEPT, "id": 1, "not_kept": True}]}}
 
+
+def test_resend_ledger_keeps_only_codes_and_numbers_when_privacy_is_on(tmp_path):
+    """Review R2: an allowlist, so every ledgered body's free text is blanked (a goal title, an echoed error)."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    goal = {"goal": {"id": 3, "title": "Run the marathon", "status": "active", "percent": 40,
+                     "steps": [{"id": 9, "text": "buy shoes", "done": True}]}}
+    c.store("d1", "cid-0004", "goal", 200, goal)
+    c.store("d1", "cid-0005", "pref", 400, {"error": "the same preference already exists: jazz"})
+    c.store("d1", "cid-0006", "pref", 403, {"error": "reworded on a phone", "code": "CONFIRM_ON_PC"})
+    c.store("d1", "cid-0007", "pref", 200, {"ok": True, "pref": 5, "state": "confirmed", "conflicts": 0})
+    assert not any(w in r["body"] for r in c._rows("SELECT body FROM ledger") for w in ("marathon", "shoes", "jazz"))
+    g = c.seen("d1", "cid-0004")["goal"]
+    assert g["title"] == continuity.NOT_KEPT and g["status"] == "active" and g["percent"] == 40 and g["id"] == 3
+    assert g["steps"] == [{"id": 9, "text": continuity.NOT_KEPT, "done": True, "not_kept": True}]
+    assert c.seen("d1", "cid-0006")["code"] == "CONFIRM_ON_PC"
+    assert c.seen("d1", "cid-0007") == {"ok": True, "pref": 5, "state": "confirmed", "conflicts": 0}
+
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
 NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
 
