@@ -1549,7 +1549,7 @@ class Core:
         try:
             await self.link.broadcast("status", self.snapshot())
             await live.start()
-            started = getattr(live, "running", True) is not False and not self.stopping   # LiveSession sets running
+            started = claimed and live.running is True and not self.stopping   # LiveSession.running: True once started
         except asyncio.CancelledError:
             cancelled = True                        # the task is going away: never greet from it
             raise
@@ -1571,11 +1571,7 @@ class Core:
             return
         finally:
             if claimed:
-                waiting, self._wake_claim, self._face_greet_waiting = self._face_greet_waiting, False, False
-                if not started:           # #520: the wake session did not start, so its greeting never happened
-                    self._greeted = waiting and not cancelled   # a face connected meanwhile: it gets its greeting now
-                    if self._greeted and not self.stopping:      # never greet during shutdown or from a cancelled task
-                        self._run_busy(self.greet())
+                self._release_wake_claim(started, cancelled)
             self._voice_connecting = False
             if ack:
                 await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
@@ -2083,6 +2079,20 @@ class Core:
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
                 await self._start_live(ack=True, greeting=self.wake_greeting())
+
+    def _release_wake_claim(self, started: bool, cancelled: bool) -> None:
+        """#520: end the wake greeting claim taken in _start_live. A started session keeps the greeting."""
+        waiting = self._face_greet_waiting
+        self._wake_claim = False
+        self._face_greet_waiting = False
+        if started:
+            return
+        if cancelled:                     # deliberate: a face that waited on a cancelled start is greeted on reconnect
+            self._greeted = False
+            return
+        self._greeted = waiting           # a face connected during the failed start: it gets its greeting now
+        if waiting and not self.stopping:  # never greet during shutdown
+            self._run_busy(self.greet())
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off. No side effects:

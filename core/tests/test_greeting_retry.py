@@ -206,6 +206,7 @@ async def test_started_wake_session_marks_greeted_only_with_a_greeting(core, gre
     seen = []
 
     class Live:                                     # #520: a session that really starts
+        running = True                          # LiveSession protocol: True once started
         async def start(self):
             seen.append(core._greeted)              # a face connecting during this await must not greet again
 
@@ -291,6 +292,7 @@ async def test_face_connecting_during_the_status_broadcast_does_not_greet_twice(
         await real_broadcast(t, payload)
 
     class Live:
+        running = True                          # LiveSession protocol: True once started
         async def start(self):
             pass
 
