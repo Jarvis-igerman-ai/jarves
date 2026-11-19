@@ -7,10 +7,10 @@ TCL_TRANSIENT = ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl", "tcl_fi
                  "can't find a usable")
 
 
-def new_tk_root(tk, attempts: int = 5, sleep=time.sleep):
+def new_tk_root(tk, attempts: int = 5, sleep=None):
     """tk.Tk() with a few retries. Windows: Tcl's init scripts are read now and then with a failure ("couldn't read
     file ...auto.tcl", 'invalid command name "tcl_findLibrary"'). attempts below 1 counts as 1 (never returns None)."""
-    attempts = max(1, int(attempts))
+    attempts, sleep = max(1, int(attempts)), sleep or time.sleep    # resolved per call, so tests can patch time.sleep
     for attempt in range(attempts):
         try:
             return tk.Tk()

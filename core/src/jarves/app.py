@@ -205,6 +205,7 @@ class Core:
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
         self._greeted = False
+        self._wake_claim = self._face_greet_waiting = False   # #520: wake greeting claim in flight
         self.voice_mode = "off"
         self._voice_connecting = False
         # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
@@ -905,6 +906,8 @@ class Core:
             self._greeted = True
             logs.info("core", "GREETING", "saying hello (once per start)", speech="cloud" if (self.cfg.ai.provider == "openai" and self.cfg.ai.connection != "chatgpt") else "local")
             self._run_busy(self.greet())      # busy => the wake mic is closed while JARVES talks (no self-trigger)
+        elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and getattr(self, "_wake_claim", False):
+            self._face_greet_waiting = True   # #520: a wake start holds the greeting; if it fails, _start_live greets
 
     def how_to_talk(self) -> str:
         if self.cfg.voice.activation == "conversation":
@@ -1539,7 +1542,7 @@ class Core:
         await self.link.broadcast("status", self.snapshot())
         claimed, started = bool(ack and greeting) and not self._greeted, False
         if claimed:
-            self._greeted = True          # #520: claimed before the await, so a face connecting meanwhile does not greet too
+            self._greeted = self._wake_claim = True   # #520: claimed before the await, so a face connecting meanwhile does not greet too
         try:
             await live.start()
             started = getattr(live, "running", True) is not False and not self.stopping
@@ -1560,8 +1563,12 @@ class Core:
             await self.notify_error("LIVE_START_FAILED", "live voice could not start", "check the internet / API key")
             return
         finally:
-            if claimed and not started:
-                self._greeted = False     # #520: the wake session did not start, so its greeting never happened
+            if claimed:
+                waiting, self._wake_claim, self._face_greet_waiting = getattr(self, "_face_greet_waiting", False), False, False
+                if not started:           # #520: the wake session did not start, so its greeting never happened
+                    self._greeted = waiting           # a face connected meanwhile: it gets its start-greeting now
+                    if waiting:
+                        self._run_busy(self.greet())
             self._voice_connecting = False
             if ack:
                 await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})

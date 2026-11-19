@@ -1,1 +1,1 @@
-- Fixed: a wake session marks the greeting as done only after it really started, and the hidden-mode listening dot retries transient Tcl start errors like the approval popup (#520).
+- Fixed: a wake session marks the greeting as done only after it really started (a face that connects during a wake start that then fails still gets its greeting), and the hidden-mode listening dot retries transient Tcl start errors like the approval popup (#520).

@@ -235,3 +235,45 @@ async def test_wake_start_that_raises_releases_the_greeting_claim(core):
     core._greeted = False
     await core._start_live(ack=True, greeting="I'm listening.")
     assert seen == [True] and core.live is None and not core._greeted
+
+
+@pytest.mark.parametrize("how", ["ended", "stopping"])
+async def test_wake_start_that_returns_without_a_session_releases_the_claim(core, how):
+    class Live:                                     # #520: start returns normally but no session is left to greet
+        running = True
+
+        async def start(self):
+            if how == "ended":
+                self.running = False                # the session ended during start
+            else:
+                core.stopping = True                # the core began stopping during the await
+
+        async def stop(self):
+            pass
+
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    stopped, core.stopping = core.stopping, False
+    assert core.live is None and not core._greeted and stopped is (how == "stopping")
+
+
+async def test_face_connecting_during_a_failed_wake_start_still_gets_its_greeting(core):
+    greets = []
+
+    class Live:
+        async def start(self):
+            await core._face_connected()            # the face arrives while the wake start holds the greeting
+            assert greets == []                     # no second greeting while the wake session may still greet
+            raise ConnectionError("no network")
+
+        async def stop(self):
+            pass
+
+    core.cfg.voice.activation, core.cfg.voice.greeting = "wake_word", True
+    core.greet = lambda: greets.append(1) or asyncio.sleep(0)
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    await asyncio.sleep(0)
+    assert greets == [1] and core._greeted and not core._face_greet_waiting
