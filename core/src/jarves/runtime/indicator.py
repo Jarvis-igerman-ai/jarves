@@ -117,7 +117,7 @@ class TkDotBackend:
     def _run(self) -> None:
         try:
             import tkinter as tk
-            from ..approval_popup import new_tk_root
+            from ..tkutil import new_tk_root
             root = new_tk_root(tk)        # #520: same transient Tcl-init retry as the popup (which runs in its own process)
             root.overrideredirect(True)
             root.attributes("-topmost", True)

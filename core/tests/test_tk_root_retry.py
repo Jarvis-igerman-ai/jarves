@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarves.approval_popup import new_tk_root
+from jarves.tkutil import new_tk_root
 
 
 class _TclError(Exception):
@@ -37,7 +37,29 @@ def test_other_errors_and_exhausted_retries_raise():
     assert len(calls) == 5
 
 
-def test_listening_dot_uses_the_shared_retry():
-    import inspect
-    from jarves.runtime import indicator
-    assert "new_tk_root(tk)" in inspect.getsource(indicator.TkDotBackend._run)
+def test_zero_attempts_still_tries_once():
+    tk, calls = _tk([])
+    assert new_tk_root(tk, attempts=0) == "root" and len(calls) == 1
+
+
+def test_listening_dot_survives_one_transient_tcl_error(monkeypatch):
+    import sys
+    from jarves.runtime.indicator import TkDotBackend
+    errors, reached = ["couldn't read file auto.tcl"], []
+
+    class Root:
+        def __getattr__(self, name):
+            return lambda *a, **k: 100 if name.startswith("winfo") else None
+
+        def mainloop(self):
+            reached.append(True)
+
+    def Tk():
+        if errors:
+            raise _TclError(errors.pop(0))
+        return Root()
+    fake = SimpleNamespace(Tk=Tk, TclError=_TclError, Canvas=lambda *a, **k: Root())
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    monkeypatch.setattr(sys, "platform", "linux")
+    TkDotBackend()._run()
+    assert reached == [True]          # before #520 the first TclError made the dot give up for the whole run

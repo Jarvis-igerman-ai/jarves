@@ -200,3 +200,19 @@ def test_failed_wake_start_does_not_mark_the_core_greeted():
     ns.stopping, ns.dev = False, SimpleNamespace(mic_muted=True)     # start refused: no session at all
     asyncio.run(Core._start_live(ns, ack=True, greeting=Core.wake_greeting(ns)))
     assert not ns._greeted
+
+
+@pytest.mark.parametrize("greeting,greeted", [("I'm listening.", True), (None, False)])
+async def test_started_wake_session_marks_greeted_only_with_a_greeting(core, greeting, greeted):
+    class Live:                                     # #520: a session that really starts
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting=greeting)   # None: greeting feature off or drive mode
+    assert core.live is not None and core._greeted is greeted
+    await core.live.stop()
