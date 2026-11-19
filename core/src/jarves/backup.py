@@ -18,8 +18,9 @@ Retention (adjustable, memory.db settings `backup.*`, CLI `jarvis backup setting
 newest per ISO week for the last 2 weeks; manual ones the last 5; pre-migration / pre-restore checkpoints the last 2
 each. Only automatic backups are thinned by the day/week rule. #1016 (archives are 200-600 MB, an install used to
 add 2-3 of them): a backup checks free disk space first and prunes before giving up; the Core-start pre-migration
-checkpoint reuses a verified backup written in the last RECENT_REUSE_S seconds (the install's own backup) instead of
-writing a second one; `jarvis doctor` warns when the backups folder exceeds `budget_mb`.
+checkpoint reuses the manual/auto/pre-migration backup written in the last RECENT_REUSE_S seconds (the install's
+own backup; never a pre-restore one) when no data file changed since, instead of writing a second one, and prune
+keeps it; `jarvis doctor` warns when the backups folder exceeds `budget_mb`.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -67,6 +68,8 @@ DEFAULTS = {"daily": 3, "weekly": 2, "manual": 5, "checkpoints": 2, "budget_mb":
             "auto": True}
 RECENT_REUSE_S = 30 * 60          # a backup this fresh stands in for the Core-start pre-migration checkpoint
 SPACE_MARGIN = 200 * 1024 * 1024  # keep this much free on top of the estimated archive size
+REUSE_KINDS = ("manual", "auto", "pre-migration")   # never pre-restore: it holds the data from BEFORE the restore
+FS_TICK_S = 2.0                   # coarsest mtime step (FAT/exFAT): a change this close to the backup is not trusted
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -288,25 +291,55 @@ def _free_bytes(path: Path) -> int:
 
 def _ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
     """#1016: refuse before writing when the disk cannot hold the archive; prune old backups first."""
-    need = SPACE_MARGIN
-    for p, _rel in take:
-        try:
-            need += p.stat().st_size                         # uncompressed size: a safe upper bound
-        except OSError:
-            pass
+    archive = snaps = 0
+    for p, _rel in take:                                     # uncompressed size: a safe upper bound
+        size = _size(p) + _size(_wal(p))                     # a SQLite snapshot folds its -wal in
+        archive += size
+        snaps += size if _is_sqlite(p) else 0               # only db snapshots are staged in the temp dir
     out_dir = backup_dir(home)
-    if _free_bytes(out_dir) >= need:
+    tmp = Path(tempfile.gettempdir())
+    if _device(tmp) == _device(out_dir):
+        needs = {out_dir: archive + snaps + SPACE_MARGIN}
+    else:
+        needs = {out_dir: archive + SPACE_MARGIN, tmp: snaps + SPACE_MARGIN}
+
+    def short() -> tuple[int, int] | None:
+        for d, need in needs.items():
+            free = _free_bytes(d)
+            if free < need:
+                return free, need
+        return None
+    if short() is None:
         return
     gone = prune(home)
-    free = _free_bytes(out_dir)
-    if free >= need:
+    gap = short()
+    if gap is None:
         logs.info("backup", "BACKUP_SPACE_PRUNED", "low disk space: pruned before the backup", removed=len(gone))
         return
+    free, need = gap
     logs.error("backup", "BACKUP_NO_SPACE", "not enough disk space for a backup", bytes=free)
     raise BackupError("BACKUP_NO_SPACE",
                       f"not enough disk space for a backup ({free // 2**20} MB free, about {need // 2**20} MB needed)",
                       "free disk space, or keep fewer backups: `jarvis backup settings --manual 2 --checkpoints 1` "
                       "then `jarvis backup prune`")
+
+
+def _size(p: Path) -> int:
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+def _wal(p: Path) -> Path:
+    return p.with_name(p.name + "-wal")
+
+
+def _device(p: Path) -> int | None:
+    try:
+        return p.stat().st_dev
+    except OSError:
+        return None
 
 
 def usage(home: Path) -> dict:
@@ -443,6 +476,9 @@ def prune(home: Path) -> list[str]:
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
     if autos:
         keep.add(autos[0]["name"])
+    active = read_state(home).get("checkpoint") or {}
+    if isinstance(active, dict) and active.get("path"):
+        keep.add(str(active["path"]))                         # #1016: the backup standing in for this version's checkpoint
     gone = []
     for b in items:
         if b["name"] not in keep:
@@ -616,7 +652,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if recent is not None:                          # #1016: the install's own backup already covers this start
         logs.info("backup", "CHECKPOINT_REUSED", "recent backup reused as the pre-migration checkpoint",
                   backup=recent.name)
-        _save_state(home, {"version": __version__})
+        _save_state(home, {"version": __version__, "checkpoint": {"path": recent.name, "version": __version__}})
         return recent
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
@@ -625,24 +661,38 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
         if health is not None:
             health.set("backup", "degraded", "pre-migration checkpoint failed", e.action)
         return None
-    _save_state(home, {"version": __version__})
+    _save_state(home, {"version": __version__, "checkpoint": {"path": p.name, "version": __version__}})
     return p
 
 
 def _recent_backup(home: Path, now: float | None = None) -> Path | None:
-    """The last written backup if it is younger than RECENT_REUSE_S and still on disk; else None. create() verified
-    it before the rename; a full re-verify (every SHA-256) would slow every Core start after an update."""
-    last = read_state(home).get("last") or {}
+    """The last written backup if it is a manual/auto/pre-migration one younger than RECENT_REUSE_S, still on disk,
+    and no data file (or non-empty SQLite -wal) changed since FS_TICK_S before it was started; else None. create()
+    verified it before the rename; a full re-verify (every SHA-256) would slow every Core start after an update."""
+    last = read_state(home).get("last")
+    if not isinstance(last, dict) or not last.get("ok") or last.get("kind") not in REUSE_KINDS:
+        return None
     try:
-        age = (time.time() if now is None else now) - float(last.get("ts"))
+        ts = float(last.get("ts"))
     except (TypeError, ValueError):
         return None
-    if not last.get("ok") or not 0 <= age <= RECENT_REUSE_S:
+    if not 0 <= (time.time() if now is None else now) - ts <= RECENT_REUSE_S:
         return None
     p = backup_dir(home) / str(last.get("path") or "")
-    if not p.name or not p.is_file():
+    if not p.name or not p.is_file() or not zipfile.is_zipfile(p):
         return None
-    return p if zipfile.is_zipfile(p) else None
+    for f, _rel in plan(home)[0]:                    # a write after (or just before) the backup is not in it
+        wal = _wal(f)
+        if _mtime(f) > ts - FS_TICK_S or (_size(wal) and _mtime(wal) > ts - FS_TICK_S):
+            return None
+    return p
+
+
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return float("inf")                          # cannot tell: treat as changed
 
 
 def due(home: Path, now: float | None = None) -> bool:
