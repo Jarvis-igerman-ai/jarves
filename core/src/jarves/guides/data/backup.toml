@@ -47,3 +47,9 @@ he = "הגיבויים תופסים יותר מדי מקום בדיסק"
 en = "Backups take too much disk space"
 fix_he = "שומרים פחות: jarvis backup settings --daily 3 --weekly 2 --manual 3 --checkpoints 1 ואז jarvis backup prune. בדיקת המערכת (jarvis doctor) מזהירה כשהתיקייה גדולה מהתקציב (jarvis backup settings --budget-mb)."
 fix_en = "Keep fewer: jarvis backup settings --daily 3 --weekly 2 --manual 3 --checkpoints 1, then jarvis backup prune. jarvis doctor warns when the folder is bigger than the budget (jarvis backup settings --budget-mb)."
+
+[[problems]]
+he = "גיבוי נעצר: אין מספיק מקום בדיסק (BACKUP_NO_SPACE)"
+en = "A backup stops: not enough disk space (BACKUP_NO_SPACE)"
+fix_he = "לפני גיבוי נבדק המקום הפנוי (הערכה לפי גודל הגיבויים האחרונים, ועותקי מסדי הנתונים בתיקייה הזמנית) וגיבויים ישנים נמחקים קודם. אם עדיין חסר מקום, הגיבוי לא נכתב, וגם עדכון לא מותקן בלי גיבוי. פנו מקום בדיסק או שמרו פחות: jarvis backup settings --manual 3 --checkpoints 1 ואז jarvis backup prune."
+fix_en = "Before a backup the free space is checked (estimated from the latest backups, plus the database copies in the temp folder) and old backups are removed first. If space is still short, nothing is written, and an update is not installed without a backup. Free disk space or keep fewer: jarvis backup settings --manual 3 --checkpoints 1, then jarvis backup prune."

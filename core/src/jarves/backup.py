@@ -293,12 +293,18 @@ def _free_bytes(path: Path) -> int:
 
 
 def _ensure_space(home: Path, take: list[tuple[Path, str]], protect: tuple[Path, ...] = ()) -> None:
-    """#1016: refuse before writing when the disk cannot hold the archive; prune old backups first."""
+    """#1016: refuse before writing when the disk cannot hold the archive; prune old backups first. The archive is
+    estimated from the newest archives (x1.25) when there are any, else from the uncompressed size; the db snapshots
+    staged in the temp dir are full copies. A wrong guess still ends cleanly: ENOSPC while writing is BACKUP_FAILED
+    with nothing half-written left."""
     archive = snaps = 0
     for p, _rel in take:                                     # uncompressed size: a safe upper bound
         size = _size(p) + _size(_wal(p))                     # a SQLite snapshot folds its -wal in
         archive += size
         snaps += size if _is_sqlite(p) else 0               # only db snapshots are staged in the temp dir
+    prev = [b["size"] for b in list_backups(home)[:3]]
+    if prev:                                                 # deflated archives are much smaller than raw data
+        archive = min(archive, int(max(prev) * 1.25))
     out_dir = backup_dir(home)
     tmp = Path(tempfile.gettempdir())
     if _device(tmp) == _device(out_dir):
@@ -670,7 +676,7 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
 
 
 def _recent_backup(home: Path, now: float | None = None) -> Path | None:
-    """The last written backup if it is a manual/auto/pre-migration one younger than RECENT_REUSE_S, still on disk,
+    """The last written backup if it is a REUSE_KINDS (pre-migration) one younger than RECENT_REUSE_S, still on disk,
     and no data file (or non-empty SQLite -wal) changed since FS_TICK_S before it was started; else None. create()
     verified it before the rename; a full re-verify (every SHA-256) would slow every Core start after an update."""
     last = read_state(home).get("last")

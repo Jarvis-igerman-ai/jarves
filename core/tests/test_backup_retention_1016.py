@@ -6,7 +6,14 @@ import sqlite3
 
 import pytest
 
-from jarves import backup
+from jarves import backup, updates
+
+
+@pytest.fixture(autouse=True)
+def _roomy_disk(monkeypatch):
+    """Hermetic: the space check never depends on the runner's real free space; tests that need a full disk patch
+    `_free_bytes` again."""
+    monkeypatch.setattr(backup, "_free_bytes", lambda p: 10**15)
 
 
 def test_cli_sets_manual_and_checkpoint_retention_1016(tmp_path, capsys):
@@ -26,7 +33,6 @@ def test_cli_sets_manual_and_checkpoint_retention_1016(tmp_path, capsys):
 
 
 def _db(home):
-    import sqlite3
     db = sqlite3.connect(str(home / "memory.db"))
     db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS t (x)")
@@ -175,7 +181,6 @@ def test_reused_checkpoint_is_kept_by_prune_1016(tmp_path, monkeypatch):
 
 def test_low_disk_restore_keeps_the_archive_it_restores_1016(tmp_path, monkeypatch):
     clock = _aged(tmp_path, monkeypatch)
-    bdir = tmp_path / "backups"
     old = backup.create(tmp_path, "manual", now=T0 - 30 * 86400)      # beyond the manual retention below
     for i in range(3):
         clock.t += 60
@@ -231,3 +236,42 @@ def test_default_budget_holds_the_default_retention_1016():
     d = backup.DEFAULTS                                        # archives are up to about 600 MB each (#1016)
     most = d["daily"] + d["weekly"] + d["manual"] + 2 * d["checkpoints"]
     assert d["budget_mb"] >= most * 600
+
+
+def test_low_disk_stops_the_update_before_anything_is_installed_1016(tmp_path, monkeypatch):
+    _db(tmp_path)
+    monkeypatch.setattr(backup, "_free_bytes", lambda p: 1024)
+    with pytest.raises(updates.UpdateError) as e:
+        updates.backup_before_update(tmp_path, "pre-update-1.0-to-2.0")
+    assert e.value.code == "UPDATE_BACKUP_FAILED" and "BACKUP_NO_SPACE" in str(e.value) and "not installing" in str(e.value)
+    assert not list((tmp_path / "backups").glob("*"))         # no archive, no .partial
+
+
+def test_low_disk_prepare_install_fails_cleanly_1016(tmp_path, monkeypatch):
+    import sys
+    from test_release_hosting import BASE, UpdateChecker, _hosted
+    from jarves import update_progress
+    monkeypatch.setattr(sys, "platform", "win32")
+    _db(tmp_path)
+    kept = []
+    monkeypatch.setattr(updates, "keep_previous", lambda *a, **k: kept.append(a))
+    host, pub = _hosted(tmp_path)
+    u = UpdateChecker(tmp_path, http=host, current="0.1.0.8", base_url=BASE, public_keys=[pub])
+    u.check(force=True)
+    monkeypatch.setattr(backup, "_free_bytes", lambda p: 1024)
+    with pytest.raises(updates.UpdateError) as e:
+        u.prepare_install(approved=True)                      # no installer path is returned, so nothing launches
+    assert e.value.code == "UPDATE_BACKUP_FAILED"
+    assert kept == [] and not list((tmp_path / "backups").glob("*"))
+    assert "UPDATE_BACKUP_FAILED" in json.dumps(update_progress.read(tmp_path))
+
+
+def test_space_estimate_uses_the_last_archive_size_1016(tmp_path, monkeypatch):
+    _db(tmp_path)
+    (tmp_path / "notes.txt").write_bytes(b"\0" * (4 * 2**20))  # 4 MB raw, a few KB deflated
+    monkeypatch.setattr(backup, "_device", lambda p: 1)
+    first = backup.create(tmp_path, "manual")
+    assert first.stat().st_size < 2**20
+    snaps = sum(backup._size(p) for p in tmp_path.glob("*.db"))
+    monkeypatch.setattr(backup, "_free_bytes", lambda p: snaps + backup.SPACE_MARGIN + 2 * 2**20)
+    assert backup.create(tmp_path, "manual").is_file()        # fits as a zip; the raw-size estimate refused it
