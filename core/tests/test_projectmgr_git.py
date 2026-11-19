@@ -94,6 +94,7 @@ def test_changed_files_shows_non_ascii_and_renamed_protected_paths(tmp_path):
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "ci", "--no-verify")
     base = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / ".GitHub" / "workflows").mkdir(parents=True, exist_ok=True)  # a case-sensitive FS needs its own dir
     (repo / ".GitHub" / "workflows" / "é.yml").write_text("on: push\n", encoding="utf-8")
     (repo / "src").mkdir()
     gitops.git(repo, "mv", ".github/workflows/ci.yml", "src/ci.yml")
