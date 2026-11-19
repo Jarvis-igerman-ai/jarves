@@ -252,13 +252,38 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
 # releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
+# #1311/#1316: exact read-only commands only. No wildcard (the run-time prefix matcher's handling of redirection and
+# compound commands is unverified) and no code runner or writer (pytest/conftest, npm/npx scripts, git commit/merge/
+# rebase hooks, git diff/log --output). Workers edit files (acceptEdits); tests and commits run outside the worker.
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
-    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
-    "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
-    "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+    "Read", "Grep", "Glob", "Bash(ls)", "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(git branch)",
+    "Bash(jarvis status)", "Bash(jarvis doctor)", "Bash(jarvis features)",
+    "Bash(gh pr view)", "Bash(gh pr list)", "Bash(gh pr checks)", "Bash(gh issue list)", "Bash(gh run list)",
 )
+_READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob"})
+_READ_ONLY_COMMANDS = ("ls", "wc", "git status", "git diff", "git log", "git show", "git branch", "jarvis status",
+                       "jarvis doctor", "jarvis features", "gh pr view", "gh pr list", "gh pr checks", "gh pr diff",
+                       "gh issue view", "gh issue list", "gh run view", "gh run list")
+_SHELL_META = re.compile(r"[*?;&|<>$`(){}\\\n'\"]")
+_WRITE_OPTION = re.compile(r"(?i)(^|\s)(-o|--output|--ext-diff|--textconv)(\s|=|$)")
+
+
+def worker_rule_problem(rule: object) -> str:
+    """Why an allow rule is unsafe for a headless worker, or "" when it is an exact read-only command or tool."""
+    if not isinstance(rule, str):
+        return "not a string"
+    if rule in _READ_ONLY_TOOLS:
+        return ""
+    if not (rule.startswith("Bash(") and rule.endswith(")")):
+        return "only Read, Grep, Glob or an exact Bash command"
+    cmd = rule[len("Bash("):-1]
+    if ":" in cmd or _SHELL_META.search(cmd):
+        return "wildcard, redirection, compound command or substitution"
+    if _WRITE_OPTION.search(cmd):
+        return "option that writes a file or runs a configured command"
+    if not any(cmd == c or cmd.startswith(c + " ") for c in _READ_ONLY_COMMANDS):
+        return "not a read-only command"
+    return ""
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
@@ -275,13 +300,14 @@ WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
                            home: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
-    Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
+    worker subcommands of the workflow CLI. Override rules that fail worker_rule_problem are dropped (#1316); an
+    override with nothing left falls back to the default, never to an empty list (which would mean the owner's rules)."""
     if override:
-        return list(override)
+        kept = [r for r in override if not worker_rule_problem(r)]
+        if kept:
+            return kept
     rules = list(WORKER_ALLOWED_TOOLS)
     if python:
-        for p in sorted({python, python.replace("\\", "/")}):
-            rules.append(f"Bash({p} -m pytest:*)")
         if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
             for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
                 p, c, h = conv

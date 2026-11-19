@@ -41,7 +41,7 @@ def test_allow_list_has_only_the_worker_subcommands_of_the_workflow_console():
     assert not any(r.endswith(":*)") and "workflow_console" in r for r in rules)
     assert f"Bash({py}:*)" not in rules and f"Bash({fwd}:*)" not in rules
     assert not any("workflow_console" in r for r in claude.autopilot_allowed_tools(py))
-    assert claude.autopilot_allowed_tools(py, override=["Bash(ls:*)"], console=con, home=home) == ["Bash(ls:*)"]
+    assert claude.autopilot_allowed_tools(py, override=["Bash(ls)"], console=con, home=home) == ["Bash(ls)"]
 
 
 @pytest.mark.parametrize("sub", ["autopilot", "authorize", "bootstrap", "dispatch", "seed", "sync", "recover",
