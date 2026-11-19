@@ -131,3 +131,37 @@ def test_a_new_flake_opens_one_issue_and_updates_the_tracker(monkeypatch):
     assert "run 6 " in body and "run 5 " not in body                        # only failures after the duplicate closed
     tracker = [c for c in calls if c[:3] == ("issue", "comment", str(fs.TRACKER))]
     assert len(tracker) == 1 and "#901" in " ".join(tracker[0]) and "a.py::test_x" in " ".join(tracker[0])
+
+
+def test_a_flake_without_a_start_time_and_no_issue_is_still_filed(monkeypatch):
+    """Review R3: with no matching issue there is no closing time to compare, so nothing is filtered out."""
+    gh, calls = _fake_gh([])
+    monkeypatch.setattr(fs, "gh", gh)
+    hit = _hit("")
+    del hit["started"]
+    fs.report("o/r", {"a.py::test_x": [hit]}, issues=True)
+    assert len([c for c in calls if c[:2] == ("issue", "create")]) == 1
+
+
+def test_closing_time_and_start_time_compare_as_times_not_text(monkeypatch):
+    """Review R5: a start time with an offset is compared to the closing time as a time, not as text."""
+    title = fs.TITLE + "a.py::test_x"
+    gh, calls = _fake_gh([{"number": 707, "title": title, "state": "CLOSED", "closedAt": "2026-11-02T10:00:00Z"}])
+    monkeypatch.setattr(fs, "gh", gh)
+    fs.report("o/r", {"a.py::test_x": [_hit("2026-11-02T11:00:00+02:00")]}, issues=True)  # 09:00 UTC; text says later
+    assert [c for c in calls if c[:2] == ("issue", "create")] == []
+
+
+def test_a_failed_tracker_comment_warns_once_and_the_scan_goes_on(monkeypatch, capsys):
+    """Review R4: the tracker link is best effort; one failure must not stop the other tests' issues."""
+    gh, calls = _fake_gh([])
+
+    def flaky_gh(*args):
+        if args[:3] == ("issue", "comment", str(fs.TRACKER)):
+            raise fs.subprocess.CalledProcessError(1, "gh")
+        return gh(*args)
+    monkeypatch.setattr(fs, "gh", flaky_gh)
+    fs.report("o/r", {"a.py::test_x": [_hit("2026-11-03T10:00:00Z")], "b.py::test_y": [_hit("2026-11-03T10:00:00Z")]},
+              issues=True)
+    assert len([c for c in calls if c[:2] == ("issue", "create")]) == 2
+    assert capsys.readouterr().out.count("tracker #778 not updated") == 2

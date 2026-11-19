@@ -149,6 +149,15 @@ def issue_body(test: str, hits: list[dict]) -> str:
             "Opened by core/tools/flake_scan.py.")
 
 
+def _when(stamp) -> dt.datetime | None:
+    """An ISO time from gh ('...Z' or '+HH:MM') as an aware datetime; None when missing or unreadable."""
+    try:
+        t = dt.datetime.fromisoformat(str(stamp or "").strip())
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
 def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
     quarantined = ledger_ids()
     for test, hits in sorted(found.items()):
@@ -171,16 +180,20 @@ def report(repo: str, found: dict[str, list[dict]], issues: bool) -> int:
             continue
         # #778: a closed issue (fixed, or closed as a duplicate into the tracker) covers every failure before it closed;
         # only a failure that started later is a new flake, so old runs never re-open it.
-        closed = max((str(i.get("closedAt") or "") for i in mine), default="")
-        hits = [h for h in hits if h.get("started", "") > closed]
+        closes = [t for t in (_when(i.get("closedAt")) for i in mine) if t]
+        if closes:   # with no closed issue there is nothing to compare, so every hit is filed
+            hits = [h for h in hits if (t := _when(h.get("started"))) and t > max(closes)]
         if not hits:
             print(f"  already handled by closed issue(s) {', '.join('#%s' % i['number'] for i in mine)}")
             continue
         url = gh("issue", "create", "-R", repo, "--title", title, "--label", "showstopper", "--label", "P1",
                  "--label", "ci", "--body", issue_body(test, hits)).strip()
         ref = "#" + url.rsplit("/", 1)[-1] if url else "(issue number unknown)"
-        gh("issue", "comment", str(TRACKER), "-R", repo, "--body",
-           f"flake_scan: new flaky test `{test}` -> {ref} ({len(hits)} run(s)). Add it to this tracker's checklist.")
+        try:   # best effort: the issue exists either way, and the next test still gets its issue
+            gh("issue", "comment", str(TRACKER), "-R", repo, "--body",
+               f"flake_scan: new flaky test `{test}` -> {ref} ({len(hits)} run(s)). Add it to this tracker's checklist.")
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"  warning: tracker #{TRACKER} not updated for {ref}: {e}")
     if not found:
         print("no flakes in the window")
     return 0
