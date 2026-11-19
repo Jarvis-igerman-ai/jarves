@@ -174,7 +174,8 @@ def test_wake_session_gets_a_short_greeting_when_the_feature_is_on():
     from jarves.app import Core
     on, off = _ns(), _ns(greeting=False)
     assert Core.wake_greeting(on) and len(Core.wake_greeting(on)) < 20
-    assert on._greeted and Core.wake_greeting(off) is None and not off._greeted
+    # #520: no side effect; _start_live marks the core greeted only once the session really started
+    assert not on._greeted and Core.wake_greeting(off) is None and not off._greeted
 
 
 def test_wake_greeting_follows_ui_language_and_is_silent_in_drive_mode():
@@ -190,3 +191,12 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
     _log(tmp_path, [{"ts": ts, "code": "LIVE_GREETING_MISSED"}, {"ts": ts, "code": "LIVE_GREETING_TTS_FALLBACK"}])
     got = speedtest.measure_history(tmp_path)
     assert got["greeting_tts_fallback"] == 1 and got["greeting_missed"] == 1
+
+
+def test_failed_wake_start_does_not_mark_the_core_greeted():
+    import asyncio
+    from jarves.app import Core
+    ns = _ns()
+    ns.stopping, ns.dev = False, SimpleNamespace(mic_muted=True)     # start refused: no session at all
+    asyncio.run(Core._start_live(ns, ack=True, greeting=Core.wake_greeting(ns)))
+    assert not ns._greeted

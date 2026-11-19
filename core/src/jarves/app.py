@@ -1566,6 +1566,8 @@ class Core:
             await live.stop()
             return
         self.live = live
+        if ack and greeting:
+            self._greeted = True          # #520: only once the wake session really started (no second start-greeting)
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open
@@ -2065,7 +2067,8 @@ class Core:
                 await self._start_live(ack=True, greeting=self.wake_greeting())
 
     def wake_greeting(self) -> str | None:
-        """Short cue for a wake-opened live session; None when the greeting feature is off."""
+        """Short cue for a wake-opened live session; None when the greeting feature is off. No side effects:
+        _start_live marks the core greeted only after the session started (#520)."""
         if not self.cfg.voice.greeting:
             return None
         try:
@@ -2074,7 +2077,6 @@ class Core:
                 return None                # drive mode: no spoken cue (and no start-greeting claim) on a wake
         except Exception:
             pass
-        self._greeted = True              # the wake session greets: no second start-greeting when the face connects later
         return "אני מקשיב." if self.cfg.voice.language == "he" else "I'm listening."
 
     # ------------------------------------------------------------------ feature switches (features.py)
