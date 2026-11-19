@@ -85,3 +85,42 @@ def test_every_console_subcommand_the_worker_is_allowed_is_not_refused():
     from jarves.orchestrator.claude import WORKER_CONSOLE_SUBCOMMANDS
     for sub in WORKER_CONSOLE_SUBCOMMANDS:
         assert wf.worker_refusal(["--home", "H", sub]) == "", sub
+
+
+# #1311: the default list must not admit run-time write/exec options. Hermetic model of Claude Code's matcher for the
+# deny side: a deny rule `Bash(pattern)` matches when the glob matches the whole command (deny wins over allow). The
+# real matcher was checked on 19 Nov 2026 (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+def _denied(command: str) -> bool:
+    import fnmatch
+    return any(fnmatch.fnmatchcase(command, r[5:-1]) for r in WORKER_DENY if r.startswith("Bash("))
+
+
+@pytest.mark.parametrize("command", [
+    "git diff --output=/h/autopilot2.json", "git log --output /h/x", "ruff check . --output-file /h/x",
+    "ruff check --cache-dir /h/c", "pytest --junitxml=/h/j.xml", "pytest --junit-xml /h/j.xml", "pytest --basetemp=/h/bt",
+    "pytest -o cache_dir=/h/cd", "pytest --log-file=/h/l", "pytest --report-log=/h/r", "pytest --cov-report=xml:/h/c.xml",
+    "pytest --html=/h/r.html", "pytest --rootdir=/h", "git rebase --exec 'python x.py' main", "git rebase -x 'sh x' main",
+    "git fetch --upload-pack='sh x' origin", "gh run download 1 -D /h", "ls /h/autopilot.json",
+])
+def test_default_list_write_and_exec_options_are_denied(command):
+    assert _denied(command), command
+
+
+@pytest.mark.parametrize("command", ["pytest -q tests/test_x.py", "git diff HEAD", "git log --oneline -5", "ruff check .",
+                                     "git rebase main", "gh run view 1 --log-failed", "git fetch origin"])
+def test_ordinary_worker_commands_are_not_denied(command):
+    assert not _denied(command), command
+
+
+@pytest.mark.parametrize("rule", ["Bash(npm:*)", "Bash(npx:*)", "Bash(jarvis features:*)", "Bash(jarvis doctor:*)"])
+def test_default_list_drops_script_runners_and_owner_switches(rule):
+    """npm/npx run any package script; `jarvis features on` installs packages; `jarvis doctor --live` costs money."""
+    assert rule not in WORKER_ALLOWED_TOOLS
+
+
+def test_write_flag_denies_reach_the_worker_argv():
+    from jarves.orchestrator.claude import WORKER_WRITE_FLAG_DENY, ManagedClaude
+    argv = ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None,
+                         allowed_tools=autopilot_allowed_tools("C:/py/python.exe"), permission_mode="acceptEdits").argv
+    denied = argv[argv.index("--disallowedTools") + 1:]
+    assert set(WORKER_WRITE_FLAG_DENY) <= set(denied)

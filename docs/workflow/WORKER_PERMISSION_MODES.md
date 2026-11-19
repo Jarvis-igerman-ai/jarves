@@ -26,10 +26,42 @@ start in auto). Cloud sessions ignore `defaultMode` dontAsk/bypass from settings
 `core/src/jarves/orchestrator/claude.py` (`ManagedClaude`): `claude -p --input-format stream-json ...
 --permission-mode acceptEdits` (`WORKER_PERMISSION_MODE`; the code accepts only `default` or `acceptEdits`,
 anything else falls back to `default`), `--allowedTools WORKER_ALLOWED_TOOLS` (the narrow list from PR #748:
-python/pytest/ruff/node/npm, read-only shell, local git, `gh pr|issue|run`, a few `jarvis` status commands;
+pytest/ruff, read-only shell, local git, `gh pr|issue|run`, a few `jarvis` status commands;
 replaceable by `worker_allowed_tools` in `autopilot.json`) and `--disallowedTools WORKER_DENY` (git push/tag,
-gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell). Autopilot is off by
+gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell, autopilot.json, and
+the run-time write/exec options in `WORKER_WRITE_FLAG_DENY`, #1311). Autopilot is off by
 default and needs the owner's grant. `autopilot_loop.py` only decides when to start a worker.
+
+## Run-time matcher check (#1316, #1311)
+
+Checked on 19 Nov 2026 with the real matcher: `claude` 2.1.327, model `claude-haiku-5-5`, `-p --setting-sources
+project` in an empty temp git repo. Allow rules `Bash(ls:*)`, `Bash(git diff:*)`, `Bash(git log:*)`, `Bash(git rebase:*)`,
+`Bash(pytest:*)`, `Bash(gh run:*)`, plus the new deny rules. The model was told to run each command once, exactly as
+written. After the run the files were listed on disk, and the stand-in `autopilot.json` in a second temp dir stayed `{}`.
+
+| Command (allow rule `Bash(ls:*)` unless noted) | `default` | `acceptEdits` |
+| --- | --- | --- |
+| `ls` | allowed | - |
+| `ls > f`, `ls >> f` (f in the working dir) | refused | allowed (same as an edit in the worktree) |
+| `ls > <outside>/f`, `ls >> <outside>/autopilot.json` | refused | refused ("outside the working directories") |
+| `ls \| tee f` | refused (tee needs approval) | refused |
+| `ls; echo hi > f`, `ls && echo hi > f` | refused | refused (outside path) |
+| `` ls $(...) ``, ``ls `...` `` | refused ("nested command can't be checked") | refused |
+| `git diff --output=f`, `git log --output=f` | denied by `Bash(*--output*)` | denied |
+| `git rebase --exec "..." HEAD` | denied by `Bash(git rebase*--exec*)` | - |
+| `pytest --basetemp=`, `-o cache_dir=`, `--junitxml=` | - | denied |
+| `gh run download 1 -D <outside>` | - | denied |
+| `git diff HEAD` | allowed | - |
+
+Result: a prefix rule does not admit redirection, `tee`, `;`/`&&` chains or `$(...)`/backticks writing outside the
+worktree, and the deny rules catch the write options. `core/tests/test_worker_owner_commands_932.py` holds a hermetic
+model of the deny side. Re-run this check when Claude Code changes its Bash matcher.
+
+Residual risk, needs an owner decision (#1311): `pytest` runs test code and `conftest.py` that the worker writes in its
+worktree. That is arbitrary code running as the owner's user, so it could rewrite `autopilot.json` no matter what
+the allow list says. The default list cannot both run the worker's tests and stop this. The only real fixes are OS
+isolation (a separate user or a container) or no tests in workers. `git commit/merge/rebase` run only the hooks the owner
+installed (they live outside the worktree, which a worker cannot edit, and `git config` is not allowed).
 
 ## Comparison
 

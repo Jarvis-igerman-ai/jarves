@@ -253,17 +253,29 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
-    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
+    "Bash(pytest:*)", "Bash(ruff:*)",       # #1311: npm/npx dropped (no package.json; they run any script)
+    "Bash(jarvis status:*)", "Bash(jarvis doctor)", "Bash(jarvis selftest:*)", "Bash(jarvis features)",
+    "Bash(jarvis features list:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
     "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
     "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
     "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+)
+# #1311: run-time options of allowed tools that write a file at any path or run a command: git diff/log --output,
+# ruff --output-file/--cache-dir, pytest --junitxml/--basetemp/-o cache_dir/--log-file/--report-log/--cov-report/
+# --html/--rootdir, git rebase --exec/-x, git fetch --upload-pack and gh run download. Checked against the real Claude
+# Code matcher on 19 Nov 2026 (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+WORKER_WRITE_FLAG_DENY: tuple[str, ...] = (
+    "Bash(*--output*)", "Bash(*--junit*)", "Bash(*--basetemp*)", "Bash(*cache_dir*)", "Bash(*--cache-dir*)",
+    "Bash(*--log-file*)", "Bash(*--report-log*)", "Bash(*--result-log*)", "Bash(*--resultlog*)", "Bash(*--cov-report*)",
+    "Bash(*--html*)", "Bash(*--rootdir*)", "Bash(git rebase*--exec*)", "Bash(git rebase*-x*)", "Bash(*--upload-pack*)",
+    "Bash(gh run download*)",
 )
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
-                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)")   # #932: policy file, any tool
+                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)",   # #932: policy file, any tool
+                                *WORKER_WRITE_FLAG_DENY)
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
