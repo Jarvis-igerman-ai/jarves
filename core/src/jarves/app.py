@@ -902,12 +902,16 @@ class Core:
         if self.cfg.voice.activation == "conversation" and not self._greeted:
             self._greeted = True
             self._run_busy(self.greet())
-        elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and not self._greeted:
+        elif self._wake_face_greeting_on() and not self._greeted:
             self._greeted = True
             logs.info("core", "GREETING", "saying hello (once per start)", speech="cloud" if (self.cfg.ai.provider == "openai" and self.cfg.ai.connection != "chatgpt") else "local")
             self._run_busy(self.greet())      # busy => the wake mic is closed while JARVES talks (no self-trigger)
-        elif self.cfg.voice.activation == "wake_word" and self.cfg.voice.greeting and getattr(self, "_wake_claim", False):
+        elif self._wake_face_greeting_on() and getattr(self, "_wake_claim", False):
             self._face_greet_waiting = True   # #520: a wake start holds the greeting; if it fails, _start_live greets
+
+    def _wake_face_greeting_on(self) -> bool:
+        """Wake-word mode with the greeting feature on: the face gets a start-greeting (one predicate, #520)."""
+        return self.cfg.voice.activation == "wake_word" and bool(self.cfg.voice.greeting)
 
     def how_to_talk(self) -> str:
         if self.cfg.voice.activation == "conversation":
@@ -1567,7 +1571,7 @@ class Core:
                 waiting, self._wake_claim, self._face_greet_waiting = getattr(self, "_face_greet_waiting", False), False, False
                 if not started:           # #520: the wake session did not start, so its greeting never happened
                     self._greeted = waiting           # a face connected meanwhile: it gets its start-greeting now
-                    if waiting:
+                    if waiting and not self.stopping:  # never greet during shutdown
                         self._run_busy(self.greet())
             self._voice_connecting = False
             if ack:

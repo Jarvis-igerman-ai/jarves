@@ -194,7 +194,6 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
 
 
 def test_failed_wake_start_does_not_mark_the_core_greeted():
-    import asyncio
     from jarves.app import Core
     ns = _ns()
     ns.stopping, ns.dev = False, SimpleNamespace(mic_muted=True)     # start refused: no session at all
@@ -258,13 +257,15 @@ async def test_wake_start_that_returns_without_a_session_releases_the_claim(core
     assert core.live is None and not core._greeted and stopped is (how == "stopping")
 
 
-async def test_face_connecting_during_a_failed_wake_start_still_gets_its_greeting(core):
+@pytest.mark.parametrize("stopping", [False, True])
+async def test_face_connecting_during_a_failed_wake_start_still_gets_its_greeting(core, stopping):
     greets = []
 
     class Live:
         async def start(self):
             await core._face_connected()            # the face arrives while the wake start holds the greeting
             assert greets == []                     # no second greeting while the wake session may still greet
+            core.stopping = stopping                # stopping: the core began shutting down during the start
             raise ConnectionError("no network")
 
         async def stop(self):
@@ -276,4 +277,5 @@ async def test_face_connecting_during_a_failed_wake_start_still_gets_its_greetin
     core._greeted = False
     await core._start_live(ack=True, greeting="I'm listening.")
     await asyncio.sleep(0)
-    assert greets == [1] and core._greeted and not core._face_greet_waiting
+    core.stopping = False
+    assert greets == ([] if stopping else [1]) and core._greeted and not core._face_greet_waiting   # no greeting at shutdown
