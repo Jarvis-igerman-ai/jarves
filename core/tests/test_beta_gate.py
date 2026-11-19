@@ -289,3 +289,34 @@ def test_prefs_prompt_cli_is_friendly_when_locked(home, capsys):
     err = capsys.readouterr().err
     assert rc == 1 and BETA_MSG in err and "Traceback" not in err
     assert not make(home).enabled("prefs_in_prompt")
+
+
+def test_auto_update_switch_maps_beta_lock_and_stays_off(home):
+    from jarves import auto_update, updates
+    f = make(home)
+    f.set("update_check", True)
+    assert f.locked(auto_update.FEATURE)
+    with pytest.raises(updates.UpdateError) as error:
+        auto_update.set_switch(Config(), home, True, "cli")
+    assert error.value.code == "BETA_LOCKED"
+    assert error.value.message == f"{feat.BETA_MSG_HE} / {BETA_MSG}"
+    assert not make(home).enabled(auto_update.FEATURE)
+
+
+def test_enable_reading_maps_beta_lock_and_stays_off(home, monkeypatch):
+    from jarves import whatsapp_admin as wad, whatsapp_bridge as wab
+    f = make(home)
+    assert f.locked(wab.FEATURE)
+    modes = []
+
+    def set_mode(home, mode, *, by):
+        modes.append((mode, by))
+        return {"mode": mode}
+
+    monkeypatch.setattr(wad, "set_mode", set_mode)
+    with pytest.raises(wab.BridgeError) as error:
+        wad.enable_reading(home, by="cli", features=f)
+    assert error.value.code == "BETA_LOCKED" and error.value.status == 403
+    assert error.value.message == BETA_MSG and "בטא" in error.value.he
+    assert modes == [("read", "cli")]
+    assert not make(home).enabled(wab.FEATURE)
