@@ -460,6 +460,47 @@ def test_merge_rechecks_protected_files_on_the_approved_commit(env):
     assert not (gitops.project_root(home, 1) / "integration" / ".github").exists()
 
 
+def test_ship_never_merges_a_ref_moved_during_the_approval(env):
+    # #1352 review: the integration ref moves while the owner's approval prompt is open
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    good = gitops.rev(repo, gitops.integration_branch(1))
+
+    def ask_and_move(*a, **k):
+        gitops.git(integ, "checkout", "-q", "--detach")
+        (integ / ".github").mkdir()
+        (integ / ".github" / "x.yml").write_text("on: push\n")
+        gitops.git(integ, "add", "-A")
+        gitops.git(integ, "commit", "-qm", "evil", "--no-verify")
+        gitops.git(integ, "update-ref", "refs/heads/jarves/p1/integration", "HEAD")
+        return True
+    m._ask = ask_and_move
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "MOVED" and not (repo / ".github").exists() and not (repo / "a.txt").exists()
+    gitops.git(integ, "update-ref", "refs/heads/jarves/p1/integration", good)
+    m._ask = lambda *a, **k: True
+    assert m.call("ship_plan", project="demo", apply=True)["ok"] and (repo / "a.txt").exists()
+    assert not (repo / ".github").exists()
+
+
+def test_files_the_check_writes_outside_the_scope_are_not_merged(env):
+    # #1352 review: the check command (agent-written code) runs in the task worktree; what it writes is committed
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c",
+                                 "import os; os.makedirs('other', exist_ok=True); open('other/evil.txt', 'w').write('x')"])
+    task(m, "A", "FAKE write src/a.py=1", scope=["src/"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "outside the scope" in t["reason"], t["reason"]
+    integ = gitops.project_root(home, 1) / "integration"
+    assert not (integ / "other").exists() and not (integ / "src").exists()
+
+
 def test_agent_blocked_and_failed_runs(env):
     m, repo, _ = env
     open_project(m, repo)

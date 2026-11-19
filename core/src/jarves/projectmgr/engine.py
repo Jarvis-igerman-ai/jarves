@@ -627,10 +627,13 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 job = self._job(self.db.task(t["id"]) or t)
                 want, cur = approved_head or job.get("checked_head") or "", gitops.rev(wt, "HEAD")
+                head = self._int_sha(p)
+                why = self._merge_files_blocked(wt, head, cur, t, stages, br) if cur else ""
+                if why:
+                    return ("stop", "blocked", why)
                 if not want or cur != want:                         # the task branch is a shared ref too (#1352)
                     return ("stop", "blocked", f"the task branch {br} moved after JARVES checked it (expected "
                                                f"{want[:10] or '?'}, found {cur[:10] or 'nothing'}); not merged")
-                head = self._int_sha(p)
                 if head != job.get("tested_base"):
                     conflicts = gitops.merge_in(wt, head)            # the integration branch moved since the check
                     if conflicts:
@@ -644,11 +647,12 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                prot = [f for f in gitops.changed_files(wt, head) if gitops.is_protected(f)]
-                if prot:                                            # re-checked on exactly what is merged (#1352)
-                    return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) +
-                            f" (not merged; on {br})")
-                new = gitops.rev(wt, "HEAD")
+                new = gitops.rev(wt, "HEAD")                        # pinned: a later commit is never merged
+                if not new:
+                    raise gitops.GitError("the task branch has no commit")
+                why = self._merge_files_blocked(wt, head, new, t, stages, br) if new != cur else ""
+                if why:                                             # re-checked on exactly what is merged (#1352)
+                    return ("stop", "blocked", why)
                 gitops.fast_forward(self._integration(p), new)
                 if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
                     raise gitops.GitError("the integration branch is not at the merged commit")
@@ -661,6 +665,18 @@ class StageEngine:
         self._set_job(t, kept=None)
         self.db.event(t["id"], "manager", "merged", f"merged into {base}: {stat}")
         return ("next",)
+
+    @staticmethod
+    def _merge_files_blocked(wt, head, tip, t, stages, br) -> str:
+        """Why `tip` may not be merged over the trusted `head`: protected files, or files outside the scope (unless
+        the owner codes in this flow), e.g. written by the check command or a leftover process (#1352)."""
+        prot, outside = gitops.violations(gitops.changed_files(wt, head, tip), t["scope"])
+        if prot:
+            return "changed protected files: " + ", ".join(prot[:5]) + f" (not merged; on {br})"
+        owner_code = any(s["kind"] in pl.CODE_KINDS and str(s.get("by", "")).strip() == "owner" for s in stages)
+        if outside and not owner_code:
+            return "changed files outside the scope: " + ", ".join(outside[:5]) + f" (not merged; the work is on branch {br})"
+        return ""
 
     def _st_release(self, p, t):
         """The owner's release command (set on the PC only), at the integration branch's commit, in a detached
