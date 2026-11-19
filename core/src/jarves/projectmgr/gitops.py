@@ -178,10 +178,17 @@ def in_scope(path: str, scope: list[str]) -> bool:
     return False
 
 
+# a Windows 8.3 short name (`CLAUDE~1`, `GITHUB~1.YML`): a Windows checkout writes `CLAUDE~1/x` into the existing
+# `.claude/` folder, so the name cannot be matched against PROTECTED. Refused in any folder (JAR-574)
+_SHORT_NAME = re.compile(r"^[^.~/]{1,6}~\d+(\.[^./]{0,3})?$")
+
+
 def is_protected(path: str) -> bool:
     """True for a file an agent may never change, in any letter case and with either slash."""
     p = path.replace("\\", "/").casefold()
-    return p.startswith(PROTECTED) or p.split("/")[-1] in PROTECTED_NAMES
+    parts = p.split("/")
+    return (p.startswith(PROTECTED) or parts[-1] in PROTECTED_NAMES
+            or any(_SHORT_NAME.match(x) for x in parts))
 
 
 def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]]:
