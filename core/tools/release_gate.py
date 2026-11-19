@@ -232,14 +232,17 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
         env = {**os.environ, "LC_ALL": "C", "LANG": "C"}       # GOOD_SIG_RE reads the untranslated wording
         try:
             r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60, env=env)
-            target = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=root,
-                         capture_output=True, text=True, timeout=60, env=env)
         except (OSError, subprocess.SubprocessError) as e:
             return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
     if r.returncode != 0 or not GOOD_SIG_RE.search(r.stderr or ""):
         why = " ".join((r.stderr or "").split())[:300]
         return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag: {why}); "
                 "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]
+    try:                                                   # only a verified tag is resolved to its commit
+        target = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"], cwd=root,
+                     capture_output=True, text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot resolve the signed tag {tag} ({type(e).__name__}); refused"]
     got = (target.stdout or "").strip().lower()
     if target.returncode != 0 or got != sha.strip().lower():
         return [f"sign-off: the signed tag {tag} points at {got[:12] or 'nothing'}, not at the gated commit "

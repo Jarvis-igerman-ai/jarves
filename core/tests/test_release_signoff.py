@@ -500,6 +500,7 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     for run in (_Run(0, stranger), _Run(1, "error: no signature found\n" + "x" * 900)):
         bad = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=run, verifier=v)
         assert len(bad) == 1 and "not signed by the owner" in bad[0] and len(bad[0]) < 500
+        assert len(run.calls) == 1                                   # no rev-parse after a failed verify-tag
     moved = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=_Run(0, ok.err, "b" * 40), verifier=v)
     assert len(moved) == 1 and "not at the gated commit" in moved[0]              # owner-signed, other commit
     assert "not a stable tag" in gate.tag_signature_problems(tmp_path, "main;rm", lines, SHA, run=ok, verifier=v)[0]
@@ -507,6 +508,14 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     def boom(cmd, **kw):
         raise FileNotFoundError("git")
     assert "cannot verify" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=boom, verifier=v)[0]
+    import subprocess
+
+    def late_boom(cmd, **kw):                                         # verify-tag passes, rev-parse cannot run
+        if "rev-parse" in cmd:
+            raise subprocess.TimeoutExpired(cmd, 60)
+        return ok(cmd, **kw)
+    assert "cannot resolve the signed tag" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA,
+                                                                          run=late_boom, verifier=v)[0]
 
 
 def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsys):
@@ -573,3 +582,37 @@ def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
     assert out.returncode == 0 and out.stdout == "a" * 64, out
     moved = gate.tag_signature_problems(repo, "v4.1.3", lines, head)
     assert len(moved) == 1 and "not at the gated commit" in moved[0], moved
+
+
+@pytest.mark.parametrize("dry", ["false", "true"])
+def test_605_gate_step_requires_rows_hash_on_a_real_publish(tmp_path, monkeypatch, capsys, dry):
+    """#605 review R2: run the workflow's own rows-hash step line, load what it writes to $GITHUB_ENV into the
+    gate's process, call the gate with the gate step's flags only: a real publish (DRY_RUN=false) resolves
+    require_rows_hash and refuses without the owner's signers list; a dry run only prints a note."""
+    import subprocess
+    import yaml
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    steps = [s for j in doc["jobs"].values() for s in j.get("steps", [])]
+    rows = next(s["run"] for s in steps if "JARVES_REQUIRE_ROWS_HASH=1" in s.get("run", ""))
+    line = next(ln.strip() for ln in rows.splitlines() if "JARVES_REQUIRE_ROWS_HASH=1" in ln)
+    gate_step = next(s for s in steps if "release_gate.py" in s.get("run", ""))
+    assert "JARVES_REQUIRE_ROWS_HASH" not in (gate_step.get("env") or {})   # nothing in the gate step overrides it
+    envf = tmp_path / "github_env"
+    envf.write_text("", encoding="utf-8")
+    r = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
+                       env={"PATH": os.environ.get("PATH", ""), "DRY_RUN": dry, "GITHUB_ENV": str(envf)})
+    assert r.returncode == 0, r.stderr
+    monkeypatch.delenv("JARVES_REQUIRE_ROWS_HASH", raising=False)
+    for kv in envf.read_text(encoding="utf-8").split():
+        monkeypatch.setenv(*kv.split("=", 1))
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "")
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
+    flags = [a for a in gate_step["run"].split() if a.startswith("--")]
+    assert "--require-rows-hash" not in flags and "--dry-run" not in flags          # the env value is the only switch
+    code = gate.main(["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)])
+    out = capsys.readouterr().out
+    if dry == "false":
+        assert code == 1 and "sign-off: no owner allowed-signers list" in out
+    else:
+        assert "tag signature not checked" in out and "no owner allowed-signers list (stable" not in out

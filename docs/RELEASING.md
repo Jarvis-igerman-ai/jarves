@@ -195,6 +195,12 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    agent using your login or a token with Administration or Environments write) can add a key. Confirm: agent tokens are
    fine-grained without Administration, Environments or Variables write, and an agent session's
    `gh variable set X --env stable-release --body y` is refused.
+   It is equally only as strong as custody of the signing key: agents run under your login, so a plain key file
+   (`~/.ssh/id_ed25519`) or a key loaded in an ssh-agent that an agent session can reach lets that agent run
+   `git tag -s` itself and pass the gate. Use a key agents cannot use: a FIDO hardware key
+   (`ssh-keygen -t ed25519-sk`, touch required on every signature; its line starts `sk-ssh-ed25519@openssh.com`), or a
+   passphrase-protected key that is never added to an ssh-agent an agent session can reach. Confirm: in an agent
+   session, `git tag -s v9.9.9-test -m test` must fail (or wait for a touch you do not give); delete any test tag locally.
 6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
 
