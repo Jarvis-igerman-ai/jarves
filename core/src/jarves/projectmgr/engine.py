@@ -151,7 +151,7 @@ class StageEngine:
                 gitops.remove_worktree(p["path"], Path(t["worktree"]), t["branch"])
             self.db.update_task(t["id"], worktree="", branch="", stage=target, status="todo", reason=clean(reason, 300),
                                 pid=0)
-            self._set_job(t, tested_base=None, approved=None)
+            self._set_job(t, tested_base=None, approved=None, checked_head=None)
             self.db.event(t["id"], "manager", "retry", clean(reason, 300))
             return
         if rule.startswith("back:"):
@@ -165,7 +165,7 @@ class StageEngine:
                     return
                 self.db.update_task(t["id"], rounds=t["rounds"] + 1, stage=target, status="todo",
                                     reason=clean(reason, 300), pid=0)
-                self._set_job(t, tested_base=None, approved=None)
+                self._set_job(t, tested_base=None, approved=None, checked_head=None)
                 self.db.event(t["id"], "manager", "back", clean(reason, 300))
                 return
         self._fail(t, "blocked", f"{st['kind']} failed: {reason}", p)
@@ -222,19 +222,36 @@ class StageEngine:
         """The integration commit JARVES itself recorded (at open and after each of its own merges). Every worktree
         shares the repository's refs, so an agent can move `jarves/p<id>/integration` (git update-ref); diffs, merges
         and releases use this SHA, never the branch name."""
+        return self._int_state(p)[0]
+
+    def _int_state(self, p) -> tuple[str, str]:
+        """(recorded SHA, why it could not be adopted). A project opened before #1352 adopts the current branch once,
+        only when it holds no protected change against the owner's base branch (a moved ref is never trusted)."""
         sha = (self.db.project(p["id"]) or {}).get("integration_sha") or ""
-        if not sha:                                                 # a project opened before #1352: adopt once
-            self._integration(p)
-            sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))
-            if sha:
-                self.db.update_project(p["id"], integration_sha=sha)
-                logs.info("projects", "INTEGRATION_ADOPTED", "integration commit recorded", id=p["id"], current=sha[:12])
-        return sha
+        if sha:
+            return sha, ""
+        integ = self._integration(p)
+        try:
+            base = p.get("base_branch") or gitops.rev(p["path"], "HEAD")
+            prot = [f for f in gitops.changed_files(integ, base) if gitops.is_protected(f)] if base else ["?"]
+        except gitops.GitError:
+            prot = ["(no base branch to compare with)"]
+        if prot:
+            return "", ", ".join(prot[:5])
+        sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))
+        if sha:
+            self.db.update_project(p["id"], integration_sha=sha)
+            logs.info("projects", "INTEGRATION_ADOPTED", "integration commit recorded", id=p["id"], current=sha[:12])
+        return sha, ""
 
     def _int_moved(self, p) -> str:
         """Empty while the integration branch is at the recorded commit, else why nothing may be merged or released."""
-        sha = self._int_sha(p)
+        sha, refused = self._int_state(p)
         br = gitops.integration_branch(p["id"])
+        if refused:
+            logs.warn("projects", "INTEGRATION_UNTRUSTED", "integration branch has unchecked protected files", id=p["id"])
+            return (f"the integration branch {br} has protected-file changes JARVES never checked ({refused}); nothing "
+                    f"is merged: check them, then reset it to {p.get('base_branch') or 'your base branch'}")
         now = gitops.rev(p["path"], br)
         if sha and now == sha:
             return ""
@@ -349,6 +366,7 @@ class StageEngine:
         hand = cards.handoff_text(h) if h else cards.auto_handoff(text, stat)
         self.db.update_task(t["id"], handoff=hand, handoff_kind="owner" if owner else ("agent" if h else "auto"),
                             result=stat)
+        self._set_job(t, checked_head=gitops.rev(wt, "HEAD"))       # the commit whose scope was checked (#1352)
         if kind == "reproduce":
             if not files:
                 return ("fail", "no reproduction test was written")
@@ -564,6 +582,7 @@ class StageEngine:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
                 if conflicts:
                     return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
+            tested_head = gitops.rev(wt, "HEAD") if has_wt else ""
             outs = []
             ok = True
             if kind == "verify" and repro.get("cmd"):
@@ -575,11 +594,13 @@ class StageEngine:
                 ok, out = gitops.run_check(wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
                 outs.append(out)
             if ok and kind == "verify" and repro.get("files") and repro.get("commit") and has_wt:
-                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
+                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], tested_head, "--", *repro["files"],
                                      check=False).stdout.split()
                 if touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
+            if ok and has_wt and gitops.rev(wt, "HEAD") != tested_head:
+                ok, outs = False, ["the task branch moved while it was checked"]
             tested = base
         if self._stopped(t, cancel):
             return ("end",)
@@ -587,10 +608,10 @@ class StageEngine:
             text = " ".join(outs)
             self.db.event(t["id"], "manager", "check_failed", clean(text, cards.FAIL_MAX))
             return ("fail", f"the {kind} failed: " + clean(text, 150))
-        self._set_job(t, tested_base=tested)
+        self._set_job(t, tested_base=tested, **({"checked_head": tested_head} if has_wt else {}))
         return ("next",)
 
-    def _st_merge(self, p, t, stages, cancel):
+    def _st_merge(self, p, t, stages, cancel, approved_head: str = ""):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing to merge
         wt, br = Path(t["worktree"]), t["branch"]
@@ -604,8 +625,13 @@ class StageEngine:
                 return ("stop", "blocked", moved)
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                job = self._job(self.db.task(t["id"]) or t)
+                want, cur = approved_head or job.get("checked_head") or "", gitops.rev(wt, "HEAD")
+                if not want or cur != want:                         # the task branch is a shared ref too (#1352)
+                    return ("stop", "blocked", f"the task branch {br} moved after JARVES checked it (expected "
+                                               f"{want[:10] or '?'}, found {cur[:10] or 'nothing'}); not merged")
                 head = self._int_sha(p)
-                if head != self._job(t).get("tested_base"):
+                if head != job.get("tested_base"):
                     conflicts = gitops.merge_in(wt, head)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
@@ -685,7 +711,7 @@ class StageEngine:
                 head, dirty = self._tree(t)
                 if dirty or (appr.get("tree") and appr["tree"] != head):
                     return ("park", f"the code changed after your approval: approve merging task #{t['seq']} again")
-                return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event())
+                return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event(), approved_head=head)
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
                 head = gitops.git(wt, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()

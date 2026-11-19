@@ -349,6 +349,117 @@ def test_an_agent_moving_the_integration_ref_cannot_hide_protected_files(env):
     assert m.db.project(1)["integration_sha"] == gitops.rev(repo, gitops.integration_branch(1)) != trusted
 
 
+def _commit(cwd, path, body="x"):
+    (Path(cwd) / path).parent.mkdir(parents=True, exist_ok=True)
+    (Path(cwd) / path).write_text(body + "\n")
+    sh(cwd, "git", "add", "-A")
+    sh(cwd, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c", "--no-verify")
+
+
+def test_another_agent_moving_a_task_branch_blocks_its_merge(env):
+    # #1352 review R1: task branches are shared refs too; the merge takes only the commit JARVES checked.
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    a = m.db.by_seq(1, 1)
+    assert a["status"] == "waiting", a["reason"]
+    task(m, "B", f"FAKE write evil.txt=x\nFAKE git add -A\nFAKE git commit -qm e --no-verify\n"
+                 f"FAKE git update-ref refs/heads/{a['branch']} HEAD", scope=["b"])
+    finish(m)
+    assert m.db.by_seq(1, 2)["status"] == "blocked"
+    trusted = m.db.project(1)["integration_sha"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    a = m.db.by_seq(1, 1)
+    assert a["status"] == "blocked" and "moved after JARVES checked" in a["reason"], a["reason"]
+    assert m.db.project(1)["integration_sha"] == trusted == gitops.rev(repo, gitops.integration_branch(1))
+
+
+def test_best_of_agents_moving_the_integration_ref_are_stopped(env):
+    m, repo, home = env
+    open_project(m, repo)
+    trusted = m.db.project(1)["integration_sha"]
+    m.call("add_task", project="demo", title="A", scope=["a.txt"], flow="work:claude:alpha,claude:beta merge",
+           spec="FAKE write .github/workflows/x.yml=on: push\nFAKE git add -A\nFAKE git commit -qm ci --no-verify\n"
+                "FAKE git update-ref refs/heads/jarves/p1/integration HEAD")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == trusted
+
+
+def test_ship_and_release_refuse_a_moved_integration_ref(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work merge")
+    m.call("resume", project="demo")
+    finish(m)
+    trusted = m.db.project(1)["integration_sha"]
+    _commit(gitops.project_root(home, 1) / "integration", ".github/workflows/x.yml")     # moves the shared ref
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "MOVED" and not (repo / "a.txt").exists() and not (repo / ".github").exists()
+    flag = home.parent / "released"
+    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+    out = m._st_release(m.db.project(1), m.db.by_seq(1, 1))
+    assert out[:2] == ("stop", "blocked") and "moved outside JARVES" in out[2] and not flag.exists()
+    assert m.db.project(1)["integration_sha"] == trusted
+
+
+def test_ship_merges_the_recorded_commit(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work merge")
+    m.call("resume", project="demo")
+    finish(m)
+    real = gitops.merge_in
+    def racing(wt, branch, ident=True):                         # the ref moves between the check and the merge
+        _commit(gitops.project_root(home, 1) / "integration", ".github/workflows/x.yml")
+        return real(wt, branch, ident=ident)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(gitops, "merge_in", racing)
+        assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert (repo / "a.txt").exists() and not (repo / ".github").exists()
+
+
+def test_legacy_project_never_adopts_unchecked_protected_files(env):
+    # #1352 review R2: a project without a recorded commit adopts the branch only if it has no protected change.
+    m, repo, home = env
+    open_project(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    m.db.update_project(1, integration_sha="")
+    _commit(integ, ".github/workflows/x.yml")
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "failed" and "never checked" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == ""
+    gitops.git(integ, "reset", "-q", "--hard", "main")
+    task(m, "B", "FAKE write b.txt=1", scope=["b.txt"])
+    finish(m)
+    assert m.db.by_seq(1, 2)["status"] == "done" and (integ / "b.txt").exists()
+
+
+def test_merge_rechecks_protected_files_on_the_approved_commit(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting", t["reason"]
+    (Path(t["worktree"]) / ".github").mkdir()
+    (Path(t["worktree"]) / ".github" / "x.yml").write_text("on: push\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "changed protected files" in t["reason"], t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / ".github").exists()
+
+
 def test_agent_blocked_and_failed_runs(env):
     m, repo, _ = env
     open_project(m, repo)

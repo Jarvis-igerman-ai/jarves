@@ -916,10 +916,11 @@ class Manager(StageEngine):
             moved = self._int_moved(p)                                  # #1352: never ship a commit JARVES did not merge
             if moved:
                 return _res(False, "MOVED", moved)
-            if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"]}):
+            sha = self._int_sha(p)                                      # merge the checked commit, not the ref
+            if not yes and not self._approve(f"Merge {br} ({sha[:10]}) into {st['branch']} in {p['path']}? (no push)",
+                                             "project_ship", {"project": p["name"], "branch": st["branch"]}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False)      # your own git identity / signing
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
