@@ -67,7 +67,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     try:
         # answers hold ids and counts only: the command ledger stores them, and text must not rest there (privacy)
         if op == "confirm":
-            try:      # V5 sec H2: one atomic UPDATE refuses wording changed on a phone (a lost phone cannot edit + confirm)
+            try:      # V5 sec H2: one atomic UPDATE refuses wording changed on this page (it cannot edit + confirm)
                 r = p.confirm(pid, by=by, refuse_phone_edit=True)
             except PhoneEditNeedsPC:
                 return 403, {"error": "this preference was reworded on a phone: confirm it on the computer",

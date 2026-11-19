@@ -2,5 +2,5 @@
 - Fixed: development drafts may name a credential field ("the api key field does not save"), but a pasted key or password in a draft is still refused (#1099).
 - Fixed: with privacy mode on, the phone's 24 hour resend copy keeps only ids, numbers, codes and states on disk, and copies written before privacy was switched on are blanked at the next use (#206).
 - Fixed: a resent phone message in privacy mode gets the "not kept" note in English and Hebrew (#206).
-- Fixed: a preference reworded on the phone goes back to proposed and is confirmed on the computer only; the phone page and the chat preference tool both refuse it in one database step, and the confirm keeps who first suggested it (#206).
+- Fixed: a preference reworded on the phone's preferences page goes back to proposed and is confirmed on the computer only; the phone page and the chat preference tool both refuse to confirm it, in one database step, and the confirm keeps who first suggested it. A rewording made by the assistant in a chat is not marked this way, and phone chat can still suggest and confirm a new preference, as before (#206).
 - Fixed: the guides now say that the phone status permission shows whether someone talks to JARVES at the computer, and that the project check command runs agent code without a sandbox (#206).

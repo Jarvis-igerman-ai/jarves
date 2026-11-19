@@ -36,6 +36,10 @@ def test_journal_keeps_no_words_when_privacy_is_on(tmp_path):
 from jarves.mobile import Bridge
 
 
+DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
+NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
+
+
 def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
     """V5 sec F13: the 24 h resend copy on disk drops the reply text in privacy mode; ids and status stay."""
     from jarves import logs
@@ -69,6 +73,7 @@ def test_resend_ledger_keeps_only_codes_and_numbers_when_privacy_is_on(tmp_path)
     assert c.seen("d1", "cid-0006")["code"] == "CONFIRM_ON_PC"
     assert c.seen("d1", "cid-0007") == {"ok": True, "pref": 5, "state": "confirmed", "conflicts": 0}
 
+
 def test_resend_ledger_keeps_string_ids_when_privacy_is_on(tmp_path):
     """Review R2: string ids (id, cid, *_id) stay so a client can still place a replayed reply."""
     from jarves import logs
@@ -92,8 +97,26 @@ def test_rows_written_before_privacy_was_switched_on_are_blanked(tmp_path):
     assert replay and body["reply"] == continuity.NOT_KEPT
 
 
-DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
-NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
+def test_a_row_another_instance_writes_with_privacy_off_is_still_scrubbed(tmp_path):
+    """Review R2 (#1369): the scrub flag is shared through the DB, not kept per Continuity object."""
+    from jarves import logs
+    a, b = Continuity(tmp_path), Continuity(tmp_path)
+    logs.set_privacy(True)
+    assert a.seen("d1", "cid-0010") is None                  # a has scrubbed once: the DB is clean
+    logs.set_privacy(False)
+    b.store("d1", "cid-0010", "chat", 200, {"reply": "other process words"})   # e.g. another process
+    logs.set_privacy(True)
+    assert a.seen("d1", "cid-0010") == {"reply": continuity.NOT_KEPT, "not_kept": True}
+    assert not any("words" in r["body"] for r in a._rows("SELECT body FROM ledger"))
+
+
+def test_the_key_decides_what_is_kept_lists_are_always_blanked(tmp_path):
+    """Review R4 (#1369): a string under a kept key stays whatever it says; a string in a list is always blanked."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.store("d1", "cid-0011", "pref", 200, {"code": ["A"], "turn_id": "t-1", "status": "ok"})
+    assert c.seen("d1", "cid-0011") == {"code": [continuity.NOT_KEPT], "turn_id": "t-1", "status": "ok"}
 
 
 class Clock:

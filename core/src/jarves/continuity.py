@@ -54,9 +54,10 @@ SNOOZE_MAX_MIN = 24 * 60
 
 
 # V5 sec F13: in privacy mode only these string fields (plus ids: id, cid, *_id) rest on disk (codes, states and kinds,
-# never words); every
-# other non-empty string at any depth (reply, text, transcript, title, error, ...) becomes the marker. An allowlist,
-# so a new free-text field in a ledgered body is blanked by default.
+# never words); every other non-empty string at any depth (reply, text, transcript, title, error, ...) becomes the
+# marker. An allowlist, so a new free-text field in a ledgered body is blanked by default. The key decides: a string
+# directly under a kept key stays, whatever it says; a string inside a list has no key of its own and is always
+# blanked (so {"code": ["A"]} is blanked too; no ledgered body holds a list of codes today).
 _KEPT_STRINGS = frozenset(("code", "state", "status", "kind", "op"))
 NOT_KEPT = "(answered; the text was not kept: privacy mode)"   # Hebrew: hebrew_parts/2026-11-19-intake-1099-206.json
 
@@ -79,11 +80,7 @@ def _blank(v, key=None):
     return v                                         # numbers, booleans, None, empty strings, kept codes
 
 
-def _at_rest(body):
-    """The copy written to disk. Privacy mode on: words are replaced by a marker at any depth; ids, numbers, codes
-    and states stay so a resend is still recognised and answered once."""
-    return _blank(body) if logs.privacy() else body
-
+SCRUBBED_KEY = "ledger.scrubbed"                     # kv: "1" = privacy on and every ledger row already blanked
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger (device TEXT NOT NULL, cid TEXT NOT NULL, kind TEXT NOT NULL, status INTEGER NOT NULL,
@@ -108,7 +105,6 @@ class Continuity:
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
         self._lock = threading.RLock()
-        self._scrubbed = False                       # privacy on and every ledger row already blanked (review R5)
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -128,19 +124,27 @@ class Continuity:
 
     def _scrub(self) -> None:
         """Review R5: rows written before privacy mode was switched on are blanked at the next ledger use, not left
-        with full text until the 24 h TTL ends. One pass per privacy-on period; a write with privacy off re-arms it."""
+        with full text until the 24 h TTL ends. The 'clean' flag lives in the shared DB (kv), so a row another
+        Continuity object or process writes with privacy off re-arms the scrub here too. The flag is set BEFORE the
+        scan and cleared AFTER a privacy-off write, so a write racing a scan is either scanned or re-arms it."""
         if not logs.privacy():
-            self._scrubbed = False
-            return
-        if self._scrubbed:
             return
         with self._lock:
+            if self._kv(SCRUBBED_KEY) == "1":
+                return
+            self._set(SCRUBBED_KEY, "1")
             for r in self._rows("SELECT device, cid, body FROM ledger"):
                 old = json.loads(r["body"])
                 new = _blank(old)
                 if new != old:
                     self._x("UPDATE ledger SET body=? WHERE device=? AND cid=?", (json.dumps(new), r["device"], r["cid"]))
-            self._scrubbed = True
+
+    def _put(self, device: str, cid: str, kind: str, status: int, body: dict, ts: float) -> None:
+        private = logs.privacy()
+        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                (device, cid, kind, int(status), json.dumps(_blank(body) if private else body), ts))
+        if not private:
+            self._set(SCRUBBED_KEY, "0")             # full text on disk again: the next privacy-on use scrubs it
 
     # ------------------------------------------------------------------ idempotent commands
     def execute(self, device: str, cid: str | None, kind: str, fn: Callable[[], tuple[int, dict]],
@@ -165,16 +169,14 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
-                self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(_at_rest(body)), now))
+                self._put(device, cid, kind, st, body, now)
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         self._scrub()
-        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(_at_rest(body)), self.clock()))
+        self._put(device, cid, kind, status, body, self.clock())
 
     @staticmethod
     def stale(age_s) -> bool:
