@@ -450,20 +450,34 @@ def test_probe_stuck_timer_ignores_ticks_that_never_probed(home, server, keys):
     assert r.tick(auto_update.LATER_S) == "busy" and "probe_stuck" not in kinds(r) and r.launched == []
 
 
-def test_forced_update_now_clears_the_probe_stuck_state(home, server, keys):
-    """#1100 review R4: an owner 'Update now' while stuck installs and leaves no stale stuck-timer state."""
+def test_forced_update_now_restarts_the_stuck_timer_but_keeps_one_notice_per_version(home, server, keys):
+    """#1100 review R4: 'Update now' clears the stuck timer; a failed install must not let the same version
+    send a second probe_stuck notice when the probe keeps failing."""
     server.publish(keys, NEW)
     r = Rig(home, server, keys, busy=["probe_error"])
     r.ready()
     r.tick()
     r.tick(auto_update.PROBE_STUCK_S + 1)
-    assert {"probe_error_since", "probe_stuck_noticed"} <= set(r.au.state())
+    assert kinds(r).count("probe_stuck") == 1
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500                # the forced install fails
     r.au.answer("now")
-    assert r.tick() == "installing"
-    assert not {"probe_error_since", "probe_stuck_noticed"} & set(r.au.state())
+    assert r.tick() == "failed" and "probe_error_since" not in r.au.state()
+    assert r.au.state()["probe_stuck_noticed"] == NEW
+    r.tick(auto_update.BACKOFF_S[0] + 1)
+    r.tick(auto_update.PROBE_STUCK_S + 1)                          # probe errors again for over a day
+    assert kinds(r).count("probe_stuck") == 1 and r.launched == []
 
 
-def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval(home, monkeypatch):
+def test_cli_parser_accepts_update_install(home, monkeypatch):
+    """#1100 review R1: the manual command named in the probe_stuck notice exists in the real parser."""
+    from jarves import cli
+    monkeypatch.setenv("JARVES_HOME", str(home))
+    seen = []
+    monkeypatch.setattr(cli, "cmd_update", lambda a, cfg, h: seen.append(a.action) or 0)
+    assert cli.main(["update", "install"]) == 0 and seen == ["install"]
+
+
+def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
     """#1100 review R1/R2: a forced manual update skips busy(), so the notice and the guide say to check approvals."""
     (_, he), (_, en) = auto_update._notice_text("probe_stuck", "3.0.0.1")
     assert "no approval is waiting" in en and "אין אישור שממתין" in he
@@ -473,11 +487,6 @@ def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval(home, monkey
     assert len(row) == 1 and "no approval is waiting" in row[0]["fix_en"] and "אין אישור שממתין" in row[0]["fix_he"]
     for text in (en, he, row[0]["fix_en"], row[0]["fix_he"]):  # R2: one real command, same in notice and guide
         assert "jarvis update install" in text and "Updates" in text
-    from jarves import cli                                     # R1: the real parser accepts `jarvis update install`
-    monkeypatch.setenv("JARVES_HOME", str(home))
-    seen = []
-    monkeypatch.setattr(cli, "cmd_update", lambda a, cfg, h: seen.append(a.action) or 0)
-    assert cli.main(["update", "install"]) == 0 and seen == ["install"]
 
 
 def test_dashboard_api_switch_answer_and_channel(home):
