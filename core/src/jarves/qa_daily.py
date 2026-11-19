@@ -222,7 +222,9 @@ _lock_warned = False
 @contextlib.contextmanager
 def _check_lock(path: Path):
     """Yield True while this tick holds the day's check lock: an OS file lock (runtime/lock.py), so it is never
-    removed while held and the OS frees it when a Core dies mid-check. The file itself stays."""
+    removed while held and the OS frees it when a Core dies mid-check. The file itself stays.
+    Requires per-handle locks (flock / msvcrt.locking, not fcntl.lockf), so a second open in the SAME process
+    (a nested or second tick) is refused too: test_a_check_lock_left_by_a_dead_core_is_free_and_a_held_one_waits."""
     global _lock_warned
     from .runtime.lock import _try_lock, _unlock
     try:
@@ -319,7 +321,7 @@ def _tick_real(cfg, home, busy=lambda: []) -> str:
         return check(Deps(home, _report_reader(home, d, _since(home, d)), _cli_subprocess, d))
     return tick(home, enabled=lambda: _enabled(cfg, home), day=lambda: day,
                 report=lambda d, since: _report_reader(home, d, since)(),
-                spawn=lambda argv: _spawn_hidden(argv, out / SPAWN_LOG),
+                spawn=lambda argv: _spawn_hidden(argv, out / SPAWN_LOG),   # tick spawns only for d == today
                 busy=busy, supported=_supported, do_check=do_check)
 
 

@@ -540,6 +540,11 @@ def test_a_check_lock_left_by_a_dead_core_is_free_and_a_held_one_waits(home):
     fd = os.open(lock, os.O_RDWR)
     try:
         assert _try_lock(fd)                                                 # another live tick is checking
+        fd2 = os.open(lock, os.O_RDWR)                                       # per-handle lock: a second open in
+        try:                                                                 # this same process is refused too
+            assert not _try_lock(fd2)
+        finally:
+            os.close(fd2)
         assert _tick(home, "2026-11-12", spawned, checked, clock=lambda: 1e10) == "checking" and checked == []
         _unlock(fd)
     finally:
@@ -597,7 +602,7 @@ def test_core_thread_ticks_and_stops(home, monkeypatch):
     monkeypatch.setattr(qa_daily, "_tick_real", tick_real)
     monkeypatch.setattr(qa_daily.logs, "info", lambda *a, **kw: infos.append(a[1]))
     monkeypatch.setattr(qa_daily.logs, "warn", lambda *a, **kw: warns.append(a[1]))
-    t = qa_daily.start(types.SimpleNamespace(cfg=None, home=home), first_delay_s=0.0, every_s=0.0)
+    t = qa_daily.start(types.SimpleNamespace(cfg=None, home=home), first_delay_s=0.0, every_s=0.01)
     assert two.wait(5)
     t.stop.set()
     t.join(5)
