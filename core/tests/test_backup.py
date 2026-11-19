@@ -256,8 +256,7 @@ def test_pre_migration_checkpoint_on_version_change(profile, monkeypatch):
     assert p is not None and "pre-migration" in p.name and backup.verify(p)["ok"]
     assert backup.startup_checkpoint(profile) is None                 # same version: nothing to do
     monkeypatch.setattr(backup, "__version__", "9.9.9")
-    later = time.time() + 5
-    os.utime(profile / "memory.db", (later, later))                    # changed data: no fresh archive to reuse
+    os.utime(profile / "memory.db", (1_600_000_000, 1_600_000_000))    # changed data: no fresh archive to reuse
     monkeypatch.setattr(backup, "create", lambda *a, **k: (_ for _ in ()).throw(
         backup.BackupError("BACKUP_FAILED", "disk full", "free space")))
 
@@ -370,16 +369,87 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
 
 
 # ---------------------------------------------------------------------- issue #1016: backups filled the disk
-def test_install_reuses_a_fresh_backup_instead_of_two_more_issue_1016(profile):
+OLD, T0 = 1_700_000_000, 1_800_000_000.0       # data written long ago; a fixed fake "now" (clock-free)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    class Clock:
+        t = T0
+
+        def time(self):
+            return self.t
+    c = Clock()
+    monkeypatch.setattr(backup, "time", c)
+    return c
+
+
+def _age(home):
+    for p in home.rglob("*"):
+        if p.is_file() and "backups" not in p.parts:
+            os.utime(p, (OLD, OLD))
+
+
+def _wal_mode(*paths):
+    for target in paths:
+        db = sqlite3.connect(target)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("CREATE TABLE IF NOT EXISTS t (x)")
+        db.commit()
+        db.close()
+
+
+def test_install_reuses_a_fresh_backup_instead_of_two_more_issue_1016(profile, clock):
+    _age(profile)
     manual = backup.create(profile, "manual")                          # `jarvis install-latest`: backup now
-    first = backup.checkpoint(profile, "installer upgrade")            # a manual archive is never reused (R5)
+    clock.t += 1
+    first = backup.checkpoint(profile, "installer upgrade")            # a manual archive is never reused
     assert first != manual and "pre-migration" in first.name
+    clock.t += 60
     assert backup.startup_checkpoint(profile) == first                 # first Core start: data unchanged -> same
     assert len(backup.list_backups(profile)) == 2
-    later = time.time() + 5
-    os.utime(profile / "memory.db", (later, later))                    # the data changed after that backup
+    os.utime(profile / "memory.db", (OLD + 100, OLD + 100))            # the data changed after that backup
     again = backup.checkpoint(profile, "next migration")
     assert again != first and "pre-migration" in again.name and backup.verify(again)["ok"]
+
+
+def test_wal_profile_reused_after_core_opens_memory_db_issue_1016(profile, clock):
+    _wal_mode(profile / "memory.db", profile / "store.db")
+    _age(profile)
+    first = backup.checkpoint(profile, "installer upgrade")            # the read-only snapshot leaves an empty -wal
+    clock.t += 60
+    assert backup.get_settings(profile)["manual"] >= 1                 # Core start: open + read + close memory.db
+    db = sqlite3.connect(profile / "memory.db")
+    db.execute("SELECT count(*) FROM settings").fetchall()
+    db.close()
+    assert backup.startup_checkpoint(profile) == first
+
+
+def test_commit_after_snapshot_before_stat_blocks_reuse_issue_1016(profile, clock, monkeypatch):
+    _age(profile)
+    real = backup._sqlite_copy
+
+    def copy(src, dst):                                                # a commit lands right after the snapshot
+        real(src, dst)
+        if src.name == "memory.db":
+            db = sqlite3.connect(src)
+            db.execute("CREATE TABLE IF NOT EXISTS late (x)")
+            db.execute("INSERT INTO late VALUES (1)")
+            db.commit()
+            db.close()
+    monkeypatch.setattr(backup, "_sqlite_copy", copy)
+    first = backup.checkpoint(profile, "installer upgrade")
+    monkeypatch.setattr(backup, "_sqlite_copy", real)
+    clock.t += 60
+    assert backup.checkpoint(profile, "first start") != first          # that commit is not in the archive
+
+
+def test_same_tick_change_is_never_reused_issue_1016(profile, clock):
+    _age(profile)
+    os.utime(profile / "notes" / "shopping.md", (T0 - 1, T0 - 1))      # changed within the 2 s FAT/exFAT tick
+    first = backup.checkpoint(profile, "installer upgrade")
+    clock.t += 60
+    assert backup.checkpoint(profile, "first start") != first          # a same-tick write could hide behind it
 
 
 def test_retention_defaults_are_small_and_cover_every_kind_issue_1016(profile):
@@ -403,6 +473,16 @@ def test_cli_sets_manual_and_checkpoint_retention_issue_1016(profile, capsys):
     assert s["manual"] == 1 and s["checkpoints"] == 1
 
 
+def test_stored_zero_or_malformed_retention_is_clamped_issue_1016(profile):
+    m = MemoryStore(profile / "memory.db")
+    m.set_setting("backup.manual", "0")                                # written before the minimum of 1 existed
+    m.set_setting("backup.checkpoints", '"many"')
+    m.set_setting("backup.weekly", "999")
+    m.close()
+    s = backup.get_settings(profile)
+    assert s["manual"] == 1 and s["checkpoints"] == backup.DEFAULTS["checkpoints"] and s["weekly"] == 365
+
+
 def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
     bdir = profile / "backups"
     bdir.mkdir()
@@ -416,15 +496,17 @@ def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
     assert not list(bdir.glob("*.partial"))
 
 
-@pytest.mark.parametrize("case", ["too_old", "no_data_mtime", "fails_verify"])
-def test_checkpoint_refuses_unsafe_reuse_issue_1016(profile, monkeypatch, case):
+@pytest.mark.parametrize("case", ["too_old", "no_data_state", "fails_verify"])
+def test_checkpoint_refuses_unsafe_reuse_issue_1016(profile, clock, monkeypatch, case):
+    _age(profile)
     first = backup.checkpoint(profile, "installer upgrade")
+    clock.t += 60
     if case == "too_old":
-        monkeypatch.setattr(backup, "REUSE_S", -1)
-    elif case == "no_data_mtime":                                     # an archive from before this fix
+        clock.t += backup.REUSE_S
+    elif case == "no_data_state":                                     # an archive from before this fix
         real = backup.read_manifest
         monkeypatch.setattr(backup, "read_manifest",
-                            lambda p: {k: v for k, v in real(p).items() if k != "data_mtime"})
+                            lambda p: {k: v for k, v in real(p).items() if k != "data_state"})
     else:
         real_verify = backup.verify
         monkeypatch.setattr(backup, "verify", lambda p: {"ok": False, "errors": ["damaged"], "files": 0}
@@ -433,7 +515,8 @@ def test_checkpoint_refuses_unsafe_reuse_issue_1016(profile, monkeypatch, case):
     assert again != first and "pre-migration" in again.name
 
 
-def test_write_after_the_snapshot_blocks_reuse_issue_1016(profile, monkeypatch):
+def test_write_after_the_snapshot_blocks_reuse_issue_1016(profile, clock, monkeypatch):
+    _age(profile)
     take = [rel for _, rel in backup.plan(profile)[0]]
     assert take[-1] != "memory.db"                                      # memory.db is copied before the last file
     real, calls = zipfile.ZipFile.write, []
@@ -441,25 +524,22 @@ def test_write_after_the_snapshot_blocks_reuse_issue_1016(profile, monkeypatch):
     def write(self, src, arc=None, *a, **k):                            # a commit lands while the last file zips
         calls.append(arc)
         if len(calls) == len(take):
-            later = time.time() + 5
-            os.utime(profile / "memory.db", (later, later))
+            os.utime(profile / "memory.db", (OLD + 100, OLD + 100))
         return real(self, src, arc, *a, **k)
     monkeypatch.setattr(zipfile.ZipFile, "write", write)
     first = backup.checkpoint(profile, "installer upgrade")
     monkeypatch.setattr(zipfile.ZipFile, "write", real)
+    clock.t += 60
     assert backup.checkpoint(profile, "first start") != first          # that write is not in the archive
 
 
-@pytest.mark.parametrize("change", ["top_wal", "subfolder_wal", "added_old_file", "removed_file"])
-def test_unseen_data_change_blocks_reuse_issue_1016(profile, change):
+@pytest.mark.parametrize("change", ["none", "top_wal", "subfolder_wal", "added_old_file", "removed_file"])
+def test_unseen_data_change_blocks_reuse_issue_1016(profile, clock, change):
     sub = profile / "workspace" / "jobs.db"
-    for target in (sub, profile / "memory.db"):                       # WAL mode (persistent) before the checkpoint
-        db = sqlite3.connect(target)
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("CREATE TABLE IF NOT EXISTS t (x)")
-        db.commit()
-        db.close()
+    _wal_mode(sub, profile / "memory.db")                             # WAL mode (persistent) before the checkpoint
+    _age(profile)
     first = backup.checkpoint(profile, "installer upgrade")
+    clock.t += 60
     writer = None
     if change in ("top_wal", "subfolder_wal"):                        # a WAL-only commit: the db file keeps its mtime
         target = profile / "memory.db" if change == "top_wal" else sub
@@ -473,11 +553,11 @@ def test_unseen_data_change_blocks_reuse_issue_1016(profile, change):
         assert target.stat().st_mtime == before and wal.is_file()
     elif change == "added_old_file":                                  # moved in with an old mtime kept
         (profile / "notes" / "old.md").write_text("x", encoding="utf-8")
-        os.utime(profile / "notes" / "old.md", (400_000_000, 400_000_000))
-    else:
+        os.utime(profile / "notes" / "old.md", (OLD, OLD))
+    elif change == "removed_file":
         (profile / "notes" / "shopping.md").unlink()
     try:
-        assert backup.checkpoint(profile, "first start") != first
+        assert (backup.checkpoint(profile, "first start") == first) is (change == "none")
     finally:
         if writer is not None:
             writer.close()
@@ -515,3 +595,21 @@ def test_space_check_counts_sqlite_snapshots_issue_1016(profile, monkeypatch):
     with pytest.raises(backup.BackupError) as e:                       # enough for the zip, not for zip + snapshots
         backup.create(profile, "manual")
     assert e.value.code == "BACKUP_NO_SPACE"
+
+
+def test_space_check_counts_wal_in_the_archive_issue_1016(profile, monkeypatch):
+    _wal_mode(profile / "memory.db")
+    writer = sqlite3.connect(profile / "memory.db")                    # committed rows still only in the -wal
+    writer.execute("PRAGMA wal_autocheckpoint=0")
+    writer.execute("INSERT INTO t VALUES (randomblob(200000))")
+    writer.commit()
+    seen = []
+    monkeypatch.setattr(backup, "_ensure_space", lambda home, out, archive, snaps: seen.append(archive))
+    try:
+        take = backup.plan(profile)[0]
+        files = sum(p.stat().st_size for p, _ in take)
+        wal = (profile / "memory.db-wal").stat().st_size
+        backup.create(profile, "manual")
+    finally:
+        writer.close()
+    assert wal > 200000 and seen == [files + wal]

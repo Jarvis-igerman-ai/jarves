@@ -66,6 +66,7 @@ SQLITE_MAGIC = b"SQLite format 3\x00"
 DEFAULTS = {"daily": 3, "weekly": 2, "manual": 3, "checkpoints": 2, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
 REUSE_S = 3600                   # #1016: a checkpoint reuses an unchanged backup this fresh
+FS_TICK_S = 2.0                  # #1016: coarsest mtime step (FAT/exFAT); a file changed this recently is never reused
 FREE_RESERVE = 256 * 1024 * 1024  # #1016: never fill the disk to the last byte
 _lock = threading.Lock()
 
@@ -88,12 +89,22 @@ def get_settings(home: Path) -> dict:
             for k, v in db.execute("SELECT key, value FROM settings WHERE key LIKE 'backup.%'"):
                 name = k.removeprefix("backup.")
                 if name in out:
-                    out[name] = json.loads(v)
+                    out[name] = _clean_setting(name, json.loads(v))
         finally:
             db.close()
     except (sqlite3.Error, ValueError):
         pass
     return out
+
+
+def _clean_setting(name: str, v):
+    """#1016: a stored value from before the minimum (manual/checkpoints 0) or a malformed one is clamped/ignored."""
+    d = DEFAULTS[name]
+    if isinstance(d, bool):
+        return v if isinstance(v, bool) else d
+    if isinstance(v, bool) or not isinstance(v, int):
+        return d
+    return min(max(v, 0 if name == "weekly" else 1), 365)
 
 
 def set_settings(home: Path, changes: dict) -> dict:
@@ -228,35 +239,37 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
-    dbs = sum(_size(p) + _size(p.with_name(p.name + "-wal")) for p, _ in take if _is_sqlite(p))
-    _ensure_space(home, out_dir, sum(_size(p) for p, _ in take), dbs)
+    dbs = sum(_size(p) + _size(_wal(p)) for p, _ in take if _is_sqlite(p))
+    _ensure_space(home, out_dir, sum(_size(p) + _size(_wal(p)) for p, _ in take), dbs)   # WAL folds into the db
     files = []
-    seen = 0.0          # #1016: newest data mtime this archive really holds (each file stat'ed as it is copied)
+    state = {}          # #1016: per file (db, -wal) [mtime_ns, size] before AND after its copy; None = never reuse
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
             with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
                 for p, rel in take:
                     try:
+                        before, start = _fingerprint(p), time.time()
                         if _is_sqlite(p):
                             snap = Path(work) / f"{len(files)}.db"
-                            _sqlite_copy(p, snap)      # after the copy: it touches the WAL itself
-                            seen = max(seen, p.stat().st_mtime, _mtime(p.with_name(p.name + "-wal"), missing=0.0))
+                            _sqlite_copy(p, snap)
                             src, typ = snap, "sqlite"
                         else:
-                            seen = max(seen, p.stat().st_mtime)                 # before reading it
                             src, typ = p, "file"
                         files.append({"name": rel, "type": typ, "size": src.stat().st_size, "sha256": _sha256(src)})
                         z.write(src, "data/" + rel)
+                        stable = before == _fingerprint(p) and not _too_fresh(before, start)
+                        state[rel] = before if stable else None     # a write during/just before the copy: unknown
                     except (OSError, sqlite3.Error) as e:
                         if isinstance(e, OSError) and getattr(e, "errno", None) == 28:     # ENOSPC
                             raise
                         skipped.append({"name": rel, "reason": f"unreadable ({type(e).__name__})"})
                         files = [f for f in files if f["name"] != rel]
+                        state.pop(rel, None)
                 manifest = {"format": 1, "app": "jarves", "version": __version__, "created": now,
                             "created_text": datetime.fromtimestamp(now).isoformat(timespec="seconds"), "kind": kind,
                             "note": note[:200], "platform": sys.platform, "machine": platform.machine(),
                             "files": files, "excluded": skipped, "contains_credentials": False,
-                            "data_mtime": seen}
+                            "data_state": state}
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
             res = verify(tmp)
             if not res["ok"]:
@@ -277,6 +290,30 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
               bytes=final.stat().st_size)
     prune(home)
     return final
+
+
+def _wal(p: Path) -> Path:
+    return p.with_name(p.name + "-wal")
+
+
+def _stamp(p: Path) -> list[int] | None:
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return [st.st_mtime_ns, st.st_size]
+
+
+def _fingerprint(p: Path) -> list:
+    """#1016: [file stamp, -wal stamp]. An empty -wal holds no commit (the read-only snapshot leaves one, an open and
+    close by Core removes it), so it counts as no -wal; a WAL folded into the db changes the db's stamp instead."""
+    wal = _stamp(_wal(p))
+    return [_stamp(p), wal if wal and wal[1] else None]
+
+
+def _too_fresh(fp: list, start: float) -> bool:
+    """A same-tick write after the stat would keep an equal mtime on a coarse filesystem: not trusted for reuse."""
+    return fp[0] is None or any(s is not None and s[0] / 1e9 > start - FS_TICK_S for s in fp)
 
 
 def _size(p: Path) -> int:
@@ -588,37 +625,29 @@ def restore_test(path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------- checkpoints and automatic backups
-def checkpoint(home: Path, reason: str = "migration") -> Path:
+def checkpoint(home: Path, reason: str = "migration", *, now: float | None = None) -> Path:
     """Before a database migration or update: a verified pre-migration backup. Raises BackupError on failure, so
     the caller can refuse to migrate and show recovery guidance. #1016: reuses the newest backup when it is a
-    pre-migration checkpoint under REUSE_S old that still verifies and no data changed since (the installer's
-    checkpoint becomes the first-start one) instead of writing another 200-600 MB archive."""
-    fresh = _reusable(home)
+    pre-migration checkpoint under REUSE_S old that still verifies and every data file has the size and mtime it
+    had while being copied (the installer's checkpoint becomes the first-start one) instead of writing another
+    200-600 MB archive."""
+    now = time.time() if now is None else now
+    fresh = _reusable(home, now)
     if fresh is not None:
         man = read_manifest(fresh)
         logs.info("backup", "BACKUP_REUSED", "unchanged data: reusing a fresh backup as checkpoint",
                   backup=fresh.name, reason=reason[:80], note=str(man.get("note", ""))[:80],
-                  age_s=round(time.time() - man["created"]))
+                  age_s=round(now - man["created"]))
         return fresh
-    return create(home, "pre-migration", note=reason)
+    return create(home, "pre-migration", note=reason, now=now)
 
 
-def _data_state(home: Path) -> tuple[float, set[str]]:
-    """Newest modification time of everything a backup would hold (each file and its SQLite `-wal`, the same rule
-    as create()) and the set of archive names, so an added, removed or WAL-only change is seen."""
-    take = plan(Path(home))[0]
-    newest = max((max(_mtime(p), _mtime(p.with_name(p.name + "-wal"), missing=0.0)) for p, _ in take), default=0.0)
-    return newest, {rel for _, rel in take}
+def _data_state(home: Path) -> dict:
+    """What create() would record now for every file a backup would hold (same plan, same fingerprint)."""
+    return {rel: _fingerprint(p) for p, rel in plan(Path(home))[0]}
 
 
-def _mtime(p: Path, missing: float = float("inf")) -> float:
-    try:
-        return p.stat().st_mtime
-    except OSError:
-        return missing                                        # default: cannot tell, treat as changed
-
-
-def _reusable(home: Path) -> Path | None:
+def _reusable(home: Path, now: float) -> Path | None:
     home = Path(home)
     items = list_backups(home)
     if not items or items[0]["kind"] != "pre-migration":
@@ -628,14 +657,14 @@ def _reusable(home: Path) -> Path | None:
         man = read_manifest(path)
     except (OSError, KeyError, ValueError, zipfile.BadZipFile):
         return None                                           # unreadable: write a new checkpoint instead
-    created = man.get("created") if isinstance(man, dict) else None
-    if not isinstance(created, (int, float)) or not 0 <= time.time() - created <= REUSE_S:
+    if not isinstance(man, dict):
         return None
-    seen, files = man.get("data_mtime"), man.get("files")
-    if not isinstance(seen, (int, float)) or not isinstance(files, list):
-        return None                                           # an older archive format
-    newest, names = _data_state(home)
-    if newest > seen or names != {f.get("name") for f in files if isinstance(f, dict)}:
+    created, state, files = man.get("created"), man.get("data_state"), man.get("files")
+    if not isinstance(created, (int, float)) or not 0 <= now - created <= REUSE_S:
+        return None
+    if not isinstance(state, dict) or not isinstance(files, list) or None in state.values():
+        return None                                           # older format, or a file changed while copied
+    if set(state) != {f.get("name") for f in files if isinstance(f, dict)} or _data_state(home) != state:
         return None                                           # data changed, or a file was added/removed/unreadable
     return path if verify(path)["ok"] else None
 
