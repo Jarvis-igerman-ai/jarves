@@ -69,6 +69,29 @@ def test_resend_ledger_keeps_only_codes_and_numbers_when_privacy_is_on(tmp_path)
     assert c.seen("d1", "cid-0006")["code"] == "CONFIRM_ON_PC"
     assert c.seen("d1", "cid-0007") == {"ok": True, "pref": 5, "state": "confirmed", "conflicts": 0}
 
+def test_resend_ledger_keeps_string_ids_when_privacy_is_on(tmp_path):
+    """Review R2: string ids (id, cid, *_id) stay so a client can still place a replayed reply."""
+    from jarves import logs
+    logs.set_privacy(True)                                   # restored by the autouse _full_text fixture above
+    c = Continuity(tmp_path)
+    c.store("d1", "cid-0008", "chat", 200, {"reply": "words", "id": "msg-1", "turn_id": "t-9", "cid": "cid-0008"})
+    assert c.seen("d1", "cid-0008") == {"reply": continuity.NOT_KEPT, "id": "msg-1", "turn_id": "t-9",
+                                        "cid": "cid-0008", "not_kept": True}
+
+
+def test_rows_written_before_privacy_was_switched_on_are_blanked(tmp_path):
+    """Review R5: switching privacy on blanks the earlier resend copies at the next ledger use, not after 24 h."""
+    from jarves import logs
+    c = Continuity(tmp_path)                                 # privacy off (autouse fixture)
+    c.store("d1", "cid-0009", "chat", 200, {"reply": "earlier private answer", "turn": 1})
+    assert "earlier private" in c._rows("SELECT body FROM ledger")[0]["body"]
+    logs.set_privacy(True)
+    assert c.seen("d1", "cid-0009") == {"reply": continuity.NOT_KEPT, "turn": 1, "not_kept": True}
+    assert not any("private" in r["body"] for r in c._rows("SELECT body FROM ledger"))
+    st, body, replay = c.execute("d1", "cid-0009", "chat", lambda: (200, {}))
+    assert replay and body["reply"] == continuity.NOT_KEPT
+
+
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
 NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
 

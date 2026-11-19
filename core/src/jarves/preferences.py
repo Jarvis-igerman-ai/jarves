@@ -43,12 +43,13 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d|"
-    # credential words (#1099): API keys, tokens, secrets, private keys (EN + HE)
-    # (bare "token"/"secret" are left out: devmanager drafts such as "token refresh fails" must still save)
+    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+# credential words (#1099): API keys, tokens, secrets, private keys (EN + HE). Bare "token"/"secret" are left out, and
+# development drafts skip this list (review R3: "the api key field does not save" is a bug report, not a secret);
+# real key shapes are still caught there by logs.has_secret and _keylike.
+_CRED_WORDS = re.compile(
     r"api[\s_-]?keys?\b|access[\s_-]?keys?\b|secret[\s_-]?keys?\b|private[\s_-]?keys?\b|client[\s_-]?secrets?|"
     r"\b(?:api|access|auth|bearer)[\s_-]?token|"   # "oauth_token" (an identifier) is not a credential word
-    
     r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
 # a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
 # ('.', '/' and '-' split the run: paths, URLs, versions, UUIDs and file names are not one key)
@@ -90,9 +91,11 @@ class PhoneEditNeedsPC(PermissionError):
     """A confirm from a phone-reachable route of an item whose wording was changed on a phone (V5 sec H2)."""
 
 
-def looks_sensitive(text: str) -> bool:
+def looks_sensitive(text: str, *, credential_words: bool = True) -> bool:
+    """`credential_words=False` (development drafts): words such as "api key" alone do not refuse the text."""
     t = text or ""
-    return bool(_SENSITIVE.search(t)) or logs.has_secret(t) or _keylike(t)
+    return (bool(_SENSITIVE.search(t)) or (credential_words and bool(_CRED_WORDS.search(t)))
+            or logs.has_secret(t) or _keylike(t))
 
 
 def normalize(text: str) -> str:
@@ -157,10 +160,10 @@ class Preferences:
             raise KeyError(pid)
         now = self.clock()                  # a confirm ends the phone-edit mark: the original provenance comes back
         sql = ("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=?, source=CASE WHEN "
-               f"substr(source, 1, {len(PHONE_EDIT) + 1})='{PHONE_EDIT}:' THEN substr(source, {len(PHONE_EDIT) + 2}) "
+               f"substr(COALESCE(source, ''), 1, {len(PHONE_EDIT) + 1})='{PHONE_EDIT}:' THEN substr(source, {len(PHONE_EDIT) + 2}) "
                "ELSE source END WHERE id=?")
         if refuse_phone_edit:
-            sql += f" AND substr(source, 1, {len(PHONE_EDIT)})<>'{PHONE_EDIT}'"
+            sql += f" AND substr(COALESCE(source, ''), 1, {len(PHONE_EDIT)})<>'{PHONE_EDIT}'"   # review R1
         if not self.db.x(sql, (now, now, pid)).rowcount:
             if not self.get(pid):
                 raise KeyError(pid)                                     # removed meanwhile

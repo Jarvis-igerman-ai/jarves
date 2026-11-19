@@ -53,11 +53,17 @@ DEFAULT_DAILY = 6
 SNOOZE_MAX_MIN = 24 * 60
 
 
-# V5 sec F13: in privacy mode only these string fields rest on disk (codes, states and kinds, never words); every
+# V5 sec F13: in privacy mode only these string fields (plus ids: id, cid, *_id) rest on disk (codes, states and kinds,
+# never words); every
 # other non-empty string at any depth (reply, text, transcript, title, error, ...) becomes the marker. An allowlist,
 # so a new free-text field in a ledgered body is blanked by default.
 _KEPT_STRINGS = frozenset(("code", "state", "status", "kind", "op"))
 NOT_KEPT = "(answered; the text was not kept: privacy mode)"   # Hebrew: hebrew_parts/2026-11-19-intake-1099-206.json
+
+
+def _kept(key) -> bool:
+    """Codes, states and ids stay (review R2: a string conversation/turn id must still place a replayed reply)."""
+    return isinstance(key, str) and (key in _KEPT_STRINGS or key in ("id", "cid") or key.endswith("_id"))
 
 
 def _blank(v, key=None):
@@ -68,7 +74,7 @@ def _blank(v, key=None):
         if any(x is NOT_KEPT for x in out.values()):
             out["not_kept"] = True                   # a code, so a client can show the marker in its own language
         return out
-    if isinstance(v, str) and v.strip() and key not in _KEPT_STRINGS:
+    if isinstance(v, str) and v.strip() and not _kept(key):
         return NOT_KEPT
     return v                                         # numbers, booleans, None, empty strings, kept codes
 
@@ -102,6 +108,7 @@ class Continuity:
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
         self._lock = threading.RLock()
+        self._scrubbed = False                       # privacy on and every ledger row already blanked (review R5)
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -119,6 +126,22 @@ class Continuity:
         with self._cx() as cx:
             return cx.execute(sql, args).rowcount
 
+    def _scrub(self) -> None:
+        """Review R5: rows written before privacy mode was switched on are blanked at the next ledger use, not left
+        with full text until the 24 h TTL ends. One pass per privacy-on period; a write with privacy off re-arms it."""
+        if not logs.privacy():
+            self._scrubbed = False
+            return
+        if self._scrubbed:
+            return
+        with self._lock:
+            for r in self._rows("SELECT device, cid, body FROM ledger"):
+                old = json.loads(r["body"])
+                new = _blank(old)
+                if new != old:
+                    self._x("UPDATE ledger SET body=? WHERE device=? AND cid=?", (json.dumps(new), r["device"], r["cid"]))
+            self._scrubbed = True
+
     # ------------------------------------------------------------------ idempotent commands
     def execute(self, device: str, cid: str | None, kind: str, fn: Callable[[], tuple[int, dict]],
                 *, age_s: float | None = None) -> tuple[int, dict, bool]:
@@ -130,6 +153,7 @@ class Continuity:
             st, body = fn()
             return st, body, False
         with self._lock:
+            self._scrub()
             hit = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
             if hit and now - hit[0]["ts"] <= LEDGER_TTL_S:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
@@ -148,6 +172,7 @@ class Continuity:
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
+        self._scrub()
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
                 (device, cid, kind, int(status), json.dumps(_at_rest(body)), self.clock()))
 
@@ -162,6 +187,7 @@ class Continuity:
             return False
 
     def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
+        self._scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
             return json.loads(r[0]["body"])

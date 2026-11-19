@@ -51,3 +51,12 @@ def test_key_or_token_shaped_text_is_sensitive(text):
 ])
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)
+
+
+def test_dev_drafts_skip_credential_words_but_not_real_keys():
+    """Review R3: a bug report about the API key field saves as a draft; a pasted key is still refused."""
+    assert looks_sensitive("the OpenAI api key field does not save")
+    assert not looks_sensitive("the OpenAI api key field does not save", credential_words=False)
+    assert not looks_sensitive("access token expiry not shown", credential_words=False)
+    assert looks_sensitive("key is sk-proj-Ab3dEf9hIjK2mNoPqR7sTuVwXyZ01234", credential_words=False)
+    assert looks_sensitive("my password is hunter2", credential_words=False)

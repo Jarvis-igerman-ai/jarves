@@ -47,7 +47,7 @@ def suggest(store, title: str, body: str = "", kind: str = "suggestion", *, by: 
     if not t:
         raise ValueError("a draft needs a title")
     kind = normalize_kind(kind)
-    if looks_sensitive(t) or looks_sensitive(b):
+    if looks_sensitive(t, credential_words=False) or looks_sensitive(b, credential_words=False):
         logs.info("devmgr", "DEV_DRAFT_REFUSED", "sensitive draft not stored", by=by)
         raise ValueError("this looks sensitive (secret, number, health or money detail): not stored")
     fp = "dev:" + hashlib.sha256(t.casefold().encode()).hexdigest()[:12]
