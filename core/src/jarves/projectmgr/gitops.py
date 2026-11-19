@@ -154,8 +154,11 @@ def commit_all(wt: Path, message: str) -> bool:
 
 
 def changed_files(wt: Path, base: str) -> list[str]:
-    out = git(wt, "diff", "--name-only", f"{base}...HEAD").stdout
-    return [x.strip().replace("\\", "/") for x in out.splitlines() if x.strip()]
+    """Every path the task changed, as plain text. -z: git would otherwise print a non-ASCII name in quotes
+    (octal escapes inside `"..."`), which no PROTECTED prefix matches. --no-renames: a rename lists both
+    sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
+    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
+    return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
 def diffstat(wt: Path, base: str) -> str:

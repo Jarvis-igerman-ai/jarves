@@ -85,6 +85,26 @@ def test_protected_paths_are_refused_in_any_letter_case(path):
     assert prot == [path] and outside == []
 
 
+def test_changed_files_shows_non_ascii_and_renamed_protected_paths(tmp_path):
+    # JAR-574: plain `git diff --name-only` quotes a non-ASCII name (`".github/workflows/\303\251.yml"`), which no
+    # PROTECTED prefix matches, and names only the target of a rename, hiding a file moved out of `.github/`
+    repo = _repo(tmp_path)
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("on: push\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "ci", "--no-verify")
+    base = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    (repo / ".GitHub" / "workflows" / "é.yml").write_text("on: push\n", encoding="utf-8")
+    (repo / "src").mkdir()
+    gitops.git(repo, "mv", ".github/workflows/ci.yml", "src/ci.yml")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "sneak", "--no-verify")
+    files = gitops.changed_files(repo, base)
+    prot, _ = gitops.violations(files, ["src/**"])
+    assert ".github/workflows/ci.yml" in prot
+    assert any(f.casefold() == ".github/workflows/é.yml" for f in prot), files
+
+
 @pytest.mark.parametrize("path", ["src/github/x.py", "docs/.github.md", "src/claude/x.py", "my.mcp.json.bak"])
 def test_ordinary_paths_with_similar_names_are_not_protected(path):
     assert not gitops.is_protected(path)
