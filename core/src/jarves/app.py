@@ -1537,8 +1537,12 @@ class Core:
         logs.new_cid()
         self._voice_connecting = True
         await self.link.broadcast("status", self.snapshot())
+        claimed, started = bool(ack and greeting) and not self._greeted, False
+        if claimed:
+            self._greeted = True          # #520: claimed before the await, so a face connecting meanwhile does not greet too
         try:
             await live.start()
+            started = getattr(live, "running", True) is not False and not self.stopping
         except BudgetExceeded as e:                 # F1: no unit can be reserved ahead -> no session at all
             if e.kind in limits_mod.SPECS:
                 lv = limits_mod.view(e.kind, e.used, e.limit)
@@ -1556,6 +1560,8 @@ class Core:
             await self.notify_error("LIVE_START_FAILED", "live voice could not start", "check the internet / API key")
             return
         finally:
+            if claimed and not started:
+                self._greeted = False     # #520: the wake session did not start, so its greeting never happened
             self._voice_connecting = False
             if ack:
                 await self.link.send_face("assistant.activity", {"kind": "done", "text": "", "detail": ""})
@@ -1566,8 +1572,6 @@ class Core:
             await live.stop()
             return
         self.live = live
-        if ack and greeting:
-            self._greeted = True          # #520: only once the wake session really started (no second start-greeting)
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open

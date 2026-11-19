@@ -204,9 +204,11 @@ def test_failed_wake_start_does_not_mark_the_core_greeted():
 
 @pytest.mark.parametrize("greeting,greeted", [("I'm listening.", True), (None, False)])
 async def test_started_wake_session_marks_greeted_only_with_a_greeting(core, greeting, greeted):
+    seen = []
+
     class Live:                                     # #520: a session that really starts
         async def start(self):
-            pass
+            seen.append(core._greeted)              # a face connecting during this await must not greet again
 
         async def stop(self):
             pass
@@ -214,5 +216,22 @@ async def test_started_wake_session_marks_greeted_only_with_a_greeting(core, gre
     core._live_factory = lambda *args, **kwargs: Live()
     core._greeted = False
     await core._start_live(ack=True, greeting=greeting)   # None: greeting feature off or drive mode
-    assert core.live is not None and core._greeted is greeted
+    assert core.live is not None and core._greeted is greeted and seen == [greeted]
     await core.live.stop()
+
+
+async def test_wake_start_that_raises_releases_the_greeting_claim(core):
+    seen = []
+
+    class Live:
+        async def start(self):
+            seen.append(core._greeted)              # claimed while connecting
+            raise ConnectionError("no network")
+
+        async def stop(self):
+            pass
+
+    core._live_factory = lambda *args, **kwargs: Live()
+    core._greeted = False
+    await core._start_live(ack=True, greeting="I'm listening.")
+    assert seen == [True] and core.live is None and not core._greeted

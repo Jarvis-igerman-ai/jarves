@@ -61,5 +61,21 @@ def test_listening_dot_survives_one_transient_tcl_error(monkeypatch):
     fake = SimpleNamespace(Tk=Tk, TclError=_TclError, Canvas=lambda *a, **k: Root())
     monkeypatch.setitem(sys.modules, "tkinter", fake)
     monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr("jarves.tkutil.time.sleep", lambda s: None)      # clock-free
     TkDotBackend()._run()
     assert reached == [True]          # before #520 the first TclError made the dot give up for the whole run
+
+
+def test_popup_module_starts_in_its_own_process_like_the_core_launches_it(tmp_path):
+    """The core starts the popup as `python -m jarves.approval_popup` with src on PYTHONPATH (approvals.PopupChannel).
+    Its package-relative tkutil import must load there; --help exits before any Tk window (works headless)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from jarves import approvals
+    src = str(Path(approvals.__file__).resolve().parents[1])
+    env = dict(os.environ, PYTHONPATH=src)
+    p = subprocess.run([approvals._popup_python(), "-m", "jarves.approval_popup", "--help"], cwd=tmp_path, env=env,
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0 and "--test-invoke" in p.stdout, p.stderr
