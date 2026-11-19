@@ -443,6 +443,78 @@ def test_legacy_project_never_adopts_unchecked_protected_files(env):
     assert m.db.by_seq(1, 2)["status"] == "done" and (integ / "b.txt").exists()
 
 
+def test_legacy_adoption_checks_the_ref_not_a_detached_worktree(env):
+    # #1352 review: the worktree HEAD sits clean on main while the ref points at a protected commit
+    m, repo, home = env
+    open_project(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    gitops.git(integ, "checkout", "-q", "--detach")
+    _commit(integ, ".github/workflows/x.yml")
+    gitops.git(integ, "update-ref", "refs/heads/jarves/p1/integration", "HEAD")
+    gitops.git(integ, "checkout", "-q", "--detach", "main")
+    m.db.update_project(1, integration_sha="")
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "failed" and "never checked" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == ""
+
+
+def test_merge_without_a_recorded_checked_commit_says_retry(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    m._set_job(m.db.by_seq(1, 1), checked_head=None)              # a task in flight at the upgrade
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "retry the task" in t["reason"], t["reason"]
+
+
+def test_merge_refuses_a_commit_made_by_the_recheck(env):
+    # #1352 review: newer work merged in, then the re-run check commits: that commit was never tested
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "import os, subprocess as s; "
+                                 "os.path.exists('src/a.py') and os.path.exists('b.txt') and "
+                                 "s.run('git -c user.name=a -c user.email=a@a commit -q --allow-empty -m x'.split())"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write src/a.py=1", scope=["src/"],
+           flow="work test gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    task(m, "B", "FAKE write b.txt=1", scope=["b.txt"])                 # merges first: A must re-merge and re-check
+    finish(m)
+    assert m.db.by_seq(1, 2)["status"] == "done"
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved while it was checked" in t["reason"], t["reason"]
+
+
+def test_review_stops_on_a_moved_integration_ref(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    _commit(gitops.project_root(home, 1) / "integration", ".github/workflows/x.yml")
+    out = m._st_review(m.db.project(1), m.db.by_seq(1, 1), {"kind": "review"}, ["claude"])
+    assert out[:2] == ("stop", "blocked") and "moved outside JARVES" in out[2]
+
+
+def test_best_of_without_a_test_stage_merges_the_winner(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
+           flow="work:claude:alpha,claude:beta merge")
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+
+
 def test_merge_rechecks_protected_files_on_the_approved_commit(env):
     m, repo, home = env
     open_project(m, repo)

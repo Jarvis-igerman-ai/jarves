@@ -231,14 +231,15 @@ class StageEngine:
         if sha:
             return sha, ""
         integ = self._integration(p)
+        sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))      # check and adopt exactly this commit
         try:
             base = p.get("base_branch") or gitops.rev(p["path"], "HEAD")
-            prot = [f for f in gitops.changed_files(integ, base) if gitops.is_protected(f)] if base else ["?"]
+            prot = [f for f in gitops.changed_files(integ, base, sha) if gitops.is_protected(f)] if base and sha \
+                else ["(no base branch or integration commit to compare)"]
         except gitops.GitError:
             prot = ["(no base branch to compare with)"]
         if prot:
             return "", ", ".join(prot[:5])
-        sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))
         if sha:
             self.db.update_project(p["id"], integration_sha=sha)
             logs.info("projects", "INTEGRATION_ADOPTED", "integration commit recorded", id=p["id"], current=sha[:12])
@@ -515,6 +516,9 @@ class StageEngine:
     def _st_review(self, p, t, st, acts):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
+        moved = self._int_moved(p)
+        if moved:
+            return ("stop", "blocked", moved)
         base = self._int_sha(p)
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
@@ -631,7 +635,10 @@ class StageEngine:
                 why = self._merge_files_blocked(wt, head, cur, t, stages, br) if cur else ""
                 if why:
                     return ("stop", "blocked", why)
-                if not want or cur != want:                         # the task branch is a shared ref too (#1352)
+                if not want:                                        # checked before #1352 recorded the commit
+                    return ("stop", "blocked", f"task #{t['seq']} was checked before JARVES recorded the checked "
+                                               "commit: retry the task (not merged)")
+                if cur != want:                                     # the task branch is a shared ref too (#1352)
                     return ("stop", "blocked", f"the task branch {br} moved after JARVES checked it (expected "
                                                f"{want[:10] or '?'}, found {cur[:10] or 'nothing'}); not merged")
                 if head != job.get("tested_base"):
@@ -639,7 +646,10 @@ class StageEngine:
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     if has_check:
+                        before = gitops.rev(wt, "HEAD")
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
+                        if ok and gitops.rev(wt, "HEAD") != before:
+                            return ("stop", "blocked", f"the task branch {br} moved while it was checked; not merged")
                         if not ok:
                             self.db.event(t["id"], "manager", "check_failed", clean(out, cards.FAIL_MAX))
                             test_i = pl.find(stages, ("test", "verify"), before=len(stages))
