@@ -67,6 +67,11 @@ FAKE = textwrap.dedent('''
     sid = "sess-" + num
     for m in re.finditer(r"^FAKE (\\w+) ?(.*)$", prompt, re.M):
         op, arg = m.group(1), m.group(2)
+        if op == "as":                  # FAKE as <model> <op> <arg>: only that best-of candidate does it
+            who, _, rest = arg.partition(" ")
+            if who != model:
+                continue
+            op, _, arg = rest.partition(" ")
         if op == "write":
             path, _, body = arg.partition("=")
             os.makedirs(os.path.dirname(os.path.join(os.getcwd(), path)) or ".", exist_ok=True)
@@ -513,6 +518,33 @@ def test_best_of_without_a_test_stage_merges_the_winner(env):
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
     assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+
+
+def test_best_of_merges_the_selected_winner_not_the_last_to_finish(env):
+    # #1352 review R1: candidates write different commits; the smaller (beta) wins while alpha finishes last
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", scope=["a.txt", "b.txt"], flow="work:claude:alpha,claude:beta merge",
+           spec="FAKE as alpha sleep 1\nFAKE as alpha write a.txt=1\nFAKE as alpha write b.txt=1\n"
+                "FAKE as beta write a.txt=2")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", t["reason"]
+    integ = gitops.project_root(home, 1) / "integration"
+    assert (integ / "a.txt").read_text() == "2\n" and not (integ / "b.txt").exists()
+
+
+def test_files_the_check_writes_inside_the_scope_still_merge(env):
+    # #1352 review R3: a check that leaves in-scope output (coverage, build files) must not block every merge
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "open('src/out.txt', 'w').write('x')"])
+    task(m, "A", "FAKE write src/a.py=1", scope=["src/"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "done", t["reason"]
+    assert (gitops.project_root(home, 1) / "integration" / "src" / "out.txt").exists()
 
 
 def test_merge_rechecks_protected_files_on_the_approved_commit(env):

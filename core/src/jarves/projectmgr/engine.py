@@ -178,7 +178,7 @@ class StageEngine:
         if acts == ["owner"]:
             return self._owner_stage(p, t, st, i, stages)
         if kind in ("test", "verify", "cmd"):
-            return self._st_check(p, t, st, cancel)
+            return self._st_check(p, t, st, cancel, stages)
         if kind == "merge":
             return self._st_merge(p, t, stages, cancel)
         if kind == "release":
@@ -337,7 +337,8 @@ class StageEngine:
         h = cards.parse_handoff(text)
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
-            files = gitops.changed_files(wt, base)
+            tip = gitops.rev(wt, "HEAD")                            # one commit: checked here, recorded below (#1352)
+            files = gitops.changed_files(wt, base, tip or "HEAD")
         except gitops.GitError as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
         scope = t["scope"]
@@ -355,7 +356,7 @@ class StageEngine:
                           ", ".join(outside[:5]))
         repro = self._job(t).get("repro") or {}
         if kind == "work" and repro.get("files") and repro.get("commit"):
-            touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
+            touched = gitops.git(wt, "diff", "--name-only", repro["commit"], tip or "HEAD", "--", *repro["files"],
                                  check=False).stdout.split()
             if touched:
                 return ("stop", "blocked", "the fix changed the reproduction test " + ", ".join(touched[:3]) +
@@ -367,7 +368,7 @@ class StageEngine:
         hand = cards.handoff_text(h) if h else cards.auto_handoff(text, stat)
         self.db.update_task(t["id"], handoff=hand, handoff_kind="owner" if owner else ("agent" if h else "auto"),
                             result=stat)
-        self._set_job(t, checked_head=gitops.rev(wt, "HEAD"))       # the commit whose scope was checked (#1352)
+        self._set_job(t, checked_head=tip)                          # the commit whose scope was checked (#1352)
         if kind == "reproduce":
             if not files:
                 return ("fail", "no reproduction test was written")
@@ -565,7 +566,7 @@ class StageEngine:
         return ("next",)
 
     # ------------------------------------------------------------------ JARVES's own stages
-    def _st_check(self, p, t, st, cancel):
+    def _st_check(self, p, t, st, cancel, stages=()):
         kind = st["kind"]
         repro = self._job(t).get("repro") or {}
         argv = st.get("cmd") if kind == "cmd" else p["check_cmd"]
@@ -597,14 +598,23 @@ class StageEngine:
             if ok:
                 ok, out = gitops.run_check(wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
                 outs.append(out)
+            if ok and has_wt and gitops.rev(wt, "HEAD") != tested_head:
+                ok, outs = False, ["the task branch moved while it was checked"]
+            if ok and has_wt:                                       # files the check wrote (coverage, build output)
+                try:
+                    if gitops.commit_all(wt, f"task {t['seq']}: files written by the check"[:120]):
+                        tested_head = gitops.rev(wt, "HEAD")
+                        why = self._merge_files_blocked(wt, base, tested_head, t, stages, t["branch"])
+                        if why:
+                            return ("stop", "blocked", "the check wrote files: " + why)
+                except gitops.GitError as e:
+                    return ("stop", "failed", f"git failed after the check: {clean(e, 200)}")
             if ok and kind == "verify" and repro.get("files") and repro.get("commit") and has_wt:
                 touched = gitops.git(wt, "diff", "--name-only", repro["commit"], tested_head, "--", *repro["files"],
                                      check=False).stdout.split()
                 if touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
-            if ok and has_wt and gitops.rev(wt, "HEAD") != tested_head:
-                ok, outs = False, ["the task branch moved while it was checked"]
             tested = base
         if self._stopped(t, cancel):
             return ("end",)
