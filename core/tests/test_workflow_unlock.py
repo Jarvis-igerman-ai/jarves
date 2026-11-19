@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from jarves.workflow import __main__ as cli
-from jarves.workflow import autopilot, unlock
+from jarves.workflow import autopilot, server, unlock
 from jarves.workflow.server import Server
 
 
@@ -153,27 +153,56 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)  # this session used its 3 guesses
+        self.assertTrue((self.home / unlock.FILE).exists())           # but it cannot cancel the owner's code
         self.server.unlock_attempts.clear()
         unlock.issue(self.home)
         text = (self.home / unlock.FILE).read_text(encoding="ascii")
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+    def test_one_session_cannot_cancel_the_owner_code_1265(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the token-only caller
+        statuses = []
+        for _ in range(6):
+            self.server.unlock_attempts.clear()                        # not the rate limit under test
+            statuses.append(self.request("/api/unlock", {"code": shown if _ == 5 else wrong})[0])
+        self.assertEqual(statuses, [403] * 6)                          # even the right code: no 4th guess here
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's code survives
+        self.cookie = ""
+        owner = self.login()                                           # the owner's own window
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+        self.assertIn(owner, self.server.unlocked)
+        self.assertEqual(len(self.server.unlocked), 1)
+
+    def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for _ in range(5):                                             # a different session for every try
-            self.cookie = ""
-            self.login()
+        for i in range(server.UNLOCK_WRONG_TOTAL):                     # a fresh session every 3 tries
+            if i % server.UNLOCK_WRONG_PER_SESSION == 0:
+                self.cookie = ""
+                self.login()
+            self.server.unlock_attempts.clear()
             statuses.append(self.request("/api/unlock", {"code": wrong})[0])
-        self.assertEqual(statuses, [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
-        self.server.unlock_attempts.clear()
+        self.assertEqual(statuses, [403] * server.UNLOCK_WRONG_TOTAL)
+        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled at the total backstop
+        self.cookie = ""
+        self.login()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+
+    def test_wrong_tries_reset_for_a_new_code(self):
+        unlock.issue(self.home)
+        self.login()
+        for _ in range(3):
+            self.server.unlock_attempts.clear()
+            self.request("/api/unlock", {"code": "abcd"})
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
 
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
