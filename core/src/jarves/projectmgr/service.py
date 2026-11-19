@@ -919,7 +919,11 @@ class Manager(StageEngine):
             if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
                                              {"project": p["name"], "branch": st["branch"]}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            moved = self._int_moved(p)                                  # the ref may have moved during the approval
+            if moved:
+                return _res(False, "MOVED", moved)
+            sha = self._int_sha(p)                                      # the commit JARVES merged, not the ref
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False)     # your own git identity / signing
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])

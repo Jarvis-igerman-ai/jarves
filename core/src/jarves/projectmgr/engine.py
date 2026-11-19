@@ -226,6 +226,16 @@ class StageEngine:
         if not sha:                                                 # a project opened before #1352: adopt once
             self._integration(p)
             sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))
+            owner_base = (self.db.project(p["id"]) or {}).get("base_branch") or ""
+            if sha and owner_base and gitops.rev(p["path"], owner_base):
+                try:
+                    prot = [f for f in gitops.changed_files(Path(p["path"]), owner_base, sha) if gitops.is_protected(f)]
+                except gitops.GitError:
+                    prot = ["(unreadable)"]
+                if prot:                                            # never trust a commit that already carries one
+                    logs.warn("projects", "INTEGRATION_NOT_ADOPTED", "integration commit has protected changes",
+                              id=p["id"], found=sha[:12], count=len(prot))
+                    return ""
             if sha:
                 self.db.update_project(p["id"], integration_sha=sha)
                 logs.info("projects", "INTEGRATION_ADOPTED", "integration commit recorded", id=p["id"], current=sha[:12])
@@ -618,11 +628,17 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                prot = [f for f in gitops.changed_files(wt, head) if gitops.is_protected(f)]
+                new = gitops.rev(wt, "HEAD")                        # pinned: a later commit is never merged
+                if not new:
+                    raise gitops.GitError("the task branch has no commit")
+                prot, outside = gitops.violations(gitops.changed_files(wt, head, new), t["scope"])
                 if prot:                                            # re-checked on exactly what is merged (#1352)
                     return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) +
                             f" (not merged; on {br})")
-                new = gitops.rev(wt, "HEAD")
+                owner_code = any(s["kind"] in pl.CODE_KINDS and str(s.get("by", "")).strip() == "owner" for s in stages)
+                if outside and not owner_code:                      # e.g. written by the check command or a leftover
+                    return ("stop", "blocked", "changed files outside the scope: " + ", ".join(outside[:5]) +
+                            f" (not merged; the work is on branch {br})")
                 gitops.fast_forward(self._integration(p), new)
                 if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
                     raise gitops.GitError("the integration branch is not at the merged commit")
