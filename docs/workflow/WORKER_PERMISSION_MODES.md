@@ -61,7 +61,10 @@ changes its Bash matcher.
 Added after the review of PR #1349, **not yet run against the real matcher (UNVERIFIED)**; only the hermetic model
 covers them. Add them to the next real run: `ruff check . -o <outside>`, `pytest -o log_file=<outside>`,
 `pytest -qo log_file=<outside>`, `pytest --override-ini=log_file=<outside>`, `pytest --debug=<outside>`,
-`pytest --pastebin=all`, `ruff format <outside>/x.py`, `ruff check --fix ../x`, `git rebase -x'sh x' main`.
+`pytest --pastebin=all`, `ruff format <outside>/x.py`, `ruff check --fix ../x`, `git rebase -x'sh x' main`,
+`<python> -m pytest -o log_file=<outside>`, and `ruff format C:\h\x.py` (the rule `Bash(ruff*:\*)`: if the matcher
+reads `\*` as an escaped literal star it does not cover `C:\` paths; if this command is not refused, replace that
+rule with one that does not use a backslash).
 `Bash(git worktree:*)` is narrowed to `Bash(git worktree list:*)`, so `git worktree add <outside>` is not allowed at all.
 Whether Claude Code path-checks plain path arguments of `ruff format`/`--fix` by itself is also UNVERIFIED, so the deny
 list refuses absolute, `..`, `~` and drive-letter paths after `ruff`.
@@ -70,6 +73,11 @@ Residual risk of the deny-glob approach: a glob list cannot list every spelling.
 cluster with an attached path (`ruff check -eo/abs/x`), pytest ini writers other than `log_file`/`cache_dir` given in a
 `-qo` cluster, and plugin options of pytest plugins installed later. These sit next to the pytest/conftest item below,
 which already allows arbitrary code; OS isolation is the real fix.
+
+Config-file writers (same owner decision, #1311): under acceptEdits a worker can edit `pyproject.toml`, `ruff.toml`,
+`pytest.ini`, `setup.cfg` or `tox.ini` in its worktree and set ruff `cache-dir` or pytest `cache_dir`, `log_file`,
+`junit_xml`/`junit_logfile` or `addopts` to an outside path. That bypasses every CLI-flag deny above. It adds no power
+beyond the conftest item, so it is covered by the same decision.
 
 Residual risk, needs an owner decision (#1311): `pytest` runs test code and `conftest.py` that the worker writes in its
 worktree. That is arbitrary code running as the owner's user, so it could rewrite `autopilot.json` no matter what

@@ -107,6 +107,10 @@ def _denied(command: str) -> bool:
     "pytest -qo log_file=/h/x", "pytest -ocache_dir=/h/c", "pytest --debug=/h/x", "pytest --pastebin=all",
     "git rebase -x'sh x' main", "ruff format /h/x.py", "ruff check --fix ../outside", "ruff format ~/x.py",
     "ruff check --fix C:/h/x.py", "ruff format C:\\h\\x.py", "ruff check --fix=true --config=/h/r.toml .",
+    # the default list also allows `<python> -m pytest:*`: pytest rules must catch that spelling too
+    "C:/py/python.exe -m pytest -o log_file=/h/x", "C:/py/python.exe -m pytest --junitxml=/h/j.xml",
+    "C:/py/python.exe -m pytest -qo cache_dir=/h/c", "C:/py/python.exe -m pytest --debug=/h/x",
+    "C:/py/python.exe -m pytest --basetemp=/h/b", "git -C . diff --output=/h/x", "ruff check --output-file=/h/x .",
 ])
 def test_default_list_write_and_exec_options_are_denied(command):
     assert _denied(command), command
@@ -116,7 +120,10 @@ def test_default_list_write_and_exec_options_are_denied(command):
                                      "git rebase main", "gh run view 1 --log-failed", "git fetch origin",
                                      "grep -rn cache_dir core/", "git rebase origin/fix-xyz", "grep -rn -- --html docs/",
                                      "ruff format core/src/jarves/x.py", "ruff check --fix core/tests",
-                                     "pytest -q -k log_file core/tests/test_logs.py", "git worktree list"])
+                                     "pytest -q -k log_file core/tests/test_logs.py", "git worktree list",
+                                     "grep -rn -- --output docs/", "grep -rn junitxml --rootdir", "grep -rn -- --basetemp core",
+                                     "grep -rn -- --upload-pack docs/", "grep -rn -- --cov-report core",
+                                     "C:/py/python.exe -m pytest -q core/tests/test_x.py"])
 def test_ordinary_worker_commands_are_not_denied(command):
     assert not _denied(command), command
 

@@ -264,17 +264,20 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 # diff/log --output, ruff --output-file/-o/--cache-dir and any absolute, `..` or `~` path argument (ruff format/--fix
 # rewrite those files), pytest --junitxml/--basetemp/-o/--override-ini (log_file, cache_dir, also in a `-qo` cluster)/
 # --log-file/--report-log/--cov-report/--html/--rootdir/--debug/--pastebin, git rebase --exec/-x, git fetch
-# --upload-pack and gh run download. Globs are anchored to their tool so `grep -rn cache_dir` still works. The
-# --output/--exec forms were checked against the real Claude Code matcher on 19 Nov 2026; the rest is UNVERIFIED
-# there (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
+# --upload-pack and gh run download. Every glob is anchored to its tool so `grep -rn -- --output docs/` still works;
+# pytest globs start with `*pytest*` because the default list also allows `<python> -m pytest:*`. The --output/--exec
+# forms were checked against the real Claude Code matcher on 19 Nov 2026; the rest is UNVERIFIED there
+# (docs/workflow/WORKER_PERMISSION_MODES.md, "Run-time matcher check").
 WORKER_WRITE_FLAG_DENY: tuple[str, ...] = (
-    "Bash(*--output*)", "Bash(*--junit*)", "Bash(*--basetemp*)", "Bash(*--log-file*)", "Bash(*--report-log*)",
-    "Bash(*--result-log*)", "Bash(*--resultlog*)", "Bash(*--cov-report*)", "Bash(*--rootdir*)", "Bash(*--upload-pack*)",
-    "Bash(pytest* -o*)", "Bash(pytest*--override-ini*)", "Bash(pytest*o log_file*)", "Bash(pytest*olog_file*)",
-    "Bash(pytest*o cache_dir*)", "Bash(pytest*ocache_dir*)", "Bash(pytest*--html*)", "Bash(pytest*--debug*)",
-    "Bash(pytest*--pastebin*)", "Bash(ruff* -o*)", "Bash(ruff*--cache-dir*)", "Bash(ruff* /*)", "Bash(ruff*=/*)",
-    "Bash(ruff*..*)", "Bash(ruff*~*)", "Bash(ruff*:/*)", "Bash(ruff*:\\*)",
-    "Bash(git rebase*--exec*)", "Bash(git rebase* -x*)", "Bash(gh run download*)",
+    "Bash(git*--output*)", "Bash(ruff*--output*)", "Bash(gh*--output*)", "Bash(jarvis*--output*)",
+    "Bash(git*--upload-pack*)", "Bash(git rebase*--exec*)", "Bash(git rebase* -x*)", "Bash(gh run download*)",
+    "Bash(*pytest*--junit*)", "Bash(*pytest*--basetemp*)", "Bash(*pytest*--log-file*)", "Bash(*pytest*--report-log*)",
+    "Bash(*pytest*--result-log*)", "Bash(*pytest*--resultlog*)", "Bash(*pytest*--cov-report*)",
+    "Bash(*pytest*--rootdir*)", "Bash(*pytest* -o*)", "Bash(*pytest*--override-ini*)", "Bash(*pytest*o log_file*)",
+    "Bash(*pytest*olog_file*)", "Bash(*pytest*o cache_dir*)", "Bash(*pytest*ocache_dir*)", "Bash(*pytest*--html*)",
+    "Bash(*pytest*--debug*)", "Bash(*pytest*--pastebin*)",
+    "Bash(ruff* -o*)", "Bash(ruff*--cache-dir*)", "Bash(ruff* /*)", "Bash(ruff*=/*)", "Bash(ruff*..*)", "Bash(ruff*~*)",
+    "Bash(ruff*:/*)", "Bash(ruff*:\\*)",    # `ruff*:\*` for C:\ paths; real-matcher handling of the backslash UNVERIFIED
 )
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
