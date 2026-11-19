@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -38,6 +39,8 @@ feat.register(FEATURE, "אותות יזומים", "Proactive signals", False, ap
 DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
+_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,39}")
+NOT_KEPT = '{"not_kept": true'  # every privacy-mode ledger body starts with this (json.dumps keeps insertion order)
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
 SENT_TIMEOUT_S = 15 * 60       # a notice sent to a device that never acknowledged and went silent is re-routed
@@ -103,6 +106,7 @@ class Continuity:
             st, body = fn()
             return st, body, False
         with self._lock:
+            self._scrub()
             hit = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
             if hit and now - hit[0]["ts"] <= LEDGER_TTL_S:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
@@ -115,14 +119,34 @@ class Continuity:
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), self._at_rest(body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
-        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+        with self._lock:
+            self._scrub()
+            self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                    (device, cid, kind, int(status), self._at_rest(body), self.clock()))
+
+    @staticmethod
+    def _at_rest(body: dict) -> str:
+        """#206 F13: with privacy on, an answer rests without its words: only numbers, flags, null and an UPPER_CASE
+        code stay, enough to answer a resend without running it again. The live answer is not changed."""
+        if not logs.privacy():
+            return json.dumps(body)
+        items = body.items() if isinstance(body, dict) else ()
+        kept = {k: v for k, v in items if v is None or isinstance(v, (bool, int, float))
+                or (k == "code" and isinstance(v, str) and _CODE.fullmatch(v))}
+        return json.dumps({"not_kept": True, **kept})
+
+    def _scrub(self) -> None:
+        """#206 F13: with privacy on, an answer stored while privacy was off loses its words. One UPDATE statement, so
+        it is atomic across processes and leaves nothing half-done; it runs before every privacy-on read or write."""
+        if logs.privacy():
+            self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
+                    ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
 
     @staticmethod
     def stale(age_s) -> bool:
@@ -135,6 +159,8 @@ class Continuity:
             return False
 
     def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
+        with self._lock:
+            self._scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
             return json.loads(r[0]["body"])

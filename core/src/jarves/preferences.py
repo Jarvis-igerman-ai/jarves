@@ -138,10 +138,13 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
+        if repropose:      # decided inside the UPDATE (#206 H2): a confirm racing this edit cannot activate the wording
+            self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=?, "
+                      "confirmed_at=CASE WHEN state='confirmed' THEN 0 ELSE confirmed_at END, "
+                      "state=CASE WHEN state='confirmed' THEN 'proposed' ELSE state END WHERE id=?",
                       (t, norm, self.clock(), pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
+            logs.info("prefs", "PREF_REPROPOSED", "a preference was reworded: a confirmed one needs a new confirm",
+                      id=pid, by=by)
             return self._view(self.get(pid))
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)

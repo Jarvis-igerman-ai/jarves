@@ -94,7 +94,8 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
     assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
-    assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
+    assert [x["text"] for x in pc["items"]] == ["Play jazz while cooking"]             # the edited one waits (#206 H2)
+    assert "I like very short answers in the morning" in [x["text"] for x in pc["proposed"]]
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True
     assert op(srv, tok, op="decline", pref=b)[1]["ok"] is True
     _, v = call(srv, "GET", "/api/m/prefs", tok)
@@ -115,6 +116,34 @@ def test_the_same_rules_as_the_desktop(srv, prefs):
     assert op(srv, tok, op="remove", pref="x")[0] == 400
     assert call(srv, "POST", "/api/m/prefs/op", tok, {"op": "remove", "pref": a})[0] == 400          # command id required
     assert p.get(a) is not None
+
+
+def test_a_phone_edit_of_a_confirmed_item_needs_a_new_confirm(srv, prefs):
+    """#206 H2: new wording from the phone page goes back to 'proposed', so it cannot reach the instructions as an
+    already confirmed preference."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
+    assert p.get(a)["state"] == "proposed" and p.get(a)["text"] == "I like very short answers in the morning"
+    _, pc = call(srv, "GET", "/api/prefs", owner=True)
+    assert a not in [x["id"] for x in pc["items"]]
+
+
+def test_a_confirm_racing_a_reproposing_edit_still_leaves_the_new_wording_proposed(home, monkeypatch):
+    """#206 H2: the state change is decided in the same UPDATE, so a PC confirm that lands between edit()'s read and
+    its write cannot make the new wording active."""
+    p = Preferences(open_db(home))
+    pid = p.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]
+    real_get = p.get
+
+    def stale_get(i):                                    # edit() reads 'proposed', then the PC confirms (once)
+        row = real_get(i)
+        monkeypatch.setattr(p, "get", real_get)
+        p.db.x("UPDATE learned_prefs SET state='confirmed' WHERE id=?", (i,))
+        return row
+    monkeypatch.setattr(p, "get", stale_get)
+    p.edit(pid, "Play soft jazz while cooking", by="phone", repropose=True)
+    assert p.get(pid)["state"] == "proposed" and p.get(pid)["text"] == "Play soft jazz while cooking"
 
 
 def test_a_resent_command_runs_once(srv, prefs):

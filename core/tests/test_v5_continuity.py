@@ -33,6 +33,36 @@ def test_journal_keeps_no_words_when_privacy_is_on(tmp_path):
     c = Continuity(tmp_path)
     c.add_turn("d1", "user", "secret words")
     assert [t["text"] for t in c.turns()] == [""]
+
+
+def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
+    """#206 F13: with privacy on, the answers kept for a resend (the phone chat reply, a command result) rest without
+    their text; numbers, flags and an UPPER_CASE code are kept, and a resend is still answered without a second run."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.store("d1", "m-0001", "chat", 200, {"reply": "your secret plan", "ok": True, "seq": 7})
+    runs = []
+    st, body, again = c.execute("d1", "c-0001", "goal",
+                                lambda: runs.append(1) or (200, {"note": "secret goal", "code": "GOAL_OK", "n": 2}))
+    assert body["note"] == "secret goal" and not again                  # the live answer is complete
+    rows = " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+    assert "secret" not in rows
+    assert c.seen("d1", "m-0001") == {"not_kept": True, "ok": True, "seq": 7}
+    st, body, again = c.execute("d1", "c-0001", "goal", lambda: runs.append(1) or (200, {}))
+    assert again and runs == [1] and body == {"not_kept": True, "code": "GOAL_OK", "n": 2}
+
+
+def test_rows_kept_before_privacy_was_switched_on_lose_their_words(tmp_path):
+    """#206 F13: an answer stored while privacy was off is blanked by one atomic UPDATE at the next ledger use."""
+    from jarves import logs
+    c = Continuity(tmp_path)
+    c.store("d1", "m-0001", "chat", 200, {"reply": "old secret words", "ok": True})
+    logs.set_privacy(True)
+    assert c.seen("d1", "m-0001") == {"not_kept": True}
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+
+
 from jarves.mobile import Bridge
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
