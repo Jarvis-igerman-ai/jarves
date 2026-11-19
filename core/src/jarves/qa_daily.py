@@ -234,15 +234,46 @@ def _claim(path: Path, clock) -> bool:
                     return False
             except FileNotFoundError:                                 # recovered meanwhile: try to claim again
                 continue
+            except OSError as e:                                      # e.g. access denied: not claimable now
+                _warn_claim_once(e)
+                return False
             moved = path.with_name(f"{path.name}.stale-{os.getpid()}-{threading.get_ident()}")
             try:
                 os.replace(path, moved)
             except FileNotFoundError:                                 # another tick recovered it first
                 return False
-            if clock() - _claim_time(moved) <= CHECK_STALE_S:
-                return False                                          # moved a fresh claim: its owner checks
+            try:
+                fresh = clock() - _claim_time(moved) <= CHECK_STALE_S
+            except OSError as e:
+                _warn_claim_once(e)
+                fresh = True
+            if fresh:                                                 # moved a racing tick's fresh claim: put it
+                _put_back(moved, path)                                # back, its owner is still checking
+                return False
             moved.unlink(missing_ok=True)
     return False
+
+
+_claim_warned = False
+
+
+def _warn_claim_once(e: OSError) -> None:
+    global _claim_warned
+    if not _claim_warned:                                             # once per Core run, not every hourly tick
+        _claim_warned = True
+        logs.warn("updates", "QA_DAILY_CLAIM_UNREADABLE", "cannot read the daily check claim", error_type=type(e).__name__)
+
+
+def _put_back(moved: Path, path: Path) -> None:
+    """Restore a fresh claim moved aside by mistake, never over a newer claim (link fails if `path` exists)."""
+    try:
+        os.link(moved, path)
+    except FileExistsError:
+        pass
+    except OSError:                                                   # no hard links (e.g. FAT): best effort
+        if not path.exists():
+            os.replace(moved, path)
+    moved.unlink(missing_ok=True)
 
 
 def _write_check_failed(out: Path, d: str, e: Exception) -> None:

@@ -3,6 +3,7 @@ draft with redacted evidence and a short demo transcript; nothing is sent anywhe
 import json
 import os
 import types
+from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
@@ -556,3 +557,35 @@ def test_a_claim_recovered_while_read_is_claimed_afresh(home, monkeypatch):
         raise FileNotFoundError(p)
     monkeypatch.setattr(qa_daily, "_claim_time", gone)
     assert qa_daily._claim(path, lambda: 5.0) is True and path.read_text(encoding="utf-8") == "5.0" and seen
+
+
+def test_a_fresh_claim_moved_by_a_racing_tick_is_put_back(home, monkeypatch):
+    """JAR-232 review #1362 R2: B read the stale claim, A replaced it with a fresh one, B moved A's away and left
+    no claim while A checked; a third tick could then check again."""
+    path = home / "check.claimed"
+    path.write_text("1.0", encoding="utf-8")                                 # stale when B reads it
+    real = qa_daily.os.replace
+
+    def replace(src, dst):                                                    # A recovers and claims first
+        if str(dst).endswith(".stale-a"):
+            return real(src, dst)
+        real(src, str(src) + ".stale-a")
+        Path(src).write_text("1e9", encoding="utf-8")                        # A's fresh claim
+        return real(src, dst)
+    monkeypatch.setattr(qa_daily.os, "replace", replace)
+    assert qa_daily._claim(path, lambda: 1e9 + 1) is False
+    assert path.read_text(encoding="utf-8") == "1e9" and not list(home.glob("check.claimed.stale-[0-9]*"))
+
+
+def test_an_unreadable_claim_time_waits_and_warns_once(home, monkeypatch):
+    """JAR-232 review #1362 R3: a stat PermissionError escaped _claim and failed every hourly tick."""
+    path, warned = home / "check.claimed", []
+    path.write_text("", encoding="utf-8")
+
+    def denied(_p):
+        raise PermissionError("denied")
+    monkeypatch.setattr(qa_daily, "_claim_time", denied)
+    monkeypatch.setattr(qa_daily, "_claim_warned", False, raising=False)
+    monkeypatch.setattr(qa_daily.logs, "warn", lambda *a, **kw: warned.append(a[1]))
+    assert qa_daily._claim(path, lambda: 5.0) is False and qa_daily._claim(path, lambda: 5.0) is False
+    assert warned == ["QA_DAILY_CLAIM_UNREADABLE"] and path.is_file()
