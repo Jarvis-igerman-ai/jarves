@@ -45,7 +45,7 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # credential words (#1099) and well-known key/token prefixes
     r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?key|(?:access|auth|refresh)[\s_-]?token|(?:secret|private)[\s_-]?key|"
-    r"\bbearer\b|\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bAKIA[A-Z0-9]{12,}|"
+    r"\bbearer\s+[a-z0-9._~+/=-]{8,}|\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bAKIA[A-Z0-9]{12,}|"
     r"\bxox[abprs]-[a-z0-9-]{8,}|\bAIza[a-z0-9_-]{30,}|\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.", re.I)
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
 
@@ -58,7 +58,14 @@ def _token_shaped(run: str) -> bool:
 
 
 def looks_sensitive(text: str) -> bool:
-    if not isinstance(text, str) or not text:
+    """True when text must not be stored. Fails closed: an unexpected (non-text) type counts as sensitive."""
+    if text is None:
+        return False
+    if isinstance(text, (bytes, bytearray)):
+        text = bytes(text).decode("utf-8", errors="replace")
+    if not isinstance(text, str):
+        return True
+    if not text:
         return False
     return bool(_SENSITIVE.search(text)) or any(_token_shaped(m) for m in _TOKEN_RUN.findall(text))
 
