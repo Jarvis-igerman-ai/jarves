@@ -38,6 +38,10 @@ def test_key_or_token_shaped_text_is_sensitive(text):
     "gpt-realtime-2026-08-28 is slow",
     "faster-whisper-large-v3 model",
     "openai-2.3.1-py3-none-any.whl does not install",
+    "rerun core/tests/test_mobile_phone_e2e.py",
+    "see https://github.com/Jarvis-igerman-ai/jarves/pull/1354",
+    "access keyboard shortcuts",                         # "key" must end the word (review R5)
+    "add a private keyword list",
 ])
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)

@@ -46,7 +46,7 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # credential words (#1099): API keys, tokens, secrets, private keys (EN + HE)
     # (bare "token"/"secret" are left out: devmanager drafts such as "token refresh fails" must still save)
-    r"api[\s_-]?key|access[\s_-]?key|secret[\s_-]?key|private[\s_-]?key|client[\s_-]?secret|"
+    r"api[\s_-]?key\b|access[\s_-]?key\b|secret[\s_-]?key\b|private[\s_-]?key\b|client[\s_-]?secret|"
     r"(?:api|access|auth|bearer)[\s_-]?token|"
     r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
 # a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
