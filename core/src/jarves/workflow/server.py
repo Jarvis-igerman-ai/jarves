@@ -470,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
                 salt = json.loads(path.read_text(encoding="ascii"))["salt"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            prev_salt, wrong = self.server.unlock_wrong  # read-modify-write: safe only under session_lock (held above)
+            prev_salt, wrong = self.server.unlock_wrong  # read-modify-write under the `with session_lock` that opens this method
             # #1265: count per session, so token-only callers cannot cancel the owner's live code for everyone.
             wrong = {k: n for k, n in wrong.items() if k in self.server.sessions} if prev_salt == salt else {}
             if wrong.get(session, 0) >= 5 or not (isinstance(code, str) and unlock.consume(self.server.home, code)):
