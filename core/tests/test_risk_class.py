@@ -19,6 +19,38 @@ def test_docs_only():
     assert cls(["docs/NOW.md", "README.md", "CHANGELOG.md", "docs/DOC_MAP.md"]) == "docs"
 
 
+@pytest.mark.parametrize("path", [
+    "docs/reviews/MANUAL_TEST_4.1.0.md",
+    "docs/reviews/RELEASE_CHECKLIST_4.1.0.md",
+    "docs/release/signoff.md",
+    "docs/release/nested/signoff.md",
+    r"docs\reviews\MANUAL_TEST_4.1.0.md",
+    "./docs/reviews/MANUAL_TEST_4.1.0.md",
+    "DOCS/REVIEWS/manual_test_4.1.0.MD",
+])
+@pytest.mark.parametrize("caller", ["classify", "integration", "autopilot"])
+def test_543_signoff_paths_require_tier_r(path, caller):
+    """Owner sign-off cannot acquire docs-only auto-merge through any caller."""
+    files = [path, "docs/a.md"]
+    if caller == "classify":
+        kind, reason = rc.classify(files, labels={"bugfix"}, lines=3, mode="all")
+        assert kind is None
+        assert "high-risk path" in reason
+    elif caller == "integration":
+        from integration_branch import tier_of
+        assert tier_of(files, set()) == "R"
+    else:
+        from jarves.workflow.autopilot_watch import is_tier_r
+        assert is_tier_r(files, set())
+
+
+@pytest.mark.parametrize("path", [
+    "docs/reviews/FINDINGS_LEDGER.md", "docs/release_notes.md",
+])
+def test_543_unrelated_docs_remain_low_risk(path):
+    assert cls([path]) == "docs"
+
+
 def test_tests_only():
     assert cls(["core/tests/test_timers.py"]) == "tests"
     assert cls(["core/tests/test_timers.py", "docs/X.md"]) == "tests"
