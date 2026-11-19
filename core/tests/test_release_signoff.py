@@ -584,6 +584,7 @@ def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
     assert len(moved) == 1 and "not at the gated commit" in moved[0], moved
 
 
+@pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml), like the real-ssh test above
 @pytest.mark.parametrize("dry", ["false", "true"])
 def test_605_gate_step_requires_rows_hash_on_a_real_publish(tmp_path, monkeypatch, capsys, dry):
     """#605 review R2: run the workflow's own rows-hash step line, load what it writes to $GITHUB_ENV into the
@@ -600,7 +601,8 @@ def test_605_gate_step_requires_rows_hash_on_a_real_publish(tmp_path, monkeypatc
     envf = tmp_path / "github_env"
     envf.write_text("", encoding="utf-8")
     r = subprocess.run(["bash", "-c", line], capture_output=True, text=True,
-                       env={"PATH": os.environ.get("PATH", ""), "DRY_RUN": dry, "GITHUB_ENV": str(envf)})
+                       env={"PATH": os.environ.get("PATH", ""), "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+                            "DRY_RUN": dry, "GITHUB_ENV": str(envf)})
     assert r.returncode == 0, r.stderr
     monkeypatch.delenv("JARVES_REQUIRE_ROWS_HASH", raising=False)
     for kv in envf.read_text(encoding="utf-8").split():
