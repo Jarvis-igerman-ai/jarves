@@ -205,6 +205,8 @@ class UnlockTests(unittest.TestCase):
         with self.server.session_lock:
             self.server.sessions.pop(dead)
         self.assertEqual(self.request("/api/unlock", {"code": wrong})[0], 403)  # 5th wrong try caps this session
+        # Intentional internal check: a dead session cannot send requests, so pruning (the memory bound) is not
+        # observable through the API.
         self.assertEqual(self.server.unlock_wrong[1], {capped: 5})            # the dead session's count is gone
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)  # capped for this code
         fresh = unlock.issue(self.home)                                       # new salt
