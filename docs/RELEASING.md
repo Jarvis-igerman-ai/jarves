@@ -68,7 +68,7 @@ Run it yourself: `python core/tools/release_gate.py --tag v4.1.0 --sha <tag sha>
 4. When every row is `pass` or `accepted-blocked` with a note: `jarvis release signoff --version 4.1.0 --finish`. This writes
    the tested beta version, its commit SHA, the date, the owner (this account, or `--owner NAME`) and a hash of every row into the sheet; the gate refuses a sheet whose rows were edited after signing (#508). Commit it (docs only), then tag that commit (it is allowed to differ from the tested beta commit by documentation only).
 
-The tag must be ANNOTATED and carry the hash outside the sheet: `git tag -a vX.Y.Z -m "Rows hash: <hash printed by --finish>"` (a real publish refuses a lightweight tag or a mismatch, #605). This is only out of band while nobody but the owner can create `v*.*.*` tags (tag ruleset, step 2 of the owner settings) and the `stable-release` environment needs the owner's approval; turn on "Prevent self-review" there, because agents run under the owner's login. Any later change to a row voids the signature. A sheet signed before the owner and rows-hash lines existed (#508) is refused with a message to sign again: that is expected (fail closed); run `jarvis release signoff --finish` once more.
+The tag must be ANNOTATED and carry the hash outside the sheet: `git tag -s vX.Y.Z -m "Rows hash: <hash printed by --finish>"`, signed with a key in `RELEASE_ALLOWED_SIGNERS` (a real publish refuses a lightweight or unsigned tag, an unlisted key or a mismatch, #605). This is only out of band while nobody but the owner can create `v*.*.*` tags (tag ruleset, step 2 of the owner settings) and the `stable-release` environment needs the owner's approval; turn on "Prevent self-review" there, because agents run under the owner's login. Any later change to a row voids the signature. A sheet signed before the owner and rows-hash lines existed (#508) is refused with a message to sign again: that is expected (fail closed); run `jarvis release signoff --finish` once more.
 
 ## Hotfix: backport a merged fix to a released minor (`hotfix.py`)
 
@@ -183,7 +183,26 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    `JARVES_UPDATE_SIGNING_KEY` with the same values. Then in Settings, Secrets and variables, Actions, delete the two
    repository secrets of the same names. (The publish job now names `environment: stable-release` for real publishes (#544, merged with this change);
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
-5. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
+5. **Owner-signed stable tags (#605, required for a real publish).** Settings, Environments, `stable-release`,
+   Environment variables: add `RELEASE_ALLOWED_SIGNERS` with your SSH `allowed_signers` line
+   (`you@example namespaces="git" ssh-ed25519 AAAA...`). Do NOT create a repository variable of that name
+   (without the environment variable, a repository one would be used instead). Check before each release:
+   `python core/tools/release_gate.py --check-signers-variable` refuses when a repository-level one exists.
+   Sign with SSH (`git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/id_ed25519.pub`) and tag
+   with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. On a real publish the release job runs in `stable-release` and the gate
+   runs `git verify-tag` against that list; it refuses an unsigned tag, a key not on the list, a signed tag on a commit
+   other than the gated one, or a missing variable. A tag dry run has no environment, so it only prints a note.
+   This check is only as strong as who can edit that variable: anyone with admin rights on the repository (including an
+   agent using your login or a token with Administration or Environments write) can add a key. Confirm: agent tokens are
+   fine-grained without Administration, Environments or Variables write, and an agent session's
+   `gh variable set X --env stable-release --body y` is refused.
+   It is equally only as strong as custody of the signing key: agents run under your login, so a plain key file
+   (`~/.ssh/id_ed25519`) or a key loaded in an ssh-agent that an agent session can reach lets that agent run
+   `git tag -s` itself and pass the gate. Use a key agents cannot use: a FIDO hardware key
+   (`ssh-keygen -t ed25519-sk`, touch required on every signature; its line starts `sk-ssh-ed25519@openssh.com`), or a
+   passphrase-protected key that is never added to an ssh-agent an agent session can reach. Confirm: in an agent
+   session, `git tag -s v9.9.9-test -m test` must fail (or wait for a touch you do not give); delete any test tag locally.
+6. **Check.** Ask a non-owner account (or an agent session) to try `git push origin v9.9.9`: it must be refused. Try a
    workflow run from a side branch: the `stable-release` environment must ask for your approval, or refuse the branch.
 
 Safe default while these are not done: the coordinator does not create or accept a stable tag, and docs-only PRs that touch

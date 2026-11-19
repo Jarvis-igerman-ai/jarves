@@ -111,7 +111,7 @@ def cmd_release(a, cfg, home) -> int:
                               f"Signed off: beta {sheet.beta}, commit {sheet.commit[:12]}, {sheet.date}, {sheet.owner}, "
                               f"hash {sheet.rows_hash}. "
                               f"You can now tag v{version}."))
-            print(f"git tag -a v{version} -m \"Rows hash: {sheet.rows_hash}\"   # the annotated tag is the out-of-band record")
+            print(f"git tag -s v{version} -m \"Rows hash: {sheet.rows_hash}\"   # the owner-signed annotated tag is the out-of-band record (#605)")
             logs.info("release", "RELEASE_SIGNED", "manual test sign-off recorded", version=version)
             return 0
     except so.SheetError as e:

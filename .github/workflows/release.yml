@@ -95,6 +95,11 @@ jobs:
           fi
       - name: Release gate (sign-off, SHA, live P0/P1 issues)
         working-directory: core
+        env:
+          # #605: ssh allowed_signers lines kept as a variable of the owner-approved `stable-release` environment, which this
+          # job uses on a real publish only; the gate requires the tag to be signed by a listed key and to point at HEAD.
+          # Unset (and on a tag dry run, which has no environment): a real publish is refused, a dry run prints a note.
+          JARVES_ALLOWED_SIGNERS: ${{ github.ref_type == 'tag' && vars.RELEASE_ALLOWED_SIGNERS || '' }}
         run: uv run python tools/release_gate.py --tag "$TAG" --sha "$(git rev-parse HEAD)" --verified-sha "${{ steps.find.outputs.sha }}" --candidate-dir ../dist   # --sha = tag commit, --verified-sha = tested commit (ancestor, docs-only change allowed)
       - name: Plan (dry run)
         if: ${{ env.DRY_RUN == 'true' }}

@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +207,81 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+SSH_KEYGEN = "/usr/bin/ssh-keygen"     # absolute SSH verifier: git config and PATH cannot redirect it (ubuntu runner)
+NO_VERIFIER = "/nonexistent"          # OpenPGP/x509 verifiers point nowhere: a gpg/gpgsm-signed tag always fails
+GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
+
+
+def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=subprocess.run,
+                           verifier: str = SSH_KEYGEN) -> list[str]:
+    """#605: the tag's 'Rows hash' line is authentic only when the tag is SSH-signed by a key in the owner's
+    allowed-signers lines (`stable-release` environment variable RELEASE_ALLOWED_SIGNERS, outside the repo) AND the
+    signed tag points at the gated commit `sha`. Bad tag, missing verifier, failed git, a bad/unlisted signature or a
+    tag on another commit refuse."""
+    if not TAG_RE.match(tag):
+        return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
+    if not Path(verifier).is_file():
+        return [f"sign-off: signature verifier {verifier} not found (the check runs on the ubuntu release runner); refused"]
+    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}           # GOOD_SIG_RE reads the untranslated wording
+    try:                                    # resolve the tag ONCE; verify and dereference that object id (review R2)
+        ref = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, text=True,
+                  timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
+    oid = (ref.stdout or "").strip().lower()
+    if ref.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+        return [f"sign-off: the tag {tag} does not exist here; cannot verify its signature"]
+    with tempfile.TemporaryDirectory() as d:
+        listed = Path(d) / "allowed_signers"
+        listed.write_text(signers.strip() + "\n", encoding="utf-8")
+        # full trust plus a "Good ... signature for <principal>" line: a good signature by an unlisted key never passes
+        cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", f"gpg.openpgp.program={NO_VERIFIER}",
+               "-c", f"gpg.x509.program={NO_VERIFIER}", "-c", "gpg.minTrustLevel=fully",
+               "-c", f"gpg.ssh.allowedSignersFile={listed}", "verify-tag", oid]
+        try:
+            r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60, env=env)
+        except (OSError, subprocess.SubprocessError) as e:
+            return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
+    if r.returncode != 0 or not GOOD_SIG_RE.search(r.stderr or ""):
+        why = " ".join((r.stderr or "").split())[:300]
+        return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag: {why}); "
+                "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]
+    try:                                                   # only the verified tag object is resolved to its commit
+        target = run(["git", "rev-parse", "--verify", f"{oid}^{{commit}}"], cwd=root,
+                     capture_output=True, text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot resolve the signed tag {tag} ({type(e).__name__}); refused"]
+    got = (target.stdout or "").strip().lower()
+    if target.returncode != 0 or got != sha.strip().lower():
+        return [f"sign-off: the signed tag {tag} points at {got[:12] or 'nothing'}, not at the gated commit "
+                f"{sha.strip()[:12]}; its rows hash does not belong to this commit"]
+    return []
+
+
+
+SIGNERS_VAR = "RELEASE_ALLOWED_SIGNERS"
+
+
+def repo_signers_variable_problems(repo: str, run=subprocess.run) -> list[str]:
+    """#605 review R1: release.yml's `vars.RELEASE_ALLOWED_SIGNERS` falls back to a REPOSITORY variable of that name
+    when the `stable-release` environment one is missing, and cannot tell them apart. Owner-run check (the workflow
+    token cannot list variables): refuse when a repository-level one exists or the list cannot be read."""
+    try:
+        r = run(["gh", "variable", "list", "--repo", repo, "--json", "name"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"signers: cannot list the repository variables ({type(e).__name__}); refused"]
+    try:
+        rows = json.loads(r.stdout or "") if r.returncode == 0 else None
+    except ValueError:
+        rows = None
+    if not isinstance(rows, list):
+        why = " ".join((r.stderr or "").split())[:200]
+        return [f"signers: cannot list the repository variables (gh variable list: {why}); refused"]
+    if any(isinstance(v, dict) and v.get("name") == SIGNERS_VAR for v in rows):
+        return [f"signers: a REPOSITORY variable {SIGNERS_VAR} exists; a release would use it when the stable-release "
+                f"environment one is missing. Delete it: gh variable delete {SIGNERS_VAR} --repo {repo}"]
+    return []
+
 # ---------------------------------------------------------------------- git + GitHub (not used by the tests)
 def git_is_ancestor(root: Path):
     def f(a: str, b: str) -> bool:
@@ -296,8 +372,10 @@ def _print_legacy(legacy: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release_gate.py", description=__doc__.split("\n\n")[0])
-    ap.add_argument("--tag", required=True)
-    ap.add_argument("--sha", required=True, help="commit the tag points to")
+    ap.add_argument("--tag")
+    ap.add_argument("--check-signers-variable", action="store_true",
+                    help=f"owner-run: refuse when a repository-level {SIGNERS_VAR} variable exists (#605)")
+    ap.add_argument("--sha", help="commit the tag points to")
     ap.add_argument("--verified-sha")
     ap.add_argument("--candidate-dir", type=Path, help="dist folder with build-info.json of the candidate")
     ap.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
@@ -312,6 +390,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--require-rows-hash", action="store_true", default=os.environ.get("JARVES_REQUIRE_ROWS_HASH") == "1",
                     help="refuse when no out-of-band rows hash is given (a real publish; the release workflow sets it)")
     a = ap.parse_args(argv)
+    if a.check_signers_variable:
+        found = repo_signers_variable_problems(a.repo)
+        print("\n".join(found) or f"signers: OK, no repository-level {SIGNERS_VAR} variable")
+        return 1 if found else 0
+    if not a.tag or not a.sha:
+        ap.error("--tag and --sha are required")
     verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
         info = json.loads((a.candidate_dir / "build-info.json").read_text(encoding="utf-8-sig"))
@@ -338,9 +422,18 @@ def main(argv: list[str] | None = None) -> int:
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
+    signers = os.environ.get("JARVES_ALLOWED_SIGNERS", "").strip()
+    if signers:
+        problems += tag_signature_problems(root, a.tag, signers, a.sha)
+    elif a.require_rows_hash:              # a real publish: the out-of-band hash must be authentic (fail closed, #605)
+        problems.append("sign-off: no owner allowed-signers list (stable-release environment variable RELEASE_ALLOWED_SIGNERS), so the "
+                        "tag signature cannot be verified; see docs/RELEASING.md")
+    else:
+        print("note: no owner allowed-signers list (RELEASE_ALLOWED_SIGNERS); tag signature not checked; a real publish "
+              "refuses without it (#605)")
     if a.expect_rows_hash is None and a.require_rows_hash:
         problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
-                        "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
+                        "'Rows hash: <sha256>' (git tag -s vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
                         "`jarvis release signoff --finish`)")
     elif a.expect_rows_hash is None:
         print("note: no out-of-band rows hash given (annotated tag message 'Rows hash: <sha256>'); the sheet hash alone "
