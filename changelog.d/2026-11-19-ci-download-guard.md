@@ -1,0 +1,1 @@
+- Added: a CI-shape test that fails when a workflow curl download lacks -f or --retry or pipes into tar/unzip/sh, so the red main run 44272296783 cause cannot return (JAR-554).
