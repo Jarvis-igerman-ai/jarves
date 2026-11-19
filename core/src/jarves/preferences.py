@@ -11,6 +11,7 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
 
@@ -42,11 +43,34 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    # credential words (#1099): API keys, tokens, secrets, private keys (EN + HE)
+    # (bare "token"/"secret" are left out: devmanager drafts such as "token refresh fails" must still save)
+    r"api[\s_-]?key|access[\s_-]?key|secret[\s_-]?key|private[\s_-]?key|client[\s_-]?secret|"
+    r"(?:api|access|auth|bearer)[\s_-]?token|"
+    r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
+# a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
+_KEYLIKE = re.compile(r"[A-Za-z0-9_\-+/=.]{20,}")
+_ENTROPY_BITS = 3.5               # bits per character; English words and paths stay well below this
+
+
+def _entropy(s: str) -> float:
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in (s.count(ch) for ch in set(s)))
+
+
+def _keylike(text: str) -> bool:
+    """A high-entropy key/token-shaped string (letters AND digits, 20+ chars, >= 3.5 bits/char)."""
+    for m in _KEYLIKE.finditer(text):
+        w = m.group(0)
+        if re.search(r"[A-Za-z]", w) and re.search(r"\d", w) and _entropy(w) >= _ENTROPY_BITS:
+            return True
+    return False
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    return bool(_SENSITIVE.search(t)) or logs.has_secret(t) or _keylike(t)
 
 
 def normalize(text: str) -> str:

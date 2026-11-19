@@ -116,6 +116,17 @@ def env(tmp_path):
     e.db.close()
 
 
+@pytest.fixture(autouse=True)
+def _full_text():
+    """These tests read step evidence back, so they run with privacy off; the privacy-on case is
+    test_privacy_mode_keeps_no_step_text_at_rest."""
+    from jarves import logs
+    before = logs.privacy()
+    logs.set_privacy(False)
+    yield
+    logs.set_privacy(before)
+
+
 def steps(*pairs):
     return [{"tool": t, "args": a, "why": f"because {i}"} for i, (t, a) in enumerate(pairs)]
 
@@ -614,3 +625,16 @@ def test_813_runner_writes_do_not_overwrite_a_cancel(env):
     assert env.store.get(p["id"])["state"] == "cancelled"
     assert env.runner._finish(p["id"])["state"] == "cancelled"
     assert env.store._set_if(p["id"], ("ready", "running"), "running") is False
+
+
+async def test_privacy_mode_keeps_no_step_text_at_rest(env):
+    """V5 sec F13: with privacy on, the tool's words are not written into the plan's evidence or result."""
+    from jarves import logs
+    logs.set_privacy(True)
+    p = env.store.propose("morning", steps(("fake_read", {"text": "a"}), ("fake_act", {"text": "b"})))
+    env.store.approve(p["id"])
+    assert await env.runner.tick() == 1
+    d = env.store.get(p["id"])
+    assert d["state"] == "done"
+    assert [s["evidence"] for s in d["steps"]] == ["(not kept: privacy mode)"] * 2
+    assert "read a" not in d["result"] and "did b" not in d["result"]

@@ -67,6 +67,13 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _kept(text: object) -> str:
+    """Step evidence written to disk. Privacy mode on (V5 sec F13): the tool's words are not kept, only a marker."""
+    if logs.privacy():
+        return "(not kept: privacy mode)" if str(text or "").strip() else ""
+    return _short(text)
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
@@ -505,7 +512,7 @@ class PlanRunner:
                 if tool.untrusted_output:
                     st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
                 st.db.x("UPDATE goal_plan_steps SET status='done', finished=?, evidence=?, error='' WHERE id=?",
-                        (self.clock(), _short(res.message), step["id"]))
+                        (self.clock(), _kept(res.message), step["id"]))
                 logs.info("goals", "PLAN_STEP_DONE", "plan step done", id=pid, step=step["idx"], tool=step["tool"])
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
@@ -521,7 +528,8 @@ class PlanRunner:
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
                 self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
                 return st.get(pid)
-            self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
+            why = res.code if logs.privacy() else f"{res.code}: {_short(res.message, 120)}"
+            self._fail(pid, step, why, t0, evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
@@ -532,7 +540,7 @@ class PlanRunner:
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
-                        (status, self.clock(), _short(why, 200), _short(evidence), step["id"]))
+                        (status, self.clock(), _short(why, 200), _kept(evidence), step["id"]))
         self._stop_plan(pid, "failed", f"step {step['idx'] + 1}: {why}", finished=self.clock())
 
     def _finish(self, pid: int) -> dict:
