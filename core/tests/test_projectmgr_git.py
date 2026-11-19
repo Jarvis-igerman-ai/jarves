@@ -105,7 +105,15 @@ def test_changed_files_shows_non_ascii_and_renamed_protected_paths(tmp_path):
     assert any(f.casefold() == ".github/workflows/é.yml" for f in prot), files
 
 
-@pytest.mark.parametrize("path", ["src/github/x.py", "docs/.github.md", "src/claude/x.py", "my.mcp.json.bak"])
+@pytest.mark.parametrize("path", ["CLAUDE~1/settings.local.json", "GITHUB~1/workflows/ci.yml", "github~2/x.yml",
+                                  "src/OPENCO~1.JSO", r"GITHUB~1\workflows\ci.yml"])
+def test_windows_short_names_are_refused(path):
+    # JAR-574: a Windows checkout writes `CLAUDE~1/x` into the existing `.claude/` folder
+    assert gitops.is_protected(path)
+
+
+@pytest.mark.parametrize("path", ["src/github/x.py", "docs/.github.md", "src/claude/x.py", "my.mcp.json.bak",
+                                  "src/backup~/x.py", "notes~old.md", "src/version~12345678/x.py"])
 def test_ordinary_paths_with_similar_names_are_not_protected(path):
     assert not gitops.is_protected(path)
 
