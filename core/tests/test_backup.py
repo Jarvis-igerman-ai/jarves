@@ -1,5 +1,5 @@
 """Backup / restore (SW-V2 M5, spec section 12, D17) with fault injection: consistent SQLite snapshots under a live
-writer, no credentials in archives, verification catches damage, retention 7 daily + 4 weekly, restore into an
+writer, no credentials in archives, verification catches damage, retention 3 daily + 2 weekly, restore into an
 isolated profile, a failing restore keeps the previous data, full disk leaves no half archive, pre-migration
 checkpoint on a version change; the sanitized size-bounded diagnostic bundle; dashboard + CLI."""
 import http.client
@@ -217,7 +217,7 @@ def test_full_disk_leaves_no_half_archive(profile, monkeypatch):
     assert files == [good.name] and backup.verify(good)["ok"]
 
 
-def test_retention_7_daily_4_weekly(profile):
+def test_retention_3_daily_2_weekly(profile):
     start = datetime(2026, 10, 19, 3, 0)
     bdir = profile / "backups"
     bdir.mkdir()
@@ -233,9 +233,9 @@ def test_retention_7_daily_4_weekly(profile):
     start = start + timedelta(minutes=1)
     autos = [b for b in backup.list_backups(profile) if b["kind"] == "auto"]
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
-    assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
+    assert len(days) <= 3 + 2 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 3
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
@@ -256,6 +256,8 @@ def test_pre_migration_checkpoint_on_version_change(profile, monkeypatch):
     assert p is not None and "pre-migration" in p.name and backup.verify(p)["ok"]
     assert backup.startup_checkpoint(profile) is None                 # same version: nothing to do
     monkeypatch.setattr(backup, "__version__", "9.9.9")
+    later = time.time() + 5
+    os.utime(profile / "memory.db", (later, later))                    # changed data: no fresh archive to reuse
     monkeypatch.setattr(backup, "create", lambda *a, **k: (_ for _ in ()).throw(
         backup.BackupError("BACKUP_FAILED", "disk full", "free space")))
 
@@ -365,3 +367,50 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+# ---------------------------------------------------------------------- issue #1016: backups filled the disk
+def test_install_reuses_a_fresh_backup_instead_of_two_more_issue_1016(profile):
+    first = backup.create(profile, "manual")                           # `jarvis install-latest`: backup now
+    import glob; print("DBG", sorted(x.name for x in profile.iterdir()), [ (p, p.stat().st_mtime - backup.read_manifest(first)["created"]) for p in profile.glob("*-wal")])
+    assert backup.checkpoint(profile, "installer upgrade") == first    # installer: data unchanged -> same archive
+    assert backup.startup_checkpoint(profile) == first                 # first Core start of the new version
+    assert len(backup.list_backups(profile)) == 1
+    later = time.time() + 5
+    os.utime(profile / "memory.db", (later, later))                    # the data changed after that backup
+    again = backup.checkpoint(profile, "next migration")
+    assert again != first and "pre-migration" in again.name and backup.verify(again)["ok"]
+
+
+def test_retention_defaults_are_small_and_cover_every_kind_issue_1016(profile):
+    assert {k: backup.DEFAULTS[k] for k in ("daily", "weekly", "manual", "checkpoints")} == \
+        {"daily": 3, "weekly": 2, "manual": 3, "checkpoints": 2}
+    bdir = profile / "backups"
+    bdir.mkdir()
+    start = datetime(2026, 11, 1, 3, 0)
+    for kind in ("manual", "pre-migration", "pre-restore"):
+        for i in range(6):
+            (bdir / f"jarves-backup-{start - timedelta(minutes=i):%Y%m%d-%H%M%S}-{kind}.zip").write_bytes(b"x")
+    backup.prune(profile)
+    left = [b["kind"] for b in backup.list_backups(profile)]
+    assert left.count("manual") == 3 and left.count("pre-migration") == 2 and left.count("pre-restore") == 2
+
+
+def test_cli_sets_manual_and_checkpoint_retention_issue_1016(profile, capsys):
+    from jarves import cli
+    assert cli.main(["backup", "settings", "--manual", "1", "--checkpoints", "1"]) == 0
+    s = backup.get_settings(profile)
+    assert s["manual"] == 1 and s["checkpoints"] == 1
+
+
+def test_low_disk_prunes_first_then_refuses_issue_1016(profile, monkeypatch):
+    bdir = profile / "backups"
+    bdir.mkdir()
+    for i in range(5):
+        (bdir / f"jarves-backup-2026110{i + 1}-030000-manual.zip").write_bytes(b"x")
+    monkeypatch.setattr(backup.shutil, "disk_usage", lambda p: type("U", (), {"free": 1024})())
+    with pytest.raises(backup.BackupError) as e:
+        backup.create(profile, "manual")
+    assert e.value.code == "BACKUP_NO_SPACE" and "free" in e.value.action
+    assert len(backup.list_backups(profile)) == 3                      # pruned to the retention before refusing
+    assert not list(bdir.glob("*.partial"))

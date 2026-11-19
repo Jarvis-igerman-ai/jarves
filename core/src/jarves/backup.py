@@ -13,9 +13,13 @@ refresh token), logs, caches, health snapshots and the backups folder itself. Fa
 biometric: left out unless backup.include_faces is on. So an archive can be shared without leaking a key; after a
 restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt login`, `jarvis google login`).
 
-Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
-7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+Retention (adjustable, memory.db settings `backup.*`, `jarvis backup settings --daily/--weekly/--manual/
+--checkpoints`): automatic backups keep the newest per day for the last 3 days that have one and the newest per ISO
+week for the last 2 weeks; manual ones the last 3; pre-migration / pre-restore checkpoints the last 2 each. Only
+automatic backups are thinned by the day/week rule. Issue #1016 (each install wrote 2-3 archives and filled the
+disk): checkpoint() reuses a verified backup under an hour old when no data file changed since it, so the install's
+`backup now`, the installer checkpoint and the first-start checkpoint are one archive; create() checks free disk
+space first, prunes when short and refuses with BACKUP_NO_SPACE before writing anything.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,8 +63,10 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 3, "weekly": 2, "manual": 3, "checkpoints": 2, "include_faces": False, "auto": True}
 STATE_FILE = "backup_state.json"
+REUSE_S = 3600                   # #1016: a checkpoint reuses an unchanged backup this fresh
+FREE_RESERVE = 256 * 1024 * 1024  # #1016: never fill the disk to the last byte
 _lock = threading.Lock()
 
 
@@ -221,6 +227,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
+    _ensure_space(home, out_dir, sum(_size(p) for p, _ in take))
     files = []
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
@@ -243,7 +250,8 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                 manifest = {"format": 1, "app": "jarves", "version": __version__, "created": now,
                             "created_text": datetime.fromtimestamp(now).isoformat(timespec="seconds"), "kind": kind,
                             "note": note[:200], "platform": sys.platform, "machine": platform.machine(),
-                            "files": files, "excluded": skipped, "contains_credentials": False}
+                            "files": files, "excluded": skipped, "contains_credentials": False,
+                            "data_mtime": _data_mtime(home)}            # #1016: after the snapshot touched the WAL
                 z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
             res = verify(tmp)
             if not res["ok"]:
@@ -264,6 +272,27 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
               bytes=final.stat().st_size)
     prune(home)
     return final
+
+
+def _size(p: Path) -> int:
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+def _ensure_space(home: Path, out_dir: Path, need: int) -> None:
+    """#1016: the archive is at most the data size; when the disk is short, prune first, then refuse."""
+    need += FREE_RESERVE
+    if shutil.disk_usage(out_dir).free >= need:
+        return
+    prune(home)
+    free = shutil.disk_usage(out_dir).free
+    if free < need:
+        logs.error("backup", "BACKUP_NO_SPACE", "not enough free disk space for a backup", bytes=free, size=need)
+        raise BackupError("BACKUP_NO_SPACE", f"not enough free disk space for a backup ({free // 2**20} MB free, "
+                          f"{need // 2**20} MB needed)", "free some disk space or lower `jarvis backup settings` "
+                          "--manual/--checkpoints, then try again")
 
 
 def _unlink(p: Path) -> None:
@@ -536,8 +565,46 @@ def restore_test(path: Path) -> dict:
 # ---------------------------------------------------------------------- checkpoints and automatic backups
 def checkpoint(home: Path, reason: str = "migration") -> Path:
     """Before a database migration or update: a verified pre-migration backup. Raises BackupError on failure, so
-    the caller can refuse to migrate and show recovery guidance."""
+    the caller can refuse to migrate and show recovery guidance. #1016: reuses a fresh, verified backup of the
+    same unchanged data (e.g. the install's `backup now`) instead of writing another 200-600 MB archive."""
+    fresh = _reusable(home)
+    if fresh is not None:
+        logs.info("backup", "BACKUP_REUSED", "unchanged data: reusing a fresh backup as checkpoint",
+                  backup=fresh.name, reason=reason[:80])
+        return fresh
     return create(home, "pre-migration", note=reason)
+
+
+def _data_mtime(home: Path) -> float:
+    """Newest modification time of everything a backup would hold, SQLite WAL files included."""
+    home = Path(home)
+    return max((_mtime(p) for p in [q for q, _ in plan(home)[0]] + list(home.glob("*-wal"))), default=0.0)
+
+
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return float("inf")                                   # cannot tell: treat as changed
+
+
+def _reusable(home: Path) -> Path | None:
+    home = Path(home)
+    items = list_backups(home)
+    if not items:
+        return None
+    path = backup_dir(home) / items[0]["name"]
+    try:
+        man = read_manifest(path)
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None                                           # unreadable: write a new checkpoint instead
+    created = man.get("created") if isinstance(man, dict) else None
+    if not isinstance(created, (int, float)) or not 0 <= time.time() - created <= REUSE_S:
+        return None
+    seen = man.get("data_mtime")
+    if not isinstance(seen, (int, float)) or _data_mtime(home) > seen:
+        return None                                           # data changed since (or an older archive format)
+    return path if verify(path)["ok"] else None
 
 
 def startup_checkpoint(home: Path, health=None) -> Path | None:
@@ -693,6 +760,8 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="pre-migration and pre-restore checkpoints to keep (each)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +808,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k in ("daily", "weekly", "manual", "checkpoints")
+                  if (v := getattr(a, k, None)) is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
