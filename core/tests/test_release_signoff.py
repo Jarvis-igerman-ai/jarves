@@ -531,7 +531,7 @@ def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsy
     assert "sign-off: no owner allowed-signers list" in capsys.readouterr().out and seen == []
     gate.main(argv)                                                                # dry run: a note, not silence
     out = capsys.readouterr().out
-    assert "tag signature not checked" in out and "no owner allowed-signers list (repository" not in out
+    assert "tag signature not checked" in out and "no owner allowed-signers list (stable" not in out
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "owner ssh-ed25519 AAAA")
     assert gate.main(argv) == 1 and "SIGFAIL" in capsys.readouterr().out and seen == [("owner ssh-ed25519 AAAA", SHA)]
     import yaml
