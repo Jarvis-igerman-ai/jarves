@@ -23,6 +23,7 @@ KEYWORDS = [
     "my secret key is blue",
     "use the private key from the drive",
     "send it as Bearer abcdefgh",
+    "store both api keys and refresh tokens",
     "הטוקן שלי הוא כחול",
     "מפתח API של השירות",
 ]
@@ -33,6 +34,9 @@ SAFE = [
     "play state-of-the-art jazz",
     "call me after the meeting_room_booking_flow ends",
     "use tokens wisely and keep answers short",
+    "teach me a secret keyboard shortcut",
+    "remind me about the private keynote",
+    "the api keyboard layout is fine",
     "",
 ]
 
@@ -72,16 +76,38 @@ def test_bearer_needs_a_token_after_it():
 
 
 def test_none_and_empty_are_not_sensitive():
-    assert not looks_sensitive(None)  # type: ignore[arg-type]
+    assert not looks_sensitive(None)
     assert not looks_sensitive("")
 
 
 def test_bytes_are_decoded_and_checked():
-    assert looks_sensitive(b"use sk-abcdefghijklmnop")  # type: ignore[arg-type]
-    assert looks_sensitive(bytearray(b"my api key"))  # type: ignore[arg-type]
-    assert not looks_sensitive(b"short answers please")  # type: ignore[arg-type]
+    assert looks_sensitive(b"use sk-abcdefghijklmnop")
+    assert looks_sensitive(bytearray(b"my api key"))
+    assert not looks_sensitive(b"short answers please")
 
 
 @pytest.mark.parametrize("value", [12, 3.5, ["sk-abcdefghijklmnop"], {"k": "v"}, object()])
 def test_other_types_fail_closed(value):
     assert looks_sensitive(value)
+
+
+def test_aws_prefix_is_case_sensitive():
+    assert looks_sensitive("AKIAABCDEFGHIJKLMNOP")
+    assert not looks_sensitive("akiaabcdefghijklmnop")  # lower case is not an AWS key id (and not mixed-case)
+
+
+def test_known_limitation_hyphenated_mixed_case_phrase_with_a_digit_is_refused():
+    # Known false positive, on the safe side: a 20+ char run joined by '-' that mixes cases and has a digit
+    # looks like a key. Revisit (e.g. require 2+ digits) only if the owner reports friction.
+    assert looks_sensitive("Wake-me-at-7-on-Monday")
+
+
+def test_goals_refuse_a_non_text_step_instead_of_crashing(tmp_path):
+    # goals.Goals.add checks the raw step items, so a non-text step must be refused (fail closed), not raise TypeError
+    from jarves.goals import Goals
+    from jarves.userdata import open_db
+    g = Goals(open_db(tmp_path))
+    with pytest.raises(ValueError, match="sensitive"):
+        g.add("learn guitar", steps=["buy strings", 123])  # type: ignore[list-item]
+    with pytest.raises(ValueError, match="sensitive"):
+        g.add("learn guitar", steps=["buy strings", "keep my access token"])

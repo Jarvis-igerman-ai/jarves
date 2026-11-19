@@ -44,9 +44,11 @@ _SENSITIVE = re.compile(
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
     # credential words (#1099) and well-known key/token prefixes
-    r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?key|(?:access|auth|refresh)[\s_-]?token|(?:secret|private)[\s_-]?key|"
-    r"\bbearer\s+[a-z0-9._~+/=-]{8,}|\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bAKIA[A-Z0-9]{12,}|"
+    r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?keys?\b|(?:access|auth|refresh)[\s_-]?tokens?\b|(?:secret|private)[\s_-]?keys?\b|"
+    r"\bbearer\s+[a-z0-9._~+/=-]{8,}|\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|"
     r"\bxox[abprs]-[a-z0-9-]{8,}|\bAIza[a-z0-9_-]{30,}|\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.", re.I)
+# AWS access key ids are upper case only, so this one prefix is matched case-sensitively (outside re.I above).
+_AWS_KEY_ID = re.compile(r"\bAKIA[A-Z0-9]{12,}")
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
 
 
@@ -57,7 +59,7 @@ def _token_shaped(run: str) -> bool:
     return bool(re.search(r"[a-z]", run) and re.search(r"[A-Z]", run) and re.search(r"\d", run))
 
 
-def looks_sensitive(text: str) -> bool:
+def looks_sensitive(text: object) -> bool:
     """True when text must not be stored. Fails closed: an unexpected (non-text) type counts as sensitive."""
     if text is None:
         return False
@@ -67,7 +69,7 @@ def looks_sensitive(text: str) -> bool:
         return True
     if not text:
         return False
-    return bool(_SENSITIVE.search(text)) or any(_token_shaped(m) for m in _TOKEN_RUN.findall(text))
+    return bool(_SENSITIVE.search(text) or _AWS_KEY_ID.search(text)) or any(_token_shaped(m) for m in _TOKEN_RUN.findall(text))
 
 
 def normalize(text: str) -> str:
