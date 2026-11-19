@@ -1495,6 +1495,13 @@ def cmd_doctor(a, cfg, home) -> int:
     except Exception as e:
         add("warn", f"helper isolation: could not check ({type(e).__name__})")
 
+    # --- #1016: backups folder size against the budget (archives are 200-600 MB each)
+    try:
+        from . import backup as _backup
+        add(*_backup.doctor_row(home))
+    except Exception as e:
+        add("warn", f"backups: could not check ({type(e).__name__})")
+
     # --- microphone: level while you stay quiet (digital silence = hardware/privacy problem)
     try:
         import numpy as np

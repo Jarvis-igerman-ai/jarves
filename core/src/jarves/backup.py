@@ -13,9 +13,13 @@ refresh token), logs, caches, health snapshots and the backups folder itself. Fa
 biometric: left out unless backup.include_faces is on. So an archive can be shared without leaking a key; after a
 restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt login`, `jarvis google login`).
 
-Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
-7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+Retention (adjustable, memory.db settings `backup.*`, CLI `jarvis backup settings --daily/--weekly/--manual/
+--checkpoints/--budget-mb`): automatic backups keep the newest per day for the last 3 days that have one and the
+newest per ISO week for the last 2 weeks; manual ones the last 5; pre-migration / pre-restore checkpoints the last 2
+each. Only automatic backups are thinned by the day/week rule. #1016 (archives are 200-600 MB, an install used to
+add 2-3 of them): a backup checks free disk space first and prunes before giving up; the Core-start pre-migration
+checkpoint reuses a verified backup written in the last RECENT_REUSE_S seconds (the install's own backup) instead of
+writing a second one; `jarvis doctor` warns when the backups folder exceeds `budget_mb`.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -59,7 +63,10 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+DEFAULTS = {"daily": 3, "weekly": 2, "manual": 5, "checkpoints": 2, "budget_mb": 3000, "include_faces": False,
+            "auto": True}
+RECENT_REUSE_S = 30 * 60          # a backup this fresh stands in for the Core-start pre-migration checkpoint
+SPACE_MARGIN = 200 * 1024 * 1024  # keep this much free on top of the estimated archive size
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -100,6 +107,14 @@ def set_settings(home: Path, changes: dict) -> dict:
                 raise ValueError(f"{k} must be a whole number")
             if not 0 <= n <= 365 or (k == "daily" and n < 1):
                 raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
+            clean[k] = n
+        elif k == "budget_mb":
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                raise ValueError("budget_mb must be a whole number")
+            if not 0 <= n <= 1_000_000:
+                raise ValueError("budget_mb must be between 0 (no warning) and 1000000")
             clean[k] = n
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
@@ -221,6 +236,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
+    _ensure_space(home, take)
     files = []
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
@@ -264,6 +280,53 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
               bytes=final.stat().st_size)
     prune(home)
     return final
+
+
+def _free_bytes(path: Path) -> int:
+    return shutil.disk_usage(str(path)).free
+
+
+def _ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
+    """#1016: refuse before writing when the disk cannot hold the archive; prune old backups first."""
+    need = SPACE_MARGIN
+    for p, _rel in take:
+        try:
+            need += p.stat().st_size                         # uncompressed size: a safe upper bound
+        except OSError:
+            pass
+    out_dir = backup_dir(home)
+    if _free_bytes(out_dir) >= need:
+        return
+    gone = prune(home)
+    free = _free_bytes(out_dir)
+    if free >= need:
+        logs.info("backup", "BACKUP_SPACE_PRUNED", "low disk space: pruned before the backup", removed=len(gone))
+        return
+    logs.error("backup", "BACKUP_NO_SPACE", "not enough disk space for a backup", bytes=free)
+    raise BackupError("BACKUP_NO_SPACE",
+                      f"not enough disk space for a backup ({free // 2**20} MB free, about {need // 2**20} MB needed)",
+                      "free disk space, or keep fewer backups: `jarvis backup settings --manual 2 --checkpoints 1` "
+                      "then `jarvis backup prune`")
+
+
+def usage(home: Path) -> dict:
+    """Total size of the backups folder against the `budget_mb` setting (for doctor and the dashboard)."""
+    items = list_backups(home)
+    total = sum(b["size"] for b in items)
+    budget = int(get_settings(home).get("budget_mb") or 0)
+    return {"count": len(items), "bytes": total, "budget_mb": budget,
+            "over": bool(budget) and total > budget * 2**20}
+
+
+def doctor_row(home: Path) -> tuple[str, str, str]:
+    """(level, what, detail) for `jarvis doctor`."""
+    u = usage(home)
+    what = f"backups: {u['count']} file(s), {u['bytes'] / 2**20:.0f} MB"
+    if u["over"]:
+        return ("warn", what + f" (over the {u['budget_mb']} MB budget)",
+                "fix:  `jarvis backup settings --daily 3 --weekly 2 --manual 3 --checkpoints 1`, then "
+                "`jarvis backup prune` (or raise it: `jarvis backup settings --budget-mb N`)")
+    return ("ok", what + (f" (budget {u['budget_mb']} MB)" if u["budget_mb"] else ""), "")
 
 
 def _unlink(p: Path) -> None:
@@ -549,6 +612,12 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
     if not any(home.glob("*.db")):                  # first run: nothing to protect yet
         _save_state(home, {"version": __version__})
         return None
+    recent = _recent_backup(home)
+    if recent is not None:                          # #1016: the install's own backup already covers this start
+        logs.info("backup", "CHECKPOINT_REUSED", "recent backup reused as the pre-migration checkpoint",
+                  backup=recent.name)
+        _save_state(home, {"version": __version__})
+        return recent
     try:
         p = checkpoint(home, f"version {st.get('version') or 'unknown'} -> {__version__}")
     except BackupError as e:
@@ -558,6 +627,22 @@ def startup_checkpoint(home: Path, health=None) -> Path | None:
         return None
     _save_state(home, {"version": __version__})
     return p
+
+
+def _recent_backup(home: Path, now: float | None = None) -> Path | None:
+    """The last written backup if it is younger than RECENT_REUSE_S and still on disk; else None. create() verified
+    it before the rename; a full re-verify (every SHA-256) would slow every Core start after an update."""
+    last = read_state(home).get("last") or {}
+    try:
+        age = (time.time() if now is None else now) - float(last.get("ts"))
+    except (TypeError, ValueError):
+        return None
+    if not last.get("ok") or not 0 <= age <= RECENT_REUSE_S:
+        return None
+    p = backup_dir(home) / str(last.get("path") or "")
+    if not p.name or not p.is_file():
+        return None
+    return p if zipfile.is_zipfile(p) else None
 
 
 def due(home: Path, now: float | None = None) -> bool:
@@ -693,6 +778,9 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="how many manual backups to keep")
+    b.add_argument("--checkpoints", type=int, help="how many pre-migration / pre-restore backups to keep (each)")
+    b.add_argument("--budget-mb", type=int, help="doctor warns when the backups folder is bigger (0 = never)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -720,7 +808,8 @@ def cmd_backup(a, cfg, home) -> int:
             items = list_backups(home)
             for b in items:
                 print(f"{b['name']}  {b['kind']:13} {b['size'] / 1024:8.1f} KB")
-            print(f"{len(items)} backup(s) in {backup_dir(home)}")
+            u = usage(home)
+            print(f"{len(items)} backup(s), {u['bytes'] / 2**20:.0f} MB in {backup_dir(home)}")
         elif a.action in ("verify", "test"):
             p = _resolve(home, a.name)
             if p is None:
@@ -739,7 +828,8 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: getattr(a, k, None) for k in ("daily", "weekly", "manual", "checkpoints", "budget_mb")}
+            ch = {k: v for k, v in ch.items() if v is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:

@@ -217,7 +217,7 @@ def test_full_disk_leaves_no_half_archive(profile, monkeypatch):
     assert files == [good.name] and backup.verify(good)["ok"]
 
 
-def test_retention_7_daily_4_weekly(profile):
+def test_retention_3_daily_2_weekly_issue_1016(profile):
     start = datetime(2026, 10, 19, 3, 0)
     bdir = profile / "backups"
     bdir.mkdir()
@@ -233,9 +233,9 @@ def test_retention_7_daily_4_weekly(profile):
     start = start + timedelta(minutes=1)
     autos = [b for b in backup.list_backups(profile) if b["kind"] == "auto"]
     days = {datetime.fromtimestamp(b["ts"]).date() for b in autos}
-    assert len(days) <= 7 + 4 and len(autos) == len(days)             # one per kept day/week
+    assert len(days) <= 3 + 2 and len(autos) == len(days)             # one per kept day/week
     assert max(days) == start.date()
-    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 10
+    assert len([b for b in backup.list_backups(profile) if b["kind"] == "manual"]) == 5
     backup.set_settings(profile, {"daily": 2, "weekly": 0})
     backup.prune(profile)
     assert len([b for b in backup.list_backups(profile) if b["kind"] == "auto"]) == 2
@@ -256,6 +256,7 @@ def test_pre_migration_checkpoint_on_version_change(profile, monkeypatch):
     assert p is not None and "pre-migration" in p.name and backup.verify(p)["ok"]
     assert backup.startup_checkpoint(profile) is None                 # same version: nothing to do
     monkeypatch.setattr(backup, "__version__", "9.9.9")
+    monkeypatch.setattr(backup, "RECENT_REUSE_S", -1)                # #1016 reuse off: force a new checkpoint
     monkeypatch.setattr(backup, "create", lambda *a, **k: (_ for _ in ()).throw(
         backup.BackupError("BACKUP_FAILED", "disk full", "free space")))
 
