@@ -1,1 +1,1 @@
-- Fixed: project runs can no longer slip a protected file (such as a CI workflow) past the check by giving it a non-ASCII name or by moving it out of the protected folder (JAR-574, #1096, #1097).
+- Fixed: project runs can no longer slip a protected file (such as a CI workflow) past the check by giving it a non-ASCII name or by moving it out of the protected folder, and a path with a Windows 8.3 short-name part (such as `GITHUB~1/` or `CLAUDE~1/`) is refused in any folder (JAR-574, #1096, #1097).

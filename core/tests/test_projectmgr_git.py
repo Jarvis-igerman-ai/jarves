@@ -103,6 +103,7 @@ def test_changed_files_shows_non_ascii_and_renamed_protected_paths(tmp_path):
     files = gitops.changed_files(repo, base)
     prot, _ = gitops.violations(files, ["src/**"])
     assert ".github/workflows/ci.yml" in prot
+    # exact name: gitops.git() decodes stdout as UTF-8 (encoding="utf-8"), never the Windows locale codec
     assert any(f.casefold() == ".github/workflows/é.yml" for f in prot), files
 
 
