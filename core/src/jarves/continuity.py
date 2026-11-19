@@ -38,6 +38,15 @@ feat.register(FEATURE, "אותות יזומים", "Proactive signals", False, ap
 DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
+_TEXT_KEYS = ("reply", "text", "transcript")
+
+
+def _at_rest(body):
+    """The copy written to disk. Privacy mode on (V5 sec F13): spoken/typed words are blanked; ids, codes and
+    status stay so a resend is still recognised and answered once."""
+    if not logs.privacy() or not isinstance(body, dict):
+        return body
+    return {k: ("" if k in _TEXT_KEYS and isinstance(v, str) else v) for k, v in body.items()}
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
 SENT_TIMEOUT_S = 15 * 60       # a notice sent to a device that never acknowledged and went silent is re-routed
@@ -115,14 +124,14 @@ class Continuity:
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), json.dumps(_at_rest(body)), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+                (device, cid, kind, int(status), json.dumps(_at_rest(body)), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:

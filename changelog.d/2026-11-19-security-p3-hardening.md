@@ -1,0 +1,2 @@
+- Fixed: learned preferences, goals and development drafts now refuse API keys, tokens and other random-looking secret strings, not only passwords and long numbers (#1099).
+- Fixed: with privacy mode on, the phone's 24 hour resend copy and the plan step evidence no longer keep the words on disk; a preference edited from the phone needs a new confirm; the guides now say that the phone status permission shows whether someone talks to JARVES at the computer, and that the project check command runs agent code without a sandbox (#206).

@@ -35,6 +35,19 @@ def test_journal_keeps_no_words_when_privacy_is_on(tmp_path):
     assert [t["text"] for t in c.turns()] == [""]
 from jarves.mobile import Bridge
 
+
+def test_resend_ledger_keeps_no_words_when_privacy_is_on(tmp_path):
+    """V5 sec F13: the 24 h resend copy on disk drops the reply text in privacy mode; ids and status stay."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.store("d1", "cid-0001", "chat", 200, {"reply": "private answer", "turn": 7})
+    st, body, replay = c.execute("d1", "cid-0002", "chat", lambda: (200, {"reply": "another private answer"}))
+    assert body["reply"] == "another private answer" and not replay      # the live answer is untouched
+    rows = c._rows("SELECT body FROM ledger")
+    assert len(rows) == 2 and not any("private" in r["body"] for r in rows)
+    assert c.seen("d1", "cid-0001") == {"reply": "", "turn": 7}
+
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
 NIGHT = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc).timestamp()
 
