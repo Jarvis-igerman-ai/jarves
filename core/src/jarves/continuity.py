@@ -39,6 +39,7 @@ DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
 _TEXT_KEYS = ("reply", "text", "transcript")
+NOT_KEPT = "(answered; the text was not kept: privacy mode)"
 
 
 def _at_rest(body):
@@ -46,7 +47,7 @@ def _at_rest(body):
     status stay so a resend is still recognised and answered once."""
     if not logs.privacy() or not isinstance(body, dict):
         return body
-    return {k: ("" if k in _TEXT_KEYS and isinstance(v, str) else v) for k, v in body.items()}
+    return {k: (NOT_KEPT if k in _TEXT_KEYS and isinstance(v, str) and v.strip() else v) for k, v in body.items()}
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
 SENT_TIMEOUT_S = 15 * 60       # a notice sent to a device that never acknowledged and went silent is re-routed

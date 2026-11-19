@@ -50,7 +50,8 @@ _SENSITIVE = re.compile(
     r"(?:api|access|auth|bearer)[\s_-]?token|"
     r"מפתח\s+(?:ה)?(?:API|גישה|פרטי|סודי)|(?:ה)?טוקן\s+(?:ה)?(?:שלי|גישה)", re.I)
 # a long run of key-alphabet characters; it counts only when it mixes character classes and has high entropy
-_KEYLIKE = re.compile(r"[A-Za-z0-9_\-+/=.]{20,}")
+# ('.', '/' and '-' split the run: paths, URLs, versions, UUIDs and file names are not one key)
+_KEYLIKE = re.compile(r"[A-Za-z0-9_+=]{20,}")
 _ENTROPY_BITS = 3.5               # bits per character; English words and paths stay well below this
 
 
@@ -60,10 +61,12 @@ def _entropy(s: str) -> float:
 
 
 def _keylike(text: str) -> bool:
-    """A high-entropy key/token-shaped string (letters AND digits, 20+ chars, >= 3.5 bits/char)."""
+    """A high-entropy key/token-shaped string: 20+ chars mixing upper case, lower case AND digits, >= 3.5 bits/char.
+    Lower-case-only hex (commit SHAs) is left to the known token shapes so development drafts can quote a SHA."""
     for m in _KEYLIKE.finditer(text):
         w = m.group(0)
-        if re.search(r"[A-Za-z]", w) and re.search(r"\d", w) and _entropy(w) >= _ENTROPY_BITS:
+        if (re.search(r"[A-Z]", w) and re.search(r"[a-z]", w) and re.search(r"\d", w)
+                and _entropy(w) >= _ENTROPY_BITS):
             return True
     return False
 
@@ -149,9 +152,10 @@ class Preferences:
         logs.info("prefs", "PREF_REAFFIRMED", "preference reaffirmed", id=pid, by=by)
         return bool(n)
 
-    def edit(self, pid: int, text: str, *, by: str = "user", repropose: bool = False) -> dict:
+    def edit(self, pid: int, text: str, *, by: str = "user", repropose: bool = False, source: str | None = None) -> dict:
         """Reword an item. `repropose` (the model's edit, V5 sec F2): a confirmed item goes back to 'proposed' so the
-        new wording needs a fresh confirm before it can reach the instructions."""
+        new wording needs a fresh confirm before it can reach the instructions. `source` records who reworded it
+        (the phone sets 'phone_edit', which only the PC may confirm: V5 sec H2)."""
         t = _clean(text, MAX_TEXT)
         if not t or looks_sensitive(t):
             raise ValueError("empty or sensitive text: not stored")
@@ -163,11 +167,12 @@ class Preferences:
         if not cur:
             raise KeyError(pid)
         if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
-                      (t, norm, self.clock(), pid))
+            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=?, "
+                      "source=COALESCE(?, source) WHERE id=?", (t, norm, self.clock(), source, pid))
             logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
             return self._view(self.get(pid))
-        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=?, source=COALESCE(?, source) WHERE id=?",
+                  (t, norm, self.clock(), source, pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
 
