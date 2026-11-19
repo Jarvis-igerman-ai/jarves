@@ -431,9 +431,10 @@ def test_probe_error_timer_restarts_after_recovery_and_each_version_gets_a_notic
     r.tick(120)
     assert kinds(r).count("probe_stuck") == 1
     server.publish(keys, "3.0.0.2")                            # a newer release while still stuck
-    r.tick(auto_update.LATER_S + 1)
+    assert r.tick(auto_update.LATER_S + 1) == "announced" and "probe_error_since" not in r.au.state()   # R2
     r.clock.t += NOTICE_GRACE_S + 1
-    r.tick()
+    assert r.tick() == "busy" and kinds(r).count("probe_stuck") == 1   # the unprobed day before did not count
+    r.tick(auto_update.PROBE_STUCK_S + 1)
     stuck = [n for n in r.notices if n["kind"] == "probe_stuck"]
     assert [n["version"] for n in stuck] == [NEW, "3.0.0.2"] and r.launched == []
 
@@ -449,7 +450,20 @@ def test_probe_stuck_timer_ignores_ticks_that_never_probed(home, server, keys):
     assert r.tick(auto_update.LATER_S) == "busy" and "probe_stuck" not in kinds(r) and r.launched == []
 
 
-def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
+def test_forced_update_now_clears_the_probe_stuck_state(home, server, keys):
+    """#1100 review R4: an owner 'Update now' while stuck installs and leaves no stale stuck-timer state."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    r.tick()
+    r.tick(auto_update.PROBE_STUCK_S + 1)
+    assert {"probe_error_since", "probe_stuck_noticed"} <= set(r.au.state())
+    r.au.answer("now")
+    assert r.tick() == "installing"
+    assert not {"probe_error_since", "probe_stuck_noticed"} & set(r.au.state())
+
+
+def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval(home, monkeypatch):
     """#1100 review R1/R2: a forced manual update skips busy(), so the notice and the guide say to check approvals."""
     (_, he), (_, en) = auto_update._notice_text("probe_stuck", "3.0.0.1")
     assert "no approval is waiting" in en and "אין אישור שממתין" in he
@@ -459,8 +473,11 @@ def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
     assert len(row) == 1 and "no approval is waiting" in row[0]["fix_en"] and "אין אישור שממתין" in row[0]["fix_he"]
     for text in (en, he, row[0]["fix_en"], row[0]["fix_he"]):  # R2: one real command, same in notice and guide
         assert "jarvis update install" in text and "Updates" in text
-    cli_src = (Path(auto_update.__file__).parent / "cli.py").read_text("utf-8")
-    assert 'choices=["check", "install", "status", "auto"]' in cli_src   # `jarvis update install` exists
+    from jarves import cli                                     # R1: the real parser accepts `jarvis update install`
+    monkeypatch.setenv("JARVES_HOME", str(home))
+    seen = []
+    monkeypatch.setattr(cli, "cmd_update", lambda a, cfg, h: seen.append(a.action) or 0)
+    assert cli.main(["update", "install"]) == 0 and seen == ["install"]
 
 
 def test_dashboard_api_switch_answer_and_channel(home):

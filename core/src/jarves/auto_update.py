@@ -334,6 +334,7 @@ class AutoUpdater:
             return "gave_up"
         if not st.get("announced_ts"):
             st["announced_ts"] = now
+            st.pop("probe_error_since", None)              # #1100 R2: no probe runs here, the timer restarts
             self._emit(st, "before", ver, disp, default=self._default_note() == "beta")
             _save(self.home, st)
             return "announced"
@@ -355,6 +356,8 @@ class AutoUpdater:
         elif float(st.get("next_try") or 0) > now:
             return "backoff"
         st["busy"] = []
+        st.pop("probe_error_since", None)                  # #1100 R4: no stale stuck-timer state after an install
+        st.pop("probe_stuck_noticed", None)
         return self._install(st, chk, ver, disp)
 
     def _watch_probe_error(self, st: dict, failing: bool, now: float, ver: str, disp: str) -> None:
