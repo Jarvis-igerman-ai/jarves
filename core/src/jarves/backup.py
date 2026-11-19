@@ -18,9 +18,9 @@ Retention (adjustable, memory.db settings `backup.*`, CLI `jarvis backup setting
 newest per ISO week for the last 2 weeks; manual ones the last 5; pre-migration / pre-restore checkpoints the last 2
 each. Only automatic backups are thinned by the day/week rule. #1016 (archives are 200-600 MB, an install used to
 add 2-3 of them): a backup checks free disk space first and prunes before giving up; the Core-start pre-migration
-checkpoint reuses the manual/auto/pre-migration backup written in the last RECENT_REUSE_S seconds (the install's
-own backup; never a pre-restore one) when no data file changed since, instead of writing a second one, and prune
-keeps it; `jarvis doctor` warns when the backups folder exceeds `budget_mb`.
+checkpoint reuses the pre-migration checkpoint written in the last RECENT_REUSE_S seconds (the update's own) when
+no data file changed since, instead of writing a second one, and prune keeps it; a restore's pre-restore
+checkpoint never prunes the archive being restored; `jarvis doctor` warns when the backups folder exceeds `budget_mb`.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -64,11 +64,12 @@ _SECRET_TEXT = re.compile(r"sk-[A-Za-z0-9_\-]{16,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za
 _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
-DEFAULTS = {"daily": 3, "weekly": 2, "manual": 5, "checkpoints": 2, "budget_mb": 3000, "include_faces": False,
+DEFAULTS = {"daily": 3, "weekly": 2, "manual": 5, "checkpoints": 2, "budget_mb": 9000, "include_faces": False,
             "auto": True}
 RECENT_REUSE_S = 30 * 60          # a backup this fresh stands in for the Core-start pre-migration checkpoint
 SPACE_MARGIN = 200 * 1024 * 1024  # keep this much free on top of the estimated archive size
-REUSE_KINDS = ("manual", "auto", "pre-migration")   # never pre-restore: it holds the data from BEFORE the restore
+REUSE_KINDS = ("pre-migration",)  # only a checkpoint: "the newest pre-migration backup" stays the true one; never
+                                  # pre-restore (data from BEFORE a restore) or manual/auto (other retention rules)
 FS_TICK_S = 2.0                   # coarsest mtime step (FAT/exFAT): a change this close to the backup is not trusted
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
@@ -222,8 +223,10 @@ def backup_dir(home: Path) -> Path:
     return Path(home) / BACKUP_DIR
 
 
-def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None) -> Path:
-    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left)."""
+def create(home: Path, kind: str = "manual", *, note: str = "", now: float | None = None,
+           protect: tuple[Path, ...] = ()) -> Path:
+    """Write and verify one archive; returns its path. Raises BackupError (nothing half-written is left). `protect`:
+    archives the pruning inside this call must keep (a restore protects the archive it is about to restore)."""
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
     home = Path(home)
@@ -239,7 +242,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
         n += 1
     tmp = final.with_name(final.name + ".partial")
     take, skipped = plan(home, settings)
-    _ensure_space(home, take)
+    _ensure_space(home, take, protect)
     files = []
     with _lock, tempfile.TemporaryDirectory(prefix="jarves-bk-") as work:
         try:
@@ -281,7 +284,7 @@ def create(home: Path, kind: str = "manual", *, note: str = "", now: float | Non
                 kind=kind)
     logs.info("backup", "BACKUP_DONE", "backup written", backup=final.name, kind=kind, files=len(files), excluded=len(skipped),
               bytes=final.stat().st_size)
-    prune(home)
+    prune(home, protect=protect + (final,))
     return final
 
 
@@ -289,7 +292,7 @@ def _free_bytes(path: Path) -> int:
     return shutil.disk_usage(str(path)).free
 
 
-def _ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
+def _ensure_space(home: Path, take: list[tuple[Path, str]], protect: tuple[Path, ...] = ()) -> None:
     """#1016: refuse before writing when the disk cannot hold the archive; prune old backups first."""
     archive = snaps = 0
     for p, _rel in take:                                     # uncompressed size: a safe upper bound
@@ -311,7 +314,7 @@ def _ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
         return None
     if short() is None:
         return
-    gone = prune(home)
+    gone = prune(home, protect=protect)
     gap = short()
     if gap is None:
         logs.info("backup", "BACKUP_SPACE_PRUNED", "low disk space: pruned before the backup", removed=len(gone))
@@ -320,7 +323,7 @@ def _ensure_space(home: Path, take: list[tuple[Path, str]]) -> None:
     logs.error("backup", "BACKUP_NO_SPACE", "not enough disk space for a backup", bytes=free)
     raise BackupError("BACKUP_NO_SPACE",
                       f"not enough disk space for a backup ({free // 2**20} MB free, about {need // 2**20} MB needed)",
-                      "free disk space, or keep fewer backups: `jarvis backup settings --manual 2 --checkpoints 1` "
+                      "free disk space, or keep fewer backups: `jarvis backup settings --manual 3 --checkpoints 1` "
                       "then `jarvis backup prune`")
 
 
@@ -460,8 +463,8 @@ def list_backups(home: Path) -> list[dict]:
     return out
 
 
-def prune(home: Path) -> list[str]:
-    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind."""
+def prune(home: Path, protect: tuple[Path, ...] = ()) -> list[str]:
+    """Apply retention; returns the deleted names. Never deletes the newest backup of a kind, nor a `protect`ed one."""
     s = get_settings(home)
     items = list_backups(home)
     keep: set[str] = set()
@@ -476,6 +479,7 @@ def prune(home: Path) -> list[str]:
         keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
     if autos:
         keep.add(autos[0]["name"])
+    keep |= {Path(x).name for x in protect if Path(x).parent.resolve() == backup_dir(home).resolve()}
     active = read_state(home).get("checkpoint") or {}
     if isinstance(active, dict) and active.get("path"):
         keep.add(str(active["path"]))                         # #1016: the backup standing in for this version's checkpoint
@@ -559,7 +563,7 @@ def restore(path: Path, target: Path, *, force: bool = False, checkpoint_first: 
                           "stop it first (`jarvis stop`), then restore again")
     pre = None
     if checkpoint_first and target.is_dir() and any(target.glob("*.db")):
-        pre = create(target, "pre-restore", note=f"before restoring {path.name}")
+        pre = create(target, "pre-restore", note=f"before restoring {path.name}", protect=(path,))   # never prune it
     man = res["manifest"]
     try:
         done = _extract(path, target, man)
