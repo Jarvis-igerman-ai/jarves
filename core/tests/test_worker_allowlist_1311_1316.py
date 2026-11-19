@@ -38,3 +38,16 @@ def test_1316_override_rules_that_fail_the_check_are_dropped_and_never_empty():
     # an override with nothing usable falls back to the checked default, never to "no --allowedTools" (owner settings)
     assert claude.autopilot_allowed_tools(PY, override=bad) == claude.autopilot_allowed_tools(PY)
     assert claude.autopilot_allowed_tools(PY, override=[None, 3, "Read"]) == ["Read"]   # malformed entries dropped
+
+
+def test_1316_dropped_override_rules_are_logged_once_with_the_reason(monkeypatch):
+    seen = []
+    monkeypatch.setattr(claude.logs, "warn", lambda comp, code, msg, **f: seen.append((code, f)))
+    monkeypatch.setattr(claude, "_DROPPED_SEEN", set())
+    for _ in range(3):                                   # three worker starts with the same policy: one line per rule
+        claude.autopilot_allowed_tools(PY, override=["Bash(ls:*)", "Read", 7])
+    assert seen == [("AGENTS_WORKER_RULE_DROPPED", {"item": 0, "fallback": False,
+                     "reason": "wildcard, redirection, compound command or substitution"}),
+                    ("AGENTS_WORKER_RULE_DROPPED", {"item": 2, "fallback": False, "reason": "not a string"})]
+    claude.autopilot_allowed_tools(PY, override=["Bash(ls > a)"])          # all bad: the fallback is visible
+    assert seen[-1][1]["fallback"] is True and len(seen) == 3

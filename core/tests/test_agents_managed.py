@@ -465,8 +465,9 @@ def test_autopilot_notify_op_reaches_the_owner_channel(world):
     o.notify = old
 
 
-def test_autopilot_worker_default_list_matches_owner_rights_and_never_a_bypass(world):
-    """P1: a headless worker could not run one test (popup timed out while the owner slept). Same working rights, no bypass."""
+def test_autopilot_worker_default_list_is_edit_only_and_never_a_bypass(world):
+    """Was P1 (a worker could not run one test). #1311/#1316 accepted end state: workers are edit-only; tests, commits and
+    pushes run outside the worker (manager/owner), live check #1343. Never a bypass, hard stops always denied."""
     from jarves.orchestrator import claude
     rules = claude.autopilot_allowed_tools(r"C:\py\python.exe")
     assert "Bash(python:*)" not in rules and "Bash(pytest:*)" not in rules and "Bash(gh pr view)" in rules and "Bash(git push jarves:*)" not in rules and "Bash(jarvis:*)" not in rules

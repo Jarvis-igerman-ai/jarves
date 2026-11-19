@@ -249,12 +249,14 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # ---------------------------------------------------------------------- sessions JARVES starts
 # OWNER-APPROVED SCOPE for headless autopilot workers (see docs in PR #748). A worker runs `claude -p` in its OWN isolated
 # worktree; nobody is there to answer a permission prompt, so anything outside this list is denied (the safe outcome).
-# Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
-# releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
-# The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
-# #1311/#1316: exact read-only commands only. No wildcard (the run-time prefix matcher's handling of redirection and
-# compound commands is unverified) and no code runner or writer (pytest/conftest, npm/npx scripts, git commit/merge/
-# rebase hooks, git diff/log --output). Workers edit files (acceptEdits); tests and commits run outside the worker.
+# EDIT-ONLY WORKER (#1311/#1316, accepted end state): narrower than the owner's own settings, never a bypass mode. A
+# worker edits files in its worktree (acceptEdits), reads, runs the exact read-only commands below and reports through
+# the #784 workflow-console subcommands. It cannot run tests or stage/commit: pytest/conftest, npm/npx scripts and git
+# commit/merge/rebase hooks run worker-written code, and git diff/log --output writes files. Its uncommitted edits stay in
+# its worktree for the manager/owner to test and commit; live check and owner decision on in-worker tests: #1343.
+# No wildcard: the run-time prefix matcher's handling of redirection and compound commands is unverified.
+# The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json);
+# each override rule must pass worker_rule_problem.
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Read", "Grep", "Glob", "Bash(ls)", "Bash(git status)", "Bash(git diff)", "Bash(git log)", "Bash(git branch)",
     "Bash(jarvis status)", "Bash(jarvis doctor)", "Bash(jarvis features)",
@@ -262,11 +264,12 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 )
 _READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob"})
 # Complete commands, matched exactly: no argument tail is trusted (`git branch -D`, `gh pr view --web`, `git diff --outp=f`).
+# Intentionally a superset of the default list: an override may add these read-only forms; the default stays minimal.
 _READ_ONLY_COMMANDS = frozenset({"ls", "git status", "git diff", "git diff --stat", "git diff --cached", "git log",
                                  "git log --oneline", "git show", "git branch", "git branch --show-current",
                                  "jarvis status", "jarvis doctor", "jarvis features", "gh pr view", "gh pr list",
                                  "gh pr checks", "gh pr diff", "gh issue list", "gh run list"})
-_SHELL_META = re.compile(r"[*?;&|<>$`(){}\\\n'\"]")
+_SHELL_META = re.compile(r"[*?;&|<>$`(){}\\\n'\"]")   # defence in depth; the exact-set test alone already refuses these
 
 
 def worker_rule_problem(rule: object) -> str:
@@ -283,7 +286,8 @@ def worker_rule_problem(rule: object) -> str:
     if cmd not in _READ_ONLY_COMMANDS:
         return "not one of the exact read-only commands (arguments are not accepted)"
     return ""
-# Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
+# Always denied for a worker, whatever the allow list says. Workers are edit-only (above); the manager/steward tests,
+# commits, pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
@@ -296,6 +300,9 @@ WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own
 WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
 
 
+_DROPPED_SEEN: set[tuple[int, str, str]] = set()     # (position, rule repr, reason) already logged; capped at 200
+
+
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
                            home: str = "") -> list[str]:
     """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
@@ -303,6 +310,15 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None,
     override with nothing left falls back to the default, never to an empty list (which would mean the owner's rules)."""
     if override:
         kept = [r for r in override if not worker_rule_problem(r)]
+        for i, r in enumerate(override):
+            problem = worker_rule_problem(r)
+            seen = (i, repr(r)[:200], problem)
+            if problem and seen not in _DROPPED_SEEN:     # once per distinct dropped rule, not on every worker start
+                if len(_DROPPED_SEEN) >= 200:
+                    _DROPPED_SEEN.clear()
+                _DROPPED_SEEN.add(seen)
+                logs.warn("agents", "AGENTS_WORKER_RULE_DROPPED", "an unsafe worker_allowed_tools rule was ignored",
+                          item=i, reason=problem, fallback=not kept)
         if kept:
             return kept
     rules = list(WORKER_ALLOWED_TOOLS)
