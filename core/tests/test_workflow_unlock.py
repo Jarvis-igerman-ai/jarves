@@ -190,8 +190,20 @@ class UnlockTests(unittest.TestCase):
                 self.login()
             statuses.append(self.wrong_try(wrong)[0])
             self.assertEqual((self.home / unlock.FILE).exists(), i < 9, i)
+            if i == 8:
+                exhausted = self.cookie                                # this window used all 3 of its tries
         self.assertEqual(statuses, [403] * 10)
         self.assertEqual(self.wrong_try(shown), (403, None))           # cancelled after 10 in total
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.cookie = exhausted                                        # by_session was cleared at the backstop
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+
+    def test_wrong_tries_without_a_live_code_are_not_counted(self):
+        self.login()
+        self.assertFalse((self.home / unlock.FILE).exists())
+        self.assertEqual([self.wrong_try("1234") for _ in range(4)], [(403, None)] * 4)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (0, {}))
 
     def test_new_code_resets_an_exhausted_session(self):
         shown = unlock.issue(self.home)

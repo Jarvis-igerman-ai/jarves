@@ -17,6 +17,7 @@ import socket
 import subprocess
 import threading
 import time
+from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -101,6 +102,14 @@ UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
 UNLOCK_WRONG_TOTAL = 10       # over all sessions; 10 token logins per minute bound how fast new windows come
 
 
+@dataclass
+class UnlockWrong:
+    """Wrong unlock tries for one code (its salt); a new instance starts the counts again."""
+    salt: str = ""
+    total: int = 0
+    by_session: dict[str, int] = field(default_factory=dict)
+
+
 def session_key(token: str, session: str) -> str:
     """Keyed digest of a session id (#789). Only this digest is written to disk; rotating the
     access token invalidates every stored session because the key changes."""
@@ -160,7 +169,7 @@ class Server(ThreadingHTTPServer):
         self.unlock_attempts: list[float] = []
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 10 of 10,000).
-        self.unlock_wrong: dict = {"salt": "", "total": 0, "by_session": {}}
+        self.unlock_wrong = UnlockWrong()
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -473,24 +482,27 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
             # Counters are read and changed only under session_lock. A new code (new salt) starts them again.
-            if self.server.unlock_wrong["salt"] != salt:
-                self.server.unlock_wrong = {"salt": salt, "total": 0, "by_session": {}}
+            if not salt:  # no live code: nothing to guess and nothing to count
+                self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
+                return
+            if self.server.unlock_wrong.salt != salt:
+                self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
-            if wrong["by_session"].get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
+            if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
                 # No further guess from this session; the code stays live for the owner's other window.
                 self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
-                wrong["by_session"][session] = wrong["by_session"].get(session, 0) + 1
-                wrong["total"] += 1
-                if wrong["total"] >= UNLOCK_WRONG_TOTAL:
+                wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
+                wrong.total += 1
+                if wrong.total >= UNLOCK_WRONG_TOTAL:
                     path.unlink(missing_ok=True)
-                    self.server.unlock_wrong = {"salt": "", "total": 0, "by_session": {}}
+                    self.server.unlock_wrong = UnlockWrong()
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
-            self.server.unlock_wrong = {"salt": "", "total": 0, "by_session": {}}
+            self.server.unlock_wrong = UnlockWrong()
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             ttl = owner_unlock_s(self.server.home)
             self.server.unlocked[session] = now + ttl
