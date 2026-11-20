@@ -74,7 +74,8 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
         create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
                   "--label", "showstopper", "--label", "P1"]
         made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
-        if made.returncode != 0 and "not found" in (made.stderr or "") and "label" in (made.stderr or ""):
+        err = made.stderr or ""
+        if made.returncode != 0 and "label" in err and "not found" in err and "testing" in err:
             # gh resolves label names before it creates the issue, so a missing area label means nothing
             # was filed yet: retry once without it rather than lose the failure report (#897)
             print("area label 'testing' not found; filing without it")

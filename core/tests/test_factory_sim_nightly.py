@@ -86,6 +86,22 @@ def test_issue_is_filed_without_area_label_when_that_label_is_missing(monkeypatc
     assert "area label 'testing' not found; filing without it" in capsys.readouterr().out
 
 
+def test_missing_core_label_does_not_trigger_area_label_retry(monkeypatch, capsys):
+    import subprocess
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if "create" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "could not add label: 'showstopper' not found")
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "tail")
+    out = capsys.readouterr().out
+    assert len([c for c in calls if "create" in c]) == 1
+    assert "area label" not in out and "issue create failed" in out
+
+
 def test_issue_create_is_not_retried_after_other_failure(monkeypatch, capsys):
     import subprocess
     calls = []
