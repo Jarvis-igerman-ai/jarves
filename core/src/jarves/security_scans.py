@@ -377,10 +377,18 @@ def _loc_of(alert: dict) -> str:
     return str(loc.get("path") or "-")                    # the file only: a line number would change on every refactor
 
 
+def _unread(code: int, data: object) -> dict:
+    """Incomplete coverage for an unreadable listing. A feature GitHub reports as disabled on the repo is named as
+    such (still incomplete, never zero), so the tracker does not show a bare HTTP code for an owner setting."""
+    msg = str(data.get("message") or "") if isinstance(data, dict) else ""
+    disabled = code in (403, 404) and "disabled" in msg.lower()
+    return {"coverage": "incomplete", "reason": "disabled_on_repo" if disabled else f"http_{code}", "findings": []}
+
+
 def collect_code_scanning(client, version: str, sleep) -> dict:
     code, data = _get(client, "/code-scanning/alerts?state=open&per_page=100&ref=refs/heads/main", sleep)
     if code != 200 or not isinstance(data, list):
-        return {"coverage": "incomplete", "reason": f"http_{code}", "findings": []}
+        return _unread(code, data)
     out = []
     for a in data:
         r = a.get("rule") or {}
@@ -394,7 +402,7 @@ def collect_code_scanning(client, version: str, sleep) -> dict:
 def collect_dependabot(client, version: str, sleep) -> dict:
     code, data = _get(client, "/dependabot/alerts?state=open&per_page=100", sleep)
     if code != 200 or not isinstance(data, list):
-        return {"coverage": "incomplete", "reason": f"http_{code}", "findings": []}
+        return _unread(code, data)
     out = []
     for a in data:
         adv = a.get("security_advisory") or {}
@@ -410,7 +418,7 @@ def collect_secret_scanning(client, version: str, sleep) -> dict:
     """Signal only: the alert's secret TYPE and number. No location, no value, ever."""
     code, data = _get(client, "/secret-scanning/alerts?state=open&per_page=100", sleep)
     if code != 200 or not isinstance(data, list):
-        return {"coverage": "incomplete", "reason": f"http_{code}", "findings": []}
+        return _unread(code, data)
     out = []
     for a in data:
         f = finding("secret_scanning", a.get("secret_type"), "-", "P1", version, number=a.get("number"))

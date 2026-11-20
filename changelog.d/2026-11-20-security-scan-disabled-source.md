@@ -1,0 +1,1 @@
+- Fixed: the security scan tracker names a source GitHub reports as disabled on the repository (for example secret scanning) as `disabled_on_repo` instead of a bare HTTP code; coverage stays incomplete, never zero (#480).

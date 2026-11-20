@@ -161,6 +161,23 @@ def test_no_access_is_incomplete_coverage_never_zero(home):
     assert "never read as zero" in gh.issues[0]["body"]
 
 
+def test_a_feature_disabled_on_the_repo_is_named_and_still_incomplete(home):          # #480
+    gh = FakeGitHub()
+    base = gh.__call__
+
+    def call(method, path, payload=None):
+        if "/secret-scanning/alerts" in path:
+            return 404, {"message": "Secret scanning is disabled on this repository.", "status": "404"}
+        if "/dependabot/alerts" in path:
+            return 403, {"message": "Resource not accessible by integration"}
+        return base(method, path, payload)
+
+    r = ss.run_scan(home, "light", client=call, now=T0, version=VER, sleep=lambda s: None, report=True)
+    assert r["status"] == "ok" and not ss._complete(r["coverage"])
+    assert r["coverage"]["secret_scanning"] == "incomplete:disabled_on_repo"
+    assert r["coverage"]["dependabot"] == "incomplete:http_403"           # a token without access stays an HTTP code
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)
