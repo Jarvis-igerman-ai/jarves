@@ -170,7 +170,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.login()                                                   # the read-only token holder's one window
-        results = [self.wrong_try(wrong) for i in range(6)]
+        results = [self.wrong_try(wrong) for _ in range(6)]
         self.assertEqual(results, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)
         self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
         self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])  # names both ways out
@@ -233,7 +233,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.login()
-        for i in range(3):
+        for _ in range(3):
             self.wrong_try(wrong)
         self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))
         self.server.unlock_attempts.clear()
