@@ -54,12 +54,19 @@ def test_job_specific_paths():
     ["core/src/jarves/auto_update.py", "core/tests/test_auto_update.py"],            # PR #1344
     [".github/workflows/release.yml", "core/tests/test_ci_workflows.py"],            # PR #1336
     ["core/src/jarves/updates.py"], ["core/src/jarves/hotfix.py"], ["core/src/jarves/install_latest.py"],
+    ["core/src/jarves/update_progress.py"], ["core/src/jarves/hotfix_recover.py"], ["core/src/jarves/hotfix_slice2.py"],
     [".github/workflows/package.yml"],
 ])
 def test_jar584_installer_sensitive_pr_builds_the_windows_installer(files):
     """JAR-584: the update/install write paths and the release/package workflows change what the installed product does
-    on Windows, so their PR builds and smoke-tests the installer (it was 'skipped', never started, on #1344 and #1336)."""
+    on Windows, so their PR builds and smoke-tests the installer (it was 'skipped', never started, on #1344 and #1336).
+    The merge-queue group (the unchanged RULES["installer"]) and the main push (always) behave as before."""
+    import re
     assert ci_plan.classify(files, "pull_request")["installer"]
+    assert ci_plan.RULES["installer"] == r"^(packaging/|core/(src/|pyproject|uv\.lock)|godot/|jarvis\.cmd)"
+    group = ci_plan.classify(files, "merge_group")["installer"]
+    assert group == any(re.match(ci_plan.RULES["installer"], f) for f in files)
+    assert group == files[0].startswith("core/src/") and ci_plan.classify(files, "push")["installer"]
 
 
 def test_jar584_ordinary_core_and_workflow_prs_still_skip_the_installer():

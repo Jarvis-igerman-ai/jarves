@@ -52,7 +52,7 @@ RULES = {
 # JAR-584: plus the update/install write paths and the release/package workflows, which change what the installed product
 # does on Windows; before this their PRs (#1344 auto_update.py, #1336 release.yml) never started the installer job.
 PR_INSTALLER = (r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_"
-                r"|core/src/jarves/(auto_update|updates|hotfix|install_latest)\.py$"
+                r"|core/src/jarves/(auto_update|updates|update_progress|hotfix\w*|install_latest)\.py$"
                 r"|\.github/workflows/(release|package)\.yml$)")
 
 
