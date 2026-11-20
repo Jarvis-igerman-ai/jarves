@@ -75,8 +75,12 @@ NO_HOOKS = _no_hooks_path()
 # a driver it then cannot run counts as a conflict or a failed command). Editors: GIT_EDITOR/GIT_SEQUENCE_EDITOR=":".
 RUN_KEYS = re.compile(r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)|"
                       r"diff\.external|hook\..+\.command|core\.(sshcommand|askpass|pager|editor)|sequence\.editor|"
-                      r"credential\.helper|gpg\.(program|openpgp\.program|x509\.program|ssh\.program|"
-                      r"ssh\.defaultkeycommand))$")
+                      r"credential\.(.+\.)?helper|gpg\.(program|openpgp\.program|x509\.program|ssh\.program|"
+                      r"ssh\.defaultkeycommand)|core\.(gitproxy|alternaterefscommand)|"
+                      r"remote\..+\.(uploadpack|receivepack|vcs))$")
+# commit and merge start `maintenance run --auto` / `gc --auto`, which can run `gc.recentObjectsHook` (multi-valued:
+# an extra `-c` value cannot remove the shared config's own values). JARVES never needs auto-maintenance (#1468 R1).
+NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
 _SIGNING_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                      "gpg.ssh.program": "ssh-keygen"}
 _OWNER_SCOPES = ("system", "global")
@@ -124,7 +128,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if check:
             raise GitError("the repository's git config could not be read")
         return subprocess.CompletedProcess(["git", *args], 128, "", "the repository's git config could not be read")
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *over]
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *NO_AUTO, *over]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=_git_env(), encoding="utf-8", errors="replace")

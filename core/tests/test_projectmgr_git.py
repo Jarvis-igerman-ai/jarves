@@ -308,7 +308,9 @@ def test_only_repository_scope_command_settings_are_overridden(monkeypatch, tmp_
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     repo = _repo(tmp_path)
     keys = ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor", "credential.helper",
-            "gpg.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand", "filter.Lfs2.clean")
+            "gpg.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand", "filter.Lfs2.clean",
+            "credential.https://example.invalid.helper", "core.gitProxy", "core.alternateRefsCommand",
+            "remote.origin.uploadpack", "remote.origin.receivepack", "remote.origin.vcs")       # review R2
     for key in keys:
         subprocess.run(["git", "config", key, "evil"], cwd=repo, check=True)
     over = gitops._config_overrides(repo)
@@ -329,3 +331,39 @@ def test_an_unreadable_shared_config_fails_closed(tmp_path):
     (repo / ".git" / "config").write_text('[filter "a=b"]\n\tclean = evil\n', encoding="utf-8")    # "-c" cannot name it
     with pytest.raises(gitops.GitError, match="could not be read"):
         gitops.git(repo, "add", "-A")
+
+
+def test_auto_maintenance_never_runs_from_a_jarves_command(tmp_path):
+    """PR #1468 review R1: `commit` and `merge` start `maintenance run --auto` / `gc --auto`, and auto-gc runs commands
+    the shared config can name (`gc.recentObjectsHook`, a multi-valued key one `-c` cannot remove). JARVES turns
+    auto-maintenance off on every call: with `gc.auto=1`/`gc.autoPackLimit=1` set, a commit repacks nothing."""
+    repo, marker = _repo(tmp_path), tmp_path / "gc-hook-ran.txt"
+    _hook(tmp_path / "evil-bin", "gc-hook", marker)
+    for key, value in (("gc.auto", "1"), ("gc.autoPackLimit", "1"), ("gc.autoDetach", "false"),
+                       ("maintenance.autoDetach", "false"), ("gc.recentObjectsHook",
+                                                             (tmp_path / "evil-bin" / "gc-hook").as_posix())):
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+    for i in range(2):                                              # two packs: over gc.autoPackLimit
+        (repo / f"p{i}.txt").write_text(str(i), encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "-c", "gc.auto=0", "commit", "-qm", f"p{i}", "--no-verify"], cwd=repo, check=True)
+        subprocess.run(["git", "repack", "-q"], cwd=repo, check=True)
+    packs = sorted((repo / ".git" / "objects" / "pack").glob("*.pack"))
+    assert len(packs) == 2
+    (repo / "new.txt").write_text("n", encoding="utf-8")
+    assert gitops.commit_all(repo, "new")
+    assert sorted((repo / ".git" / "objects" / "pack").glob("*.pack")) == packs and not marker.exists()
+
+
+def test_config_hooks_never_run_on_a_commit_with_verification(tmp_path):
+    """#1468 review R4: a commit WITHOUT --no-verify runs no config hook (`hook.<name>.command`) set in the shared
+    config: its command is overridden. Git 2.43 (CI) has no config hooks, so there the commit proves nothing about
+    git's own handling of the empty command (UNVERIFIED on newer git); the override itself is always checked."""
+    repo, marker = _repo(tmp_path), tmp_path / "cfg-hook-ran.txt"
+    for key, value in (("hook.x.command", f"echo ran > '{marker.as_posix()}'"), ("hook.x.event", "pre-commit")):
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+    assert "hook.x.command=" in (gitops._config_overrides(repo) or [])
+    (repo / "v.txt").write_text("v", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "verified")
+    assert not marker.exists()

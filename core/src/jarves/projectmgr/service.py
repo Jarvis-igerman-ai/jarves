@@ -914,7 +914,10 @@ class Manager(StageEngine):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
             # #1407: the prompt names the exact commit and the merge takes that commit, so a later commit on the
             # integration branch (an agent can move it) never reaches your branch unapproved
-            sha = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False).stdout.strip()
+            rp = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False)
+            if rp.returncode not in (0, 1):                 # git itself failed (e.g. its config): not a missing branch
+                return _res(False, "GIT_ERROR", "git failed, nothing merged: " + clean(rp.stderr or "unknown", 200))
+            sha = rp.stdout.strip()
             if not sha:
                 return _res(False, "NO_BRANCH", f"the integration branch {br} has no commit to merge")
             if not yes and not self._approve(f"Merge {br} at {sha[:12]} into {st['branch']} in {p['path']}? (no push)",

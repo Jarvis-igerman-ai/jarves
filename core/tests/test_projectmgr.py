@@ -1258,3 +1258,6 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     assert plan["commit"] == late and all(late in c for c in plan["commands"][:2])    # the commands name the commit
     sh(repo, "git", "update-ref", "-d", "refs/heads/" + gitops.integration_branch(1))
     assert m.call("ship_plan", project="demo", apply=True)["code"] == "NO_BRANCH"
+    (repo / ".git" / "config").write_text("[core\n broken")              # review R5: a git failure is not NO_BRANCH
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "GIT_ERROR" and "could not be read" in r["text"]
