@@ -88,3 +88,13 @@ def test_worker_tools_pass_the_worker_cwd(tmp_path, monkeypatch):
     svc.home = tmp_path
     svc._worker_tools(str(tmp_path / "wt"))
     assert seen["cwd"] == str(tmp_path / "wt")
+
+
+def test_worker_ignores_owner_user_and_local_settings():
+    """--allowedTools only adds rules; the owner's broad user allows (python, pytest, npm, git) must not load."""
+    worker = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda *_: None,
+                                  allowed_tools=["Read"], permission_mode=claude.WORKER_PERMISSION_MODE)
+    src = worker.argv[worker.argv.index("--setting-sources") + 1]
+    assert src == "project"
+    assert worker.argv.count("--setting-sources") == 1
+    assert "Edit(**/.claude/**)" in claude.WORKER_DENY and "Write(**/.claude/**)" in claude.WORKER_DENY
