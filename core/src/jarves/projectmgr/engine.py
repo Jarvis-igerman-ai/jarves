@@ -286,12 +286,14 @@ class StageEngine:
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
             files = gitops.changed_files(wt, base)
+            links = gitops.link_files(wt, base)
         except gitops.GitError as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
         scope = t["scope"]
         if kind == "reproduce" and not scope:
             scope = ["test", "tests", "spec", "*test*", "*/test*", "*spec*"]
         prot, outside = gitops.violations(files, scope)
+        prot += [f for f in links if f not in prot]
         if prot:
             return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) + f" (not merged; on {br})")
         if outside and not owner:
@@ -389,6 +391,7 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']} ({name}): {t['title']}"[:120])
                 files = gitops.changed_files(wt, base)
                 prot, outside = gitops.violations(files, t["scope"])
+                prot += [f for f in gitops.link_files(wt, base) if f not in prot]
             except gitops.GitError as e:
                 notes.append(f"{name}: git failed {clean(e, 80)}")
                 continue

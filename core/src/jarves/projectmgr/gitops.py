@@ -57,13 +57,32 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+def _no_hooks_path() -> str:
+    """`core.hooksPath` for every JARVES git command (#1381): a path BELOW a file, so it can never be a folder and no
+    process (an agent included) can put a hook there. POSIX: `/dev/null` (root-owned, in root-owned /dev). Windows: a
+    path below `kernel32.dll` in System32 (owned by TrustedInstaller); `NUL\\x` would be a plain relative path there."""
+    if os.name == "nt":
+        return os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "kernel32.dll", "no-hooks")
+    return "/dev/null"
+
+
+NO_HOOKS = _no_hooks_path()
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
-    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch)."""
+    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
+    No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
+    shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
+    commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
+    git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
+    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
+    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     for attempt in range(LOCK_RETRIES + 1):
-        p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True,
-                           timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
-                           encoding="utf-8", errors="replace")
+        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                           errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
@@ -159,6 +178,17 @@ def changed_files(wt: Path, base: str) -> list[str]:
     sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
     out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
     return [x.replace("\\", "/") for x in out.split("\0") if x]
+
+
+LINK_MODES = ("120000", "160000")       # a symlink and a gitlink (submodule entry)
+
+
+def link_files(wt: Path, base: str) -> list[str]:
+    """Paths the task added or changed as a symlink or a gitlink (#1381). Their path text can look harmless while a
+    symlink points into `.github/` or `.claude/` and a gitlink pulls in another repository, so they count as protected."""
+    out = git(wt, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...HEAD").stdout.split("\0")
+    return [out[i + 1].replace("\\", "/") for i in range(0, len(out) - 1, 2)
+            if out[i].startswith(":") and out[i].split()[1:2] and out[i].split()[1] in LINK_MODES]
 
 
 def diffstat(wt: Path, base: str) -> str:
