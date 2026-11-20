@@ -305,8 +305,9 @@ class StageEngine:
                           ", ".join(outside[:5]))
         repro = self._job(t).get("repro") or {}
         if kind == "work" and repro.get("files") and repro.get("commit"):
-            touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
-                                 check=False).stdout.split()
+            touched, err = _repro_touched(wt, repro)
+            if err:
+                return ("stop", "failed", err)
             if touched:
                 return ("stop", "blocked", "the fix changed the reproduction test " + ", ".join(touched[:3]) +
                         " (it must stay as written)")
@@ -457,9 +458,10 @@ class StageEngine:
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
         base = gitops.integration_branch(p["id"])
-        # git's own diff only: a diff command or textconv from the shared config is blanked (#1390), so git could not
-        # run it and an empty diff would skip the review
-        diff = gitops.git(t["worktree"], "diff", "--no-ext-diff", "--no-textconv", f"{base}...HEAD", check=False).stdout
+        d = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False)     # git's own diff only (gitops.git)
+        if d.returncode:                            # e.g. a refused config: no output, but not "nothing to review"
+            return ("stop", "blocked", "git failed, not reviewed: " + clean(d.stderr or "unknown", 200))
+        diff = d.stdout
         if not diff.strip():
             return ("next",)
         if self._day_cap():
@@ -533,9 +535,10 @@ class StageEngine:
                 ok, out = gitops.run_check(wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
                 outs.append(out)
             if ok and kind == "verify" and repro.get("files") and repro.get("commit") and has_wt:
-                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
-                                     check=False).stdout.split()
-                if touched:
+                touched, err = _repro_touched(wt, repro)
+                if err:
+                    ok, outs = False, [err]
+                elif touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
             tested = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
@@ -758,6 +761,13 @@ class StageEngine:
             self.db.event(t["id"], "manager", "debate", clean(r["text"], 300))
         return self._res(True, "ok", r["text"], decision=v, needs_owner=r["needs_owner"], id=did, rounds=r["rounds"],
                          participants=names, judge=judge, untrusted=self.UNTRUSTED)
+
+
+def _repro_touched(wt: Path, repro: dict) -> tuple[list[str], str]:
+    """(reproduction-test files the fix changed, "") or ([], git's error): a failed git (e.g. a refused config, no
+    output) never counts as "not touched" (PR #1486)."""
+    d = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"], check=False)
+    return (d.stdout.split(), "") if d.returncode == 0 else ([], "git failed: " + clean(d.stderr or "unknown", 200))
 
 
 def _diff_size(wt: Path, base: str) -> int:

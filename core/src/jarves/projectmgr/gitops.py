@@ -86,7 +86,8 @@ NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "submodule.r
 # fixed-name command keys JARVES never needs (it never fetches, pushes, pages or edits): blanked on every call, so a key
 # toggled between the config read and git's own read gains nothing (#1468 round 2 R2). Not diff.external (an empty one
 # breaks a patch diff: every diff/show/log gets --no-ext-diff instead, #1468 R2) and not the signing programs (always
-# set from the owner's scope, _SIGNING_DEFAULTS).
+# set from the owner's scope, _SIGNING_DEFAULTS). core.gitProxy is first-match in git, so a later `-c` cannot override
+# a repository value; JARVES never contacts a git:// remote, where it applies (PR #1486 council nit).
 NO_CMDS = [x for k in ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor",
                        "core.gitProxy", "core.alternateRefsCommand", "credential.helper") for x in ("-c", f"{k}=")]
 # refused at repository scope: a conditional include can match only in a child git (worktree add checks out with HEAD

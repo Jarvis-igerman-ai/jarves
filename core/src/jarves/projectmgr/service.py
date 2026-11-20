@@ -945,11 +945,15 @@ class Manager(StageEngine):
         ref, err = _integration_commit(p["path"], br, "no plan")
         if err:
             return err
-        try:
-            stat = (gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{ref}", check=False).stdout.strip()
-                    or "no changes") if ref else "no commit"
-        except (OSError, gitops.GitError):
-            stat = "unknown"
+        stat = "no commit"
+        if ref:
+            try:
+                d = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{ref}", check=False)
+            except OSError:
+                d = None
+            if d is not None and d.returncode:          # never "no changes" for a git failure (PR #1486)
+                return _res(False, "GIT_ERROR", "git failed, no plan: " + clean(d.stderr or "unknown", 200))
+            stat = (d.stdout.strip() or "no changes") if d is not None else "unknown"
         tip = ref or br
         cmds = [f"git -C \"{p['path']}\" diff HEAD...{tip}", f"git -C \"{p['path']}\" merge --no-ff {tip}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]

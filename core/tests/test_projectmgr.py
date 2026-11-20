@@ -1287,3 +1287,61 @@ def test_a_diff_command_in_the_shared_config_cannot_skip_the_review(env, tmp_pat
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "done" and t["rounds"] == 1                  # the review ran and sent it back once
+
+
+def test_a_refused_config_during_the_review_never_skips_it(env):
+    """PR #1486 council (opus blocker): git returns rc 128 with no output when the shared config is refused, and the
+    review read that as "no diff, nothing to review", so a task an agent toggled `includeIf` for reached the merge
+    unreviewed. A git failure at the review now blocks the task."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.py=1", scope=["a.py"], flow="work test review merge")
+    orig = m._st_review
+
+    def toggled(*a):                                   # another agent's includeIf, on only during this review read
+        sh(repo, "git", "config", "includeIf.onbranch:x.path", "nowhere.cfg")
+        try:
+            return orig(*a)
+        finally:
+            sh(repo, "git", "config", "--unset", "includeIf.onbranch:x.path")
+    m._st_review = toggled
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "not reviewed" in t["reason"] and "conditional include" in t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "a.py").exists()
+
+
+def test_a_git_failure_never_counts_as_an_untouched_reproduction_test(env, monkeypatch):
+    """PR #1486 council audit: the check that a fix left the reproduction test alone read empty output of a failed
+    git (e.g. a refused config) as "not touched". A git failure there now stops the task."""
+    m, repo, _ = env
+    open_project(m, repo)
+    repro = [sys.executable, "-c", "import sys; sys.exit(1)"]
+    m.call("bug", project="demo", title="b", spec="FAKE write tests/test_bug.py=def test_bug(): pass", repro_cmd=repro,
+           flow="reproduce work verify merge")
+    real = gitops.git
+
+    def git(cwd, *args, **kw):
+        if args[:2] == ("diff", "--name-only") and "--" in args:   # only the reproduction-test check
+            return subprocess.CompletedProcess(["git", *args], 128, "", gitops.CONFIG_REFUSED)
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] in ("blocked", "failed") and "git failed" in t["reason"], (t["status"], t["reason"])
+
+
+def test_ship_plan_reports_a_failed_diff_as_git_error(env, monkeypatch):
+    """PR #1486 council (gpt): when the commit resolves but the diff then fails, the plan said "no changes" and ok."""
+    m, repo, _ = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    real = gitops.git
+    monkeypatch.setattr(gitops, "git", lambda cwd, *a, **kw: subprocess.CompletedProcess(
+        ["git", *a], 128, "", gitops.CONFIG_REFUSED) if a[:2] == ("diff", "--shortstat") else real(cwd, *a, **kw))
+    r = m.call("ship_plan", project="demo")
+    assert not r["ok"] and r["code"] == "GIT_ERROR" and "could not be read" in r["text"]
