@@ -2070,7 +2070,9 @@ class Core:
 
     async def _start_wake_live(self) -> None:
         """#520: wake_greeting() claims _greeted (no second start greeting while connecting); a wake session that
-        did not open releases the claim, unless a greeting had already happened before this wake."""
+        did not open releases the claim, unless a greeting had already happened before this wake.
+        Invariant (review nit): every other _greeted=True setter either clears _greet_claim (prepare_desktop) or runs
+        only while _greeted is False (the face-connect greetings), i.e. never while a wake claim is pending."""
         was_greeted, opened_before = self._greeted, self._live_opened
         greeting = self.wake_greeting()
         claim = object() if greeting and not was_greeted else None

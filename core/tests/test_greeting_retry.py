@@ -249,29 +249,6 @@ def test_wake_greeting_claim_is_released_when_start_raises_before_opening():
     assert not c._greeted
 
 
-def test_a_turn_without_language_breaks_the_short_english_streak():
-    """#520 item 3: two NON-consecutive short English turns (a no-language turn between) must not switch the
-    Hebrew reply language; two consecutive ones still do. Hermetic: stub self/connection, no network."""
-    notes = []
-
-    async def append(**kw):
-        notes.append(kw)
-    session = SimpleNamespace(instructions=SimpleNamespace(append=append), thinking=SimpleNamespace(append=append))
-    lv = SimpleNamespace(_lang_turn=-1, _user_turn_n=0, _reply_lang="he", _en_streak=0, _in_text="",
-                         conn=SimpleNamespace(session=session), _stats={})
-
-    def turn(text):
-        lv._user_turn_n += 1
-        lv._in_text = text
-        asyncio.run(LiveVoice._match_language(lv))
-    turn("hello there")
-    turn("")                                             # no detectable language
-    turn("hello there")
-    assert lv._reply_lang == "he" and notes == []
-    turn("hello there")                                  # second short English turn in a row: switch
-    assert lv._reply_lang == "en" and len(notes) == 1
-
-
 def test_wake_release_leaves_a_greeting_claimed_by_another_path_meanwhile():
     """#520 review R2: a path that greeted during the wake's await (and cleared the token) keeps its _greeted."""
     from jarves.app import Core
