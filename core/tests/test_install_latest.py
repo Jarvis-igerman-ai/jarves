@@ -6,6 +6,9 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from jarves import install_latest as il
 from jarves.updates import UpdateError
@@ -157,12 +160,15 @@ def _real_checkpoint_prepare(home):
     return prepare
 
 
-def test_install_leaves_exactly_one_archive_issue_1016(tmp_path):
+@pytest.mark.parametrize("with_data", [True, False])                  # False: a fresh profile still gets an archive
+def test_install_leaves_exactly_one_archive_issue_1016(tmp_path, monkeypatch, with_data):
     from jarves import backup
-    db = sqlite3.connect(tmp_path / "memory.db")
-    db.execute("CREATE TABLE t (x)")
-    db.commit()
-    db.close()
+    monkeypatch.setattr(backup, "time", SimpleNamespace(time=lambda: 1_800_000_000.0))   # clock-free archive name
+    if with_data:
+        db = sqlite3.connect(tmp_path / "memory.db")
+        db.execute("CREATE TABLE t (x)")
+        db.commit()
+        db.close()
     f = Fake(tmp=tmp_path)
     d = f.deps()
     d.prepare = _real_checkpoint_prepare(tmp_path)

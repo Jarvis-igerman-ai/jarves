@@ -15,7 +15,7 @@ restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt 
 
 Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each (at least 2, #1016: the first start after an update must not prune the
+pre-restore checkpoints the last 5 each (at least 3, #1016: the first start after an update must not prune the
 rollback archive). Only automatic backups are thinned by the day/week rule.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
@@ -61,9 +61,9 @@ _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
 DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
-# #1016: the pre-update checkpoint is the only rollback archive; the first start of the new version writes another
-# checkpoint, so at least 2 of each checkpoint kind are kept or that start would prune the rollback archive.
-MIN_KEEP = {"daily": 1, "checkpoints": 2}
+# #1016: the pre-update checkpoint is the only rollback archive; the first start of the new version can write two
+# more (startup_checkpoint + migrations.run before a schema step), so at least 3 of each checkpoint kind are kept.
+MIN_KEEP = {"daily": 1, "checkpoints": 3}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 

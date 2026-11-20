@@ -278,7 +278,9 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
             rep.add("verify installer (signature, SHA256)", False, _err(e))
             rep.stopped_at = "verify"
         return rep
-    rep.revert_id = Path(str(prep.get("backup") or "")).name
+    rep.add("verify installer (signature, SHA256)", True, f"{Path(prep['installer']).name}, "
+                                                           f"{'signed' if prep.get('signed') else 'unsigned'}")
+    rep.revert_id = Path(str(prep.get("backup") or "")).name   # prepare verifies first, then backs up
     if not rep.revert_id:                                 # #1016: no install without the one rollback archive
         rep.add("backup before install", False, "no pre-update backup")
         rep.stopped_at = "backup"
@@ -286,8 +288,6 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     rep.add("backup before install", True, rep.revert_id)
     if ch != deps.channel:
         deps.set_channel(ch)                              # same switch as `jarvis update --channel`, only once verified
-    rep.add("verify installer (signature, SHA256)", True, f"{Path(prep['installer']).name}, "
-                                                           f"{'signed' if prep.get('signed') else 'unsigned'}")
     core_up = deps.core_running()
     was = deps.detect_running(core_up)                    # read BEFORE anything is stopped (#293)
     try:
