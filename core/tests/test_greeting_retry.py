@@ -256,4 +256,3 @@ def test_wake_claim_is_kept_while_another_start_is_still_connecting():
     c._voice_connecting = True
     asyncio.run(Core._start_wake_live(c))
     assert c._greeted
-

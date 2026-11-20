@@ -2064,7 +2064,13 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
-                await self._start_wake_live()
+                try:
+                    await self._start_wake_live()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:          # #520 review R2: a raising start must not end the wake loop for good
+                    logs.error("wake", "WAKE_START_FAILED", "wake live start failed; still listening", exc=True)
+                    await asyncio.sleep(2)  # one log per wake attempt, never a tight loop
 
     async def _start_wake_live(self) -> None:
         """#520: the wake greeting claims _greeted (no second start greeting while connecting); a session that did

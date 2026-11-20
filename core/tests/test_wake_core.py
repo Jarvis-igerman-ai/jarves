@@ -294,3 +294,30 @@ async def test_resume_is_limited_when_the_server_keeps_closing(home, cfg, monkey
         assert len(sessions) == 4                                  # first + at most 3 resumes
     finally:
         await c.stop()
+
+
+async def test_wake_loop_survives_a_raising_live_start_and_the_next_wake_greets(home, cfg, monkeypatch):
+    """#520 review R2: a wake start that raised ended the whole wake loop (no more 'Hey Jarvis' until restart);
+    the loop logs it and keeps listening, and the released claim lets the next wake session greet."""
+    import json as _json
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg.voice.greeting = True
+    c = await make(home, cfg, lambda: iter([bytes(CHUNK), FakeDetector.marker_chunk()]))
+    calls = []
+
+    async def start(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            raise RuntimeError("connect blew up")
+        return False
+    c._start_live = start
+    try:
+        for _ in range(1500):
+            if len(calls) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert len(calls) >= 2 and calls[1]["greeting"]                  # second wake still heard, and it greets
+        codes = [_json.loads(l)["code"] for l in (home / "logs" / "jarves.log").read_text(encoding="utf-8").splitlines()]
+        assert "WAKE_START_FAILED" in codes
+    finally:
+        await c.stop()
