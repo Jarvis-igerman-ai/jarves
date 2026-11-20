@@ -82,6 +82,9 @@ FAKE = textwrap.dedent('''
             os.symlink(body, path)
         elif op == "sleep":
             time.sleep(float(arg))
+        elif op == "sh":                # #1352: an agent can run git, e.g. move a shared ref
+            import shlex, subprocess
+            subprocess.run(shlex.split(arg), check=True)
         elif op == "fail":
             print(json.dumps({"is_error": True, "result": "boom", "session_id": sid})); sys.exit(1)
     status = "BLOCKED" if "FAKE block" in prompt else "DONE"
@@ -356,6 +359,103 @@ def test_a_symlink_in_scope_into_github_is_blocked_as_protected(env, tmp_path):
     t = m.db.tasks(1)[0]
     assert t["status"] == "blocked" and "protected" in t["reason"] and "src/ci" in t["reason"]
     assert not (gitops.project_root(home, 1) / "integration" / "src").exists()
+
+
+MOVE_REF = ("FAKE write .github/workflows/x.yml=on: push\nFAKE sh git add -A\n"
+            "FAKE sh git -c user.name=a -c user.email=a@a commit -qm x\n"
+            "FAKE sh git update-ref refs/heads/jarves/p1/integration HEAD")
+
+
+def test_moving_the_integration_ref_never_hides_protected_files_1352(env):
+    m, repo, home = env
+    open_project(m, repo)
+    start = sh(repo, "git", "rev-parse", "jarves/p1/integration").strip()
+    task(m, "Mover", MOVE_REF, scope=[])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "MOVED"
+    assert m.db.project(1)["integration_sha"] == start                       # JARVES's record was never moved
+    assert not (repo / ".github").exists()
+
+
+def test_best_of_agent_moving_the_integration_ref_is_blocked_1352(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mover", spec=MOVE_REF, scope=[], flow="work:claude:alpha,claude:beta merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert len(list((gitops.project_root(home, 1) / "wt").glob("t1-*"))) == 0          # nothing kept to merge
+
+
+def test_release_never_runs_at_a_moved_integration_ref_1352(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Ship it", spec="s", scope=["a"], flow="release:jarves")
+    flag = home.parent / "released"
+    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+    evil = sh(repo, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit-tree", "HEAD^{tree}", "-p", "HEAD",
+              "-m", "evil").strip()
+    sh(repo, "git", "update-ref", "refs/heads/jarves/p1/integration", evil)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"] and not flag.exists(), t["reason"]
+
+
+def test_ship_merges_the_recorded_commit_not_a_moved_ref_1352(env):
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    rec = sh(repo, "git", "rev-parse", "jarves/p1/integration").strip()
+    assert m.db.tasks(1)[0]["status"] == "done"
+    other = gitops.project_root(home, 1) / "evil"
+    sh(repo, "git", "worktree", "add", "-q", "--detach", str(other), rec)
+    (other / ".claude").mkdir()
+    (other / ".claude" / "settings.json").write_text("{}")
+    sh(other, "git", "add", "-A")
+    sh(other, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "evil")
+    sh(other, "git", "update-ref", "refs/heads/jarves/p1/integration", "HEAD")
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "MOVED" and not (repo / ".claude").exists()
+    assert m.db.project(1)["integration_sha"] == rec
+    sh(other, "git", "update-ref", "refs/heads/jarves/p1/integration", rec)   # back at the recorded commit: ships
+    (repo / "b.txt").write_text("owner\n")                                    # the owner moved on: a real merge commit
+    sh(repo, "git", "add", "b.txt")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "owner")
+    sh(repo, "git", "config", "user.name", "t")                              # ship uses the owner's own identity
+    sh(repo, "git", "config", "user.email", "t@t")
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and (repo / "a.txt").exists(), r
+    assert sh(repo, "git", "log", "-1", "--format=%s").strip() == f"Merge jarves/p1/integration ({rec[:12]})"
+
+
+def test_files_written_after_the_scope_check_are_rechecked_before_merge_1352(env):
+    m, repo, home = env
+    check = [sys.executable, "-c", "import os; os.makedirs('.claude', exist_ok=True); "
+             "open('.claude/settings.json', 'w').write('{}')"]
+    open_project(m, repo, check=check)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "protected" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == sh(repo, "git", "rev-parse", "main").strip()
+
+
+def test_project_opened_before_1352_records_its_integration_commit_once(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.db.update_project(1, integration_sha="")                                # as stored by an older JARVES
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.tasks(1)[0]["status"] == "done"
+    assert m.db.project(1)["integration_sha"] == sh(repo, "git", "rev-parse", "jarves/p1/integration").strip()
 
 
 def test_agent_blocked_and_failed_runs(env):

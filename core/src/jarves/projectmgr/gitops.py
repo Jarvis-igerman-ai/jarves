@@ -130,6 +130,12 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     return wt
 
 
+def rev(cwd: str | Path, ref: str) -> str:
+    """The commit SHA `ref` points at now, or "" when there is none."""
+    p = git(cwd, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False)
+    return p.stdout.strip() if p.returncode == 0 else ""
+
+
 def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -> tuple[Path, str]:
     """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
@@ -172,11 +178,11 @@ def commit_all(wt: Path, message: str) -> bool:
     return True
 
 
-def changed_files(wt: Path, base: str) -> list[str]:
+def changed_files(wt: Path, base: str, tip: str = "HEAD") -> list[str]:
     """Every path the task changed, as plain text. -z: git would otherwise print a non-ASCII name in quotes
     (octal escapes inside `"..."`), which no PROTECTED prefix matches. --no-renames: a rename lists both
     sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
-    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
+    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...{tip}").stdout
     return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
@@ -228,14 +234,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
