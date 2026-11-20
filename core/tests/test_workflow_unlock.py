@@ -379,7 +379,10 @@ class UnlockTests(unittest.TestCase):
 
     def test_750_close_withdraws_only_its_own_key(self):
         second = Server(self.home, 0)                                      # replaces the published key
+        self.addCleanup(second.server_close)                               # idempotent, so the close below is harmless
         mine = (self.home / unlock.PUB_FILE).read_bytes()
+        self.server.shutdown()
+        self.thread.join(5)
         self.server.server_close()                                         # the first one's key is no longer published
         self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), mine)
         second.server_close()
@@ -388,7 +391,7 @@ class UnlockTests(unittest.TestCase):
     def test_750_a_boolean_port_in_the_published_key_is_no_port(self):
         """JSON true/false is not a port (bool is an int in Python): no --port must not mean port 1."""
         pub = json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))["pub"]
-        for bad in (True, False):
+        for bad in (True, False, 0, -1, 65536, 99999):                    # bools and out-of-range ints
             (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": pub, "port": bad}), encoding="ascii")
             with self.assertRaises(unlock.UnlockUnavailable):
                 unlock.published_port(self.home)
