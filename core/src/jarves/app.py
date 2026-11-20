@@ -1567,7 +1567,7 @@ class Core:
         if self.stopping:
             await live.stop()
             return
-        self.live = live                            # the ONLY non-None assignment of self.live (#520: rg "self\.live = ")
+        self.live = live                            # #520: keep _live_opened next to every non-None self.live set
         self._live_opened += 1                      # counted here, so a wake session that opened keeps its greeting claim
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
