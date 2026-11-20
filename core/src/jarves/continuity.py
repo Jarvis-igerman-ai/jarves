@@ -46,6 +46,8 @@ JOURNAL_KEEP = 500
 NOTICE_KEEP_S = 7 * 86400
 MAX_TEXT = 1000
 DEVICES = ("desktop", "phone")
+NOT_KEPT = '{"not_kept": true'      # privacy mode (#206 F13): a ledger body starting with this keeps no words
+_KEEP_STR = ("code", "state")      # the only strings kept at rest in privacy mode: fixed codes and states
 
 # signal gate defaults (owner-changeable through settings)
 DEFAULT_HOURLY = 2
@@ -78,11 +80,28 @@ class Continuity:
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
+        self._scrub()
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         cx.row_factory = sqlite3.Row
+        cx.execute("PRAGMA secure_delete=ON")            # freed pages (old answer text) are overwritten, not left
         return cx
+
+    @staticmethod
+    def _at_rest(body: dict) -> str:
+        """The stored form of an answer. Privacy on: only numbers, flags, null and a fixed code/state survive."""
+        if not logs.privacy():
+            return json.dumps(body)
+        kept = {k: v for k, v in (body.items() if isinstance(body, dict) else ()) if k != "not_kept" and (v is None or isinstance(v, (bool, int, float))
+                or (k in _KEEP_STR and isinstance(v, str)))}
+        return json.dumps({"not_kept": True, **kept})
+
+    def _scrub(self) -> None:
+        """Privacy on: blank the words of answers stored while privacy was off (a Core start or a ledger write)."""
+        if logs.privacy():
+            self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
+                    (json.dumps({"not_kept": True}), len(NOT_KEPT), NOT_KEPT))
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:
@@ -114,15 +133,17 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
+                self._scrub()
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), self._at_rest(body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
+        self._scrub()
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+                (device, cid, kind, int(status), self._at_rest(body), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:

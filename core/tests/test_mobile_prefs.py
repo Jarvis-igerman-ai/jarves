@@ -94,7 +94,8 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
     assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
-    assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
+    assert [x["text"] for x in pc["items"]] == ["Play jazz while cooking"]               # #206 H2: a new wording
+    assert [x["text"] for x in pc["proposed"]] == ["I like very short answers in the morning"]   # needs a new confirm
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True
     assert op(srv, tok, op="decline", pref=b)[1]["ok"] is True
     _, v = call(srv, "GET", "/api/m/prefs", tok)

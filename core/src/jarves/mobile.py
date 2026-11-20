@@ -467,6 +467,9 @@ class MobileAccess:
             self._replay_failed = True
             return None
         self._replay_failed = False
+        if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
+            en, he = _MSG["NOT_KEPT"]
+            hit = {**hit, "code": "NOT_KEPT", "reply": he, "reply_en": en}
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -633,6 +636,8 @@ _MSG = {
               "אין תעודת חיבור מהימן: הפעילו את phone_trust והריצו במחשב jarvis phone trust enable"),
     "BAD_ID": ("the request was not readable: reload the page and try again", "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"),
     "STALE": ("this message waited too long while offline: send it again", "ההודעה חיכתה יותר מדי זמן בלי חיבור: שלחו אותה שוב"),
+    "NOT_KEPT": ("this was already answered, but privacy mode did not keep the answer: ask again if you need it",
+                 "על זה כבר נענה, אבל מצב פרטיות לא שמר את התשובה: שאלו שוב אם צריך"),
     "CHAT_RATE": ("too many messages: wait half a minute and send again", "יותר מדי הודעות: חכו חצי דקה ושלחו שוב"),
     "EMPTY": ("the message is empty: type something and send again", "ההודעה ריקה: כתבו משהו ושלחו שוב"),
     "NOT_CONNECTED": ("JARVES on the computer is not connected yet: check it is fully started and try again",
@@ -654,6 +659,14 @@ _MSG = {
 def _err(key: str, **fmt) -> dict:
     en, he = _MSG[key]
     return {"error": en.format(**fmt), "error_he": he.format(**fmt)}
+
+
+def _again(status: int, obj: dict) -> dict:
+    """A resent command answered from the ledger. A privacy-mode row has no words: an error gets a defined message."""
+    out = {**obj, "replay": True}
+    if obj.get("not_kept") and status >= 400 and "error" not in obj:
+        out.update(_err("NOT_KEPT"), code="NOT_KEPT")
+    return out
 
 
 _UNREADABLE, _TOO_BIG = _err("UNREADABLE"), _err("TOO_BIG")
@@ -945,7 +958,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+        return done(status, _again(status, obj) if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/audio" and method == "GET":        # mic / cloud-audio indicator (V5 G5): true state, read-only
         if not need("status"):
             return
@@ -972,7 +985,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
+        return done(status, _again(status, obj) if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
     if path == "/api/m/browser" or path.startswith("/api/m/browser/"):
         # Browser pilot viewer (V7 B4 #399): beta, https only, paired + scope
         if not need("browser"):
@@ -1013,7 +1026,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
+        return done(status, _again(status, obj) if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
     if path == "/api/m/drive" and method == "GET":        # Drive tab (V6 #218): drive mode read-only, queue COUNT + tool names
         if not need("drive"):
             return
@@ -1127,7 +1140,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "signals", lambda: signals_action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+        return done(status, _again(status, obj) if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/approvals" and method == "GET":
         if not need("approvals") or not need_page("approvals"):
             return
@@ -1152,7 +1165,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(
             dev["id"], cid, "approval", lambda: answer_approval(mob, m.group(1), d["approved"], dev["id"], **extra),
             age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, decision="approve" if d["approved"] else "deny")
+        return done(status, _again(status, obj) if again else obj, decision="approve" if d["approved"] else "deny")
     return h._json(404, _err("NOT_FOUND"))
 
 
