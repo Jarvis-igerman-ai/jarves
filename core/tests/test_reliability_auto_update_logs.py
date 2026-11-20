@@ -29,7 +29,7 @@ def _boom(*a, **k):
 
 
 def test_busy_probe_failures_are_logged_once_each(seen):
-    assert auto_update.core_busy(_core()) == []
+    assert auto_update.core_busy(_core()) == ["approval_probe_failed"]     # JAR-316: an unknown approval state defers
     assert [c for c, _ in seen] == ["AUTO_UPDATE_BUSY_PROBE_FAILED"] * 4
     assert [f["where"] for _, f in seen] == ["approvals", "chat", "agents", "quiet"]
     assert all(f["error_type"] == "RuntimeError" and "secret" not in str(f) for _, f in seen)
@@ -53,7 +53,8 @@ WHERE = {"approvals": "approvals", "chat": "chat", "orchestrator": "agents", "op
 def test_each_busy_probe_failure_is_logged_alone(seen, broken):
     core = _Healthy()
     setattr(core, broken, Boom())
-    assert auto_update.core_busy(core) == [v for k, v in BUSY.items() if k != broken]
+    failed = ["approval_probe_failed"] if broken == "approvals" else []    # JAR-316: only approvals fail closed
+    assert auto_update.core_busy(core) == failed + [v for k, v in BUSY.items() if k != broken]
     assert seen == [("AUTO_UPDATE_BUSY_PROBE_FAILED", {"error_type": "RuntimeError", "where": WHERE[broken]})]
 
 

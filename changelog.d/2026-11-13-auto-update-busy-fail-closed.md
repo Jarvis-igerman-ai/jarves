@@ -1,0 +1,1 @@
+- Fixed: automatic updates no longer restart JARVES when the pending-approval check fails; the install waits (busy reason `approval_probe_failed`, logged once per outage) until the check works and nothing is pending, and `jarvis update auto status` explains the wait in Hebrew and English with `jarvis update auto now` to install anyway (#1100, JAR-316).
