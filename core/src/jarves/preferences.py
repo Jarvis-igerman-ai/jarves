@@ -11,6 +11,7 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
 
@@ -42,11 +43,26 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    r"טוקן|מפתח\s+(?:api|גישה|פרטי|סודי)|"
+    r"api[\s_-]?key|(?:private|access|secret)[\s_-]?key|(?:access|auth|bearer|refresh|api)[\s_-]?token|"
+    r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]", re.I)
+# An unlabelled credential: a long run of key alphabet with letters AND digits and high per-character entropy.
+# (- and _ split runs so word slugs stay ordinary; prefixed dashed tokens are caught by logs.has_secret above)
+_KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
+_MIN_ENTROPY = 3.5                # bits per character; English words and slugs stay well below this
+
+
+def _entropy(s: str) -> float:
+    return -sum(c / len(s) * math.log2(c / len(s)) for c in map(s.count, set(s)))
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    if _SENSITIVE.search(t) or logs.has_secret(t):            # keywords, numbers, and the known token shapes
+        return True
+    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and _entropy(m) >= _MIN_ENTROPY
+               for m in _KEYISH.findall(t))
 
 
 def normalize(text: str) -> str:
