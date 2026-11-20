@@ -201,6 +201,22 @@ class UnlockTests(unittest.TestCase):
         self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
 
+    def test_fresh_logins_while_a_code_is_live_cannot_cancel_it_1416(self):
+        owner = self.login()                                           # the owner's window, open before the code
+        self.cookie = ""
+        self.login()                                                   # the token holder's window A, also open before
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        results = [self.wrong_try(wrong) for _ in range(3)]            # window A uses its own tries
+        for _ in range(3):                                             # then logs in again and again while the code is live
+            self.cookie = ""
+            self.login()
+            results += [self.wrong_try(wrong) for _ in range(3)]
+        self.assertEqual([r for r in results if r == (403, None)], [(403, None)] * 4)  # 2 (A) + 2 shared by fresh logins
+        self.assertTrue((self.home / unlock.FILE).exists())           # the backstop (5) is never reached
+        self.cookie = f"{self.server.cookie}={owner}"
+        self.assertEqual(self.wrong_try(shown), (200, None))           # the owner's own window still unlocks
+
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
         self.assertFalse((self.home / unlock.FILE).exists())
