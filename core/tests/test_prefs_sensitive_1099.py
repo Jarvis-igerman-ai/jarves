@@ -30,6 +30,8 @@ LEAKY = [
     "שמור את מפתח ה-API שלי",                 # Hebrew only: no English "api key" to lean on
     "המפתח הפרטי שלי נמצא בכונן",
     "send the bearer token with every call",
+    "export OPENAI_API_KEY_FILE before running",   # word end is not "_": variable names stay caught
+    "rotate the refresh tokens weekly",
 ]
 SAFE = [
     "I prefer short answers in the morning",
@@ -41,6 +43,9 @@ SAFE = [
     "open make-the-coffee-strong-2024 and MyFavouritePlaylist2024",
     "the file release_notes_v4_0_1_final is fine",
     "the bearer of the news was late",
+    "my private keyboard layout is Dvorak",      # keyword must end the word (review R1)
+    "the secret keyboard shortcut opens notes",
+    "access keyboard settings by voice",
 ]
 SHA = "ab17fe59578af69d56815eb69b4dbcb72a864efe"   # a real 40-hex commit id of this branch
 SAFE_DRAFTS = [
@@ -67,11 +72,22 @@ def test_vendor_shapes_are_caught_through_has_secret_only(token):
     assert prefs_mod.looks_sensitive(f"remember {token}")
 
 
-def test_token_shaped_suggestion_is_refused_and_not_stored(home):
+def test_token_shaped_suggestion_is_refused_and_not_stored(home, monkeypatch):
+    seen = []
+    monkeypatch.setattr(prefs_mod.logs, "info", lambda *a, **f: seen.append((a, f)))
     p = prefs_mod.Preferences(open_db(home))
-    with pytest.raises(ValueError, match="sensitive"):
+    with pytest.raises(ValueError, match="sensitive") as err:
         p.suggest(f"remember {RANDOM}", "the owner said it", by="voice")
     assert p.items() == []
+    # the refusal log and error carry only the reason code, never the refused text (review R3)
+    assert [a[1] for a, _ in seen] == ["PREF_REFUSED_SENSITIVE"]
+    assert RANDOM not in repr(seen) and RANDOM not in str(err.value)
+
+
+def test_sha_with_six_digit_run_is_still_refused_known_gap_1482():
+    # KNOWN GAP (#1482), pinned so it stays visible (the repo forbids xfail): the old \\d{6,} rule refuses a commit
+    # SHA containing a 6-digit run, so SAFE_DRAFTS above only proves SHAs without one. Flip this when #1482 lands.
+    assert prefs_mod.looks_sensitive("revert commit 3f2a1b9c0d123456ef7890abcdef1234567890ab")
 
 
 def test_goals_share_the_refusal(home):
