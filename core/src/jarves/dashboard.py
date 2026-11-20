@@ -961,7 +961,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"Open /pair on this device to pair it (code from the computer).", "text/plain; charset=utf-8")
         if not a.allowed(who, self.command, url.path):
             a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
-            return self._json(403, {"error": "only the computer itself can do this"})
+            return self._json(403, {"error": "only the computer itself can do this: do it in the dashboard on that computer"})
         if who["kind"] == "device" and self.command not in ("GET", "HEAD") and not secrets.compare_digest(
                 self.headers.get("X-CSRF-Token") or "", who["csrf"]):
             a.audit("refused_csrf", principal=who["id"], method=self.command, path=url.path)
@@ -1005,7 +1005,7 @@ class Handler(BaseHTTPRequestHandler):
         if who["kind"] == "device" and self.command not in ("GET", "HEAD") \
                 and not device_body_ok(self.ctx, self.command, url.path, body):
             a.audit("refused_privilege", principal=who["id"], method=self.command, path=url.path)
-            return self._json(403, {"error": "only the computer itself can do this"})
+            return self._json(403, {"error": "only the computer itself can do this: do it in the dashboard on that computer"})
         for method, rx, fn in _ROUTES:
             mt = rx.match(url.path)
             if mt and method == self.command:

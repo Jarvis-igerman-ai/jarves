@@ -37,7 +37,8 @@
     UI_ACTION_FORBIDDEN: ["את זה אפשר לעשות רק בדשבורד של המחשב עצמו.", "This can only be done in the dashboard on the computer itself."],
     CHAT_UNAVAILABLE: ["השיחה לא פועלת כאן. הריצו jarvis web או הפעילו את JARVES.", "Chat is not running here. Run jarvis web or start JARVES."],
     CHAT_FEATURE_OFF: ["השיחה כבויה: jarvis features on web_chat", "Chat is switched off: jarvis features on web_chat"],
-    CHAT_TOO_LONG: ["ההודעה ארוכה מדי.", "The message is too long."],
+    CHAT_TOO_LONG: ["ההודעה ארוכה מדי (עד 4000 תווים). קצרו אותה או חלקו לכמה הודעות.", "The message is too long (4000 characters at most). Shorten it or split it into several messages."],
+    CHAT_STOPPING: ["ג'רביס נעצר או מופעל מחדש. המתינו כמה שניות ושלחו שוב.", "JARVES is stopping or restarting. Wait a few seconds and send again."],
     PAGE_NOT_ALLOWED: ["למכשיר הזה לא ניתן הדף הזה. אפשר לאשר במחשב.", "This device was not given this page. Allow it on the computer."],
     PAGE_PC_ONLY: ["את זה אפשר לעשות רק במחשב עצמו.", "This can only be done on the computer itself."],
     APPROVAL_ALREADY_ANSWERED: ["כבר נענה במקום אחר.", "Already answered somewhere else."],
@@ -408,7 +409,7 @@
         setText(b, e.text); scroll();
       } else if (e.type === "reply") {
         let b = turns.get(e.turn);
-        const text = e.text || (e.ok ? "" : word(e.code, tx("משהו השתבש. ראו את היומן.", "Something went wrong. See the log.")));
+        const text = e.text || (e.ok ? "" : word(e.code, tx("משהו השתבש. נסו שוב; אם זה חוזר, פתחו את דף הבריאות או הריצו jarvis logs.", "Something went wrong. Try again; if it repeats, open the Health page or run jarvis logs.")));
         if (!b && text) b = bubble("assistant", "", e.turn, e.ts);
         if (b) { setText(b, text); b.classList.remove("streaming"); b.removeAttribute("aria-busy"); if (!e.ok) b.classList.add("err"); else addCopy(b, text); }
         turns.delete(e.turn);

@@ -8,7 +8,7 @@
   const msgSpan = () => el("span", { class: "muted small", role: "status" });
   const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body || {}) });
   async function act(msg, fn) {
-    try { await fn(); route(true); } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+    try { await fn(); route(true); } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }
   }
   const WAITING = () => tx("ממתין לאישור על המסך שלך", "waiting for approval on your screen");
   const STATUS = { active: ["פעיל", "Active"], paused: ["מושהה", "Paused"], done: ["הושלם", "Completed"], dropped: ["בוטל", "Dropped"] };
@@ -40,7 +40,7 @@
             g.stalled ? pill("degraded", tx("בלי התקדמות", "No movement")) : null,
             g.next_steps.length ? el("span", { class: "muted small", dir: "auto" }, tx("הבא: ", "Next: ") + g.next_steps[0]) : null))
             : el("div", { class: "empty" }, tx("אין יעדים פעילים.", "No active goals.")));
-      } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+      } catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }
     };
     const card = (g) => {
       const open = g.status === "active" || g.status === "paused";
@@ -169,7 +169,7 @@
     const file = (i) => async () => {
       msg.textContent = WAITING();
       try { const r = await post("/api/health/ticket/file", { id: i.id }); msg.textContent = r.status === "draft" ? JL.t(r.reason || "") : r.status; route(true); }
-      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }
     };
     render(header(tx("טיוטות פיתוח", "Development drafts"), tx("רעיונות וכרטיסים נשמרים כאן, מקומית בלבד. שום דבר לא נשלח ל-GitHub בלי אישור שלך על המסך.",
         "Ideas and tickets are kept here, locally only. Nothing is posted to GitHub without your approval on the screen.")),
@@ -195,7 +195,7 @@
     const ask = (p) => async () => {
       msg.textContent = WAITING();
       try { const r = await post("/api/dev/status/apply", { id: p.id }); msg.textContent = r.status === "done" ? tx("בוצע", "Done") : tx("לא בוצע (לא אושר)", "Not done (not approved)"); route(true); }
-      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); }
+      catch (e) { msg.textContent = tx("נכשל: ", "Failed: ") + e.message; }
     };
     const row = (i) => el("tr", {}, el("td", { dir: "auto" }, (i.type === "pr" ? "PR #" : tx("נושא #", "Issue #")) + i.number),
       el("td", { dir: "auto" }, i.title),

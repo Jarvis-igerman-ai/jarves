@@ -111,12 +111,12 @@ def briefing(mob, answer: str | None) -> tuple[int, dict]:
         return 200, {"ask": True, "mode": "ask"}
     fn = getattr(mob.bridge, "drive_briefing", None) if mob.bridge is not None else None
     if fn is None:
-        return 503, {"error": "the briefing is not available right now"}
+        return 503, {"error": "the briefing is not available right now: try again in a minute"}
     try:
         got = fn(mode)
     except Exception as e:
         logs.warn("mobile", "MOBILE_DRIVE_BRIEFING_FAILED", "briefing could not be built", error_type=type(e).__name__)
-        return 503, {"error": "the briefing is not available right now"}
+        return 503, {"error": "the briefing is not available right now: try again in a minute"}
     secs = [{"id": str(s.get("id", ""))[:20], "ok": bool(s.get("ok")), "text": str(s.get("text", ""))[:400]}
             for s in (got.get("sections") or [])[:6] if isinstance(s, dict)]
     return 200, {"ask": False, "mode": mode, "ok": bool(got.get("ok")), "sections": secs,
