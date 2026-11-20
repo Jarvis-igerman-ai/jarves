@@ -67,7 +67,9 @@ class ServerKey:
             tmp.unlink(missing_ok=True)
 
     def withdraw(self, home: Path) -> None:
-        """On a clean stop: remove unlock_pub.json only while it still holds THIS key (a newer dashboard's stays)."""
+        """On a clean stop: remove unlock_pub.json only while it still holds THIS key (a newer dashboard's stays).
+        Accepted race: a dashboard that publishes between the read and the unlink loses its published key; codes
+        then fail (fail closed) until it restarts. #789 keeps one dashboard per supervisor."""
         path = Path(home) / PUB_FILE
         try:
             if json.loads(path.read_text(encoding="ascii")).get("pub") == self.pub.hex():

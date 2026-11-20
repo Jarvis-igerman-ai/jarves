@@ -191,7 +191,6 @@ def _home_count(av) -> int:
     return len(seen)
 
 
-
 def live_code(home: Path, port: int) -> str:
     """#750: issue a code only for a dashboard that answers on `port` AND published the key (no dead codes)."""
     from . import unlock
@@ -199,6 +198,7 @@ def live_code(home: Path, port: int) -> str:
     if not listening(port):
         raise unlock.UnlockUnavailable(f"no dashboard is running on port {port}; start it with: jarvis workflow supervise")
     return unlock.issue(home, port=port)
+
 
 def main(argv=None) -> int:
     utf8_streams()
@@ -272,7 +272,8 @@ def main(argv=None) -> int:
         except PermissionError:
             pass
         except unlock.UnlockUnavailable as exc:
-            print(f"No unlock code yet: {exc}", file=sys.stderr)
+            # `open` never starts a dashboard (opener only probes), so say how to get the code once one runs.
+            print(f"No unlock code yet: {exc}; once it runs, get a code with: jarvis workflow unlock", file=sys.stderr)
         return rc
     if a.action == "web-check":
         # Read-only 'one dashboard server' line for factory-check (#789): exit 0 only for exactly one recorded server.

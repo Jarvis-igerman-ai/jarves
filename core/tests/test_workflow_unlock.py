@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import shutil
 import tempfile
 import threading
 import unittest
@@ -194,6 +195,7 @@ class UnlockTests(unittest.TestCase):
         record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
         self.assertEqual(set(record), {"eph", "tag", "expires"})       # no salt/hash pair to brute-force
         snapshot = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, snapshot, ignore_errors=True)
         for f in self.home.iterdir():
             try:
                 if f.is_file():
@@ -265,20 +267,23 @@ class UnlockTests(unittest.TestCase):
         self.assertIn("No unlock code yet", err)
         self.assertIn(f"no dashboard is running on port {port}", err)
         self.assertNotIn("Unlock code for", out + err)
+        self.assertIn("once it runs, get a code with: jarvis workflow unlock", err)   # not just "start it"
         rc, out, err = self.cli_owner("--port", str(port), "unlock")
         self.assertEqual(rc, 2)
         self.assertIn(f"no dashboard is running on port {port}", err)
         self.assertFalse((self.home / unlock.FILE).exists())
-        self.server = Server(self.home, port)                              # tearDown closes it
+        self.server = Server(self.home, 0)                                 # new port: no rebind/TIME_WAIT race; tearDown closes it
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        self.assertEqual(self.cli_owner("--port", str(port), "unlock")[0], 0)
+        self.assertEqual(self.cli_owner("--port", str(self.server.server_port), "unlock")[0], 0)
 
     def test_750_code_only_for_the_dashboard_that_published_the_key(self):
         live = self.server.server_port
         record = json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
         self.assertEqual(record["port"], live)
-        other = Server(Path(tempfile.mkdtemp()), 0)                        # some other listener on another port
+        other_home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, other_home, ignore_errors=True)
+        other = Server(other_home, 0)                                      # some other listener on another port
         try:
             rc, _, err = self.cli_owner("--port", str(other.server_port), "unlock")
         finally:
