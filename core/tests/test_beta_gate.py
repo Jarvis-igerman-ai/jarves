@@ -325,14 +325,30 @@ def test_enable_reading_maps_beta_lock_and_stays_off(home, monkeypatch):
 def test_whatsapp_setup_cli_is_friendly_when_reading_is_locked(home, monkeypatch, capsys):
     """`jarvis whatsapp setup` end to end (#469): the owner's yes on a locked reading switch prints the one friendly
     beta message, exits 1, changes no bridge mode and leaves the switch off."""
-    from jarves import whatsapp_admin as wad, whatsapp_bridge as wab
+    from jarves import clilang, whatsapp_admin as wad, whatsapp_bridge as wab
+    assert make(home).locked(wab.FEATURE)           # the home fixture starts with beta features off
     modes = []
     monkeypatch.setattr(wab, "bridge_installed", lambda home: True)
     monkeypatch.setattr(wad, "_link", lambda home, a: 0)
     monkeypatch.setattr(wad, "_confirm", lambda prompt: True)
     monkeypatch.setattr(wad, "set_mode", lambda home, mode, *, by: modes.append(mode) or {"mode": mode})
+    monkeypatch.setattr(clilang, "current", lambda: "both")   # show both languages so both are asserted
     rc = wad._setup(home, None)
     err = capsys.readouterr().err
     assert rc == 1 and BETA_MSG in err and "Traceback" not in err
+    assert wab.BridgeError("BETA_LOCKED", BETA_MSG, 403).he in err
     assert modes == []
     assert not make(home).enabled(wab.FEATURE)
+
+
+def test_enable_reading_with_beta_on_still_sets_read_mode_and_the_switch(home, monkeypatch):
+    """The pre-check must not block the unlocked path (#469): beta on -> mode read, then the switch on."""
+    from jarves import whatsapp_admin as wad, whatsapp_bridge as wab
+    f = make(home)
+    f.set_beta(True)
+    assert not f.locked(wab.FEATURE)
+    modes = []
+    monkeypatch.setattr(wad, "set_mode", lambda home, mode, *, by: modes.append(mode) or {"mode": mode})
+    r = wad.enable_reading(home, by="cli", features=f)
+    assert modes == ["read"] and r["feature_on"] is True and r["mode"] == "read"
+    assert make(home).enabled(wab.FEATURE)

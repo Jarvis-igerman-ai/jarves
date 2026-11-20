@@ -109,7 +109,8 @@ def _beta_switch(features, fid: str, on: bool, *, by: str) -> dict:
         raise _beta_locked_error() from None
 
 
-def _beta_locked_error() -> BridgeError:
+def _beta_locked_error() -> wab.BridgeError:
+    """The one refusal for a beta-locked WhatsApp switch; `Features.locked` is the predicate `switch()` gates on."""
     from .features import BETA_MSG
     return wab.BridgeError("BETA_LOCKED", BETA_MSG, 403)
 
