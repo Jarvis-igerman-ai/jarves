@@ -187,6 +187,64 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(sorted(results), [200, 403])
         self.assertEqual(len(self.server.unlocked), 1)
 
+    def test_750_files_in_the_home_are_no_offline_oracle_for_the_code(self):
+        """#750: a reader of every home file (token included) must not be able to test codes offline.
+        The check needs the dashboard's in-memory key; a copy of the files plus any other key confirms nothing."""
+        shown = unlock.issue(self.home)
+        record = json.loads((self.home / unlock.FILE).read_text(encoding="ascii"))
+        self.assertEqual(set(record), {"eph", "tag", "expires"})       # no salt/hash pair to brute-force
+        snapshot = Path(tempfile.mkdtemp())
+        for f in self.home.iterdir():
+            try:
+                if f.is_file():
+                    (snapshot / f.name).write_bytes(f.read_bytes())
+            except PermissionError:  # Windows byte-range locks (e.g. an open database); the unlock files are asserted below
+                pass
+        self.assertTrue({unlock.FILE, unlock.PUB_FILE, "access.token"} <= {p.name for p in snapshot.iterdir()})
+        self.assertFalse(unlock.consume(snapshot, shown))                    # no key: nothing to compare with
+        self.assertFalse(unlock.consume(snapshot, shown, key=unlock.ServerKey()))  # attacker's own key
+        self.assertTrue(unlock.consume(self.home, shown, key=self.server.unlock_key))
+
+    def test_750_issue_needs_a_published_dashboard_key(self):
+        (self.home / unlock.PUB_FILE).unlink()
+        with self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)
+        (self.home / unlock.PUB_FILE).write_text('{"pub": "00"}', encoding="ascii")
+        with self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)
+        (self.home / unlock.PUB_FILE).write_text("[]", encoding="ascii")
+        with self.assertRaises(unlock.UnlockUnavailable):
+            unlock.issue(self.home)
+        self.assertFalse((self.home / unlock.FILE).exists())
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        with patch.object(cli, "owner_only_guard", lambda action: None), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(argv), 2)
+        self.assertIn("restart the dashboard", err.getvalue())
+        self.assertNotIn("Unlock code", out.getvalue())
+        with patch.object(cli, "owner_only_guard", lambda action: None), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"])
+        self.assertIn("No unlock code yet", err.getvalue())
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_750_a_failed_second_start_keeps_the_live_key(self):
+        before = (self.home / unlock.PUB_FILE).read_bytes()
+        with self.assertRaises(OSError):
+            Server(self.home, self.server.server_port)               # port taken: never publishes
+        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), before)
+
+    def test_750_a_failed_key_publish_closes_the_socket(self):
+        real_close, closed = Server.server_close, []
+        def close(srv):
+            closed.append(srv.server_port)
+            real_close(srv)
+        with patch.object(unlock.ServerKey, "publish", side_effect=OSError("disk full")), \
+                patch.object(Server, "server_close", close):
+            with self.assertRaises(OSError):
+                Server(self.home, 0)
+        self.assertEqual(len(closed), 1)
+
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
         self.assertEqual(self.request("/api/unlock", {"code": "1234"})[0], 401)

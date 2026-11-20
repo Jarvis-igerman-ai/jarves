@@ -156,11 +156,17 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_wrong = ("", 0)             # (code record id, wrong tries over ALL sessions); 5 cancel the code
+        self.unlock_key = unlock.ServerKey()     # private half only in memory: the files give no offline oracle (#750)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
-        super().__init__(("127.0.0.1", port), Handler)
+        super().__init__(("127.0.0.1", port), Handler)  # a failed bind raises here, before the live key is replaced
+        try:
+            self.unlock_key.publish(self.home)
+        except OSError:
+            self.server_close()
+            raise
         self.origin = f"http://127.0.0.1:{self.server_port}"
         self.cookie = f"jarves_workflow_{self.server_port}"
 
@@ -465,10 +471,10 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
+                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code, key=self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
                 prev_salt, n = self.server.unlock_wrong
                 n = (n if prev_salt == salt else 0) + 1
