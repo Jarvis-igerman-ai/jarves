@@ -153,19 +153,19 @@ def _real_unload(p, dash, how):  # noqa: F811
     p.evaluate(WATCH)
     if how == "close":
         p.close(run_before_unload=False)                     # returns once the page is gone (lifecycle complete)
+        q = p.context.new_page()                             # sentinel: a beat from the closed page is recorded first
+        with q.expect_request(lambda r: "/api/health" in r.url, timeout=5000):
+            q.goto(_base(dash) + "/api/health")
         return _unload_events(order)
-    p.goto(_base(dash) + "/api/health", wait_until="load")   # returns once the old document unloaded
+    p.goto(_base(dash) + "/api/health", wait_until="load")   # sentinel: returns once the old document unloaded
     return _unload_events(p.evaluate("() => sessionStorage.getItem('unload') || ''").split())
 
 
 def test_leak_guard_leaky_variant_is_caught_on_real_close(leaky_tab, dash):  # noqa: F811
     # guard for the browser-behaviour dependency: the real close must still let a hide beat out of the leaky variant.
     # (Same-tab navigation does not let one out even from the leaky variant in this Chromium, so only close is guarded.)
-    ctx, p, urls, _ = leaky_tab
-    assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]
-    q = ctx.new_page()                                       # the closed page is gone: a fresh page is the sentinel
-    with q.expect_request(lambda r: "/api/health" in r.url, timeout=5000):
-        q.goto(_base(dash) + "/api/health")
+    _, p, urls, _ = leaky_tab
+    assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]   # includes the sentinel
     assert _hidden_beats(urls), "real close no longer runs the departing page's handlers: the close test is moot"
 
 
