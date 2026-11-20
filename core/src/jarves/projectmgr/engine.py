@@ -217,6 +217,30 @@ class StageEngine:
             return None, f"{spec if spec != 'jarves' else 'no coding agent'} is not installed", "", False
         return r, name, model, team or t.get("mode") == "team"
 
+    # ------------------------------------------------------------------ the integration commit JARVES trusts (#1352)
+    def _int_sha(self, p) -> str:
+        """The integration commit JARVES recorded at open and after each of its own merges. All worktrees share the
+        repo's refs, so an agent can move `jarves/p<id>/integration` (git update-ref): diffs, merges, ship and release
+        use this SHA, never the branch name. A project opened before #1352 records the branch's commit once."""
+        sha = (self.db.project(p["id"]) or {}).get("integration_sha") or ""
+        if not sha:
+            sha = gitops.rev(p["path"], gitops.integration_branch(p["id"]))
+            if sha:
+                self.db.update_project(p["id"], integration_sha=sha)
+                logs.info("projects", "INTEGRATION_RECORDED", "integration commit recorded", id=p["id"], current=sha[:12])
+        return sha
+
+    def _int_moved(self, p) -> str:
+        """Empty while the integration branch is at the recorded commit, else why nothing may be merged."""
+        sha, br = self._int_sha(p), gitops.integration_branch(p["id"])
+        now = gitops.rev(p["path"], br)
+        if sha and now == sha:
+            return ""
+        logs.warn("projects", "INTEGRATION_MOVED", "integration branch moved outside JARVES", id=p["id"],
+                  previous=sha[:12], found=now[:12])
+        return (f"the integration branch {br} was moved outside JARVES (expected {sha[:10] or '?'}, found "
+                f"{now[:10] or 'nothing'}); nothing is merged until it is back at {sha[:10] or 'a checked commit'}")
+
     def _ensure_worktree(self, p, t):
         if t["worktree"] and Path(t["worktree"]).exists():
             return Path(t["worktree"]), t["branch"]
@@ -281,7 +305,10 @@ class StageEngine:
     def _after_code(self, p, t, wt, br, text: str, kind: str, *, owner: bool = False):
         """Commit, enforce the scope and protected paths (the owner's own edits: scope is only a warning), keep the
         reproduction test untouched by the fix, record the handoff."""
-        base = gitops.integration_branch(p["id"])
+        moved = self._int_moved(p)
+        if moved:
+            return ("stop", "blocked", moved + f" (the task's work is on {br})")
+        base = self._int_sha(p)
         h = cards.parse_handoff(text)
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
@@ -347,7 +374,7 @@ class StageEngine:
         one), then the smallest change, then your order. The others are removed at once."""
         if self._day_cap():
             return ("requeue", self._day_cap())
-        base = gitops.integration_branch(p["id"])
+        base = self._int_sha(p)
         self.db.update_task(t["id"], attempts=t["attempts"] + 1)
         t = self.db.task(t["id"])
         card = self._card(p, t, self._last_failure(t))
@@ -378,6 +405,12 @@ class StageEngine:
                 if wt:
                     gitops.remove_worktree(p["path"], wt, br)
             return ("end",)
+        moved = self._int_moved(p)
+        if moved:
+            for _n, wt, br, _r, _e in results.values():
+                if wt:
+                    gitops.remove_worktree(p["path"], wt, br)
+            return ("stop", "blocked", moved)
         has_check = bool(p["check_cmd"]) and any(s["kind"] in ("test", "verify") and not s.get("skip") for s in stages)
         good, notes = [], []
         for k in sorted(results):
@@ -453,7 +486,7 @@ class StageEngine:
     def _st_review(self, p, t, st, acts):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
-        base = gitops.integration_branch(p["id"])
+        base = self._int_sha(p)                                  # #1352: never a movable ref
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
             return ("next",)
@@ -505,10 +538,13 @@ class StageEngine:
         argv = st.get("cmd") if kind == "cmd" else p["check_cmd"]
         has_wt = bool(t["worktree"]) and Path(t["worktree"]).exists()
         wt = Path(t["worktree"]) if has_wt else self._integration(p)
-        base = gitops.integration_branch(p["id"])
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
+            moved = self._int_moved(p)
+            if moved:
+                return ("stop", "blocked", moved)
+            base = self._int_sha(p)
             if has_wt:
                 try:
                     gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
@@ -533,7 +569,7 @@ class StageEngine:
                 if touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
-            tested = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+            tested = base
         if self._stopped(t, cancel):
             return ("end",)
         if not ok:
@@ -552,11 +588,14 @@ class StageEngine:
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
+            moved = self._int_moved(p)
+            if moved:
+                return ("stop", "blocked", moved)
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
-                head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+                head = self._int_sha(p)
                 if head != self._job(t).get("tested_base"):
-                    conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
+                    conflicts = gitops.merge_in(wt, head)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     if has_check:
@@ -568,7 +607,17 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                gitops.fast_forward(self._integration(p), br)
+                new = gitops.rev(wt, "HEAD")                        # exactly this commit is checked and merged
+                prot = [f for f in gitops.changed_files(wt, head, new) if gitops.is_protected(f)] if new else []
+                if prot:                                            # e.g. written by the check command (#1352)
+                    return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) +
+                            f" (not merged; on {br})")
+                if not new:
+                    raise gitops.GitError("the task branch has no commit")
+                gitops.fast_forward(self._integration(p), new)
+                if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
+                    raise gitops.GitError("the integration branch is not at the merged commit")
+                self.db.update_project(p["id"], integration_sha=new)
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat = t["result"]
@@ -585,7 +634,10 @@ class StageEngine:
         if not argv:
             return ("park", "no release command is set for this project (jarvis project config --release "
                             "\"...\" on the PC): release it yourself, then say done")
-        sha = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+        moved = self._int_moved(p)
+        if moved:
+            return ("stop", "blocked", moved)
+        sha = self._int_sha(p)
         if not self._approve(f"Release {p['name']} at {sha[:10]}: {' '.join(argv)[:300]}?", "project_release",
                              {"project": p["name"], "commit": sha[:12]}):
             return ("park", "the release was not approved: say done when you released it yourself, or approve it "

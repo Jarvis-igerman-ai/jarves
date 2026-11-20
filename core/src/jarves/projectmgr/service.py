@@ -276,6 +276,7 @@ class Manager(StageEngine):
             pid = self.db.add_project(name, str(root), clean(goal, 600), brief, check or [], runners_ or [],
                                       base_branch=base.strip() or state["branch"])
             gitops.ensure_integration(self.home, str(root), pid, base=start)
+            self.db.update_project(pid, integration_sha=gitops.rev(str(root), gitops.integration_branch(pid)))
         except (ValueError, gitops.GitError, OSError, sqlite3.Error) as e:
             if pid:
                 self.db.delete_project(pid)                       # no half-open project left behind
@@ -912,10 +913,15 @@ class Manager(StageEngine):
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
-            if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"]}):
+            sha = self._int_sha(p)                                      # #1352: the commit JARVES merged, not the ref
+            if not yes and not self._approve(f"Merge {br} ({sha[:10]}) into {st['branch']} in {p['path']}? (no push)",
+                                             "project_ship", {"project": p["name"], "branch": st["branch"]}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            moved = self._int_moved(p)                                  # checked after the approval wait too
+            if moved:
+                return _res(False, "MOVED", moved)
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,      # your own git identity / signing
+                                        message=f"Merge {br} ({sha[:12]})")
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
