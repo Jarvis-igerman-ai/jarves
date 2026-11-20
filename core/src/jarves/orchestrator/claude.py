@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -249,8 +250,8 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # ---------------------------------------------------------------------- sessions JARVES starts
 # OWNER-APPROVED SCOPE for headless autopilot workers (see docs in PR #748). A worker runs `claude -p` in its OWN isolated
 # worktree; nobody is there to answer a permission prompt, so anything outside this list is denied (the safe outcome).
-# Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
-# releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
+# Read-only since #1311, narrower than the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask
+# rules: tags, releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 # #1311: read-only only. Wildcard rules for pytest, npm/npx, ruff, git diff/log (--output), git commit/merge/rebase (hooks,
 # --exec), cd and mkdir could write outside the worktree or run worker-written code, so a worker could rewrite
@@ -268,7 +269,9 @@ WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh re
                                 "Edit(**/autopilot.json)", "Write(**/autopilot.json)",   # #932: policy file, any tool
                                 # #1311: git status/diff/log read worktree git config (core.fsmonitor, diff drivers),
                                 # so the `.git` pointer and any gitdir inside the worktree are not editable
-                                "Edit(**/.git)", "Write(**/.git)", "Edit(**/.git/**)", "Write(**/.git/**)")
+                                "Edit(**/.git)", "Write(**/.git)", "Edit(**/.git/**)", "Write(**/.git/**)",
+                                "Bash(*>*)",                          # #1311: no shell redirection after ls/grep/wc
+                                "Bash(gh *--web*)", "Bash(gh * -w*)")  # #1311: `gh ... view --web` opens a browser
 # #1311: commands with no option that writes a file or runs repo code; a wildcard is allowed only after these prefixes.
 _READ_ONLY_PREFIXES = frozenset({"ls", "grep", "wc", "gh pr view", "gh pr checks", "gh pr diff", "gh issue view",
                                  "gh run view"})
@@ -279,20 +282,23 @@ WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own
 # #784: the only workflow_console subcommands an autopilot worker may run unprompted. autopilot, authorize, bootstrap,
 # dispatch, seed, sync, recover, close-superseded, answer, confirm, reopen, unlock and open are deliberately absent.
 WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
-_CONSOLE_TAIL = re.compile(r"^--home \S+ (%s)( \*)?$" % "|".join(map(re.escape, WORKER_CONSOLE_SUBCOMMANDS)))
+_CONSOLE_TAIL = re.compile(r"^(%s)( \*)?$" % "|".join(map(re.escape, WORKER_CONSOLE_SUBCOMMANDS)))
+log = logging.getLogger(__name__)
+_WARNED_OVERRIDES: set[tuple[str, ...]] = set()
 
 
-def worker_rule_problem(rule: str, python: str = "", console: str = "") -> str:
+def worker_rule_problem(rule: str, python: str = "", console: str = "", home: str = "") -> str:
     """#1311: why an allow rule could let a headless worker write outside its worktree or run worker-written code
     ('' = read-only). Wildcards are allowed only after a known read-only command or a #784 workflow-console route
-    that starts with exactly this `python` and `console` (either slash form)."""
+    that starts with exactly this `python`, `console` and `--home` (all-backslash or all-slash form)."""
     if rule in ("Read", "Grep", "Glob"):
         return ""
     if not (rule.startswith("Bash(") and rule.endswith(")")):
         return "only Read, Grep, Glob and Bash(...) rules"
     body = rule[5:-1]
-    for p, c in {(python, console), (python.replace("\\", "/"), console.replace("\\", "/"))}:
-        if p and c and body.startswith(f"{p} {c} ") and _CONSOLE_TAIL.match(body[len(p) + len(c) + 2:]):
+    for p, c, h in {(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}:
+        head = f"{p} {c} --home {h} "
+        if p and c and h and body.startswith(head) and _CONSOLE_TAIL.match(body[len(head):]):
             return ""
     if body.endswith(":*") or body.endswith(" *"):
         prefix = body[:-2]
@@ -305,6 +311,11 @@ def autopilot_allowed_tools(python: str = "", override: list[str] | None = None,
     """The allow rules for an autopilot worker: the owner's policy override when set, else the read-only
     WORKER_ALLOWED_TOOLS plus the #784 workflow-console routes for the worker's own home."""
     if override:
+        problems = [r for r in override if worker_rule_problem(r, python, console, home)]
+        if problems and tuple(override) not in _WARNED_OVERRIDES:   # #1311: visible, not blocking; once per override
+            _WARNED_OVERRIDES.add(tuple(override))
+            log.warning("autopilot worker_allowed_tools override has %d rule(s) that can write files or run code: %s",
+                        len(problems), ", ".join(problems[:5])[:300])
         return list(override)
     rules = list(WORKER_ALLOWED_TOOLS)
     if python:

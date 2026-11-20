@@ -27,9 +27,11 @@ start in auto). Cloud sessions ignore `defaultMode` dontAsk/bypass from settings
 --permission-mode acceptEdits` (`WORKER_PERMISSION_MODE`; the code accepts only `default` or `acceptEdits`,
 anything else falls back to `default`), `--allowedTools WORKER_ALLOWED_TOOLS` (read-only since #1311:
 ls/grep/wc, bare `git status|diff|log`, `gh pr view|checks|diff`, `gh issue view`, `gh run view`, a few `jarvis`
-status commands, checked by `worker_rule_problem()`; no test runner, npm or git commit; `.git` edits denied;
-replaceable by `worker_allowed_tools` in `autopilot.json`) and `--disallowedTools WORKER_DENY` (git push/tag,
-gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell). Autopilot is off by
+status commands, checked by `worker_rule_problem()`; no test runner, npm or git commit, and the worker assignment
+says so; replaceable by `worker_allowed_tools` in `autopilot.json`, where unsafe rules are logged once, not blocked)
+and `--disallowedTools WORKER_DENY` (git push/tag, gh release, gh pr merge, rm, jarvis hotfix/release/update,
+schtasks, taskkill, powershell, any Bash/Edit/Write naming `autopilot.json`, Edit/Write of `.git`, shell `>`
+redirection and `gh ... --web`/`-w`). Autopilot is off by
 default and needs the owner's grant. `autopilot_loop.py` only decides when to start a worker.
 
 ## Comparison
