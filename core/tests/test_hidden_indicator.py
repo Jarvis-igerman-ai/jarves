@@ -165,3 +165,32 @@ def test_never_inside_greeting_pending_window(lc):
     lc.greeting, lc._first_audio, lc._t_ready = "hi", threading.Event(), 1995.0
     lc._last_activity = 0.0
     assert not lc._idle_stop_due()
+
+
+def test_dot_retries_transient_tcl_init_errors_like_the_popup():
+    """#520: the dot's tk.Tk() had no retry for Windows' transient Tcl init failures (tcl_findLibrary) and
+    died silently; it now shares the approval popup's retry helper. Fake Tk module: no tkinter or display needed."""
+    import inspect
+    from jarves import approval_popup
+
+    class TclError(Exception):
+        pass
+
+    def fake_tk(errors):
+        tries = []
+
+        def tk_():
+            tries.append(1)
+            if errors:
+                raise TclError(errors.pop(0))
+            return "root"
+        return type("T", (), {"Tk": staticmethod(tk_), "TclError": TclError}), tries
+
+    naps = []
+    mod, tries = fake_tk(['invalid command name "tcl_findLibrary"', "couldn't read file auto.tcl"])
+    assert approval_popup.new_root(mod, sleep=naps.append) == "root" and len(tries) == 3 and len(naps) == 2
+    mod, tries = fake_tk(["no display name"])
+    with pytest.raises(TclError):                        # a real (non-transient) error is not retried
+        approval_popup.new_root(mod, sleep=naps.append)
+    assert len(tries) == 1
+    assert "new_root(" in inspect.getsource(indicator.TkDotBackend._run)

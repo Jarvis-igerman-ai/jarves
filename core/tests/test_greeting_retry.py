@@ -190,3 +190,31 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
     _log(tmp_path, [{"ts": ts, "code": "LIVE_GREETING_MISSED"}, {"ts": ts, "code": "LIVE_GREETING_TTS_FALLBACK"}])
     got = speedtest.measure_history(tmp_path)
     assert got["greeting_tts_fallback"] == 1 and got["greeting_missed"] == 1
+
+
+def _wake_core(start_ok: bool, greeted: bool = False):
+    from jarves.app import Core
+    c = _ns()
+    c._greeted, c.live, c.calls = greeted, None, []
+    c.wake_greeting = lambda: Core.wake_greeting(c)
+
+    async def start(**kw):
+        c.calls.append(kw)
+        if start_ok:
+            c.live = object()
+    c._start_live = start
+    return c
+
+
+def test_wake_greeting_claim_is_released_when_the_session_does_not_start():
+    """#520: _greeted was set before the wake session was known to start; a failed start ate the start greeting."""
+    from jarves.app import Core
+    failed = _wake_core(start_ok=False)
+    asyncio.run(Core._start_wake_live(failed))
+    assert failed.calls == [{"ack": True, "greeting": "אני מקשיב."}] and not failed._greeted
+    ok = _wake_core(start_ok=True)
+    asyncio.run(Core._start_wake_live(ok))
+    assert ok._greeted                                   # started: the claim stands (no second start greeting)
+    before = _wake_core(start_ok=False, greeted=True)
+    asyncio.run(Core._start_wake_live(before))
+    assert before._greeted                               # an earlier greeting is never un-done

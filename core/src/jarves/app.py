@@ -2062,7 +2062,18 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
-                await self._start_live(ack=True, greeting=self.wake_greeting())
+                await self._start_wake_live()
+
+    async def _start_wake_live(self) -> None:
+        """#520: the wake greeting claims _greeted (no second start greeting while connecting); a session that did
+        not start releases that claim, unless the start greeting had already happened before this wake."""
+        was_greeted = self._greeted
+        greeting = self.wake_greeting()
+        try:
+            await self._start_live(ack=True, greeting=greeting)
+        finally:
+            if greeting and not was_greeted and self.live is None:
+                self._greeted = False
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""
