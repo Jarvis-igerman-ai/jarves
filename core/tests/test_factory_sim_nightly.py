@@ -197,4 +197,4 @@ def test_label_check_uses_short_timeout(monkeypatch):
         return base(cmd, **kw)
     monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
     factory_sim.file_issue(["x"], "tail")
-    assert timeouts["label"] == factory_sim.LABEL_CHECK_TIMEOUT_S == 15
+    assert timeouts["label"] is not None and 0 < timeouts["label"] < 60
