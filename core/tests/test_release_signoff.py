@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -493,6 +494,17 @@ class _Run:
         return subprocess.CompletedProcess(cmd, self.code, "", self.err)
 
 
+def test_605_verify_env_drops_injected_git_config(tmp_path, monkeypatch):
+    """#605 review R3: inherited GIT_CONFIG_* variables never reach verify-tag; system git config is ignored."""
+    for k, v in (("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "gpg.ssh.program"), ("GIT_CONFIG_VALUE_0", "/bin/true"),
+                 ("GIT_CONFIG_PARAMETERS", "'gpg.minTrustLevel'='undefined'"), ("GIT_CONFIG_GLOBAL", "/tmp/x")):
+        monkeypatch.setenv(k, v)
+    ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
+    assert gate.tag_signature_problems(tmp_path, "v4.1.0", "owner ssh-ed25519 AAAA", SHA, run=ok, verifier=sys.executable) == []
+    assert ok.envs and all(e.get("GIT_CONFIG_NOSYSTEM") == "1" for e in ok.envs)
+    assert not [k for e in ok.envs for k in e if k.startswith("GIT_CONFIG") and k != "GIT_CONFIG_NOSYSTEM"]
+
+
 def test_605_tag_signature_by_owner_key(tmp_path):
     """#605: the tag's 'Rows hash' is authentic only when the tag is signed by a key in the owner's allowed-signers
     lines (kept outside the repo). A bad tag name, missing verifier, git error or bad/unlisted signature refuse."""
@@ -519,7 +531,6 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     def boom(cmd, **kw):
         raise FileNotFoundError("git")
     assert "cannot verify" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=boom, verifier=v)[0]
-    import subprocess
 
     def late_boom(cmd, **kw):                                         # verify-tag passes, rev-parse cannot run
         if cmd[-1].endswith("^{commit}"):
@@ -569,16 +580,24 @@ def test_605_fallback_signers_variable_is_never_trusted(tmp_path, monkeypatch, c
     check = fj["steps"][0]
     assert check["env"]["FALLBACK"] == "${{ vars.RELEASE_ALLOWED_SIGNERS }}"
     assert fj["outputs"]["present"] == "${{ steps.check.outputs.present }}" and check["id"] == "check"
-    import subprocess
-    for val, want in (("x", "true"), ("", "false")):                              # run the job's own line
-        out = tmp_path / "o"
-        out.write_text("", encoding="utf-8")
-        r = subprocess.run(["bash", "-c", check["run"]], capture_output=True, text=True,
-                           env={"PATH": os.environ.get("PATH", ""), "FALLBACK": val, "GITHUB_OUTPUT": str(out)})
-        assert r.returncode == 0 and out.read_text(encoding="utf-8").strip() == f"present={want}", r.stderr
     assert doc["jobs"]["stable"]["needs"] == "signers-fallback"
     gate_step = next(s for s in doc["jobs"]["stable"]["steps"] if "release_gate.py" in s.get("run", ""))
     assert gate_step["env"]["JARVES_SIGNERS_FALLBACK"] == "${{ needs.signers-fallback.outputs.present }}"
+
+
+@pytest.mark.linux_only      # runs the job's bash line; the job runs on ubuntu (review R1: no WSL bash on Windows)
+def test_605_fallback_job_line_reports_presence(tmp_path):
+    """#605 review R1: the signers-fallback job's own shell line writes present=true/false to GITHUB_OUTPUT."""
+    import yaml                                    # pyyaml is a declared core dev dependency (core/pyproject.toml)
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    check = doc["jobs"]["signers-fallback"]["steps"][0]
+    for val, want in (("x", "true"), ("", "false")):
+        out = tmp_path / "o"
+        out.write_text("", encoding="utf-8")
+        r = subprocess.run(["bash", "-c", check["run"]], capture_output=True, text=True,
+                           env={"PATH": os.environ.get("PATH", ""), "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+                                "FALLBACK": val, "GITHUB_OUTPUT": str(out)})
+        assert r.returncode == 0 and out.read_text(encoding="utf-8").strip() == f"present={want}", r.stderr
 
 
 def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsys):
@@ -610,7 +629,6 @@ def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsy
 def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
     """#605: with real git + ssh-keygen a tag signed by the owner's listed key passes; a good signature by an
     unlisted key (git verify-tag can exit 0 with "No principal matched") is refused."""
-    import subprocess
     for k, val in (("HOME", str(tmp_path)), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_GLOBAL", str(tmp_path / "gc"))):
         monkeypatch.setenv(k, val)                                   # no runner/user git config leaks in
 
@@ -656,7 +674,6 @@ def test_605_gate_step_requires_rows_hash_on_a_real_publish(tmp_path, monkeypatc
     """#605 review R2: run the workflow's own rows-hash step line, load what it writes to $GITHUB_ENV into the
     gate's process, call the gate with the gate step's flags only: a real publish (DRY_RUN=false) resolves
     require_rows_hash and refuses without the owner's signers list; a dry run only prints a note."""
-    import subprocess
     import yaml
     doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
     steps = [s for j in doc["jobs"].values() for s in j.get("steps", [])]
