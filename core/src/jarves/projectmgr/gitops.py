@@ -313,12 +313,12 @@ def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> li
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189).
-    message: the merge commit's message (default: git's own, e.g. "Merge commit '<sha>'" for a commit); with a message
-    the merge never fast-forwards, so that commit is always recorded (#1486 R3)."""
+    message: the merge commit's message (default: git's own, e.g. "Merge commit '<sha>'" for a commit); a fast-forward
+    makes no merge commit (#1486 R3: an owner with no git identity can still take a fast-forward)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", *(["--no-ff", "-m", message] if message else []), branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

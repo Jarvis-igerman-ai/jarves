@@ -344,6 +344,9 @@ def test_signing_programs_are_set_on_every_call_from_the_owner_scope_only(monkey
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "side", "--no-verify")
     gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m", encoding="utf-8")                # main moved: a real (signed) merge commit
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
     for key, value in (("commit.gpgsign", "true"), ("user.name", "Owner"), ("user.email", "o@example.invalid"),
                        ("gpg.openpgp.program", (tmp_path / "evil-bin" / "gpg").as_posix())):
         subprocess.run(["git", "config", key, value], cwd=repo, check=True)
@@ -353,19 +356,6 @@ def test_signing_programs_are_set_on_every_call_from_the_owner_scope_only(monkey
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     gitops.git(tmp_path, "commit", "-m", "x")                       # the read saw nothing: still set
     assert "gpg.ssh.defaultkeycommand=" in calls[0] and "gpg.program=gpg" in calls[0]
-
-
-def test_ship_merge_always_records_a_merge_commit(tmp_path):
-    """PR #1486 R3: with a message (the ship path), the merge never fast-forwards, so `Merge <branch> at <commit>`
-    is in the owner's history even when their branch has not moved."""
-    repo = _repo(tmp_path)
-    gitops.git(repo, "checkout", "-qb", "side")
-    (repo / "s.txt").write_text("s", encoding="utf-8")
-    gitops.git(repo, "add", "-A")
-    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
-    gitops.git(repo, "checkout", "-q", "main")
-    assert gitops.merge_in(repo, "side", message="Merge side at abc") == []
-    assert gitops.git(repo, "log", "-1", "--format=%s").stdout.strip() == "Merge side at abc"
 
 
 def test_a_repository_textconv_cannot_break_a_patch_diff(tmp_path):
