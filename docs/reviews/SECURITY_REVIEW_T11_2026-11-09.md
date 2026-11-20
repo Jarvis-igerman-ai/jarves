@@ -50,8 +50,12 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 - **#10 P3: OpenCode prompt in argv** (`runners.py:265`): visible to other local users in the process list and bounded
   by the OS command-line limit. `--` prevents option injection. Claude/Codex receive the prompt on stdin.
 
-Good: `child_env` allow-lists the environment (`gitops.py:53`); runners use `shell=False` with stdin closed unless a
-prompt is piped; JARVES never force-pushes or pushes the default branch.
+Good: `child_env` allow-lists the environment (`gitops.py:53`); runners start the tool without a shell, with stdin
+closed unless a prompt is piped (`runners.py:107`; no `shell=True` in `projectmgr/`). The only push in `projectmgr/` is
+`forge.push_branch` (`forge.py:71-75`): a plain `git push origin <branch>:<branch>` with no `--force`, allowed only
+for `jarves/p<N>/...` branch names, so the default branch is never pushed. The name guard is tested by
+`test_projectmgr.py::test_forge_status_issues_pr_and_checks` (`main` and `../` are refused); the absence of
+`--force` is from reading the code only.
 
 ## devstatus
 
