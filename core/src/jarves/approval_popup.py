@@ -40,6 +40,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from . import tkutil
+
 APPROVE_DELAY_MS = 900
 CARD_WIDTH = 420                 # logical px at 100% scaling
 MAX_SCREEN_FRACTION = 0.60       # the whole window is never taller than this part of the screen
@@ -310,27 +312,13 @@ class FlatButton:
 
 
 # ---------------------------------------------------------------------- the window
-def new_root(tk, *, attempts: int = 5, sleep=None):
-    """tk.Tk(), retried on Windows' transient Tcl init failures ("couldn't read file ...auto.tcl", 'invalid command
-    name "tcl_findLibrary"'); any other TclError is raised at once. Shared with the listening dot (#520)."""
-    for attempt in range(attempts):
-        try:
-            return tk.Tk()
-        except tk.TclError as e:
-            transient = any(k in str(e) for k in ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
-                                                  "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
-            if attempt == attempts - 1 or not transient:
-                raise
-            (sleep or time.sleep)(0.25 * (attempt + 1))     # looked up at call time (tests patch time.sleep)
-
-
 def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | None = None,
           scale: float | None = None, where: str = "bottom-right"):
     import tkinter as tk
     from tkinter import font as tkfont
 
     _dpi_aware()
-    root = new_root(tk)
+    root = tkutil.new_root(tk)
     lang = pick_lang(req)
     S = STRINGS[lang]
     rtl = lang == "he"

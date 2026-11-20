@@ -1369,7 +1369,8 @@ class Core:
             except Exception:
                 logs.debug("tts", "CHIME_FAILED", "could not play the chime")
 
-    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> None:
+    async def _start_live(self, *, greeting: str | None = None, hold_output: bool = False, ack: bool = False) -> bool | None:
+        """Open a live conversation. True only when this call started the session (#520); None otherwise."""
         if self.stopping or getattr(self.dev, "mic_muted", False):
             return
         if self.live is not None or self._voice_connecting:
@@ -1577,6 +1578,7 @@ class Core:
             await self.set_face("listening")
         if not hold_output and self.cfg.voice.activation == "conversation":
             self._startup_stage("running", "Voice ready")
+        return True
 
     async def _wake_greeting_watch(self, live) -> None:
         try:
@@ -2067,12 +2069,12 @@ class Core:
     async def _start_wake_live(self) -> None:
         """#520: the wake greeting claims _greeted (no second start greeting while connecting); a session that did
         not start releases that claim, unless the start greeting had already happened before this wake."""
-        was_greeted = self._greeted
+        was_greeted, started = self._greeted, False
         greeting = self.wake_greeting()
         try:
-            await self._start_live(ack=True, greeting=greeting)
+            started = bool(await self._start_live(ack=True, greeting=greeting))
         finally:
-            if greeting and not was_greeted and self.live is None:
+            if greeting and not was_greeted and not started:
                 self._greeted = False
 
     def wake_greeting(self) -> str | None:

@@ -202,6 +202,7 @@ def _wake_core(start_ok: bool, greeted: bool = False):
         c.calls.append(kw)
         if start_ok:
             c.live = object()
+            return True
     c._start_live = start
     return c
 
@@ -215,6 +216,10 @@ def test_wake_greeting_claim_is_released_when_the_session_does_not_start():
     ok = _wake_core(start_ok=True)
     asyncio.run(Core._start_wake_live(ok))
     assert ok._greeted                                   # started: the claim stands (no second start greeting)
+    other = _wake_core(start_ok=False)
+    other.live = object()                                # another session already open: this wake started nothing
+    asyncio.run(Core._start_wake_live(other))
+    assert not other._greeted
     before = _wake_core(start_ok=False, greeted=True)
     asyncio.run(Core._start_wake_live(before))
     assert before._greeted                               # an earlier greeting is never un-done
