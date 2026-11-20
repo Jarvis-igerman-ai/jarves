@@ -1,32 +1,47 @@
 """#477 in a real headless browser against the real dashboard server: the moment the approvals tab goes hidden it
 sends a ?hidden=1 heartbeat. Before, the last visible beat kept the marker fresh for only 15 s while the first hidden
 beat came from the 20 s interval, which a throttled background tab stretches to ~1/min: up to ~45 s with nobody
-"looking", so an approval could be refused as no_channel. A tab that is CLOSED (or navigated away) also turns hidden
-first; it must NOT send that beat, or a closed dashboard would count as a place to answer for 90 s.
-setInterval is stubbed before the page loads, so the 2 s / 20 s polls can never stand in for the handler.
-The approvals API is faked at the HTTP edge (page.route). Missing Playwright or browser = a failure, never a skip."""
+"looking", so an approval could be refused as no_channel. A tab that is really CLOSED or navigated away also turns
+hidden while it unloads; it must NOT send that beat, or a closed dashboard counts as a place to answer for 90 s.
+
+Clock-free and handler-only: setInterval is stubbed before the page loads (the 2 s / 20 s polls can never stand in for
+the handler), requests are recorded on the browser CONTEXT (so a departing page's requests are kept), and "no beat was
+sent" is proven by ordering, not by sleeping: the page's next fetch (a sentinel) is awaited, and a beat issued earlier
+would have been recorded before it. Missing Playwright or browser = a failure, never a skip (CI installs both)."""
 from __future__ import annotations
 
-import json
-import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
 from test_dashboard import dash  # noqa: F401  (fixture)
 
+from jarves import approvals as appr
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import all_pages_check as apc  # noqa: E402
 
-NO_POLL = "window.setInterval = () => 0;"     # only event handlers may send a beat in these tests
+NO_POLL = "window.setInterval = () => 0;"
 SET_HIDDEN = """(h) => { Object.defineProperty(document, 'hidden', {configurable: true, get: () => h});
   Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => h ? 'hidden' : 'visible'});
   document.dispatchEvent(new Event('visibilitychange')); }"""
-# what the browser does on close / navigation: visibilitychange (hidden) and pagehide in the same unload steps
-CLOSE = """() => { Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
-  Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'});
-  document.dispatchEvent(new Event('visibilitychange'));
-  window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: false})); }"""
+# synthetic unload, for targeted handler coverage of both in-task orders: Chromium's real close fires pagehide first,
+# then visibilitychange (hidden) (seen in this browser); the reverse order must be handled the same way
+UNLOAD = """(pagehideFirst) => {
+  const hide = () => { Object.defineProperty(document, 'hidden', {configurable: true, get: () => true});
+    Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'});
+    document.dispatchEvent(new Event('visibilitychange')); };
+  const ph = () => window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: false}));
+  if (pagehideFirst) { ph(); hide(); } else { hide(); ph(); } }"""
+# records the real unload events (console for a closed page, sessionStorage for the next same-origin document): the
+# test proves the browser really ran its unload steps, and these listeners also make headless Chromium run the
+# departing page's handlers the way a desktop tab close does (without them the old code's leak was not reproduced)
+WATCH = """() => { const rec = (e) => { console.log(e);
+    sessionStorage.setItem('unload', (sessionStorage.getItem('unload') || '') + e + ' '); };
+  window.addEventListener('pagehide', () => rec('pagehide'));
+  document.addEventListener('visibilitychange', () => rec('visibilitychange')); }"""
+DRAIN = "() => new Promise(r => setTimeout(() => setTimeout(r, 0), 0))"     # let deferred (setTimeout 0) tasks run
 
 
 @pytest.fixture(scope="module")
@@ -40,31 +55,62 @@ def browser():
             b.close()
 
 
-def _open(browser, dash, seen):  # noqa: F811
-    def handle(route):
-        seen.append(route.request.url)
-        return route.fulfill(status=200, content_type="application/json", body=json.dumps({"pending": [], "history": []}))
-    p = browser.new_page()
-    p.add_init_script(NO_POLL)
-    p.route(re.compile(r"/api/approvals(\?.*)?$"), handle)
+@pytest.fixture
+def tab(browser, dash):  # noqa: F811
+    ctx = browser.new_context()
+    urls: list[str] = []
+    ctx.on("request", lambda r: urls.append(r.url))
+    ctx.add_init_script(NO_POLL)
+    p = ctx.new_page()
     p.goto(dash.url + "#/approvals")
     p.wait_for_function("() => document.getElementById('apPage') && !document.querySelector('#apPage .muted')",
                         timeout=30000)
-    assert seen and not any("hidden=1" in u for u in seen)
-    return p
+    assert any("/api/approvals" in u for u in urls) and not _hidden_beats(urls)
+    try:
+        yield ctx, p, urls
+    finally:
+        ctx.close()
 
 
-def test_tab_going_hidden_sends_a_hidden_beat_at_once(browser, dash):  # noqa: F811
-    p = _open(browser, dash, [])
-    with p.expect_request(lambda r: "/api/approvals?hidden=1" in r.url, timeout=1000):
+def _hidden_beats(urls):
+    return [u for u in urls if "/api/approvals?hidden=1" in u]
+
+
+def _marker_ahead(home) -> float:
+    return (home / "approvals" / "dashboard_seen").stat().st_mtime - time.time()
+
+
+def test_tab_going_hidden_sends_a_hidden_beat_at_once(tab, home):
+    _, p, _ = tab
+    with p.expect_request(lambda r: "/api/approvals?hidden=1" in r.url, timeout=5000) as beat:
         p.evaluate(SET_HIDDEN, True)
-    with p.expect_request(lambda r: r.url.endswith("/api/approvals"), timeout=1000):    # shown again: catch up (#159)
+    beat.value.response()                                    # the server handled it: marker dated forward (90 s)
+    assert _marker_ahead(home) > appr.DASHBOARD_FRESH_S
+    with p.expect_request(lambda r: r.url.endswith("/api/approvals"), timeout=5000):    # shown again: catch up (#159)
         p.evaluate(SET_HIDDEN, False)
 
 
-def test_closing_the_tab_sends_no_hidden_beat(browser, dash):  # noqa: F811
-    seen: list[str] = []
-    p = _open(browser, dash, seen)
-    p.evaluate(CLOSE)
-    p.wait_for_timeout(1000)
-    assert not any("hidden=1" in u for u in seen)       # the marker lapses after 15 s, as for any closed dashboard
+@pytest.mark.parametrize("pagehide_first", [True, False], ids=["pagehide_first", "visibility_first"])
+def test_synthetic_unload_sends_no_hidden_beat(tab, pagehide_first):
+    _, p, urls = tab
+    p.evaluate(UNLOAD, pagehide_first)
+    p.evaluate(DRAIN)
+    with p.expect_request(lambda r: "/api/health" in r.url, timeout=5000):        # sentinel: later than any beat
+        p.evaluate("() => { fetch('/api/health').catch(() => {}); }")
+    assert not _hidden_beats(urls)
+
+
+@pytest.mark.parametrize("how", ["close", "navigate"])
+def test_real_close_or_navigation_sends_no_hidden_beat(tab, home, dash, how):  # noqa: F811
+    ctx, p, urls = tab
+    order: list[str] = []
+    p.on("console", lambda m: order.append(m.text))
+    p.evaluate(WATCH)
+    if how == "close":
+        p.close(run_before_unload=False)                     # returns once the page is gone (lifecycle complete)
+        assert order == ["pagehide", "visibilitychange"]     # the real unload steps ran (Chromium's order)
+    else:
+        p.goto(dash.url.split("/?")[0] + "/api/health", wait_until="load")   # returns once the old document unloaded
+        assert p.evaluate("() => sessionStorage.getItem('unload')").split() == ["pagehide", "visibilitychange"]
+    assert not _hidden_beats(urls)
+    assert _marker_ahead(home) <= appr.DASHBOARD_FRESH_S     # server side: not dated into the 90 s hidden window
