@@ -52,7 +52,7 @@ _SENSITIVE = re.compile(
     r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]|"
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)   # UUID-shaped keys (dashed runs)
 # An unlabelled credential: a long run of the base64 key alphabet with high per-character entropy.
-# - and _ split runs so word slugs stay ordinary (prefixed dashed tokens are caught by logs.has_secret above).
+# - and _ split these runs (word slugs stay ordinary); a dashed run is scored whole by _random_dashed below.
 # A run containing / is scored whole (base64 secrets such as AWS secret keys contain /) unless it is a URL path: it
 # follows '.', ':' or '/' (host.tld/..., scheme://...) or every segment is a plain path word; then only its segments
 # are scored, so example.com/owner/repo/pull/1450 stays ordinary. A bare 40-hex string is still refused on purpose:
@@ -61,6 +61,11 @@ _KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
 _PATH_WORD = re.compile(r"[a-z]*|[A-Z][a-z]*|\d+")
 _MIN_ENTROPY = 3.5                # bits per character for letter+digit runs; English words and slugs stay below this
 _MIN_ENTROPY_LETTERS = 4.2        # letter-only runs need more: random mixed case (CamelCase words stay well below)
+# A URL-safe credential (base64url, random ids) also uses - and _: such a run is scored whole when less than half of
+# its characters sit in plain-word segments (word, Word or WORD with
+# optional digits at either end, such as office365 or 2fa, or 3+ digits), so word slugs stay ordinary.
+_DASHED = re.compile(r"[A-Za-z0-9_-]{20,}")
+_PLAIN_SEG = re.compile(r"\d*(?:[a-z]{2,}|[A-Z][a-z]+|[A-Z]{2,})\d*|\d{3,}")
 
 
 def _entropy(s: str) -> float:
@@ -84,11 +89,20 @@ def _scored_parts(t: str, m: re.Match) -> list[str]:
     return [run]
 
 
+def _random_dashed(run: str) -> bool:
+    if not re.search(r"[-_]", run):
+        return False                                          # plain runs are scored by _KEYISH
+    plain = sum(len(seg) for seg in re.split(r"[-_]+", run) if _PLAIN_SEG.fullmatch(seg))
+    return plain * 2 < len(run) and _random_run(run)
+
+
 def looks_sensitive(text: str) -> bool:
     t = text or ""
     if _SENSITIVE.search(t) or logs.has_secret(t):            # keywords, numbers, and the known token shapes
         return True
-    return any(_random_run(p) for m in _KEYISH.finditer(t) for p in _scored_parts(t, m))
+    if any(_random_run(p) for m in _KEYISH.finditer(t) for p in _scored_parts(t, m)):
+        return True
+    return any(_random_dashed(m.group()) for m in _DASHED.finditer(t))
 
 
 def normalize(text: str) -> str:

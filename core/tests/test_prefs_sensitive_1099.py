@@ -25,6 +25,10 @@ LEAKY = [
     "remember wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",         # base64 secret with / (AWS secret-key shape)
     "my secret: I hum while cooking",                            # labelled "secret:" refused on the safe side
     "the key QxZvBnMkLpWrTyUiOpAsDfGhJkLzXcVb",                  # letter-only random mixed case
+    "use Zx9Qw3Er7Ty1-Ui5Op2As8_Df4Gh6Jk-mN3bV7cX9zL2kQ8w",       # unprefixed URL-safe token with - and _ (review R1)
+    "id x7Kp_Q2vR9-mT4wZ8nB3_cY6hJ1-dF5sL0",                      # random segments joined by _ and -
+    "Zx9Qw3Er7Ty1Ui5Op2As",                                      # 20-char letter+digit run, entropy 4.3 (R3 boundary)
+    "0123456789abcdef0a1b",                                      # 20-char hex run, entropy 3.9 (R3 boundary)
 ]
 SAFE = [
     "short answers in the morning",
@@ -44,6 +48,18 @@ SAFE = [
     "call it ThisIsMyVeryLongPreferenceName",                  # CamelCase words: not random mixed case
     "SupercalifragilisticExpialidocious songs",                # long letter-only word
     "docs at example.com/Guides/Setup/Step2/Wifi/Router",      # URL path with capitalised segments
+    "my_favourite_morning_playlist_v2",                        # underscore slug of words (R1)
+    "Living_Room-Lamp_Kitchen-TV_Zone2",                       # mixed-case word slug (R1)
+    "release-2026-11-20-hotfix-build",                         # dated slug (R1)
+    "skip songs by skrillex",                                  # words starting with "sk" (review R2)
+    "ghost stories at night",                                  # words starting with "gh" (R2)
+    "my hotkey: F5",                                           # "...key:" is not a credential label (R2)
+    "the monkey: grey",
+    "skeleton key on the hook",                                # "key" alone is an ordinary word (R2)
+    "tokens are counted per month",
+    "Zx9Qw3Er7Ty1Ui5Op2A",                                     # 19 chars: below the 20-char minimum (R3 boundary)
+    "9af144bface62e59ef2b",                                    # 20-char hex, entropy 3.35 < 3.5 (R3 boundary)
+    "serial AAAA1111BBBB2222CCCC",                             # 20-char code with repeats, entropy 2.3 (R3)
 ]
 
 TOKEN_TEXT = "use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather"
