@@ -183,9 +183,12 @@ def test_a_feature_disabled_on_the_repo_is_named_and_still_incomplete(home):    
     ("dependabot", "/dependabot/alerts", 403, "Dependabot alerts are disabled for this repository."),
     ("secret_scanning", "/secret-scanning/alerts", 403, "Secret scanning is disabled on this repository."),
     ("code_scanning", "/code-scanning/alerts", 404, "Code scanning is disabled for this repository."),
+    ("dependabot", "/dependabot/alerts", 404, "Dependabot alerts are disabled for this repository."),
+    ("secret_scanning", "/secret-scanning/alerts", 403, "Advanced Security must be enabled for this repository."),
 ])
 def test_every_collector_names_a_repo_disabled_source(home, source, path, code, msg):   # #480, each call site
     gh = FakeGitHub()
+    gh.issues = [{"number": 1, "state": "open", "body": f"old {ss.TRACKER_MARKER}", "html_url": ISSUE_URL}]
     base = gh.__call__
 
     def call(method, p, payload=None):
@@ -193,6 +196,7 @@ def test_every_collector_names_a_repo_disabled_source(home, source, path, code, 
 
     r = ss.run_scan(home, "light", client=call, now=T0, version=VER, sleep=lambda s: None, report=True)
     assert r["coverage"][source] == "incomplete:disabled_on_repo" and not ss._complete(r["coverage"])
+    assert gh.writes() and "disabled_on_repo" in gh.issues[0]["body"] and msg not in gh.issues[0]["body"]   # free text stays out
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

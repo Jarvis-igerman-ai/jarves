@@ -377,13 +377,16 @@ def _loc_of(alert: dict) -> str:
     return str(loc.get("path") or "-")                    # the file only: a line number would change on every refactor
 
 
+_FEATURE_OFF = ("disabled", "must be enabled")   # known GitHub "feature off" phrasings (e.g. Advanced Security)
+
+
 def _unread(code: int, data: object) -> dict:
     """Incomplete coverage for an unreadable listing. A feature GitHub reports as disabled on the repo is named as
     such (still incomplete, never zero), so the tracker does not show a bare HTTP code for an owner setting."""
     # Best-effort LABEL only: GitHub's free-text message is matched, never copied out. If GitHub rewords it the
     # reason falls back to http_<code>; coverage is incomplete in every branch, so safety never depends on it.
     msg = str(data.get("message") or "") if isinstance(data, dict) else ""
-    disabled = code in (403, 404) and "disabled" in msg.lower()
+    disabled = code in (403, 404) and any(p in msg.lower() for p in _FEATURE_OFF)
     return {"coverage": "incomplete", "reason": "disabled_on_repo" if disabled else f"http_{code}", "findings": []}
 
 
