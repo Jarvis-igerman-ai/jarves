@@ -164,6 +164,47 @@ def test_read_tolerates_corrupt_file(tmp_path):
     d = tmp_path / "receipts"
     d.mkdir()
     (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n\xff\xfe\n')
-    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}] or ar.read(tmp_path) == []
+    assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}]          # #1107: one bad byte no longer hides the rest
     (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "clock"}\nnot json\n[1,2]\n')
     assert ar.read(tmp_path) == [{"seq": 1, "tool": "clock"}]
+
+
+def test_bad_byte_line_does_not_hide_valid_receipts_or_status(tmp_path, capsys, monkeypatch):
+    """#1107: an undecodable line is skipped; the valid lines around it are still listed and counted."""
+    d = tmp_path / "receipts"
+    d.mkdir()
+    (d / "tool_receipts.jsonl").write_bytes(b'{"seq": 1, "tool": "a"}\n\xff\xfe garbage\n{"seq": 2, "tool": "b"}\n')
+    assert [r["tool"] for r in ar.read(tmp_path)] == ["a", "b"]
+    import jarves.cli as cli
+    monkeypatch.setattr(cli, "_cli_features", lambda cfg, home: types.SimpleNamespace(active=lambda f: True))
+    assert ar.cmd_receipts(types.SimpleNamespace(limit=20, json=True, action="status"), None, tmp_path) == 0
+    assert json.loads(capsys.readouterr().out)["stored"] == 2
+
+
+def test_seq_continues_across_processes_and_rotation(tmp_path, monkeypatch):
+    """#1107: a second ReceiptLog (another process / a restart) continues the file's sequence, also after rotation."""
+    first, _ = mk(tmp_path)
+    first.record("clock", True)
+    first.record("clock", True)
+    second, _ = mk(tmp_path)                                  # fresh process: in-memory seq starts at 0
+    assert second.record("clock", True)["seq"] == 3
+    assert first.record("clock", True)["seq"] == 4           # the older writer also sees the other's receipt
+    path = tmp_path / ar.RECEIPT_FILE
+    path.replace(path.with_suffix(".1.jsonl"))               # rotated: the live file is gone
+    assert mk(tmp_path)[0].record("clock", True)["seq"] == 5
+    assert [r["seq"] for r in lines(tmp_path)] == [5]
+
+
+def test_lock_timeout_drops_only_the_receipt(tmp_path, monkeypatch):
+    """#1107: when another process holds the receipts lock too long, the receipt is dropped with a warning."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def busy(path, wait_s=None):
+        raise TimeoutError("locked")
+        yield
+    warned = []
+    monkeypatch.setattr(ar, "_file_lock", busy)
+    monkeypatch.setattr(ar.logs, "warn", lambda *a, **k: warned.append(a[1]))
+    assert mk(tmp_path)[0].record("clock", True) is None
+    assert warned == ["RECEIPT_FAILED"] and not (tmp_path / ar.RECEIPT_FILE).exists()

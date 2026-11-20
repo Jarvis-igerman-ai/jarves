@@ -22,10 +22,17 @@ def sink(monkeypatch):
     return got
 
 
+NOW = datetime(2026, 6, 15, 12, 0, 0).timestamp()      # fixed local noon: no midnight race between test and Monitor
+
+
+def clock():
+    return NOW
+
+
 def set_usage(home, kind, n, day=None):
     m = MemoryStore(home / "memory.db")
     m._x("INSERT INTO usage (day, kind, count) VALUES (?, ?, ?) ON CONFLICT(day, kind) DO UPDATE SET count = "
-         "excluded.count", (day or datetime.now().date().isoformat(), kind, n))
+         "excluded.count", (day or datetime.fromtimestamp(NOW).date().isoformat(), kind, n))
     m.close()
 
 
@@ -62,17 +69,17 @@ def test_thresholds_fire_once_per_window_and_survive_restart(home, sink):
     cfg = Config()
     cfg.ai.daily_request_limit = 100
     set_usage(home, "ai_requests", 76)
-    assert [a["threshold"] for a in usage.Monitor(home, cfg).check_alerts()] == [75]
-    assert usage.Monitor(home, cfg).check_alerts() == []                       # no storm
+    assert [a["threshold"] for a in usage.Monitor(home, cfg, clock=clock).check_alerts()] == [75]
+    assert usage.Monitor(home, cfg, clock=clock).check_alerts() == []                       # no storm
     set_usage(home, "ai_requests", 100)                                        # 90 and 100 crossed together
-    fired = usage.Monitor(home, cfg).check_alerts()
+    fired = usage.Monitor(home, cfg, clock=clock).check_alerts()
     assert [a["threshold"] for a in fired] == [100] and fired[0]["priority"] == "high"
-    assert usage.Monitor(home, cfg).check_alerts() == []                       # "reboot": a new instance
-    hist = {(h["meter"], h["threshold"]) for h in usage.Monitor(home, cfg).alert_history()}
+    assert usage.Monitor(home, cfg, clock=clock).check_alerts() == []                       # "reboot": a new instance
+    hist = {(h["meter"], h["threshold"]) for h in usage.Monitor(home, cfg, clock=clock).alert_history()}
     assert {("jarves.ai_requests", t) for t in (75, 90, 100)} <= hist
     assert len(sink) == 2
     # a real new window (tomorrow) may alert again; the clock is the only thing that changes the window
-    tomorrow = time.time() + 86400
+    tomorrow = NOW + 86400
     set_usage(home, "ai_requests", 80, day=datetime.fromtimestamp(tomorrow).date().isoformat())
     again = usage.Monitor(home, cfg, clock=lambda: tomorrow).check_alerts()
     assert [(a["meter"], a["threshold"]) for a in again] == [("jarves.ai_requests", 75)]
@@ -87,7 +94,7 @@ def test_custom_thresholds_and_validation(home, sink):
     cfg = Config()
     cfg.ai.daily_realtime_minutes = 10
     set_usage(home, "voice_seconds", 6 * 60)
-    fired = usage.Monitor(home, cfg).check_alerts()
+    fired = usage.Monitor(home, cfg, clock=clock).check_alerts()
     assert [(a["meter"], a["threshold"]) for a in fired] == [("openai_api.voice_minutes", 50)]
 
 

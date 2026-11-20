@@ -384,6 +384,56 @@ def test_recover_requeues_running_tasks_once(env):
     m.db = m2.db
 
 
+@pytest.mark.parametrize("status", ["running", "review"])
+def test_recover_does_not_kill_unverified_stored_pid(env, monkeypatch, status):
+    """#1098: a persisted PID alone cannot establish process ownership after restart."""
+    m, repo, _ = env
+    open_project(m, repo)
+    tid = m.db.add_task(1, "Interrupted", "FAKE write z=1", "z", ["z"], [], status)
+    m.db.update_task(tid, attempts=1, pid=424242)
+    killed = []
+    monkeypatch.setattr("jarves.projectmgr.service._kill_pid", killed.append)
+
+    m._recover()
+
+    assert killed == [], "startup must not kill a PID without verified process identity"
+    recovered = m.db.task(tid)
+    assert recovered["status"] in ("todo", "ready")
+    assert recovered["pid"] == 0
+
+
+@pytest.mark.parametrize("live,expect_kill", [("111", True), ("222", False), ("", False)])
+def test_recover_kills_only_when_start_marker_matches(env, monkeypatch, live, expect_kill):
+    """#1098: the stored pid is killed only when the live process has the recorded start time."""
+    m, repo, _ = env
+    open_project(m, repo)
+    tid = m.db.add_task(1, "Interrupted", "FAKE write z=1", "z", ["z"], [], "running")
+    m.db.update_task(tid, attempts=1, pid=424242, pid_start="111")
+    killed = []
+    monkeypatch.setattr("jarves.projectmgr.service._kill_pid", killed.append)
+    monkeypatch.setattr("jarves.procstats.start_marker", lambda pid: live if pid == 424242 else "")
+
+    m._recover()
+
+    assert killed == ([424242] if expect_kill else [])
+    assert m.db.task(tid)["pid"] == 0
+
+
+def test_procstats_start_marker_names_one_live_process():
+    import subprocess
+    import sys
+    from jarves import procstats
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        mark = procstats.start_marker(p.pid)
+        if sys.platform != "darwin":
+            assert mark and procstats.start_marker(p.pid) == mark
+    finally:
+        p.kill()
+        p.wait()
+    assert procstats.start_marker(p.pid) in ("", mark) and procstats.start_marker(0) == ""
+
+
 def test_owner_list_starts_directly_and_is_lenient(env):
     m, repo, _ = env
     open_project(m, repo)

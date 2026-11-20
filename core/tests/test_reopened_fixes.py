@@ -51,3 +51,34 @@ def test_jar220_web_search_switch_on_and_off_stay_tested():
     src = _read("core/tests/test_web_search.py")
     assert src.count("def test_") >= 6, "the chat web-search tests (switch on, off, Hebrew, sources) were removed"
     assert "web_search" in src and "Sources:" in src
+
+
+# JAR-276: a quarantined test runs in the non-blocking job, so a regression of these fixes would pass PR CI and come
+# back only as another reopened ticket. The tests that verify the five fixes must stay in the blocking run.
+REOPENED_PROOF_TESTS = (
+    "test_mobile_browser_e2e.py::test_browser_tab_fits_390_and_360_px_in_english_and_hebrew",   # JAR-191 (#1049)
+    "test_projectmgr.py::test_parallel_tasks_merge_and_dependent_gets_handoff",                 # JAR-217 (#1051)
+    "test_projectmgr.py::test_fake_review_counter_survives_a_concurrent_reviewer",              # JAR-217
+)
+
+
+def reopened_proofs_in_quarantine(ledger: Path) -> list[str]:
+    from conftest import quarantined_ids
+    q = quarantined_ids(ledger)
+    return [t for t in REOPENED_PROOF_TESTS + tuple(f"test_reopened_fixes.py::{n}" for n in _PINS) if t in q]
+
+
+_PINS = [n for n in dir() if n.startswith("test_jar")]
+
+
+def test_jar276_reopened_ticket_proofs_are_not_quarantined():
+    from conftest import QUARANTINE_LEDGER
+    found = reopened_proofs_in_quarantine(QUARANTINE_LEDGER)
+    assert not found, f"a reopened ticket's proof is quarantined (non-blocking): {found}"
+
+
+def test_jar276_guard_catches_the_pre_fix_ledger(tmp_path):
+    # The ledger as it was before JAR-345 lifted #1049: the guard must name the JAR-191 test.
+    ledger = tmp_path / "quarantine.toml"
+    ledger.write_text('[[test]]\nid = "%s"\nissue = 1049\n' % REOPENED_PROOF_TESTS[0], encoding="utf-8")
+    assert reopened_proofs_in_quarantine(ledger) == [REOPENED_PROOF_TESTS[0]]
