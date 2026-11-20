@@ -46,11 +46,25 @@ var ErrAlreadyLinked = errors.New("already linked")
 // Event is anything an engine reports.
 type Event interface{ isEvent() }
 
-// MessageEvent = one message (live, or from a history sync when History is true).
+// MessageEvent = one message (live, or from a history sync when History is true; OnDemand = the answer to a
+// RequestHistory call).
 type MessageEvent struct {
-	Msg     msgstore.Message
-	Chat    msgstore.ChatInfo
-	History bool
+	Msg      msgstore.Message
+	Chat     msgstore.ChatInfo
+	History  bool
+	OnDemand bool
+	// RequestID = the id of the on-demand request this message answers, as WhatsApp echoes it ("" if unknown).
+	RequestID string
+}
+
+// HistoryAnswerEvent = one on-demand history answer was fully delivered (its MessageEvents came first). Chats lists
+// the direct/group conversations that carried messages; Messages counts the raw messages WhatsApp sent for them
+// (before filtering out reactions, protocol messages etc.), so Messages == 0 means WhatsApp had nothing more to send.
+// RequestID is the id of the request it answers, as WhatsApp echoes it ("" if the transport did not say).
+type HistoryAnswerEvent struct {
+	Chats     []string
+	Messages  int
+	RequestID string
 }
 
 // EditEvent = the sender edited a message.
@@ -91,6 +105,7 @@ func (AccountWarningEvent) isEvent() {}
 func (LoggedOutEvent) isEvent()      {}
 func (ContactEvent) isEvent()        {}
 func (LinkEvent) isEvent()           {}
+func (HistoryAnswerEvent) isEvent()  {}
 
 // Engine is a WhatsApp transport.
 type Engine interface {
@@ -112,4 +127,25 @@ type Engine interface {
 	StartLink(ctx context.Context, phone string) error
 	// SendText sends one text message to one person. Returns the message id and server timestamp.
 	SendText(ctx context.Context, to, text string) (id string, ts float64, err error)
+	// RequestHistory asks the phone for up to count messages of chat sent before anchor (on-demand history
+	// sync); count is 1..MaxHistoryRequestCount, anything else is refused. Results arrive later as
+	// MessageEvent{History: true, OnDemand: true, RequestID: <echoed id>}, followed by one closing
+	// HistoryAnswerEvent per answer; the API layer applies every rule to them.
+	// id (from NewRequestID) is sent as the request's message id, so its answer can be matched to it.
+	// Invariant: never deliver an event synchronously on the caller's goroutine (a caller holding a lock that the
+	// event handler also takes would deadlock). whatsmeow dispatches events on its own goroutines (UNVERIFIED
+	// against a real phone).
+	RequestHistory(ctx context.Context, id, chat string, anchor HistoryAnchor, count int) error
+	// NewRequestID returns a fresh message id for RequestHistory.
+	NewRequestID() string
+}
+
+// MaxHistoryRequestCount bounds one on-demand history request (the backfill asks for 50 at a time).
+const MaxHistoryRequestCount = 500
+
+// HistoryAnchor is the oldest message already known for a chat; on-demand history returns messages before it.
+type HistoryAnchor struct {
+	ID     string
+	FromMe bool
+	TS     float64
 }
