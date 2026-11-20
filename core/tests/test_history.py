@@ -286,3 +286,26 @@ def test_expected_refusals_stay_in_history_without_runtime_defect_issues(st, cod
             {"ts": 10, "code": event_code, "level": "WARNING", "component": "skills",
              "msg": "test -> " + code, "fields": json.dumps({"result_code": code, "origin": origin})}], 100)
         assert bool(issues) == defect
+
+
+# #1328: rolling windows took time.time() with no override, so tests on the Oct 19 fixture broke once it aged out
+FIXTURE_NOW = 1792454400.0           # 2026-10-20 UTC, one day after the fixture session
+
+
+def test_diagnose_window_uses_injected_now_not_the_wall_clock(st, monkeypatch):
+    st.ingest_log(FIXTURE)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 5000 * 86400)   # years later: the 30-day window misses Oct 19
+    diagnose.run(st, Config(), days=30)
+    assert "early_response" not in _issues(st)
+    diagnose.run(st, Config(), days=30, now=FIXTURE_NOW)
+    assert "early_response" in _issues(st)
+
+
+def test_tool_stats_window_uses_injected_now_not_the_wall_clock(st, monkeypatch):
+    st.ingest_log(FIXTURE)
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 5000 * 86400)
+    assert st.tool_stats(30) == {}
+    stats = st.tool_stats(30, now=FIXTURE_NOW)
+    assert stats["music_status"]["n"] == 2 and stats["music_volume"]["n"] == 2
