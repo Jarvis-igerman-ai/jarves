@@ -4,15 +4,17 @@ Flow: the owner says a preference ("I prefer short answers in the morning") -> t
 the item is stored as `proposed` (visible on the Learned preferences page, NEVER used anywhere yet) -> the owner
 confirms (spoken/typed yes on the approval, or the Confirm button) -> `confirmed`. Declining keeps only the
 normalised text so the same suggestion is not asked again (removable). Nothing is inferred silently: a suggestion
-must carry the owner's own words as evidence, sensitive text (passwords, card/ID/long numbers, health and money
+must carry the owner's own words as evidence, sensitive text (passwords, API keys/tokens, card/ID/long numbers, health and money
 details) is refused and NOT stored, proposals are capped and expire, and conflicts are shown, never auto-merged.
 Every item is listable, editable, removable (dashboard, CLI, voice). Local only, in memory.db `learned_prefs`.
 """
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
+from collections import Counter
 
 from pydantic import BaseModel, Field
 
@@ -42,11 +44,32 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    # #1099: key/token wording and well-known credential prefixes
+    r"טוקן|מפתח\s+(?:ה)?api|\bapi[\s_-]?keys?\b|\b(?:access|auth|api|bearer|refresh|session)[\s_-]?tokens?\b|"
+    r"\bsecret[\s_-]?keys?\b|\bprivate\s+key\b|\bbearer\s+\S|"
+    r"\bsk-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|\baiza[0-9a-z_-]{20,}|"
+    r"\bxox[abprs]-[a-z0-9-]{10,}|\beyj[a-z0-9_-]{8,}\.", re.I)
+# #1099: a long unbroken run of key characters mixing letters and digits with high entropy is a likely secret.
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
+_MIN_ENTROPY = 3.5                 # bits per character; English words and simple ids stay below this
+
+
+def _entropy(s: str) -> float:
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
+
+
+def _high_entropy(text: str) -> bool:
+    for run in _TOKEN_RUN.findall(text):
+        if re.search(r"[A-Za-z]", run) and re.search(r"\d", run) and _entropy(run) >= _MIN_ENTROPY:
+            return True
+    return False
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    return bool(_SENSITIVE.search(t)) or _high_entropy(t)
 
 
 def normalize(text: str) -> str:
