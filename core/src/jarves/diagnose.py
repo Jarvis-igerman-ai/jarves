@@ -323,12 +323,14 @@ class Finder:
                            e["msg"][:200], {"at": _clock(e["ts"])})
 
 
-def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30) -> list[dict]:
-    """Diagnose the given conversations (default: all of the last `days`). Returns the issues raised/updated."""
+def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30,
+        now: float | None = None) -> list[dict]:
+    """Diagnose the given conversations (default: all of the `days` before `now`, which defaults to the wall clock).
+    Returns the issues raised/updated."""
     f = Finder(store, cfg)
     if session_ids is None:
         sessions = store.rows("SELECT * FROM sessions WHERE started > ? ORDER BY started",
-                              (time.time() - days * 86400,))
+                              ((time.time() if now is None else now) - days * 86400,))
     else:
         sessions = [s for s in (store.session(i) for i in session_ids) if s]
     for s in sessions:
