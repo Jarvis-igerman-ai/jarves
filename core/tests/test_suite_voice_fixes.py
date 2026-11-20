@@ -373,3 +373,63 @@ async def test_confirmation_tells_the_voice_session(core):
     assert calls == [("pending", "Delete something?"), ("done",)]     # kind only, one language, never details
     core.live = None
     await face.ws.close()
+
+
+# ------------------------------------------------------------------ #520 review: _start_live says False on every early exit
+def _live_cls(start_error=None, ends_during_start=False):
+    class Live:
+        running = True
+
+        def __init__(self, core, **kw):
+            pass
+
+        async def start(self):
+            if start_error is not None:
+                raise start_error
+            if ends_during_start:
+                self.running = False              # the session closed while starting (on_end already ran)
+
+        async def stop(self):
+            self.running = False
+    return Live
+
+
+@pytest.mark.parametrize("case", ["start_failed", "ended_during_start", "budget_gate", "stopping"])
+async def test_start_live_early_exits_return_false(home, cfg, monkeypatch, case):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    live = _live_cls(start_error=RuntimeError("no network") if case == "start_failed" else None,
+                     ends_during_start=case == "ended_during_start")
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=live)
+    await c.start()
+    try:
+        if case == "budget_gate":
+            from jarves import daily_limits
+
+            async def no_announce(view):
+                pass
+            monkeypatch.setattr(daily_limits, "admit_voice", lambda budget: SimpleNamespace(allowed=False, view={}))
+            monkeypatch.setattr(c, "announce_limit", no_announce)
+        if case == "stopping":
+            c.stopping = True
+        assert await c._start_live() is False and c.live is None
+    finally:
+        c.stopping = False
+        await c.stop()
+
+
+async def test_wake_session_that_ends_during_start_releases_the_greeting_claim(home, cfg, monkeypatch):
+    """#520 review R2 (intent): a wake session that closed while starting is not a started session. Its greeting is
+    not known to have played (the greeting watch runs only for a started session), so the claim is released: the
+    next start greets, preferring a rare repeat over the lost greeting #520 reported."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-real")
+    cfg.voice.activation, cfg.voice.greeting = "wake_word", True
+    c = Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+             use_real_audio=False, live_factory=_live_cls(ends_during_start=True))
+    await c.start()
+    try:
+        c._greeted = False
+        await c._start_wake_live()
+        assert c.live is None and not c._greeted
+    finally:
+        await c.stop()
