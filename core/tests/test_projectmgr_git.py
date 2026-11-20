@@ -328,19 +328,58 @@ def test_only_repository_scope_command_settings_are_overridden(monkeypatch, tmp_
 def test_signing_programs_are_set_on_every_call_from_the_owner_scope_only(monkeypatch, tmp_path):
     """PR #1468 R1: the signing programs and `gpg.ssh.defaultKeyCommand` have fixed names, so they are set on every
     call (the owner's global value, else git's default) and never depend on the repository-scope read, which an agent
-    can race."""
-    home = tmp_path / "owner-home"
+    can race. PR #1486 R1: `gpg.program` and `gpg.openpgp.program` set the same program in git (the last one wins), so
+    a signed ship merge (ident=False) must still run the owner's global `gpg.program`, not plain `gpg`."""
+    home, marker = tmp_path / "owner-home", tmp_path / "owner-gpg-ran.txt"
+    _hook(tmp_path / "owner-bin", "owner-gpg", marker)
     home.mkdir()
-    (home / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n", encoding="utf-8")
+    (home / ".gitconfig").write_text(f"[gpg]\n\tprogram = {(tmp_path / 'owner-bin' / 'owner-gpg').as_posix()}\n",
+                                     encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
-    pairs = dict(x.split("=", 1) for x in gitops._config_overrides(_repo(tmp_path))[1::2])
-    assert pairs == {"gpg.program": "owner-gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-                     "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+    repo, evil = _repo(tmp_path), tmp_path / "repo-gpg-ran.txt"
+    _hook(tmp_path / "evil-bin", "gpg", evil)
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    for key, value in (("commit.gpgsign", "true"), ("user.name", "Owner"), ("user.email", "o@example.invalid"),
+                       ("gpg.openpgp.program", (tmp_path / "evil-bin" / "gpg").as_posix())):
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+    gitops.merge_in(repo, "side", ident=False, message="Merge side")   # signing fails (fake gpg): only who ran counts
+    assert marker.exists() and not evil.exists()
     calls: list = []
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     gitops.git(tmp_path, "commit", "-m", "x")                       # the read saw nothing: still set
     assert "gpg.ssh.defaultkeycommand=" in calls[0] and "gpg.program=gpg" in calls[0]
+
+
+def test_ship_merge_always_records_a_merge_commit(tmp_path):
+    """PR #1486 R3: with a message (the ship path), the merge never fast-forwards, so `Merge <branch> at <commit>`
+    is in the owner's history even when their branch has not moved."""
+    repo = _repo(tmp_path)
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    assert gitops.merge_in(repo, "side", message="Merge side at abc") == []
+    assert gitops.git(repo, "log", "-1", "--format=%s").stdout.strip() == "Merge side at abc"
+
+
+def test_a_repository_textconv_cannot_break_a_patch_diff(tmp_path):
+    """PR #1486 R2: a repository-scope `diff.<x>.textconv` is blanked to "", which git still tries to run, so a patch
+    diff died or came back empty. Every diff/show/log call passes --no-textconv too."""
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_text("* diff=t\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
+    subprocess.run(["git", "config", "diff.t.textconv", "evil"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    p = gitops.git(repo, "diff", check=False)
+    assert p.returncode == 0 and "+changed" in p.stdout
+    assert "1 file changed" in gitops.git(repo, "diff", "--shortstat", check=False).stdout
 
 
 @pytest.mark.parametrize("cmd", ["diff", "show", "log"])
@@ -350,7 +389,7 @@ def test_patch_output_never_runs_an_external_diff(monkeypatch, tmp_path, cmd):
     calls: list = []
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     gitops.git(tmp_path, cmd, "HEAD~1")
-    assert calls[0][calls[0].index(cmd):] == [cmd, "--no-ext-diff", "HEAD~1"]
+    assert calls[0][calls[0].index(cmd):] == [cmd, "--no-ext-diff", "--no-textconv", "HEAD~1"]
 
 
 def test_an_unreadable_shared_config_fails_closed(tmp_path):
