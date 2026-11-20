@@ -113,6 +113,9 @@ def issue(home: Path, *, port: int | None = None, now: float | None = None) -> s
     """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
     With `port`, the published key must belong to the dashboard on that port (else a dead code would be shown)."""
     pub, owner = _published(home)
+    if port is not None and owner is None:
+        raise UnlockUnavailable(f"the published dashboard unlock key records no port, so it cannot be matched to port {port}; "
+                                "restart the dashboard")
     if port is not None and owner != port:
         raise UnlockUnavailable(f"the unlock key belongs to the dashboard on port {owner}, not {port}; "
                                 "restart the dashboard or pass --port with its port")

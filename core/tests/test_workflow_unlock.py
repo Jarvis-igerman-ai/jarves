@@ -6,7 +6,6 @@ import shutil
 import sqlite3
 import tempfile
 import threading
-import time
 import unittest
 import urllib.error
 import urllib.request
@@ -287,7 +286,7 @@ class UnlockTests(unittest.TestCase):
         argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         with patch.object(cli, "owner_only_guard", lambda action: None), \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(cli.main(argv), 2)
+            self.assertEqual(cli.main(argv), cli.UNLOCK_UNAVAILABLE_EXIT)
         self.assertIn("restart the dashboard", err.getvalue())
         self.assertNotIn("Unlock code", out.getvalue())
         with patch.object(cli, "owner_only_guard", lambda action: None), \
@@ -335,7 +334,7 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn("Unlock code for", out + err)
         self.assertIn("once it runs, get a code with: jarvis workflow unlock", err)   # not just "start it"
         rc, out, err = self.cli_owner("--port", str(port), "unlock")
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, cli.UNLOCK_UNAVAILABLE_EXIT)
         self.assertIn(f"no dashboard is running on port {port}", err)
         self.assertFalse((self.home / unlock.FILE).exists())
         self.server = Server(self.home, 0)                                 # new port: no rebind/TIME_WAIT race; tearDown closes it
@@ -354,7 +353,7 @@ class UnlockTests(unittest.TestCase):
             rc, _, err = self.cli_owner("--port", str(other.server_port), "unlock")
         finally:
             other.server_close()
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, cli.UNLOCK_UNAVAILABLE_EXIT)
         self.assertIn(f"belongs to the dashboard on port {live}", err)
         self.assertFalse((self.home / unlock.FILE).exists())
 
@@ -371,7 +370,7 @@ class UnlockTests(unittest.TestCase):
         self.server.server_close()
         unlock.ServerKey().publish(self.home, live)                       # stale key whose port nobody answers
         rc, _, err = self.cli_owner("unlock")
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, cli.UNLOCK_UNAVAILABLE_EXIT)
         self.assertIn(f"no dashboard is running on port {live}", err)
         self.assertFalse((self.home / unlock.FILE).exists())
         self.server = Server(self.home, 0)                                 # tearDown closes it
@@ -393,19 +392,19 @@ class UnlockTests(unittest.TestCase):
             (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": pub, "port": bad}), encoding="ascii")
             with self.assertRaises(unlock.UnlockUnavailable):
                 unlock.published_port(self.home)
-            with self.assertRaises(unlock.UnlockUnavailable):
+            with self.assertRaisesRegex(unlock.UnlockUnavailable, "records no port") as ctx:
                 unlock.issue(self.home, port=1)
+            self.assertNotIn("port None", str(ctx.exception))
         rc, out, err = self.cli_owner("unlock")
-        self.assertEqual(rc, 2)
+        self.assertEqual(rc, cli.UNLOCK_UNAVAILABLE_EXIT)
         self.assertIn("records no port", err)
         self.assertNotIn("port 1", err)
 
     def test_750_low_order_or_malformed_eph_is_a_counted_wrong_try(self):
         """A record whose eph is all-zero (low order) or the wrong length never unlocks; the server counts the try."""
-        expires = time.time() + 60
         for eph in ("00" * 32, "00" * 31):
-            (self.home / unlock.FILE).write_text(json.dumps({"eph": eph, "tag": "00" * 32, "expires": expires}), encoding="ascii")
-            self.assertFalse(unlock.consume(self.home, "0000", key=self.server.unlock_key))
+            (self.home / unlock.FILE).write_text(json.dumps({"eph": eph, "tag": "00" * 32, "expires": 4e9}), encoding="ascii")
+            self.assertFalse(unlock.consume(self.home, "0000", key=self.server.unlock_key, now=1000.0))
             self.assertTrue((self.home / unlock.FILE).exists())          # not consumed by the bad record
         session = self.login()
         status, _, body = self.request("/api/unlock", {"code": "0000"})
@@ -422,6 +421,20 @@ class UnlockTests(unittest.TestCase):
             self.server.server_close()                                     # tearDown closes it again, too
         self.assertEqual(closes, [self.server.unlock_key, self.store])
         self.store.close()                                                 # the real close the patch replaced
+
+    def test_750_unlock_exit_code_differs_from_usage_errors_and_is_in_help(self):
+        self.assertNotIn(cli.UNLOCK_UNAVAILABLE_EXIT, (0, 2, 3))
+        with redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            cli.main(["--help"])
+        self.assertIn(f"{cli.UNLOCK_UNAVAILABLE_EXIT} no running dashboard key", out.getvalue())
+
+    def test_750_cryptography_is_a_declared_core_dependency(self):
+        """unlock imports cryptography at module top; it must stay a declared core dependency (>= 40 for raw keys)."""
+        import tomllib
+        deps = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+        spec = [d for d in deps if d.split(">")[0].split("=")[0].strip().lower() == "cryptography"]
+        self.assertEqual(len(spec), 1, deps)
+        self.assertGreaterEqual(int(spec[0].split(">=")[1].split(",")[0].split(".")[0]), 40)
 
     def test_750_close_after_stopping_was_set_still_closes(self):
         """`stopping` is also the stream-stop event: a path that sets it first must not turn close into a no-op."""

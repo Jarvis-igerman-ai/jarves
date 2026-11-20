@@ -24,10 +24,13 @@ REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task"
 
 
 DEFAULT_PORT = 8188
+UNLOCK_UNAVAILABLE_EXIT = 4  # unlock: no live dashboard key (argparse usage errors are 2, an agent/pipe refusal is 3)
 
 
 def parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
+    ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor",
+                                 epilog="unlock exit codes: 0 code shown, 2 usage error, 3 refused (agent or not a terminal), "
+                                        f"{UNLOCK_UNAVAILABLE_EXIT} no running dashboard key (start or restart the dashboard)")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
                                         "create", "ask", "ask-more", "reply", "answer", "confirm", "reopen", "task", "transition", "check", "authorize", "recover", "dispatch", "bootstrap", "trace", "retro", "autopilot", "layer-beat", "timeline", "health", "now", "today", "focus", "questions-rewrite",
                                         "own", "release", "owners", "msg", "check-touch", "web-check", "close-superseded", "worker-watch", "handover", "handover-state"])
@@ -266,7 +269,7 @@ def main(argv=None) -> int:
             code = live_code(home, a.port if port_given else None)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
-            return 2
+            return UNLOCK_UNAVAILABLE_EXIT
         print(f"Unlock code (type it in the dashboard, Questions tab; type it within {unlock.CODE_TTL_S // 60} minutes; answering then stays unlocked for {unlock_span(owner_unlock_s(home))}): {code}")
         return 0
     if a.action == "open":

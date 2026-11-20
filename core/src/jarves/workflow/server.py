@@ -175,7 +175,9 @@ class Server(ThreadingHTTPServer):
         self.stopping = threading.Event()
         self._closed = False
         self.discuss = Helper(self.home, token=self.token)
-        super().__init__(("127.0.0.1", port), Handler)  # a failed bind raises here, before the live key is replaced
+        # A failed bind raises here, before the live key is replaced. TCPServer.__init__ then calls the overridden
+        # server_close(): that closes self.store too, and withdraw() leaves the other dashboard's key (not ours) alone.
+        super().__init__(("127.0.0.1", port), Handler)
         try:
             self.unlock_key.publish(self.home, self.server_port)
         except OSError:
