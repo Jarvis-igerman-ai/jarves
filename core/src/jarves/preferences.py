@@ -69,7 +69,9 @@ def _high_entropy(word: str) -> bool:
 
 def looks_sensitive(text: str) -> bool:
     t = text or ""
-    return bool(_SENSITIVE.search(t)) or logs.has_secret(t) or any(_high_entropy(m) for m in _TOKENISH.findall(t))
+    # '/' splits the run first so file paths (/Users/Owner/Project2024/v3/file1) are judged segment by segment
+    return bool(_SENSITIVE.search(t)) or logs.has_secret(t) or any(
+        _high_entropy(p) for m in _TOKENISH.findall(t) for p in m.split("/") if len(p) >= 20)
 
 
 def normalize(text: str) -> str:

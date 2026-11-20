@@ -30,6 +30,8 @@ LEAKY = [
     "שמור את מפתח ה-API שלי",                 # Hebrew only: no English "api key" to lean on
     "המפתח הפרטי שלי נמצא בכונן",
     "send the bearer token with every call",
+    "send bearer Ab12Cd34Ef56Gh78 with every call",   # bearer value branch (review of #1489 @ ca5c6b0, R2)
+    "Authorization: Bearer Ab12Cd34Ef56Gh78",
     "export OPENAI_API_KEY_FILE before running",   # word end is not "_": variable names stay caught
     "rotate the refresh tokens weekly",
 ]
@@ -72,6 +74,8 @@ SAFE_DRAFTS = [
     (f"revert commit {SHA}", f"it broke the build; see {SHA[:7]}"),
     ("bump jarves to v4.0.1-rc2", "edit core/src/jarves/goals.py and pyproject.toml"),
     ("crash in release_notes_v4_0_1_final", "trace in C:/work/jarves/core/src/jarves/devmanager.py line 50"),
+    # mixed-case path with 3+ digit groups: '/' splits the run before the entropy check (review @ ca5c6b0, R1)
+    ("crash in /Users/Owner/Documents/Project2024/v3/file1.py", "seen in /Users/Owner/Builds/Release7x9/run2/Log5"),
 ]
 
 
@@ -97,8 +101,9 @@ def test_ordinary_preferences_are_not_sensitive(text):
 
 @pytest.mark.parametrize("token", [JWT, AWS])
 def test_vendor_shapes_are_caught_through_has_secret_only(token):
+    # no entropy assertion here: that would pin _ENTROPY_BITS, not has_secret (review @ ca5c6b0, R3)
     assert not prefs_mod._SENSITIVE.search(token)
-    assert not any(prefs_mod._high_entropy(m) for m in prefs_mod._TOKENISH.findall(token))
+    assert logs.has_secret(token)
     assert prefs_mod.looks_sensitive(f"remember {token}")
 
 
