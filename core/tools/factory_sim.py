@@ -72,7 +72,7 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
         made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1"],
+                               "--label", "showstopper", "--label", "P1", "--label", "testing"],
                               capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
