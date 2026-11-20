@@ -55,3 +55,36 @@ def test_safe_defaults_reach_worker_argv():
 def test_default_grants_pass_the_override_validator():
     from jarves.workflow import autopilot
     autopilot._worker_tools(list(claude.WORKER_ALLOWED_TOOLS))
+
+
+def _console_rules(rules):
+    return [r for r in rules if "workflow_console.py" in r]
+
+
+def test_console_rules_are_kept_when_console_lives_outside_the_worker_cwd(tmp_path):
+    """Review R1: the usual layout, core checkout beside `<project>/.jarves/worktrees/<slug>`; routes stay."""
+    con = tmp_path / "proj" / "core" / "tools" / "workflow_console.py"
+    wt = tmp_path / "proj" / ".jarves" / "worktrees" / "t1"
+    rules = claude.autopilot_allowed_tools("C:/py/python.exe", console=str(con), home="C:/home", cwd=str(wt))
+    assert _console_rules(rules)
+
+
+@pytest.mark.parametrize("rel", ["proj", "proj/core", "proj/core/tools"])
+def test_console_rules_are_dropped_when_the_worker_can_edit_the_console(tmp_path, rel):
+    """Review R1: the worker runs in the folder that holds the console, its directory or the core/src import root;
+    acceptEdits would let it edit code that the preapproved console rule then runs, so no console rule."""
+    con = tmp_path / "proj" / "core" / "tools" / "workflow_console.py"
+    rules = claude.autopilot_allowed_tools("C:/py/python.exe", console=str(con), home="C:/home",
+                                           cwd=str(tmp_path / rel))
+    assert not _console_rules(rules) and "Read" in rules
+
+
+def test_worker_tools_pass_the_worker_cwd(tmp_path, monkeypatch):
+    """Review R1: the service hands the worker's cwd to the rule builder, so the check above is applied."""
+    from jarves.orchestrator import service
+    seen = {}
+    monkeypatch.setattr(service.claude, "autopilot_allowed_tools", lambda *a, **k: seen.update(k) or [])
+    svc = object.__new__(service.Orchestrator)
+    svc.home = tmp_path
+    svc._worker_tools(str(tmp_path / "wt"))
+    assert seen["cwd"] == str(tmp_path / "wt")

@@ -256,7 +256,7 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Read", "Grep", "Glob", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)",
 )
-# Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
+# Always denied for a worker, whatever the allow list says. Default workers cannot commit (#1311); nobody here pushes or merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
@@ -269,17 +269,28 @@ WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own
 WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
 
 
+def _console_editable_from(console: str, cwd: str) -> bool:
+    """#1311 review R1: True when a worker in `cwd` could edit the console script, its directory (on sys.path) or the
+    Core tree it imports (`<core>/tools/workflow_console.py` -> `<core>`, which holds `src/jarves`)."""
+    try:
+        root, wd = Path(console).resolve().parents[1], Path(cwd).resolve()
+    except (OSError, IndexError, ValueError):
+        return True                                   # unknown layout: treat as editable (fail closed)
+    return wd == root or wd in root.parents or root in wd.parents
+
+
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
-                           home: str = "") -> list[str]:
+                           home: str = "", cwd: str = "") -> list[str]:
     """Owner override, else read-only defaults plus the bounded worker workflow-console commands.
 
-    Never grant pytest through the Core interpreter: it executes worker-written code (#1311).
+    Never grant pytest through the Core interpreter: it executes worker-written code (#1311). For the same reason the
+    console routes are left out when the worker's `cwd` holds the console or its Core import root (review R1).
     """
     if override:
         return list(override)
     rules = list(WORKER_ALLOWED_TOOLS)
     if python:
-        if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
+        if console and home and not (cwd and _console_editable_from(console, cwd)):    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
             for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
                 p, c, h = conv
                 for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home <exact HOME> <sub> ...`

@@ -1149,7 +1149,7 @@ class Orchestrator:
             pass
         return str(wt)
 
-    def _worker_tools(self) -> list[str]:
+    def _worker_tools(self, cwd: str) -> list[str]:
         """Allow rules for an autopilot worker: the owner's `worker_allowed_tools` policy key, else the narrow default."""
         try:
             from ..workflow import autopilot
@@ -1159,7 +1159,7 @@ class Orchestrator:
             override = None
         console = Path(__file__).resolve().parents[2].parent / "tools" / "workflow_console.py"
         return claude.autopilot_allowed_tools(sys.executable, override, str(console) if console.is_file() else "",
-                                             str(self.home / "workflow"))
+                                             str(self.home / "workflow"), cwd=cwd)
 
     def _start_claude(self, proj, cwd: str, task: str, *, by: str, model: str, lang: str, resume: str = "",
                       env: dict | None = None) -> dict:
@@ -1172,7 +1172,7 @@ class Orchestrator:
             self._managed_claude_event(holder, kind, d, started)
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
                                  env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"),
-                                 allowed_tools=self._worker_tools() if by == "autopilot" else None,
+                                 allowed_tools=self._worker_tools(cwd) if by == "autopilot" else None,
                                  permission_mode=claude.WORKER_PERMISSION_MODE
                                  if by == "autopilot" and cwd != proj.path else "default")
         try:
