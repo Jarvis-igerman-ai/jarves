@@ -45,8 +45,9 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
-    r"api[\s_-]*key|access[\s_-]*(?:key|token)|auth[\s_-]*token|refresh[\s_-]*token|\bbearer\b|"
-    r"client[\s_-]*secret|secret[\s_-]*key|private[\s_-]*key|טוקן|מפתח\s+(?:ה)?(?:api|גישה|פרטי)", re.I)
+    r"api[\s_-]*key|access[\s_-]*(?:key|token)|auth[\s_-]*token|refresh[\s_-]*token|"
+    r"\bbearer\s+(?:token\b|[A-Za-z0-9._~+/-]{16,})|"
+    r"client[\s_-]*secret|secret[\s_-]*key|private[\s_-]*key|טוקן|מפתח\s+(?:ה[-\s]*)?(?:api|גישה|פרטי)", re.I)
 # A long unbroken run of letters, digits and token punctuation (#1099): a key/token without a known vendor prefix.
 _TOKENISH = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
 _ENTROPY_BITS = 4.0               # bits per character over the run

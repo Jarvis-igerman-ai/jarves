@@ -1,7 +1,7 @@
 """#1099: preferences.looks_sensitive must refuse key/token-shaped text, not only passwords and long numbers."""
 import pytest
 
-from jarves import devmanager as dev_mod, goals as goals_mod, preferences as prefs_mod
+from jarves import devmanager as dev_mod, goals as goals_mod, logs, preferences as prefs_mod
 from jarves.store import Store
 from jarves.userdata import open_db
 
@@ -27,6 +27,9 @@ LEAKY = [
     "my private key is on the usb stick",
     "תזכור את ה-API key שלי",
     "תשמור את הטוקן שלי",
+    "שמור את מפתח ה-API שלי",                 # Hebrew only: no English "api key" to lean on
+    "המפתח הפרטי שלי נמצא בכונן",
+    "send the bearer token with every call",
 ]
 SAFE = [
     "I prefer short answers in the morning",
@@ -37,6 +40,13 @@ SAFE = [
     "summarise news from https://example.com/world/europe",
     "open make-the-coffee-strong-2024 and MyFavouritePlaylist2024",
     "the file release_notes_v4_0_1_final is fine",
+    "the bearer of the news was late",
+]
+SHA = "ab17fe59578af69d56815eb69b4dbcb72a864efe"   # a real 40-hex commit id of this branch
+SAFE_DRAFTS = [
+    (f"revert commit {SHA}", f"it broke the build; see {SHA[:7]}"),
+    ("bump jarves to v4.0.1-rc2", "edit core/src/jarves/goals.py and pyproject.toml"),
+    ("crash in release_notes_v4_0_1_final", "trace in C:/work/jarves/core/src/jarves/devmanager.py line 50"),
 ]
 
 
@@ -77,4 +87,13 @@ def test_dev_drafts_share_the_refusal(home):
     with pytest.raises(ValueError, match="sensitive"):
         dev_mod.suggest(st, "store the client secret in the settings page")
     assert dev_mod.listing(st) == []
+    st.close()
+
+
+@pytest.mark.parametrize("title,body", SAFE_DRAFTS)
+def test_technical_dev_drafts_are_still_accepted(home, title, body):
+    # commit SHAs, versions and paths go through every rule, logs.has_secret included, without a refusal
+    assert not logs.has_secret(f"{title} {body}")
+    st = Store(home / "store.db")
+    assert dev_mod.suggest(st, title, body)["title"].endswith(title)
     st.close()
