@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -58,29 +57,25 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-_NOHOOKS = {"dir": ""}
+def _no_hooks_path() -> str:
+    """`core.hooksPath` for every JARVES git command (#1381): a path BELOW a file, so it can never be a folder and no
+    process (an agent included) can put a hook there. POSIX: `/dev/null` (root-owned, in root-owned /dev). Windows: a
+    path below `kernel32.dll` in System32 (owned by TrustedInstaller); `NUL\\x` would be a plain relative path there."""
+    if os.name == "nt":
+        return os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "kernel32.dll", "no-hooks")
+    return "/dev/null"
 
 
-def _no_hooks_dir() -> str:
-    """One empty folder per process for `core.hooksPath` (#1381). Re-made when it is missing or no longer empty, so
-    a hook written into it never runs."""
-    with _LOCKS_GUARD:
-        d = _NOHOOKS["dir"]
-        try:
-            if d and os.path.isdir(d) and not os.path.islink(d) and not os.listdir(d):
-                return d
-        except OSError:
-            pass
-        _NOHOOKS["dir"] = tempfile.mkdtemp(prefix="jarves-nohooks-")
-        return _NOHOOKS["dir"]
+NO_HOOKS = _no_hooks_path()
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
-    No git hook ever runs (#1381): `core.hooksPath` points at an empty folder, so neither the shared `.git/hooks` nor
-    a `core.hooksPath` from the shared config (both writable by agents) runs on a merge, commit, index or ref write."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={_no_hooks_dir()}"]
+    No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
+    shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
+    commit, index or ref write."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",

@@ -2,6 +2,7 @@
 No network; a throw-away local repository."""
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -197,11 +198,13 @@ def test_worktree_creation_and_commits_never_run_shared_hooks(tmp_path):
     assert not marker.exists()
 
 
-def test_the_empty_hooks_folder_is_reused_and_replaced_once_written_to():
-    """#1381 review R3: one empty folder per process instead of a new one per command; a hook written into it never
-    runs, because a folder that is no longer empty is replaced."""
-    d = gitops._no_hooks_dir()
-    assert gitops._no_hooks_dir() == d and not list(Path(d).iterdir())
-    (Path(d) / "post-index-change").write_text("#!/bin/sh\n", encoding="utf-8")
-    d2 = gitops._no_hooks_dir()
-    assert d2 != d and not list(Path(d2).iterdir())
+def test_the_hooks_path_can_never_become_a_folder_an_agent_fills():
+    """#1381 review R1: a shared temp folder could be filled by a racing agent between a check and git's hook lookup.
+    The hooks path sits below an existing file, so nobody can create it as a folder, and every git call uses it."""
+    assert not os.path.isdir(gitops.NO_HOOKS)
+    with pytest.raises(OSError):
+        os.makedirs(gitops.NO_HOOKS)
+    with pytest.raises(OSError):
+        (Path(gitops.NO_HOOKS) / "post-merge").write_text("#!/bin/sh\n", encoding="utf-8")
+    assert gitops._no_hooks_path() == gitops.NO_HOOKS
+
