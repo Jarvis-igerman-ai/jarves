@@ -44,12 +44,18 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
+    # Hebrew bare "טוקן" is a loanword that only means a digital credential, so it is refused alone; English bare
+    # "token"/"secret" are everyday words ("a token of thanks", "a secret party") and count only as credential phrases
+    # or a labelled value (token: / secret=).
     r"טוקן|מפתח\s+(?:api|גישה|פרטי|סודי)|"
     r"api[\s_-]?key|(?:private|access|secret)[\s_-]?key|(?:access|auth|bearer|refresh|api)[\s_-]?token|"
-    r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]", re.I)
+    r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]|"
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)   # UUID-shaped keys (dashed runs)
 # An unlabelled credential: a long run of key alphabet with letters AND digits and high per-character entropy.
-# (- and _ split runs so word slugs stay ordinary; prefixed dashed tokens are caught by logs.has_secret above)
-_KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
+# - and _ split runs so word slugs stay ordinary (prefixed dashed tokens are caught by logs.has_secret above);
+# / splits too, so URL paths (example.com/owner/repo/pull/1450) stay ordinary. A bare 40-hex string is still refused
+# on purpose: it is indistinguishable from a 40-hex API token, and a short commit id (7-12 chars) is allowed.
+_KEYISH = re.compile(r"[A-Za-z0-9+=]{20,}")
 _MIN_ENTROPY = 3.5                # bits per character; English words and slugs stay well below this
 
 
