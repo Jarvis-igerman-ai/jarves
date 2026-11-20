@@ -163,7 +163,7 @@ class Server(ThreadingHTTPServer):
         self.discuss = Helper(self.home, token=self.token)
         super().__init__(("127.0.0.1", port), Handler)  # a failed bind raises here, before the live key is replaced
         try:
-            self.unlock_key.publish(self.home)
+            self.unlock_key.publish(self.home, self.server_port)
         except OSError:
             self.server_close()
             raise
@@ -197,6 +197,10 @@ class Server(ThreadingHTTPServer):
     def server_close(self) -> None:
         self.stopping.set()
         super().server_close()
+        try:
+            self.unlock_key.withdraw(self.home)  # a stopped dashboard leaves no key that would yield a dead code
+        except (OSError, ValueError, AttributeError) as exc:
+            logging.getLogger(__name__).warning("unlock key not withdrawn: %s", exc)  # once per stop; a later start replaces the key
         self.store.close()
 
 

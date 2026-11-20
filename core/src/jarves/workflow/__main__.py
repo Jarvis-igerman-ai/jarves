@@ -191,6 +191,15 @@ def _home_count(av) -> int:
     return len(seen)
 
 
+
+def live_code(home: Path, port: int) -> str:
+    """#750: issue a code only for a dashboard that answers on `port` AND published the key (no dead codes)."""
+    from . import unlock
+    from .opener import listening
+    if not listening(port):
+        raise unlock.UnlockUnavailable(f"no dashboard is running on port {port}; start it with: jarvis workflow supervise")
+    return unlock.issue(home, port=port)
+
 def main(argv=None) -> int:
     utf8_streams()
     _av = list(sys.argv[1:] if argv is None else argv)
@@ -245,7 +254,7 @@ def main(argv=None) -> int:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
         try:
-            code = unlock.issue(home)
+            code = live_code(home, a.port)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 2
@@ -259,7 +268,7 @@ def main(argv=None) -> int:
         from . import unlock
         try:  # in the owner's own terminal only: also show the answer-unlock code (#750)
             owner_only_guard("open")
-            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {unlock.issue(home)}", file=sys.stderr)
+            print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {live_code(home, a.port)}", file=sys.stderr)
         except PermissionError:
             pass
         except unlock.UnlockUnavailable as exc:

@@ -26,7 +26,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 CODE_TTL_S = 300      # how long a shown code can be typed
 UNLOCK_TTL_S = 7 * 86400  # default session unlock: 1 week (owner decision 2 Nov; was 8 h); policy watchdog.owner_unlock_s overrides
 FILE = "unlock.json"
-PUB_FILE = "unlock_pub.json"  # the live dashboard's public key; the private half is never written
+PUB_FILE = "unlock_pub.json"  # the live dashboard's public key and port; the private half is never written
+REPLACE_TRIES = 5
 
 
 class UnlockUnavailable(RuntimeError):
@@ -44,18 +45,35 @@ class ServerKey:
         self._key = X25519PrivateKey.generate()
         self.pub = self._key.public_key().public_bytes_raw()
 
-    def publish(self, home: Path) -> None:
-        """Atomically replace unlock_pub.json (unique temp file + os.replace) with this key's public half."""
+    def publish(self, home: Path, port: int) -> None:
+        """Atomically replace unlock_pub.json (unique temp file + os.replace) with this key's public half and the
+        port it answers on. On Windows a reader can hold the target briefly: a few short retries, then it raises."""
         path = Path(home) / PUB_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{PUB_FILE}.{secrets.token_hex(8)}.tmp")
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="ascii") as f:
-                json.dump({"pub": self.pub.hex()}, f)
-            os.replace(tmp, path)
+                json.dump({"pub": self.pub.hex(), "port": int(port)}, f)
+            for attempt in range(REPLACE_TRIES):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    if attempt == REPLACE_TRIES - 1:
+                        raise
+                    time.sleep(0.05)
         finally:
             tmp.unlink(missing_ok=True)
+
+    def withdraw(self, home: Path) -> None:
+        """On a clean stop: remove unlock_pub.json only while it still holds THIS key (a newer dashboard's stays)."""
+        path = Path(home) / PUB_FILE
+        try:
+            if json.loads(path.read_text(encoding="ascii")).get("pub") == self.pub.hex():
+                path.unlink()
+        except FileNotFoundError:
+            pass
 
     def shared(self, eph: bytes) -> bytes:
         return self._key.exchange(X25519PublicKey.from_public_bytes(eph))  # ValueError for a malformed or low-order key
@@ -66,18 +84,24 @@ def _tag(shared: bytes, eph: bytes, pub: bytes, code: str) -> bytes:
     return hmac.new(key, normalize(code).encode("ascii"), hashlib.sha256).digest()
 
 
-def _published(home: Path) -> bytes:
+def _published(home: Path) -> tuple[bytes, int | None]:
     try:
-        pub = bytes.fromhex(json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))["pub"])
+        record = json.loads((Path(home) / PUB_FILE).read_text(encoding="ascii"))
+        pub = bytes.fromhex(record["pub"])
         X25519PublicKey.from_public_bytes(pub)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+        port = record.get("port")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("no dashboard unlock key is published; start or restart the dashboard, then run this again") from exc
-    return pub
+    return pub, port if isinstance(port, int) else None
 
 
-def issue(home: Path, *, now: float | None = None) -> str:
-    """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
-    pub = _published(home)
+def issue(home: Path, *, port: int | None = None, now: float | None = None) -> str:
+    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
+    With `port`, the published key must belong to the dashboard on that port (else a dead code would be shown)."""
+    pub, owner = _published(home)
+    if port is not None and owner != port:
+        raise UnlockUnavailable(f"the unlock key belongs to the dashboard on port {owner}, not {port}; "
+                                "restart the dashboard or pass --port with its port")
     eph_key = X25519PrivateKey.generate()
     eph = eph_key.public_key().public_bytes_raw()
     try:

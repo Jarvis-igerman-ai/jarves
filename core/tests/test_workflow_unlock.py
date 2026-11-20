@@ -133,7 +133,7 @@ class UnlockTests(unittest.TestCase):
         autopilot.save(self.home, policy)
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
-            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "unlock"]), 0)
+            self.assertEqual(cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]), 0)
         self.assertIn("unlocked for 6 hours", out.getvalue())
         self.assertNotIn("0 days", out.getvalue())
 
@@ -216,7 +216,7 @@ class UnlockTests(unittest.TestCase):
         with self.assertRaises(unlock.UnlockUnavailable):
             unlock.issue(self.home)
         self.assertFalse((self.home / unlock.FILE).exists())
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         with patch.object(cli, "owner_only_guard", lambda action: None), \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
             self.assertEqual(cli.main(argv), 2)
@@ -224,7 +224,7 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn("Unlock code", out.getvalue())
         with patch.object(cli, "owner_only_guard", lambda action: None), \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-            cli.main(["--home", str(self.home), "--profile-home", str(self.home), "open", "--no-open"])
+            cli.main(["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "open", "--no-open"])
         self.assertIn("No unlock code yet", err.getvalue())
         self.assertFalse((self.home / unlock.FILE).exists())
 
@@ -244,6 +244,73 @@ class UnlockTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 Server(self.home, 0)
         self.assertEqual(len(closed), 1)
+
+    def cli_owner(self, *args):
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), *args]
+        with patch.object(cli, "owner_only_guard", lambda action: None), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            rc = cli.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_750_open_and_unlock_give_no_code_when_no_dashboard_listens(self):
+        """R1/R2 (#1410): a stopped dashboard withdraws its key; a key left by a crash on a port nobody
+        answers gives no (dead) code, from `open` (fresh start, not yet listening) or from `unlock`."""
+        port = self.server.server_port
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.server_close()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())          # clean stop withdraws its own key
+        unlock.ServerKey().publish(self.home, port)                       # what a crashed dashboard leaves behind
+        rc, out, err = self.cli_owner("--port", str(port), "open", "--no-open")
+        self.assertIn("No unlock code yet", err)
+        self.assertIn(f"no dashboard is running on port {port}", err)
+        self.assertNotIn("Unlock code for", out + err)
+        rc, out, err = self.cli_owner("--port", str(port), "unlock")
+        self.assertEqual(rc, 2)
+        self.assertIn(f"no dashboard is running on port {port}", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+        self.server = Server(self.home, port)                              # tearDown closes it
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.assertEqual(self.cli_owner("--port", str(port), "unlock")[0], 0)
+
+    def test_750_code_only_for_the_dashboard_that_published_the_key(self):
+        live = self.server.server_port
+        record = json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))
+        self.assertEqual(record["port"], live)
+        other = Server(Path(tempfile.mkdtemp()), 0)                        # some other listener on another port
+        try:
+            rc, _, err = self.cli_owner("--port", str(other.server_port), "unlock")
+        finally:
+            other.server_close()
+        self.assertEqual(rc, 2)
+        self.assertIn(f"belongs to the dashboard on port {live}", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_750_close_withdraws_only_its_own_key(self):
+        second = Server(self.home, 0)                                      # replaces the published key
+        mine = (self.home / unlock.PUB_FILE).read_bytes()
+        self.server.server_close()                                         # the first one's key is no longer published
+        self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), mine)
+        second.server_close()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())
+
+    def test_750_key_publish_retries_a_briefly_locked_target_then_gives_up(self):
+        real, calls = os.replace, []
+        def flaky(src, dst):
+            calls.append(dst)
+            if len(calls) < 3:
+                raise PermissionError("reader holds the file")
+            real(src, dst)
+        key = unlock.ServerKey()
+        with patch.object(unlock.os, "replace", flaky), patch.object(unlock.time, "sleep", lambda s: None):
+            key.publish(self.home, 1234)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))["pub"], key.pub.hex())
+        with patch.object(unlock.os, "replace", side_effect=PermissionError("held")), \
+                patch.object(unlock.time, "sleep", lambda s: None), self.assertRaises(PermissionError):
+            key.publish(self.home, 1234)
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.endswith(".tmp")], [])
 
     def test_unlock_needs_a_session(self):
         unlock.issue(self.home)
@@ -265,7 +332,7 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())
 
     def test_cli_unlock_in_terminal_shows_code_that_the_server_accepts(self):
-        argv = ["--home", str(self.home), "--profile-home", str(self.home), "unlock"]
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port), "unlock"]
         out = io.StringIO()
         with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"), redirect_stdout(out):
             self.assertEqual(cli.main(argv), 0)
