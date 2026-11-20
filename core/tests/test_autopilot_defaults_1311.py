@@ -110,3 +110,13 @@ def test_worker_cannot_edit_tier_r_paths_without_the_owner_settings(path):
     for tool in ("Edit", "Write"):
         pats = [r[len(tool) + 1:-1] for r in claude.WORKER_DENY if r.startswith(tool + "(")]
         assert any(fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase("x/" + path, p) for p in pats), (tool, path)
+
+
+def test_owner_override_argv_keeps_owner_settings_and_worker_deny():
+    """Review R1: `owner_tools=True` (autopilot.json override) passes no `--setting-sources`, so the owner's user-level
+    deny/ask rules and hooks still load; WORKER_DENY is still passed."""
+    argv = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda *_: None, allowed_tools=["Bash(python:*)"],
+                                permission_mode=claude.WORKER_PERMISSION_MODE, owner_tools=True).argv
+    assert "--setting-sources" not in argv
+    assert argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")] == ["Bash(python:*)"]
+    assert argv[argv.index("--disallowedTools") + 1:][:len(claude.WORKER_DENY)] == list(claude.WORKER_DENY)

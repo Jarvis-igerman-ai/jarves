@@ -313,7 +313,7 @@ class ManagedClaude:
     def __init__(self, cmd: list[str], cwd: str, *, plugin_dir: str | None, on_event: Callable[[str, dict], None],
                  resume: str = "", model: str = "", env: dict | None = None, max_budget_usd: float = 0.0,
                  restricted: bool = False, allowed_tools: list[str] | None = None,
-                 permission_mode: str = "default") -> None:
+                 permission_mode: str = "default", owner_tools: bool = False) -> None:
         argv = [*cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                 "--permission-mode",
                 permission_mode if permission_mode in ("default", WORKER_PERMISSION_MODE) else "default"]
@@ -321,7 +321,10 @@ class ManagedClaude:
         if restricted:        # a self-diagnosis hand-off (#336 C): the owner's broad allow rules do not apply, merging and pushing are denied
             argv += ["--setting-sources", "project", "--disallowedTools", *RESTRICTED_DENY]
         if allowed_tools:     # explicit narrow allow rules for a headless worker (no one is there to answer a prompt)
-            if not restricted:  # #1311: --allowedTools adds to settings; the owner's broad user/local allows must not apply
+            # #1311: --allowedTools adds to settings, so the default list loads project settings only (the owner's broad
+            # user allows must not apply). An owner override (`owner_tools`, autopilot.json `worker_allowed_tools`) keeps
+            # the owner's user/local settings: their deny/ask rules (installers, network) and hooks still bind (review R1).
+            if not restricted and not owner_tools:
                 argv += ["--setting-sources", "project"]
             argv += ["--allowedTools", *allowed_tools, "--disallowedTools", *WORKER_DENY]
         if plugin_dir:

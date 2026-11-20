@@ -500,9 +500,10 @@ def test_autopilot_worker_start_uses_isolated_worktree_mode_and_policy_override(
     assert r2.get("ok"), r2
     a2 = o.managed[r2["session"]["id"]].argv
     assert "--allowedTools" not in a2 and a2[a2.index("--permission-mode") + 1] == "default"
-    policy, _ = autopilot.load(home)
+    policy, _ = autopilot.load(home / "workflow")       # #1311: the real policy file, as the kill switch and store read it
     policy["worker_allowed_tools"] = ["Bash(ls:*)"]
-    autopilot.save(home, policy)
+    (home / "workflow").mkdir(exist_ok=True)
+    autopilot.save(home / "workflow", policy)
     r3 = o.start_session("claude", "alpha", "z", by="autopilot", model=M_SON)
     a3 = o.managed[r3["session"]["id"]].argv
     assert a3[a3.index("--allowedTools") + 1] == "Bash(ls:*)"
@@ -519,3 +520,33 @@ def test_policy_worker_allowed_tools_is_validated(tmp_path):
             autopilot.validate({**base, "worker_allowed_tools": bad})
     autopilot.set_key(tmp_path, "worker_allowed_tools", '["Bash(ls:*)"]')
     assert autopilot.load(tmp_path)[0]["worker_allowed_tools"] == ["Bash(ls:*)"]
+
+
+def _worker_argv(o, sid):
+    return next(m.argv for m in o.managed.values() if "--allowedTools" in getattr(m, "argv", ()))
+
+
+@pytest.mark.parametrize("override", [None, ["Bash(python:*)"]])
+def test_autopilot_owner_override_keeps_the_owner_settings_1311(world, override):
+    """#1311 review R1: only the DEFAULT allow list drops the owner's user/local settings (`--setting-sources project`).
+    An owner override in autopilot.json keeps them, so the owner's own deny rules (installers, network) and hooks still
+    bind; WORKER_DENY is passed in both cases."""
+    import json
+    from jarves.orchestrator import claude
+    from jarves.workflow import autopilot
+    o, owner = world["o"], world["owner"]
+    assert _grant(o, owner)["ok"]
+    wf = world["home"] / "workflow"
+    wf.mkdir(exist_ok=True)
+    pol = dict(autopilot.DEFAULTS, **({"worker_allowed_tools": override} if override else {}))
+    (wf / "autopilot.json").write_text(json.dumps(pol), encoding="utf-8")
+    r = o.start_session("claude", "alpha", "x", by="autopilot", model=M_SON, env={"JARVES_WORKFLOW_AGENT": "ap-bugs-1"})
+    assert r["ok"], r
+    argv = _worker_argv(o, r["session"]["id"])
+    allowed = argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    assert argv[argv.index("--disallowedTools") + 1:][:len(claude.WORKER_DENY)] == list(claude.WORKER_DENY)
+    if override:
+        assert allowed == override and "--setting-sources" not in argv
+    else:
+        assert "Read" in allowed and argv[argv.index("--setting-sources") + 1] == "project"
+    o.stop_session(r["session"]["id"], by="autopilot")

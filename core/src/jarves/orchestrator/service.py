@@ -1149,14 +1149,17 @@ class Orchestrator:
             pass
         return str(wt)
 
-    def _worker_tools(self, cwd: str) -> list[str]:
-        """Allow rules for an autopilot worker: the owner's `worker_allowed_tools` policy key, else the narrow default."""
+    def _worker_override(self) -> list[str] | None:
+        """The owner's `worker_allowed_tools` policy key, or None (no key, unreadable policy)."""
         try:
             from ..workflow import autopilot
-            pol, err = autopilot.load(self.home)
-            override = None if err else pol.get("worker_allowed_tools")
+            pol, err = autopilot.load(self.home / "workflow")   # same file as the kill switch check above
+            return None if err else pol.get("worker_allowed_tools") or None
         except Exception:                                  # never block a start on a policy read
-            override = None
+            return None
+
+    def _worker_tools(self, cwd: str = "", override: list[str] | None = None) -> list[str]:
+        """Allow rules for an autopilot worker: the owner's override (see `_worker_override`), else the narrow default."""
         console = Path(__file__).resolve().parents[2].parent / "tools" / "workflow_console.py"
         return claude.autopilot_allowed_tools(sys.executable, override, str(console) if console.is_file() else "",
                                              str(self.home / "workflow"), cwd=cwd)
@@ -1170,9 +1173,11 @@ class Orchestrator:
 
         def on_event(kind: str, d: dict) -> None:
             self._managed_claude_event(holder, kind, d, started)
+        override = self._worker_override() if by == "autopilot" else None
         m = claude.ManagedClaude(self.claude_cmd, cwd, plugin_dir=pdir, on_event=on_event, resume=resume, model=model,
                                  env=env, max_budget_usd=self._budget_left(), restricted=(by == "diag"),
-                                 allowed_tools=self._worker_tools(cwd) if by == "autopilot" else None,
+                                 allowed_tools=self._worker_tools(cwd, override) if by == "autopilot" else None,
+                                 owner_tools=override is not None,
                                  permission_mode=claude.WORKER_PERMISSION_MODE
                                  if by == "autopilot" and cwd != proj.path else "default")
         try:
