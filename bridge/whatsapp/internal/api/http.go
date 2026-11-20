@@ -70,8 +70,6 @@ var messages = map[string]string{
 	"WA_NO_ENGINE":         "No WhatsApp engine is available.",
 	"WA_LINK_FAILED":       "Linking could not start.",
 	"WA_INTERNAL":          "Internal bridge error.",
-	"WA_KEEP_NOTHING":      "Keep-nothing is on: history is not collected.",
-	"WA_BACKFILL_RUNNING":  "A history backfill is already running.",
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -93,28 +91,25 @@ func writeErr(w http.ResponseWriter, status int, code string, extra map[string]a
 // Handler returns the HTTP handler (Host check, auth, routing).
 func (s *Server) Handler() http.Handler {
 	routes := map[string]route{
-		"GET /status":              {false, s.hStatus},
-		"GET /chats":               {false, s.hChats},
-		"GET /messages":            {false, s.hMessages},
-		"GET /search":              {false, s.hSearch},
-		"POST /seen":               {false, s.hSeen},
-		"POST /send":               {false, s.hSend},
-		"GET /events":              {false, s.handleEvents},
-		"POST /mode":               {true, s.hMode},
-		"POST /allow":              {true, s.hAllow},
-		"POST /read_scope":         {true, s.hReadScope},
-		"POST /kill":               {true, s.hKill},
-		"POST /link":               {true, s.hLinkStart},
-		"GET /link":                {true, s.hLinkGet},
-		"POST /unlink":             {true, s.hUnlink},
-		"POST /retention":          {true, s.hRetention},
-		"POST /purge":              {true, s.hPurge},
-		"GET /audit":               {true, s.hAudit},
-		"GET /policy":              {true, s.hPolicy},
-		"POST /shutdown":           {true, s.hShutdown},
-		"POST /history/backfill":   {true, s.hBackfillStart},
-		"GET /history/backfill":    {true, s.hBackfillGet},
-		"DELETE /history/backfill": {true, s.hBackfillStop},
+		"GET /status":      {false, s.hStatus},
+		"GET /chats":       {false, s.hChats},
+		"GET /messages":    {false, s.hMessages},
+		"GET /search":      {false, s.hSearch},
+		"POST /seen":       {false, s.hSeen},
+		"POST /send":       {false, s.hSend},
+		"GET /events":      {false, s.handleEvents},
+		"POST /mode":       {true, s.hMode},
+		"POST /allow":      {true, s.hAllow},
+		"POST /read_scope": {true, s.hReadScope},
+		"POST /kill":       {true, s.hKill},
+		"POST /link":       {true, s.hLinkStart},
+		"GET /link":        {true, s.hLinkGet},
+		"POST /unlink":     {true, s.hUnlink},
+		"POST /retention":  {true, s.hRetention},
+		"POST /purge":      {true, s.hPurge},
+		"GET /audit":       {true, s.hAudit},
+		"GET /policy":      {true, s.hPolicy},
+		"POST /shutdown":   {true, s.hShutdown},
 	}
 	paths := map[string]bool{}
 	for k := range routes {
@@ -426,21 +421,16 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.nowTS()
-	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	prev := s.pol.Mode
 	if b.Mode == "send" && prev != "send" && !b.OverrideWatch {
 		if left := s.watchDaysLeftLocked(); left > 0 {
 			s.mu.Unlock()
-			s.bfGate.Unlock()
 			writeErr(w, 409, "WA_WATCH_WINDOW", map[string]any{"days_left": left})
 			return
 		}
 	}
 	s.pol.Mode = b.Mode
-	if b.Mode == "off" {
-		s.bfClearLocked("stopped")
-	}
 	switch {
 	case b.Mode == "off":
 		s.pol.ReadSince = nil
@@ -450,7 +440,6 @@ func (s *Server) hMode(w http.ResponseWriter, r *http.Request) {
 	}
 	s.savePolicyLocked()
 	s.mu.Unlock()
-	s.bfGate.Unlock()
 	if prev != b.Mode {
 		s.log.Info("WA_MODE", "Mode changed.", F{"mode": b.Mode, "override_watch": b.OverrideWatch})
 		s.hub.broadcast("", map[string]any{"type": "mode.changed", "mode": b.Mode})
@@ -477,7 +466,6 @@ func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, "WA_GROUP_REFUSED", nil)
 		return
 	}
-	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	l := &s.pol.ReadAllow
 	if b.List == "send" {
@@ -497,7 +485,6 @@ func (s *Server) hAllow(w http.ResponseWriter, r *http.Request) {
 	n := len(*l)
 	s.savePolicyLocked()
 	s.mu.Unlock()
-	s.bfGate.Unlock()
 	s.log.Info("WA_ALLOW", "Allow-list changed.", F{"list": b.List, "op": b.Op, "count": n})
 	writeJSON(w, 200, map[string]any{"ok": true, "list": b.List, "count": n})
 }
@@ -514,7 +501,6 @@ func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "WA_BAD_REQUEST", nil)
 		return
 	}
-	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	if b.AllDirect != nil {
 		s.pol.ReadScope.AllDirect = *b.AllDirect
@@ -525,7 +511,6 @@ func (s *Server) hReadScope(w http.ResponseWriter, r *http.Request) {
 	sc := s.pol.ReadScope
 	s.savePolicyLocked()
 	s.mu.Unlock()
-	s.bfGate.Unlock()
 	writeJSON(w, 200, map[string]any{"ok": true, "read_scope": sc})
 }
 
@@ -626,12 +611,9 @@ func (s *Server) unlink(ctx context.Context) {
 		}
 	}
 	_ = s.st.Wipe(ctx)
-	s.bfGate.Lock()
 	s.mu.Lock()
-	s.bfClearLocked("stopped")
 	s.link = linkState{State: engine.LinkIdle}
 	s.mu.Unlock()
-	s.bfGate.Unlock()
 	s.seal(true)
 	s.log.Warn("WA_UNLINKED", "Device unlinked and store wiped.", nil)
 }
@@ -653,15 +635,10 @@ func (s *Server) hRetention(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "WA_BAD_REQUEST", nil)
 		return
 	}
-	s.bfGate.Lock() // only around the policy write, after the body is read: a slow client never delays bfNext
 	s.mu.Lock()
 	s.pol.RetentionDays, s.pol.KeepNothing = *b.Days, b.KeepNothing
-	if b.KeepNothing {
-		s.bfClearLocked("stopped")
-	}
 	s.savePolicyLocked()
 	s.mu.Unlock()
-	s.bfGate.Unlock()
 	s.purgeRetention()
 	writeJSON(w, 200, map[string]any{"ok": true, "retention_days": *b.Days, "keep_nothing": b.KeepNothing})
 }

@@ -11,33 +11,21 @@ import (
 // FakeSent is one text the fake engine "sent".
 type FakeSent struct{ To, Text string }
 
-// FakeHistoryRequest is one on-demand history request the fake engine received.
-type FakeHistoryRequest struct {
-	ID     string
-	Chat   string
-	Anchor HistoryAnchor
-	Count  int
-}
-
 // Fake is an in-memory engine for tests: no network, scripted by the test through Emit / CompleteLink.
 type Fake struct {
-	mu        sync.Mutex
-	handler   func(Event)
-	linked    bool
-	connected bool
-	linking   bool
-	loggedOut bool
-	Sent      []FakeSent
-	// HistoryRequests records RequestHistory calls; tests answer them with Emit(MessageEvent{History: true}).
-	HistoryRequests []FakeHistoryRequest
-	OnRequest       func() // called during RequestHistory (outside the fake's lock): tests act inside a dispatch
-	SendErr         error
-	Disconnects     int
-	Connects        int
-	Logouts         int
-	seq             int
-	reqSeq          int
-	Now             func() time.Time
+	mu          sync.Mutex
+	handler     func(Event)
+	linked      bool
+	connected   bool
+	linking     bool
+	loggedOut   bool
+	Sent        []FakeSent
+	SendErr     error
+	Disconnects int
+	Connects    int
+	Logouts     int
+	seq         int
+	Now         func() time.Time
 }
 
 // NewFake returns a fake engine; linked=true simulates an already linked device.
@@ -157,35 +145,4 @@ func (f *Fake) SendText(ctx context.Context, to, text string) (string, float64, 
 	f.seq++
 	f.Sent = append(f.Sent, FakeSent{To: to, Text: text})
 	return fmt.Sprintf("FAKE%06d", f.seq), float64(f.Now().UnixNano()) / 1e9, nil
-}
-
-func (f *Fake) RequestHistory(ctx context.Context, id, chat string, anchor HistoryAnchor, count int) error {
-	f.mu.Lock()
-	hook := f.OnRequest
-	f.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if !f.connected {
-		return ErrNotConnected
-	}
-	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{ID: id, Chat: chat, Anchor: anchor, Count: count})
-	return nil
-}
-
-// Requests returns a copy of the history requests received so far.
-func (f *Fake) Requests() []FakeHistoryRequest {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]FakeHistoryRequest(nil), f.HistoryRequests...)
-}
-
-// NewRequestID returns hist1, hist2, ...
-func (f *Fake) NewRequestID() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.reqSeq++
-	return fmt.Sprintf("hist%d", f.reqSeq)
 }

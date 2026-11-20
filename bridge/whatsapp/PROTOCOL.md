@@ -61,9 +61,6 @@ Tokens and keys are never logged, printed, put in an error message, or returned 
 | `GET /audit?limit=` | ADMIN | the send audit lines (hashes only) |
 | `GET /policy` | ADMIN | `policy.json` content (allow-lists hold JIDs: shown only on the PC) |
 | `POST /shutdown` | ADMIN | orderly stop (store sealed first) |
-| `POST /history/backfill {"chat"?, "since"?}` | ADMIN | start an on-demand history backfill (section 3a) |
-| `GET /history/backfill?cursor=&limit=` | ADMIN | progress plus buffered history; drops everything up to `cursor` |
-| `DELETE /history/backfill` | ADMIN | stop the backfill and clear its buffer |
 
 `GET /status` fields: `v, engine, version, mode, killed, kill_reason, connection` (`not_linked | linking | connecting |
 connected | disconnected | logged_out`), `linked, device_name` ("JARVES bridge"), `phone_last_seen` (ts of the last
@@ -78,75 +75,6 @@ media is NEVER downloaded or opened); `text` = "" for non-text kinds.
 
 Read gate: a direct chat is readable when `read_scope.all_direct` or it is on the read allow-list; a group only when
 `read_scope.groups` AND it is on the read allow-list. Mode `off` refuses every read with 409 `WA_MODE_OFF`.
-
-## 3a. History backfill (beta; real-phone behaviour UNVERIFIED)
-
-`POST /history/backfill {"chat"?, "since"?}` starts a backfill of every readable chat (or only `chat`) that has a
-stored message. Refusals: 409 `WA_MODE_OFF`, 423 `WA_KILLED`, 409 `WA_KEEP_NOTHING`, 409 `WA_STORE_LOCKED`, 409
-`WA_BACKFILL_RUNNING`, 503 `WA_NOT_CONNECTED`, 404 `WA_CHAT_NOT_FOUND`.
-
-Walk:
-- For each chat the bridge asks the phone for 50 messages before the oldest one it knows (whatsmeow on-demand
-  history sync), then asks again with the oldest answered message as the new anchor.
-- The anchor moves for a message older than it, or with the same timestamp but later in the answer (WhatsApp sends
-  newest first). So a batch boundary inside messages that share one timestamp does not end the walk; messages at
-  that timestamp collected by an earlier window are not buffered again.
-- A chat is finished when an answer brings nothing new and older. With `since` (a ts; default: no age limit),
-  messages older than `since` are ignored, so finishing costs one extra request.
-- A request the phone does not answer within 60 s is asked again from the same anchor. After 3 more unanswered
-  requests the chat moves on and counts in `chats_incomplete`, never as silently finished. If the bridge is offline
-  then, the backfill ends `failed` with `WA_NOT_CONNECTED` and the chat is not counted done.
-
-Bounds:
-- Answered messages of readable chats are kept ONLY in a bounded memory buffer (hard bounds: 2000 messages and
-  16 MiB; requests pause while it is full). On-demand answers never create or update a stored chat, and are never
-  written to the store or the sealed snapshot.
-- Overflow counts in `dropped`, and the same request is asked again after Core drains. Messages already buffered
-  from that anchor are skipped, so the retry adds exactly the missing ones. After 3 answers that add nothing (a
-  message that can never fit), the chat moves on and the overflow is reported in `lost` and `chats_incomplete`.
-- Deduplication remembers at most 10000 message IDs per chat (the current window plus messages at the anchor's
-  timestamp from earlier windows). An answer that needs more ends the chat: the rest counts in `lost` and the chat in
-  `chats_incomplete`.
-
-Matching (normative):
-- Only the answer to the request that is out is kept: its chat, older than its anchor, readable at that moment. Any
-  other history is ignored.
-- Each request is sent with its own message id. An answer that names another request (WhatsApp's
-  `peerDataRequestSessionID`; real-phone echo UNVERIFIED) is ignored, messages and completion alike.
-
-Matching (fallback heuristic, only for an answer that names no request):
-- An answer that brings nothing usable while an earlier request is still unanswered is taken as that late answer and
-  does not finish the chat. If it was the real answer, the request times out and is asked again; that timeout does
-  not count as a retry and adds no new late answer to expect, so earlier unanswered requests cost a responsive chat
-  time, never its completion.
-- Two late answers in a row: if a swallowed late answer is followed by this request's own answer also arriving
-  late, that empty answer can end a later request, possibly of the next chat when it names no chat. So once any
-  request of the run has timed out, a chat that an id-less empty answer ends counts in `chats_incomplete`, not in
-  `chats_done`: its history may not have been collected. Transports that echo the request id are not affected.
-  Whether the real phone echoes the id is UNVERIFIED; check it before the CLI or dashboard ships (JAR-290).
-
-Read scope and wipe triggers:
-- Read scope is checked again before every request. A chat that leaves it is never asked again (it counts in
-  `chats_incomplete`, also while its request is out), and its buffered messages are wiped as soon as the policy
-  changes.
-- Read-policy writes, stop and unlink wait for a request being sent (at most 15 s), so once they return no forbidden
-  request goes out. A policy write takes this wait only after its request body is read and validated.
-- Stop, kill, mode `off`, keep-nothing and unlink clear the buffer. For acknowledged and cleared messages the
-  bridge drops its references; Go strings cannot be overwritten, so the bytes stay in memory until the garbage
-  collector reuses it.
-  Logs carry counts only.
-
-`GET /history/backfill?cursor=N`:
-- Returns `{state: idle|running|done|stopped|failed, chats_total, chats_done, chats_skipped, received, buffered,
-  dropped, lost, chats_incomplete, error, batch, messages, next_cursor}`.
-- Each finished chat counts once: in `chats_done` (complete; this includes `chats_skipped`) or in `chats_incomplete`,
-  never in both.
-- It first drops every buffered message with a sequence number up to `cursor`, then returns the next readable
-  messages. Pass `next_cursor` on the following read to acknowledge them.
-- Sequence numbers keep growing across backfill runs (until the bridge restarts), so a cursor kept from an earlier
-  run never drops a new run's messages unread.
-
-WhatsApp may limit how much history the phone sends on demand.
 
 ## 4. Sending: the policy (normative order; first failing rule wins)
 

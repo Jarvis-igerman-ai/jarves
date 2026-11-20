@@ -40,15 +40,6 @@ type Config struct {
 	KillPoll      time.Duration // default 250 ms
 	SealEvery     time.Duration // default 5 s
 	RetentionTick time.Duration // default 1 h
-	// BackfillBuffer bounds the in-memory history backfill buffer (default 2000 messages); BackfillWait is how long
-	// one on-demand request may stay unanswered before it is asked again (default 60 s); after 3 more unanswered
-	// requests the chat moves on and is reported in chats_incomplete.
-	BackfillBuffer int
-	BackfillBytes  int // in-memory backfill buffer bound in bytes (default 16 MiB)
-	BackfillDedup  int // bound on remembered message IDs per chat for deduplication (default 10000)
-	BackfillWait   time.Duration
-	// AfterFunc schedules the unanswered-request timeout (default time.AfterFunc); tests inject a manual timer.
-	AfterFunc func(time.Duration, func())
 }
 
 // Server is the bridge.
@@ -72,13 +63,8 @@ type Server struct {
 	link       linkState
 	port       int
 	connecting bool
-	bf         backfill // on-demand history backfill (backfill.go); memory only
 
 	sendMu sync.Mutex // serializes /send so rate and nonce checks are atomic
-	// bfGate serializes backfill dispatch (read lock, held across the scope check and RequestHistory) with read
-	// policy writes and backfill stops (write lock, taken before s.mu): once one of those returns, no request
-	// it forbids can still go out.
-	bfGate sync.RWMutex
 
 	hub        *hub
 	lastSealed int64
@@ -110,9 +96,6 @@ func (s *Server) path(name string) string {
 func New(cfg Config) (*Server, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if cfg.AfterFunc == nil {
-		cfg.AfterFunc = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
 	}
 	if cfg.LocalHour == nil {
 		cfg.LocalHour = func(t time.Time) int { return t.Local().Hour() }
@@ -398,9 +381,6 @@ func (s *Server) applyKill(on bool, reason string) {
 	if on && s.eng != nil {
 		s.eng.Disconnect() // within 2 s of the KILL file appearing (poll <= 250 ms)
 	}
-	if on {
-		s.bfStop()
-	}
 	if on != was {
 		var r any = reason
 		if !on {
@@ -419,7 +399,6 @@ func (s *Server) selfKill(reason string) {
 }
 
 func (s *Server) savePolicyLocked() {
-	s.bfPruneLocked()
 	if err := savePolicy(s.path(FilePolicy), s.pol); err != nil {
 		s.log.Error("WA_POLICY_WRITE_FAILED", "Writing policy.json failed.", nil)
 	}
@@ -479,10 +458,6 @@ func (s *Server) onEvent(e engine.Event) {
 	ctx := context.Background()
 	switch ev := e.(type) {
 	case engine.MessageEvent:
-		if ev.OnDemand { // backfill answers live in the memory buffer only: never the store, chats or snapshot
-			s.bfMessage(ev.Msg, ev.RequestID)
-			return
-		}
 		s.mu.Lock()
 		readable := s.readableLocked(ev.Msg.Chat)
 		keep := readable && !s.pol.KeepNothing && ev.Msg.TS >= s.retentionMinTSLocked()
@@ -509,8 +484,6 @@ func (s *Server) onEvent(e engine.Event) {
 			s.hub.broadcast(ev.Msg.Chat, map[string]any{"type": "message.new", "chat": ev.Msg.Chat, "id": ev.Msg.ID,
 				"ts": ev.Msg.TS, "from_me": ev.Msg.FromMe, "kind": ev.Msg.Kind})
 		}
-	case engine.HistoryAnswerEvent:
-		s.bfAnswer(ev.Chats, ev.RequestID)
 	case engine.EditEvent:
 		_ = s.st.EditMessage(ctx, ev.Chat, ev.ID, ev.Text)
 	case engine.RevokeEvent:
@@ -526,7 +499,6 @@ func (s *Server) onEvent(e engine.Event) {
 		s.hub.broadcast("", map[string]any{"type": "connection.state", "state": ev.State})
 	case engine.AccountWarningEvent:
 		now := s.nowTS()
-		s.bfGate.Lock()
 		s.mu.Lock()
 		s.pol.WarningsTotal++
 		s.pol.WarningsSinceRead++
@@ -534,7 +506,6 @@ func (s *Server) onEvent(e engine.Event) {
 		s.pol.ReadSince = nil // PROTOCOL section 5: any warning resets read_since to null
 		s.savePolicyLocked()
 		s.mu.Unlock()
-		s.bfGate.Unlock()
 		s.log.Warn("WA_ACCOUNT_WARNING", "WhatsApp account warning; the bridge killed itself.", F{"code": ev.Code})
 		s.hub.broadcast("", map[string]any{"type": "account.warning", "code": ev.Code})
 		s.selfKill("account_warning:" + ev.Code)
