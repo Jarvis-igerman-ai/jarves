@@ -458,6 +458,78 @@ def test_project_opened_before_1352_records_its_integration_commit_once(env):
     assert m.db.project(1)["integration_sha"] == sh(repo, "git", "rev-parse", "jarves/p1/integration").strip()
 
 
+def test_project_opened_before_1352_records_before_the_agent_can_move_the_ref(env):
+    """Review R1 on #1459: the record must exist before the first agent runs, not be adopted after it."""
+    m, repo, home = env
+    open_project(m, repo)
+    start = sh(repo, "git", "rev-parse", "jarves/p1/integration").strip()
+    m.db.update_project(1, integration_sha="")                                # as stored by an older JARVES
+    task(m, "Mover", MOVE_REF, scope=[])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert m.db.project(1)["integration_sha"] == start
+
+
+def test_release_rechecks_the_ref_after_the_approval_wait_1352(env):
+    """Review R2 on #1459: another agent moves the shared ref while the release approval is pending."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Ship it", spec="s", scope=["a"], flow="release:jarves")
+    flag = home.parent / "released"
+    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+
+    def ask(*a, **k):
+        evil = sh(repo, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit-tree", "HEAD^{tree}", "-p",
+                  "HEAD", "-m", "evil").strip()
+        sh(repo, "git", "update-ref", "refs/heads/jarves/p1/integration", evil)
+        return True
+    m._ask = ask
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"] and not flag.exists(), t["reason"]
+
+
+def test_open_fails_when_the_integration_commit_cannot_be_read_1352(env, monkeypatch):
+    """Review R3 on #1459: no project is left with an empty record (that would fall back to adopting the ref)."""
+    m, repo, home = env
+    monkeypatch.setattr(gitops, "rev", lambda *a, **k: "")
+    assert not m.call("open", path=str(repo), name="demo", goal="build it")["ok"]
+    assert m.db.project(1) is None
+
+
+def test_files_the_check_writes_outside_the_scope_are_not_merged_1352(env):
+    """Review R4 on #1459: the pre-merge re-check covers the scope, not only protected files."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "open('other.txt', 'w').write('x')"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "outside the scope" in t["reason"] and "other.txt" in t["reason"], t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "other.txt").exists()
+
+
+def test_ref_moved_during_the_fast_forward_is_reported_as_moved_1352(env, monkeypatch):
+    """Review R5 on #1459: a move inside the merge window says "moved outside JARVES", not "merge failed"."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+
+    def racing_ff(wt, new):
+        evil = sh(repo, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit-tree", "HEAD^{tree}", "-m",
+                  "evil").strip()
+        sh(repo, "git", "update-ref", "refs/heads/jarves/p1/integration", evil)
+        raise gitops.GitError("not possible to fast-forward")
+    monkeypatch.setattr(gitops, "fast_forward", racing_ff)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+
+
 def test_agent_blocked_and_failed_runs(env):
     m, repo, _ = env
     open_project(m, repo)

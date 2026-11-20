@@ -242,6 +242,7 @@ class StageEngine:
                 f"{now[:10] or 'nothing'}); nothing is merged until it is back at {sha[:10] or 'a checked commit'}")
 
     def _ensure_worktree(self, p, t):
+        self._int_sha(p)                      # #1352 R1: a legacy project records its commit BEFORE any agent runs
         if t["worktree"] and Path(t["worktree"]).exists():
             return Path(t["worktree"]), t["branch"]
         att = max(1, t["attempts"])
@@ -611,18 +612,23 @@ class StageEngine:
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
                 new = gitops.rev(wt, "HEAD")                        # exactly this commit is checked and merged
-                prot = [f for f in gitops.changed_files(wt, head, new) if gitops.is_protected(f)] if new else []
+                if not new:
+                    raise gitops.GitError("the task branch has no commit")
+                prot, outside = gitops.violations(gitops.changed_files(wt, head, new), t["scope"])
+                prot += [f for f in gitops.link_files(wt, head) if f not in prot]
                 if prot:                                            # e.g. written by the check command (#1352)
                     return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) +
                             f" (not merged; on {br})")
-                if not new:
-                    raise gitops.GitError("the task branch has no commit")
+                if outside and not any(s["kind"] == "work" and s.get("by") == "owner" for s in stages):
+                    return ("stop", "blocked", "changed files outside the scope: " + ", ".join(outside[:5]) +
+                            f" (not merged; the work is on branch {br})")
                 gitops.fast_forward(self._integration(p), new)
                 if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
                     raise gitops.GitError("the integration branch is not at the merged commit")
                 self.db.update_project(p["id"], integration_sha=new)
             except gitops.GitError as e:
-                return ("stop", "failed", f"merge failed: {clean(e, 200)}")
+                moved = self._int_moved(p)                         # #1352 R5: moved during the merge window
+                return ("stop", "blocked", moved) if moved else ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat = t["result"]
         gitops.remove_worktree(p["path"], wt, br)
         self.db.update_task(t["id"], branch="", worktree="", reason="")
@@ -645,6 +651,12 @@ class StageEngine:
                              {"project": p["name"], "commit": sha[:12]}):
             return ("park", "the release was not approved: say done when you released it yourself, or approve it "
                             "again by answering approve")
+        moved = self._int_moved(p)                                  # #1352 R2: re-checked after the approval wait
+        if moved:
+            return ("stop", "blocked", moved)
+        if self._int_sha(p) != sha:
+            return ("park", f"the integration commit changed while the release of {sha[:10]} waited for approval: "
+                            "approve it again by answering approve")
         lock = self._merge_locks.setdefault(("release", p["id"]), threading.Lock())
         if not lock.acquire(blocking=False):
             return ("requeue", "another release of this project is running")

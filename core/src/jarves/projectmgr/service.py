@@ -276,7 +276,10 @@ class Manager(StageEngine):
             pid = self.db.add_project(name, str(root), clean(goal, 600), brief, check or [], runners_ or [],
                                       base_branch=base.strip() or state["branch"])
             gitops.ensure_integration(self.home, str(root), pid, base=start)
-            self.db.update_project(pid, integration_sha=gitops.rev(str(root), gitops.integration_branch(pid)))
+            sha = gitops.rev(str(root), gitops.integration_branch(pid))
+            if not sha:                                           # #1352 R3: never fall back to adopting a moved ref
+                raise gitops.GitError("could not read the new integration commit")
+            self.db.update_project(pid, integration_sha=sha)
         except (ValueError, gitops.GitError, OSError, sqlite3.Error) as e:
             if pid:
                 self.db.delete_project(pid)                       # no half-open project left behind
