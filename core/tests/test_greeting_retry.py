@@ -190,3 +190,126 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
     _log(tmp_path, [{"ts": ts, "code": "LIVE_GREETING_MISSED"}, {"ts": ts, "code": "LIVE_GREETING_TTS_FALLBACK"}])
     got = speedtest.measure_history(tmp_path)
     assert got["greeting_tts_fallback"] == 1 and got["greeting_missed"] == 1
+
+
+def _wake_core(start_ok: bool, greeted: bool = False, live=None):
+    from jarves.app import Core
+    c = _ns()
+    c._greeted, c.live, c.calls, c._live_opened = greeted, live, [], 0
+    c.wake_greeting = lambda: Core.wake_greeting(c)
+
+    async def start(**kw):
+        c.calls.append(kw)
+        if start_ok:
+            c.live, c._live_opened = object(), c._live_opened + 1
+    c._start_live = start
+    return c
+
+
+def test_wake_greeting_claim_is_released_when_the_session_does_not_start():
+    """#520: wake_greeting() set _greeted before the wake session was known to start; a failed start ate the
+    one start greeting. A started session keeps the claim; an earlier greeting is never undone."""
+    from jarves.app import Core
+    failed = _wake_core(start_ok=False)
+    asyncio.run(Core._start_wake_live(failed))
+    assert failed.calls == [{"ack": True, "greeting": "אני מקשיב."}] and not failed._greeted
+    ok = _wake_core(start_ok=True)
+    asyncio.run(Core._start_wake_live(ok))
+    assert ok._greeted
+    other = _wake_core(start_ok=False, live=object())    # another session already open: this wake started nothing
+    asyncio.run(Core._start_wake_live(other))
+    assert not other._greeted
+    before = _wake_core(start_ok=False, greeted=True)
+    asyncio.run(Core._start_wake_live(before))
+    assert before._greeted
+
+
+def test_wake_greeting_claim_stands_when_the_session_opened_and_already_ended():
+    """#520 review R1: a session that opened, greeted and ended before _start_live returned keeps the claim."""
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+
+    async def open_then_end(**kw):
+        c._live_opened += 1                              # _start_live assigned self.live ...
+        c.live = None                                    # ... and on_end already freed the slot
+    c._start_live = open_then_end
+    asyncio.run(Core._start_wake_live(c))
+    assert c._greeted
+
+
+def test_wake_greeting_claim_is_released_when_start_raises_before_opening():
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+
+    async def boom(**kw):
+        raise RuntimeError("connect failed")
+    c._start_live = boom
+    with pytest.raises(RuntimeError):
+        asyncio.run(Core._start_wake_live(c))
+    assert not c._greeted
+
+
+def test_a_turn_without_language_breaks_the_short_english_streak():
+    """#520 item 3: two NON-consecutive short English turns (a no-language turn between) must not switch the
+    Hebrew reply language; two consecutive ones still do. Hermetic: stub self/connection, no network."""
+    notes = []
+
+    async def append(**kw):
+        notes.append(kw)
+    session = SimpleNamespace(instructions=SimpleNamespace(append=append), thinking=SimpleNamespace(append=append))
+    lv = SimpleNamespace(_lang_turn=-1, _user_turn_n=0, _reply_lang="he", _en_streak=0, _in_text="",
+                         conn=SimpleNamespace(session=session), _stats={})
+
+    def turn(text):
+        lv._user_turn_n += 1
+        lv._in_text = text
+        asyncio.run(LiveVoice._match_language(lv))
+    turn("hello there")
+    turn("")                                             # no detectable language
+    turn("hello there")
+    assert lv._reply_lang == "he" and notes == []
+    turn("hello there")                                  # second short English turn in a row: switch
+    assert lv._reply_lang == "en" and len(notes) == 1
+
+
+def test_wake_release_leaves_a_greeting_claimed_by_another_path_meanwhile():
+    """#520 review R2: a path that greeted during the wake's await (and cleared the token) keeps its _greeted."""
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+    c._greet_claim = None
+
+    async def startup_greets(**kw):
+        c._greeted, c._greet_claim = True, None          # the startup greeting path (app.py) claimed it
+    c._start_live = startup_greets
+    asyncio.run(Core._start_wake_live(c))
+    assert c._greeted
+
+
+class _StubLive:
+    def __init__(self, fail=False, running=True):
+        self.fail, self.running, self.stopped = fail, running, False
+
+    async def start(self):
+        if self.fail:
+            raise RuntimeError("connect failed")
+
+    async def stop(self):
+        self.stopped = True
+
+
+@pytest.mark.parametrize("fail,running,opened", [(False, True, 1), (True, True, 0), (False, False, 0)])
+async def test_real_start_live_counts_only_an_assigned_session(core, fail, running, opened):
+    """#520 review R1: the real Core._start_live bumps _live_opened only when it assigns self.live."""
+    stub = _StubLive(fail=fail, running=running)
+    core._live_factory = lambda *a, **k: stub
+    await core._start_live(ack=True, greeting="hi")
+    assert core._live_opened == opened and (core.live is stub) == bool(opened)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_real_wake_start_keeps_the_claim_only_for_an_opened_session(core, fail):
+    """#520: end to end through the real _start_live: a failed wake start releases the greeting claim."""
+    core.cfg.voice.greeting, core._greeted = True, False
+    core._live_factory = lambda *a, **k: _StubLive(fail=fail)
+    await core._start_wake_live()
+    assert core._greeted is (not fail) and core._greet_claim is None
