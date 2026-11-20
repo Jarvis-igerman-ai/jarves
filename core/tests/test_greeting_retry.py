@@ -270,3 +270,46 @@ def test_a_turn_without_language_breaks_the_short_english_streak():
     assert lv._reply_lang == "he" and notes == []
     turn("hello there")                                  # second short English turn in a row: switch
     assert lv._reply_lang == "en" and len(notes) == 1
+
+
+def test_wake_release_leaves_a_greeting_claimed_by_another_path_meanwhile():
+    """#520 review R2: a path that greeted during the wake's await (and cleared the token) keeps its _greeted."""
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+    c._greet_claim = None
+
+    async def startup_greets(**kw):
+        c._greeted, c._greet_claim = True, None          # the startup greeting path (app.py) claimed it
+    c._start_live = startup_greets
+    asyncio.run(Core._start_wake_live(c))
+    assert c._greeted
+
+
+class _StubLive:
+    def __init__(self, fail=False, running=True):
+        self.fail, self.running, self.stopped = fail, running, False
+
+    async def start(self):
+        if self.fail:
+            raise RuntimeError("connect failed")
+
+    async def stop(self):
+        self.stopped = True
+
+
+@pytest.mark.parametrize("fail,running,opened", [(False, True, 1), (True, True, 0), (False, False, 0)])
+async def test_real_start_live_counts_only_an_assigned_session(core, fail, running, opened):
+    """#520 review R1: the real Core._start_live bumps _live_opened only when it assigns self.live."""
+    stub = _StubLive(fail=fail, running=running)
+    core._live_factory = lambda *a, **k: stub
+    await core._start_live(ack=True, greeting="hi")
+    assert core._live_opened == opened and (core.live is stub) == bool(opened)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_real_wake_start_keeps_the_claim_only_for_an_opened_session(core, fail):
+    """#520: end to end through the real _start_live: a failed wake start releases the greeting claim."""
+    core.cfg.voice.greeting, core._greeted = True, False
+    core._live_factory = lambda *a, **k: _StubLive(fail=fail)
+    await core._start_wake_live()
+    assert core._greeted is (not fail) and core._greet_claim is None
