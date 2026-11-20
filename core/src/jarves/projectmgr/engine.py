@@ -391,7 +391,7 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']} ({name}): {t['title']}"[:120])
                 files = gitops.changed_files(wt, base)
                 prot, outside = gitops.violations(files, t["scope"])
-                prot += gitops.link_files(wt, base)
+                prot += [f for f in gitops.link_files(wt, base) if f not in prot]
             except gitops.GitError as e:
                 notes.append(f"{name}: git failed {clean(e, 80)}")
                 continue

@@ -171,3 +171,17 @@ def test_symlinks_and_gitlinks_in_scope_count_as_protected(tmp_path):
     files = gitops.changed_files(repo, base)
     assert gitops.violations(files, ["src/"]) == ([], [])                       # the path text alone looks harmless
     assert sorted(gitops.link_files(repo, base)) == ["src/link", "src/sub"]
+
+
+def test_worktree_creation_and_commits_never_run_shared_hooks(tmp_path):
+    """#1381 review R2: worktree add runs `post-checkout`, and `commit --no-verify` still runs `prepare-commit-msg`
+    and `post-commit`. JARVES creates worktrees and commits task work without running any shared hook."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "hook-ran.txt"
+    for name in ("post-checkout", "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"):
+        _hook(repo / ".git" / "hooks", name, marker)
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    gitops.detached_worktree(home, str(repo), 1, gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+    assert not marker.exists()

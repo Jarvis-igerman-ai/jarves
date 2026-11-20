@@ -111,9 +111,9 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     start = base or "HEAD"
     with _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
-            git(repo, "worktree", "add", str(wt), br)
+            git(repo, "worktree", "add", str(wt), br, hooks=False)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start)
+            git(repo, "worktree", "add", "-b", br, str(wt), start, hooks=False)
     return wt
 
 
@@ -124,7 +124,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid), hooks=False)
     return wt, br
 
 
@@ -134,7 +134,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "--detach", str(wt), sha)
+        git(repo, "worktree", "add", "--detach", str(wt), sha, hooks=False)
     return wt
 
 
@@ -155,7 +155,8 @@ def commit_all(wt: Path, message: str) -> bool:
     git(wt, "add", "-A")
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
-    git(wt, "commit", "-m", message[:200], "--no-verify")
+    # --no-verify alone still runs prepare-commit-msg and post-commit (#1381)
+    git(wt, "commit", "-m", message[:200], "--no-verify", hooks=False)
     return True
 
 

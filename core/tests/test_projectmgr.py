@@ -326,8 +326,18 @@ def test_out_of_scope_and_protected_files_block_without_merge(env):
     assert not (integ / "other").exists() and not (integ / ".claude").exists()
 
 
-def test_a_symlink_in_scope_into_github_is_blocked_as_protected(env):
+def _can_symlink(tmp: Path) -> bool:
+    try:
+        os.symlink("target", tmp / "probe-link")
+        return True
+    except (OSError, NotImplementedError):          # Windows without Developer Mode or admin rights
+        return False
+
+
+def test_a_symlink_in_scope_into_github_is_blocked_as_protected(env, tmp_path):
     """#1381 item 2: the path `src/ci` is in scope and its text is harmless, but it is a symlink into .github/."""
+    if not _can_symlink(tmp_path):
+        pytest.skip("this system cannot create symlinks")
     m, repo, home = env
     open_project(m, repo)
     task(m, "Link", "FAKE link src/ci=../.github/workflows", scope=["src/"])
