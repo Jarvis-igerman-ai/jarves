@@ -260,7 +260,8 @@ WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
-                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)")   # #932: policy file, any tool
+                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)",   # #932: policy file, any tool
+                                "Edit(**/.claude/**)", "Write(**/.claude/**)")   # #1311: no self-written project settings
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
@@ -303,6 +304,8 @@ class ManagedClaude:
         if restricted:        # a self-diagnosis hand-off (#336 C): the owner's broad allow rules do not apply, merging and pushing are denied
             argv += ["--setting-sources", "project", "--disallowedTools", *RESTRICTED_DENY]
         if allowed_tools:     # explicit narrow allow rules for a headless worker (no one is there to answer a prompt)
+            if not restricted:  # #1311: --allowedTools adds to settings; the owner's broad user/local allows must not apply
+                argv += ["--setting-sources", "project"]
             argv += ["--allowedTools", *allowed_tools, "--disallowedTools", *WORKER_DENY]
         if plugin_dir:
             argv += ["--plugin-dir", plugin_dir]
