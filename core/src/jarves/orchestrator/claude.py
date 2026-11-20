@@ -249,21 +249,21 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # ---------------------------------------------------------------------- sessions JARVES starts
 # OWNER-APPROVED SCOPE for headless autopilot workers (see docs in PR #748). A worker runs `claude -p` in its OWN isolated
 # worktree; nobody is there to answer a permission prompt, so anything outside this list is denied (the safe outcome).
-# Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
+# Read-only by default (#1311), never a bypass mode. Hard stops stay on his deny/ask rules: tags,
 # releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
-WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
+WORKER_ALLOWED_TOOLS: tuple[str, ...] = (     # #1311: read-only only; no rule may write a path or run worker-written code
     "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
-    "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
-    "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
 )
-# Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
+# #1311: removed from the default (the owner can restore any through `worker_allowed_tools`): pytest/`-m pytest` (conftest.py,
+# --junitxml, --basetemp), npm/npx (scripts), ruff (--output-file), git add/commit/merge/rebase/switch/worktree/fetch/branch (hooks).
+# Always denied for a worker, whatever the allow list says. The manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
-                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)")   # #932: policy file, any tool
+                                "Edit(**/autopilot.json)", "Write(**/autopilot.json)",    # #932: policy file, any tool
+                                "Bash(git diff*--output*)", "Bash(git log*--output*)")   # #1311: --output=<path> writes any file
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 
@@ -274,20 +274,17 @@ WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "
 
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
                            home: str = "") -> list[str]:
-    """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
-    Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
+    """The allow rules for an autopilot worker: the owner's policy override when set, else the read-only
+    WORKER_ALLOWED_TOOLS plus the exact-home workflow console rules (#784). No interpreter rule (#1311)."""
     if override:
         return list(override)
     rules = list(WORKER_ALLOWED_TOOLS)
-    if python:
-        for p in sorted({python, python.replace("\\", "/")}):
-            rules.append(f"Bash({p} -m pytest:*)")
-        if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
-            for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
-                p, c, h = conv
-                for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home <exact HOME> <sub> ...`
-                    rules.append(f"Bash({p} {c} --home {h} {sub})")
-                    rules.append(f"Bash({p} {c} --home {h} {sub} *)")
+    if python and console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
+        for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
+            p, c, h = conv
+            for sub in WORKER_CONSOLE_SUBCOMMANDS:      # `<py> <console> --home <exact HOME> <sub> ...`
+                rules.append(f"Bash({p} {c} --home {h} {sub})")
+                rules.append(f"Bash({p} {c} --home {h} {sub} *)")
     return rules
 
 
