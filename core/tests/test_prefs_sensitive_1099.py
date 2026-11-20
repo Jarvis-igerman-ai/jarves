@@ -93,6 +93,16 @@ def test_random_hex_keys_are_refused_by_rule_not_by_entropy_luck():
     assert all(looks_sensitive("key " + "".join(rnd.choice(alnum) for _ in range(32))) for _ in range(500))
 
 
+@pytest.mark.parametrize("n,floor", [(20, 0.95), (24, 0.98)])
+def test_short_random_alnum_keys_refusal_rate_floor(n, floor):
+    # seeded floor so a future heuristic tweak cannot quietly lower short-key refusal (measured ~96.7% / ~99.0%)
+    import random
+    rnd = random.Random(1464 + n)
+    alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    hits = sum(looks_sensitive("key " + "".join(rnd.choice(alnum) for _ in range(n))) for _ in range(1000))
+    assert hits >= floor * 1000, hits
+
+
 TOKEN_TEXT = "use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather"
 
 
