@@ -178,6 +178,23 @@ def test_a_feature_disabled_on_the_repo_is_named_and_still_incomplete(home):    
     assert r["coverage"]["dependabot"] == "incomplete:http_403"           # a token without access stays an HTTP code
 
 
+@pytest.mark.parametrize("source,path,code,msg", [
+    ("code_scanning", "/code-scanning/alerts", 403, "Code scanning is disabled for this repository."),
+    ("dependabot", "/dependabot/alerts", 403, "Dependabot alerts are disabled for this repository."),
+    ("secret_scanning", "/secret-scanning/alerts", 403, "Secret scanning is disabled on this repository."),
+    ("code_scanning", "/code-scanning/alerts", 404, "Code scanning is disabled for this repository."),
+])
+def test_every_collector_names_a_repo_disabled_source(home, source, path, code, msg):   # #480, each call site
+    gh = FakeGitHub()
+    base = gh.__call__
+
+    def call(method, p, payload=None):
+        return (code, {"message": msg}) if path in p else base(method, p, payload)
+
+    r = ss.run_scan(home, "light", client=call, now=T0, version=VER, sleep=lambda s: None, report=True)
+    assert r["coverage"][source] == "incomplete:disabled_on_repo" and not ss._complete(r["coverage"])
+
+
 def test_resolved_only_when_the_source_was_read_completely(home):
     gh = FakeGitHub(code_scanning=[alert(1)])
     scan(home, gh)
