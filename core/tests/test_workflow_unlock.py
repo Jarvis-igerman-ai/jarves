@@ -221,6 +221,19 @@ class UnlockTests(unittest.TestCase):
         self.cookie = f"{self.server.cookie}={owner}"
         self.assertEqual(self.wrong_try(shown), (200, None))           # the owner's own window still unlocks
 
+    def test_owner_window_opened_after_the_code_shares_the_spent_late_tries_1416(self):
+        # Current trade-off (council decision pending, PR #1439 R1): a token holder who spends the 2 shared late
+        # tries first leaves the owner's late window exhausted; the code is not cancelled and a new code recovers.
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # token holder logs in after the code
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)
+        self.cookie = ""
+        self.login()                                                   # the owner opens the dashboard after the code
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))
+        self.assertTrue((self.home / unlock.FILE).exists())           # not cancelled, but unusable from late windows
+        self.assertEqual(self.wrong_try(unlock.issue(self.home))[0], 200)  # re-running 'unlock' recovers the window
+
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
         self.assertFalse((self.home / unlock.FILE).exists())

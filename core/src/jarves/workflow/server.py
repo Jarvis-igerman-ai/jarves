@@ -183,6 +183,8 @@ class Server(ThreadingHTTPServer):
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
         self.late_sessions: dict[str, str] = {}   # #1416: session -> salt of the code that was live at its login
+        # Restart: unlock_wrong and late_sessions live in memory only (sessions are persisted), so a server restart
+        # starts every count for the live code again, as it already did for unlock_wrong before #1416.
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
