@@ -249,15 +249,12 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # ---------------------------------------------------------------------- sessions JARVES starts
 # OWNER-APPROVED SCOPE for headless autopilot workers (see docs in PR #748). A worker runs `claude -p` in its OWN isolated
 # worktree; nobody is there to answer a permission prompt, so anything outside this list is denied (the safe outcome).
-# Same working rights as the owner's own settings (never a bypass mode). Hard stops stay on his deny/ask rules: tags,
-# releases, force push, rm, installers, schtasks, taskkill, powershell, settings edits.
+# #1311: only read-only tools are preapproved here. Git/gh output options, hooks, test runners,
+# linters and package scripts can write the policy indirectly, without naming autopilot.json.
+# Those commands require approval; a filename deny rule is not a sandbox.
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
-    "Bash(pytest:*)", "Bash(ruff:*)", "Bash(npm:*)", "Bash(npx:*)",
-    "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git add:*)", "Bash(git commit:*)",
-    "Bash(git branch:*)", "Bash(git switch:*)", "Bash(git fetch:*)", "Bash(git rebase:*)", "Bash(git merge:*)",
-    "Bash(git worktree:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
+    "Read", "Grep", "Glob", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)",
 )
 # Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
@@ -274,14 +271,14 @@ WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "
 
 def autopilot_allowed_tools(python: str = "", override: list[str] | None = None, console: str = "",
                            home: str = "") -> list[str]:
-    """The allow rules for an autopilot worker: the owner's policy override when set, else WORKER_ALLOWED_TOOLS plus the
-    Core interpreter restricted to `-m pytest` (the owner's own list matches only a bare `python`)."""
+    """Owner override, else read-only defaults plus the bounded worker workflow-console commands.
+
+    Never grant pytest through the Core interpreter: it executes worker-written code (#1311).
+    """
     if override:
         return list(override)
     rules = list(WORKER_ALLOWED_TOOLS)
     if python:
-        for p in sorted({python, python.replace("\\", "/")}):
-            rules.append(f"Bash({p} -m pytest:*)")
         if console and home:    # #784: the workflow CLI with the worker's own exact home; all-backslash or all-slash form
             for conv in sorted({(python, console, home), tuple(x.replace("\\", "/") for x in (python, console, home))}):
                 p, c, h = conv

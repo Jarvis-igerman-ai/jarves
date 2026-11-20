@@ -25,8 +25,9 @@ start in auto). Cloud sessions ignore `defaultMode` dontAsk/bypass from settings
 
 `core/src/jarves/orchestrator/claude.py` (`ManagedClaude`): `claude -p --input-format stream-json ...
 --permission-mode acceptEdits` (`WORKER_PERMISSION_MODE`; the code accepts only `default` or `acceptEdits`,
-anything else falls back to `default`), `--allowedTools WORKER_ALLOWED_TOOLS` (the narrow list from PR #748:
-python/pytest/ruff/node/npm, read-only shell, local git, `gh pr|issue|run`, a few `jarvis` status commands;
+anything else falls back to `default`), `--allowedTools WORKER_ALLOWED_TOOLS` (read-only since #1311:
+Read/Grep/Glob, `ls`/`grep`/`wc`/`cd` and the bounded worker workflow-console commands; tests, git, `gh`, npm
+and linters need approval because their options or hooks can write files such as `autopilot.json` indirectly;
 replaceable by `worker_allowed_tools` in `autopilot.json`) and `--disallowedTools WORKER_DENY` (git push/tag,
 gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell). Autopilot is off by
 default and needs the owner's grant. `autopilot_loop.py` only decides when to start a worker.
