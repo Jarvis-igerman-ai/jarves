@@ -91,3 +91,14 @@ def test_goals_refuse_a_non_text_step_instead_of_crashing(tmp_path):
         g.add("learn guitar", steps=["buy strings", 123])  # type: ignore[list-item]
     with pytest.raises(ValueError, match="sensitive"):
         g.add("learn guitar", steps=["buy strings", "keep my access token"])
+
+
+def test_preferences_suggest_refuses_a_token_and_stores_nothing(tmp_path):
+    from jarves.preferences import Preferences
+    from jarves.userdata import open_db
+    p = Preferences(open_db(tmp_path))
+    with pytest.raises(ValueError, match="sensitive"):
+        p.suggest("use sk_live_abcdefghijklmnop for payments", "the owner said so")
+    with pytest.raises(ValueError, match="sensitive"):
+        p.add_confirmed("my github token is ghp_abcdefghijklmnopqrstuvwxyz")
+    assert p.items("proposed") == [] and p.items("confirmed") == []
