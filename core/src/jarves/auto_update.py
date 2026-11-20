@@ -527,6 +527,11 @@ def status_lines(s: dict) -> list[str]:
     if kind in NEXT_TEXT and s.get("next_at"):
         he, en = NEXT_TEXT[kind]
         out.append(clilang.fmt(he.format(t=_local(s["next_at"])), en.format(t=_local(s["next_at"]))))
+    if "approval_probe_failed" in (s.get("busy") or []):
+        out.append(clilang.fmt("בדיקת האישורים הממתינים נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של ג'רביס "
+                               "בדרך כלל עוזרת). להתקין בכל זאת: jarvis update auto now",
+                               "The pending-approval check is failing, so the update waits until it works (restarting "
+                               "JARVES usually helps). To install anyway: jarvis update auto now"))
     r = s.get("last_result") or {}
     if r.get("version"):
         t = _local(float(r.get("ts") or 0))
@@ -558,7 +563,8 @@ def core_busy(core) -> list[str]:
         if core.approvals.has_pending():
             out.append("pending_approval")
         _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
-    except Exception as e:
+    except Exception as e:                  # #1100: unknown = an approval may be pending: fail closed, defer
+        out.append("approval_probe_failed")
         if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals"):
             logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
                       error_type=type(e).__name__, where="approvals")

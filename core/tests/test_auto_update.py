@@ -386,6 +386,37 @@ def test_core_busy_reads_the_core_state():
     assert set(auto_update.core_busy(c)) == {"voice_session", "listening", "pending_approval", "chat_turn", "quiet_hours"}
 
 
+def test_busy_probe_error_defers_the_restart_fail_closed(home, server, keys, monkeypatch):
+    """#1100: when the pending-approval probe raises, an approval may be pending: never restart (fail closed)."""
+    class BrokenApprovals:
+        def has_pending(self):
+            raise OSError("approval store unreadable")
+
+    class Core:
+        live, listening, stopping = None, False, False
+        approvals = BrokenApprovals()
+        chat = type("C", (), {"turns": {}})()
+        ops = type("O", (), {"alerts": type("E", (), {"quiet_now": lambda s: False, "paused": lambda s: False})()})()
+    warned = []
+    monkeypatch.setattr(auto_update.logs, "warn", lambda *a, **k: warned.append((a, k)))
+    auto_update._ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
+    c = Core()
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys)
+    r.au.busy = lambda: auto_update.core_busy(c)
+    r.ready()
+    assert r.tick() == "busy" and r.tick(600) == "busy" and r.launched == []
+    s = r.au.status()
+    assert s["busy"] == ["approval_probe_failed"]
+    assert len(warned) == 1 and warned[0][0][1] == "AUTO_UPDATE_BUSY_PROBE_FAILED"     # once per outage
+    from jarves import clilang
+    monkeypatch.setattr(clilang, "current", lambda: "both")
+    lines = " ".join(auto_update.status_lines(s))                                    # readable, not the raw key
+    assert "בדיקת האישורים" in lines and "approval check" in lines and "jarvis update auto now" in lines and "approval_probe_failed" not in lines
+    c.approvals = type("A", (), {"has_pending": lambda s: False})()                  # the store works again
+    assert r.tick(600) == "installing" and len(r.launched) == 1
+
+
 def test_dashboard_api_switch_answer_and_channel(home):
     class Ctx:
         cfg = Config()
