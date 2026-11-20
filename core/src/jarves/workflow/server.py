@@ -98,8 +98,20 @@ def access_token(home: Path) -> str:
 
 SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
-UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
+# #1416: 2 per window, and every session that logged in while the code was live shares ONE such bucket, so one
+# window plus any number of fresh logins reaches at most 2 + 2 = 4 < 5 and cannot cancel the owner's code.
+UNLOCK_WRONG_PER_SESSION = 2  # #1265: one window cannot use up the code's tries
 UNLOCK_WRONG_TOTAL = 5        # over all sessions, unchanged by #1265: at most 5 guesses of 10,000 per code
+LATE_BUCKET = "late:"         # wrong-try key shared by sessions created while the code was live (never a hex id)
+
+
+def live_code_salt(home: Path) -> str:
+    """Salt of the current unlock code, or '' when there is none or it cannot be read."""
+    try:
+        salt = json.loads((Path(home) / unlock.FILE).read_text(encoding="ascii"))["salt"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+    return salt if isinstance(salt, str) else ""
 
 
 @dataclass
@@ -170,6 +182,9 @@ class Server(ThreadingHTTPServer):
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
+        self.late_sessions: dict[str, str] = {}   # #1416: session -> salt of the code that was live at its login
+        # Restart: unlock_wrong and late_sessions live in memory only (sessions are persisted), so a server restart
+        # starts every count for the live code again, as it already did for unlock_wrong before #1416.
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -480,10 +495,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
-            try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
-            except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+            salt = live_code_salt(self.server.home)
             # Counters are read and changed only under session_lock. A new code (new salt) starts them again.
             if not salt:  # no live code: nothing to guess and nothing to count
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
@@ -491,14 +503,15 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.unlock_wrong.salt != salt:
                 self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
-            if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
+            bucket = LATE_BUCKET if self.server.late_sessions.get(session) == salt else session  # #1416
+            if wrong.by_session.get(bucket, 0) >= UNLOCK_WRONG_PER_SESSION:
                 # No further guess from this session; the code stays live for the owner's other window.
                 self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
-                wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
+                wrong.by_session[bucket] = wrong.by_session.get(bucket, 0) + 1
                 wrong.total += 1
                 if wrong.total >= UNLOCK_WRONG_TOTAL:
                     path.unlink(missing_ok=True)
@@ -537,6 +550,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
+            # #1416: a login while a code is live gets no fresh tries for that code (bounded by the live sessions).
+            salt = live_code_salt(self.server.home)
+            self.server.late_sessions = {s: v for s, v in self.server.late_sessions.items() if s in self.server.sessions}
+            if salt:
+                self.server.late_sessions[session] = salt
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 
