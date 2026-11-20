@@ -50,6 +50,8 @@ _SENSITIVE = re.compile(
 # AWS access key ids are upper case only, so this one prefix is matched case-sensitively (outside re.I above).
 _AWS_KEY_ID = re.compile(r"\bAKIA[A-Z0-9]{12,}")
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
+# base64-alphabet secrets (e.g. AWS secret access keys) contain '+' and '/', which split _TOKEN_RUN into short runs
+_B64_RUN = re.compile(r"[A-Za-z0-9+/]{30,}")
 
 
 def _token_shaped(run: str) -> bool:
@@ -69,7 +71,8 @@ def looks_sensitive(text: object) -> bool:
         return True
     if not text:
         return False
-    return bool(_SENSITIVE.search(text) or _AWS_KEY_ID.search(text)) or any(_token_shaped(m) for m in _TOKEN_RUN.findall(text))
+    return bool(_SENSITIVE.search(text) or _AWS_KEY_ID.search(text)) or any(
+        _token_shaped(m) for m in _TOKEN_RUN.findall(text) + _B64_RUN.findall(text))
 
 
 def normalize(text: str) -> str:

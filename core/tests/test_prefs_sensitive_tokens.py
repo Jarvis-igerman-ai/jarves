@@ -15,6 +15,8 @@ TOKENS = [
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig",
     "the value Zq8Lm3Rt9Vx2Bk7Np4Hs6Wd1",
     "d41d8cd98f00b204e9800998ecf8427e",
+    "my aws secret is wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",   # base64 with '/', runs split below 20
+    "key Qx7Lm2+Rt8Vx3/Bk9Np4Hs6Wd1Zq8Lm3Rt9Vx2Bk7Np4Hs6Wd1==",      # base64 with '+', '/' and '=' padding
 ]
 KEYWORDS = [
     "remember my api key please",
@@ -37,6 +39,8 @@ SAFE = [
     "teach me a secret keyboard shortcut",
     "remind me about the private keynote",
     "the api keyboard layout is fine",
+    "use the notes in docs/music/jazz/favourites/list.md",         # lower-case path: not a key
+    "Morning/Evening/Weekend routines are fine",                    # mixed case but no digit
     "",
 ]
 
@@ -100,6 +104,20 @@ def test_known_limitation_hyphenated_mixed_case_phrase_with_a_digit_is_refused()
     # Known false positive, on the safe side: a 20+ char run joined by '-' that mixes cases and has a digit
     # looks like a key. Revisit (e.g. require 2+ digits) only if the owner reports friction.
     assert looks_sensitive("Wake-me-at-7-on-Monday")
+
+
+def test_base64_rule_alone_catches_a_slash_split_secret():
+    # every '/'-separated run is under 20 chars and there is no keyword, prefix or 6+ digit run:
+    # only the base64 run rule (30+ chars of [A-Za-z0-9+/], mixed case and digits) matches
+    assert looks_sensitive("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")
+    assert not looks_sensitive("wJalrXUtnFEMI/K7MDENG")  # under 30 chars: not key-shaped
+
+
+def test_known_limitation_hashes_and_camelcase_with_a_digit_are_refused():
+    # Known false positives, on the safe side (also for dev-manager drafts): a 32+ hex git SHA/checksum and a
+    # 20+ char CamelCase identifier with a digit look like keys. Revisit only if the owner reports friction.
+    assert looks_sensitive("fix after 24fd0a5990d2f3df1abbf4655836533d3b6fcce1")
+    assert looks_sensitive("rename Base64EncoderFactoryHelper")
 
 
 def test_goals_refuse_a_non_text_step_instead_of_crashing(tmp_path):
