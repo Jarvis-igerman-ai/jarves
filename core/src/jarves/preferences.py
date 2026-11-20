@@ -47,12 +47,13 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # (?![a-z]) ends the word ("private keyboard" is fine) but still matches API_KEY_FILE, api_key=, api keys
     r"(?:api|access|secret|private)[\s_-]*keys?(?![a-z])|(?:access|auth|refresh)[\s_-]*tokens?(?![a-z])|"
-    r"\bbearer\s+(?:token\b|[A-Za-z0-9._~+/-]{16,})|"
+    r"\bbearer\s+(?:tokens?\b|[A-Za-z0-9._~+/-]{16,})|"
     r"client[\s_-]*secrets?(?![a-z])|"
-    # a vendor word before key/token/secret ("my openai key"), and a bare key/token/secret given a 6+ char value with a digit
+    # a vendor word before key/token/secret ("my openai key"), and a bare key/token/secret given a 6+ char value with a
+    # digit that is not a version string ("the token: v4.0.1")
     r"\b(?:openai|anthropic|github|gitlab|google|slack|stripe|aws|azure|discord|telegram|twilio)[\s_-]*"
     r"(?:api[\s_-]*)?(?:keys?|tokens?|secrets?)(?![a-z])|"
-    r"\b(?:key|token|secret)s?\s*(?:is|=|:)\s*(?=[A-Za-z0-9_+/=.-]*\d)[A-Za-z0-9_+/=.-]{6,}|טוקן|מפתח\s+(?:ה[-\s]*)?(?:api|גישה|פרטי)", re.I)
+    r"\b(?:key|token|secret)s?\s*(?:is|=|:)\s*(?!v?\d+(?:\.\d+)+(?:-[a-z0-9]+)?(?![A-Za-z0-9_+/=]|[.-][A-Za-z0-9]))(?=[A-Za-z0-9_+/=.-]*\d)[A-Za-z0-9_+/=.-]{6,}|טוקן|מפתח\s+(?:ה[-\s]*)?(?:api|גישה|פרטי)", re.I)
 # A long unbroken run of letters, digits and token punctuation (#1099): a key/token without a known vendor prefix.
 _TOKENISH = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
 _ENTROPY_BITS = 4.0               # bits per character over the run

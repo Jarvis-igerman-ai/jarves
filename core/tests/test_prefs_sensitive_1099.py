@@ -34,6 +34,7 @@ LEAKY = [
     "Authorization: Bearer Ab12Cd34Ef56Gh78",
     "export OPENAI_API_KEY_FILE before running",   # word end is not "_": variable names stay caught
     "rotate the refresh tokens weekly",
+    "send the bearer tokens with every call",      # plural bearer (review of #1489 @ 412fc49, R1)
 ]
 SAFE = [
     "I prefer short answers in the morning",
@@ -59,6 +60,8 @@ VENDOR_OR_VALUE = [
     "secret: hunter2isGreat",
     "my key = qwertyuiop9",
     "my key is hunter2",                         # 7 chars: the value minimum is 6 (review of #1489, R3)
+    "the token: v4.0.1x9Qz",                     # version prefix glued to more value is still refused
+    "the token: v4.0.1.Ab9",
 ]
 SAFE_WORDING = [
     "the key is to stay calm",
@@ -68,6 +71,9 @@ SAFE_WORDING = [
     "the key is 2024",
     "the key is ab12c",                          # 5 chars: below the value minimum (boundary pin)
     "the token: abcdefghij",                       # value without a digit: not refused (boundary pin)
+    "the token: v4.0.1",                         # version string is not a value (review @ 412fc49, R3)
+    "the key is 2.0.1-rc2 now",
+    "the token: v4.0.1.",
 ]
 SHA = "ab17fe59578af69d56815eb69b4dbcb72a864efe"   # a real 40-hex commit id of this branch
 SAFE_DRAFTS = [
