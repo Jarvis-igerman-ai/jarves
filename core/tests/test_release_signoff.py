@@ -526,29 +526,41 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     assert "does not exist" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=missing, verifier=v)[0]
 
 
-def test_605_owner_check_refuses_a_repository_level_signers_variable(monkeypatch, capsys):
-    """#605 review R1: vars.RELEASE_ALLOWED_SIGNERS falls back to a repository variable of the same name; the owner-run
-    check refuses one, and refuses when the variable list cannot be read (never passes blind)."""
-    import subprocess
+def test_605_fallback_signers_variable_is_never_trusted(tmp_path, monkeypatch, capsys):
+    """#605 review R1: vars.RELEASE_ALLOWED_SIGNERS falls back to a repository/organization variable when the
+    stable-release one is missing. A no-environment job reports such a fallback; a real publish verifies the tag only
+    when it reports exactly "false" (repository or org variable present, or the result missing: refused)."""
+    monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
+    monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
     seen = []
-
-    def gh(out, code=0, err=""):
-        return lambda cmd, **kw: seen.append(cmd) or subprocess.CompletedProcess(cmd, code, out, err)
-    assert gate.repo_signers_variable_problems("o/r", run=gh('[{"name":"OTHER"}]')) == []
-    assert seen[0][:3] == ["gh", "variable", "list"] and "--env" not in seen[0]      # repository scope only
-    bad = gate.repo_signers_variable_problems("o/r", run=gh('[{"name":"RELEASE_ALLOWED_SIGNERS"}]'))
-    assert len(bad) == 1 and "REPOSITORY variable" in bad[0] and "gh variable delete" in bad[0]
-    assert all("cannot list" in gate.repo_signers_variable_problems("o/r", run=r)[0]
-               for r in (gh("", 1, "HTTP 403"), gh("not json"), gh('{"name":"x"}')))
-    assert gate.repo_signers_variable_problems("o/r", run=gh("[1, null]")) == []     # non-object rows are ignored
-
-    def boom(cmd, **kw):
-        raise FileNotFoundError("gh")
-    assert "cannot list" in gate.repo_signers_variable_problems("o/r", run=boom)[0]
-    monkeypatch.setattr(gate, "repo_signers_variable_problems", lambda repo: ["signers: X"])
-    assert gate.main(["--check-signers-variable"]) == 1 and "signers: X" in capsys.readouterr().out
-    monkeypatch.setattr(gate, "repo_signers_variable_problems", lambda repo: [])
-    assert gate.main(["--check-signers-variable"]) == 0 and "signers: OK" in capsys.readouterr().out
+    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s, sha: seen.append(s) or [])
+    monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "repo-or-org ssh-ed25519 AAAA")
+    argv = ["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--require-rows-hash"]
+    for fb in ("true", "", " TRUE ", "False"):
+        monkeypatch.setenv("JARVES_SIGNERS_FALLBACK", fb)
+        assert gate.main(argv) == 1 and "repository or organization variable" in capsys.readouterr().out and seen == []
+    gate.main(argv[:-1])                                                           # dry run: a note, never verified
+    assert "tag signature not checked" in capsys.readouterr().out and seen == []
+    monkeypatch.setenv("JARVES_SIGNERS_FALLBACK", "false")
+    gate.main(argv)
+    assert "repository or organization variable" not in capsys.readouterr().out and seen == ["repo-or-org ssh-ed25519 AAAA"]
+    import yaml
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    fj = doc["jobs"]["signers-fallback"]
+    assert "environment" not in fj and fj["permissions"] == {}                    # sees only repository/org variables
+    check = fj["steps"][0]
+    assert check["env"]["FALLBACK"] == "${{ vars.RELEASE_ALLOWED_SIGNERS }}"
+    assert fj["outputs"]["present"] == "${{ steps.check.outputs.present }}" and check["id"] == "check"
+    import subprocess
+    for val, want in (("x", "true"), ("", "false")):                              # run the job's own line
+        out = tmp_path / "o"
+        out.write_text("", encoding="utf-8")
+        r = subprocess.run(["bash", "-c", check["run"]], capture_output=True, text=True,
+                           env={"PATH": os.environ.get("PATH", ""), "FALLBACK": val, "GITHUB_OUTPUT": str(out)})
+        assert r.returncode == 0 and out.read_text(encoding="utf-8").strip() == f"present={want}", r.stderr
+    assert doc["jobs"]["stable"]["needs"] == "signers-fallback"
+    gate_step = next(s for s in doc["jobs"]["stable"]["steps"] if "release_gate.py" in s.get("run", ""))
+    assert gate_step["env"]["JARVES_SIGNERS_FALLBACK"] == "${{ needs.signers-fallback.outputs.present }}"
 
 
 def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsys):
@@ -566,6 +578,7 @@ def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsy
     out = capsys.readouterr().out
     assert "tag signature not checked" in out and "no owner allowed-signers list (stable" not in out
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "owner ssh-ed25519 AAAA")
+    monkeypatch.setenv("JARVES_SIGNERS_FALLBACK", "false")
     assert gate.main(argv) == 1 and "SIGFAIL" in capsys.readouterr().out and seen == [("owner ssh-ed25519 AAAA", SHA)]
     import yaml
     doc = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8"))

@@ -185,13 +185,13 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    do step 4 only after that change is merged, or the next publish cannot read the secrets.)
 5. **Owner-signed stable tags (#605, required for a real publish).** Settings, Environments, `stable-release`,
    Environment variables: add `RELEASE_ALLOWED_SIGNERS` with your SSH `allowed_signers` line
-   (`you@example namespaces="git" ssh-ed25519 AAAA...`). Do NOT create a repository variable of that name
-   (without the environment variable, a repository one would be used instead). Check before each release:
-   `python core/tools/release_gate.py --check-signers-variable` refuses when a repository-level one exists.
+   (`you@example namespaces="git" ssh-ed25519 AAAA...`). Do NOT create a repository or organization variable of that
+   name: `vars.*` falls back to those when the environment one is missing, so the release workflow's `signers-fallback`
+   job (no environment) looks for one and a real publish refuses while one exists or the check result is missing.
    Sign with SSH (`git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/id_ed25519.pub`) and tag
    with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. On a real publish the release job runs in `stable-release` and the gate
    runs `git verify-tag` against that list; it refuses an unsigned tag, a key not on the list, a signed tag on a commit
-   other than the gated one, or a missing variable. A tag dry run has no environment, so it only prints a note.
+   other than the gated one, or a missing variable. A tag dry run has no environment, so it does not verify the signature and only prints a note.
    This check is only as strong as who can edit that variable: anyone with admin rights on the repository (including an
    agent using your login or a token with Administration or Environments write) can add a key. Confirm: agent tokens are
    fine-grained without Administration, Environments or Variables write, and an agent session's

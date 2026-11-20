@@ -258,30 +258,6 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
     return []
 
 
-
-SIGNERS_VAR = "RELEASE_ALLOWED_SIGNERS"
-
-
-def repo_signers_variable_problems(repo: str, run=subprocess.run) -> list[str]:
-    """#605 review R1: release.yml's `vars.RELEASE_ALLOWED_SIGNERS` falls back to a REPOSITORY variable of that name
-    when the `stable-release` environment one is missing, and cannot tell them apart. Owner-run check (the workflow
-    token cannot list variables): refuse when a repository-level one exists or the list cannot be read."""
-    try:
-        r = run(["gh", "variable", "list", "--repo", repo, "--json", "name"], capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.SubprocessError) as e:
-        return [f"signers: cannot list the repository variables ({type(e).__name__}); refused"]
-    try:
-        rows = json.loads(r.stdout or "") if r.returncode == 0 else None
-    except ValueError:
-        rows = None
-    if not isinstance(rows, list):
-        why = " ".join((r.stderr or "").split())[:200]
-        return [f"signers: cannot list the repository variables (gh variable list: {why}); refused"]
-    if any(isinstance(v, dict) and v.get("name") == SIGNERS_VAR for v in rows):
-        return [f"signers: a REPOSITORY variable {SIGNERS_VAR} exists; a release would use it when the stable-release "
-                f"environment one is missing. Delete it: gh variable delete {SIGNERS_VAR} --repo {repo}"]
-    return []
-
 # ---------------------------------------------------------------------- git + GitHub (not used by the tests)
 def git_is_ancestor(root: Path):
     def f(a: str, b: str) -> bool:
@@ -372,10 +348,8 @@ def _print_legacy(legacy: list[str]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="release_gate.py", description=__doc__.split("\n\n")[0])
-    ap.add_argument("--tag")
-    ap.add_argument("--check-signers-variable", action="store_true",
-                    help=f"owner-run: refuse when a repository-level {SIGNERS_VAR} variable exists (#605)")
-    ap.add_argument("--sha", help="commit the tag points to")
+    ap.add_argument("--tag", required=True)
+    ap.add_argument("--sha", required=True, help="commit the tag points to")
     ap.add_argument("--verified-sha")
     ap.add_argument("--candidate-dir", type=Path, help="dist folder with build-info.json of the candidate")
     ap.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
@@ -390,12 +364,6 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--require-rows-hash", action="store_true", default=os.environ.get("JARVES_REQUIRE_ROWS_HASH") == "1",
                     help="refuse when no out-of-band rows hash is given (a real publish; the release workflow sets it)")
     a = ap.parse_args(argv)
-    if a.check_signers_variable:
-        found = repo_signers_variable_problems(a.repo)
-        print("\n".join(found) or f"signers: OK, no repository-level {SIGNERS_VAR} variable")
-        return 1 if found else 0
-    if not a.tag or not a.sha:
-        ap.error("--tag and --sha are required")
     verified, build_version, installer = a.verified_sha, None, None
     if a.candidate_dir:
         info = json.loads((a.candidate_dir / "build-info.json").read_text(encoding="utf-8-sig"))
@@ -423,7 +391,17 @@ def main(argv: list[str] | None = None) -> int:
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
     signers = os.environ.get("JARVES_ALLOWED_SIGNERS", "").strip()
-    if signers:
+    # review R1: vars.* falls back to a repository/organization variable when the stable-release one is missing; the
+    # no-environment `signers-fallback` job reports "false" only when no such fallback exists. Anything else: untrusted.
+    fallback = os.environ.get("JARVES_SIGNERS_FALLBACK", "").strip()
+    if signers and fallback != "false" and a.require_rows_hash:
+        problems.append("sign-off: a repository or organization variable RELEASE_ALLOWED_SIGNERS exists (or that could "
+                        f"not be checked: JARVES_SIGNERS_FALLBACK={fallback[:10]!r}); only the stable-release "
+                        "environment variable is trusted. Delete the fallback variable; see docs/RELEASING.md")
+    elif signers and fallback != "false":
+        print("note: the signers list may come from a repository/organization variable (no environment on a dry "
+              "run); tag signature not checked; a real publish refuses (#605)")
+    elif signers:
         problems += tag_signature_problems(root, a.tag, signers, a.sha)
     elif a.require_rows_hash:              # a real publish: the out-of-band hash must be authentic (fail closed, #605)
         problems.append("sign-off: no owner allowed-signers list (stable-release environment variable RELEASE_ALLOWED_SIGNERS), so the "
