@@ -3,8 +3,9 @@ routine in one command (docs/plans/LEAN_PROCESS_V2_2026-10-27.md, item 5).
 
 Two phases, because setup force-stops every process that runs from {app}\\python (jarves.iss StopScript):
 
-  begin (runs from the installed program): backup now -> find the newest signed installer of the channel
-    (UpdateChecker.check) -> verify signature, SHA256 and size and take the pre-update backup (UpdateChecker.prepare_install,
+  begin (runs from the installed program): find the newest signed installer of the channel
+    (UpdateChecker.check) -> verify signature, SHA256 and size and take the ONE verified pre-update backup (#1016: no
+    extra `manual` archive before it; UpdateChecker.prepare_install,
     the same code as `jarvis update install`; launch_installer re-checks the SHA256 right before the start) -> stop the Core
     if it ran -> silent setup (/VERYSILENT /SUPPRESSMSGBOXES /NORESTART, plus /RESTARTJARVES=1 when the Core ran). If the
     start fails, the Core is started again and a clean report is printed. Then a tiny PowerShell waiter (outside {app})
@@ -39,6 +40,7 @@ CHANNELS = ("stable", "beta")
 LOCK_FILE = "install-latest.lock"
 STATE_FILE = "install-latest-state.json"
 REPORT_FILE = "install-latest-report.txt"
+BACKUP_FAILED = "UPDATE_BACKUP_FAILED"            # updates.backup_before_update's code (test pins the two together)
 PID_FILE = "install-latest.pid"                   # setup process id written by the parent; "cancel" = setup never started
 SETUP_WAIT_S = 1200
 SETUP_SEEN_S = 300                                # how long the waiter looks for the setup process before it judges nothing
@@ -51,7 +53,6 @@ class Deps:
     home: Path
     channel: str                                              # the channel in force now
     set_channel: Callable[[str], None]
-    backup_now: Callable[[], Path]
     check: Callable[[str], dict]                              # channel -> UpdateChecker.status()-shaped dict
     prepare: Callable[[str], dict]                            # channel -> {installer, backup, version, signed, sha256}
     core_running: Callable[[], bool]
@@ -259,7 +260,7 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     rep.from_version = str(s.get("current") or "")
     shown = sorted({rep.version, str(rel.get("display") or rep.version)})
     if dry_run:
-        for step in ("backup now", f"download {rep.version} and verify signature, SHA256 and size",
+        for step in (f"download {rep.version} and verify signature, SHA256 and size", "backup before install",
                      "stop the Core if it runs; silent setup (/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
                      " /RESTARTJARVES=1 when the Core ran)", "wait for the setup process to exit",
                      "version + doctor + selftest + speedtest + status + features diff in the new program",
@@ -268,22 +269,25 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
         rep.ok = True
         return rep
     try:
-        rep.add("backup now", True, deps.backup_now().name)
-    except Exception as e:                                # noqa: BLE001  (BackupError and OS errors alike)
-        rep.add("backup now", False, getattr(e, "code", type(e).__name__))
-        rep.stopped_at = "backup"
-        return rep
-    try:
-        prep = deps.prepare(ch)
+        prep = deps.prepare(ch)                           # also writes the verified pre-update backup (#1016: only one)
     except Exception as e:                                # noqa: BLE001  (UpdateError and anything else: no traceback)
-        rep.add("verify installer (signature, SHA256)", False, _err(e))
-        rep.stopped_at = "verify"
+        if getattr(e, "code", "") == BACKUP_FAILED:
+            rep.add("backup before install", False, e.code)
+            rep.stopped_at = "backup"
+        else:
+            rep.add("verify installer (signature, SHA256)", False, _err(e))
+            rep.stopped_at = "verify"
         return rep
-    if ch != deps.channel:
-        deps.set_channel(ch)                              # same switch as `jarvis update --channel`, only once verified
     rep.add("verify installer (signature, SHA256)", True, f"{Path(prep['installer']).name}, "
                                                            f"{'signed' if prep.get('signed') else 'unsigned'}")
-    rep.revert_id = Path(str(prep.get("backup") or "")).name
+    rep.revert_id = Path(str(prep.get("backup") or "")).name   # prepare verifies first, then backs up
+    if not rep.revert_id:                                 # #1016: no install without the one rollback archive
+        rep.add("backup before install", False, "no pre-update backup")
+        rep.stopped_at = "backup"
+        return rep
+    rep.add("backup before install", True, rep.revert_id)
+    if ch != deps.channel:
+        deps.set_channel(ch)                              # same switch as `jarvis update --channel`, only once verified
     core_up = deps.core_running()
     was = deps.detect_running(core_up)                    # read BEFORE anything is stopped (#293)
     try:
@@ -493,7 +497,7 @@ def finisher_script(state: Path, python: str, report: Path, pid_file: Path, inst
 
 
 def real_deps(a, cfg, home: Path) -> Deps:
-    from . import backup, cli, runmarks, update_progress as up
+    from . import cli, runmarks, update_progress as up
     from .updates import (UpdateChecker, is_installed_build, launch_installer, record_was_running, rollback,
                           set_channel)
     box: dict = {}
@@ -553,7 +557,6 @@ def real_deps(a, cfg, home: Path) -> Deps:
 
     return Deps(home=home, channel=UpdateChecker(home, cfg=cfg).channel,
                 set_channel=lambda ch: set_channel(home, cfg, ch),
-                backup_now=lambda: backup.create(home, "manual"),
                 check=check, prepare=lambda ch: checker(ch).prepare_install(approved=True),
                 core_running=running,
                 detect_running=lambda up_: runmarks.detect_running(home, core_up=up_),

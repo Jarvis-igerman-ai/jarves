@@ -365,3 +365,50 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+def test_cli_sets_manual_and_checkpoint_retention_issue_1016(profile, capsys):
+    """#1016: only --daily/--weekly were settable; the manual and checkpoint limits (the big archives) had no CLI."""
+    from jarves import cli
+    assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "3"]) == 0
+    s = backup.get_settings(profile)
+    assert s["manual"] == 2 and s["checkpoints"] == 3
+    assert cli.main(["backup", "settings", "--manual", "-1"]) == 1          # refused by set_settings, nothing stored
+    assert "between 0 and 365" in capsys.readouterr().out and backup.get_settings(profile)["manual"] == 2
+    for n in ("0", "2"):                       # fewer than 3 would let the first start prune the rollback archive
+        assert cli.main(["backup", "settings", "--checkpoints", n]) == 1
+        assert "between 3 and 365" in capsys.readouterr().out
+    assert backup.get_settings(profile)["checkpoints"] == 3
+
+
+class _Clock:
+    """Clock-free: backup.time.time() returns a fixed value the test advances; everything else is the real module."""
+    def __init__(self, t: float) -> None:
+        self.t = t
+
+    def time(self) -> float:
+        return self.t
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def test_pre_update_checkpoint_survives_first_start_checkpoints_issue_1016(profile, monkeypatch):
+    """#1016: the pre-update checkpoint is the only rollback archive. The new version's first start writes up to two
+    more (startup_checkpoint, then migrations.run before a schema step) and prunes after each; even a stored
+    `checkpoints` of 0 (older versions accepted it) must keep the rollback archive."""
+    db = sqlite3.connect(profile / "memory.db")
+    db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('backup.checkpoints', '0')")
+    db.commit()
+    db.close()
+    clock = _Clock(1_800_000_000.0)
+    monkeypatch.setattr(backup, "time", clock)
+    pre = backup.checkpoint(profile, "pre-update-4.5.0-to-4.5.1")
+    clock.t += 60
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    first_start = backup.startup_checkpoint(profile)
+    clock.t += 60
+    schema = backup.checkpoint(profile, "schema 3->4")
+    assert len({pre, first_start, schema}) == 3
+    assert pre.is_file() and backup.verify(pre)["ok"] and first_start.is_file() and schema.is_file()

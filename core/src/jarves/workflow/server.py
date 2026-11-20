@@ -17,6 +17,7 @@ import socket
 import subprocess
 import threading
 import time
+from dataclasses import dataclass, field
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -97,6 +98,16 @@ def access_token(home: Path) -> str:
 
 SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
+UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
+UNLOCK_WRONG_TOTAL = 5        # over all sessions, unchanged by #1265: at most 5 guesses of 10,000 per code
+
+
+@dataclass
+class UnlockWrong:
+    """Wrong unlock tries for one code (its salt); a new instance starts the counts again."""
+    salt: str = ""
+    total: int = 0
+    by_session: dict[str, int] = field(default_factory=dict)
 
 
 def session_key(token: str, session: str) -> str:
@@ -156,7 +167,9 @@ class Server(ThreadingHTTPServer):
         self.attempts: list[float] = []
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
-        self.unlock_wrong = ("", 0)             # (code salt, wrong tries over ALL sessions); 5 cancel the code
+        # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
+        # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
+        self.unlock_wrong = UnlockWrong()
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -456,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
     def _unlock(self, data):
         now = time.time()
         session = self._session()
+        if not session:  # the session ended after the auth check: never count tries under an empty key
+            self._json(401, {"error": "private session required"})
+            return
         code = data.get("code")
         with self.server.session_lock:  # one request at a time: two correct requests cannot both consume the code
             self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
@@ -468,17 +484,28 @@ class Handler(BaseHTTPRequestHandler):
                 salt = json.loads(path.read_text(encoding="ascii"))["salt"]
             except (OSError, ValueError, KeyError, TypeError):
                 salt = ""
-            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
-                # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
-                prev_salt, n = self.server.unlock_wrong
-                n = (n if prev_salt == salt else 0) + 1
-                if n >= 5:
-                    path.unlink(missing_ok=True)
-                    n = 0
-                self.server.unlock_wrong = (salt, n)
+            # Counters are read and changed only under session_lock. A new code (new salt) starts them again.
+            if not salt:  # no live code: nothing to guess and nothing to count
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
-            self.server.unlock_wrong = ("", 0)
+            if self.server.unlock_wrong.salt != salt:
+                self.server.unlock_wrong = UnlockWrong(salt)
+            wrong = self.server.unlock_wrong
+            if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
+                # No further guess from this session; the code stays live for the owner's other window.
+                self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
+                                 "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
+                                 "reason": "session_exhausted"})
+                return
+            if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
+                wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
+                wrong.total += 1
+                if wrong.total >= UNLOCK_WRONG_TOTAL:
+                    path.unlink(missing_ok=True)
+                    self.server.unlock_wrong = UnlockWrong()
+                self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
+                return
+            self.server.unlock_wrong = UnlockWrong()
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             ttl = owner_unlock_s(self.server.home)
             self.server.unlocked[session] = now + ttl

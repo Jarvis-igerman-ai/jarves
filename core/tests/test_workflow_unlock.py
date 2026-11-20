@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
-from jarves.workflow.server import Server
+from jarves.workflow.server import Handler, Server, UnlockWrong
 
 
 class UnlockTests(unittest.TestCase):
@@ -153,7 +153,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
+        self.assertTrue((self.home / unlock.FILE).exists())           # #1265: one session cannot cancel the code
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
         self.server.unlock_attempts.clear()
         unlock.issue(self.home)
@@ -161,19 +161,83 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+    def wrong_try(self, code):
+        self.server.unlock_attempts.clear()                            # keep the 5-per-minute limit out of the way
+        status, _, data = self.request("/api/unlock", {"code": code})
+        return status, data.get("reason")
+
+    def test_one_session_cannot_cancel_the_owner_code_1265(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the read-only token holder's one window
+        results = [self.wrong_try(wrong) for _ in range(6)]
+        self.assertEqual(results, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
+        self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])  # names both ways out
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
+        self.cookie = ""
+        self.login()                                                   # the owner's own window
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for _ in range(5):                                             # a different session for every try
-            self.cookie = ""
-            self.login()
-            statuses.append(self.request("/api/unlock", {"code": wrong})[0])
+        for i in range(5):                                             # new sessions give no extra guesses past 5
+            if i % 3 == 0:
+                self.cookie = ""
+                self.login()
+            statuses.append(self.wrong_try(wrong)[0])
+            self.assertEqual((self.home / unlock.FILE).exists(), i < 4, i)
+            if i == 2:
+                exhausted = self.cookie                                # this window used all 3 of its tries
         self.assertEqual(statuses, [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        # The backstop itself cleared every count (checked before any new code, whose new salt would also reset them).
+        self.assertEqual(self.server.unlock_wrong, UnlockWrong())
+        self.assertEqual(self.wrong_try(shown), (403, None))           # cancelled after 5 in total (guess bound unchanged)
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+
+    def test_wrong_tries_without_a_live_code_are_not_counted(self):
+        self.login()
+        self.assertFalse((self.home / unlock.FILE).exists())
+        self.assertEqual([self.wrong_try("1234") for _ in range(4)], [(403, None)] * 4)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (0, {}))
+
+    def test_exhausted_window_refusals_count_against_the_shared_minute_limit(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
         self.server.unlock_attempts.clear()
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+        tries = [self.request("/api/unlock", {"code": wrong})[2].get("reason") for _ in range(5)]
+        self.assertEqual(tries, [None] * 3 + ["session_exhausted"] * 2)
+        self.cookie = ""
+        self.login()                                                   # a fresh window in the same minute
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
+        self.assertTrue((self.home / unlock.FILE).exists())
+
+    def test_unlock_without_a_live_session_is_refused_before_counting(self):
+        unlock.issue(self.home)
+        self.cookie = "jarves_bogus=nope"
+        self.assertEqual(self.request("/api/unlock", {"code": "0000"})[0], 401)   # no or bogus cookie
+        # The session ends between the auth check and _unlock: the try is refused, not counted under "".
+        with patch.object(Handler, "_authenticated", return_value=True):
+            self.assertEqual(self.request("/api/unlock", {"code": "0000"})[0], 401)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (0, {}))
+        self.assertEqual(self.server.unlock_attempts, [])
+
+    def test_new_code_resets_an_exhausted_session(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        for _ in range(3):
+            self.wrong_try(wrong)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
 
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
