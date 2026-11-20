@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -206,6 +207,72 @@ def signoff_problems(root: Path, version: str, tag_sha: str, is_ancestor, change
     return probs
 
 
+SSH_KEYGEN = "/usr/bin/ssh-keygen"     # absolute SSH verifier: git config and PATH cannot redirect it (ubuntu runner)
+NO_VERIFIER = "/nonexistent"          # OpenPGP/x509 verifiers point nowhere: a gpg/gpgsm-signed tag always fails
+GOOD_SIG_RE = re.compile(r'^Good "git" signature for \S', re.M)
+
+
+def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=subprocess.run,
+                           verifier: str = SSH_KEYGEN, rows_hash: str | None = None) -> list[str]:
+    """#605: the tag's 'Rows hash' line is authentic only when the tag is SSH-signed by a key in the owner's
+    allowed-signers lines (`stable-release` environment variable RELEASE_ALLOWED_SIGNERS, outside the repo) AND the
+    signed tag points at the gated commit `sha`. Bad tag, missing verifier, failed git, a bad/unlisted signature or a
+    tag on another commit refuse. The verified object's own `tag` header must name `tag`, and its first 'Rows hash:'
+    line must equal `rows_hash` (the value the workflow extracted earlier by ref name; review R2)."""
+    if not TAG_RE.match(tag):
+        return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
+    if not Path(verifier).is_file():
+        return [f"sign-off: signature verifier {verifier} not found (the check runs on the ubuntu release runner); refused"]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG")}  # no injected config (review R3)
+    env.update({"LC_ALL": "C", "LANG": "C", "GIT_CONFIG_NOSYSTEM": "1"})  # GOOD_SIG_RE reads the untranslated wording
+    try:                                    # resolve the tag ONCE; verify and dereference that object id (review R2)
+        ref = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, text=True,
+                  timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
+    oid = (ref.stdout or "").strip().lower()
+    if ref.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", oid):
+        return [f"sign-off: the tag {tag} does not exist here; cannot verify its signature"]
+    with tempfile.TemporaryDirectory() as d:
+        listed = Path(d) / "allowed_signers"
+        listed.write_text(signers.strip() + "\n", encoding="utf-8")
+        # full trust plus a "Good ... signature for <principal>" line: a good signature by an unlisted key never passes
+        cmd = ["git", "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={verifier}", "-c", f"gpg.openpgp.program={NO_VERIFIER}",
+               "-c", f"gpg.x509.program={NO_VERIFIER}", "-c", "gpg.minTrustLevel=fully",
+               "-c", f"gpg.ssh.allowedSignersFile={listed}", "verify-tag", oid]
+        try:
+            r = run(cmd, cwd=root, capture_output=True, text=True, timeout=60, env=env)
+        except (OSError, subprocess.SubprocessError) as e:
+            return [f"sign-off: cannot verify the tag signature ({type(e).__name__}); refused"]
+    if r.returncode != 0 or not GOOD_SIG_RE.search(r.stderr or ""):
+        why = " ".join((r.stderr or "").split())[:300]
+        return [f"sign-off: the tag {tag} is not signed by the owner's key (git verify-tag: {why}); "
+                "sign it: git tag -s vX.Y.Z -m 'Rows hash: <sha256>'"]
+    try:                                                   # only the verified tag object is resolved to its commit
+        target = run(["git", "rev-parse", "--verify", f"{oid}^{{commit}}"], cwd=root,
+                     capture_output=True, text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot resolve the signed tag {tag} ({type(e).__name__}); refused"]
+    got = (target.stdout or "").strip().lower()
+    if target.returncode != 0 or got != sha.strip().lower():
+        return [f"sign-off: the signed tag {tag} points at {got[:12] or 'nothing'}, not at the gated commit "
+                f"{sha.strip()[:12]}; its rows hash does not belong to this commit"]
+    try:                                                   # read name + hash from the SAME verified object
+        body = run(["git", "cat-file", "tag", oid], cwd=root, capture_output=True, text=True, timeout=60, env=env)
+    except (OSError, subprocess.SubprocessError) as e:
+        return [f"sign-off: cannot read the signed tag {tag} ({type(e).__name__}); refused"]
+    head, _, msg = (body.stdout or "").partition("\n\n")
+    name = next((ln[4:].strip() for ln in head.splitlines() if ln.startswith("tag ")), "")
+    if body.returncode != 0 or name != tag:
+        return [f"sign-off: the signed tag object is named {name[:40]!r}, not {tag}; refused"]
+    m = re.search(r"^Rows hash: ([0-9a-fA-F]{64})", msg, re.M | re.I)
+    signed = m.group(1).lower() if m else ""
+    if rows_hash is not None and signed != rows_hash.strip().lower():
+        return [f"sign-off: the rows hash in the signed tag {tag} ({signed[:12] or 'none'}) differs from the one "
+                f"given ({rows_hash.strip()[:12]}); refused"]
+    return []
+
+
 # ---------------------------------------------------------------------- git + GitHub (not used by the tests)
 def git_is_ancestor(root: Path):
     def f(a: str, b: str) -> bool:
@@ -338,9 +405,28 @@ def main(argv: list[str] | None = None) -> int:
                         checks_runs=checks, is_ancestor=git_is_ancestor(root),
                         changed_files=git_changed(root), issues=issues, installer_sha=installer,
                         expect_rows_hash=a.expect_rows_hash)
+    signers = os.environ.get("JARVES_ALLOWED_SIGNERS", "").strip()
+    # review R1: vars.* falls back to a repository/organization variable when the stable-release one is missing; the
+    # no-environment `signers-fallback` job reports "false" only when no such fallback exists. Anything else: untrusted.
+    fallback = os.environ.get("JARVES_SIGNERS_FALLBACK", "").strip()
+    if signers and fallback != "false" and a.require_rows_hash:
+        problems.append("sign-off: a repository or organization variable RELEASE_ALLOWED_SIGNERS exists (or that could "
+                        f"not be checked: JARVES_SIGNERS_FALLBACK={fallback[:10]!r}); only the stable-release "
+                        "environment variable is trusted. Delete the fallback variable; see docs/RELEASING.md")
+    elif signers and fallback != "false":
+        print("note: the signers list may come from a repository/organization variable (no environment on a dry "
+              "run); tag signature not checked; a real publish refuses (#605)")
+    elif signers:
+        problems += tag_signature_problems(root, a.tag, signers, a.sha, rows_hash=a.expect_rows_hash)
+    elif a.require_rows_hash:              # a real publish: the out-of-band hash must be authentic (fail closed, #605)
+        problems.append("sign-off: no owner allowed-signers list (stable-release environment variable RELEASE_ALLOWED_SIGNERS), so the "
+                        "tag signature cannot be verified; see docs/RELEASING.md")
+    else:
+        print("note: no owner allowed-signers list (RELEASE_ALLOWED_SIGNERS); tag signature not checked; a real publish "
+              "refuses without it (#605)")
     if a.expect_rows_hash is None and a.require_rows_hash:
         problems.append("sign-off: no out-of-band rows hash: the tag must be an ANNOTATED tag whose message has the line "
-                        "'Rows hash: <sha256>' (git tag -a vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
+                        "'Rows hash: <sha256>' (git tag -s vX.Y.Z -m 'Rows hash: <sha256>', value printed by "
                         "`jarvis release signoff --finish`)")
     elif a.expect_rows_hash is None:
         print("note: no out-of-band rows hash given (annotated tag message 'Rows hash: <sha256>'); the sheet hash alone "
