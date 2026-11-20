@@ -529,6 +529,14 @@ def _complete(coverage: dict) -> bool:
 
 
 # ---------------------------------------------------------------------- the ONE issue
+_REFUSED = ("http_401", "http_403", "http_404")
+_OWNER_ACTION = {
+    "dependabot": "give the scan token (JARVES_GITHUB_TOKEN) read access to Dependabot alerts.",
+    "secret_scanning": "turn on secret scanning for the repo (an owner decision) and give the scan token "
+                       "(JARVES_GITHUB_TOKEN) read access to secret-scanning alerts.",
+}
+
+
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
     lines = ["## JARVES recurring security scan", "",
              "Written by the daily light / weekly full scan. Read-only inventory: nothing is merged, dismissed, deployed or sent.",
@@ -550,6 +558,11 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
+    for k, v in sorted(gaps.items()):
+        code = v.split(":", 1)[1] if ":" in v else ""
+        if v.startswith("incomplete:") and code in _REFUSED:     # access refused: only the owner can fix this
+            lines.append(f"Owner action for {k} ({code}): " + _OWNER_ACTION.get(
+                k, "give the scan token (JARVES_GITHUB_TOKEN) read access to this source."))
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)

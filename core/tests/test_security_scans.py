@@ -411,3 +411,14 @@ def test_codeql_44_state_and_settings_files_never_store_a_planted_secret(tmp_pat
         blob = (tmp_path / name).read_text(encoding="utf-8")
         assert SECRET not in blob and "A1b2C3d4E5f6G7h8" not in blob
     assert "tracker_url" in (tmp_path / ss.STATE_FILE).read_text(encoding="utf-8")
+
+
+def test_issue_480_a_refused_source_names_the_owner_action_in_the_tracker():
+    cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
+           "main_ci": "incomplete:http_503", "local_diagnostics": "skipped:no_local_registry"}
+    body = ss.tracker_body([], cov, 0, "0" * 16, "light")
+    assert "Owner action for dependabot (http_403): give the scan token (JARVES_GITHUB_TOKEN) read access to Dependabot alerts." in body
+    assert "Owner action for secret_scanning (http_404): turn on secret scanning for the repo" in body
+    assert "Owner action for main_ci" not in body                     # a transient 5xx is retried, not an owner action
+    assert "Owner action for local_diagnostics" not in body           # skipped is not refused
+    assert ss.tracker_body([], {"dependabot": "complete"}, 0, "0" * 16, "light").count("Owner action") == 0
