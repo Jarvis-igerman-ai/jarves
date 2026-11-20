@@ -40,11 +40,15 @@ DB_FILE = "continuity.db"
 REPLAY_WINDOW_S = 120          # a queued command older than this is refused (the user must send it again on purpose)
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,39}")
+_KEY = re.compile(r"[a-z_]{1,30}")   # review R3 on #1444: a kept key name is a short lower_case word, never free text
+VACUUMED = 1                         # PRAGMA user_version once the one-time VACUUM ran (review R1 on #1444)
 NOT_KEPT = '{"not_kept": true'  # every privacy-mode ledger body starts with this (json.dumps keeps insertion order)
 # A row still holding words (review R2 on #1444): no marker, unreadable JSON, or any value _at_rest() would not keep
-# (a string other than an UPPER_CASE code up to 40 chars, a list or an object), so a marker alone never counts as clean.
+# (a string other than an UPPER_CASE code up to 40 chars, a list or an object) or key not matching _KEY, so a marker
+# alone never counts as clean.
 _DIRTY = ("(substr(body, 1, ?) <> ? OR CASE WHEN json_valid(body) THEN EXISTS (SELECT 1 FROM json_each(ledger.body) j "
-          "WHERE j.type IN ('array', 'object') OR (j.type = 'text' AND (j.key <> 'code' OR length(j.value) > 40 "
+          "WHERE j.key IS NULL OR length(j.key) NOT BETWEEN 1 AND 30 OR j.key GLOB '*[^a-z_]*' "
+          "OR j.type IN ('array', 'object') OR (j.type = 'text' AND (j.key <> 'code' OR length(j.value) > 40 "
           "OR j.value GLOB '*[^A-Z0-9_]*' OR j.value NOT GLOB '[A-Z]*'))) ELSE 1 END)")
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
@@ -84,6 +88,7 @@ class Continuity:
         self.path = self.home / DB_FILE
         self._lock = threading.RLock()               # re-entrant on purpose: execute() runs fn() under it, and store()/
                                                      # seen() take it too (review R1 on #1444), so a callback may use them
+        self._vacuum_failed = False                    # LEDGER_VACUUM_FAILED is logged once per outage
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -145,26 +150,40 @@ class Continuity:
         if not logs.privacy():
             return json.dumps(body)
         items = body.items() if isinstance(body, dict) else ()
-        kept = {k: v for k, v in items if k != "not_kept" and (v is None or isinstance(v, (bool, int, float))
+        kept = {k: v for k, v in items if k != "not_kept" and isinstance(k, str) and _KEY.fullmatch(k) and (v is None or isinstance(v, (bool, int, float))
                 or (k == "code" and isinstance(v, str) and _CODE.fullmatch(v)))}
         return json.dumps({"not_kept": True, **kept})
 
     def scrub(self) -> None:
         """#206 F13: with privacy on, an answer stored while privacy was off loses its words and expired answers go.
         Runs at start, when privacy is switched on and at each ledger use. A read-only check first, so the common case
-        writes nothing; each UPDATE/DELETE is one atomic statement. Limit: secure_delete overwrites freed pages in the
-        database file; the default rollback journal (journal_mode=DELETE) that briefly held the old page is unlinked,
-        not overwritten, so the old words may remain in free disk blocks until the file system reuses them.
+        writes nothing; each UPDATE/DELETE is one atomic statement. secure_delete (on in every connection) zeroes content
+        freed from now on; content freed before (rows deleted or replaced by an older JARVES, with secure_delete off) is
+        removed from the file by a one-time VACUUM, recorded in PRAGMA user_version (review R1 on #1444). Limit: the
+        rollback journal (journal_mode=DELETE) that briefly held old pages, and file blocks given back when VACUUM
+        shrinks the file, are released, not overwritten, so old words may remain in free disk blocks until the file
+        system reuses them.
         Cost: the check scans the ledger, which is bounded by LEDGER_TTL_S (expired rows are deleted here and on each
         insert) and by the phone rate limits, so a few thousand small rows at most. No "clean" flag is kept on purpose:
         another process (the dashboard switch, a second Continuity) may write to the same file between uses."""
         if not logs.privacy():
             return
         old = self.clock() - LEDGER_TTL_S
-        if not self._rows(f"SELECT 1 FROM ledger WHERE {_DIRTY} OR ts < ? LIMIT 1", (len(NOT_KEPT), NOT_KEPT, old)):
+        if self._rows(f"SELECT 1 FROM ledger WHERE {_DIRTY} OR ts < ? LIMIT 1", (len(NOT_KEPT), NOT_KEPT, old)):
+            self._x(f"UPDATE ledger SET body=? WHERE {_DIRTY}", ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
+            self._x("DELETE FROM ledger WHERE ts < ?", (old,))
+        if self._rows("PRAGMA user_version")[0]["user_version"] >= VACUUMED:
             return
-        self._x(f"UPDATE ledger SET body=? WHERE {_DIRTY}", ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
-        self._x("DELETE FROM ledger WHERE ts < ?", (old,))
+        try:                                            # rebuilds the file: free pages and freeblocks are not copied
+            self._x("VACUUM")
+            self._x(f"PRAGMA user_version={VACUUMED}")
+        except sqlite3.OperationalError as e:           # e.g. another process holds the file: tried again next use
+            if not self._vacuum_failed:
+                logs.warn("continuity", "LEDGER_VACUUM_FAILED", "the privacy clean-up of the ledger file could not run "
+                          "now; it is tried again at the next ledger use", error_type=type(e).__name__)
+            self._vacuum_failed = True
+            return
+        self._vacuum_failed = False
 
     @staticmethod
     def stale(age_s) -> bool:

@@ -182,6 +182,90 @@ def test_ledger_uses_the_rollback_journal_documented_in_scrub(tmp_path):
         assert cx.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
 
 
+def test_text_freed_before_the_upgrade_is_vacuumed_out_of_the_file_once(tmp_path, monkeypatch):
+    """#206 F13 (review R1 on #1444): rows an older JARVES deleted with secure_delete off leave their words in free
+    space that no UPDATE/DELETE touches; the first privacy-on ledger use VACUUMs the file once (PRAGMA user_version)."""
+    from jarves import logs
+    Continuity(tmp_path)                                                 # privacy off: schema only, no VACUUM
+    db, secret = tmp_path / continuity.DB_FILE, b"pre-upgrade-secret-words-" * 4
+    cx = sqlite3.connect(db, isolation_level=None)
+    cx.execute("PRAGMA secure_delete=OFF")                               # how the old code deleted
+    cx.execute("INSERT INTO ledger VALUES ('d1', 'm-1', 'chat', 200, ?, 1)", (json.dumps({"reply": secret.decode()}),))
+    cx.execute("DELETE FROM ledger")
+    cx.close()
+    assert secret in db.read_bytes()                                     # the words survive the old DELETE
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    assert secret not in db.read_bytes()
+    assert c._rows("PRAGMA user_version")[0]["user_version"] == continuity.VACUUMED
+    writes = []
+    monkeypatch.setattr(c, "_x", lambda sql, args=(): writes.append(sql) or 0)
+    c.scrub()
+    assert writes == []                                                  # once only: no VACUUM on every use
+
+
+def test_a_failed_vacuum_is_logged_once_and_tried_again(tmp_path, monkeypatch):
+    """#206 F13 (review R1 on #1444): a busy file does not break the phone; the VACUUM is retried at the next use."""
+    from jarves import logs
+    c = Continuity(tmp_path)
+    real, warned = c._x, []
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: warned.append(a[1]))
+
+    def busy(sql, args=()):
+        if sql == "VACUUM":
+            raise sqlite3.OperationalError("database is locked")
+        return real(sql, args)
+    monkeypatch.setattr(c, "_x", busy)
+    logs.set_privacy(True)
+    c.scrub()
+    c.scrub()
+    assert warned == ["LEDGER_VACUUM_FAILED"] and c._rows("PRAGMA user_version")[0]["user_version"] == 0
+    monkeypatch.setattr(c, "_x", real)
+    c.scrub()
+    assert c._rows("PRAGMA user_version")[0]["user_version"] == continuity.VACUUMED
+
+
+def test_only_short_lower_case_key_names_rest_in_the_ledger(tmp_path):
+    """#206 F13 (review R3 on #1444): a key name is never kept as free text, at store time or in an older row."""
+    from jarves import logs
+    c = Continuity(tmp_path)
+    c._x("INSERT INTO ledger (device, cid, kind, status, body, ts) VALUES ('d1', 'm-1', 'chat', 200, ?, ?)",
+         ('{"not_kept": true, "Secret words": 1}', c.clock()))
+    logs.set_privacy(True)
+    c.store("d1", "m-2", "chat", 200, {"ok": True, "Secret words": 1, "a" * 31: 2, "seq": 3})
+    assert c.seen("d1", "m-1") == {"not_kept": True}
+    assert c.seen("d1", "m-2") == {"not_kept": True, "ok": True, "seq": 3}
+
+
+def test_switching_privacy_on_during_a_full_text_window_scrubs_at_once(tmp_path):
+    """#206 F13 (review R4 on #1444): set_privacy(True) ends a running 24 h full-text window, so the scrub it starts
+    is not skipped."""
+    from types import SimpleNamespace
+    from jarves import logs, privacy
+    cfg = SimpleNamespace(log=SimpleNamespace(privacy=True))
+    ctx = SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml")
+    privacy.set_full_text(ctx, True)
+    assert logs.privacy() is False
+    c = Continuity(tmp_path)
+    c.store("d1", "m-1", "chat", 200, {"reply": "window secret words"})
+    privacy.set_privacy(ctx, True)
+    assert logs.privacy() is True
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+
+
+@pytest.mark.parametrize("page,call", [("app.js", 'post("/api/m/goals/op"'), ("app.js", 'post("/api/m/signals"'),
+                                       ("indicator.js", 'cx.post("/api/m/signals"'), ("plans.js", 'cx.post("/api/m/plans/op"')])
+def test_goal_signal_and_plan_pages_do_not_read_the_answer_body(page, call):
+    """#206 F13 (review R2 on #1444): a privacy-mode resend answers these routes with the thin NOT_KEPT body. The pages
+    await the call without reading its result (they show a fixed text or reload), and a 4xx still throws with the
+    error/error_he that _not_kept() adds, so the dropped fields cannot change what the page shows."""
+    src = (Path(mobile.__file__).parent / "dashboard_static" / "mobile" / page).read_text(encoding="utf-8")
+    sites = [m.start() for m in re.finditer(re.escape(call), src)]
+    assert sites
+    for i in sites:
+        assert src[max(0, i - 10):i].rstrip().endswith("await") and not re.search(r"=\s*await\s*$", src[max(0, i - 20):i])
+
+
 from jarves.mobile import Bridge
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
