@@ -7,6 +7,8 @@ LEAKY = [
     "my api key is abc",                                         # keyword: api key
     "remember my API_KEY for the weather service",
     "my github access token for the account",                    # keyword: access token
+    "set OPENAI_API_KEY for the weather",                        # env-var name after _ (#1464 R2)
+    "export MY_ACCESS_TOKEN before the run",
     "token = abc for the weather",                               # labelled value
     "keep this secret: hunter",                                  # labelled value
     "the OAuth client secret",
@@ -95,7 +97,7 @@ def test_random_hex_keys_are_refused_by_rule_not_by_entropy_luck():
 
 @pytest.mark.parametrize("n,floor", [(20, 0.95), (24, 0.98)])
 def test_short_random_alnum_keys_refusal_rate_floor(n, floor):
-    # seeded floor so a future heuristic tweak cannot quietly lower short-key refusal (measured ~96.7% / ~99.0%)
+    # seeded floor so a future heuristic tweak cannot quietly lower short-key refusal (measured 965/1000 and 993/1000 with these seeds)
     import random
     rnd = random.Random(1464 + n)
     alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

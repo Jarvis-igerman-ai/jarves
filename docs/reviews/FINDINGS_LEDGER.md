@@ -55,6 +55,7 @@ Created 27 Oct 2026 under the owner-approved lean process.
 | 667a | workflows other than release.yml pin first-party actions by tag (actions/checkout@v7, codeql-action@v4, cache@v6, upload-artifact@v7), release.yml pins by SHA; the pull_request_target workflows (autolabel, dependabot-automerge) use the tag form | CI | A moved tag runs new code in a workflow with a write token; pin by SHA and let Dependabot bump | review (agent 1 read-through 27 Oct) |
 | 385a | the new goal_plans texts ("it may already have happened", "the plan changed in the meantime", unknown-step phone refusal) are English only, like the existing goal_plans strings | goals | Hebrew users see English in the retry popup and errors; add to hebrew_parts and the dashboard locale part | review (Opus review of #812) |
 | 1059a | workflow console: the shared `.demo-notice` band keeps hard-coded dark colours (#221d13 / #dfba76) in the light theme | workflow console UI | Dark band on the light Health/Timeline/Today demo pages; out of JAR-194 scope (.hl-*/.tl-* only) | review #1059 |
+| 1099a | preferences.looks_sensitive hex hardening: a 40-hex commit link (github.com/o/r/commit/<sha>) is now refused as a preference (deliberate: same as "see commit <40-hex>"), and hex runs of 20-31 chars are only entropy-scored | preferences / security | Owners may hit false refusals on commit links; revisit only if reported | review #1464 R3 |
 
 ## Kept as issues
 

@@ -46,9 +46,10 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # Hebrew bare "טוקן" is a loanword that only means a digital credential, so it is refused alone; English bare
     # "token"/"secret" are everyday words ("a token of thanks", "a secret party") and count only as credential phrases
-    # or a labelled value (token: / secret=).
+    # or a labelled value (token: / secret=). (?<![a-z]) (case-insensitive) keeps "okapi key" ordinary but, unlike \b,
+    # also matches after _ in env-var names such as OPENAI_API_KEY / MY_ACCESS_TOKEN.
     r"טוקן|מפתח\s+(?:api|גישה|פרטי|סודי)|"
-    r"\bapi[\s_-]?key|(?:private|access|secret)[\s_-]?key|\b(?:access|auth|bearer|refresh|api)[\s_-]?token|"
+    r"(?<![a-z])api[\s_-]?key|(?:private|access|secret)[\s_-]?key|(?<![a-z])(?:access|auth|bearer|refresh|api)[\s_-]?token|"
     r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]|"
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)   # UUID-shaped keys (dashed runs)
 # An unlabelled credential: a long run of the base64 key alphabet with high per-character entropy.
