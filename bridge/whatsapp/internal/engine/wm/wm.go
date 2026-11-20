@@ -285,14 +285,17 @@ func (e *Engine) SendText(ctx context.Context, to, text string) (string, float64
 // The request goes out with message id id; the phone names it in HistorySyncNotification.PeerDataRequestSessionID
 // (real-phone echo UNVERIFIED), which onHistory copies to the events so the API can match the answer.
 func (e *Engine) RequestHistory(ctx context.Context, id, chat string, anchor engine.HistoryAnchor, count int) error {
-	if !e.IsConnected() {
-		return engine.ErrNotConnected
+	if id == "" {
+		return errors.New("bad history request")
 	}
 	m, err := historyRequest(chat, anchor, count)
 	if err != nil {
 		return err
 	}
-	cli := e.client()
+	cli := e.client() // taken once: a concurrent disconnect cannot swap it between the checks and the send
+	if cli == nil || cli.Store == nil || !cli.IsConnected() || !cli.IsLoggedIn() {
+		return engine.ErrNotConnected
+	}
 	own := cli.Store.GetJID().ToNonAD()
 	if own.IsEmpty() {
 		return engine.ErrNotConnected
@@ -301,9 +304,19 @@ func (e *Engine) RequestHistory(ctx context.Context, id, chat string, anchor eng
 	return err
 }
 
-// NewRequestID returns a WhatsApp message id for the next on-demand history request.
+// NewRequestID returns a WhatsApp message id for the next on-demand history request ("" without a client, which
+// RequestHistory refuses).
 func (e *Engine) NewRequestID() string {
-	return string(e.client().GenerateMessageID()) // nil-safe in whatsmeow
+	cli := e.client()
+	if cli == nil {
+		return ""
+	}
+	return string(cli.GenerateMessageID())
+}
+
+// isChatServer: direct or group chats; status broadcasts, newsletters and broadcast lists are not chats.
+func isChatServer(server string) bool {
+	return server == types.DefaultUserServer || server == types.HiddenUserServer || server == types.GroupServer
 }
 
 // historyRequest builds the peer message asking for count messages of chat older than anchor.
@@ -313,10 +326,17 @@ func historyRequest(chat string, anchor engine.HistoryAnchor, count int) (*waE2E
 	if err != nil || jid.User == "" || anchor.ID == "" || !(direct || jid.Server == types.GroupServer) {
 		return nil, errors.New("bad history request")
 	}
-	info := &types.MessageInfo{ID: anchor.ID, Timestamp: time.Unix(0, int64(anchor.TS*1e9)),
-		MessageSource: types.MessageSource{Chat: jid, IsFromMe: anchor.FromMe, IsGroup: jid.Server == types.GroupServer}}
-	// The builder only fills a proto message; it never touches the client, so no live connection is needed here.
-	return (*whatsmeow.Client)(nil).BuildHistorySyncRequest(info, count), nil
+	// Built here (same fields as whatsmeow's BuildHistorySyncRequest) so no client, live or nil, is needed.
+	// OldestMsgTimestampMS carries seconds despite its name, as whatsmeow sends it.
+	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE.Enum(),
+		PeerDataOperationRequestMessage: &waE2E.PeerDataOperationRequestMessage{
+			PeerDataOperationRequestType: waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND.Enum(),
+			HistorySyncOnDemandRequest: &waE2E.PeerDataOperationRequestMessage_HistorySyncOnDemandRequest{
+				ChatJID: proto.String(jid.String()), OldestMsgID: proto.String(anchor.ID),
+				OldestMsgFromMe: proto.Bool(anchor.FromMe), OnDemandMsgCount: proto.Int32(int32(count)),
+				OldestMsgTimestampMS: proto.Int64(int64(anchor.TS)),
+			}}}}, nil
 }
 
 // handle converts whatsmeow events. It runs on whatsmeow's goroutines.
@@ -469,7 +489,7 @@ func firstNonEmpty(v ...string) string {
 func (e *Engine) onMessage(ev *events.Message, history, onDemand bool, reqID string) {
 	ctx := context.Background()
 	chat := ev.Info.Chat.ToNonAD()
-	if chat.Server != types.DefaultUserServer && chat.Server != types.HiddenUserServer && chat.Server != types.GroupServer {
+	if !isChatServer(chat.Server) {
 		return // status broadcasts, newsletters, broadcast lists: ignored
 	}
 	m := ev.Message
@@ -562,7 +582,7 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 	if onDemand {
 		reqID = ev.Notification.GetPeerDataRequestSessionID()
 	}
-	chats := []string{}
+	chats, delivered := []string{}, 0
 	for _, p := range data.GetPushnames() {
 		if p.GetPushname() != "" {
 			if jid, err := types.ParseJID(p.GetID()); err == nil {
@@ -575,7 +595,9 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 		if err != nil {
 			continue
 		}
-		chats = append(chats, jid.ToNonAD().String())
+		if n := len(conv.GetMessages()); n > 0 && isChatServer(jid.Server) {
+			chats, delivered = append(chats, jid.ToNonAD().String()), delivered+n
+		}
 		if jid.Server == types.GroupServer {
 			if n := firstNonEmpty(conv.GetName(), conv.GetDisplayName()); n != "" {
 				e.mu.Lock()
@@ -596,6 +618,6 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 		}
 	}
 	if onDemand {
-		e.emit(engine.HistoryAnswerEvent{Chats: chats, RequestID: reqID})
+		e.emit(engine.HistoryAnswerEvent{Chats: chats, Messages: delivered, RequestID: reqID})
 	}
 }

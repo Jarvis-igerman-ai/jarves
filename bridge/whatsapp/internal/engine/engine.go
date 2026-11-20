@@ -58,10 +58,12 @@ type MessageEvent struct {
 }
 
 // HistoryAnswerEvent = one on-demand history answer was fully delivered (its MessageEvents came first). Chats lists
-// the conversations it carried; empty means WhatsApp had nothing more to send.
+// the direct/group conversations that carried messages; Messages counts the raw messages WhatsApp sent for them
+// (before filtering out reactions, protocol messages etc.), so Messages == 0 means WhatsApp had nothing more to send.
 // RequestID is the id of the request it answers, as WhatsApp echoes it ("" if the transport did not say).
 type HistoryAnswerEvent struct {
 	Chats     []string
+	Messages  int
 	RequestID string
 }
 

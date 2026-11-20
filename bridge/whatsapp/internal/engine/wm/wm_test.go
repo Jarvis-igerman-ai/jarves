@@ -10,6 +10,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -219,6 +220,18 @@ func TestRequestHistoryOfflineIsNotConnected(t *testing.T) {
 	if err := e.RequestHistory(ctx, e.NewRequestID(), "972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", TS: 1}, 50); err != engine.ErrNotConnected {
 		t.Fatalf("err %v", err)
 	}
+	if err := e.RequestHistory(ctx, "", "972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", TS: 1}, 50); err == nil {
+		t.Fatal("empty request id accepted")
+	}
+	e.mu.Lock()
+	e.cli = nil // after a teardown: no client at all
+	e.mu.Unlock()
+	if e.NewRequestID() != "" {
+		t.Fatal("request id without a client")
+	}
+	if err := e.RequestHistory(ctx, "R1", "972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "ABC", TS: 1}, 50); err != engine.ErrNotConnected {
+		t.Fatalf("nil client err %v", err)
+	}
 }
 
 func TestOnDemandHistoryEndsWithAnswerEvent(t *testing.T) {
@@ -234,18 +247,39 @@ func TestOnDemandHistoryEndsWithAnswerEvent(t *testing.T) {
 	}
 	var got []engine.Event
 	e.SetHandler(func(ev engine.Event) { got = append(got, ev) })
-	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
-		Conversations: []*waHistorySync.Conversation{{ID: proto.String("972541112222@s.whatsapp.net")}}},
-		Notification: &waE2E.HistorySyncNotification{PeerDataRequestSessionID: proto.String("REQ1")}})
-	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum()}})
-	e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_RECENT.Enum()}})
-	if len(got) != 2 {
+	conv := func(id string, msgs ...string) *waHistorySync.Conversation {
+		c := &waHistorySync.Conversation{ID: proto.String(id)}
+		for _, m := range msgs {
+			c.Messages = append(c.Messages, &waHistorySync.HistorySyncMsg{Message: &waWeb.WebMessageInfo{
+				Key:              &waCommon.MessageKey{RemoteJID: proto.String(id), ID: proto.String(m)},
+				MessageTimestamp: proto.Uint64(1700000000), Message: &waE2E.Message{Conversation: proto.String("x")}}})
+		}
+		return c
+	}
+	sync := func(typ waHistorySync.HistorySync_HistorySyncType, req string, convs ...*waHistorySync.Conversation) {
+		e.handle(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: typ.Enum(), Conversations: convs},
+			Notification: &waE2E.HistorySyncNotification{PeerDataRequestSessionID: proto.String(req)}})
+	}
+	// On demand: a chat with a message, an empty chat and a broadcast chat; only the first counts.
+	sync(waHistorySync.HistorySync_ON_DEMAND, "REQ1", conv("972541112222@s.whatsapp.net", "M1"),
+		conv("972541113333@s.whatsapp.net"), conv("status@broadcast", "S1"))
+	sync(waHistorySync.HistorySync_ON_DEMAND, "")
+	sync(waHistorySync.HistorySync_RECENT, "REQ9", conv("972541112222@s.whatsapp.net", "M0"))
+	if len(got) != 4 {
 		t.Fatalf("events %v", got)
 	}
-	a, _ := got[0].(engine.HistoryAnswerEvent)
-	b, _ := got[1].(engine.HistoryAnswerEvent)
-	if len(a.Chats) != 1 || a.Chats[0] != "972541112222@s.whatsapp.net" || b.Chats == nil || len(b.Chats) != 0 ||
-		a.RequestID != "REQ1" || b.RequestID != "" {
-		t.Fatalf("answers %v", got)
+	m1, _ := got[0].(engine.MessageEvent)
+	a, _ := got[1].(engine.HistoryAnswerEvent)
+	b, _ := got[2].(engine.HistoryAnswerEvent)
+	m0, _ := got[3].(engine.MessageEvent)
+	if m1.Msg.ID != "M1" || !m1.History || !m1.OnDemand || m1.RequestID != "REQ1" {
+		t.Fatalf("on-demand message %+v", m1)
+	}
+	if m0.Msg.ID != "M0" || !m0.History || m0.OnDemand || m0.RequestID != "" {
+		t.Fatalf("recent message %+v", m0)
+	}
+	if len(a.Chats) != 1 || a.Chats[0] != "972541112222@s.whatsapp.net" || a.Messages != 1 || a.RequestID != "REQ1" ||
+		b.Chats == nil || len(b.Chats) != 0 || b.Messages != 0 || b.RequestID != "" {
+		t.Fatalf("answers %+v %+v", a, b)
 	}
 }
