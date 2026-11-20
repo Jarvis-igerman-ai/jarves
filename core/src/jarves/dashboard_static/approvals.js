@@ -128,7 +128,21 @@
   // keeps the marker fresh for 90 s after a hidden beat). It only marks presence; nothing is approved by it.
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
   setInterval(() => { if (document.hidden) refresh(); }, 20000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  // #477: hiding sends a ?hidden=1 beat at once (the last visible beat lasts only 15 s, while a throttled 20 s hidden
+  // timer may first fire ~1 min later); showing catches up at once (#159). Closing a VISIBLE tab also turns it hidden,
+  // followed by pagehide in the same unload steps: the hide beat waits one task and is skipped after pagehide, so that
+  // closed dashboard lapses after 15 s. Trade-off: a tab hidden first and closed later already sent its beat, so it
+  // counts as a place to answer for up to 90 s after hiding (presence only; nothing is approved by a beat).
+  // Expected to run within about 1 s: Chrome's per-second alignment of hidden-tab timers applies at hide time, its
+  // intensive 1/min throttling only after 5 min hidden. A pagehide without a real unload (bfcache) keeps `leaving` set
+  // until pageshow; meanwhile hides send no immediate beat, which only falls back to the 20 s timer (never a leak).
+  let leaving = false;
+  window.addEventListener("pagehide", () => { leaving = true; });
+  window.addEventListener("pageshow", () => { leaving = false; });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { refresh(); return; }
+    setTimeout(() => { if (document.hidden && !leaving) refresh(); }, 0);
+  });
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);
 })();
