@@ -71,9 +71,14 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1"],
-                              capture_output=True, text=True, timeout=60)
+        create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
+                  "--label", "showstopper", "--label", "P1"]
+        made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
+        if made.returncode != 0 and "not found" in (made.stderr or "") and "label" in (made.stderr or ""):
+            # gh resolves label names before it creates the issue, so a missing area label means nothing
+            # was filed yet: retry once without it rather than lose the failure report (#897)
+            print("area label 'testing' not found; filing without it")
+            made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:
