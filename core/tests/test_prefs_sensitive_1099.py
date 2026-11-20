@@ -27,6 +27,8 @@ SAFE = [
     "call me Igal, not mister",
     "use metric units and 24h time",
     "summarise news from https://example.com/world/europe",
+    "open make-the-coffee-strong-2024 and MyFavouritePlaylist2024",
+    "the file release_notes_v4_0_1_final is fine",
 ]
 
 

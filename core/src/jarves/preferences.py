@@ -10,7 +10,9 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 """
 from __future__ import annotations
 
+import collections
 import difflib
+import math
 import re
 import time
 
@@ -42,11 +44,26 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    r"api[\s_-]*key|access[\s_-]*(?:key|token)|auth[\s_-]*token|refresh[\s_-]*token|\bbearer\b|"
+    r"client[\s_-]*secret|secret[\s_-]*key|private[\s_-]*key|טוקן|מפתח\s+(?:ה)?(?:api|גישה|פרטי)", re.I)
+# A long unbroken run of letters, digits and token punctuation (#1099): a key/token without a known vendor prefix.
+_TOKENISH = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
+_ENTROPY_BITS = 4.0               # bits per character over the run
+
+
+def _high_entropy(word: str) -> bool:
+    # random keys mix upper case, lower case and digits scattered through the run; slugs, file names, version
+    # strings and CamelCase phrases ending in a year do not
+    if not (re.search(r"[a-z]", word) and re.search(r"[A-Z]", word) and len(re.findall(r"\d+", word)) >= 3):
+        return False
+    n = len(word)
+    return -sum(c / n * math.log2(c / n) for c in collections.Counter(word).values()) >= _ENTROPY_BITS
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    return bool(_SENSITIVE.search(t)) or logs.has_secret(t) or any(_high_entropy(m) for m in _TOKENISH.findall(t))
 
 
 def normalize(text: str) -> str:
