@@ -81,7 +81,7 @@ class Continuity:
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
-        self._scrub()
+        self._scrub(logs.privacy())
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -89,21 +89,27 @@ class Continuity:
         cx.execute("PRAGMA secure_delete=ON")            # freed pages (old answer text) are overwritten, not left
         return cx
 
+    def _stored(self, body: dict) -> str:
+        """One ledger write reads the privacy setting ONCE for both the scrub and the stored form (#1478 R1)."""
+        private = logs.privacy()
+        self._scrub(private)
+        return self._at_rest(body, private)
+
     @staticmethod
-    def _at_rest(body: dict) -> str:
+    def _at_rest(body: dict, private: bool) -> str:
         """The stored form of an answer. Privacy on: only numbers, flags, null and a fixed code/state survive."""
-        if not logs.privacy():
+        if not private:
             return json.dumps(body)
         kept = {k: v for k, v in (body.items() if isinstance(body, dict) else ()) if k != "not_kept" and (v is None or isinstance(v, (bool, int, float))
                 or (k in _KEEP_STR and isinstance(v, str)))}
         return json.dumps({"not_kept": True, **kept})
 
-    def _scrub(self) -> None:
+    def _scrub(self, private: bool) -> None:
         """Privacy on: blank the words of answers stored while privacy was off. Runs at a Core start and then only at
         the first ledger write with privacy on after a write made with privacy off, not on every write.
         logs privacy defaults to on and the Core runs logs.setup before it builds a Continuity (MobileAccess opens
         it lazily), so the owner's setting is known here. The file uses the rollback journal (no WAL)."""
-        if not logs.privacy():
+        if not private:
             self._clean = False                        # this write may keep words: the next privacy-on write cleans
         elif not self._clean:
             self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
@@ -140,17 +146,15 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
-                self._scrub()
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), self._at_rest(body), now))
+                        (device, cid, kind, int(st), self._stored(body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
-        self._scrub()
         self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), self._at_rest(body), self.clock()))
+                (device, cid, kind, int(status), self._stored(body), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:

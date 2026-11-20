@@ -468,8 +468,9 @@ class MobileAccess:
             return None
         self._replay_failed = False
         if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
-            en, he = _MSG[_msg_key(hit)]
-            hit = {**hit, "reply": he, "reply_en": en}
+            en, he = _MSG["NOT_KEPT"]                   # never a kept error text shown as a JARVES chat reply (#1478 R2)
+            key = _msg_key(hit)
+            hit = {**hit, "reply": he, "reply_en": en, **(_err(key) if key != "NOT_KEPT" else {})}
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:

@@ -91,7 +91,8 @@ def test_f13_a_privacy_mode_resend_keeps_the_code_it_kept(tmp_path, privacy_on):
     mob = mobile.MobileAccess(tmp_path)
     mob.cont.store("ph", "m1", "chat", 200, {"reply": "words", "code": "CHAT_RATE"})
     got = mob.replay("ph", "m1")
-    assert got["code"] == "CHAT_RATE" and got["reply"] == mobile._MSG["CHAT_RATE"][1]
+    assert got["code"] == "CHAT_RATE" and got["error_he"] == mobile._MSG["CHAT_RATE"][1]   # #1478 R2: an error,
+    assert got["reply"] == mobile._MSG["NOT_KEPT"][1]                                      # not a JARVES reply
 
 
 # ---------------------------------------------------------------- H2
@@ -205,3 +206,31 @@ def test_f13_the_scrub_runs_once_not_before_every_ledger_write(tmp_path, privacy
     logs.set_privacy(True)
     c.store("ph", "m3", "chat", 200, {"ok": True})
     assert len([q for q in sql if q.startswith("UPDATE ledger")]) == 1 and not any("secret" in b for b in _bodies(c))
+
+
+def test_f13_one_write_reads_privacy_once_so_a_toggle_cannot_leave_words(tmp_path, privacy_on, monkeypatch):
+    """#1478 R1: privacy flipping off and on during one write must not store words while the ledger counts as clean."""
+    c = Continuity(tmp_path)
+    reads = iter([True, False, True])
+    monkeypatch.setattr(logs, "privacy", lambda: next(reads, True))
+    for i in range(3):
+        c.store("ph", f"m{i}", "chat", 200, {"reply": "secret words"})
+    assert not any("secret" in b for b in _bodies(c))
+
+
+def test_f13_a_privacy_mode_approval_resend_keeps_ok_and_the_refusal_code(tmp_path, privacy_on, monkeypatch):
+    """#1478 R3: approval answers carry only ok, or error + code; a privacy-mode resend keeps ok and the code."""
+    from jarves import approvals
+    monkeypatch.setattr(approvals, "read_pending_file", lambda home, reveal=False: [])
+    monkeypatch.setattr(approvals, "submit_answer", lambda home, aid, ok, channel=None: (True, ""))
+    on = {"phone_approvals": True}
+    mob = SimpleNamespace(home=tmp_path, settings=lambda: on, audit=lambda *a, **k: None)
+    c = Continuity(tmp_path)
+    c.execute("ph", "a1", "approval", lambda: mobile.answer_approval(mob, "x1", False, "ph"))
+    st, obj, again = c.execute("ph", "a1", "approval", lambda: (500, {}))
+    assert again and st == 200 and mobile._again(st, obj) == {"not_kept": True, "ok": True, "replay": True}
+    on["phone_approvals"] = False
+    c.execute("ph", "a2", "approval", lambda: mobile.answer_approval(mob, "x2", True, "ph"))
+    st, obj, again = c.execute("ph", "a2", "approval", lambda: (200, {}))
+    out = mobile._again(st, obj)
+    assert again and st == 403 and out["code"] == "PHONE_APPROVALS_OFF" and out["error"] and out["error_he"]
