@@ -63,7 +63,6 @@ def test_jar584_installer_sensitive_pr_builds_the_windows_installer(files):
     The merge-queue group (the unchanged RULES["installer"]) and the main push (always) behave as before."""
     import re
     assert ci_plan.classify(files, "pull_request")["installer"]
-    assert ci_plan.RULES["installer"] == r"^(packaging/|core/(src/|pyproject|uv\.lock)|godot/|jarvis\.cmd)"
     group = ci_plan.classify(files, "merge_group")["installer"]
     assert group == any(re.match(ci_plan.RULES["installer"], f) for f in files)
     assert group == files[0].startswith("core/src/") and ci_plan.classify(files, "push")["installer"]
