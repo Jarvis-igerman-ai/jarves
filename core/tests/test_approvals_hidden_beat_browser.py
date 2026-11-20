@@ -15,6 +15,7 @@ from __future__ import annotations
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from test_dashboard import dash  # noqa: F401  (fixture)
@@ -99,10 +100,19 @@ def leaky_tab(browser, dash, home, tmp_path, monkeypatch):  # noqa: F811
     (static / "approvals.js").write_text(js.replace(LEAK_GUARD, "refresh();"), encoding="utf-8")
     monkeypatch.setattr(dashboard, "STATIC", static)
     t = _open(browser, dash, home)
+    js_url = next(u for u in t[2] if urlsplit(u).path.endswith("/approvals.js"))
+    served = t[1].evaluate("(u) => fetch(u, {cache: 'no-store'}).then(r => r.text())", js_url)
+    assert LEAK_GUARD not in served, "the server still serves the fixed approvals.js: the leak guard would test nothing"
     try:
         yield t
     finally:
         t[0].close()
+
+
+def _base(dash) -> str:  # noqa: F811
+    """scheme://host:port of the dashboard (its URL carries the sign-in token as a query string)."""
+    u = urlsplit(dash.url)
+    return f"{u.scheme}://{u.netloc}"
 
 
 def _hidden_beats(urls):
@@ -144,7 +154,7 @@ def _real_unload(p, dash, how):  # noqa: F811
     if how == "close":
         p.close(run_before_unload=False)                     # returns once the page is gone (lifecycle complete)
         return _unload_events(order)
-    p.goto(dash.url.split("/?")[0] + "/api/health", wait_until="load")   # returns once the old document unloaded
+    p.goto(_base(dash) + "/api/health", wait_until="load")   # returns once the old document unloaded
     return _unload_events(p.evaluate("() => sessionStorage.getItem('unload') || ''").split())
 
 
@@ -155,7 +165,7 @@ def test_leak_guard_leaky_variant_is_caught_on_real_close(leaky_tab, dash):  # n
     assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]
     q = ctx.new_page()                                       # the closed page is gone: a fresh page is the sentinel
     with q.expect_request(lambda r: "/api/health" in r.url, timeout=5000):
-        q.goto(dash.url.split("/?")[0] + "/api/health")
+        q.goto(_base(dash) + "/api/health")
     assert _hidden_beats(urls), "real close no longer runs the departing page's handlers: the close test is moot"
 
 
