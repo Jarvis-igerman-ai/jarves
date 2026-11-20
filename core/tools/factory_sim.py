@@ -71,11 +71,12 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1", "--label", "testing"],
+        labels = ["showstopper", "P1", "testing"]
+        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
+                              + [arg for name in labels for arg in ("--label", name)],
                               capture_output=True, text=True, timeout=60)
-        if made.returncode != 0:
-            print("issue create failed: " + (made.stderr or "").strip()[:200])
+        if made.returncode != 0:   # a renamed/deleted label fails here; name them so it is diagnosable
+            print(f"issue create failed (labels: {', '.join(labels)}): " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"could not file the issue: {exc}")
 

@@ -68,6 +68,20 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert labels == ["showstopper", "P1", "testing"]   # #897: an area label ("testing" exists in the repo)
 
 
+def test_file_issue_create_failure_names_labels(monkeypatch, capsys):
+    import subprocess
+
+    def fake_run(cmd, **kw):
+        if "list" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+        return subprocess.CompletedProcess(cmd, 1, "", "could not add label: 'testing' not found")
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "tail")
+    out = capsys.readouterr().out
+    assert "issue create failed (labels: showstopper, P1, testing)" in out   # a renamed label is diagnosable
+    assert "'testing' not found" in out
+
+
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
     assert factory_sim.main(["--schedule-command"]) == 0
     out = capsys.readouterr().out
