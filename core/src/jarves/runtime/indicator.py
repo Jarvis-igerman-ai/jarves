@@ -117,7 +117,8 @@ class TkDotBackend:
     def _run(self) -> None:
         try:
             import tkinter as tk
-            root = tk.Tk()
+            from jarves.tkutil import new_root     # absolute, same style as approval_popup (review R1)
+            root = new_root(tk)            # #520: same transient Tcl-init retry as the approval popup
             root.overrideredirect(True)
             root.attributes("-topmost", True)
             root.attributes("-alpha", 0.85)
