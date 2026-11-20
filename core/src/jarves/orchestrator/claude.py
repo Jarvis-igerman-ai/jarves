@@ -256,12 +256,18 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Read", "Grep", "Glob", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)",
 )
+_WORKER_PROTECTED = ("**/.github/**", "**/packaging/**", "**/CLAUDE.md", "**/AGENTS.md", "**/core/tools/release*",
+                     "**/core/tools/promote*", "**/pyproject.toml", "**/uv.lock")
 # Always denied for a worker, whatever the allow list says. Default workers cannot commit (#1311); nobody here pushes or merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
                                 "Edit(**/autopilot.json)", "Write(**/autopilot.json)",   # #932: policy file, any tool
-                                "Edit(**/.claude/**)", "Write(**/.claude/**)")   # #1311: no self-written project settings
+                                "Edit(**/.claude/**)", "Write(**/.claude/**)",   # #1311: no self-written project settings
+                                # #1311 review R2: `--setting-sources project` drops the owner's user-level Edit/Write
+                                # denies (and user hooks), and acceptEdits accepts any in-worktree edit, so the Tier R
+                                # paths of core/tools/risk_class.py HIGH_RISK that steer agents, CI or releases are here.
+                                *(f"{t}({p})" for p in _WORKER_PROTECTED for t in ("Edit", "Write")))
 WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own worktree are accepted; never a bypass mode
 
 

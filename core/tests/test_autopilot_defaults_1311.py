@@ -98,3 +98,15 @@ def test_worker_ignores_owner_user_and_local_settings():
     assert src == "project"
     assert worker.argv.count("--setting-sources") == 1
     assert "Edit(**/.claude/**)" in claude.WORKER_DENY and "Write(**/.claude/**)" in claude.WORKER_DENY
+
+
+@pytest.mark.parametrize("path", [".github/workflows/ci.yml", "AGENTS.md", "CLAUDE.md", "core/CLAUDE.md",
+                                  "packaging/windows/setup.iss", "core/tools/release_gate.py", "core/tools/promote.py",
+                                  "core/pyproject.toml", "core/uv.lock", ".claude/settings.json"])
+def test_worker_cannot_edit_tier_r_paths_without_the_owner_settings(path):
+    """Review R2: workers load project settings only, so the owner's user-level Edit/Write denies are gone and
+    acceptEdits accepts any in-worktree edit. WORKER_DENY itself must refuse the Tier R paths (risk_class HIGH_RISK)."""
+    import fnmatch
+    for tool in ("Edit", "Write"):
+        pats = [r[len(tool) + 1:-1] for r in claude.WORKER_DENY if r.startswith(tool + "(")]
+        assert any(fnmatch.fnmatchcase(path, p) or fnmatch.fnmatchcase("x/" + path, p) for p in pats), (tool, path)

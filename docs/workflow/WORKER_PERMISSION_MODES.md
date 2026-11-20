@@ -29,7 +29,7 @@ anything else falls back to `default`), `--allowedTools WORKER_ALLOWED_TOOLS` (r
 Read/Grep/Glob, `ls`/`grep`/`wc`/`cd` and the bounded worker workflow-console commands, left out when the worker cwd holds the console or its Core tree; a shell `>` or `cd ..` out of the worktree is refused by the CLI itself, live-checked on claude 2.1.329; tests, git, `gh`, npm
 and linters need approval because their options or hooks can write files such as `autopilot.json` indirectly;
 replaceable by `worker_allowed_tools` in `autopilot.json`) and `--disallowedTools WORKER_DENY` (git push/tag,
-gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell). Autopilot is off by
+gh release, gh pr merge, rm, jarvis hotfix/release/update, schtasks, taskkill, powershell, any Bash/Edit/Write naming `autopilot.json`, Edit/Write of `.claude/**` and of the Tier R paths `.github/**`, `packaging/**`, `CLAUDE.md`, `AGENTS.md`, `core/tools/release*|promote*`, `pyproject.toml`, `uv.lock`). Workers start with `--setting-sources project`: the owner's user/local allow, deny and hook settings do not load, so WORKER_DENY carries the edit denies itself. Autopilot is off by
 default and needs the owner's grant. `autopilot_loop.py` only decides when to start a worker.
 
 ## Comparison
