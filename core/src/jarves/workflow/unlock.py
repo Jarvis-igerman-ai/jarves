@@ -38,6 +38,27 @@ def normalize(code: str) -> str:
     return "".join(ch for ch in str(code).upper() if ch.isalnum())
 
 
+def _write_atomic(path: Path, record: dict) -> None:
+    """Replace `path` whole (unique temp file + os.replace), so a reader never sees a half-written record.
+    On Windows a reader can hold the target briefly: a few short retries, then it raises."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            json.dump(record, f)
+        for attempt in range(REPLACE_TRIES):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:
+                if attempt == REPLACE_TRIES - 1:
+                    raise
+                time.sleep(0.05)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class ServerKey:
     """The dashboard's in-memory X25519 key (#750)."""
 
@@ -46,25 +67,8 @@ class ServerKey:
         self.pub = self._key.public_key().public_bytes_raw()
 
     def publish(self, home: Path, port: int) -> None:
-        """Atomically replace unlock_pub.json (unique temp file + os.replace) with this key's public half and the
-        port it answers on. On Windows a reader can hold the target briefly: a few short retries, then it raises."""
-        path = Path(home) / PUB_FILE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{PUB_FILE}.{secrets.token_hex(8)}.tmp")
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w", encoding="ascii") as f:
-                json.dump({"pub": self.pub.hex(), "port": int(port)}, f)
-            for attempt in range(REPLACE_TRIES):
-                try:
-                    os.replace(tmp, path)
-                    break
-                except PermissionError:
-                    if attempt == REPLACE_TRIES - 1:
-                        raise
-                    time.sleep(0.05)
-        finally:
-            tmp.unlink(missing_ok=True)
+        """Atomically replace unlock_pub.json with this key's public half and the port it answers on."""
+        _write_atomic(Path(home) / PUB_FILE, {"pub": self.pub.hex(), "port": int(port)})
 
     def withdraw(self, home: Path) -> None:
         """On a clean stop: remove unlock_pub.json only while it still holds THIS key (a newer dashboard's stays).
@@ -120,10 +124,7 @@ def issue(home: Path, *, port: int | None = None, now: float | None = None) -> s
         raise UnlockUnavailable("the published dashboard unlock key is invalid; restart the dashboard") from exc
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     record = {"eph": eph.hex(), "tag": _tag(shared, eph, pub, raw).hex(), "expires": (now or time.time()) + CODE_TTL_S}
-    path = Path(home) / FILE
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="ascii") as f:
-        json.dump(record, f)
+    _write_atomic(Path(home) / FILE, record)  # a concurrent check never reads a truncated record
     return raw
 
 

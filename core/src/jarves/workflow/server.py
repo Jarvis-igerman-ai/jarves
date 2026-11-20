@@ -173,6 +173,7 @@ class Server(ThreadingHTTPServer):
         self.unlock_key = unlock.ServerKey()     # private half only in memory: the files give no offline oracle (#750)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
+        self._closed = False
         self.discuss = Helper(self.home, token=self.token)
         super().__init__(("127.0.0.1", port), Handler)  # a failed bind raises here, before the live key is replaced
         try:
@@ -208,8 +209,9 @@ class Server(ThreadingHTTPServer):
             pass  # persistence is a convenience; the live session still works in memory
 
     def server_close(self) -> None:
-        if self.stopping.is_set():  # idempotent: a second close neither withdraws again nor closes the store twice
+        if self._closed:  # idempotent: a second close neither withdraws again nor closes the store twice
             return
+        self._closed = True  # own flag: `stopping` is also the stream-stop event and may be set before close
         self.stopping.set()
         super().server_close()
         try:

@@ -3,6 +3,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import threading
 import time
@@ -421,6 +422,26 @@ class UnlockTests(unittest.TestCase):
             self.server.server_close()                                     # tearDown closes it again, too
         self.assertEqual(closes, [self.server.unlock_key, self.store])
         self.store.close()                                                 # the real close the patch replaced
+
+    def test_750_close_after_stopping_was_set_still_closes(self):
+        """`stopping` is also the stream-stop event: a path that sets it first must not turn close into a no-op."""
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.stopping.set()
+        self.server.server_close()
+        self.assertFalse((self.home / unlock.PUB_FILE).exists())          # key withdrawn
+        with self.assertRaises(sqlite3.ProgrammingError):
+            self.store.create_task({"id": "u", "title": "U", "lane": "bugs"})  # store closed
+
+    def test_750_code_record_is_replaced_atomically(self):
+        """unlock.json is replaced whole (temp file + os.replace): a failed write keeps the previous record."""
+        unlock.issue(self.home)
+        before = (self.home / unlock.FILE).read_bytes()
+        with patch.object(unlock.os, "replace", side_effect=PermissionError("held")), \
+                patch.object(unlock.time, "sleep", lambda s: None), self.assertRaises(PermissionError):
+            unlock.issue(self.home)
+        self.assertEqual((self.home / unlock.FILE).read_bytes(), before)
+        self.assertEqual([p.name for p in self.home.iterdir() if p.name.endswith(".tmp")], [])
 
     def test_750_key_publish_retries_a_briefly_locked_target_then_gives_up(self):
         real, calls = os.replace, []
