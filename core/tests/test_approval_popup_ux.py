@@ -218,3 +218,29 @@ def _tk_objects_die_on_the_main_thread():
     """Tk variables garbage-collected on another thread print 'main thread is not in main loop'; collect here."""
     yield
     gc.collect()
+
+
+def test_popup_build_retries_a_transient_tcl_error_through_the_shared_helper(monkeypatch, tmp_path):
+    """#520 refactor guard: approval_popup.build still retries Windows' transient Tcl init error (now via
+    jarves.tkutil, shared with the listening dot) and still raises a real one. Fake tkinter, no display/clock."""
+    import sys
+    import types
+    from jarves import approval_popup, tkutil
+
+    class TclError(Exception):
+        pass
+    errors, tries = ['invalid command name "tcl_findLibrary"', "no display name and no $DISPLAY"], []
+
+    def Tk():
+        tries.append(1)
+        raise TclError(errors.pop(0))
+    fake = types.ModuleType("tkinter")
+    fake.Tk, fake.TclError = Tk, TclError
+    fake.font = types.ModuleType("tkinter.font")
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    monkeypatch.setitem(sys.modules, "tkinter.font", fake.font)
+    naps = []
+    monkeypatch.setattr(tkutil.time, "sleep", naps.append)
+    with pytest.raises(TclError, match="no display"):
+        approval_popup.build({"kind": "run"}, tmp_path / "out.json")
+    assert len(tries) == 2 and naps == [0.25]
