@@ -132,22 +132,29 @@ def _hook(folder: Path, name: str, marker: Path) -> None:
     h.chmod(0o755)
 
 
+# every hook JARVES's own commands could trigger (#1381): index writes run post-index-change, ref writes run
+# reference-transaction, merges, commits and checkouts run the rest
+HOOKS = ("post-merge", "pre-merge-commit", "commit-msg", "prepare-commit-msg", "pre-commit", "post-commit",
+         "post-checkout", "post-index-change", "reference-transaction", "post-rewrite")
+
+
 def test_merges_never_run_hooks_from_the_shared_git_folder_or_config(tmp_path):
     """#1381 item 1: an agent that writes `.git/hooks` or sets `core.hooksPath` in the shared config must not get code
     run by JARVES's merges (merge_in, its abort, fast_forward; ship uses merge_in with the owner's identity)."""
     repo, marker = _repo(tmp_path), tmp_path / "hook-ran.txt"
-    gitops.git(repo, "checkout", "-qb", "side")
-    (repo / "s.txt").write_text("s", encoding="utf-8")
-    gitops.git(repo, "add", "-A")
-    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
-    gitops.git(repo, "checkout", "-q", "main")
-    (repo / "m.txt").write_text("m", encoding="utf-8")
-    gitops.git(repo, "add", "-A")
-    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
-    for name in ("post-merge", "pre-merge-commit", "commit-msg", "prepare-commit-msg"):
+    gitops.git(repo, "config", "user.name", "Owner")                              # ident=False: the owner's identity
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
+    for br in ("side", "side2", "main"):                                          # three divergent tips
+        gitops.git(repo, "checkout", "-q", *(["main"] if br == "main" else ["-b", br, "main"]))
+        (repo / f"{br}.txt").write_text(br, encoding="utf-8")
+        gitops.git(repo, "add", "-A")
+        gitops.git(repo, "commit", "-qm", br, "--no-verify")
+    for name in HOOKS:
         _hook(repo / ".git" / "hooks", name, marker)
-    assert gitops.merge_in(repo, "side") == [] and (repo / "s.txt").exists()      # a real merge commit
-    assert gitops.merge_in(repo, "side", ident=False) == []
+    assert gitops.merge_in(repo, "side") == [] and (repo / "side.txt").exists()   # a real merge commit
+    assert gitops.merge_in(repo, "side2", ident=False) == [] and (repo / "side2.txt").exists()   # the ship path
+    assert gitops.git(repo, "log", "-1", "--format=%an").stdout.strip() == "Owner"
+    assert gitops.merge_in(repo, "main~1") == []                                  # already merged: nothing to do
     _hook(tmp_path / "evil-hooks", "post-merge", marker)
     gitops.git(repo, "config", "core.hooksPath", str(tmp_path / "evil-hooks"))
     gitops.git(repo, "checkout", "-qb", "ff", "HEAD~1")
@@ -174,14 +181,27 @@ def test_symlinks_and_gitlinks_in_scope_count_as_protected(tmp_path):
 
 
 def test_worktree_creation_and_commits_never_run_shared_hooks(tmp_path):
-    """#1381 review R2: worktree add runs `post-checkout`, and `commit --no-verify` still runs `prepare-commit-msg`
-    and `post-commit`. JARVES creates worktrees and commits task work without running any shared hook."""
+    """#1381 review: worktree add runs `post-checkout`, `commit --no-verify` still runs `prepare-commit-msg` and
+    `post-commit`, `add -A` runs `post-index-change`, branch create/delete runs `reference-transaction`. JARVES's own
+    git commands run no shared hook at all."""
     repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "hook-ran.txt"
-    for name in ("post-checkout", "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"):
+    for name in HOOKS:
         _hook(repo / ".git" / "hooks", name, marker)
     gitops.ensure_integration(home, str(repo), 1)
     wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
     (wt / "a.py").write_text("1\n", encoding="utf-8")
     assert gitops.commit_all(wt, "a")
     gitops.detached_worktree(home, str(repo), 1, gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+    gitops.remove_worktree(str(repo), wt, gitops.task_branch(1, 1, 1))           # branch -D: a ref write
+    assert gitops.git(repo, "branch", "--list", gitops.task_branch(1, 1, 1)).stdout.strip() == ""
     assert not marker.exists()
+
+
+def test_the_empty_hooks_folder_is_reused_and_replaced_once_written_to():
+    """#1381 review R3: one empty folder per process instead of a new one per command; a hook written into it never
+    runs, because a folder that is no longer empty is replaced."""
+    d = gitops._no_hooks_dir()
+    assert gitops._no_hooks_dir() == d and not list(Path(d).iterdir())
+    (Path(d) / "post-index-change").write_text("#!/bin/sh\n", encoding="utf-8")
+    d2 = gitops._no_hooks_dir()
+    assert d2 != d and not list(Path(d2).iterdir())

@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from contextlib import nullcontext
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -59,20 +58,36 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
-        hooks: bool = True) -> subprocess.CompletedProcess:
+_NOHOOKS = {"dir": ""}
+
+
+def _no_hooks_dir() -> str:
+    """One empty folder per process for `core.hooksPath` (#1381). Re-made when it is missing or no longer empty, so
+    a hook written into it never runs."""
+    with _LOCKS_GUARD:
+        d = _NOHOOKS["dir"]
+        try:
+            if d and os.path.isdir(d) and not os.path.islink(d) and not os.listdir(d):
+                return d
+        except OSError:
+            pass
+        _NOHOOKS["dir"] = tempfile.mkdtemp(prefix="jarves-nohooks-")
+        return _NOHOOKS["dir"]
+
+
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
+        ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
-    hooks=False: no git hook runs (#1381): `core.hooksPath` is a fresh empty folder for this command, so neither the
-    shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs."""
-    with (nullcontext("") if hooks else tempfile.TemporaryDirectory(prefix="jarves-nohooks-")) as d:
-        pre = [*(IDENT if ident else []), *(["-c", f"core.hooksPath={d}"] if d else [])]
-        for attempt in range(LOCK_RETRIES + 1):
-            p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                               creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                               errors="replace")
-            if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
-                break
-            time.sleep(0.15 * (attempt + 1))
+    No git hook ever runs (#1381): `core.hooksPath` points at an empty folder, so neither the shared `.git/hooks` nor
+    a `core.hooksPath` from the shared config (both writable by agents) runs on a merge, commit, index or ref write."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={_no_hooks_dir()}"]
+    for attempt in range(LOCK_RETRIES + 1):
+        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                           errors="replace")
+        if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
+            break
+        time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -111,9 +126,9 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     start = base or "HEAD"
     with _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
-            git(repo, "worktree", "add", str(wt), br, hooks=False)
+            git(repo, "worktree", "add", str(wt), br)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start, hooks=False)
+            git(repo, "worktree", "add", "-b", br, str(wt), start)
     return wt
 
 
@@ -124,7 +139,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid), hooks=False)
+        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
     return wt, br
 
 
@@ -134,7 +149,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "--detach", str(wt), sha, hooks=False)
+        git(repo, "worktree", "add", "--detach", str(wt), sha)
     return wt
 
 
@@ -155,8 +170,7 @@ def commit_all(wt: Path, message: str) -> bool:
     git(wt, "add", "-A")
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
-    # --no-verify alone still runs prepare-commit-msg and post-commit (#1381)
-    git(wt, "commit", "-m", message[:200], "--no-verify", hooks=False)
+    git(wt, "commit", "-m", message[:200], "--no-verify")
     return True
 
 
@@ -223,11 +237,11 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident, hooks=False)
+        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
-        git(wt, "merge", "--abort", check=False, hooks=False)
+        git(wt, "merge", "--abort", check=False)
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
@@ -235,7 +249,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
-    git(integration_wt, "merge", "--ff-only", branch, hooks=False)
+    git(integration_wt, "merge", "--ff-only", branch)
 
 
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
