@@ -4,7 +4,9 @@ The private link (access.token) only opens a READ-ONLY session. Answering, defer
 window needs an unlock code that is shown only in the owner's own terminal (`workflow_console.py unlock`, or `open`
 in a terminal). The code is never stored: only a salted scrypt hash, with a short expiry, single use. An agent that
 can read every file in the workflow home can read the hash; a 4-digit code is brute-forceable offline, so this stops
-token-only HTTP callers, not a determined file reader (honest limit, see issue #750). The CLI refuses agent environments and non-terminals (owner_only_guard)."""
+token-only HTTP callers, not a determined file reader (honest limit, see issue #750). A same-user process that
+can WRITE the workflow home can also replace unlock.json with a record for a code it chose (#1313); only OS-level
+separation of the workflow home closes that, which needs an owner decision. The CLI refuses agent environments and non-terminals (owner_only_guard)."""
 from __future__ import annotations
 
 import hashlib
