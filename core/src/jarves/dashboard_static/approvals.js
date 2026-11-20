@@ -128,9 +128,17 @@
   // keeps the marker fresh for 90 s after a hidden beat). It only marks presence; nothing is approved by it.
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
   setInterval(() => { if (document.hidden) refresh(); }, 20000);
-  // #477: beat on EVERY visibility change: hiding sends a ?hidden=1 beat at once (the last visible beat lasts only 15 s,
-  // while a throttled 20 s hidden timer may first fire ~1 min later); showing catches up at once (#159)
-  document.addEventListener("visibilitychange", () => refresh());
+  // #477: hiding sends a ?hidden=1 beat at once (the last visible beat lasts only 15 s, while a throttled 20 s hidden
+  // timer may first fire ~1 min later); showing catches up at once (#159). Closing or leaving the page also turns it
+  // hidden, followed by pagehide in the same unload steps: the hide beat waits one task and is skipped after pagehide,
+  // so a closed dashboard never counts as a place to answer for the 90 s hidden window (it lapses after 15 s).
+  let leaving = false;
+  window.addEventListener("pagehide", () => { leaving = true; });
+  window.addEventListener("pageshow", () => { leaving = false; });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { refresh(); return; }
+    setTimeout(() => { if (document.hidden && !leaving) refresh(); }, 0);
+  });
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);
 })();
