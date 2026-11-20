@@ -417,8 +417,16 @@ def test_issue_480_a_refused_source_names_the_owner_action_in_the_tracker():
     cov = {"code_scanning": "complete", "dependabot": "incomplete:http_403", "secret_scanning": "incomplete:http_404",
            "main_ci": "incomplete:http_503", "local_diagnostics": "skipped:no_local_registry"}
     body = ss.tracker_body([], cov, 0, "0" * 16, "light")
-    assert "Owner action for dependabot (http_403): give the scan token (JARVES_GITHUB_TOKEN) read access to Dependabot alerts." in body
+    assert ("Owner action for dependabot (http_403): turn on Dependabot alerts for the repo if they are off, "
+            "and give the scan token (JARVES_GITHUB_TOKEN) read access to Dependabot alerts.") in body
     assert "Owner action for secret_scanning (http_404): turn on secret scanning for the repo" in body
     assert "Owner action for main_ci" not in body                     # a transient 5xx is retried, not an owner action
     assert "Owner action for local_diagnostics" not in body           # skipped is not refused
     assert ss.tracker_body([], {"dependabot": "complete"}, 0, "0" * 16, "light").count("Owner action") == 0
+
+
+def test_issue_480_a_tracker_signed_by_the_old_body_template_is_rewritten_once():
+    import hashlib
+    old = hashlib.sha256(b"i|").hexdigest()[:16]                       # the pre-owner-action signature of the live #480
+    new = ss.signature([], False)
+    assert new != old and new == ss.signature([], False)              # one rewrite, then stable

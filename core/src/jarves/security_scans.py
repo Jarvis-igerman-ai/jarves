@@ -520,8 +520,11 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
             "coverage": coverage}
 
 
+BODY_VERSION = "b2"   # bump when tracker_body's template changes: forces ONE rewrite so the tracker shows the new text
+
+
 def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+    return hashlib.sha256((BODY_VERSION + "|" + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
 
 
 def _complete(coverage: dict) -> bool:
@@ -531,7 +534,8 @@ def _complete(coverage: dict) -> bool:
 # ---------------------------------------------------------------------- the ONE issue
 _REFUSED = ("http_401", "http_403", "http_404")
 _OWNER_ACTION = {
-    "dependabot": "give the scan token (JARVES_GITHUB_TOKEN) read access to Dependabot alerts.",
+    "dependabot": "turn on Dependabot alerts for the repo if they are off, and give the scan token "
+                  "(JARVES_GITHUB_TOKEN) read access to Dependabot alerts.",
     "secret_scanning": "turn on secret scanning for the repo (an owner decision) and give the scan token "
                        "(JARVES_GITHUB_TOKEN) read access to secret-scanning alerts.",
 }
