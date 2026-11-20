@@ -223,3 +223,18 @@ def test_wake_greeting_claim_is_released_when_the_session_does_not_start():
     before = _wake_core(start_ok=False, greeted=True)
     asyncio.run(Core._start_wake_live(before))
     assert before._greeted                               # an earlier greeting is never un-done
+
+
+def test_wake_greeting_claim_stands_when_start_raises_after_the_session_opened():
+    """#520 review R1: a session already assigned is a started session, whatever _start_live returned."""
+    import pytest
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+
+    async def start(**kw):
+        c.live = object()                                # opened, then a later step (status broadcast) failed
+        raise RuntimeError("broadcast failed")
+    c._start_live = start
+    with pytest.raises(RuntimeError):
+        asyncio.run(Core._start_wake_live(c))
+    assert c._greeted

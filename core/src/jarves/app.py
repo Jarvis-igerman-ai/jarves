@@ -2069,11 +2069,13 @@ class Core:
     async def _start_wake_live(self) -> None:
         """#520: the wake greeting claims _greeted (no second start greeting while connecting); a session that did
         not start releases that claim, unless the start greeting had already happened before this wake."""
-        was_greeted, started = self._greeted, False
+        was_greeted, started, live_before = self._greeted, False, self.live
         greeting = self.wake_greeting()
         try:
             started = bool(await self._start_live(ack=True, greeting=greeting))
         finally:
+            # a session this call assigned counts as started even if _start_live raised after assigning it
+            started = started or (self.live is not None and self.live is not live_before)
             if greeting and not was_greeted and not started:
                 self._greeted = False
 
