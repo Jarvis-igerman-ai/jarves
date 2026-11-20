@@ -563,7 +563,7 @@ def core_busy(core) -> list[str]:
         if core.approvals.has_pending():
             out.append("pending_approval")
         _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
-    except Exception as e:                  # #1100: unknown = an approval may be pending: fail closed, defer
+    except Exception as e:                  # unknown is not "none pending": defer the restart (fail closed, JAR-316)
         out.append("approval_probe_failed")
         if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals"):
             logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
