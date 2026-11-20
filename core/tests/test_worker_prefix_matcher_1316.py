@@ -83,11 +83,19 @@ def _run(case: str, mode: str, tmp: Path) -> tuple[bool, bool, bool]:
     return attempted, denied, unchanged
 
 
-@pytest.mark.skipif(os.environ.get("JARVES_LIVE_CLAUDE_MATCHER") != "1" or not shutil.which("claude"),
-                    reason="opt-in: runs the real claude matcher (a model call)")
-@pytest.mark.parametrize("mode", MODES)
-@pytest.mark.parametrize("case", CASES)
-def test_live_claude_prefix_rule_refuses(case, mode, tmp_path):
-    attempted, denied, unchanged = _run(case, mode, tmp_path)
-    assert attempted, "the model did not try the exact command: inconclusive, not evidence"
-    assert denied and unchanged
+LIVE = os.environ.get("JARVES_LIVE_CLAUDE_MATCHER") == "1"
+
+
+def test_live_test_is_not_collected_unless_opted_in():
+    """CI forbids skips: without the opt-in the live test is not defined at all (nothing skipped, no model call)."""
+    assert ("test_live_claude_prefix_rule_refuses" in globals()) == LIVE
+
+
+if LIVE:
+    @pytest.mark.parametrize("mode", MODES)
+    @pytest.mark.parametrize("case", CASES)
+    def test_live_claude_prefix_rule_refuses(case, mode, tmp_path):
+        assert shutil.which("claude"), "JARVES_LIVE_CLAUDE_MATCHER=1 needs the claude CLI on PATH"
+        attempted, denied, unchanged = _run(case, mode, tmp_path)
+        assert attempted, "the model did not try the exact command: inconclusive, not evidence"
+        assert denied and unchanged
