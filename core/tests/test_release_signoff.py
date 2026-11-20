@@ -469,11 +469,14 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
 
 
 TAG_OID = "c" * 40
+ROWS = "a" * 64
+TAG_BODY = f"object {SHA}\ntype commit\ntag v4.1.0\ntagger o <o@x> 1 +0000\n\nRows hash: {ROWS}\n-----BEGIN SSH SIGNATURE-----\n"
 
 
 class _Run:
-    def __init__(self, code=0, err="", target=SHA):
+    def __init__(self, code=0, err="", target=SHA, body=TAG_BODY):
         self.code, self.err, self.target, self.calls, self.listed, self.envs = code, err, target, [], None, []
+        self.body = body
 
     def __call__(self, cmd, **kw):
         import subprocess
@@ -481,6 +484,8 @@ class _Run:
         self.envs.append(kw.get("env") or {})
         if "rev-parse" in cmd and cmd[-1].endswith("^{commit}"):  # the commit the verified tag object points at
             return subprocess.CompletedProcess(cmd, 0, self.target + "\n", "")
+        if "cat-file" in cmd:                                    # the verified tag object's own name + message
+            return subprocess.CompletedProcess(cmd, 0, self.body, "")
         if "rev-parse" in cmd:                                   # the tag object id, resolved once (review R2)
             return subprocess.CompletedProcess(cmd, 0, TAG_OID + "\n", "")
         f = next(c.split("=", 1)[1] for c in cmd if c.startswith("gpg.ssh.allowedSignersFile="))
@@ -497,11 +502,11 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     cmd = ok.calls[1]
     assert ok.calls[0][-1] == "refs/tags/v4.1.0" and all(e.get("LC_ALL") == "C" for e in ok.envs)
     assert cmd[-2:] == ["verify-tag", TAG_OID] and ok.listed == lines + "\n"      # R2: the ref is resolved once,
-    assert ok.calls[2][-1] == TAG_OID + "^{commit}" and len(ok.calls) == 3        # the same object is dereferenced
+    assert ok.calls[2][-1] == TAG_OID + "^{commit}" and ok.calls[3][1:] == ["cat-file", "tag", TAG_OID]  # same object
     assert "gpg.minTrustLevel=fully" in cmd and f"gpg.ssh.program={v}" in cmd and gate.SSH_KEYGEN == "/usr/bin/ssh-keygen"
     assert "gpg.openpgp.program=/nonexistent" in cmd and "gpg.x509.program=/nonexistent" in cmd   # only SSH verifies
     absent = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=ok, verifier=str(tmp_path / "none"))
-    assert len(absent) == 1 and "verifier" in absent[0] and len(ok.calls) == 3        # refused before running git
+    assert len(absent) == 1 and "verifier" in absent[0] and len(ok.calls) == 4        # refused before running git
     stranger = 'Good "git" signature with ED25519 key SHA256:y\nNo principal matched.\n'     # exit 0, unlisted key
     for run in (_Run(0, stranger), _Run(1, "error: no signature found\n" + "x" * 900)):
         bad = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=run, verifier=v)
@@ -522,6 +527,19 @@ def test_605_tag_signature_by_owner_key(tmp_path):
         return ok(cmd, **kw)
     assert "cannot resolve the signed tag" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA,
                                                                           run=late_boom, verifier=v)[0]
+    assert gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=ok, verifier=v, rows_hash=ROWS.upper()) == []
+    other = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=ok, verifier=v, rows_hash="b" * 64)
+    assert len(other) == 1 and "differs from the one given" in other[0]          # review R2: hash from the signed object
+    nohash = _Run(0, ok.err, body=TAG_BODY.replace("Rows hash: ", "Rows: "))
+    assert "(none)" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=nohash, verifier=v, rows_hash=ROWS)[0]
+    renamed = _Run(0, ok.err, body=TAG_BODY.replace("tag v4.1.0", "tag v4.0.9"))  # signed for another version
+    assert "named 'v4.0.9', not v4.1.0" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=renamed, verifier=v)[0]
+
+    def cat_boom(cmd, **kw):
+        if "cat-file" in cmd:
+            raise subprocess.TimeoutExpired(cmd, 60)
+        return ok(cmd, **kw)
+    assert "cannot read the signed tag" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=cat_boom, verifier=v)[0]
     missing = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 128, "", "fatal: Needed a single revision")  # noqa: E731
     assert "does not exist" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=missing, verifier=v)[0]
 
@@ -533,7 +551,7 @@ def test_605_fallback_signers_variable_is_never_trusted(tmp_path, monkeypatch, c
     monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
     monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
     seen = []
-    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s, sha: seen.append(s) or [])
+    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s, sha, rows_hash=None: seen.append(s) or [])
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "repo-or-org ssh-ed25519 AAAA")
     argv = ["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path), "--require-rows-hash"]
     for fb in ("true", "", " TRUE ", "False"):
@@ -569,7 +587,7 @@ def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(gate, "gh_issues", lambda repo: [])
     monkeypatch.setattr(gate, "gh_runs", lambda *a: [])
     seen = []
-    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s, sha: seen.append((s, sha)) or ["sign-off: SIGFAIL"])
+    monkeypatch.setattr(gate, "tag_signature_problems", lambda root, tag, s, sha, rows_hash=None: seen.append((s, sha)) or ["sign-off: SIGFAIL"])
     argv = ["--tag", "v4.5.0", "--sha", SHA, "--repo-root", str(tmp_path)]
     monkeypatch.setenv("JARVES_ALLOWED_SIGNERS", "  ")                             # blank = unset
     assert gate.main(argv + ["--require-rows-hash"]) == 1
@@ -616,6 +634,8 @@ def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
        f"user.signingkey={tmp_path / 'owner'}", "tag", "-s", "v4.1.3", "-m", "Rows hash: " + "b" * 64, cwd=repo)
     lines = 'owner namespaces="git" ' + (tmp_path / "owner.pub").read_text(encoding="utf-8")
     assert gate.tag_signature_problems(repo, "v4.1.0", lines, head) == []
+    assert gate.tag_signature_problems(repo, "v4.1.0", lines, head, rows_hash="a" * 64) == []
+    assert "differs from the one given" in gate.tag_signature_problems(repo, "v4.1.0", lines, head, rows_hash="c" * 64)[0]
     for tag in ("v4.1.1", "v4.1.2"):
         bad = gate.tag_signature_problems(repo, tag, lines, head)
         assert len(bad) == 1 and "not signed by the owner" in bad[0], bad
