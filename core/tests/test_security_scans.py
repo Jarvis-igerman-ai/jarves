@@ -430,3 +430,22 @@ def test_issue_480_a_tracker_signed_by_the_old_body_template_is_rewritten_once()
     old = hashlib.sha256(b"i|").hexdigest()[:16]                       # the pre-owner-action signature of the live #480
     new = ss.signature([], False)
     assert new != old and new == ss.signature([], False)              # one rewrite, then stable
+
+
+def test_issue_480_a_401_says_the_token_is_invalid_not_turn_a_feature_on():
+    body = ss.tracker_body([], {"dependabot": "incomplete:http_401", "secret_scanning": "incomplete:http_401"}, 0, "0" * 16, "light")
+    for k in ("dependabot", "secret_scanning"):
+        assert f"Owner action for {k} (http_401): the scan token is missing, expired or invalid; renew JARVES_GITHUB_TOKEN." in body
+    assert "turn on" not in body
+
+
+def test_issue_480_update_tracker_rewrites_an_old_sig_tracker_once_then_writes_nothing():
+    import hashlib
+    gh = FakeGitHub()
+    old = hashlib.sha256(b"i|").hexdigest()[:16]
+    gh.issues.append({"number": 480, "state": "open", "html_url": ISSUE_URL, "body": f"old\n{ss.TRACKER_MARKER}\n<!-- sig:{old} -->"})
+    sig = ss.signature([], False)
+    body = ss.tracker_body([], {"dependabot": "incomplete:http_403"}, 0, sig, "light")
+    assert ss.update_tracker(gh, body, sig, False, lambda s: None)["status"] == "updated"
+    assert ss.update_tracker(gh, body, sig, False, lambda s: None)["status"] == "unchanged"
+    assert len(gh.writes()) == 1 and "Owner action for dependabot" in gh.issues[0]["body"]
