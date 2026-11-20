@@ -9,8 +9,10 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -57,16 +59,20 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
-    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch)."""
-    for attempt in range(LOCK_RETRIES + 1):
-        p = subprocess.run(["git", *(IDENT if ident else []), *args], cwd=str(cwd), capture_output=True, text=True,
-                           timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
-                           encoding="utf-8", errors="replace")
-        if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
-            break
-        time.sleep(0.15 * (attempt + 1))
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        hooks: bool = True) -> subprocess.CompletedProcess:
+    """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
+    hooks=False: no git hook runs (#1381): `core.hooksPath` is a fresh empty folder for this command, so neither the
+    shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs."""
+    with (nullcontext("") if hooks else tempfile.TemporaryDirectory(prefix="jarves-nohooks-")) as d:
+        pre = [*(IDENT if ident else []), *(["-c", f"core.hooksPath={d}"] if d else [])]
+        for attempt in range(LOCK_RETRIES + 1):
+            p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                               creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                               errors="replace")
+            if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
+                break
+            time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -161,6 +167,17 @@ def changed_files(wt: Path, base: str) -> list[str]:
     return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
+LINK_MODES = ("120000", "160000")       # a symlink and a gitlink (submodule entry)
+
+
+def link_files(wt: Path, base: str) -> list[str]:
+    """Paths the task added or changed as a symlink or a gitlink (#1381). Their path text can look harmless while a
+    symlink points into `.github/` or `.claude/` and a gitlink pulls in another repository, so they count as protected."""
+    out = git(wt, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...HEAD").stdout.split("\0")
+    return [out[i + 1].replace("\\", "/") for i in range(0, len(out) - 1, 2)
+            if out[i].startswith(":") and out[i].split()[1:2] and out[i].split()[1] in LINK_MODES]
+
+
 def diffstat(wt: Path, base: str) -> str:
     out = git(wt, "diff", "--shortstat", f"{base}...HEAD", check=False).stdout.strip()
     return out or "no changes"
@@ -205,11 +222,11 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident, hooks=False)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
-        git(wt, "merge", "--abort", check=False)
+        git(wt, "merge", "--abort", check=False, hooks=False)
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
@@ -217,7 +234,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
-    git(integration_wt, "merge", "--ff-only", branch)
+    git(integration_wt, "merge", "--ff-only", branch, hooks=False)
 
 
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:

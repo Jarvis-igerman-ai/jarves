@@ -71,6 +71,10 @@ FAKE = textwrap.dedent('''
             path, _, body = arg.partition("=")
             os.makedirs(os.path.dirname(os.path.join(os.getcwd(), path)) or ".", exist_ok=True)
             open(os.path.join(os.getcwd(), path), "w").write(body + "\\n")
+        elif op == "link":                  # a symlink in scope (#1381)
+            path, _, body = arg.partition("=")
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            os.symlink(body, path)
         elif op == "sleep":
             time.sleep(float(arg))
         elif op == "fail":
@@ -320,6 +324,18 @@ def test_out_of_scope_and_protected_files_block_without_merge(env):
     assert "outside the scope" in ts[0]["reason"] and "protected" in ts[1]["reason"]
     integ = gitops.project_root(home, 1) / "integration"
     assert not (integ / "other").exists() and not (integ / ".claude").exists()
+
+
+def test_a_symlink_in_scope_into_github_is_blocked_as_protected(env):
+    """#1381 item 2: the path `src/ci` is in scope and its text is harmless, but it is a symlink into .github/."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "Link", "FAKE link src/ci=../.github/workflows", scope=["src/"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "protected" in t["reason"] and "src/ci" in t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "src").exists()
 
 
 def test_agent_blocked_and_failed_runs(env):

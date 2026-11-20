@@ -123,3 +123,51 @@ def test_ordinary_paths_with_similar_names_are_not_protected(path):
 def test_agent_tool_rules_deny_edits_to_github_workflows():
     from jarves.projectmgr import runners
     assert "Edit(.github/**)" in runners.DENY and "Write(.github/**)" in runners.DENY
+
+
+def _hook(folder: Path, name: str, marker: Path) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    h = folder / name
+    h.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\n", encoding="utf-8")
+    h.chmod(0o755)
+
+
+def test_merges_never_run_hooks_from_the_shared_git_folder_or_config(tmp_path):
+    """#1381 item 1: an agent that writes `.git/hooks` or sets `core.hooksPath` in the shared config must not get code
+    run by JARVES's merges (merge_in, its abort, fast_forward; ship uses merge_in with the owner's identity)."""
+    repo, marker = _repo(tmp_path), tmp_path / "hook-ran.txt"
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
+    for name in ("post-merge", "pre-merge-commit", "commit-msg", "prepare-commit-msg"):
+        _hook(repo / ".git" / "hooks", name, marker)
+    assert gitops.merge_in(repo, "side") == [] and (repo / "s.txt").exists()      # a real merge commit
+    assert gitops.merge_in(repo, "side", ident=False) == []
+    _hook(tmp_path / "evil-hooks", "post-merge", marker)
+    gitops.git(repo, "config", "core.hooksPath", str(tmp_path / "evil-hooks"))
+    gitops.git(repo, "checkout", "-qb", "ff", "HEAD~1")
+    gitops.fast_forward(repo, "main")
+    assert not marker.exists()
+
+
+def test_symlinks_and_gitlinks_in_scope_count_as_protected(tmp_path):
+    """#1381 item 2: `is_protected` only reads path text, so a symlink in scope pointing into `.github/` or a gitlink
+    (submodule entry) in scope passed the scope check. link_files reports both; the engine treats them as protected."""
+    repo = _repo(tmp_path)
+    base = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=repo, input="../.github/workflows",
+                          capture_output=True, text=True, check=True).stdout.strip()
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},src/link")
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},src/sub")
+    (repo / "src").mkdir()
+    (repo / "src" / "ok.py").write_text("1", encoding="utf-8")
+    gitops.git(repo, "add", "src/ok.py")
+    gitops.git(repo, "commit", "-qm", "links", "--no-verify")
+    files = gitops.changed_files(repo, base)
+    assert gitops.violations(files, ["src/"]) == ([], [])                       # the path text alone looks harmless
+    assert sorted(gitops.link_files(repo, base)) == ["src/link", "src/sub"]
