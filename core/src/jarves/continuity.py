@@ -41,6 +41,11 @@ REPLAY_WINDOW_S = 120          # a queued command older than this is refused (th
 LEDGER_TTL_S = 24 * 3600       # how long an answer is kept for a resend (survives a PC restart)
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,39}")
 NOT_KEPT = '{"not_kept": true'  # every privacy-mode ledger body starts with this (json.dumps keeps insertion order)
+# A row still holding words (review R2 on #1444): no marker, unreadable JSON, or any value _at_rest() would not keep
+# (a string other than an UPPER_CASE code up to 40 chars, a list or an object), so a marker alone never counts as clean.
+_DIRTY = ("(substr(body, 1, ?) <> ? OR CASE WHEN json_valid(body) THEN EXISTS (SELECT 1 FROM json_each(ledger.body) j "
+          "WHERE j.type IN ('array', 'object') OR (j.type = 'text' AND (j.key <> 'code' OR length(j.value) > 40 "
+          "OR j.value GLOB '*[^A-Z0-9_]*' OR j.value NOT GLOB '[A-Z]*'))) ELSE 1 END)")
 ACTIVE_WINDOW_S = 300          # the last interaction counts as "active" for this long
 BEAT_WINDOW_S = 60             # a device that polled within this time is reachable
 SENT_TIMEOUT_S = 15 * 60       # a notice sent to a device that never acknowledged and went silent is re-routed
@@ -77,7 +82,8 @@ class Continuity:
         self.home, self.clock = Path(home), clock
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()               # re-entrant on purpose: execute() runs fn() under it, and store()/
+                                                     # seen() take it too (review R1 on #1444), so a callback may use them
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -155,11 +161,9 @@ class Continuity:
         if not logs.privacy():
             return
         old = self.clock() - LEDGER_TTL_S
-        if not self._rows("SELECT 1 FROM ledger WHERE substr(body, 1, ?) <> ? OR ts < ? LIMIT 1",
-                          (len(NOT_KEPT), NOT_KEPT, old)):
+        if not self._rows(f"SELECT 1 FROM ledger WHERE {_DIRTY} OR ts < ? LIMIT 1", (len(NOT_KEPT), NOT_KEPT, old)):
             return
-        self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
-                ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
+        self._x(f"UPDATE ledger SET body=? WHERE {_DIRTY}", ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
         self._x("DELETE FROM ledger WHERE ts < ?", (old,))
 
     @staticmethod

@@ -142,6 +142,39 @@ def test_a_body_not_kept_key_cannot_override_the_privacy_marker(tmp_path):
     assert c.seen("d1", "m-0001") == {"not_kept": True, "code": "CHAT_RATE"}
 
 
+def test_a_marked_body_that_still_holds_words_is_blanked(tmp_path):
+    """#206 F13 (review R2 on #1444): a row written with privacy off whose first key is not_kept=true is not taken as
+    clean; only the shape _at_rest() writes (numbers, flags, null, an UPPER_CASE code) is."""
+    from jarves import logs
+    c = Continuity(tmp_path)
+    for cid, body in (("m-1", {"not_kept": True, "reply": "secret words"}), ("m-2", {"not_kept": True, "code": "secret"}),
+                      ("m-3", {"not_kept": True, "x": ["secret"]}), ("m-4", {"not_kept": True, "code": "GOAL_OK", "n": 2})):
+        c.store("d1", cid, "chat", 200, body)
+    c._x("INSERT INTO ledger (device, cid, kind, status, body, ts) VALUES ('d1', 'm-5', 'chat', 200, ?, ?)",
+         ('{"not_kept": true, "reply": "secret', c.clock()))                # not even valid JSON
+    logs.set_privacy(True)
+    assert c.seen("d1", "m-1") == {"not_kept": True}
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+    assert c.seen("d1", "m-4") == {"not_kept": True, "code": "GOAL_OK", "n": 2}           # a clean row is left as it was
+
+
+def test_a_command_callback_can_use_the_ledger_without_a_deadlock(tmp_path):
+    """#206 F13 (review R1 on #1444): execute() holds the lock while fn() runs; store()/seen() inside it must not hang."""
+    import threading
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+
+    def fn():
+        c.store("d1", "m-inner", "chat", 200, {"ok": True})
+        return 200, {"seen": c.seen("d1", "m-inner")}
+    out = []
+    t = threading.Thread(target=lambda: out.append(c.execute("d1", "c-outer", "goal", fn)), daemon=True)
+    t.start()
+    t.join(5)
+    assert out and out[0][1] == {"seen": {"not_kept": True, "ok": True}}
+
+
 def test_ledger_uses_the_rollback_journal_documented_in_scrub(tmp_path):
     """#206 F13: the at-rest limit stated for scrub() holds only for the rollback journal; a WAL switch must revisit it."""
     c = Continuity(tmp_path)

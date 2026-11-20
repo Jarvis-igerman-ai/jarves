@@ -379,6 +379,36 @@ def test_approvals_list_answer_typed_refused_and_switch_off(browser, phone):
 
 
 # ------------------------------------------------------------------ steps 9-10: push to talk
+def test_approvals_page_handles_a_privacy_mode_resend_like_a_live_answer(browser, phone, monkeypatch):
+    """#206 F13 (review R4 on #1444): the Approve answer is lost and the phone resends it; in privacy mode the replay body
+    is the thin NOT_KEPT one. The approval runs once, the page shows no error and the list empties as after a live answer."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    p = phone()
+    page = new_page(browser)
+    ui_pair(page, p)
+    assert p.owner("POST", "/api/mobile/settings", {"phone_approvals": True})[0] == 200
+    go(page, "approvals")
+    replays = []
+
+    def lost_then_resent(route):                         # the first answer is lost on the way back: the phone resends
+        url = route.request.url.replace(f"//{HOST}:", "//127.0.0.1:")      # phone.lan is mapped inside the browser only
+        hdrs = {**route.request.headers, "host": route.request.url.split("/")[2]}
+        route.fetch(url=url, headers=hdrs)
+        again = route.fetch(url=url, headers=hdrs)
+        replays.append(again.json())
+        route.fulfill(response=again)
+    page.route("**/api/m/approvals/*", lambda route: lost_then_resent(route) if route.request.method == "POST"
+               else route.continue_())
+    fut = p.ask("Send test message")
+    page.wait_for_selector("#apprList button:has-text('Approve')", timeout=12000)
+    page.tap("#apprList button:has-text('Approve')")
+    until(page, "document.querySelector('#apprList').textContent.includes('Nothing is waiting')")   # pumps the route
+    assert fut.result(15) is True
+    assert replays and replays[0]["replay"] is True and replays[0]["code"] == "NOT_KEPT" and replays[0]["not_kept"] is True
+    assert "HTTP" not in page.inner_text("#apprList") and page.errors == []
+
+
 def test_push_to_talk_is_refused_without_tls(browser, phone):
     p = phone(tls=False)
     page = new_page(browser)
