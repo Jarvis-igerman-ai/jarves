@@ -1,6 +1,8 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
 Date: 2026-11-09. Every file:line reference below was re-checked on 2026-11-20 against `origin/main` 3bed837.
+Line numbers are valid only at commit 3bed837 (main moves on); check one with
+`git show 3bed837:core/src/jarves/<file> | sed -n '<line>p'`.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was exercised at runtime: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -48,7 +50,8 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
   `git merge branch` (`gitops.py:208`). Worktree branches are checked with `rev-parse --verify` (`gitops.py:107`) and
   `forge.push_branch` is regex-restricted (`forge.py:73`). Add `--end-of-options` or reject a leading `-`.
 - **#10 P3: OpenCode prompt in argv** (`runners.py:265`): visible to other local users in the process list and bounded
-  by the OS command-line limit. `--` prevents option injection. Claude/Codex receive the prompt on stdin.
+  by the OS command-line limit. `--` is inserted before the prompt on that same line (`argv += ["--", prompt]`,
+  `runners.py:265`), so the prompt is not parsed as an option (from reading only). Claude/Codex receive the prompt on stdin.
 
 Good: `child_env` allow-lists the environment (`gitops.py:53`); runners start the tool without a shell, with stdin
 closed unless a prompt is piped (`runners.py:107`; no `shell=True` in `projectmgr/`). The only push in `projectmgr/` is
