@@ -102,19 +102,28 @@ def reading_switch_on(home: Path, features=None) -> bool:
 
 def _beta_switch(features, fid: str, on: bool, *, by: str) -> dict:
     """`switch()` with the beta-lock mapped to the one friendly refusal (#469), not a raw PermissionError."""
-    from .features import BETA_MSG, BetaLocked, switch
+    from .features import BetaLocked, switch
     try:
         return switch(features, fid, on, by=by)
     except BetaLocked:
-        raise wab.BridgeError("BETA_LOCKED", BETA_MSG, 403) from None
+        raise _beta_locked_error() from None
+
+
+def _beta_locked_error() -> wab.BridgeError:
+    """The one refusal for a beta-locked WhatsApp switch; `Features.locked` is the predicate `switch()` gates on."""
+    from .features import BETA_MSG
+    return wab.BridgeError("BETA_LOCKED", BETA_MSG, 403)
 
 
 def enable_reading(home: Path, *, by: str, features=None, cfg=None) -> dict:
     """The ONE 'yes, switch on read-only' backend (dashboard page, Connect row, `jarvis whatsapp setup`): bridge mode
     read AND the `whatsapp_bridge` feature switch, through the same `switch()` as `jarvis features on`. Only called
     after the owner's explicit yes. Never touches `whatsapp_send`; sending stays off."""
+    feats = features or _features(home, cfg)
+    if feats.locked(wab.FEATURE):                        # refuse BEFORE the bridge mode changes (#469)
+        raise _beta_locked_error()
     r = set_mode(home, "read", by=by)
-    s = _beta_switch(features or _features(home, cfg), wab.FEATURE, True, by=by)
+    s = _beta_switch(feats, wab.FEATURE, True, by=by)
     logs.info("whatsapp", "WA_READING_SWITCH_ON", "WhatsApp reading switch turned on with read-only mode", by=by)
     return {**r, "mode": r.get("mode", "read"), "feature": wab.FEATURE, "feature_on": bool(s.get("enabled")),
             "message": READ_ON_EN, "message_he": READ_ON_HE}
