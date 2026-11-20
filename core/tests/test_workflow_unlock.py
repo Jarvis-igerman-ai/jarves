@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
-from jarves.workflow.server import Handler, Server
+from jarves.workflow.server import Handler, Server, UnlockWrong
 
 
 class UnlockTests(unittest.TestCase):
@@ -193,10 +193,12 @@ class UnlockTests(unittest.TestCase):
             if i == 2:
                 exhausted = self.cookie                                # this window used all 3 of its tries
         self.assertEqual(statuses, [403] * 5)
+        # The backstop itself cleared every count (checked before any new code, whose new salt would also reset them).
+        self.assertEqual(self.server.unlock_wrong, UnlockWrong())
         self.assertEqual(self.wrong_try(shown), (403, None))           # cancelled after 5 in total (guess bound unchanged)
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
-        self.cookie = exhausted                                        # by_session was cleared at the backstop
+        self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
 
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
