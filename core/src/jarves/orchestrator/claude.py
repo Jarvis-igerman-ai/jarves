@@ -270,8 +270,10 @@ WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh re
                                 # #1311: git status/diff/log read worktree git config (core.fsmonitor, diff drivers),
                                 # so the `.git` pointer and any gitdir inside the worktree are not editable
                                 "Edit(**/.git)", "Write(**/.git)", "Edit(**/.git/**)", "Write(**/.git/**)",
-                                "Bash(*>*)",                          # #1311: no shell redirection after ls/grep/wc
-                                "Bash(gh *--web*)", "Bash(gh * -w*)")  # #1311: `gh ... view --web` opens a browser
+                                # #1311: `gh ... view --web/-w` opens a browser. No `Bash(*>*)`: claude 2.1.329 matches
+                                # rules with redirects stripped (it never stops `grep x y > f`) but refuses a quoted `->`
+                                # in console reports; its own path check refuses `>` outside the worktree (live probe).
+                                "Bash(gh *--web*)", "Bash(gh * -w*)")
 # #1311: commands with no option that writes a file or runs repo code; a wildcard is allowed only after these prefixes.
 _READ_ONLY_PREFIXES = frozenset({"ls", "grep", "wc", "gh pr view", "gh pr checks", "gh pr diff", "gh issue view",
                                  "gh run view"})

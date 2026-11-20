@@ -7,6 +7,12 @@ from jarves.orchestrator import claude
 PY, CON, HOME = "C:/py/python.exe", "C:/r/core/tools/workflow_console.py", "C:/h"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_warned(monkeypatch):
+    """Review R6: each test sees an empty once-per-override warning memory, not module state from other tests."""
+    monkeypatch.setattr(claude, "_WARNED_OVERRIDES", set())
+
+
 def _default():
     return claude.autopilot_allowed_tools(PY, None, CON, HOME)
 
@@ -50,19 +56,22 @@ def test_console_routes_are_tied_to_the_exact_python_and_console(rule):
 
 def test_worker_cannot_edit_git_metadata():
     """#1334 R1: git status/diff read worktree git config (core.fsmonitor, diff drivers); the `.git` pointer and any
-    gitdir under the worktree are denied to Edit and Write, and the deny reaches the worker argv."""
+    gitdir under the worktree are denied to Edit and Write, and the deny reaches the worker argv.
+    Live probe, claude 2.1.329 `-p --permission-mode acceptEdits`: `gh pr view 1 -w` and `--web` were refused by these
+    denies (and ran without them); `Bash(*>*)` did not stop `grep x y > out.txt` but refused `grep -o "a -> b" y`, so it
+    is not used; `grep x y > ../f` and `> /abs/f` were refused by the CLI with no deny rule at all."""
     argv = claude.ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None,
                                 allowed_tools=_default(), permission_mode="acceptEdits").argv
     denied = argv[argv.index("--disallowedTools") + 1:]
     for rule in ("Edit(**/.git)", "Write(**/.git)", "Edit(**/.git/**)", "Write(**/.git/**)",
-                 "Bash(*>*)", "Bash(gh *--web*)", "Bash(gh * -w*)"):    # review R3 redirection, R2 browser
+                 "Bash(gh *--web*)", "Bash(gh * -w*)"):    # review R2 browser
         assert rule in claude.WORKER_DENY and rule in denied
+    assert not any(">" in r for r in claude.WORKER_DENY)   # review R1/R3: a `>` glob only broke console reports
 
 
 def test_unsafe_override_is_logged_once_and_still_used(caplog):
     """Review R6: an owner override that fails the check is logged (once per override), not blocked."""
     override = ["Bash(pytest:*)", "Bash(ls:*)", "Bash(git commit -m x)"]
-    claude._WARNED_OVERRIDES.discard(tuple(override))
     with caplog.at_level("WARNING", logger="jarves.orchestrator.claude"):
         assert claude.autopilot_allowed_tools(PY, override, CON, HOME) == override
         assert claude.autopilot_allowed_tools(PY, override, CON, HOME) == override

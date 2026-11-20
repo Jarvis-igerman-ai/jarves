@@ -30,8 +30,8 @@ ls/grep/wc, bare `git status|diff|log`, `gh pr view|checks|diff`, `gh issue view
 status commands, checked by `worker_rule_problem()`; no test runner, npm or git commit, and the worker assignment
 says so; replaceable by `worker_allowed_tools` in `autopilot.json`, where unsafe rules are logged once, not blocked)
 and `--disallowedTools WORKER_DENY` (git push/tag, gh release, gh pr merge, rm, jarvis hotfix/release/update,
-schtasks, taskkill, powershell, any Bash/Edit/Write naming `autopilot.json`, Edit/Write of `.git`, shell `>`
-redirection and `gh ... --web`/`-w`). Autopilot is off by
+schtasks, taskkill, powershell, any Bash/Edit/Write naming `autopilot.json`, Edit/Write of `.git` and `gh ... --web`/`-w`;
+a shell `>` to a path outside the worktree is refused by the CLI's own path check, live-checked on claude 2.1.329). Autopilot is off by
 default and needs the owner's grant. `autopilot_loop.py` only decides when to start a worker.
 
 ## Comparison
