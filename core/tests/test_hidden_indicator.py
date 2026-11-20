@@ -227,3 +227,36 @@ def test_dot_backend_survives_one_transient_tcl_error(monkeypatch):
     indicator.TkDotBackend()._run()
     assert len(tk_calls) == 2 and naps == [0.25]
     assert calls[0] == "overrideredirect" and "mainloop" in calls
+
+
+def test_approval_popup_build_retries_transient_tcl_error_via_shared_helper(monkeypatch, tmp_path):
+    """#520 review: the popup's own retry loop became tkutil.new_root; drive the real approval_popup.build with a
+    fake tkinter whose first Tk() hits the transient tcl_findLibrary error. It retries once (one 0.25 s nap) and
+    reaches the second Tk(), which here stops the build on purpose. No display, no clock."""
+    import sys
+    import types
+    from jarves import approval_popup, tkutil
+
+    class TclError(Exception):
+        pass
+
+    class Reached(Exception):
+        pass
+
+    tries = []
+
+    def Tk():
+        tries.append(1)
+        if len(tries) == 1:
+            raise TclError('invalid command name "tcl_findLibrary"')
+        raise Reached
+    fake = types.ModuleType("tkinter")
+    fake.Tk, fake.TclError = Tk, TclError
+    fake.font = types.ModuleType("tkinter.font")
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    monkeypatch.setitem(sys.modules, "tkinter.font", fake.font)
+    naps = []
+    monkeypatch.setattr(tkutil.time, "sleep", naps.append)
+    with pytest.raises(Reached):
+        approval_popup.build({}, tmp_path / "out.json")
+    assert len(tries) == 2 and naps == [0.25]

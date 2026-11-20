@@ -238,3 +238,11 @@ def test_wake_greeting_claim_stands_when_start_raises_after_the_session_opened()
     with pytest.raises(RuntimeError):
         asyncio.run(Core._start_wake_live(c))
     assert c._greeted
+
+
+def test_start_live_early_exit_returns_false_not_none():
+    """#520 review: _start_live is typed -> bool; an early exit (Core stopping) says False explicitly."""
+    from jarves.app import Core
+    c = _ns()
+    c.stopping, c.dev = True, _ns()
+    assert asyncio.run(Core._start_live(c)) is False
