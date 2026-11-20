@@ -3,14 +3,16 @@ H3/H4 guide notes. Hermetic: tmp homes, no network, no clock."""
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from jarves import guides, logs, mobile, mobile_prefs
 from jarves.continuity import Continuity
-from jarves.preferences import Preferences
+from jarves.preferences import PrefChanged, Preferences
 from jarves.userdata import open_db
 
 
@@ -130,18 +132,48 @@ def test_h4_project_guide_says_the_check_command_runs_without_a_sandbox():
     assert g.privacy_en in guides.help_text(g)
 
 
-def test_h2_an_edit_whose_row_keeps_flipping_gives_up_and_changes_nothing(home):
+def _flipping(home, pid):
+    """A clock hook: before every write edit() makes, another connection flips the row confirmed <-> proposed."""
+    other = open_db(home)
+
+    def clock():
+        st = other.row("SELECT state FROM learned_prefs WHERE id=?", (pid,))["state"]
+        other.x("UPDATE learned_prefs SET state=? WHERE id=?", ("proposed" if st == "confirmed" else "confirmed", pid))
+        return 1000.0
+    return clock
+
+
+def test_h2_an_edit_whose_row_keeps_flipping_gives_up_with_a_try_again_error(home):
     p = Preferences(open_db(home))
     pid = p.add_confirmed("I like short answers", "communication")["item"]["id"]
-    real_x = p.db.x
-
-    def flipping_x(sql, args=()):            # another process confirms / re-proposes before every guarded write
-        if sql.startswith("UPDATE learned_prefs SET text"):
-            state = "proposed" if "state='confirmed'" in sql else "confirmed"
-            real_x("UPDATE learned_prefs SET state=? WHERE id=?", (state, pid))
-        return real_x(sql, args)
-    p.db.x = flipping_x
-    with pytest.raises(KeyError):
-        p.edit(pid, "I like long answers", repropose=True)
-    p.db.x = real_x
+    racing = Preferences(open_db(home), clock=_flipping(home, pid))
+    with pytest.raises(PrefChanged, match="try again"):
+        racing.edit(pid, "I like long answers", repropose=True)
     assert p.get(pid)["text"] == "I like short answers"
+
+
+def test_h2_the_phone_gets_a_defined_409_when_the_edit_loses_the_race(home):
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers", "communication")["item"]["id"]
+    mob = SimpleNamespace(bridge=None, _prefs=Preferences(open_db(home), clock=_flipping(home, pid)), home=home)
+    st, out = mobile_prefs.action(mob, {"op": "edit", "pref": pid, "text": "I like long answers"}, "ph")
+    assert st == 409 and out["code"] == "PREF_CHANGED" and "try again" in out["error"]
+
+
+def test_h2_an_edit_of_a_row_deleted_meanwhile_is_not_found(home):
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers", "communication")["item"]["id"]
+    other = open_db(home)
+    racing = Preferences(open_db(home), clock=lambda: other.x("DELETE FROM learned_prefs WHERE id=?", (pid,)) and 1.0)
+    with pytest.raises(KeyError):
+        racing.edit(pid, "I like long answers")
+
+
+def test_f13_phone_pages_read_code_only_from_failed_answers():
+    """A 2xx resend carries code=NOT_KEPT: the shared api() reads d.code only when !r.ok, prefs.js ignores the body."""
+    base = Path(mobile.__file__).parent / "dashboard_static" / "mobile"
+    reads = [(f.name, ln) for f in base.glob("*.js") for ln in f.read_text(encoding="utf-8").splitlines()
+             if re.search(r"\bd\.code\b", ln)]
+    assert reads == [("app.js", next(ln for ln in (base / "app.js").read_text(encoding="utf-8").splitlines()
+                                     if "e.code = d.code" in ln))]
+    assert reads[0][1].lstrip().startswith("if (!r.ok)")

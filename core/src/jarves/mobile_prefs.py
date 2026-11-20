@@ -52,6 +52,7 @@ def view(mob) -> dict:
 
 def action(mob, d: dict, device: str) -> tuple[int, dict]:
     """One idempotent phone command (run through Continuity.execute by the route)."""
+    from .preferences import PrefChanged
     op = d.get("op")
     if op not in PHONE_OPS:
         return 400, {"error": "op must be " + ", ".join(PHONE_OPS)}
@@ -76,6 +77,8 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: needs a new confirm
             return 200, {"ok": True, "pref": pid}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
+    except PrefChanged as e:                                  # #206 H2: a racing confirm won; nothing stored
+        return 409, {"error": str(e), "code": "PREF_CHANGED"}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}
     except KeyError:

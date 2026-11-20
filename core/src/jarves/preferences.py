@@ -57,6 +57,10 @@ def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+class PrefChanged(ValueError):
+    """The row kept changing state under an edit (#206 H2): nothing was written; the caller may try again."""
+
+
 class Preferences:
     def __init__(self, db: UserDB, *, clock=time.time) -> None:
         self.db, self.clock = db, clock
@@ -150,7 +154,9 @@ class Preferences:
                          (t, norm, self.clock(), pid)).rowcount:
                 break
         else:
-            raise KeyError(pid)
+            if not self.get(pid):
+                raise KeyError(pid)
+            raise PrefChanged("this preference changed while it was being edited: nothing was saved, try again")
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
 
