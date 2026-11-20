@@ -475,17 +475,17 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["eph"]
+                record_id = json.loads(path.read_text(encoding="ascii"))["eph"]
             except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+                record_id = ""
             if not (isinstance(code, str) and unlock.consume(self.server.home, code, key=self.server.unlock_key)):
                 # Wrong tries count over all sessions for the current code: 5 in total cancel it (new sessions give no extra guesses).
-                prev_salt, n = self.server.unlock_wrong
-                n = (n if prev_salt == salt else 0) + 1
+                prev_id, n = self.server.unlock_wrong
+                n = (n if prev_id == record_id else 0) + 1
                 if n >= 5:
                     path.unlink(missing_ok=True)
                     n = 0
-                self.server.unlock_wrong = (salt, n)
+                self.server.unlock_wrong = (record_id, n)
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = ("", 0)

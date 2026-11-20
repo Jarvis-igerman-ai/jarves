@@ -97,6 +97,14 @@ def _published(home: Path) -> tuple[bytes, int | None]:
     return pub, port if isinstance(port, int) else None
 
 
+def published_port(home: Path) -> int:
+    """The port recorded with the published key (for `unlock` without --port); UnlockUnavailable if none."""
+    port = _published(home)[1]
+    if port is None:
+        raise UnlockUnavailable("the published dashboard unlock key records no port; pass --port with the dashboard's port")
+    return port
+
+
 def issue(home: Path, *, port: int | None = None, now: float | None = None) -> str:
     """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
     With `port`, the published key must belong to the dashboard on that port (else a dead code would be shown)."""

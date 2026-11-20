@@ -23,6 +23,9 @@ REQUIRED_FLAGS = {"next": ("agent",), "agent": ("agent",), "transition": ("task"
                   "recover": ("task",), "authorize": ("task",), "check": ("task",), "reply": ("id",)}
 
 
+DEFAULT_PORT = 8188
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Live workflow: durable tasks, owner questions, evidence and an external supervisor")
     ap.add_argument("action", choices=["serve", "supervise", "open", "unlock", "status", "seed", "sync", "agent", "report", "next",
@@ -31,7 +34,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("rest", nargs="*", help="autopilot: status | set KEY VALUE | stop | start | once; close-superseded: open PR numbers")
     ap.add_argument("--home", type=Path, help="private workflow data directory; default <profile>/workflow")
     ap.add_argument("--profile-home", type=Path, default=default_profile(), help="existing JARVES orchestrator profile")
-    ap.add_argument("--port", type=int, default=8188)
+    ap.add_argument("--port", type=int, default=None, help="dashboard port (default 8188; unlock: the published dashboard's port)")
     ap.add_argument("--parent-pid", type=int, default=0, help="serve: exit when this supervisor process is gone (set by the supervisor)")
     ap.add_argument("--no-sync", action="store_true", help="supervisor: no periodic public GitHub metadata reads")
     ap.add_argument("--no-open", action="store_true", help="print the private UI link without opening a browser (open alone prints no link)")
@@ -191,10 +194,13 @@ def _home_count(av) -> int:
     return len(seen)
 
 
-def live_code(home: Path, port: int) -> str:
-    """#750: issue a code only for a dashboard that answers on `port` AND published the key (no dead codes)."""
+def live_code(home: Path, port: int | None) -> str:
+    """#750: issue a code only for a dashboard that answers on `port` AND published the key (no dead codes).
+    port=None (no --port given): use the port the published key records, still checked with listening()."""
     from . import unlock
     from .opener import listening
+    if port is None:
+        port = unlock.published_port(home)
     if not listening(port):
         raise unlock.UnlockUnavailable(f"no dashboard is running on port {port}; start it with: jarvis workflow supervise")
     return unlock.issue(home, port=port)
@@ -216,6 +222,9 @@ def main(argv=None) -> int:
         from .autopilot_grant import run as grant_run
         return grant_run(_av[1:])
     a = parser().parse_args(argv)
+    port_given = a.port is not None
+    if not port_given:
+        a.port = DEFAULT_PORT
     if not 0 <= a.port <= 65535:
         parser().error("invalid port")
     home = (a.home or a.profile_home / "workflow").resolve()
@@ -254,7 +263,7 @@ def main(argv=None) -> int:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 3
         try:
-            code = live_code(home, a.port)
+            code = live_code(home, a.port if port_given else None)
         except unlock.UnlockUnavailable as exc:
             print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
             return 2

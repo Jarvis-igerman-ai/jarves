@@ -292,6 +292,26 @@ class UnlockTests(unittest.TestCase):
         self.assertIn(f"belongs to the dashboard on port {live}", err)
         self.assertFalse((self.home / unlock.FILE).exists())
 
+    def test_750_unlock_without_port_uses_the_published_dashboard_port(self):
+        """R1 (#1410 round 3): no --port means the port the published key records (not 8188), still live-checked."""
+        live = self.server.server_port
+        self.assertNotEqual(live, cli.DEFAULT_PORT)
+        rc, out, err = self.cli_owner("unlock")
+        self.assertEqual(rc, 0, err)
+        code = out.rsplit(":", 1)[1].strip()
+        self.assertTrue(unlock.consume(self.home, code, key=self.server.unlock_key))
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.server_close()
+        unlock.ServerKey().publish(self.home, live)                       # stale key whose port nobody answers
+        rc, _, err = self.cli_owner("unlock")
+        self.assertEqual(rc, 2)
+        self.assertIn(f"no dashboard is running on port {live}", err)
+        self.assertFalse((self.home / unlock.FILE).exists())
+        self.server = Server(self.home, 0)                                 # tearDown closes it
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
     def test_750_close_withdraws_only_its_own_key(self):
         second = Server(self.home, 0)                                      # replaces the published key
         mine = (self.home / unlock.PUB_FILE).read_bytes()
