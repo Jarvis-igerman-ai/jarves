@@ -13,6 +13,13 @@ LEAKY = [
     "backup code GEZDGNBVGY3TQOJQGEZDGNBV",                                          # base32, longer
     "use Xk9fLm2QzRtPwYbNcVdH",                                                      # 20-char base62, 2 digit runs
     "the bot uses aZ3kQ7mPxR2tLwNcYbVd4E",                                           # 22-char base62
+    "המפתח שלי b084f9e0094f68db07f3501e4eab9e3fbecd52da",                            # Hebrew credential word + 40 hex
+    "טוקן cac0e7d816b7c1d886ed2d5dfe767db4",                                         # Hebrew 'token' + 32 hex
+    "הסוד: 59dbbb9210cfabbba394c0e43d68ad47",                                        # Hebrew 'secret' + 32 hex
+    "the key fix is 5d4a5f84be1b703ff001e75d0cdccb785f087a78",                       # SHA right after 'key': refused on purpose (fails safe)
+    "token cac0e7d816b7c1d886ed2d5dfe767db4",                                        # boundary: exactly 32 hex after a word
+    "6b26aee60ab93d4337af4a7b1c7f527fe5b6b7df1",                                     # boundary: exactly 41 hex alone
+    "Xk9fLm2QzRtPwYbNcVdH",                                                          # boundary: exactly 20 base62
 ]
 
 SAFE = [
@@ -25,6 +32,10 @@ SAFE = [
     "README CONTRIBUTING and LICENSE files",                                         # upper-case words
     "I prefer short answers in the morning",
     "set MAX_PROPOSED_SUGGESTIONS_LIMIT higher",                                     # constant name
+    "token cac0e7d816b7c1d886ed2d5dfe767db",                                         # boundary: 31 hex after a word
+    "6b26aee60ab93d4337af4a7b1c7f527fe5b6b7df",                                      # boundary: 40 hex alone (SHA length)
+    "Xk9fLm2QzRtPwYbNcVd",                                                           # boundary: 19 base62
+    "המפתחות במגירה",                                                                 # Hebrew 'keys' as an ordinary word
 ]
 
 
@@ -44,3 +55,13 @@ def test_lowercase_hex_secret_suggestion_is_refused_and_not_stored(home):
     with pytest.raises(ValueError):
         p.suggest("remember my webhook secret cac0e7d816b7c1d886ed2d5dfe767db4", "x", by="voice")
     assert p.items("proposed") == []
+
+
+def test_dev_draft_with_a_lowercase_hex_secret_is_refused_and_not_stored(home):
+    from jarves import devmanager as dev_mod
+    from test_v5_followups import make_store
+    st = make_store(home)
+    with pytest.raises(ValueError):
+        dev_mod.suggest(st, "Webhook setup", "the webhook secret is cac0e7d816b7c1d886ed2d5dfe767db4", by="voice")
+    assert dev_mod.listing(st) == []
+    st.close()

@@ -43,9 +43,10 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
-# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is right before them.
+# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 20 chars before them
+# (then they are refused too: fails safe).
 _HEX_SECRET = re.compile(
-    r"\b(?:keys?|tokens?|secrets?|webhook|hmac|signature)\b[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
+    r"\b(?:keys?|tokens?|secrets?|webhook|hmac|signature|ה?(?:מפתח|טוקן|סוד))\b[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
     r"(?<![0-9a-f])[0-9a-f]{41,}(?![0-9a-f])", re.I)
 _BASE32_SECRET = re.compile(r"(?<![A-Za-z0-9_])(?=[A-Z]*[2-7])[A-Z2-7]{16,}=*(?![A-Za-z0-9_])")
 _BASE62_RUN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9]{20,}(?![A-Za-z0-9_])")
