@@ -176,6 +176,8 @@ def test_hooks_and_fsmonitor_set_in_the_shared_config_never_run(tmp_path):
     """#1381 review R1 and R5: a merge commit, a fast-forward, worktree add and a commit with `core.hooksPath` and
     `core.fsmonitor` set in the shared config run neither."""
     repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "hook-ran.txt"
+    gitops.git(repo, "config", "user.name", "Owner")                    # ident=False needs the owner's identity
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
     gitops.git(repo, "checkout", "-qb", "side")
     (repo / "side.txt").write_text("s", encoding="utf-8")
     gitops.git(repo, "add", "-A")
