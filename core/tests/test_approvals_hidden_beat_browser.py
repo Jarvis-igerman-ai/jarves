@@ -41,8 +41,8 @@ UNLOAD = """(pagehideFirst) => {
   if (pagehideFirst) { ph(); hide(); } else { hide(); ph(); } }"""
 # records the real unload events in the console: the
 # test proves the browser really ran its unload steps, and these listeners also make headless Chromium run the
-# departing page's handlers the way a desktop tab close does (without them the old code's leak was not reproduced;
-# observed with Playwright 1.64 headless Chromium). Because this rests on browser behaviour, the leak guard below runs
+# departing page's handlers the way a desktop tab close does (without them the old code's leak was not
+# reproduced in headless Chromium). Because this rests on browser behaviour, the leak guard below runs
 # the same real close against the leaky variant and requires a hidden beat: a browser update that stops running the
 # departing page's handlers fails that guard instead of silently passing the leaky code.
 # The sentinel /api/health is diag/service.py's route; DASHBOARD_FRESH_S is approvals.py's 15 s.
@@ -142,6 +142,8 @@ def test_tab_going_hidden_sends_a_hidden_beat_at_once(tab, home):
 
 @pytest.mark.parametrize("pagehide_first", [True, False], ids=["pagehide_first", "visibility_first"])
 def test_synthetic_unload_sends_no_hidden_beat(tab, pagehide_first):
+    # these synthetic orders are what pin the `leaving` check: on a real close the departing page's deferred
+    # setTimeout never runs, so the real-close test only tells an immediate beat from a deferred one
     _, p, urls, _ = tab
     p.evaluate(UNLOAD, pagehide_first)
     p.evaluate(DRAIN)
@@ -167,7 +169,7 @@ def test_leak_guard_leaky_variant_is_caught_on_real_close(leaky_tab, dash):  # n
     _, p, urls, _ = leaky_tab
     assert _real_close(p, dash)[:2] == ["pagehide", "visibilitychange"]   # both real unload events ran
     assert _hidden_beats(urls), (
-        f"real close no longer runs the departing page's handlers (Playwright {_pw_version()}; checked on 1.63 and 1.64): "
+        f"real close no longer runs the departing page's handlers (Playwright {_pw_version()}): "
         "most likely a browser/Playwright bump changed unload behaviour, so the close test is moot. "
         "Re-check the real-close repro on this version before changing approvals.js.")
 
