@@ -9,6 +9,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -528,6 +529,48 @@ def test_ref_moved_during_the_fast_forward_is_reported_as_moved_1352(env, monkey
     finish(m)
     t = m.db.tasks(1)[0]
     assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+
+
+def test_merge_in_names_the_integration_branch_1352(env, monkeypatch):
+    """Review R3 on #1459 @ f7d52af: merging the recorded SHA still names the branch in the merge message."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    seen, real = [], gitops.merge_in
+    monkeypatch.setattr(gitops, "merge_in", lambda wt, ref, **k: seen.append((ref, k.get("message"))) or real(wt, ref, **k))
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.tasks(1)[0]["status"] == "done"
+    assert any(msg and msg.startswith("Merge jarves/p1/integration (") for _ref, msg in seen), seen
+
+
+def test_release_is_rechecked_under_the_merge_lock_1352(env):
+    """Review R2 on #1459 @ f7d52af: the post-approval re-check waits for a running JARVES merge to finish."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Ship it", spec="s", scope=["a"], flow="release:jarves")
+    flag = home.parent / "released"
+    m.db.update_project(1, release_cmd=[sys.executable, "-c", f"open(r'{flag}','w').write('v1')"])
+    merging = m._merge_locks.setdefault(1, threading.Lock())
+
+    def ask(*a, **k):                     # a JARVES merge is in progress when the approval comes back
+        merging.acquire()
+
+        def merge_lands():
+            time.sleep(0.3)
+            evil = sh(repo, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit-tree", "HEAD^{tree}", "-p",
+                      "HEAD", "-m", "merged").strip()
+            sh(repo, "git", "update-ref", "refs/heads/jarves/p1/integration", evil)
+            m.db.update_project(1, integration_sha=evil)
+            merging.release()
+        threading.Thread(target=merge_lands).start()
+        return True
+    m._ask = ask
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert "changed while the release" in (t["waiting"] or t["reason"] or ""), dict(t)
+    assert not flag.exists()
 
 
 def test_agent_blocked_and_failed_runs(env):

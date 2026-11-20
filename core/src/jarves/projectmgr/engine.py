@@ -241,6 +241,11 @@ class StageEngine:
         return (f"the integration branch {br} was moved outside JARVES (expected {sha[:10] or '?'}, found "
                 f"{now[:10] or 'nothing'}); nothing is merged until it is back at {sha[:10] or 'a checked commit'}")
 
+    @staticmethod
+    def _merge_msg(p, sha: str) -> str:
+        """A merge of the recorded SHA still names the branch (git would write "Merge commit '<sha>'")."""
+        return f"Merge {gitops.integration_branch(p['id'])} ({sha[:12]})"
+
     def _ensure_worktree(self, p, t):
         self._int_sha(p)                      # #1352 R1: a legacy project records its commit BEFORE any agent runs
         if t["worktree"] and Path(t["worktree"]).exists():
@@ -433,7 +438,7 @@ class StageEngine:
                 notes.append(f"{name}: changed files it may not")
                 continue
             if has_check:
-                if gitops.merge_in(wt, base):
+                if gitops.merge_in(wt, base, message=self._merge_msg(p, base)):
                     notes.append(f"{name}: does not merge with earlier tasks")
                     continue
                 ok, _out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
@@ -552,7 +557,7 @@ class StageEngine:
             if has_wt:
                 try:
                     gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
-                    conflicts = gitops.merge_in(wt, base)
+                    conflicts = gitops.merge_in(wt, base, message=self._merge_msg(p, base))
                 except gitops.GitError as e:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
                 if conflicts:
@@ -599,7 +604,7 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 head = self._int_sha(p)
                 if head != self._job(t).get("tested_base"):
-                    conflicts = gitops.merge_in(wt, head)            # the integration branch moved since the check
+                    conflicts = gitops.merge_in(wt, head, message=self._merge_msg(p, head))   # moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     if has_check:
@@ -651,17 +656,18 @@ class StageEngine:
                              {"project": p["name"], "commit": sha[:12]}):
             return ("park", "the release was not approved: say done when you released it yourself, or approve it "
                             "again by answering approve")
-        moved = self._int_moved(p)                                  # #1352 R2: re-checked after the approval wait
-        if moved:
-            return ("stop", "blocked", moved)
-        if self._int_sha(p) != sha:
-            return ("park", f"the integration commit changed while the release of {sha[:10]} waited for approval: "
-                            "approve it again by answering approve")
         lock = self._merge_locks.setdefault(("release", p["id"]), threading.Lock())
         if not lock.acquire(blocking=False):
             return ("requeue", "another release of this project is running")
         try:
-            wt = gitops.detached_worktree(self.home, p["path"], p["id"], sha)
+            with self._merge_locks.setdefault(p["id"], threading.Lock()):  # no JARVES merge between check and checkout
+                moved = self._int_moved(p)                          # #1352: re-checked after the approval wait
+                if moved:
+                    return ("stop", "blocked", moved)
+                if self._int_sha(p) != sha:
+                    return ("park", f"the integration commit changed while the release of {sha[:10]} waited for "
+                                    "approval: approve it again by answering approve")
+                wt = gitops.detached_worktree(self.home, p["path"], p["id"], sha)   # the approved commit, detached
             try:
                 ok, out = gitops.run_check(wt, argv, timeout=3600, env_keep=list(self.cfg.release_env))
             finally:
