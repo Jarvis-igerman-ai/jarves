@@ -193,12 +193,22 @@ def test_h2_the_409_has_hebrew_and_its_privacy_resend_keeps_that_message(home, p
     assert again and out["code"] == "PREF_CHANGED" and out["error_he"] == mobile._MSG["PREF_CHANGED"][1]
 
 
+def _traced(c: Continuity, monkeypatch) -> list[str]:
+    """Record every SQL statement the ledger runs (all of its connections come from _cx)."""
+    sql, real = [], c._cx
+
+    def cx():
+        conn = real()
+        conn.set_trace_callback(sql.append)
+        return conn
+    monkeypatch.setattr(c, "_cx", cx)
+    return sql
+
+
 def test_f13_the_scrub_runs_once_not_before_every_ledger_write(tmp_path, privacy_on, monkeypatch):
     """R3 (#1453): with privacy on, the full-table scrub runs at start, then only after a privacy-off write."""
     c = Continuity(tmp_path)
-    sql = []
-    real = c._x
-    monkeypatch.setattr(c, "_x", lambda q, a=(): sql.append(q) or real(q, a))
+    sql = _traced(c, monkeypatch)
     c.store("ph", "m1", "chat", 200, {"ok": True})
     c.execute("ph", "c1", "plan", lambda: (200, {"ok": True}))
     assert not [q for q in sql if q.startswith("UPDATE ledger")]
@@ -207,6 +217,27 @@ def test_f13_the_scrub_runs_once_not_before_every_ledger_write(tmp_path, privacy
     logs.set_privacy(True)
     c.store("ph", "m3", "chat", 200, {"ok": True})
     assert len([q for q in sql if q.startswith("UPDATE ledger")]) == 1 and not any("secret" in b for b in _bodies(c))
+
+
+def test_f13_a_privacy_off_write_from_another_process_is_scrubbed(tmp_path, privacy_on, monkeypatch):
+    """#1478 R2: the dirty mark lives in the DB, so another writer's (process's) privacy-off words are scrubbed at
+    this writer's next privacy-on write, not left until the next start."""
+    core, other = Continuity(tmp_path), Continuity(tmp_path)    # two handles = two processes' in-memory state
+    core.store("ph", "m1", "chat", 200, {"ok": True})            # core has scrubbed and written with privacy on
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    other.store("ph", "m2", "chat", 200, {"reply": "secret words"})
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    core.store("ph", "m3", "chat", 200, {"ok": True})
+    assert not any("secret" in b for b in _bodies(core))
+
+
+def test_f13_privacy_mode_keeps_code_and_state_only_when_token_shaped(tmp_path, privacy_on):
+    """#1478 R1: a free-text code/state is dropped at rest; a fixed token is kept."""
+    c = Continuity(tmp_path)
+    c.store("ph", "m1", "plan", 200, {"ok": True, "state": "call mom about the 4321 PIN", "code": "PREF_CHANGED"})
+    assert c.seen("ph", "m1") == {"not_kept": True, "ok": True, "code": "PREF_CHANGED"}
+    c.store("ph", "m2", "plan", 200, {"state": "done", "code": "x" * 33})
+    assert c.seen("ph", "m2") == {"not_kept": True, "state": "done"}
 
 
 def test_f13_one_write_reads_privacy_once_so_a_toggle_cannot_leave_words(tmp_path, privacy_on, monkeypatch):
@@ -246,20 +277,24 @@ def test_f13_privacy_mode_keeps_numbers_only_under_known_keys(tmp_path, privacy_
 
 
 def test_f13_a_privacy_off_store_cannot_land_after_a_privacy_on_scrub(tmp_path, privacy_on, monkeypatch):
-    """#1478 R1: store() holds the lock across scrub, flag and INSERT, so a privacy-on writer cannot scrub in between."""
+    """#1478 R1: store() holds the lock across scrub and INSERT, so a privacy-on writer cannot scrub in between.
+    Event handshake, no timed wait: the other writer signals just before store(); it must not have finished while
+    the main write is still pending."""
     import threading
     c = Continuity(tmp_path)
     main = threading.current_thread()
     monkeypatch.setattr(logs, "privacy", lambda: threading.current_thread() is not main)  # main writes with it off
-    real, done = c._x, threading.Event()
-    other = threading.Thread(target=lambda: (c.store("ph", "m2", "chat", 200, {"ok": True}), done.set()))
+    ready, done, seen = threading.Event(), threading.Event(), []
+    other = threading.Thread(target=lambda: (ready.set(), c.store("ph", "m2", "chat", 200, {"ok": True}), done.set()))
+    real = Continuity._at_rest
 
-    def slow_insert(q, a=()):
-        if q.startswith("INSERT") and threading.current_thread() is main and not other.is_alive() and not done.is_set():
-            other.start()                        # the privacy-on writer runs while this INSERT is pending
-            done.wait(0.3)                       # with the lock it cannot finish yet; without it, it scrubs first
-        return real(q, a)
-    monkeypatch.setattr(c, "_x", slow_insert)
+    def pending(body, private):
+        if threading.current_thread() is main and not other.is_alive() and not done.is_set():
+            other.start()
+            ready.wait()                          # the other writer is about to call store()
+            seen.append(done.is_set())            # with the lock it is blocked; it cannot have finished
+        return real(body, private)
+    monkeypatch.setattr(Continuity, "_at_rest", staticmethod(pending))
     c.store("ph", "m1", "chat", 200, {"reply": "secret words"})
-    other.join(5)
-    assert done.is_set() and not any("secret" in b for b in _bodies(c))
+    other.join()
+    assert seen == [False] and done.is_set() and not any("secret" in b for b in _bodies(c))

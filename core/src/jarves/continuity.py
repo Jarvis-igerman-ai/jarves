@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -48,6 +49,8 @@ MAX_TEXT = 1000
 DEVICES = ("desktop", "phone")
 NOT_KEPT = '{"not_kept": true'      # privacy mode (#206 F13): a ledger body starting with this keeps no words
 _KEEP_STR = ("code", "state")      # the only strings kept at rest in privacy mode: fixed codes and states
+_TOKEN = re.compile(r"[A-Za-z_]{1,32}")  # ...and only when shaped like a fixed token, never free text (#1478 R1)
+_DIRTY = "ledger.dirty"            # kv row: "1" after a privacy-off ledger write, shared by every process (#1478 R2)
 # the only number/flag keys kept at rest in privacy mode (#1478 R2): ids, counts, flags and times of the phone command
 # answers (mobile_prefs/mobile_plans/signals_action/answer_approval/chat). A new answer number is dropped unless listed.
 _KEEP_NUM = ("ok", "pref", "plan", "conflicts", "snoozed_until", "stopped")
@@ -80,11 +83,13 @@ class Continuity:
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
         self._lock = threading.RLock()
-        self._clean = False                            # True once the ledger was scrubbed with privacy on (#206 F13)
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
-        self._scrub(logs.privacy())
+        if logs.privacy():
+            with self._cx() as cx:
+                cx.execute("BEGIN IMMEDIATE")
+                self._scrub(cx, force=True)
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -92,33 +97,42 @@ class Continuity:
         cx.execute("PRAGMA secure_delete=ON")            # freed pages (old answer text) are overwritten, not left
         return cx
 
-    def _stored(self, body: dict) -> str:
-        """One ledger write reads the privacy setting ONCE for both the scrub and the stored form (#1478 R1)."""
+    def _put(self, device: str, cid: str, kind: str, status: int, body: dict, ts: float) -> None:
+        """Store one answer. The privacy setting is read ONCE for the scrub and the stored form (#1478 R1). The scrub,
+        the INSERT and the dirty mark are one IMMEDIATE transaction, so writers in other processes on the same file
+        cannot interleave and leave words behind a scrub (#1478 R2)."""
         private = logs.privacy()
-        self._scrub(private)
-        return self._at_rest(body, private)
+        with self._cx() as cx:
+            cx.execute("BEGIN IMMEDIATE")
+            if private:
+                self._scrub(cx)
+            cx.execute("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                       (device, cid, kind, int(status), self._at_rest(body, private), ts))
+            if not private:
+                cx.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, '1')", (_DIRTY,))
 
     @staticmethod
     def _at_rest(body: dict, private: bool) -> str:
-        """The stored form of an answer. Privacy on: only numbers, flags, null and a fixed code/state survive."""
+        """The stored form of an answer. Privacy on: only numbers and flags under known keys, null, and a code/state
+        shaped like a fixed token survive."""
         if not private:
             return json.dumps(body)
         kept = {k: v for k, v in (body.items() if isinstance(body, dict) else ())
                 if (k in _KEEP_NUM and (v is None or isinstance(v, (bool, int, float))))
-                or (k in _KEEP_STR and isinstance(v, str))}
+                or (k in _KEEP_STR and isinstance(v, str) and _TOKEN.fullmatch(v))}
         return json.dumps({"not_kept": True, **kept})
 
-    def _scrub(self, private: bool) -> None:
-        """Privacy on: blank the words of answers stored while privacy was off. Runs at a Core start and then only at
-        the first ledger write with privacy on after a write made with privacy off, not on every write.
+    @staticmethod
+    def _scrub(cx: sqlite3.Connection, force: bool = False) -> None:
+        """Privacy on: blank the words of answers stored while privacy was off. Runs at a Core start and then only
+        when the shared dirty mark says some process wrote with privacy off since the last scrub, not on every write.
         logs privacy defaults to on and the Core runs logs.setup before it builds a Continuity (MobileAccess opens
         it lazily), so the owner's setting is known here. The file uses the rollback journal (no WAL)."""
-        if not private:
-            self._clean = False                        # this write may keep words: the next privacy-on write cleans
-        elif not self._clean:
-            self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
-                    (json.dumps({"not_kept": True}), len(NOT_KEPT), NOT_KEPT))
-            self._clean = True
+        dirty = cx.execute("SELECT v FROM kv WHERE k=?", (_DIRTY,)).fetchone()
+        if force or (dirty and dirty[0] == "1"):
+            cx.execute("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
+                       (json.dumps({"not_kept": True}), len(NOT_KEPT), NOT_KEPT))
+            cx.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, '0')", (_DIRTY,))
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:
@@ -150,17 +164,15 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
-                self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), self._stored(body), now))
+                self._put(device, cid, kind, st, body, now)
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules). Under the lock, like
-        execute(): the scrub, the clean flag and the INSERT are one step for other writers (#1478 R1)."""
+        execute(); _put makes the scrub, the dirty mark and the INSERT one transaction (#1478 R1, R2)."""
         with self._lock:
-            self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                    (device, cid, kind, int(status), self._stored(body), self.clock()))
+            self._put(device, cid, kind, status, body, self.clock())
 
     @staticmethod
     def stale(age_s) -> bool:
