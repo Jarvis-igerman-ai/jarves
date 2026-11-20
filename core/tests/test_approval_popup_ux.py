@@ -244,3 +244,12 @@ def test_popup_build_retries_a_transient_tcl_error_through_the_shared_helper(mon
     with pytest.raises(TclError, match="no display"):
         approval_popup.build({"kind": "run"}, tmp_path / "out.json")
     assert len(tries) == 2 and naps == [0.25]
+    seen = []                                            # review R3: build() goes through the shared helper itself
+
+    def spy(tk_mod, **kw):
+        seen.append(tk_mod)
+        raise TclError("stop")
+    monkeypatch.setattr(tkutil, "new_root", spy)
+    with pytest.raises(TclError, match="stop"):
+        approval_popup.build({"kind": "run"}, tmp_path / "out.json")
+    assert seen == [fake]
