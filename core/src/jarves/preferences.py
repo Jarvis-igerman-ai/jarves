@@ -42,11 +42,38 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    # credential words and well-known key/token prefixes (#1099)
+    r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?keys?\b|(?:access|auth|refresh)[\s_-]?tokens?\b|(?:secret|private)[\s_-]?keys?\b|"
+    r"\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\b(?:sk|pk|rk)_(?:live|test)_[a-z0-9]{12,}|\bgh[pousr]_[a-z0-9]{20,}|"
+    r"\bxox[abprs]-[a-z0-9-]{8,}|\bAIza[a-z0-9_-]{30,}|\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.", re.I)
+_AWS_KEY_ID = re.compile(r"\bAKIA[A-Z0-9]{12,}")   # upper case only, so matched case-sensitively
+# "bearer" + a token that has a digit or a lower->upper change (plain English like "bearer instruments" passes)
+_BEARER = re.compile(r"\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", re.I)
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
+_B64_RUN = re.compile(r"[A-Za-z0-9+/]{30,}")       # base64 secrets (AWS secret keys) split _TOKEN_RUN at '+' '/'
 
 
-def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+def _token_shaped(run: str) -> bool:
+    """A long run that mixes upper, lower and digits (base62 key) or a 32+ hex string."""
+    if len(run) >= 32 and re.fullmatch(r"[0-9a-fA-F]+", run):
+        return True
+    return bool(re.search(r"[a-z]", run) and re.search(r"[A-Z]", run) and re.search(r"\d", run))
+
+
+def looks_sensitive(text: object) -> bool:
+    """True when text must not be stored. Fails closed: a non-text value counts as sensitive."""
+    if text is None:
+        return False
+    if isinstance(text, (bytes, bytearray)):
+        text = bytes(text).decode("utf-8", errors="replace")
+    if not isinstance(text, str):
+        return True
+    if _SENSITIVE.search(text) or _AWS_KEY_ID.search(text):
+        return True
+    if any(re.search(r"\d|[a-z][A-Z]", tok) for tok in _BEARER.findall(text)):
+        return True
+    return any(_token_shaped(m) for m in _TOKEN_RUN.findall(text) + _B64_RUN.findall(text))
 
 
 def normalize(text: str) -> str:
