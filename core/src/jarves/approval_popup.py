@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from . import tkutil
+from jarves import tkutil      # absolute: also resolves if a launcher runs this file by path
 
 APPROVE_DELAY_MS = 900
 CARD_WIDTH = 420                 # logical px at 100% scaling

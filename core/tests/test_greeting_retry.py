@@ -195,7 +195,7 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
 def _wake_core(start_ok: bool, greeted: bool = False):
     from jarves.app import Core
     c = _ns()
-    c._greeted, c.live, c.calls = greeted, None, []
+    c._greeted, c.live, c.calls, c._voice_connecting = greeted, None, [], False
     c.wake_greeting = lambda: Core.wake_greeting(c)
 
     async def start(**kw):
@@ -246,3 +246,27 @@ def test_start_live_early_exit_returns_false_not_none():
     c = _ns()
     c.stopping, c.dev = True, _ns()
     assert asyncio.run(Core._start_live(c)) is False
+
+
+def test_wake_claim_is_kept_while_another_start_is_still_connecting():
+    """#520 review R1: another start was connecting (this wake hit LIVE_ALREADY_RUNNING) and may have skipped its
+    greeting on this wake's claim; releasing the claim then let a later start greet a second time."""
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+    c._voice_connecting = True
+    asyncio.run(Core._start_wake_live(c))
+    assert c._greeted
+
+
+def test_start_live_has_no_bare_return():
+    """#520 review R2: _start_live is typed -> bool; a bare `return` anywhere in its body would give None."""
+    import ast
+    import inspect
+    import textwrap
+    from jarves.app import Core
+    tree = ast.parse(textwrap.dedent(inspect.getsource(Core._start_live)))
+    fn = tree.body[0]
+    nested = {id(n) for d in ast.walk(fn) if d is not fn and isinstance(d, (ast.FunctionDef, ast.AsyncFunctionDef,
+              ast.Lambda)) for n in ast.walk(d)}
+    bare = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is None and id(n) not in nested]
+    assert bare == []

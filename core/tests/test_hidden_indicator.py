@@ -257,6 +257,7 @@ def test_approval_popup_build_retries_transient_tcl_error_via_shared_helper(monk
     monkeypatch.setitem(sys.modules, "tkinter.font", fake.font)
     naps = []
     monkeypatch.setattr(tkutil.time, "sleep", naps.append)
+    monkeypatch.setattr(approval_popup, "_dpi_aware", lambda: None)   # hermetic: no ctypes on Windows CI
     with pytest.raises(Reached):
         approval_popup.build({}, tmp_path / "out.json")
     assert len(tries) == 2 and naps == [0.25]
