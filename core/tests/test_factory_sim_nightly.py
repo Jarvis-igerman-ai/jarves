@@ -30,6 +30,8 @@ def test_stale_and_missing(tmp_path):
     assert [a["kind"] for a in missing] == ["factory_sim_missing"]
     assert missing[0]["summary"].startswith("No nightly factory simulation result found")
     assert "--schedule-command" in missing[0]["summary"]
+    # same shape as the failed/stale alerts: no task/agent, so the worker-stall handler skips it
+    assert missing[0]["task_id"] is None and missing[0]["agent_id"] is None
     (tmp_path / "factory_sim_last.json").write_text(json.dumps({"at": 100.0, "ok": True}))
     assert factory_sim_alerts(tmp_path, now=100.0 + 37 * 3600)[0]["kind"] == "factory_sim_stale"
     assert factory_sim_alerts(tmp_path, now=100.0 + 3600) == []
