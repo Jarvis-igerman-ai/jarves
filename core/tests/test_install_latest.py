@@ -13,14 +13,14 @@ NOW = datetime(2026, 10, 27, 9, 0, tzinfo=timezone.utc)
 
 
 class Fake:
-    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, backup_error=False, launch_error=None, installer_exits=True, spawn=False, waits=None, after=None):
+    def __init__(self, tmp=None, available=True, error=None, core=True, cli=None, wait="done", prep_error=None, launch_error=None, installer_exits=True, spawn=False, waits=None, after=None):
         self.waits = list(waits or [])                      # wait() results after the first one (the restart)
         self.after = after                                  # does a Core answer after setup? None: same as before
         self.tmp, self.launch_error, self.installer_exits, self.spawn = tmp, launch_error, installer_exits, spawn
         self.calls: list = []
         self.available, self.error, self.core, self.wait_end = available, error, core, wait
         self.cli = cli or {}
-        self.prep_error, self.backup_error = prep_error, backup_error
+        self.prep_error = prep_error
         self.channel = "stable"
 
     def deps(self) -> il.Deps:
@@ -29,12 +29,6 @@ class Fake:
                 self.calls.append(name)
                 return ret(*a) if callable(ret) else ret
             return f
-
-        def backup():
-            self.calls.append("backup")
-            if self.backup_error:
-                raise OSError("disk full")
-            return Path("jarves-backup-1.zip")
 
         def prepare(ch):
             self.calls.append("prepare")
@@ -75,7 +69,7 @@ class Fake:
         return il.Deps(
             home=self.tmp, start_core=rec("start_core"), wait_installer=wait_installer,
             spawn_finisher=spawn if self.spawn else None, publish_pid=publish,
-            channel=self.channel, set_channel=rec("set_channel"), backup_now=backup,
+            channel=self.channel, set_channel=rec("set_channel"),
             check=lambda ch: {"error": self.error, "available": self.available, "current": "4.5.0",
                               "latest": {"version": "4.5.1", "display": "4.5.1-beta.9"}},
             prepare=prepare, core_running=core_running, detect_running=lambda up: {"core": up},
@@ -88,8 +82,8 @@ def test_happy_path_order_and_report(tmp_path):
     f = Fake(tmp=tmp_path)
     rep = il.run(f.deps(), channel="beta")
     assert rep.ok and rep.changed and not rep.rolled_back
-    assert f.calls[:10] == ["backup", "prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
-                           "wait_installer", "wait", "cli:update status"]
+    assert f.calls[:9] == ["prepare", "set_channel", "record", "cli:features", "stop", "launch restart=True",
+                          "wait_installer", "wait", "cli:update status"]
     assert [c for c in f.calls if c.startswith("cli:")] == ["cli:features", "cli:update status", "cli:doctor",
                                                             "cli:selftest", "cli:speedtest", "cli:status --brief",
                                                             "cli:features"]
@@ -135,10 +129,20 @@ def test_core_not_running_installs_without_restart_flag_and_tolerates_status_1(t
 
 
 def test_backup_failure_stops_before_anything_changes(tmp_path):
-    f = Fake(tmp=tmp_path, backup_error=True)
+    f = Fake(tmp=tmp_path, prep_error=UpdateError("UPDATE_BACKUP_FAILED", "backup before the update failed"))
     rep = il.run(f.deps())
-    assert not rep.ok and not rep.changed and f.calls == ["backup"]
-    assert "prepare" not in f.calls and "stop" not in f.calls
+    assert not rep.ok and not rep.changed and f.calls == ["prepare"] and rep.stopped_at == "backup"
+    assert ("backup before install", False, "UPDATE_BACKUP_FAILED") in rep.checks
+
+
+def test_install_writes_one_backup_not_a_manual_one_too_issue_1016(tmp_path):
+    """#1016: install-latest wrote a `manual` archive and then prepare_install wrote the pre-update checkpoint
+    seconds later (2 x 200-600 MB per install, the manual one held by the 10-slot manual retention)."""
+    assert not hasattr(il.Deps, "backup_now") and "backup_now" not in il.Deps.__dataclass_fields__
+    f = Fake(tmp=tmp_path)
+    rep = il.run(f.deps())
+    assert rep.ok and f.calls.count("prepare") == 1 and "backup" not in f.calls
+    assert ("backup before install", True, "pre-update.zip") in rep.checks and rep.revert_id == "pre-update.zip"
 
 
 def test_verification_failure_stops_before_stopping_the_core(tmp_path):
@@ -152,7 +156,7 @@ def test_up_to_date_and_check_error(tmp_path):
     assert il.run(Fake(tmp=tmp_path, available=False).deps()).ok
     f = Fake(tmp=tmp_path, error="offline")
     rep = il.run(f.deps())
-    assert not rep.ok and "offline" in rep.render() and "backup" not in f.calls
+    assert not rep.ok and "offline" in rep.render() and "prepare" not in f.calls
 
 
 def test_dry_run_changes_nothing(tmp_path):
@@ -160,7 +164,7 @@ def test_dry_run_changes_nothing(tmp_path):
     rep = il.run(f.deps(), channel="beta", dry_run=True)
     assert rep.ok and rep.dry_run and not rep.changed
     assert f.calls == []                                   # not even the channel switch
-    assert rep.render().startswith("DRY RUN") and "would: backup now" in rep.render()
+    assert rep.render().startswith("DRY RUN") and "would: backup before install" in rep.render()
 
 
 def test_bad_channel_and_parser(tmp_path):
@@ -296,7 +300,7 @@ def test_second_begin_is_refused_while_a_run_is_pending(tmp_path):
     assert il.begin(f.deps()).pending
     g = Fake(tmp=tmp_path, spawn=True)
     rep = il.begin(g.deps())
-    assert not rep.ok and rep.stopped_at == "pending" and "backup" not in g.calls and "launch restart=True" not in g.calls
+    assert not rep.ok and rep.stopped_at == "pending" and "prepare" not in g.calls and "launch restart=True" not in g.calls
     state = __import__("json").loads(f.spawned.read_text(encoding="utf-8"))
     il.finish(f.deps(), state)                            # the first run ends: its report frees the lock
     h = Fake(tmp=tmp_path, spawn=True)

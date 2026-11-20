@@ -365,3 +365,13 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
     got = names(backup.create(profile, "manual"))
     assert "data/workspace/recordings/x.txt" in got
     assert not any(n.startswith("data/browser/recordings/") for n in got)
+
+
+def test_cli_sets_manual_and_checkpoint_retention_issue_1016(profile, capsys):
+    """#1016: only --daily/--weekly were settable; the manual and checkpoint limits (the big archives) had no CLI."""
+    from jarves import cli
+    assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "1"]) == 0
+    s = backup.get_settings(profile)
+    assert s["manual"] == 2 and s["checkpoints"] == 1
+    assert cli.main(["backup", "settings", "--manual", "-1"]) == 1          # refused by set_settings, nothing stored
+    assert "between 0 and 365" in capsys.readouterr().out and backup.get_settings(profile)["manual"] == 2

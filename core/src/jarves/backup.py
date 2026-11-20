@@ -693,6 +693,8 @@ def add_cli(sub) -> None:
     b.add_argument("name", nargs="?")
     b.add_argument("--daily", type=int)
     b.add_argument("--weekly", type=int)
+    b.add_argument("--manual", type=int, help="manual backups to keep (#1016)")
+    b.add_argument("--checkpoints", type=int, help="pre-migration and pre-restore checkpoints to keep, each (#1016)")
     b.add_argument("--include-faces", choices=["on", "off"])
     b.add_argument("--auto", choices=["on", "off"])
     r = sub.add_parser("restore", help="restore a backup (stop JARVES first); --test = restore drill only")
@@ -739,7 +741,7 @@ def cmd_backup(a, cfg, home) -> int:
         elif a.action == "prune":
             print(f"removed {len(prune(home))} old backup(s)")
         elif a.action == "settings":
-            ch = {k: v for k, v in (("daily", a.daily), ("weekly", a.weekly)) if v is not None}
+            ch = {k: v for k in ("daily", "weekly", "manual", "checkpoints") if (v := getattr(a, k)) is not None}
             for k in ("include_faces", "auto"):
                 v = getattr(a, k)
                 if v is not None:
