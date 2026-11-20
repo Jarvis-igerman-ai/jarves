@@ -198,7 +198,7 @@ def next_task(snapshot: dict, policy: dict, lane: str) -> str | None:
         ready = [t for t in tasks if t.get("ready")]
         ready.sort(key=lambda t: (t["priority"], version_rank(policy, t.get("version", "")), t["updated_at"], t["id"]))
         return ready[0]["id"] if ready else None
-    open_required = [t for t in tasks if t.get("scope", "required") == "required" and t["state"] not in {"verified", "done"}]
+    open_required = [t for t in tasks if t.get("scope", "required") == "required" and t["state"] not in {"verified", "done", "cancelled"}]
     if not open_required:
         return None
     lowest = min(version_rank(policy, t.get("version", "")) for t in open_required)
