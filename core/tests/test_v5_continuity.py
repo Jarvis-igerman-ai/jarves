@@ -63,6 +63,25 @@ def test_rows_kept_before_privacy_was_switched_on_lose_their_words(tmp_path):
     assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
 
 
+def test_privacy_on_ledger_expires_old_rows_overwrites_freed_bytes_and_writes_nothing_when_clean(tmp_path, monkeypatch):
+    """#206 F13 (review R2, R5): expired answers go at the next privacy-on use, secure_delete is on, and a clean ledger
+    is only read (no UPDATE/DELETE on every read path)."""
+    from jarves import logs
+    clock = [1000.0]
+    c = Continuity(tmp_path, clock=lambda: clock[0])
+    c.store("d1", "m-0001", "chat", 200, {"reply": "old words"})
+    logs.set_privacy(True)
+    clock[0] += continuity.LEDGER_TTL_S + 1
+    assert c.seen("d1", "m-0002") is None and c._rows("SELECT cid FROM ledger") == []
+    with c._cx() as cx:
+        assert cx.execute("PRAGMA secure_delete").fetchone()[0] == 1
+    c.store("d1", "m-0003", "chat", 200, {"reply": "new words"})
+    writes = []
+    monkeypatch.setattr(c, "_x", lambda sql, args=(): writes.append(sql) or 0)
+    c.seen("d1", "m-0003")
+    assert writes == []
+
+
 from jarves.mobile import Bridge
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
@@ -360,6 +379,19 @@ def test_chat_resend_after_a_pc_restart_is_answered_from_the_ledger(srv, fake):
     srv.mobile._replies.clear()                                        # the in-memory copy is gone (PC restart)
     st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-aaaaaaaa"})
     assert st == 200 and out["replay"] is True and out["reply"] == "echo: hi"
+    assert fake.chats == ["hi"]
+
+
+def test_privacy_on_chat_resend_after_a_pc_restart_gets_a_defined_message(srv, fake):
+    """#206 F13 (review R1): the ledger kept no words, so the resend is still answered once, with a clear message."""
+    from jarves import logs
+    logs.set_privacy(True)                                             # restored by the autouse _full_text fixture
+    tok, _ = pair(srv)
+    assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-dddddddd"})[1]["reply"] == "echo: hi"
+    srv.mobile._replies.clear()
+    st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-dddddddd"})
+    assert st == 200 and out["replay"] is True and out["code"] == "NOT_KEPT"
+    assert "privacy" in out["reply_en"] and out["reply"] and "echo" not in out["reply"]
     assert fake.chats == ["hi"]
 
 

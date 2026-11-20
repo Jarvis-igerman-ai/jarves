@@ -84,6 +84,7 @@ class Continuity:
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        cx.execute("PRAGMA secure_delete=ON")     # #206 F13: blanked/deleted text is overwritten in the file
         cx.row_factory = sqlite3.Row
         return cx
 
@@ -142,11 +143,17 @@ class Continuity:
         return json.dumps({"not_kept": True, **kept})
 
     def _scrub(self) -> None:
-        """#206 F13: with privacy on, an answer stored while privacy was off loses its words. One UPDATE statement, so
-        it is atomic across processes and leaves nothing half-done; it runs before every privacy-on read or write."""
-        if logs.privacy():
-            self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
-                    ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
+        """#206 F13: with privacy on, an answer stored while privacy was off loses its words and expired answers go.
+        A read-only check first, so the common case writes nothing; each UPDATE/DELETE is one atomic statement."""
+        if not logs.privacy():
+            return
+        old = self.clock() - LEDGER_TTL_S
+        if not self._rows("SELECT 1 FROM ledger WHERE substr(body, 1, ?) <> ? OR ts < ? LIMIT 1",
+                          (len(NOT_KEPT), NOT_KEPT, old)):
+            return
+        self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
+                ('{"not_kept": true}', len(NOT_KEPT), NOT_KEPT))
+        self._x("DELETE FROM ledger WHERE ts < ?", (old,))
 
     @staticmethod
     def stale(age_s) -> bool:

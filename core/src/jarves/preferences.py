@@ -138,14 +138,18 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        if repropose:      # decided inside the UPDATE (#206 H2): a confirm racing this edit cannot activate the wording
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=?, "
-                      "confirmed_at=CASE WHEN state='confirmed' THEN 0 ELSE confirmed_at END, "
-                      "state=CASE WHEN state='confirmed' THEN 'proposed' ELSE state END WHERE id=?",
-                      (t, norm, self.clock(), pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a preference was reworded: a confirmed one needs a new confirm",
-                      id=pid, by=by)
-            return self._view(self.get(pid))
+        if repropose:      # #206 H2: each UPDATE's WHERE fixes the transition, so a racing confirm cannot activate it
+            for _ in range(3):
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? "
+                             "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
+                              id=pid, by=by)
+                    return self._view(self.get(pid))
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=? AND state<>'confirmed'",
+                             (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+                    return self._view(self.get(pid))
+            raise KeyError(pid)                 # removed meanwhile (or its state kept flipping): nothing was changed
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))

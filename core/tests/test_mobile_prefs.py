@@ -146,6 +146,19 @@ def test_a_confirm_racing_a_reproposing_edit_still_leaves_the_new_wording_propos
     assert p.get(pid)["state"] == "proposed" and p.get(pid)["text"] == "Play soft jazz while cooking"
 
 
+def test_a_reproposing_edit_logs_what_really_happened(home, monkeypatch):
+    """#206 H2 (review R4): PREF_REPROPOSED only when a confirmed item went back to proposed, else PREF_EDITED."""
+    p = Preferences(open_db(home))
+    a = p.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    b = p.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]
+    seen = []
+    monkeypatch.setattr(logs, "info", lambda *a_, **k: seen.append(a_[1]))
+    p.edit(b, "Play soft jazz while cooking", by="phone", repropose=True)
+    p.edit(a, "I like very short answers in the morning", by="phone", repropose=True)
+    assert seen == ["PREF_EDITED", "PREF_REPROPOSED"]
+    assert p.get(b)["state"] == "proposed" and p.get(a)["state"] == "proposed"
+
+
 def test_a_resent_command_runs_once(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)

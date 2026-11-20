@@ -467,6 +467,9 @@ class MobileAccess:
             self._replay_failed = True
             return None
         self._replay_failed = False
+        if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
+            en, he = _MSG["NOT_KEPT"]
+            hit = {**hit, "code": "NOT_KEPT", "reply": he, "reply_en": en}
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -632,6 +635,8 @@ _MSG = {
     "NO_CA": ("there is no trusted-connection certificate: turn on phone_trust and run jarvis phone trust enable",
               "אין תעודת חיבור מהימן: הפעילו את phone_trust והריצו במחשב jarvis phone trust enable"),
     "BAD_ID": ("the request was not readable: reload the page and try again", "לא הצלחנו לקרוא את הבקשה: רעננו את הדף ונסו שוב"),
+    "NOT_KEPT": ("this answer was not kept (privacy mode): ask again if you still need it",
+                 "התשובה לא נשמרה (מצב פרטיות): שאלו שוב אם צריך"),
     "STALE": ("this message waited too long while offline: send it again", "ההודעה חיכתה יותר מדי זמן בלי חיבור: שלחו אותה שוב"),
     "CHAT_RATE": ("too many messages: wait half a minute and send again", "יותר מדי הודעות: חכו חצי דקה ושלחו שוב"),
     "EMPTY": ("the message is empty: type something and send again", "ההודעה ריקה: כתבו משהו ושלחו שוב"),
