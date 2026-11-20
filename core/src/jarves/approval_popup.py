@@ -316,17 +316,8 @@ def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | 
     from tkinter import font as tkfont
 
     _dpi_aware()
-    for attempt in range(5):
-        try:
-            root = tk.Tk()
-            break
-        except tk.TclError as e:      # Windows: Tcl's init scripts are read now and then with a failure ("couldn't read
-            msg = str(e)              # file ...auto.tcl", 'invalid command name "tcl_findLibrary"'): retry a few times
-            transient = any(k in msg for k in ("couldn't read file", "tk.tcl", "init.tcl", "auto.tcl",
-                                               "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
-            if attempt == 4 or not transient:
-                raise
-            time.sleep(0.25 * (attempt + 1))
+    from jarves.tkutil import new_root      # absolute: also works if this file is ever run by path (#520)
+    root = new_root(tk)                     # retries Windows' transient Tcl init errors (shared with the dot)
     lang = pick_lang(req)
     S = STRINGS[lang]
     rtl = lang == "he"

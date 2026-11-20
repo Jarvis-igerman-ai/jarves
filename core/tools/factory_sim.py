@@ -9,6 +9,7 @@ C:\\work\\claude-j-run.py are reported NOT RUN when that file is missing. Exit c
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -35,7 +36,6 @@ def schedule_command() -> str:
 
 def record(home: str, results: list, failed: int, tail: str) -> None:
     """Write <home>/factory_sim_last.json (read by the workflow dashboard) and, on failure, file one issue."""
-    import json
     import time
     folder = Path(home) if home else default_home()
     folder.mkdir(parents=True, exist_ok=True)
@@ -57,6 +57,23 @@ def _summary(tail: str, limit: int = 600) -> str:
     return text[:limit]
 
 
+LABEL_CHECK_TIMEOUT_S = 15  # #897: short, so a hung `gh label list` barely delays the failure report
+
+
+def _has_label(repo: str, name: str) -> bool:
+    """True only when `gh label list` succeeds and returns a label called `name`; anything else is False."""
+    try:
+        got = subprocess.run(["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--limit", "100"],
+                             capture_output=True, text=True, timeout=LABEL_CHECK_TIMEOUT_S)
+        labels = json.loads(got.stdout) if got.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        labels = None
+    if not isinstance(labels, list):
+        print(f"label check failed; filing without the '{name}' label")
+        return False
+    return any(isinstance(item, dict) and item.get("name") == name for item in labels)
+
+
 def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves") -> None:
     title = "Factory nightly simulation failed: " + ", ".join(failing)[:120]
     try:
@@ -71,9 +88,13 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
             return
         body = ("The nightly factory simulation (core/tools/factory_sim.py --nightly) failed.\n\nFailing: "
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
-        made = subprocess.run(["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
-                               "--label", "showstopper", "--label", "P1"],
-                              capture_output=True, text=True, timeout=60)
+        create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
+                  "--label", "showstopper", "--label", "P1"]
+        # #897: add the area label only when the repo has it, checked up front rather than by parsing
+        # gh's error wording, so a missing label can never cost the failure report
+        if _has_label(repo, "testing"):
+            create += ["--label", "testing"]
+        made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:

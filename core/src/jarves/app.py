@@ -205,6 +205,8 @@ class Core:
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
         self._greeted = False
+        self._live_opened = 0               # live sessions _start_live has assigned (#520: wake greeting claim)
+        self._greet_claim: object | None = None   # token of the wake call that holds the _greeted claim (#520)
         self.voice_mode = "off"
         self._voice_connecting = False
         # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
@@ -1565,7 +1567,8 @@ class Core:
         if self.stopping:
             await live.stop()
             return
-        self.live = live
+        self.live = live                            # #520: keep _live_opened next to every non-None self.live set
+        self._live_opened += 1                      # counted here, so a wake session that opened keeps its greeting claim
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open
@@ -1653,7 +1656,8 @@ class Core:
                               error_type=type(e).__name__)
                     self._startup_stage("waiting_audio", "No greeting audio arrived; speaking a short TTS hello.")
                     await self._greeting_tts_fallback()
-                self._greeted = True                # the greeting is this live session's, or the one startup TTS hello above
+                # the greeting is this live session's, or the one startup TTS hello above; no wake owns it (#520)
+                self._greeted, self._greet_claim = True, None
             elif self.use_real_audio and self.voice_mode != "off":
                 self._startup_stage("loading", "Preparing local wake microphone...")
                 deadline = time.monotonic() + 20
@@ -2062,7 +2066,28 @@ class Core:
                 await self.set_face("listening")
                 await self.link.send_face("assistant.activity", {"kind": "connecting", "text": "מתחבר…", "detail": ""})
                 # #179: every wake session opens with a short spoken cue (the greeting was once per Core start only)
-                await self._start_live(ack=True, greeting=self.wake_greeting())
+                await self._start_wake_live()
+
+    async def _start_wake_live(self) -> None:
+        """#520: wake_greeting() claims _greeted (no second start greeting while connecting); a wake session that
+        did not open releases the claim, unless a greeting had already happened before this wake.
+        Invariant (review nit): every other _greeted=True setter either clears _greet_claim (prepare_desktop) or runs
+        only while _greeted is False (the face-connect greetings), i.e. never while a wake claim is pending."""
+        was_greeted, opened_before = self._greeted, self._live_opened
+        greeting = self.wake_greeting()
+        claim = object() if greeting and not was_greeted else None
+        if claim is not None:
+            self._greet_claim = claim
+        try:
+            await self._start_live(ack=True, greeting=greeting)
+        finally:
+            # counted when _start_live assigns self.live, so a session that opened and already ended still counts;
+            # if any session opened meanwhile, the claim is kept (never a second greeting). Only this call's own
+            # claim is released: a path that greeted meanwhile cleared the token (review R2).
+            if claim is not None and self._greet_claim is claim:
+                self._greet_claim = None
+                if self._live_opened == opened_before:
+                    self._greeted = False
 
     def wake_greeting(self) -> str | None:
         """Short cue for a wake-opened live session; None when the greeting feature is off."""
