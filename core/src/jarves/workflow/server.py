@@ -99,7 +99,7 @@ def access_token(home: Path) -> str:
 SESSION_TTL_S = 12 * 3600
 MAX_SESSIONS = 32
 UNLOCK_WRONG_PER_SESSION = 3  # #1265: one window cannot use up the code's tries
-UNLOCK_WRONG_TOTAL = 10       # over all sessions; 10 token logins per minute bound how fast new windows come
+UNLOCK_WRONG_TOTAL = 5        # over all sessions, unchanged by #1265: at most 5 guesses of 10,000 per code
 
 
 @dataclass
@@ -168,7 +168,7 @@ class Server(ThreadingHTTPServer):
         self.unlocked: dict[str, float] = {}      # session -> end of the owner-answer unlock (#750)
         self.unlock_attempts: list[float] = []
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
-        # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 10 of 10,000).
+        # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
@@ -469,6 +469,9 @@ class Handler(BaseHTTPRequestHandler):
     def _unlock(self, data):
         now = time.time()
         session = self._session()
+        if not session:  # the session ended after the auth check: never count tries under an empty key
+            self._json(401, {"error": "private session required"})
+            return
         code = data.get("code")
         with self.server.session_lock:  # one request at a time: two correct requests cannot both consume the code
             self.server.unlock_attempts = [t for t in self.server.unlock_attempts if now - t < 60]
