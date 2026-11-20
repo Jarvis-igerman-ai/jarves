@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from .. import logs
+from .. import logs, procstats
 from ..orchestrator import policy
 from ..orchestrator.envelope import clean, summary
 from . import cards, finder, forge, gitops, pipeline as pl, plan as planmod, runners
@@ -95,12 +95,12 @@ class Manager(StageEngine):
         self.db.close()
 
     def _recover(self) -> None:
-        """Rows left `running` by a dead process: kill a surviving child by pid (no second writer), then requeue once;
-        a task that was interrupted max_attempts times fails instead of looping."""
+        """Rows left `running` by a dead process: kill a surviving child by pid (no second writer) only when its
+        recorded start time still matches (#1098: a reused pid is another program), then requeue once; a task that
+        was interrupted max_attempts times fails instead of looping."""
         for p in self.db.projects():
             for t in self.db.tasks(p["id"], ("running", "review")):
-                if t["pid"]:
-                    _kill_pid(t["pid"])
+                _kill_owned(t)
                 stages = self._stages(p, t)
                 kind = stages[t["stage"]]["kind"] if t["stage"] < len(stages) else "work"
                 job = self._job(t)
@@ -1003,8 +1003,8 @@ class Manager(StageEngine):
             ev = self._cancel.get(t["id"])
             if ev is not None:
                 ev.set()
-            elif t["pid"]:
-                _kill_pid(t["pid"])
+            else:
+                _kill_owned(t)
             self.db.update_task(t["id"], status="blocked", reason=f"{STOPPED} (retry {t['seq']} to continue)", pid=0)
             self.db.event(t["id"], "owner", "stopped", "stopped by the owner")
             done.append(f"#{t['seq']}")
@@ -1294,6 +1294,20 @@ def _read_brief(root: Path) -> str:
         except OSError:
             pass
     return ""
+
+
+def _kill_owned(t: dict) -> bool:
+    """Kill a task's stored pid only when it is still the process this manager started: the pid AND its recorded
+    start time must match the live process. A missing or different marker (pid reused after a restart or reboot,
+    a row from before the marker existed, a platform without process times) fails closed: nothing is killed."""
+    pid, marker = int(t.get("pid") or 0), str(t.get("pid_start") or "")
+    if pid <= 0 or not marker or procstats.start_marker(pid) != marker:
+        if pid > 0:
+            logs.info("projects", "PID_NOT_KILLED", "stored pid not verified as ours; left alone", task=t.get("id"),
+                      pid=pid)
+        return False
+    _kill_pid(pid)
+    return True
 
 
 def _kill_pid(pid: int) -> None:

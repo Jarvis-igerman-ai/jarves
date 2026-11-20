@@ -1,0 +1,1 @@
+- Added: `core/tools/cli_demo.py` renders `jarvis [GROUP] --help` as a terminal-style SVG image and writes `demo.json` (PR, title, one-line "what changed for you", files) for a PR demo (JAR-251, first slice: CLI images only, no CI workflow yet).

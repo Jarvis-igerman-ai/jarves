@@ -119,6 +119,7 @@ def test_issues_are_deduplicated_and_reopened(st):
 def test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st):
     fmt = logs.JsonFormatter()
     logs.set_privacy(True)
+    sids = []           # diagnose exactly these: the default 30-day window would depend on today's date
     try:
         for line in FIXTURE.read_text(encoding="utf-8").splitlines():
             d = json.loads(line)
@@ -127,13 +128,13 @@ def test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st):
             rec.component, rec.code = d["component"], d["code"]
             rec.fields = {k: v for k, v in d.items() if k not in ("ts", "level", "component", "code", "msg", "cid",
                                                                  "session")}
-            st.ingest(json.loads(fmt.format(rec)))
+            sids.append(st.ingest(json.loads(fmt.format(rec))))
     finally:
         logs.set_privacy(False)
     turns = st.rows("SELECT * FROM turns")
     assert turns and all(t["text"] is None and t["chars"] > 0 for t in turns)
     assert "אינטל" not in json.dumps(st.rows("SELECT * FROM events"), ensure_ascii=False)
-    diagnose.run(st, Config())
+    diagnose.run(st, Config(), [sid for sid in sids if sid])
     iss = _issues(st)
     assert "early_response" in iss                   # timing rules still work
     assert not any(k.startswith(("filler", "user_", "backend_stall")) for k in iss)
