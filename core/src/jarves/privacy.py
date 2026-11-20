@@ -57,6 +57,19 @@ def _window_until(home: Path) -> float:
     return float(u) if isinstance(u, (int, float)) and not isinstance(u, bool) and u > time.time() else 0.0
 
 
+def _scrub_ledger(ctx) -> None:
+    """#206 F13: privacy just turned on: the phone resend ledger loses the words it kept while privacy was off now,
+    not at the next phone use. A failure is logged and does not undo the switch."""
+    from .continuity import DB_FILE, Continuity
+    if not (Path(ctx.home) / DB_FILE).exists():     # no ledger yet: nothing to clean, and none is created here
+        return
+    try:
+        Continuity(ctx.home)                        # its constructor runs scrub()
+    except (sqlite3.Error, OSError) as e:
+        logs.warn("privacy", "PRIVACY_LEDGER_SCRUB_FAILED", "the phone resend ledger could not be cleaned now; "
+                  "it is cleaned at its next use", error_type=type(e).__name__)
+
+
 def set_full_text(ctx, on: bool) -> dict:
     """"Full text on request" (owner decision OD-12, 2026-10-21): full text for 24 hours ONLY, then privacy turns on
     again by itself (logs._expire_full_text, in every process). config.toml is not changed: a restart also ends it."""
@@ -68,6 +81,7 @@ def set_full_text(ctx, on: bool) -> dict:
     else:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
+        _scrub_ledger(ctx)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
     return state(ctx)
 
@@ -76,6 +90,8 @@ def set_privacy(ctx, on: bool) -> dict:
     """Flip it now (this process + the Core via the flag file) and in config.toml for the next start."""
     logs.write_privacy(ctx.home / "logs", on)
     ctx.cfg.log.privacy = bool(on)                  # this dashboard's reads (logs view, tasks, notes) follow at once
+    if on:
+        _scrub_ledger(ctx)
     saved, err = True, ""
     try:
         config_edit.apply(ctx.config_path, {"log.privacy": bool(on)})

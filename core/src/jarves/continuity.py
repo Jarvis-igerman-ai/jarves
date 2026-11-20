@@ -81,6 +81,7 @@ class Continuity:
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
+        self.scrub()                                   # #206 F13: rows kept while privacy was off do not wait for a phone
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
@@ -107,7 +108,7 @@ class Continuity:
             st, body = fn()
             return st, body, False
         with self._lock:
-            self._scrub()
+            self.scrub()
             hit = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
             if hit and now - hit[0]["ts"] <= LEDGER_TTL_S:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
@@ -127,7 +128,7 @@ class Continuity:
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
         with self._lock:
-            self._scrub()
+            self.scrub()
             self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
                     (device, cid, kind, int(status), self._at_rest(body), self.clock()))
 
@@ -138,13 +139,16 @@ class Continuity:
         if not logs.privacy():
             return json.dumps(body)
         items = body.items() if isinstance(body, dict) else ()
-        kept = {k: v for k, v in items if v is None or isinstance(v, (bool, int, float))
-                or (k == "code" and isinstance(v, str) and _CODE.fullmatch(v))}
+        kept = {k: v for k, v in items if k != "not_kept" and (v is None or isinstance(v, (bool, int, float))
+                or (k == "code" and isinstance(v, str) and _CODE.fullmatch(v)))}
         return json.dumps({"not_kept": True, **kept})
 
-    def _scrub(self) -> None:
+    def scrub(self) -> None:
         """#206 F13: with privacy on, an answer stored while privacy was off loses its words and expired answers go.
-        A read-only check first, so the common case writes nothing; each UPDATE/DELETE is one atomic statement."""
+        Runs at start, when privacy is switched on and at each ledger use. A read-only check first, so the common case
+        writes nothing; each UPDATE/DELETE is one atomic statement. Limit: secure_delete overwrites freed pages in the
+        database file; the default rollback journal (journal_mode=DELETE) that briefly held the old page is unlinked,
+        not overwritten, so the old words may remain in free disk blocks until the file system reuses them."""
         if not logs.privacy():
             return
         old = self.clock() - LEDGER_TTL_S
@@ -167,7 +171,7 @@ class Continuity:
 
     def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
         with self._lock:
-            self._scrub()
+            self.scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
             return json.loads(r[0]["body"])

@@ -82,6 +82,49 @@ def test_privacy_on_ledger_expires_old_rows_overwrites_freed_bytes_and_writes_no
     assert writes == []
 
 
+def test_privacy_on_at_start_or_switch_scrubs_the_ledger_without_a_phone(tmp_path):
+    """#206 F13 (review R1): rows kept while privacy was off lose their words when a Continuity starts with privacy on
+    and when privacy is switched on from the dashboard, not only at the next phone use."""
+    from types import SimpleNamespace
+    from jarves import logs, privacy
+    logs.set_privacy(False)
+    Continuity(tmp_path).store("d1", "m-0001", "chat", 200, {"reply": "old secret words"})
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)                                            # a restart: nothing else touches the ledger
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+    logs.set_privacy(False)
+    c.store("d1", "m-0002", "chat", 200, {"reply": "new secret words"})
+    cfg = SimpleNamespace(log=SimpleNamespace(privacy=False))
+    privacy.set_privacy(SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml"), True)
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+    assert c._rows("SELECT body FROM ledger WHERE cid='m-0002'")[0]["body"].startswith(continuity.NOT_KEPT)
+
+
+def test_privacy_switch_creates_no_ledger_when_none_exists(tmp_path):
+    from types import SimpleNamespace
+    from jarves import privacy
+    privacy._scrub_ledger(SimpleNamespace(home=tmp_path))
+    assert not (tmp_path / continuity.DB_FILE).exists()
+
+
+def test_a_body_not_kept_key_cannot_override_the_privacy_marker(tmp_path):
+    """#206 F13 (review R3): a body with not_kept=false still rests marked, so the resend keeps the marker."""
+    from jarves import logs
+    logs.set_privacy(True)
+    c = Continuity(tmp_path)
+    c.store("d1", "m-0001", "chat", 200, {"not_kept": False, "code": "CHAT_RATE", "reply": "words"})
+    assert c._rows("SELECT body FROM ledger")[0]["body"].startswith(continuity.NOT_KEPT)
+    assert c.seen("d1", "m-0001") == {"not_kept": True, "code": "CHAT_RATE"}
+
+
+def test_ledger_uses_the_rollback_journal_documented_in_scrub(tmp_path):
+    """#206 F13 (review R2): scrub() documents the journal_mode=DELETE limit; a WAL switch must revisit it."""
+    c = Continuity(tmp_path)
+    with c._cx() as cx:
+        assert cx.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    assert "journal_mode=DELETE" in Continuity.scrub.__doc__
+
+
 from jarves.mobile import Bridge
 
 DAY = datetime(2026, 10, 22, 12, 0, tzinfo=timezone.utc).timestamp()      # noon
