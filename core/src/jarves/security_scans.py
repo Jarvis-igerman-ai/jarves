@@ -523,8 +523,10 @@ def run_collectors(kind: str, client, version: str, *, home=None, state=None, no
 BODY_VERSION = "b2"   # bump when tracker_body's template changes: forces ONE rewrite so the tracker shows the new text
 
 
-def signature(findings: list[dict], complete: bool) -> str:
-    return hashlib.sha256((BODY_VERSION + "|" + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))).encode()).hexdigest()[:16]
+def signature(findings: list[dict], complete: bool, coverage: dict | None = None) -> str:
+    refused = ",".join(f"{k}={code}" for k, code in _refused(coverage or {}))   # access changes rewrite the owner-action lines
+    return hashlib.sha256((BODY_VERSION + "|" + ("c" if complete else "i") + "|" + ",".join(sorted(f["fp"] for f in findings))
+                           + ("|" + refused if refused else "")).encode()).hexdigest()[:16]
 
 
 def _complete(coverage: dict) -> bool:
@@ -540,6 +542,22 @@ _OWNER_ACTION = {                                                               
     "secret_scanning": "turn on secret scanning for the repo (an owner decision) and give the scan token "
                        "(JARVES_GITHUB_TOKEN) read access to secret-scanning alerts.",
 }
+
+
+def _refused(coverage: dict) -> list[tuple[str, str]]:
+    """Sorted (source, code) pairs whose access was refused (401/403/404); 5xx and skipped are not refusals."""
+    out = []
+    for k, v in sorted(coverage.items()):
+        state, _, code = str(v).partition(":")
+        if state == "incomplete" and code in _REFUSED:
+            out.append((k, code))
+    return out
+
+
+def _owner_action(k: str, code: str) -> str:
+    if code == "http_401":
+        return _TOKEN_INVALID
+    return _OWNER_ACTION.get(k, "give the scan token (JARVES_GITHUB_TOKEN) read access to this source.")
 
 
 def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, kind: str) -> str:
@@ -563,11 +581,8 @@ def tracker_body(findings: list[dict], coverage: dict, resolved: int, sig: str, 
                  + ("Sources not fully read: " + ", ".join(f"{k} ({v})" for k, v in sorted(gaps.items())) if gaps else ""))
     if not _complete(coverage):
         lines.append("Incomplete coverage is never read as zero findings.")
-    for k, v in sorted(gaps.items()):
-        code = v.split(":", 1)[1] if ":" in v else ""
-        if v.startswith("incomplete:") and code in _REFUSED:     # access refused: only the owner can fix this
-            lines.append(f"Owner action for {k} ({code}): " + (_TOKEN_INVALID if code == "http_401" else _OWNER_ACTION.get(
-                k, "give the scan token (JARVES_GITHUB_TOKEN) read access to this source.")))
+    for k, code in _refused(coverage):                          # access refused: only the owner can fix this
+        lines.append(f"Owner action for {k} ({code}): {_owner_action(k, code)}")
     lines += ["", "Only identifiers, counts and severities are published: no secret values, messages or private paths.",
               TRACKER_MARKER, f"<!-- sig:{sig} -->"]
     return "\n".join(lines)
@@ -639,7 +654,7 @@ def run_scan(home: Path | None, kind: str, *, trigger: str = "manual", client: C
         return _fail(home, state, entry, result, now, "failed", type(e).__name__)
     findings, coverage = got["findings"], got["coverage"]
     complete = _complete(coverage)
-    sig = signature(findings, complete)
+    sig = signature(findings, complete, coverage)
     now_fps = {f["fp"] for f in findings}
     resolved = sum(1 for fp, src in state["fingerprints"].items()
                    if fp not in now_fps and _source_complete(src, coverage))

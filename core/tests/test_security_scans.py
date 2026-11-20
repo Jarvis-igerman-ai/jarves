@@ -425,11 +425,14 @@ def test_issue_480_a_refused_source_names_the_owner_action_in_the_tracker():
     assert ss.tracker_body([], {"dependabot": "complete"}, 0, "0" * 16, "light").count("Owner action") == 0
 
 
-def test_issue_480_a_tracker_signed_by_the_old_body_template_is_rewritten_once():
-    import hashlib
-    old = hashlib.sha256(b"i|").hexdigest()[:16]                       # the pre-owner-action signature of the live #480
-    new = ss.signature([], False)
-    assert new != old and new == ss.signature([], False)              # one rewrite, then stable
+def test_issue_480_the_signature_follows_access_changes_but_not_transient_errors():
+    def sig(**cov):
+        return ss.signature([], False, cov)
+    both_403 = sig(dependabot="incomplete:http_403", secret_scanning="incomplete:http_403")
+    assert sig(dependabot="incomplete:http_401", secret_scanning="incomplete:http_403") != both_403   # 403 -> 401
+    assert sig(dependabot="complete", secret_scanning="incomplete:http_403") != both_403             # one recovers
+    assert sig(dependabot="incomplete:http_403", secret_scanning="incomplete:http_403", main_ci="incomplete:http_503") == both_403
+    assert sig(main_ci="incomplete:http_503") == ss.signature([], False)                            # 5xx is retried, not owner action
 
 
 def test_issue_480_a_401_says_the_token_is_invalid_not_turn_a_feature_on():
@@ -444,8 +447,10 @@ def test_issue_480_update_tracker_rewrites_an_old_sig_tracker_once_then_writes_n
     gh = FakeGitHub()
     old = hashlib.sha256(b"i|").hexdigest()[:16]
     gh.issues.append({"number": 480, "state": "open", "html_url": ISSUE_URL, "body": f"old\n{ss.TRACKER_MARKER}\n<!-- sig:{old} -->"})
-    sig = ss.signature([], False)
-    body = ss.tracker_body([], {"dependabot": "incomplete:http_403"}, 0, sig, "light")
+    cov = {"dependabot": "incomplete:http_403"}
+    sig = ss.signature([], False, cov)
+    assert sig != old                                                  # the live #480 was signed b"i|" before this change
+    body = ss.tracker_body([], cov, 0, sig, "light")
     assert ss.update_tracker(gh, body, sig, False, lambda s: None)["status"] == "updated"
     assert ss.update_tracker(gh, body, sig, False, lambda s: None)["status"] == "unchanged"
     assert len(gh.writes()) == 1 and "Owner action for dependabot" in gh.issues[0]["body"]
