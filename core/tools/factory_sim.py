@@ -57,6 +57,21 @@ def _summary(tail: str, limit: int = 600) -> str:
     return text[:limit]
 
 
+def _has_label(repo: str, name: str) -> bool:
+    """True only when `gh label list` succeeds and returns a label called `name`; anything else is False."""
+    got = subprocess.run(["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--limit", "100"],
+                         capture_output=True, text=True, timeout=60)
+    import json
+    try:
+        labels = json.loads(got.stdout) if got.returncode == 0 else None
+    except ValueError:
+        labels = None
+    if not isinstance(labels, list):
+        print(f"label check failed; filing without the '{name}' label")
+        return False
+    return any(isinstance(item, dict) and item.get("name") == name for item in labels)
+
+
 def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves") -> None:
     title = "Factory nightly simulation failed: " + ", ".join(failing)[:120]
     try:
@@ -73,13 +88,11 @@ def file_issue(failing: list, tail: str, repo: str = "Jarvis-igerman-ai/jarves")
                 + ", ".join(failing) + "\n\nSummary:\n```\n" + _summary(tail) + "\n```\nRe-run: python core/tools/factory_sim.py -v")
         create = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body,
                   "--label", "showstopper", "--label", "P1"]
-        made = subprocess.run(create + ["--label", "testing"], capture_output=True, text=True, timeout=60)
-        err = made.stderr or ""
-        if made.returncode != 0 and "label" in err and "not found" in err and "testing" in err:
-            # gh resolves label names before it creates the issue, so a missing area label means nothing
-            # was filed yet: retry once without it rather than lose the failure report (#897)
-            print("area label 'testing' not found; filing without it")
-            made = subprocess.run(create, capture_output=True, text=True, timeout=60)
+        # #897: add the area label only when the repo has it, checked up front rather than by parsing
+        # gh's error wording, so a missing label can never cost the failure report
+        if _has_label(repo, "testing"):
+            create += ["--label", "testing"]
+        made = subprocess.run(create, capture_output=True, text=True, timeout=60)
         if made.returncode != 0:
             print("issue create failed: " + (made.stderr or "").strip()[:200])
     except (OSError, subprocess.SubprocessError) as exc:

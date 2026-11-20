@@ -52,69 +52,59 @@ def test_file_issue_skips_when_duplicate_check_fails(monkeypatch):
     assert len(calls) == 1 and "list" in calls[0]
 
 
-def test_file_issue_body_has_no_raw_output(monkeypatch):
+def _fake_gh(calls, labels_out="[]", labels_rc=0, create_rc=0, create_err=""):
     import subprocess
-    calls = []
 
     def fake_run(cmd, **kw):
         calls.append(cmd)
+        if cmd[:3] == ["gh", "label", "list"]:
+            return subprocess.CompletedProcess(cmd, labels_rc, labels_out, "")
+        if "create" in cmd:
+            return subprocess.CompletedProcess(cmd, create_rc, "", create_err)
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
-    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    return fake_run
+
+
+def _create_labels(calls):
+    (create,) = [c for c in calls if "create" in c]
+    return [create[i + 1] for i, a in enumerate(create) if a == "--label"]
+
+
+def test_file_issue_body_has_no_raw_output(monkeypatch):
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, labels_out='[{"name": "testing"}]'))
     tail = "noise C:\\Users\\bob\\secret.py sk-abcdefghijkl123\nFAILED core/tests/t.py::x - boom\n=== 1 failed in 2s ==="
     factory_sim.file_issue(["x"], tail)
-    body = calls[1][calls[1].index("--body") + 1]
+    (create,) = [c for c in calls if "create" in c]
+    body = create[create.index("--body") + 1]
     assert "noise" not in body and "sk-abc" not in body and "C:\\Users" not in body
     assert "FAILED core/tests/t.py::x" in body
-    create = calls[1]
-    labels = [create[i + 1] for i, a in enumerate(create) if a == "--label"]
-    assert labels == ["showstopper", "P1", "testing"]  # #897: the auto-issue carries an area label
+    assert _create_labels(calls) == ["showstopper", "P1", "testing"]  # #897: the auto-issue carries an area label
 
 
-def test_issue_is_filed_without_area_label_when_that_label_is_missing(monkeypatch, capsys):
-    import subprocess
-    calls = []
-
-    def fake_run(cmd, **kw):
-        calls.append(cmd)
-        if "create" in cmd and "testing" in cmd:
-            return subprocess.CompletedProcess(cmd, 1, "", "could not add label: 'testing' not found")
-        return subprocess.CompletedProcess(cmd, 0, "[]", "")
-    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+def test_issue_is_filed_without_area_label_when_repo_lacks_it(monkeypatch):
+    calls = []  # #897: decided from `gh label list`, not from gh's error wording; exactly one create call
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, labels_out='[{"name": "testing-old"}]'))
     factory_sim.file_issue(["x"], "tail")
-    creates = [c for c in calls if "create" in c]
-    assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
-    assert "area label 'testing' not found; filing without it" in capsys.readouterr().out
+    assert _create_labels(calls) == ["showstopper", "P1"]
 
 
-def test_missing_core_label_does_not_trigger_area_label_retry(monkeypatch, capsys):
-    import subprocess
+def test_label_check_failure_or_malformed_output_files_without_area_label(monkeypatch, capsys):
+    for kw in ({"labels_rc": 1}, {"labels_out": "{not json"}, {"labels_out": '{"name": "testing"}'}):
+        calls = []
+        monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, **kw))
+        factory_sim.file_issue(["x"], "tail")
+        assert _create_labels(calls) == ["showstopper", "P1"]
+        assert "label check failed; filing without the 'testing' label" in capsys.readouterr().out
+
+
+def test_issue_create_failure_is_reported_once(monkeypatch, capsys):
     calls = []
-
-    def fake_run(cmd, **kw):
-        calls.append(cmd)
-        if "create" in cmd:
-            return subprocess.CompletedProcess(cmd, 1, "", "could not add label: 'showstopper' not found")
-        return subprocess.CompletedProcess(cmd, 0, "[]", "")
-    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
-    factory_sim.file_issue(["x"], "tail")
-    out = capsys.readouterr().out
-    assert len([c for c in calls if "create" in c]) == 1
-    assert "area label" not in out and "issue create failed" in out
-
-
-def test_issue_create_is_not_retried_after_other_failure(monkeypatch, capsys):
-    import subprocess
-    calls = []
-
-    def fake_run(cmd, **kw):
-        calls.append(cmd)
-        if "create" in cmd:
-            return subprocess.CompletedProcess(cmd, 1, "", "HTTP 401: Bad credentials")
-        return subprocess.CompletedProcess(cmd, 0, "[]", "")
-    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    monkeypatch.setattr(factory_sim.subprocess, "run",
+                        _fake_gh(calls, labels_out='[{"name": "testing"}]', create_rc=1, create_err="HTTP 401: Bad credentials"))
     factory_sim.file_issue(["x"], "tail")
     assert len([c for c in calls if "create" in c]) == 1
-    assert "issue create failed" in capsys.readouterr().out
+    assert "issue create failed: HTTP 401: Bad credentials" in capsys.readouterr().out
 
 
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
