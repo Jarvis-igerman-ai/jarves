@@ -81,6 +81,17 @@ def test_f13_privacy_on_command_resend_of_an_error_shows_a_message(tmp_path, pri
     assert mobile._again(200, {"ok": True}) == {"ok": True, "replay": True}     # privacy off: unchanged
 
 
+def test_f13_a_privacy_mode_resend_keeps_the_code_it_kept(tmp_path, privacy_on):
+    out = mobile._again(429, {"not_kept": True, "code": "CHAT_RATE"})
+    assert out["code"] == "CHAT_RATE" and out["error_he"] == mobile._MSG["CHAT_RATE"][1]
+    out = mobile._again(409, {"not_kept": True, "code": "NEEDS_PC"})           # a code without a phone message
+    assert out["code"] == "NEEDS_PC" and out["error"] == mobile._MSG["NOT_KEPT"][0]
+    mob = mobile.MobileAccess(tmp_path)
+    mob.cont.store("ph", "m1", "chat", 200, {"reply": "words", "code": "CHAT_RATE"})
+    got = mob.replay("ph", "m1")
+    assert got["code"] == "CHAT_RATE" and got["reply"] == mobile._MSG["CHAT_RATE"][1]
+
+
 # ---------------------------------------------------------------- H2
 def test_h2_a_phone_edit_of_a_confirmed_item_needs_a_new_confirm(home):
     p = Preferences(open_db(home))
@@ -117,3 +128,20 @@ def test_h4_project_guide_says_the_check_command_runs_without_a_sandbox():
     g = guides.find("project_manager")
     assert "check command" in g.privacy_en and "sandbox" in g.privacy_en and "ארגז חול" in g.privacy_he
     assert g.privacy_en in guides.help_text(g)
+
+
+def test_h2_an_edit_whose_row_keeps_flipping_gives_up_and_changes_nothing(home):
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers", "communication")["item"]["id"]
+    real_x = p.db.x
+
+    def flipping_x(sql, args=()):            # another process confirms / re-proposes before every guarded write
+        if sql.startswith("UPDATE learned_prefs SET text"):
+            state = "proposed" if "state='confirmed'" in sql else "confirmed"
+            real_x("UPDATE learned_prefs SET state=? WHERE id=?", (state, pid))
+        return real_x(sql, args)
+    p.db.x = flipping_x
+    with pytest.raises(KeyError):
+        p.edit(pid, "I like long answers", repropose=True)
+    p.db.x = real_x
+    assert p.get(pid)["text"] == "I like short answers"

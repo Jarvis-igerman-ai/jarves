@@ -468,8 +468,9 @@ class MobileAccess:
             return None
         self._replay_failed = False
         if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
-            en, he = _MSG["NOT_KEPT"]
-            hit = {**hit, "code": "NOT_KEPT", "reply": he, "reply_en": en}
+            hit = _not_kept(hit)
+            en, he = _MSG.get(hit["code"], _MSG["NOT_KEPT"])
+            hit.update(reply=he, reply_en=en)
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -663,10 +664,18 @@ def _err(key: str, **fmt) -> dict:
 
 def _again(status: int, obj: dict) -> dict:
     """A resent command answered from the ledger. A privacy-mode row has no words: an error gets a defined message."""
-    out = {**obj, "replay": True}
-    if obj.get("not_kept") and status >= 400 and "error" not in obj:
-        out.update(_err("NOT_KEPT"), code="NOT_KEPT")
+    out = {**_not_kept(obj), "replay": True}
+    if out.get("not_kept") and status >= 400 and "error" not in out:
+        out.update(_err(out["code"] if out["code"] in _MSG else "NOT_KEPT"))
     return out
+
+
+def _not_kept(obj: dict) -> dict:
+    """A privacy-mode ledger row (#206 F13) always carries a code: the fixed one it kept, else NOT_KEPT."""
+    if not obj.get("not_kept"):
+        return obj
+    kept = obj.get("code")
+    return {**obj, "code": kept if isinstance(kept, str) and kept else "NOT_KEPT"}
 
 
 _UNREADABLE, _TOO_BIG = _err("UNREADABLE"), _err("TOO_BIG")
