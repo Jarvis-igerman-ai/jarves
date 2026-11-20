@@ -34,10 +34,10 @@ def test_f13_privacy_on_ledger_keeps_no_words_but_still_dedupes(tmp_path, privac
     c.store("ph", "m1", "chat", 200, {"reply": "your PIN is 4321", "ok": True})
     runs = []
     st, body, again = c.execute("ph", "c1", "plan", lambda: (runs.append(1) or 200, {"ok": True, "state": "done",
-                                                                                     "note": "secret words", "n": 2}))
+                                                                                     "note": "secret words", "pref": 2}))
     assert body["note"] == "secret words"                       # the live answer is unchanged
     st, body, again = c.execute("ph", "c1", "plan", lambda: (runs.append(1) or 200, {}))
-    assert again and runs == [1] and body == {"not_kept": True, "ok": True, "state": "done", "n": 2}
+    assert again and runs == [1] and body == {"not_kept": True, "ok": True, "state": "done", "pref": 2}
     assert not any("4321" in b or "secret" in b for b in _bodies(c))
 
 
@@ -71,6 +71,7 @@ def test_f13_privacy_on_chat_resend_gets_a_defined_message(tmp_path, privacy_on)
     got = mob.replay("ph", "m1")
     assert got["reply"] == mobile._MSG["NOT_KEPT"][1] and "code" not in got
     assert got["reply_en"] == mobile._MSG["NOT_KEPT"][0] and "words" not in json.dumps(got)
+    assert "not_kept" not in got                                                 # #1478 R3: internal marker
 
 
 def test_f13_privacy_on_command_resend_of_an_error_shows_a_message(tmp_path, privacy_on):
@@ -175,7 +176,7 @@ def test_f13_a_privacy_mode_2xx_resend_gets_no_error_code(tmp_path, privacy_on):
     c = Continuity(tmp_path)
     c.execute("ph", "c1", "plan", lambda: (200, {"ok": True, "note": "words"}))
     st, obj, again = c.execute("ph", "c1", "plan", lambda: (200, {}))
-    assert again and st == 200 and mobile._again(st, obj) == {"not_kept": True, "ok": True, "replay": True}
+    assert again and st == 200 and mobile._again(st, obj) == {"ok": True, "replay": True}   # #1478 R3: no marker
 
 
 def test_h2_the_409_has_hebrew_and_its_privacy_resend_keeps_that_message(home, privacy_on):
@@ -228,9 +229,37 @@ def test_f13_a_privacy_mode_approval_resend_keeps_ok_and_the_refusal_code(tmp_pa
     c = Continuity(tmp_path)
     c.execute("ph", "a1", "approval", lambda: mobile.answer_approval(mob, "x1", False, "ph"))
     st, obj, again = c.execute("ph", "a1", "approval", lambda: (500, {}))
-    assert again and st == 200 and mobile._again(st, obj) == {"not_kept": True, "ok": True, "replay": True}
+    assert again and st == 200 and mobile._again(st, obj) == {"ok": True, "replay": True}
     on["phone_approvals"] = False
     c.execute("ph", "a2", "approval", lambda: mobile.answer_approval(mob, "x2", True, "ph"))
     st, obj, again = c.execute("ph", "a2", "approval", lambda: (200, {}))
     out = mobile._again(st, obj)
     assert again and st == 403 and out["code"] == "PHONE_APPROVALS_OFF" and out["error"] and out["error_he"]
+
+
+def test_f13_privacy_mode_keeps_numbers_only_under_known_keys(tmp_path, privacy_on):
+    """#1478 R2: a number under an unlisted key (a code, an amount) is not kept at rest; ids, counts, flags are."""
+    c = Continuity(tmp_path)
+    c.store("ph", "m1", "pref", 200, {"ok": True, "pref": 7, "conflicts": 1, "pin": 4321, "amount": 99.5, "x": None})
+    assert c.seen("ph", "m1") == {"not_kept": True, "ok": True, "pref": 7, "conflicts": 1}
+    assert not any("4321" in b or "99.5" in b for b in _bodies(c))
+
+
+def test_f13_a_privacy_off_store_cannot_land_after_a_privacy_on_scrub(tmp_path, privacy_on, monkeypatch):
+    """#1478 R1: store() holds the lock across scrub, flag and INSERT, so a privacy-on writer cannot scrub in between."""
+    import threading
+    c = Continuity(tmp_path)
+    main = threading.current_thread()
+    monkeypatch.setattr(logs, "privacy", lambda: threading.current_thread() is not main)  # main writes with it off
+    real, done = c._x, threading.Event()
+    other = threading.Thread(target=lambda: (c.store("ph", "m2", "chat", 200, {"ok": True}), done.set()))
+
+    def slow_insert(q, a=()):
+        if q.startswith("INSERT") and threading.current_thread() is main and not other.is_alive() and not done.is_set():
+            other.start()                        # the privacy-on writer runs while this INSERT is pending
+            done.wait(0.3)                       # with the lock it cannot finish yet; without it, it scrubs first
+        return real(q, a)
+    monkeypatch.setattr(c, "_x", slow_insert)
+    c.store("ph", "m1", "chat", 200, {"reply": "secret words"})
+    other.join(5)
+    assert done.is_set() and not any("secret" in b for b in _bodies(c))

@@ -470,7 +470,7 @@ class MobileAccess:
         if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
             en, he = _MSG["NOT_KEPT"]                   # never a kept error text shown as a JARVES chat reply (#1478 R2)
             key = _msg_key(hit)
-            hit = {**hit, "reply": he, "reply_en": en, **(_err(key) if key != "NOT_KEPT" else {})}
+            hit = {**_public(hit), "reply": he, "reply_en": en, **(_err(key) if key != "NOT_KEPT" else {})}
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -667,11 +667,16 @@ def _err(key: str, **fmt) -> dict:
 def _again(status: int, obj: dict) -> dict:
     """A resent command answered from the ledger. A privacy-mode error row has no words: it gets a defined message
     and keeps its fixed code (else NOT_KEPT). A 2xx row gets no code added: success answers carry none."""
-    out = {**obj, "replay": True}
-    if out.get("not_kept") and status >= 400 and "error" not in out:
+    out = {**_public(obj), "replay": True}
+    if obj.get("not_kept") and status >= 400 and "error" not in out:
         kept = out.get("code")
         out.update(_err(_msg_key(out)), code=kept if isinstance(kept, str) and kept else "NOT_KEPT")
     return out
+
+
+def _public(obj: dict) -> dict:
+    """The internal privacy marker of a ledger row is not part of the phone answer (#1478 R3)."""
+    return {k: v for k, v in obj.items() if k != "not_kept"}
 
 
 def _msg_key(obj: dict) -> str:

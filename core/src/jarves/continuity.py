@@ -48,6 +48,9 @@ MAX_TEXT = 1000
 DEVICES = ("desktop", "phone")
 NOT_KEPT = '{"not_kept": true'      # privacy mode (#206 F13): a ledger body starting with this keeps no words
 _KEEP_STR = ("code", "state")      # the only strings kept at rest in privacy mode: fixed codes and states
+# the only number/flag keys kept at rest in privacy mode (#1478 R2): ids, counts, flags and times of the phone command
+# answers (mobile_prefs/mobile_plans/signals_action/answer_approval/chat). A new answer number is dropped unless listed.
+_KEEP_NUM = ("ok", "pref", "plan", "conflicts", "snoozed_until", "stopped")
 
 # signal gate defaults (owner-changeable through settings)
 DEFAULT_HOURLY = 2
@@ -100,8 +103,9 @@ class Continuity:
         """The stored form of an answer. Privacy on: only numbers, flags, null and a fixed code/state survive."""
         if not private:
             return json.dumps(body)
-        kept = {k: v for k, v in (body.items() if isinstance(body, dict) else ()) if k != "not_kept" and (v is None or isinstance(v, (bool, int, float))
-                or (k in _KEEP_STR and isinstance(v, str)))}
+        kept = {k: v for k, v in (body.items() if isinstance(body, dict) else ())
+                if (k in _KEEP_NUM and (v is None or isinstance(v, (bool, int, float))))
+                or (k in _KEEP_STR and isinstance(v, str))}
         return json.dumps({"not_kept": True, **kept})
 
     def _scrub(self, private: bool) -> None:
@@ -152,9 +156,11 @@ class Continuity:
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
-        """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
-        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), self._stored(body), self.clock()))
+        """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules). Under the lock, like
+        execute(): the scrub, the clean flag and the INSERT are one step for other writers (#1478 R1)."""
+        with self._lock:
+            self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                    (device, cid, kind, int(status), self._stored(body), self.clock()))
 
     @staticmethod
     def stale(age_s) -> bool:
