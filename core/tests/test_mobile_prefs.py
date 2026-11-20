@@ -259,11 +259,13 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 def test_the_phone_page_shows_a_privacy_mode_confirm_resend_like_a_live_answer(srv, prefs, monkeypatch):
     """#206 F13 (review R3): the thinner NOT_KEPT replay of a confirm (no 'state') still shows "Saved." on the phone
     page, because the page reloads the list after every action instead of reading the answer body."""
+    import os
     import shutil
     import subprocess
     node = shutil.which("node")
-    if not node:
-        pytest.skip("node not available")
+    if not node:                                         # review R1: the CI images ship node, so CI never skips this
+        assert os.environ.get("CI") != "true", "node is required on CI for the phone-page replay test"
+        pytest.skip("node not available on this machine")
     p, a, b = prefs
     tok, _ = pair(srv)
     monkeypatch.setattr(logs, "privacy", lambda: True)

@@ -459,7 +459,7 @@ class MobileAccess:
             if hit and self.clock() - hit[0] <= REPLY_TTL_S:
                 return hit[1]
         try:
-            hit = self.cont.seen(device, mid, REPLY_TTL_S)           # survives a PC restart (the in-memory copy is gone then)
+            hit = self.cont.seen(device, mid, REPLY_TTL_S, with_status=True)   # survives a PC restart (memory is gone then)
         except Exception as e:                    # the message may now run a second time: say so once per outage
             if not self._replay_failed:
                 logs.warn("mobile", "MOBILE_REPLAY_LOOKUP_FAILED",
@@ -467,7 +467,7 @@ class MobileAccess:
             self._replay_failed = True
             return None
         self._replay_failed = False
-        return _not_kept(hit, chat=True) if hit is not None else None
+        return _not_kept(hit[1], hit[0], chat=True) if hit is not None else None
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
         now = self.clock()

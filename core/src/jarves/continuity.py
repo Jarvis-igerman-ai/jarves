@@ -148,7 +148,10 @@ class Continuity:
         Runs at start, when privacy is switched on and at each ledger use. A read-only check first, so the common case
         writes nothing; each UPDATE/DELETE is one atomic statement. Limit: secure_delete overwrites freed pages in the
         database file; the default rollback journal (journal_mode=DELETE) that briefly held the old page is unlinked,
-        not overwritten, so the old words may remain in free disk blocks until the file system reuses them."""
+        not overwritten, so the old words may remain in free disk blocks until the file system reuses them.
+        Cost: the check scans the ledger, which is bounded by LEDGER_TTL_S (expired rows are deleted here and on each
+        insert) and by the phone rate limits, so a few thousand small rows at most. No "clean" flag is kept on purpose:
+        another process (the dashboard switch, a second Continuity) may write to the same file between uses."""
         if not logs.privacy():
             return
         old = self.clock() - LEDGER_TTL_S
@@ -169,12 +172,14 @@ class Continuity:
         except (TypeError, ValueError):
             return False
 
-    def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
+    def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S, with_status: bool = False):
+        """The kept answer (or None); with_status=True gives (status, body) or None."""
         with self._lock:
             self.scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
-            return json.loads(r[0]["body"])
+            body = json.loads(r[0]["body"])
+            return (int(r[0]["status"]), body) if with_status else body
         return None
 
     # ------------------------------------------------------------------ the shared conversation

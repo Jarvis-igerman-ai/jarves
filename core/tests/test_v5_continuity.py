@@ -99,9 +99,12 @@ def test_privacy_on_at_start_or_switch_scrubs_the_ledger_without_a_phone(tmp_pat
     privacy.set_privacy(SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml"), True)
     assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
     assert c._rows("SELECT body FROM ledger WHERE cid='m-0002'")[0]["body"].startswith(continuity.NOT_KEPT)
-    logs.set_privacy(False)                                             # review R4: "full text" switched off too
+    ctx = SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml")
+    privacy.set_full_text(ctx, True)                                    # review R4: a running 24 h full-text window...
+    assert logs.privacy() is False
     c.store("d1", "m-0003", "chat", 200, {"reply": "full text secret words"})
-    privacy.set_full_text(SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml"), False)
+    privacy.set_full_text(ctx, False)                                   # ...switched off: the words go at once
+    assert logs.privacy() is True
     assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
 
 
@@ -468,6 +471,25 @@ def test_a_privacy_mode_resend_keeps_a_known_refusal_code_and_its_message():
     assert unknown["code"] == "NOT_KEPT" and unknown["reply_en"] == mobile._MSG["NOT_KEPT"][0] and "error" not in unknown
     live = {"reply": "echo", "ok": True}
     assert mobile._not_kept(live, 200, chat=True) is live
+
+
+def test_privacy_mode_chat_rate_resend_on_the_server(srv, fake):
+    """#206 F13 (review R2 on #1444): a refused CHAT_RATE message is never kept, so its resend is refused again with its
+    own message and is not run; a kept refusal row is replayed with its stored status, so it carries error/error_he."""
+    from jarves import logs
+    logs.set_privacy(True)                                             # restored by the autouse _full_text fixture
+    tok, dev = pair(srv)
+    for i in range(mobile.CHAT_RATE_PER_MIN):
+        assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": f"msg-rate{i:04d}"})[0] == 200
+    en, he = mobile._MSG["CHAT_RATE"]
+    for _ in range(2):                                                 # the message, then its resend
+        st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "late", "id": "msg-rrrrrrrr"})
+        assert st == 429 and out["error"] == en and out["error_he"] == he and "NOT_KEPT" not in json.dumps(out)
+    assert "late" not in fake.chats
+    srv.mobile.cont.store(dev, "msg-ssssssss", "chat", 429, {"code": "CHAT_RATE", "reply": "words"})
+    st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "x", "id": "msg-ssssssss"})
+    assert st == 200 and out["replay"] is True and out["code"] == "CHAT_RATE" and "words" not in json.dumps(out)
+    assert out["error"] == en and out["error_he"] == he and out["reply"] == he and out["reply_en"] == en
 
 
 def test_a_late_replayed_chat_is_refused_stale(srv, fake):
