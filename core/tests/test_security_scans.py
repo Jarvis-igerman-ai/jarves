@@ -184,6 +184,7 @@ def test_a_feature_disabled_on_the_repo_is_named_and_still_incomplete(home):    
     ("secret_scanning", "/secret-scanning/alerts", 403, "Secret scanning is disabled on this repository."),
     ("code_scanning", "/code-scanning/alerts", 404, "Code scanning is disabled for this repository."),
     ("dependabot", "/dependabot/alerts", 404, "Dependabot alerts are disabled for this repository."),
+    ("secret_scanning", "/secret-scanning/alerts", 404, "Secret scanning is disabled on this repository."),
     ("secret_scanning", "/secret-scanning/alerts", 403, "Advanced Security must be enabled for this repository."),
 ])
 def test_every_collector_names_a_repo_disabled_source(home, source, path, code, msg):   # #480, each call site
@@ -197,6 +198,19 @@ def test_every_collector_names_a_repo_disabled_source(home, source, path, code, 
     r = ss.run_scan(home, "light", client=call, now=T0, version=VER, sleep=lambda s: None, report=True)
     assert r["coverage"][source] == "incomplete:disabled_on_repo" and not ss._complete(r["coverage"])
     assert gh.writes() and "disabled_on_repo" in gh.issues[0]["body"] and msg not in gh.issues[0]["body"]   # free text stays out
+
+
+@pytest.mark.parametrize("code,msg", [(403, "token disabled"), (403, "Account disabled"), (404, "Not Found"),
+                                      (403, "This repository is disabled by the owner of the token")])
+def test_a_credential_or_other_disabled_message_stays_an_http_code(home, code, msg):      # #480, label accuracy
+    gh = FakeGitHub()
+    base = gh.__call__
+
+    def call(method, p, payload=None):
+        return (code, {"message": msg}) if "/secret-scanning/alerts" in p else base(method, p, payload)
+
+    r = ss.run_scan(home, "light", client=call, now=T0, version=VER, sleep=lambda s: None, report=True)
+    assert r["coverage"]["secret_scanning"] == f"incomplete:http_{code}" and not ss._complete(r["coverage"])
 
 
 def test_resolved_only_when_the_source_was_read_completely(home):

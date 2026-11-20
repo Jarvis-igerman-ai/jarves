@@ -377,7 +377,9 @@ def _loc_of(alert: dict) -> str:
     return str(loc.get("path") or "-")                    # the file only: a line number would change on every refactor
 
 
-_FEATURE_OFF = ("disabled", "must be enabled")   # known GitHub "feature off" phrasings (e.g. Advanced Security)
+# GitHub's exact "feature off on this repo" phrasings only: a bare "disabled" (e.g. "token disabled") is a credential
+# problem and stays http_<code>.
+_FEATURE_OFF = re.compile(r"\b(?:is|are) disabled (?:on|for) this repository\b|\bmust be enabled for this repository\b")
 
 
 def _unread(code: int, data: object) -> dict:
@@ -386,7 +388,7 @@ def _unread(code: int, data: object) -> dict:
     # Best-effort LABEL only: GitHub's free-text message is matched, never copied out. If GitHub rewords it the
     # reason falls back to http_<code>; coverage is incomplete in every branch, so safety never depends on it.
     msg = str(data.get("message") or "") if isinstance(data, dict) else ""
-    disabled = code in (403, 404) and any(p in msg.lower() for p in _FEATURE_OFF)
+    disabled = code in (403, 404) and bool(_FEATURE_OFF.search(msg.lower()))
     return {"coverage": "incomplete", "reason": "disabled_on_repo" if disabled else f"http_{code}", "findings": []}
 
 
