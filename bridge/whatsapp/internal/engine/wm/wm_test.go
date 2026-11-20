@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -202,6 +203,23 @@ func TestHistoryRequestAnchorsOnOldestKnownMessage(t *testing.T) {
 	}
 	if _, err := historyRequest("972500000001@s.whatsapp.net", engine.HistoryAnchor{}, 50); err == nil {
 		t.Fatal("missing anchor accepted")
+	}
+	for _, n := range []int{0, -1, engine.MaxHistoryRequestCount + 1, 1 << 40} {
+		if _, err := historyRequest("972500000001@s.whatsapp.net", engine.HistoryAnchor{ID: "X", TS: 1}, n); err == nil {
+			t.Fatalf("count %d accepted", n)
+		}
+	}
+	if _, err := historyRequest("status@broadcast", engine.HistoryAnchor{ID: "X", TS: 1}, 50); err == nil {
+		t.Fatal("broadcast chat accepted")
+	}
+	// Our request must equal whatsmeow's own builder (it never touches its receiver in the pinned version), so a
+	// whatsmeow bump that changes the request (e.g. ms instead of seconds) fails here.
+	jid, _ := types.ParseJID("120363000000000001@g.us")
+	info := &types.MessageInfo{ID: "G1", Timestamp: time.Unix(1700000000, 0),
+		MessageSource: types.MessageSource{Chat: jid, IsGroup: true}}
+	ours, err := historyRequest(jid.String(), engine.HistoryAnchor{ID: "G1", TS: 1700000000}, engine.MaxHistoryRequestCount)
+	if err != nil || !proto.Equal(ours, (*whatsmeow.Client)(nil).BuildHistorySyncRequest(info, engine.MaxHistoryRequestCount)) {
+		t.Fatalf("differs from whatsmeow: %v %v", ours, err)
 	}
 }
 

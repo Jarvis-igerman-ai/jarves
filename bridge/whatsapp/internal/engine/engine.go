@@ -128,7 +128,9 @@ type Engine interface {
 	// SendText sends one text message to one person. Returns the message id and server timestamp.
 	SendText(ctx context.Context, to, text string) (id string, ts float64, err error)
 	// RequestHistory asks the phone for up to count messages of chat sent before anchor (on-demand history
-	// sync). Results arrive later as MessageEvent{History: true}; the API layer applies every rule to them.
+	// sync); count is 1..MaxHistoryRequestCount, anything else is refused. Results arrive later as
+	// MessageEvent{History: true, OnDemand: true, RequestID: <echoed id>}, followed by one closing
+	// HistoryAnswerEvent per answer; the API layer applies every rule to them.
 	// id (from NewRequestID) is sent as the request's message id, so its answer can be matched to it.
 	// Invariant: never deliver an event synchronously on the caller's goroutine (a caller holding a lock that the
 	// event handler also takes would deadlock). whatsmeow dispatches events on its own goroutines (UNVERIFIED
@@ -137,6 +139,9 @@ type Engine interface {
 	// NewRequestID returns a fresh message id for RequestHistory.
 	NewRequestID() string
 }
+
+// MaxHistoryRequestCount bounds one on-demand history request (the backfill asks for 50 at a time).
+const MaxHistoryRequestCount = 500
 
 // HistoryAnchor is the oldest message already known for a chat; on-demand history returns messages before it.
 type HistoryAnchor struct {

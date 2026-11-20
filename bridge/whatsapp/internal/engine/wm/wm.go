@@ -322,12 +322,13 @@ func isChatServer(server string) bool {
 // historyRequest builds the peer message asking for count messages of chat older than anchor.
 func historyRequest(chat string, anchor engine.HistoryAnchor, count int) (*waE2E.Message, error) {
 	jid, err := types.ParseJID(chat)
-	direct := jid.Server == types.DefaultUserServer || jid.Server == types.HiddenUserServer
-	if err != nil || jid.User == "" || anchor.ID == "" || !(direct || jid.Server == types.GroupServer) {
+	if err != nil || jid.User == "" || !isChatServer(jid.Server) || anchor.ID == "" || count < 1 ||
+		count > engine.MaxHistoryRequestCount {
 		return nil, errors.New("bad history request")
 	}
-	// Built here (same fields as whatsmeow's BuildHistorySyncRequest) so no client, live or nil, is needed.
-	// OldestMsgTimestampMS carries seconds despite its name, as whatsmeow sends it.
+	// Built here (same fields as whatsmeow's BuildHistorySyncRequest, which a test compares) so no client, live or
+	// nil, is needed. OldestMsgTimestampMS carries seconds despite its name: the pinned whatsmeow (send.go,
+	// BuildHistorySyncRequest) fills it with Timestamp.Unix() and says so. What a real phone expects is UNVERIFIED.
 	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
 		Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE.Enum(),
 		PeerDataOperationRequestMessage: &waE2E.PeerDataOperationRequestMessage{
