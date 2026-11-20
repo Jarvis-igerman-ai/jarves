@@ -31,8 +31,20 @@ def test_unsafe_rules_are_reported(rule):
 
 def test_default_list_passes_the_check():
     """The same check that names the #1311 rules finds nothing in the shipped default (console rules included)."""
-    assert [(r, claude.worker_rule_problem(r)) for r in _default() if claude.worker_rule_problem(r)] == []
+    bad = [(r, claude.worker_rule_problem(r, PY, CON)) for r in _default() if claude.worker_rule_problem(r, PY, CON)]
+    assert bad == []
     assert "Bash(git status)" in _default() and "Bash(gh pr view:*)" in _default()
+
+
+@pytest.mark.parametrize("rule", [f"Bash(node {CON} --home {HOME} next *)",          # another interpreter
+                                  f"Bash({PY} /tmp/workflow_console.py --home {HOME} next *)",   # another console file
+                                  f"Bash({PY} {CON} --home {HOME} autopilot *)",       # an owner-only subcommand
+                                  f"Bash({PY} {CON} --home {HOME} next * ; sh x *)"])
+def test_console_routes_are_tied_to_the_exact_python_and_console(rule):
+    """Review R4: a console route counts only with the exact interpreter and console autopilot_allowed_tools uses."""
+    assert claude.worker_rule_problem(rule, PY, CON)
+    assert claude.worker_rule_problem(f"Bash({PY} {CON} --home {HOME} next *)")   # without the expected values: refused
+    assert not claude.worker_rule_problem(f"Bash({PY} {CON} --home {HOME} next *)", PY, CON)
 
 
 def test_worker_cannot_edit_git_metadata():

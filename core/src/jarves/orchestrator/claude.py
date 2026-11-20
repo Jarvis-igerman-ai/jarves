@@ -254,14 +254,14 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 # #1311: read-only only. Wildcard rules for pytest, npm/npx, ruff, git diff/log (--output), git commit/merge/rebase (hooks,
 # --exec), cd and mkdir could write outside the worktree or run worker-written code, so a worker could rewrite
-# autopilot.json without naming it. They stay out (fail closed): a worker edits files and reports; the manager runs
-# tests, commits and pushes. Every rule here must pass worker_rule_problem().
+# autopilot.json without naming it. They stay out (fail closed): such a call is refused, the worker edits files and
+# reports. Nothing here makes another agent run its tests or commit. Every rule here must pass worker_rule_problem().
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(git status)", "Bash(git diff)", "Bash(git log)",
     "Bash(jarvis status)", "Bash(jarvis doctor)", "Bash(jarvis features)",
     "Bash(gh pr view:*)", "Bash(gh pr checks:*)", "Bash(gh pr diff:*)", "Bash(gh issue view:*)", "Bash(gh run view:*)",
 )
-# Always denied for a worker, whatever the allow list says. Workers commit locally; the manager/steward pushes and merges.
+# Always denied for a worker, whatever the allow list says. Workers do not commit, push or merge (#1311: no git commit rule).
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
                                 "Bash(taskkill*)", "Bash(powershell*)", "Bash(*autopilot.json*)",
@@ -279,19 +279,21 @@ WORKER_PERMISSION_MODE = "acceptEdits"      # file edits inside the worker's own
 # #784: the only workflow_console subcommands an autopilot worker may run unprompted. autopilot, authorize, bootstrap,
 # dispatch, seed, sync, recover, close-superseded, answer, confirm, reopen, unlock and open are deliberately absent.
 WORKER_CONSOLE_SUBCOMMANDS = ("next", "report", "task", "check", "transition", "ask", "check-touch", "own", "msg", "status")
-_CONSOLE_RULE = re.compile(r"^\S+ \S*workflow_console\.py --home \S+ (%s)( \*)?$" % "|".join(map(re.escape, WORKER_CONSOLE_SUBCOMMANDS)))
+_CONSOLE_TAIL = re.compile(r"^--home \S+ (%s)( \*)?$" % "|".join(map(re.escape, WORKER_CONSOLE_SUBCOMMANDS)))
 
 
-def worker_rule_problem(rule: str) -> str:
+def worker_rule_problem(rule: str, python: str = "", console: str = "") -> str:
     """#1311: why an allow rule could let a headless worker write outside its worktree or run worker-written code
-    ('' = read-only). Wildcards are allowed only after a known read-only command or a #784 workflow-console route."""
+    ('' = read-only). Wildcards are allowed only after a known read-only command or a #784 workflow-console route
+    that starts with exactly this `python` and `console` (either slash form)."""
     if rule in ("Read", "Grep", "Glob"):
         return ""
     if not (rule.startswith("Bash(") and rule.endswith(")")):
         return "only Read, Grep, Glob and Bash(...) rules"
     body = rule[5:-1]
-    if _CONSOLE_RULE.match(body):
-        return ""
+    for p, c in {(python, console), (python.replace("\\", "/"), console.replace("\\", "/"))}:
+        if p and c and body.startswith(f"{p} {c} ") and _CONSOLE_TAIL.match(body[len(p) + len(c) + 2:]):
+            return ""
     if body.endswith(":*") or body.endswith(" *"):
         prefix = body[:-2]
         return "" if prefix in _READ_ONLY_PREFIXES else f"wildcard after '{prefix}' can write files or run code"
