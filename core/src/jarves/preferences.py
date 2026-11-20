@@ -43,10 +43,31 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
+# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 20 chars before them
+# (then they are refused too: fails safe).
+_HEX_SECRET = re.compile(
+    r"\b(?:keys?|tokens?|secrets?|webhook|hmac|signature|ה?(?:מפתח|טוקן|סוד))\b[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
+    r"(?<![0-9a-f])[0-9a-f]{41,}(?![0-9a-f])", re.I)
+_BASE32_SECRET = re.compile(r"(?<![A-Za-z0-9_])(?=[A-Z]*[2-7])[A-Z2-7]{16,}=*(?![A-Za-z0-9_])")
+_BASE62_RUN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9]{20,}(?![A-Za-z0-9_])")
+
+
+def _cls(c: str) -> int:
+    return 0 if c.isdigit() else 1 if c.isupper() else 2
+
+
+def _random_base62(run: str) -> bool:
+    """Mixed upper/lower/digit run whose character class flips often (random), unlike CamelCase words."""
+    if len({_cls(c) for c in run}) < 3:
+        return False
+    flips = sum(_cls(a) != _cls(b) for a, b in zip(run, run[1:]))
+    return flips >= 0.45 * (len(run) - 1)
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    return bool(_SENSITIVE.search(t) or _HEX_SECRET.search(t) or _BASE32_SECRET.search(t)
+                or any(_random_base62(m.group()) for m in _BASE62_RUN.finditer(t)))
 
 
 def normalize(text: str) -> str:
