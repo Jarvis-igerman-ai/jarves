@@ -48,7 +48,7 @@ _SENSITIVE = re.compile(
     # "token"/"secret" are everyday words ("a token of thanks", "a secret party") and count only as credential phrases
     # or a labelled value (token: / secret=).
     r"טוקן|מפתח\s+(?:api|גישה|פרטי|סודי)|"
-    r"api[\s_-]?key|(?:private|access|secret)[\s_-]?key|(?:access|auth|bearer|refresh|api)[\s_-]?token|"
+    r"\bapi[\s_-]?key|(?:private|access|secret)[\s_-]?key|\b(?:access|auth|bearer|refresh|api)[\s_-]?token|"
     r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]|"
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)   # UUID-shaped keys (dashed runs)
 # An unlabelled credential: a long run of the base64 key alphabet with high per-character entropy.
@@ -56,8 +56,8 @@ _SENSITIVE = re.compile(
 # A run containing / is scored whole (base64 secrets such as AWS secret keys contain /) unless it is a URL path: it
 # follows '.', ':' or '/' (host.tld/..., scheme://...) or every segment is a plain path word; then only its segments
 # are scored, plus its non-word segments joined (a webhook credential split over short segments), so
-# example.com/owner/repo/pull/1450 stays ordinary. A bare 40-hex string is still refused on purpose:
-# it is indistinguishable from a 40-hex API token, and a short commit id (7-12 chars) is allowed.
+# example.com/owner/repo/pull/1450 stays ordinary. A hex run of 32+ chars is refused by rule, whatever its entropy:
+# it is indistinguishable from a 128/160/256-bit hex key (dashless UUID, 40-hex token); a short commit id is allowed.
 _KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
 _PATH_WORD = re.compile(r"[a-z]*|[A-Z][a-z]*|\d+")
 _MIN_ENTROPY = 3.5                # bits per character for letter+digit runs; English words and slugs stay below this
@@ -67,6 +67,11 @@ _MIN_ENTROPY_LETTERS = 4.2        # letter-only runs need more: random mixed cas
 # optional digits at either end, such as office365 or 2fa, or 3+ digits), so word slugs stay ordinary.
 _DASHED = re.compile(r"[A-Za-z0-9_-]{20,}")
 _PLAIN_SEG = re.compile(r"\d*(?:[a-z]{2,}|[A-Z][a-z]+|[A-Z]{2,})\d*|\d{3,}")
+_HEX_KEY = re.compile(r"[0-9a-fA-F]{32,}")
+# An identifier (Base64EncoderV2Helper, iPhone15ProMaxCase2024) is mostly Capitalised words split into few long tokens;
+# a random key switches case/digits every 1-2 chars and has few vowels, so it keeps being scored.
+_CAMEL_WORD = re.compile(r"[A-Z][a-z]{2,}")
+_TOKEN = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
 
 
 def _entropy(s: str) -> float:
@@ -76,7 +81,14 @@ def _entropy(s: str) -> float:
 def _random_run(s: str) -> bool:
     if len(s) < 20 or not re.search(r"[A-Za-z]", s):
         return False
+    if _HEX_KEY.fullmatch(s):
+        return True
     if re.search(r"\d", s):
+        words = sum(len(w) for w in _CAMEL_WORD.findall(s))
+        letters = [c for c in s.lower() if c.isalpha()]
+        vowels = sum(c in "aeiou" for c in letters) / len(letters)   # words ~40% vowels, random letters ~19%
+        if words * 2 >= len(s) and len(_TOKEN.findall(s)) * 3 <= len(s) and vowels >= 0.3:
+            return False
         return _entropy(s) >= _MIN_ENTROPY
     upper = sum(c.isupper() for c in s) / len(s)              # random mixed case is about half upper case
     return len(s) >= 24 and 0.3 <= upper <= 0.7 and _entropy(s) >= _MIN_ENTROPY_LETTERS

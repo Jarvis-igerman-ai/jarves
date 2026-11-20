@@ -30,6 +30,9 @@ LEAKY = [
     "Zx9Qw3Er7Ty1Ui5Op2As",                                      # 20-char letter+digit run, entropy 4.3 (R3 boundary)
     "0123456789abcdef0a1b",                                      # 20-char hex run, entropy 3.9 (R3 boundary)
     "hooks.example.com/services/T0AB12CD/B0EF34GH/Xy7Kq2",       # credential split over short URL segments (R3)
+    "key 5e8a1c5e0a9b1c8e5a0e1c9a8b5e0a1c",                      # low-entropy random 32-hex API key (#1464 R1)
+    "id 3f2a9c1eb7d44e8a9c5fa1b2c3d4e5f6",                       # dashless UUID (#1464 R1)
+    "the API key is in the drawer",                              # capitalised keyword still refused (#1464 R2)
 ]
 SAFE = [
     "short answers in the morning",
@@ -61,6 +64,11 @@ SAFE = [
     "Zx9Qw3Er7Ty1Ui5Op2A",                                     # 19 chars: below the 20-char minimum (R3 boundary)
     "9af144bface62e59ef2b",                                    # 20-char hex, entropy 3.35 < 3.5 (R3 boundary)
     "serial AAAA1111BBBB2222CCCC",                             # 20-char code with repeats, entropy 2.3 (R3)
+    "an okapi key ring",                                       # "api key" inside a word (#1464 R2)
+    "the okapi token in the zoo",
+    "rename Base64EncoderV2Helper",                            # CamelCase identifier with digits (#1464 R3)
+    "buy an iPhone15ProMaxCase2024",                           # product name with digits (#1464 R3)
+    "use LivingRoomLamp2KitchenSpeaker3",
 ]
 
 def test_known_shapes_come_from_the_log_redactor():
@@ -68,6 +76,21 @@ def test_known_shapes_come_from_the_log_redactor():
     from jarves import logs
     assert logs.has_secret("AKIA" + "ABCDEFGHIJKLMNOP") and logs.has_secret("use sk-proj-AbCdEfGhIjKlMnOp for answers")
     assert not logs.has_secret("prefer Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk")      # this one needs the entropy branch
+    for text in ("skip songs by skrillex", "ghost stories at night"):     # sk-/gh-like words are not shapes (#1464 R4)
+        assert not logs.has_secret(text) and not looks_sensitive(text)
+
+
+def test_random_hex_keys_are_refused_by_rule_not_by_entropy_luck():
+    # 32+ hex chars (128-bit keys, dashless UUIDs, 40-hex tokens) are refused whatever their entropy (#1464 R1)
+    import random
+    rnd = random.Random(1099)
+    for n in (32, 40, 64):
+        for _ in range(200):
+            assert looks_sensitive("key " + "".join(rnd.choice("0123456789abcdef") for _ in range(n)))
+    assert looks_sensitive("key " + "ab12" * 8)                              # 32-hex, entropy 2.0
+    # the identifier exemption (#1464 R3) must not let random 32-char letter+digit keys through
+    alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    assert all(looks_sensitive("key " + "".join(rnd.choice(alnum) for _ in range(32))) for _ in range(500))
 
 
 TOKEN_TEXT = "use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather"
