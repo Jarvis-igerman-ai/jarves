@@ -7,11 +7,12 @@ hidden while it unloads; it must NOT send that beat, or a closed dashboard count
 Clock-free and handler-only: setInterval is stubbed before the page loads (the 2 s / 20 s polls can never stand in for
 the handler), requests are recorded on the browser CONTEXT (so a departing page's requests are kept), and "no beat was
 sent" is proven by ordering, not by sleeping: the page's next fetch (a sentinel) is awaited, and a beat issued earlier
-would have been recorded before it. Missing Playwright or browser = a failure, never a skip (CI installs both)."""
+would have been recorded before it; the marker is compared with the load's own beat (baseline), never time.time().
+Browser: the same launch path as the other *_browser.py tests (apc.launch_kwargs: Playwright Chromium or a local
+Chrome/Edge, msedge on Windows); the CI core job installs the 'browser' extra. Missing = a failure, never a skip."""
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -56,7 +57,7 @@ def browser():
 
 
 @pytest.fixture
-def tab(browser, dash):  # noqa: F811
+def tab(browser, dash, home):  # noqa: F811
     ctx = browser.new_context()
     urls: list[str] = []
     ctx.on("request", lambda r: urls.append(r.url))
@@ -66,8 +67,9 @@ def tab(browser, dash):  # noqa: F811
     p.wait_for_function("() => document.getElementById('apPage') && !document.querySelector('#apPage .muted')",
                         timeout=30000)
     assert any("/api/approvals" in u for u in urls) and not _hidden_beats(urls)
+    base = _marker_mtime(home)                               # written by the load's visible beat: the baseline
     try:
-        yield ctx, p, urls
+        yield ctx, p, urls, base
     finally:
         ctx.close()
 
@@ -76,23 +78,27 @@ def _hidden_beats(urls):
     return [u for u in urls if "/api/approvals?hidden=1" in u]
 
 
-def _marker_ahead(home) -> float:
-    return (home / "approvals" / "dashboard_seen").stat().st_mtime - time.time()
+def _marker_mtime(home) -> float:
+    return (home / "approvals" / "dashboard_seen").stat().st_mtime
+
+
+def _unload_events(events) -> list[str]:
+    return [e for e in events if e in ("pagehide", "visibilitychange")]
 
 
 def test_tab_going_hidden_sends_a_hidden_beat_at_once(tab, home):
-    _, p, _ = tab
+    _, p, _, base = tab
     with p.expect_request(lambda r: "/api/approvals?hidden=1" in r.url, timeout=5000) as beat:
         p.evaluate(SET_HIDDEN, True)
     beat.value.response()                                    # the server handled it: marker dated forward (90 s)
-    assert _marker_ahead(home) > appr.DASHBOARD_FRESH_S
+    assert _marker_mtime(home) - base > appr.DASHBOARD_FRESH_S     # baseline-relative: no wall-clock read
     with p.expect_request(lambda r: r.url.endswith("/api/approvals"), timeout=5000):    # shown again: catch up (#159)
         p.evaluate(SET_HIDDEN, False)
 
 
 @pytest.mark.parametrize("pagehide_first", [True, False], ids=["pagehide_first", "visibility_first"])
 def test_synthetic_unload_sends_no_hidden_beat(tab, pagehide_first):
-    _, p, urls = tab
+    _, p, urls, _ = tab
     p.evaluate(UNLOAD, pagehide_first)
     p.evaluate(DRAIN)
     with p.expect_request(lambda r: "/api/health" in r.url, timeout=5000):        # sentinel: later than any beat
@@ -102,15 +108,16 @@ def test_synthetic_unload_sends_no_hidden_beat(tab, pagehide_first):
 
 @pytest.mark.parametrize("how", ["close", "navigate"])
 def test_real_close_or_navigation_sends_no_hidden_beat(tab, home, dash, how):  # noqa: F811
-    ctx, p, urls = tab
+    ctx, p, urls, base = tab
     order: list[str] = []
     p.on("console", lambda m: order.append(m.text))
     p.evaluate(WATCH)
     if how == "close":
         p.close(run_before_unload=False)                     # returns once the page is gone (lifecycle complete)
-        assert order == ["pagehide", "visibilitychange"]     # the real unload steps ran (Chromium's order)
+        assert _unload_events(order)[:2] == ["pagehide", "visibilitychange"]   # the real unload steps ran (Chromium's order)
     else:
         p.goto(dash.url.split("/?")[0] + "/api/health", wait_until="load")   # returns once the old document unloaded
-        assert p.evaluate("() => sessionStorage.getItem('unload')").split() == ["pagehide", "visibilitychange"]
+        seen = p.evaluate("() => sessionStorage.getItem('unload') || ''").split()
+        assert _unload_events(seen)[:2] == ["pagehide", "visibilitychange"]
     assert not _hidden_beats(urls)
-    assert _marker_ahead(home) <= appr.DASHBOARD_FRESH_S     # server side: not dated into the 90 s hidden window
+    assert _marker_mtime(home) - base <= appr.DASHBOARD_FRESH_S   # server side: not dated into the 90 s hidden window
