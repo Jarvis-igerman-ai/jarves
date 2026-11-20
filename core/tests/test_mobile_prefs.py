@@ -177,7 +177,7 @@ def test_prefs_js_is_served_csp_safe_and_translated():
 
 
 def test_privacy_mode_resend_of_a_phone_command_still_answers_ok(srv, prefs):
-    """#206 F13: a privacy-mode ledger row keeps no words; a 2xx resend still says ok and carries a defined code (the
+    """#206 F13: a privacy-mode ledger row keeps no words; a 2xx resend still says ok and gets no error code added (the
     phone pages show their own note on success, so no field they read is lost)."""
     p, a, b = prefs
     tok, _ = pair(srv)
@@ -191,4 +191,4 @@ def test_privacy_mode_resend_of_a_phone_command_still_answers_ok(srv, prefs):
         logs.set_privacy(before)
     assert first[0] == again[0] == 200 and first[1]["state"] == "confirmed"
     assert again[1]["replay"] is True and again[1]["ok"] is True and again[1]["state"] == "confirmed"
-    assert again[1]["code"] == "NOT_KEPT" and again[1]["pref"] == b and "error" not in again[1]
+    assert "code" not in again[1] and again[1]["pref"] == b and "error" not in again[1]

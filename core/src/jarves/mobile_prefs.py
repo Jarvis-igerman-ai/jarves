@@ -77,8 +77,9 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: needs a new confirm
             return 200, {"ok": True, "pref": pid}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
-    except PrefChanged as e:                                  # #206 H2: a racing confirm won; nothing stored
-        return 409, {"error": str(e), "code": "PREF_CHANGED"}
+    except PrefChanged:                                       # #206 H2: a racing confirm won; nothing stored
+        from .mobile import _err
+        return 409, {**_err("PREF_CHANGED"), "code": "PREF_CHANGED"}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}
     except KeyError:

@@ -77,6 +77,7 @@ class Continuity:
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
         self._lock = threading.RLock()
+        self._clean = False                            # True once the ledger was scrubbed with privacy on (#206 F13)
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -98,12 +99,16 @@ class Continuity:
         return json.dumps({"not_kept": True, **kept})
 
     def _scrub(self) -> None:
-        """Privacy on: blank the words of answers stored while privacy was off (a Core start or a ledger write).
+        """Privacy on: blank the words of answers stored while privacy was off. Runs at a Core start and then only at
+        the first ledger write with privacy on after a write made with privacy off, not on every write.
         logs privacy defaults to on and the Core runs logs.setup before it builds a Continuity (MobileAccess opens
         it lazily), so the owner's setting is known here. The file uses the rollback journal (no WAL)."""
-        if logs.privacy():
+        if not logs.privacy():
+            self._clean = False                        # this write may keep words: the next privacy-on write cleans
+        elif not self._clean:
             self._x("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
                     (json.dumps({"not_kept": True}), len(NOT_KEPT), NOT_KEPT))
+            self._clean = True
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:

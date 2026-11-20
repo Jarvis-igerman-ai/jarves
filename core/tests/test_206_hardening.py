@@ -3,9 +3,8 @@ H3/H4 guide notes. Hermetic: tmp homes, no network, no clock."""
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
-from pathlib import Path
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -25,7 +24,7 @@ def privacy_on():
 
 
 def _bodies(c: Continuity) -> list[str]:
-    with sqlite3.connect(c.path) as cx:
+    with closing(sqlite3.connect(c.path)) as cx:
         return [r[0] for r in cx.execute("SELECT body FROM ledger")]
 
 
@@ -50,8 +49,9 @@ def test_f13_rows_from_before_privacy_lose_their_words_and_freed_bytes_are_overw
     c = Continuity(tmp_path)                                    # a Core start with privacy on cleans the ledger
     assert not any("secret" in b for b in _bodies(c))
     assert c.seen("ph", "m1") == {"not_kept": True}
-    assert c._cx().execute("PRAGMA secure_delete").fetchone()[0] == 1
-    assert c._cx().execute("PRAGMA journal_mode").fetchone()[0] == "delete"   # no -wal file can keep old pages
+    with closing(c._cx()) as cx:
+        assert cx.execute("PRAGMA secure_delete").fetchone()[0] == 1
+        assert cx.execute("PRAGMA journal_mode").fetchone()[0] == "delete"   # no -wal file can keep old pages
     assert not list(tmp_path.glob("continuity.db-*"))                          # no journal left behind
     assert b"old secret" not in c.path.read_bytes()                           # the raw file holds no old words
 
@@ -69,7 +69,7 @@ def test_f13_privacy_on_chat_resend_gets_a_defined_message(tmp_path, privacy_on)
     mob = mobile.MobileAccess(tmp_path)
     mob.cont.store("ph", "m1", "chat", 200, {"reply": "words", "ok": True})
     got = mob.replay("ph", "m1")
-    assert got["code"] == "NOT_KEPT" and got["reply"] == mobile._MSG["NOT_KEPT"][1]
+    assert got["reply"] == mobile._MSG["NOT_KEPT"][1] and "code" not in got
     assert got["reply_en"] == mobile._MSG["NOT_KEPT"][0] and "words" not in json.dumps(got)
 
 
@@ -169,11 +169,39 @@ def test_h2_an_edit_of_a_row_deleted_meanwhile_is_not_found(home):
         racing.edit(pid, "I like long answers")
 
 
-def test_f13_phone_pages_read_code_only_from_failed_answers():
-    """A 2xx resend carries code=NOT_KEPT: the shared api() reads d.code only when !r.ok, prefs.js ignores the body."""
-    base = Path(mobile.__file__).parent / "dashboard_static" / "mobile"
-    reads = [(f.name, ln) for f in base.glob("*.js") for ln in f.read_text(encoding="utf-8").splitlines()
-             if re.search(r"\bd\.code\b", ln)]
-    assert reads == [("app.js", next(ln for ln in (base / "app.js").read_text(encoding="utf-8").splitlines()
-                                     if "e.code = d.code" in ln))]
-    assert reads[0][1].lstrip().startswith("if (!r.ok)")
+def test_f13_a_privacy_mode_2xx_resend_gets_no_error_code(tmp_path, privacy_on):
+    """R1 (#1453): a success resend must not carry code=NOT_KEPT, which the phone could read as a failure."""
+    c = Continuity(tmp_path)
+    c.execute("ph", "c1", "plan", lambda: (200, {"ok": True, "note": "words"}))
+    st, obj, again = c.execute("ph", "c1", "plan", lambda: (200, {}))
+    assert again and st == 200 and mobile._again(st, obj) == {"not_kept": True, "ok": True, "replay": True}
+
+
+def test_h2_the_409_has_hebrew_and_its_privacy_resend_keeps_that_message(home, privacy_on):
+    """R2 (#1453): PREF_CHANGED has a Hebrew text and a resend of the kept 409 shows it, not the generic NOT_KEPT."""
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers", "communication")["item"]["id"]
+    mob = SimpleNamespace(bridge=None, _prefs=Preferences(open_db(home), clock=_flipping(home, pid)), home=home)
+    c = Continuity(home)
+    d = {"op": "edit", "pref": pid, "text": "I like long answers"}
+    st, out, _ = c.execute("ph", "c9", "pref", lambda: mobile_prefs.action(mob, d, "ph"))
+    assert st == 409 and out["error_he"] == mobile._MSG["PREF_CHANGED"][1]
+    st, obj, again = c.execute("ph", "c9", "pref", lambda: (200, {}))
+    out = mobile._again(st, obj)
+    assert again and out["code"] == "PREF_CHANGED" and out["error_he"] == mobile._MSG["PREF_CHANGED"][1]
+
+
+def test_f13_the_scrub_runs_once_not_before_every_ledger_write(tmp_path, privacy_on, monkeypatch):
+    """R3 (#1453): with privacy on, the full-table scrub runs at start, then only after a privacy-off write."""
+    c = Continuity(tmp_path)
+    sql = []
+    real = c._x
+    monkeypatch.setattr(c, "_x", lambda q, a=(): sql.append(q) or real(q, a))
+    c.store("ph", "m1", "chat", 200, {"ok": True})
+    c.execute("ph", "c1", "plan", lambda: (200, {"ok": True}))
+    assert not [q for q in sql if q.startswith("UPDATE ledger")]
+    logs.set_privacy(False)
+    c.store("ph", "m2", "chat", 200, {"reply": "old secret"})
+    logs.set_privacy(True)
+    c.store("ph", "m3", "chat", 200, {"ok": True})
+    assert len([q for q in sql if q.startswith("UPDATE ledger")]) == 1 and not any("secret" in b for b in _bodies(c))

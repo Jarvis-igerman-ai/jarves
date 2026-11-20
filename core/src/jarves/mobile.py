@@ -468,9 +468,8 @@ class MobileAccess:
             return None
         self._replay_failed = False
         if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
-            hit = _not_kept(hit)
-            en, he = _MSG.get(hit["code"], _MSG["NOT_KEPT"])
-            hit.update(reply=he, reply_en=en)
+            en, he = _MSG[_msg_key(hit)]
+            hit = {**hit, "reply": he, "reply_en": en}
         return hit
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
@@ -639,6 +638,8 @@ _MSG = {
     "STALE": ("this message waited too long while offline: send it again", "ההודעה חיכתה יותר מדי זמן בלי חיבור: שלחו אותה שוב"),
     "NOT_KEPT": ("this was already answered, but privacy mode did not keep the answer: ask again if you need it",
                  "על זה כבר נענה, אבל מצב פרטיות לא שמר את התשובה: שאלו שוב אם צריך"),
+    "PREF_CHANGED": ("this preference changed while it was being edited: nothing was saved, try again",
+                     "ההעדפה השתנתה בזמן העריכה: שום דבר לא נשמר, נסו שוב"),
     "CHAT_RATE": ("too many messages: wait half a minute and send again", "יותר מדי הודעות: חכו חצי דקה ושלחו שוב"),
     "EMPTY": ("the message is empty: type something and send again", "ההודעה ריקה: כתבו משהו ושלחו שוב"),
     "NOT_CONNECTED": ("JARVES on the computer is not connected yet: check it is fully started and try again",
@@ -663,19 +664,19 @@ def _err(key: str, **fmt) -> dict:
 
 
 def _again(status: int, obj: dict) -> dict:
-    """A resent command answered from the ledger. A privacy-mode row has no words: an error gets a defined message."""
-    out = {**_not_kept(obj), "replay": True}
+    """A resent command answered from the ledger. A privacy-mode error row has no words: it gets a defined message
+    and keeps its fixed code (else NOT_KEPT). A 2xx row gets no code added: success answers carry none."""
+    out = {**obj, "replay": True}
     if out.get("not_kept") and status >= 400 and "error" not in out:
-        out.update(_err(out["code"] if out["code"] in _MSG else "NOT_KEPT"))
+        kept = out.get("code")
+        out.update(_err(_msg_key(out)), code=kept if isinstance(kept, str) and kept else "NOT_KEPT")
     return out
 
 
-def _not_kept(obj: dict) -> dict:
-    """A privacy-mode ledger row (#206 F13) always carries a code: the fixed one it kept, else NOT_KEPT."""
-    if not obj.get("not_kept"):
-        return obj
+def _msg_key(obj: dict) -> str:
+    """The phone message for a privacy-mode ledger row (#206 F13): its kept code when known, else NOT_KEPT."""
     kept = obj.get("code")
-    return {**obj, "code": kept if isinstance(kept, str) and kept else "NOT_KEPT"}
+    return kept if isinstance(kept, str) and kept in _MSG else "NOT_KEPT"
 
 
 _UNREADABLE, _TOO_BIG = _err("UNREADABLE"), _err("TOO_BIG")
