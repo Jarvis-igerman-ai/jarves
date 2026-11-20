@@ -528,7 +528,7 @@ def status_lines(s: dict) -> list[str]:
         he, en = NEXT_TEXT[kind]
         out.append(clilang.fmt(he.format(t=_local(s["next_at"])), en.format(t=_local(s["next_at"]))))
     if "approval_probe_failed" in (s.get("busy") or []):
-        out.append(clilang.fmt("בדיקת האישורים הממתינים נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של ג'רביס "
+        out.append(clilang.fmt("בדיקת האישורים הממתינים נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של JARVES "
                                "בדרך כלל עוזרת). להתקין בכל זאת: jarvis update auto now",
                                "The pending-approval check is failing, so the update waits until it works (restarting "
                                "JARVES usually helps). To install anyway: jarvis update auto now"))

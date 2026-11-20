@@ -431,12 +431,12 @@ def test_busy_probe_error_is_explained_in_plain_words(home, server, keys, monkey
     r.au.busy = lambda: auto_update.core_busy(core)
     r.ready()
     assert r.tick() == "busy" and r.tick(600) == "busy" and r.launched == []
-    lines = " ".join(auto_update.status_lines(r.au.status()))
-    assert "בדיקת האישורים" in lines and "pending-approval check is failing" in lines
-    assert "jarvis update auto now" in lines and "approval_probe_failed" not in lines
+    lines = auto_update.status_lines(r.au.status())      # copy-edit proof: the override, never the raw key
+    extra = [x for x in lines if "jarvis update auto now" in x]
+    assert len(extra) == 1 and "approval_probe_failed" not in " ".join(lines)
     r.au.answer("now")                                   # the owner's explicit choice still installs
     assert r.tick() == "installing" and len(r.launched) == 1
-    assert "pending-approval check" not in " ".join(auto_update.status_lines(r.au.status()))
+    assert not [x for x in auto_update.status_lines(r.au.status()) if "jarvis update auto now" in x]
 
 
 def test_busy_probe_error_is_logged_once_per_outage(monkeypatch):
