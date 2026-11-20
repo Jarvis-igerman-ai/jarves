@@ -128,7 +128,9 @@
   // keeps the marker fresh for 90 s after a hidden beat). It only marks presence; nothing is approved by it.
   setInterval(() => { if (!document.hidden) refresh(); }, 2000);
   setInterval(() => { if (document.hidden) refresh(); }, 20000);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+  // #477: beat on EVERY visibility change: hiding sends a ?hidden=1 beat at once (the last visible beat lasts only 15 s,
+  // while a throttled 20 s hidden timer may first fire ~1 min later); showing catches up at once (#159)
+  document.addEventListener("visibilitychange", () => refresh());
   window.addEventListener("hashchange", () => { last = ""; refresh(); });
   document.addEventListener("DOMContentLoaded", refresh);
 })();
