@@ -132,6 +132,7 @@
   // timer may first fire ~1 min later); showing catches up at once (#159). Closing or leaving the page also turns it
   // hidden, followed by pagehide in the same unload steps: the hide beat waits one task and is skipped after pagehide,
   // so a closed dashboard never counts as a place to answer for the 90 s hidden window (it lapses after 15 s).
+  // A background tab's timers are aligned, so the deferred beat may run up to ~1 s late: well inside the 15 s window.
   let leaving = false;
   window.addEventListener("pagehide", () => { leaving = true; });
   window.addEventListener("pageshow", () => { leaving = false; });

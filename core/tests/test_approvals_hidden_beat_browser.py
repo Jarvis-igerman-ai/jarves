@@ -12,6 +12,7 @@ Browser: the same launch path as the other *_browser.py tests (apc.launch_kwargs
 Chrome/Edge, msedge on Windows); the CI core job installs the 'browser' extra. Missing = a failure, never a skip."""
 from __future__ import annotations
 
+import importlib.metadata
 import shutil
 import sys
 from pathlib import Path
@@ -70,6 +71,8 @@ def _open(browser, dash, home):  # noqa: F811
     ctx = browser.new_context()
     urls: list[str] = []
     ctx.on("request", lambda r: urls.append(r.url))
+    scripts: list = []                                       # the approvals.js response the page itself ran
+    ctx.on("response", lambda r: scripts.append(r) if urlsplit(r.url).path.endswith("/approvals.js") else None)
     ctx.add_init_script(NO_POLL)
     p = ctx.new_page()
     p.goto(dash.url + "#/approvals")
@@ -77,6 +80,7 @@ def _open(browser, dash, home):  # noqa: F811
                         timeout=30000)
     assert any("/api/approvals" in u for u in urls) and not _hidden_beats(urls)
     base = _marker_mtime(home)                               # written by the load's visible beat: the baseline
+    p.loaded_js = scripts[0].text() if scripts else ""
     return ctx, p, urls, base
 
 
@@ -100,9 +104,9 @@ def leaky_tab(browser, dash, home, tmp_path, monkeypatch):  # noqa: F811
     (static / "approvals.js").write_text(js.replace(LEAK_GUARD, "refresh();"), encoding="utf-8")
     monkeypatch.setattr(dashboard, "STATIC", static)
     t = _open(browser, dash, home)
-    js_url = next(u for u in t[2] if urlsplit(u).path.endswith("/approvals.js"))
-    served = t[1].evaluate("(u) => fetch(u, {cache: 'no-store'}).then(r => r.text())", js_url)
-    assert LEAK_GUARD not in served, "the server still serves the fixed approvals.js: the leak guard would test nothing"
+    ran = t[1].loaded_js                                     # the body of the response the page executed, not a refetch
+    assert ran and LEAK_GUARD not in ran and "refresh();" in ran, \
+        "the page did not run the leaky approvals.js: the leak guard would test nothing"
     try:
         yield t
     finally:
@@ -165,8 +169,18 @@ def test_leak_guard_leaky_variant_is_caught_on_real_close(leaky_tab, dash):  # n
     # guard for the browser-behaviour dependency: the real close must still let a hide beat out of the leaky variant.
     # (Same-tab navigation does not let one out even from the leaky variant in this Chromium, so only close is guarded.)
     _, p, urls, _ = leaky_tab
-    assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]   # includes the sentinel
-    assert _hidden_beats(urls), "real close no longer runs the departing page's handlers: the close test is moot"
+    assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]   # both real unload events ran
+    assert _hidden_beats(urls), (
+        f"real close no longer runs the departing page's handlers (Playwright {_pw_version()}; checked on 1.63 and 1.64): "
+        "most likely a browser/Playwright bump changed unload behaviour, so the close test is moot. "
+        "Re-check the real-close repro on this version before changing approvals.js.")
+
+
+def _pw_version() -> str:
+    try:
+        return importlib.metadata.version("playwright")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 @pytest.mark.parametrize("how", ["close", "navigate"])
