@@ -1241,6 +1241,11 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     finish(m)
     integ = gitops.project_root(home, 1) / "integration"
     approved = sh(integ, "git", "rev-parse", "HEAD").strip()
+    (repo / "owner.txt").write_text("owner\n")                          # your branch moved on: a real merge commit
+    sh(repo, "git", "config", "user.name", "Owner")                       # the merge commit uses your own identity
+    sh(repo, "git", "config", "user.email", "owner@example.invalid")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "owner", "--no-verify")
     seen = []
 
     def ask(prompt, **_):
@@ -1253,6 +1258,8 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     r = m.call("ship_plan", project="demo", apply=True)
     assert r["ok"] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
     assert approved[:12] in seen[0]
+    subject = sh(repo, "git", "log", "-1", "--format=%s").strip()          # review round 2 R4: history names both
+    assert subject == f"Merge {gitops.integration_branch(1)} at {approved[:12]}"
     late = sh(integ, "git", "rev-parse", "HEAD").strip()
     plan = m.call("ship_plan", project="demo")
     assert plan["commit"] == late and all(late in c for c in plan["commands"][:2])    # the commands name the commit
@@ -1261,3 +1268,19 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     (repo / ".git" / "config").write_text("[core\n broken")              # review R5: a git failure is not NO_BRANCH
     r = m.call("ship_plan", project="demo", apply=True)
     assert r["code"] == "GIT_ERROR" and "could not be read" in r["text"]
+
+
+def test_a_diff_command_in_the_shared_config_cannot_skip_the_review(env, tmp_path):
+    """PR #1468 review round 2: JARVES blanks a repository-scope `diff.<x>.command`, so git could not run it and the
+    review diff came back empty, which skips the review. The review diff now uses git's own diff only."""
+    m, repo, home = env
+    (repo / ".gitattributes").write_text("* diff=d\n")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "attrs", "--no-verify")
+    sh(repo, "git", "config", "diff.d.command", (tmp_path / "no-such-diff-tool").as_posix())
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.py=1\nREVIEW_CHANGES_1", scope=["a.py"], flow="work test review merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done" and t["rounds"] == 1                  # the review ran and sent it back once

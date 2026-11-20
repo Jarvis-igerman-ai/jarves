@@ -457,7 +457,9 @@ class StageEngine:
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
         base = gitops.integration_branch(p["id"])
-        diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
+        # git's own diff only: a diff command or textconv from the shared config is blanked (#1390), so git could not
+        # run it and an empty diff would skip the review
+        diff = gitops.git(t["worktree"], "diff", "--no-ext-diff", "--no-textconv", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
             return ("next",)
         if self._day_cap():

@@ -74,13 +74,25 @@ NO_HOOKS = _no_hooks_path()
 # (e.g. a git-lfs filter). Signing programs fall back to git's default program, everything else to "" (git runs nothing;
 # a driver it then cannot run counts as a conflict or a failed command). Editors: GIT_EDITOR/GIT_SEQUENCE_EDITOR=":".
 RUN_KEYS = re.compile(r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)|"
-                      r"diff\.external|hook\..+\.command|core\.(sshcommand|askpass|pager|editor)|sequence\.editor|"
+                      r"diff\.external|core\.(sshcommand|askpass|pager|editor)|sequence\.editor|"
                       r"credential\.(.+\.)?helper|gpg\.(program|openpgp\.program|x509\.program|ssh\.program|"
                       r"ssh\.defaultkeycommand)|core\.(gitproxy|alternaterefscommand)|"
                       r"remote\..+\.(uploadpack|receivepack|vcs))$")
 # commit and merge start `maintenance run --auto` / `gc --auto`, which can run `gc.recentObjectsHook` (multi-valued:
 # an extra `-c` value cannot remove the shared config's own values). JARVES never needs auto-maintenance (#1468 R1).
 NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
+# fixed-name command keys JARVES never needs (it never fetches, pushes, pages or edits): blanked on every call, so a key
+# toggled between the config read and git's own read gains nothing (#1468 round 2 R2). Not diff.external (an empty one
+# breaks a patch diff; the review diff uses --no-ext-diff) and not signing programs (the owner's own may be set).
+NO_CMDS = [x for k in ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor",
+                       "core.gitProxy", "core.alternateRefsCommand", "credential.helper") for x in ("-c", f"{k}=")]
+# refused at repository scope: a conditional include can match only in a child git (worktree add checks out with HEAD
+# on the new branch and the gitdir under .git/worktrees/), which the one config read cannot see (round 2 R1); a config
+# hook (`hook.<name>.*`, git 2.5x) has no safe neutral value: an empty command makes git fail, and its event list is
+# multi-valued (round 2 R3, seen on git 2.56 in CI)
+_REFUSED = re.compile(r"^(includeif|hook)\.")
+CONFIG_REFUSED = ("the repository's git config could not be read, or uses a conditional include (includeIf) or a "
+                  "config hook (hook.<name>)")
 _SIGNING_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                      "gpg.ssh.program": "ssh-keygen"}
 _OWNER_SCOPES = ("system", "global")
@@ -92,11 +104,13 @@ def _git_env() -> dict[str, str]:
 
 def _config_overrides(cwd: str | Path) -> list[str] | None:
     """`-c key=<neutral>` for every RUN_KEYS entry set at repository scope, read right before each command (the
-    config can change between commands). None: the config could not be read (git exits 1 when nothing matches).
+    config can change between commands). None: the config could not be read (git exits 1 when nothing matches), or
+    a key cannot be overridden safely.
     Residual: an agent writing the config between this read and git's own read is not covered."""
     try:
         p = subprocess.run(["git", "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", "config",
-                            "--show-scope", "--null", "--get-regexp", RUN_KEYS.pattern], cwd=str(cwd),
+                            "--show-scope", "--null", "--get-regexp", f"{RUN_KEYS.pattern}|{_REFUSED.pattern}"],
+                           cwd=str(cwd),
                            capture_output=True, text=True, timeout=30, creationflags=_NOWIN, env=_git_env(),
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
@@ -106,9 +120,13 @@ def _config_overrides(cwd: str | Path) -> list[str] | None:
     parts, out, seen = p.stdout.split("\0"), [], set()
     for scope, entry in zip(parts[0::2], parts[1::2]):
         key = entry.split("\n", 1)[0]
-        if scope not in _OWNER_SCOPES and "=" in key:
-            return None                             # `-c` would split the name at "=": refuse instead of guessing
-        if scope not in _OWNER_SCOPES and key not in seen:
+        if scope in _OWNER_SCOPES:
+            continue
+        if "=" in key or _REFUSED.match(key.lower()):
+            return None                             # `-c` would split the name at "="; the others: see _REFUSED
+        if not RUN_KEYS.match(key.lower()):
+            continue
+        if key not in seen:
             seen.add(key)
             out += ["-c", f"{key}={_SIGNING_DEFAULTS.get(key.lower(), '')}"]
     return out
@@ -122,13 +140,14 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Every other command the repository's own config names (filter and merge
-    drivers, diff commands, signing programs, config hooks: RUN_KEYS) is overridden too (#1390), see _config_overrides."""
+    drivers, diff commands, signing programs: RUN_KEYS) is overridden too (#1390), see _config_overrides."""
     over = _config_overrides(cwd)
     if over is None:
         if check:
-            raise GitError("the repository's git config could not be read")
-        return subprocess.CompletedProcess(["git", *args], 128, "", "the repository's git config could not be read")
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *NO_AUTO, *over]
+            raise GitError(CONFIG_REFUSED)
+        return subprocess.CompletedProcess(["git", *args], 128, "", CONFIG_REFUSED)
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *NO_AUTO, *NO_CMDS,
+           *over]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=_git_env(), encoding="utf-8", errors="replace")
@@ -277,14 +296,15 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
-    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
+    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189).
+    message: the merge commit's message (default: git's own, e.g. "Merge commit '<sha>'" for a commit)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

@@ -273,9 +273,8 @@ def test_commands_named_in_the_shared_config_never_run(tmp_path):
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
     for key in ("filter.x.clean", "filter.x.smudge", "merge.m.driver", "diff.d.command", "diff.external",
-                "gpg.program", "hook.x.command"):
+                "gpg.program"):
         subprocess.run(["git", "config", key, cmd], cwd=repo, check=True)
-    subprocess.run(["git", "config", "hook.x.event", "pre-commit"], cwd=repo, check=True)
     (repo / "f.txt").write_text("main side", encoding="utf-8")
     subprocess.run(["git", "add", "f.txt"], cwd=repo, capture_output=True, check=True)
     assert marker.exists()                          # the setup works: without the fix git runs the clean filter
@@ -303,7 +302,9 @@ def test_only_repository_scope_command_settings_are_overridden(monkeypatch, tmp_
     default program, the rest to empty); the owner's global settings (e.g. a git-lfs filter) are left alone."""
     home = tmp_path / "owner-home"
     home.mkdir()
-    (home / ".gitconfig").write_text("[filter \"lfs\"]\n\tclean = git-lfs clean -- %f\n", encoding="utf-8")
+    (home / ".gitconfig").write_text("[filter \"lfs\"]\n\tclean = git-lfs clean -- %f\n"
+                                     "[includeIf \"gitdir:/nowhere/\"]\n\tpath = owner.cfg\n",   # the owner's own: allowed
+                                     encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     repo = _repo(tmp_path)
@@ -346,7 +347,8 @@ def test_auto_maintenance_never_runs_from_a_jarves_command(tmp_path):
     for i in range(2):                                              # two packs: over gc.autoPackLimit
         (repo / f"p{i}.txt").write_text(str(i), encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-        subprocess.run(["git", "-c", "gc.auto=0", "commit", "-qm", f"p{i}", "--no-verify"], cwd=repo, check=True)
+        subprocess.run(["git", *gitops.IDENT, "-c", "gc.auto=0", "commit", "-qm", f"p{i}", "--no-verify"], cwd=repo,
+                       check=True)                                  # CI has no git identity of its own
         subprocess.run(["git", "repack", "-q"], cwd=repo, check=True)
     packs = sorted((repo / ".git" / "objects" / "pack").glob("*.pack"))
     assert len(packs) == 2
@@ -355,15 +357,46 @@ def test_auto_maintenance_never_runs_from_a_jarves_command(tmp_path):
     assert sorted((repo / ".git" / "objects" / "pack").glob("*.pack")) == packs and not marker.exists()
 
 
-def test_config_hooks_never_run_on_a_commit_with_verification(tmp_path):
-    """#1468 review R4: a commit WITHOUT --no-verify runs no config hook (`hook.<name>.command`) set in the shared
-    config: its command is overridden. Git 2.43 (CI) has no config hooks, so there the commit proves nothing about
-    git's own handling of the empty command (UNVERIFIED on newer git); the override itself is always checked."""
+def test_a_config_hook_in_the_shared_config_fails_closed(tmp_path):
+    """#1468 review R3 (round 1 R4): newer git (2.56 in CI) runs `hook.<name>.command` for `hook.<name>.event`, even on
+    a commit with verification. An empty command is no safe override there (git fails "cannot run"), so a
+    repository-scope config hook stops every JARVES git command, whatever the git version."""
     repo, marker = _repo(tmp_path), tmp_path / "cfg-hook-ran.txt"
     for key, value in (("hook.x.command", f"echo ran > '{marker.as_posix()}'"), ("hook.x.event", "pre-commit")):
         subprocess.run(["git", "config", key, value], cwd=repo, check=True)
-    assert "hook.x.command=" in (gitops._config_overrides(repo) or [])
     (repo / "v.txt").write_text("v", encoding="utf-8")
-    gitops.git(repo, "add", "-A")
-    gitops.git(repo, "commit", "-qm", "verified")
+    with pytest.raises(gitops.GitError, match="config hook"):
+        gitops.git(repo, "add", "-A")
+    with pytest.raises(gitops.GitError, match="config hook"):
+        gitops.git(repo, "commit", "-qm", "verified")
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("condition", ["onbranch:jarves/**", "gitdir:**/worktrees/**"])
+def test_a_conditional_include_in_the_shared_config_fails_closed(tmp_path, condition):
+    """PR #1468 review round 2 R1: the overrides come from one config read in JARVES's own context, but `worktree add`
+    checks out in a child where HEAD is the new branch and the gitdir is `.git/worktrees/<id>`. A repository-scope
+    `includeIf` matching only there pulled in a smudge filter the read never saw. Such a config now stops the command."""
+    repo, marker = _repo(tmp_path), tmp_path / "include-ran.txt"
+    _hook(tmp_path / "evil-bin", "cmd", marker)
+    (repo / ".gitattributes").write_text("* filter=x\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
+    evil = tmp_path / "evil.cfg"
+    evil.write_text(f"[filter \"x\"]\n\tsmudge = {(tmp_path / 'evil-bin' / 'cmd').as_posix()}\n", encoding="utf-8")
+    subprocess.run(["git", "config", f"includeIf.{condition}.path", evil.as_posix()], cwd=repo, check=True)
+    with pytest.raises(gitops.GitError, match="conditional include"):
+        gitops.ensure_integration(tmp_path / "home", str(repo), 1)
+    assert not marker.exists()
+
+
+def test_fixed_name_command_keys_are_overridden_on_every_call(monkeypatch, tmp_path):
+    """Review round 2 R2: keys with a fixed name are overridden whatever the config read saw, so an agent toggling one
+    between JARVES's read and git's own read gains nothing. Only `<section>.<name>.*` keys depend on the read."""
+    calls: list = []
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
+    gitops.git(tmp_path, "status")
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    for key in ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor", "core.gitProxy",
+                "core.alternateRefsCommand", "credential.helper"):
+        assert f"{key}=" in pairs
