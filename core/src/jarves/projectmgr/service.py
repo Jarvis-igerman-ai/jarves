@@ -932,13 +932,16 @@ class Manager(StageEngine):
             return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed.")
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         br = gitops.integration_branch(p["id"])
+        # #1407: resolve the commit first; the stat and the commands describe that commit, not the branch an agent can
+        # still move. commit="" when the branch has no commit (review round 3 R3)
+        ref = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False).stdout.strip()
         try:
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{br}", check=False).stdout.strip() or "no changes"
+            stat = (gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{ref}", check=False).stdout.strip()
+                    or "no changes") if ref else "no commit"
         except (OSError, gitops.GitError):
             stat = "unknown"
-        # #1407: the commands name the commit this answer describes, not the branch an agent can still move
-        ref = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False).stdout.strip() or br
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{ref}", f"git -C \"{p['path']}\" merge --no-ff {ref}   # when you are happy",
+        tip = ref or br
+        cmds = [f"git -C \"{p['path']}\" diff HEAD...{tip}", f"git -C \"{p['path']}\" merge --no-ff {tip}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
         return _res(True, "ok", f"{p['name']}: integration branch {br} has {stat}. JARVES does not merge or push; "
                                 "the commands are in the result.", branch=br, commit=ref, worktree=str(wt), commands=cmds)

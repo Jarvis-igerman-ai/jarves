@@ -80,7 +80,9 @@ RUN_KEYS = re.compile(r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|d
                       r"remote\..+\.(uploadpack|receivepack|vcs))$")
 # commit and merge start `maintenance run --auto` / `gc --auto`, which can run `gc.recentObjectsHook` (multi-valued:
 # an extra `-c` value cannot remove the shared config's own values). JARVES never needs auto-maintenance (#1468 R1).
-NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0"]
+# Submodule recursion is off too: a submodule's own config (`.git/modules/<name>/config`, agent-writable, never read
+# here) could name a filter that a recursing checkout or reset would run (#1468 round 3 R2).
+NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "submodule.recurse=false"]
 # fixed-name command keys JARVES never needs (it never fetches, pushes, pages or edits): blanked on every call, so a key
 # toggled between the config read and git's own read gains nothing (#1468 round 2 R2). Not diff.external (an empty one
 # breaks a patch diff; the review diff uses --no-ext-diff) and not signing programs (the owner's own may be set).
@@ -106,7 +108,8 @@ def _config_overrides(cwd: str | Path) -> list[str] | None:
     """`-c key=<neutral>` for every RUN_KEYS entry set at repository scope, read right before each command (the
     config can change between commands). None: the config could not be read (git exits 1 when nothing matches), or
     a key cannot be overridden safely.
-    Residual: an agent writing the config between this read and git's own read is not covered."""
+    Accepted residual risk (P1 #1483, PR #1468 round 3 R1): `<section>.<name>.*` keys (filter, merge and diff
+    drivers) depend on this read, so an agent that toggles one between this read and git's own read can still win."""
     try:
         p = subprocess.run(["git", "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", "config",
                             "--show-scope", "--null", "--get-regexp", f"{RUN_KEYS.pattern}|{_REFUSED.pattern}"],

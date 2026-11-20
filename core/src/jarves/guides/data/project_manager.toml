@@ -92,6 +92,12 @@ he = "GitHub הוא תוסף לא חובה, פרויקט בפרויקט: off (כ
 en = "GitHub is an optional add-on, per project: off (default, local git only), read (reads issues and CI status), write (only after jarvis project config --github write, from the PC; needs gh installed and signed in). Without GitHub everything still works locally."
 
 [[problems]]
+he = "פעולת git של ג'ארביס נכשלת בפרויקט שמשתמש ב-git-lfs או במנהל מיזוג משלו"
+en = "A JARVES git step fails in a project that uses git-lfs or its own merge driver"
+fix_he = "ג'ארביס מתעלם מפקודות שהגדרות git של המאגר עצמו מפעילות (מסננים כמו filter.lfs, merge.<שם>.driver, diff.<שם>.command), כי סוכנים יכולים לכתוב לשם. העבירו הגדרות כאלה להגדרות הגלובליות שלכם (למשל התקנת git-lfs גלובלית ולא מקומית); הגדרות גלובליות ומערכתיות נשארות. includeIf או hook.<שם> בהגדרות המאגר עוצרים את הפקודה עם הודעה."
+fix_en = "JARVES ignores commands that the repository's own git config names (filters such as filter.lfs, merge.<name>.driver, diff.<name>.command), because agents can write that config. Move such settings to your global git config (for example git lfs install instead of git lfs install --local); global and system settings stay. An includeIf or hook.<name> in the repository config stops the command with a message."
+
+[[problems]]
 he = "ג'ארביס לא מוצא את התיקייה של הפרויקט"
 en = "JARVES does not find the project's folder"
 fix_he = "הוא מחפש תיקיות git בשם הזה בבית, work, projects, src, code, Documents ושולחן העבודה. אם יש כמה, אמרו מילה מהנתיב (\"בתיקייה work\"), את הנתיב המלא, או הוסיפו מקום ב-projects.search_roots בהגדרות."

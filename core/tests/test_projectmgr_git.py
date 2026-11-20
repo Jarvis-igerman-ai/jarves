@@ -400,3 +400,29 @@ def test_fixed_name_command_keys_are_overridden_on_every_call(monkeypatch, tmp_p
     for key in ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor", "core.gitProxy",
                 "core.alternateRefsCommand", "credential.helper"):
         assert f"{key}=" in pairs
+
+
+def test_a_submodule_filter_never_runs_from_a_jarves_command(tmp_path):
+    """PR #1468 review round 3 R2: a submodule's own config (`.git/modules/<name>/config`) is in the agent-writable
+    shared `.git`, but JARVES never reads it. With `submodule.recurse=true` at repository scope a checkout recursed into
+    the submodule and ran a smudge filter named there. JARVES turns submodule recursion off on every call."""
+    marker, g = tmp_path / "sub-filter-ran.txt", ["git", *gitops.IDENT, "-c", "protocol.file.allow=always"]
+    _hook(tmp_path / "evil-bin", "cmd", marker)
+    src = tmp_path / "subsrc"
+    src.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=src, check=True)
+    for name in ("a", "b"):                                         # the second submodule commit adds a filtered file
+        (src / ".gitattributes").write_text("* filter=x\n", encoding="utf-8")
+        (src / name).write_text(name, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=src, check=True)
+        subprocess.run([*g, "commit", "-qm", name, "--no-verify"], cwd=src, check=True)
+    repo = _repo(tmp_path)
+    subprocess.run([*g, "submodule", "-q", "add", src.as_posix(), "sub"], cwd=repo, check=True, capture_output=True)
+    subprocess.run([*g, "commit", "-qm", "sub at b", "--no-verify"], cwd=repo, check=True)
+    subprocess.run(["git", "checkout", "-q", "HEAD~1"], cwd=repo / "sub", check=True, capture_output=True)
+    subprocess.run([*g, "commit", "-qam", "sub at a", "--no-verify"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "-f", ".git/modules/sub/config", "filter.x.smudge",
+                    (tmp_path / "evil-bin" / "cmd").as_posix()], cwd=repo, check=True)
+    subprocess.run(["git", "config", "submodule.recurse", "true"], cwd=repo, check=True)
+    gitops.git(repo, "checkout", "-q", "HEAD~1")                    # recursing would check out `b` in the submodule
+    assert not marker.exists()
