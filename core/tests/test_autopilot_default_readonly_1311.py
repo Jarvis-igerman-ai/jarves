@@ -1,4 +1,6 @@
 """#1311: the built-in default autopilot worker allow list grants no rule that can write a file or run worker-written code."""
+import fnmatch
+
 import pytest
 
 from jarves.orchestrator.claude import WORKER_ALLOWED_TOOLS, WORKER_DENY, ManagedClaude, autopilot_allowed_tools
@@ -19,12 +21,41 @@ def test_default_list_has_no_write_or_exec_rule(rule):
 
 @pytest.mark.parametrize("cmd", ["git diff", "git log"])
 def test_diff_and_log_output_option_is_denied_in_the_worker_argv(cmd):
-    """`git diff --output=<path>` / `git log --output=<path>` write any file; the read-only rules stay, the option is denied."""
+    """`git diff --output=<path>` / `git log --output=<path>` write any file; the deny rule reaches the worker argv."""
     rule = f"Bash({cmd}*--output*)"
-    assert f"Bash({cmd}:*)" in WORKER_ALLOWED_TOOLS and rule in WORKER_DENY
+    assert rule in WORKER_DENY
     argv = ManagedClaude(["claude"], ".", plugin_dir=None, on_event=lambda k, d: None,
                          allowed_tools=autopilot_allowed_tools(PY), permission_mode="acceptEdits").argv
     assert rule in argv[argv.index("--disallowedTools") + 1:]
+
+
+def _rule_matches(rule: str, cmd: str) -> bool:
+    """A FAKE of Claude Code's Bash rule semantics (prefix `X:*`, `*` glob, else exact). Not the real matcher (UNVERIFIED)."""
+    body = rule[len("Bash("):-1]
+    if body.endswith(":*"):
+        return cmd == body[:-2] or cmd.startswith(body[:-2] + " ")
+    return fnmatch.fnmatchcase(cmd, body) if "*" in body else cmd == body
+
+
+def _worker_may_run(cmd: str) -> bool:
+    rules = [r for r in autopilot_allowed_tools(PY, None, CON, HOME) if r.startswith("Bash(")]
+    return any(_rule_matches(r, cmd) for r in rules) and not any(_rule_matches(r, cmd) for r in WORKER_DENY if r.startswith("Bash("))
+
+
+@pytest.mark.parametrize("cmd", [
+    "git diff --output=../h/autopilot.json", "git diff --out=../h/x", "git diff --outp=../h/x", "git diff --ou ../h/x",
+    "git log --output=../h/x", "git log --out=../h/x", "git log -p --outpu=../h/x", "git diff --stat --out=../h/x",
+    "gh run download 1 -D ../h", "gh pr checkout 7", "gh issue develop 5 --checkout", "pytest -q", "npm test",
+    f"{PY} -m pytest -q", "ruff check --output-file ../h/x", "git commit -m x"])
+def test_write_or_exec_commands_are_not_runnable_by_a_default_worker(cmd):
+    """#1311 R2/R3: option abbreviations (`--out`, `--outp`) and local-write gh subcommands fall outside every allow rule."""
+    assert not _worker_may_run(cmd)
+
+
+@pytest.mark.parametrize("cmd", ["git status", "git diff", "git diff --stat", "git log --oneline -20", "gh pr view 7",
+                                 "gh pr checks 7", "gh run view 9 --log", "gh issue list", "ls -la", "grep -rn x ."])
+def test_read_only_commands_stay_runnable(cmd):
+    assert _worker_may_run(cmd)
 
 
 def test_owner_override_is_still_used_verbatim():

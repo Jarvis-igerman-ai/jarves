@@ -254,10 +254,13 @@ _SECRET_KEY = re.compile(r"(?i)(token|secret|password|passwd|credential|api_?key
 # The owner can replace the list with the `worker_allowed_tools` key of the autopilot policy file (autopilot.json).
 WORKER_ALLOWED_TOOLS: tuple[str, ...] = (     # #1311: read-only only; no rule may write a path or run worker-written code
     "Bash(jarvis status:*)", "Bash(jarvis doctor:*)", "Bash(jarvis selftest:*)", "Bash(jarvis features:*)", "Bash(ls:*)", "Bash(grep:*)", "Bash(wc:*)", "Bash(cd:*)", "Bash(mkdir:*)",
-    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(gh pr:*)", "Bash(gh issue:*)", "Bash(gh run:*)",
-)
+    "Bash(git status:*)", "Bash(git diff)", "Bash(git diff --stat)", "Bash(git diff --cached)", "Bash(git log --oneline -20)",
+    "Bash(gh pr view:*)", "Bash(gh pr list:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)", "Bash(gh pr status:*)",
+    "Bash(gh issue view:*)", "Bash(gh issue list:*)", "Bash(gh run view:*)", "Bash(gh run list:*)",
+)   # git diff/log are exact (no free options: `--output=<path>` and its abbreviations); no `gh pr checkout`, `gh run download`
 # #1311: removed from the default (the owner can restore any through `worker_allowed_tools`): pytest/`-m pytest` (conftest.py,
-# --junitxml, --basetemp), npm/npx (scripts), ruff (--output-file), git add/commit/merge/rebase/switch/worktree/fetch/branch (hooks).
+# --junitxml, --basetemp), npm/npx (scripts), ruff (--output-file), git add/commit/merge/rebase/switch/worktree/fetch/branch (hooks),
+# free-option `git diff`/`git log` (--output) and `gh pr|issue|run` beyond read subcommands (checkout/develop run git, download writes).
 # Always denied for a worker, whatever the allow list says. The manager/steward pushes and merges.
 WORKER_DENY: tuple[str, ...] = ("Bash(git push*)", "Bash(git tag*)", "Bash(gh release*)", "Bash(gh pr merge*)", "Bash(rm *)",
                                 "Bash(jarvis hotfix*)", "Bash(jarvis release*)", "Bash(jarvis update*)", "Bash(schtasks*)",
