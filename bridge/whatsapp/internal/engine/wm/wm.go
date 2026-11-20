@@ -23,6 +23,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -279,6 +280,66 @@ func (e *Engine) SendText(ctx context.Context, to, text string) (string, float64
 	return resp.ID, float64(resp.Timestamp.UnixNano()) / 1e9, nil
 }
 
+// RequestHistory sends one on-demand history request (whatsmeow BuildHistorySyncRequest) to the phone. The
+// answer comes back as an ON_DEMAND *events.HistorySync and flows through onHistory like any history sync.
+// The request goes out with message id id; the phone names it in HistorySyncNotification.PeerDataRequestSessionID
+// (real-phone echo UNVERIFIED), which onHistory copies to the events so the API can match the answer.
+func (e *Engine) RequestHistory(ctx context.Context, id, chat string, anchor engine.HistoryAnchor, count int) error {
+	if id == "" {
+		return errors.New("bad history request")
+	}
+	m, err := historyRequest(chat, anchor, count)
+	if err != nil {
+		return err
+	}
+	cli := e.client() // taken once: a concurrent disconnect cannot swap it between the checks and the send
+	if cli == nil || cli.Store == nil || !cli.IsConnected() || !cli.IsLoggedIn() {
+		return engine.ErrNotConnected
+	}
+	own := cli.Store.GetJID().ToNonAD()
+	if own.IsEmpty() {
+		return engine.ErrNotConnected
+	}
+	_, err = cli.SendMessage(ctx, own, m, whatsmeow.SendRequestExtra{Peer: true, ID: types.MessageID(id)})
+	return err
+}
+
+// NewRequestID returns a WhatsApp message id for the next on-demand history request ("" without a client, which
+// RequestHistory refuses).
+func (e *Engine) NewRequestID() string {
+	cli := e.client()
+	if cli == nil {
+		return ""
+	}
+	return string(cli.GenerateMessageID())
+}
+
+// isChatServer: direct or group chats; status broadcasts, newsletters and broadcast lists are not chats.
+func isChatServer(server string) bool {
+	return server == types.DefaultUserServer || server == types.HiddenUserServer || server == types.GroupServer
+}
+
+// historyRequest builds the peer message asking for count messages of chat older than anchor.
+func historyRequest(chat string, anchor engine.HistoryAnchor, count int) (*waE2E.Message, error) {
+	jid, err := types.ParseJID(chat)
+	if err != nil || jid.User == "" || !isChatServer(jid.Server) || anchor.ID == "" || count < 1 ||
+		count > engine.MaxHistoryRequestCount {
+		return nil, errors.New("bad history request")
+	}
+	// Built here (same fields as whatsmeow's BuildHistorySyncRequest, which a test compares) so no client, live or
+	// nil, is needed. OldestMsgTimestampMS carries seconds despite its name: the pinned whatsmeow (send.go,
+	// BuildHistorySyncRequest) fills it with Timestamp.Unix() and says so. What a real phone expects is UNVERIFIED.
+	return &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_MESSAGE.Enum(),
+		PeerDataOperationRequestMessage: &waE2E.PeerDataOperationRequestMessage{
+			PeerDataOperationRequestType: waE2E.PeerDataOperationRequestType_HISTORY_SYNC_ON_DEMAND.Enum(),
+			HistorySyncOnDemandRequest: &waE2E.PeerDataOperationRequestMessage_HistorySyncOnDemandRequest{
+				ChatJID: proto.String(jid.String()), OldestMsgID: proto.String(anchor.ID),
+				OldestMsgFromMe: proto.Bool(anchor.FromMe), OnDemandMsgCount: proto.Int32(int32(count)),
+				OldestMsgTimestampMS: proto.Int64(int64(anchor.TS)),
+			}}}}, nil
+}
+
 // handle converts whatsmeow events. It runs on whatsmeow's goroutines.
 func (e *Engine) handle(raw any) {
 	switch ev := raw.(type) {
@@ -319,7 +380,7 @@ func (e *Engine) handle(raw any) {
 			e.emit(engine.AccountWarningEvent{Code: engine.WarnAccountRestricted})
 		}
 	case *events.Message:
-		e.onMessage(ev, false)
+		e.onMessage(ev, false, false, "")
 	case *events.HistorySync:
 		e.onHistory(ev)
 	case *events.Receipt:
@@ -426,10 +487,10 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-func (e *Engine) onMessage(ev *events.Message, history bool) {
+func (e *Engine) onMessage(ev *events.Message, history, onDemand bool, reqID string) {
 	ctx := context.Background()
 	chat := ev.Info.Chat.ToNonAD()
-	if chat.Server != types.DefaultUserServer && chat.Server != types.HiddenUserServer && chat.Server != types.GroupServer {
+	if !isChatServer(chat.Server) {
 		return // status broadcasts, newsletters, broadcast lists: ignored
 	}
 	m := ev.Message
@@ -460,8 +521,10 @@ func (e *Engine) onMessage(ev *events.Message, history bool) {
 	e.emit(engine.MessageEvent{
 		Msg: msgstore.Message{ID: ev.Info.ID, Chat: chat.String(), FromMe: ev.Info.IsFromMe, SenderName: sender,
 			TS: float64(ev.Info.Timestamp.UnixNano()) / 1e9, Kind: kind, Text: text, Media: media, Edited: ev.IsEdit},
-		Chat:    e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
-		History: history,
+		Chat:      e.chatInfo(ctx, chat, ev.Info.PushName, ev.Info.IsFromMe),
+		History:   history,
+		OnDemand:  onDemand,
+		RequestID: reqID,
 	})
 }
 
@@ -515,6 +578,12 @@ func onlySKD(m *waE2E.Message) bool {
 func (e *Engine) onHistory(ev *events.HistorySync) {
 	cli := e.client()
 	data := ev.Data
+	onDemand := data.GetSyncType() == waHistorySync.HistorySync_ON_DEMAND
+	reqID := ""
+	if onDemand {
+		reqID = ev.Notification.GetPeerDataRequestSessionID()
+	}
+	chats, delivered := []string{}, 0
 	for _, p := range data.GetPushnames() {
 		if p.GetPushname() != "" {
 			if jid, err := types.ParseJID(p.GetID()); err == nil {
@@ -526,6 +595,9 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 		jid, err := types.ParseJID(conv.GetID())
 		if err != nil {
 			continue
+		}
+		if n := len(conv.GetMessages()); n > 0 && isChatServer(jid.Server) {
+			chats, delivered = append(chats, jid.ToNonAD().String()), delivered+n
 		}
 		if jid.Server == types.GroupServer {
 			if n := firstNonEmpty(conv.GetName(), conv.GetDisplayName()); n != "" {
@@ -543,7 +615,10 @@ func (e *Engine) onHistory(ev *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			e.onMessage(msg, true)
+			e.onMessage(msg, true, onDemand, reqID)
 		}
+	}
+	if onDemand {
+		e.emit(engine.HistoryAnswerEvent{Chats: chats, Messages: delivered, RequestID: reqID})
 	}
 }

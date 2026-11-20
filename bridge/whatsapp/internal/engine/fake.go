@@ -26,6 +26,18 @@ type Fake struct {
 	Logouts     int
 	seq         int
 	Now         func() time.Time
+
+	// HistoryRequests records RequestHistory calls; tests answer them with Emit(MessageEvent{History: true}).
+	HistoryRequests []FakeHistoryRequest
+	reqSeq          int
+}
+
+// FakeHistoryRequest is one on-demand history request the fake engine received.
+type FakeHistoryRequest struct {
+	ID     string
+	Chat   string
+	Anchor HistoryAnchor
+	Count  int
 }
 
 // NewFake returns a fake engine; linked=true simulates an already linked device.
@@ -145,4 +157,23 @@ func (f *Fake) SendText(ctx context.Context, to, text string) (string, float64, 
 	f.seq++
 	f.Sent = append(f.Sent, FakeSent{To: to, Text: text})
 	return fmt.Sprintf("FAKE%06d", f.seq), float64(f.Now().UnixNano()) / 1e9, nil
+}
+
+// RequestHistory records the request (ErrNotConnected while offline); it never emits an event itself.
+func (f *Fake) RequestHistory(ctx context.Context, id, chat string, anchor HistoryAnchor, count int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.connected {
+		return ErrNotConnected
+	}
+	f.HistoryRequests = append(f.HistoryRequests, FakeHistoryRequest{ID: id, Chat: chat, Anchor: anchor, Count: count})
+	return nil
+}
+
+// NewRequestID returns hist1, hist2, ...
+func (f *Fake) NewRequestID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqSeq++
+	return fmt.Sprintf("hist%d", f.reqSeq)
 }

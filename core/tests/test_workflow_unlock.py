@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -14,7 +15,7 @@ from unittest.mock import patch
 
 from jarves.workflow import __main__ as cli
 from jarves.workflow import autopilot, unlock
-from jarves.workflow.server import Server
+from jarves.workflow.server import Handler, Server, UnlockWrong
 
 
 class UnlockTests(unittest.TestCase):
@@ -154,7 +155,7 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         self.assertEqual([self.request("/api/unlock", {"code": wrong})[0] for _ in range(5)], [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # 5 wrong tries cancel the code
+        self.assertTrue((self.home / unlock.FILE).exists())           # #1265: one session cannot cancel the code
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
         self.server.unlock_attempts.clear()
         unlock.issue(self.home)
@@ -162,19 +163,83 @@ class UnlockTests(unittest.TestCase):
         self.assertNotIn(self.server.token, text)
         self.assertNotRegex(text, r'"\d{4}"')
 
-    def test_wrong_tries_count_across_all_sessions_and_cancel_the_code(self):
+    def wrong_try(self, code):
+        self.server.unlock_attempts.clear()                            # keep the 5-per-minute limit out of the way
+        status, _, data = self.request("/api/unlock", {"code": code})
+        return status, data.get("reason")
+
+    def test_one_session_cannot_cancel_the_owner_code_1265(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()                                                   # the read-only token holder's one window
+        results = [self.wrong_try(wrong) for _ in range(6)]
+        self.assertEqual(results, [(403, None)] * 3 + [(403, "session_exhausted")] * 3)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))  # no 4th guess, even a right one
+        self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])  # names both ways out
+        self.assertTrue((self.home / unlock.FILE).exists())           # the owner's live code survives
+        self.cookie = ""
+        self.login()                                                   # the owner's own window
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_wrong_tries_over_many_sessions_cancel_the_code_at_the_backstop(self):
         shown = unlock.issue(self.home)
         wrong = "0000" if shown != "0000" else "1111"
         statuses = []
-        for _ in range(5):                                             # a different session for every try
-            self.cookie = ""
-            self.login()
-            statuses.append(self.request("/api/unlock", {"code": wrong})[0])
+        for i in range(5):                                             # new sessions give no extra guesses past 5
+            if i % 3 == 0:
+                self.cookie = ""
+                self.login()
+            statuses.append(self.wrong_try(wrong)[0])
+            self.assertEqual((self.home / unlock.FILE).exists(), i < 4, i)
+            if i == 2:
+                exhausted = self.cookie                                # this window used all 3 of its tries
         self.assertEqual(statuses, [403] * 5)
-        self.assertFalse((self.home / unlock.FILE).exists())          # cancelled after 5 in total
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)  # shared 5-per-minute limit
+        # The backstop itself cleared every count (checked before any new code, whose new salt would also reset them).
+        self.assertEqual(self.server.unlock_wrong, UnlockWrong())
+        self.assertEqual(self.wrong_try(shown), (403, None))           # cancelled after 5 in total (guess bound unchanged)
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+
+    def test_wrong_tries_without_a_live_code_are_not_counted(self):
+        self.login()
+        self.assertFalse((self.home / unlock.FILE).exists())
+        self.assertEqual([self.wrong_try("1234") for _ in range(4)], [(403, None)] * 4)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (0, {}))
+
+    def test_exhausted_window_refusals_count_against_the_shared_minute_limit(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
         self.server.unlock_attempts.clear()
-        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 403)
+        tries = [self.request("/api/unlock", {"code": wrong})[2].get("reason") for _ in range(5)]
+        self.assertEqual(tries, [None] * 3 + ["session_exhausted"] * 2)
+        self.cookie = ""
+        self.login()                                                   # a fresh window in the same minute
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 429)
+        self.assertTrue((self.home / unlock.FILE).exists())
+
+    def test_unlock_without_a_live_session_is_refused_before_counting(self):
+        unlock.issue(self.home)
+        self.cookie = "jarves_bogus=nope"
+        self.assertEqual(self.request("/api/unlock", {"code": "0000"})[0], 401)   # no or bogus cookie
+        # The session ends between the auth check and _unlock: the try is refused, not counted under "".
+        with patch.object(Handler, "_authenticated", return_value=True):
+            self.assertEqual(self.request("/api/unlock", {"code": "0000"})[0], 401)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (0, {}))
+        self.assertEqual(self.server.unlock_attempts, [])
+
+    def test_new_code_resets_an_exhausted_session(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        for _ in range(3):
+            self.wrong_try(wrong)
+        self.assertEqual(self.wrong_try(shown), (403, "session_exhausted"))
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": unlock.issue(self.home)})[0], 200)
 
     def test_two_simultaneous_correct_requests_unlock_once(self):
         self.login()
@@ -255,7 +320,7 @@ class UnlockTests(unittest.TestCase):
         return rc, out.getvalue(), err.getvalue()
 
     def test_750_open_and_unlock_give_no_code_when_no_dashboard_listens(self):
-        """R1/R2 (#1410): a stopped dashboard withdraws its key; a key left by a crash on a port nobody
+        """#750: a stopped dashboard withdraws its key; a key left by a crash on a port nobody
         answers gives no (dead) code, from `open` (fresh start, not yet listening) or from `unlock`."""
         port = self.server.server_port
         self.server.shutdown()
@@ -293,7 +358,7 @@ class UnlockTests(unittest.TestCase):
         self.assertFalse((self.home / unlock.FILE).exists())
 
     def test_750_unlock_without_port_uses_the_published_dashboard_port(self):
-        """R1 (#1410 round 3): no --port means the port the published key records (not 8188), still live-checked."""
+        """#750: no --port means the port the published key records (not 8188), still live-checked."""
         live = self.server.server_port
         self.assertNotEqual(live, cli.DEFAULT_PORT)
         rc, out, err = self.cli_owner("unlock")
@@ -319,6 +384,43 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual((self.home / unlock.PUB_FILE).read_bytes(), mine)
         second.server_close()
         self.assertFalse((self.home / unlock.PUB_FILE).exists())
+
+    def test_750_a_boolean_port_in_the_published_key_is_no_port(self):
+        """JSON true/false is not a port (bool is an int in Python): no --port must not mean port 1."""
+        pub = json.loads((self.home / unlock.PUB_FILE).read_text(encoding="ascii"))["pub"]
+        for bad in (True, False):
+            (self.home / unlock.PUB_FILE).write_text(json.dumps({"pub": pub, "port": bad}), encoding="ascii")
+            with self.assertRaises(unlock.UnlockUnavailable):
+                unlock.published_port(self.home)
+            with self.assertRaises(unlock.UnlockUnavailable):
+                unlock.issue(self.home, port=1)
+        rc, out, err = self.cli_owner("unlock")
+        self.assertEqual(rc, 2)
+        self.assertIn("records no port", err)
+        self.assertNotIn("port 1", err)
+
+    def test_750_low_order_or_malformed_eph_is_a_counted_wrong_try(self):
+        """A record whose eph is all-zero (low order) or the wrong length never unlocks; the server counts the try."""
+        expires = time.time() + 60
+        for eph in ("00" * 32, "00" * 31):
+            (self.home / unlock.FILE).write_text(json.dumps({"eph": eph, "tag": "00" * 32, "expires": expires}), encoding="ascii")
+            self.assertFalse(unlock.consume(self.home, "0000", key=self.server.unlock_key))
+            self.assertTrue((self.home / unlock.FILE).exists())          # not consumed by the bad record
+        session = self.login()
+        status, _, body = self.request("/api/unlock", {"code": "0000"})
+        self.assertEqual((status, body.get("locked")), (403, True))
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.by_session), (1, {session: 1}))
+
+    def test_750_server_close_twice_closes_once(self):
+        closes = []
+        with patch.object(type(self.store), "close", lambda store: closes.append(store)), \
+                patch.object(unlock.ServerKey, "withdraw", lambda key, home: closes.append(key)):
+            self.server.shutdown()
+            self.thread.join(5)
+            self.server.server_close()
+            self.server.server_close()                                     # tearDown closes it again, too
+        self.assertEqual(closes, [self.server.unlock_key, self.store])
+        self.store.close()                                                 # the real close the patch replaced
 
     def test_750_key_publish_retries_a_briefly_locked_target_then_gives_up(self):
         real, calls = os.replace, []

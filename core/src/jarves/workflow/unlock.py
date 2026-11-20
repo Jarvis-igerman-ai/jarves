@@ -94,7 +94,7 @@ def _published(home: Path) -> tuple[bytes, int | None]:
         port = record.get("port")
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise UnlockUnavailable("no dashboard unlock key is published; start or restart the dashboard, then run this again") from exc
-    return pub, port if isinstance(port, int) else None
+    return pub, port if isinstance(port, int) and not isinstance(port, bool) else None  # JSON true is no port
 
 
 def published_port(home: Path) -> int:
