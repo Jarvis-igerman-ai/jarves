@@ -29,7 +29,7 @@ def _boom(*a, **k):
 
 
 def test_busy_probe_failures_are_logged_once_each(seen):
-    assert auto_update.core_busy(_core()) == []
+    assert auto_update.core_busy(_core()) == ["probe_error"]       # #1100: every probe down = busy, not quiet
     assert [c for c, _ in seen] == ["AUTO_UPDATE_BUSY_PROBE_FAILED"] * 4
     assert [f["where"] for _, f in seen] == ["approvals", "chat", "agents", "quiet"]
     assert all(f["error_type"] == "RuntimeError" and "secret" not in str(f) for _, f in seen)
@@ -53,8 +53,20 @@ WHERE = {"approvals": "approvals", "chat": "chat", "orchestrator": "agents", "op
 def test_each_busy_probe_failure_is_logged_alone(seen, broken):
     core = _Healthy()
     setattr(core, broken, Boom())
-    assert auto_update.core_busy(core) == [v for k, v in BUSY.items() if k != broken]
+    assert auto_update.core_busy(core) == [v for k, v in BUSY.items() if k != broken] + ["probe_error"]
     assert seen == [("AUTO_UPDATE_BUSY_PROBE_FAILED", {"error_type": "RuntimeError", "where": WHERE[broken]})]
+
+
+@pytest.mark.parametrize("broken", list(BUSY))
+def test_issue_1100_a_failing_probe_fails_closed(seen, broken):
+    """#1100: an unreadable probe (e.g. approvals.has_pending) must block an update restart, not allow it."""
+    core = SimpleNamespace(live=None, listening=False, stopping=False,
+                           approvals=SimpleNamespace(has_pending=lambda: False), chat=SimpleNamespace(turns={}),
+                           orchestrator=None, ops=SimpleNamespace(alerts=SimpleNamespace(quiet_now=lambda: False,
+                                                                                         paused=lambda: False)))
+    assert auto_update.core_busy(core) == []
+    setattr(core, broken, Boom())
+    assert auto_update.core_busy(core) == ["probe_error"]
 
 
 def test_unreadable_switch_is_logged_once(seen, monkeypatch, tmp_path):

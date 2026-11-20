@@ -3,6 +3,7 @@ through the SAME signed path (signed manifest, SHA256 + size), notices before/af
 respected, and nothing ever runs a real installer. Fake release server on loopback, fake clock, fake launcher."""
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from release_fakes import BASE, FakeReleaseServer, Keys, installer_bytes, manifest, seed_legacy, snapshot
@@ -384,6 +385,108 @@ def test_core_busy_reads_the_core_state():
     c.chat = type("C", (), {"turns": {"x": 1}})()
     c.ops = type("O", (), {"alerts": Eng(True)})()
     assert set(auto_update.core_busy(c)) == {"voice_session", "listening", "pending_approval", "chat_turn", "quiet_hours"}
+
+
+def test_busy_probe_error_defers_the_restart(home, server, keys):
+    """#1100: if the pending-approval probe raises, the update must wait (fail closed), never restart."""
+    class Appr:
+        def has_pending(self):
+            raise RuntimeError("approvals store unreadable")
+
+    class Core:
+        live, listening, stopping, orchestrator = None, False, False, None
+        approvals = Appr()
+        chat = type("C", (), {"turns": {}})()
+        ops = type("O", (), {"alerts": type("E", (), {"quiet_now": lambda s: False, "paused": lambda s: False})()})()
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys)
+    r.au.busy = lambda: auto_update.core_busy(Core())
+    r.ready()
+    assert r.tick() == "busy" and r.launched == []
+    assert r.au.status()["busy"] == ["probe_error"]
+
+
+def test_persistent_probe_error_tells_the_owner_once(home, server, keys):
+    """#1100 follow-up: probe_error that never clears raises one 'probe_stuck' notice, not silence or spam."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    assert r.tick() == "busy" and "probe_stuck" not in kinds(r)
+    assert r.tick(auto_update.PROBE_STUCK_S + 1) == "busy" and r.launched == []
+    r.tick(600)
+    assert kinds(r).count("probe_stuck") == 1
+
+
+def test_probe_error_timer_restarts_after_recovery_and_each_version_gets_a_notice(home, server, keys):
+    """#1100 follow-up: a probe that recovers restarts the day-long timer; a new version gets its own notice."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    r.tick(auto_update.PROBE_STUCK_S - 600)
+    r.busy = ["pending_approval"]                              # probes readable again (still busy, so no install)
+    assert r.tick(300) == "busy" and "probe_error_since" not in r.au.state()
+    r.busy = ["probe_error"]
+    assert r.tick(600) == "busy" and r.tick(auto_update.PROBE_STUCK_S - 60) == "busy"
+    assert "probe_stuck" not in kinds(r)                       # without the reset this would have fired already
+    r.tick(120)
+    assert kinds(r).count("probe_stuck") == 1
+    server.publish(keys, "3.0.0.2")                            # a newer release while still stuck
+    assert r.tick(auto_update.LATER_S + 1) == "announced" and "probe_error_since" not in r.au.state()   # R2
+    r.clock.t += NOTICE_GRACE_S + 1
+    assert r.tick() == "busy" and kinds(r).count("probe_stuck") == 1   # the unprobed day before did not count
+    r.tick(auto_update.PROBE_STUCK_S + 1)
+    stuck = [n for n in r.notices if n["kind"] == "probe_stuck"]
+    assert [n["version"] for n in stuck] == [NEW, "3.0.0.2"] and r.launched == []
+
+
+def test_probe_stuck_timer_ignores_ticks_that_never_probed(home, server, keys):
+    """#1100 review R3: a long 'later' (no busy check) must not count toward the day-long probe_stuck timer."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    assert r.tick() == "busy" and "probe_error_since" in r.au.state()
+    r.au.answer("later")
+    assert r.tick(3600) == "snoozed" and "probe_error_since" not in r.au.state()
+    assert r.tick(auto_update.LATER_S) == "busy" and "probe_stuck" not in kinds(r) and r.launched == []
+
+
+def test_forced_update_now_restarts_the_stuck_timer_but_keeps_one_notice_per_version(home, server, keys):
+    """#1100 review R4: 'Update now' clears the stuck timer; a failed install must not let the same version
+    send a second probe_stuck notice when the probe keeps failing."""
+    server.publish(keys, NEW)
+    r = Rig(home, server, keys, busy=["probe_error"])
+    r.ready()
+    r.tick()
+    r.tick(auto_update.PROBE_STUCK_S + 1)
+    assert kinds(r).count("probe_stuck") == 1
+    server.status[f"/JARVES-Setup-{NEW}.exe"] = 500                # the forced install fails
+    r.au.answer("now")
+    assert r.tick() == "failed" and "probe_error_since" not in r.au.state()
+    assert r.au.state()["probe_stuck_noticed"] == NEW
+    r.tick(auto_update.BACKOFF_S[0] + 1)
+    r.tick(auto_update.PROBE_STUCK_S + 1)                          # probe errors again for over a day
+    assert kinds(r).count("probe_stuck") == 1 and r.launched == []
+
+
+def test_cli_parser_accepts_update_install(home, monkeypatch):
+    """#1100 review R1: the manual command named in the probe_stuck notice exists in the real parser."""
+    from jarves import cli
+    monkeypatch.setenv("JARVES_HOME", str(home))
+    seen = []
+    monkeypatch.setattr(cli, "cmd_update", lambda a, cfg, h: seen.append(a.action) or 0)
+    assert cli.main(["update", "install"]) == 0 and seen == ["install"]
+
+
+def test_probe_stuck_notice_and_guide_warn_about_a_waiting_approval():
+    """#1100 review R1/R2: a forced manual update skips busy(), so the notice and the guide say to check approvals."""
+    (_, he), (_, en) = auto_update._notice_text("probe_stuck", "3.0.0.1")
+    assert "no approval is waiting" in en and "אין אישור שממתין" in he
+    import tomllib
+    guide = tomllib.loads((Path(auto_update.__file__).parent / "guides/data/auto_update.toml").read_text("utf-8"))
+    row = [p for p in guide["problems"] if "probe_stuck" in p["en"]]
+    assert len(row) == 1 and "no approval is waiting" in row[0]["fix_en"] and "אין אישור שממתין" in row[0]["fix_he"]
+    for text in (en, he, row[0]["fix_en"], row[0]["fix_he"]):  # R2: one real command, same in notice and guide
+        assert "jarvis update install" in text and "Updates" in text
 
 
 def test_dashboard_api_switch_answer_and_channel(home):
