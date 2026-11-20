@@ -77,7 +77,7 @@ RUN_KEYS = re.compile(r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|d
                       r"diff\.external|core\.(sshcommand|askpass|pager|editor)|sequence\.editor|"
                       r"credential\.(.+\.)?helper|gpg\.(program|openpgp\.program|x509\.program|ssh\.program|"
                       r"ssh\.defaultkeycommand)|core\.(gitproxy|alternaterefscommand)|"
-                      r"remote\..+\.(uploadpack|receivepack|vcs))$")
+                      r"remote\..+\.(uploadpack|receivepack|vcs)|trailer\..+\.(command|cmd))$")
 # commit and merge start `maintenance run --auto` / `gc --auto`, which can run `gc.recentObjectsHook` (multi-valued:
 # an extra `-c` value cannot remove the shared config's own values). JARVES never needs auto-maintenance (#1468 R1).
 # Submodule recursion is off too: a submodule's own config (`.git/modules/<name>/config`, agent-writable, never read
@@ -85,7 +85,8 @@ RUN_KEYS = re.compile(r"^(filter\..+\.(clean|smudge|process)|merge\..+\.driver|d
 NO_AUTO = ["-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "submodule.recurse=false"]
 # fixed-name command keys JARVES never needs (it never fetches, pushes, pages or edits): blanked on every call, so a key
 # toggled between the config read and git's own read gains nothing (#1468 round 2 R2). Not diff.external (an empty one
-# breaks a patch diff; the review diff uses --no-ext-diff) and not signing programs (the owner's own may be set).
+# breaks a patch diff: every diff/show/log gets --no-ext-diff instead, #1468 R2) and not the signing programs (always
+# set from the owner's scope, _SIGNING_DEFAULTS).
 NO_CMDS = [x for k in ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor",
                        "core.gitProxy", "core.alternateRefsCommand", "credential.helper") for x in ("-c", f"{k}=")]
 # refused at repository scope: a conditional include can match only in a child git (worktree add checks out with HEAD
@@ -95,8 +96,11 @@ NO_CMDS = [x for k in ("core.sshCommand", "core.askPass", "core.pager", "core.ed
 _REFUSED = re.compile(r"^(includeif|hook)\.")
 CONFIG_REFUSED = ("the repository's git config could not be read, or uses a conditional include (includeIf) or a "
                   "config hook (hook.<name>)")
+# fixed-name signing keys: set on every call to the owner's global/system value, else git's default, so the repository
+# scope never counts and an agent racing the read gains nothing (#1468 R1)
 _SIGNING_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-                     "gpg.ssh.program": "ssh-keygen"}
+                     "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+_PATCH_CMDS = ("diff", "show", "log")
 _OWNER_SCOPES = ("system", "global")
 
 
@@ -105,8 +109,8 @@ def _git_env() -> dict[str, str]:
 
 
 def _config_overrides(cwd: str | Path) -> list[str] | None:
-    """`-c key=<neutral>` for every RUN_KEYS entry set at repository scope, read right before each command (the
-    config can change between commands). None: the config could not be read (git exits 1 when nothing matches), or
+    """`-c key=` for every RUN_KEYS entry set at repository scope, read right before each command (the config can
+    change between commands), plus every signing key from the owner's scope (_SIGNING_DEFAULTS). None: the config could not be read (git exits 1 when nothing matches), or
     a key cannot be overridden safely.
     Accepted residual risk (P1 #1483, PR #1468 round 3 R1): `<section>.<name>.*` keys (filter, merge and diff
     drivers) depend on this read, so an agent that toggles one between this read and git's own read can still win."""
@@ -120,19 +124,21 @@ def _config_overrides(cwd: str | Path) -> list[str] | None:
         return None
     if p.returncode not in (0, 1):
         return None
-    parts, out, seen = p.stdout.split("\0"), [], set()
+    parts, out, seen, sign = p.stdout.split("\0"), [], set(), dict(_SIGNING_DEFAULTS)
     for scope, entry in zip(parts[0::2], parts[1::2]):
-        key = entry.split("\n", 1)[0]
+        key, _, value = entry.partition("\n")
         if scope in _OWNER_SCOPES:
+            if key.lower() in sign:
+                sign[key.lower()] = value           # system, then global: the last one wins, as in git
             continue
         if "=" in key or _REFUSED.match(key.lower()):
             return None                             # `-c` would split the name at "="; the others: see _REFUSED
-        if not RUN_KEYS.match(key.lower()):
+        if not RUN_KEYS.match(key.lower()) or key.lower() in sign:
             continue
         if key not in seen:
             seen.add(key)
-            out += ["-c", f"{key}={_SIGNING_DEFAULTS.get(key.lower(), '')}"]
-    return out
+            out += ["-c", f"{key}="]
+    return out + [x for k, v in sign.items() for x in ("-c", f"{k}={v}")]
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -149,6 +155,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if check:
             raise GitError(CONFIG_REFUSED)
         return subprocess.CompletedProcess(["git", *args], 128, "", CONFIG_REFUSED)
+    if args and args[0] in _PATCH_CMDS:             # diff.external has a fixed name: never from the config (#1468 R2)
+        args = (args[0], "--no-ext-diff", *args[1:])
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *NO_AUTO, *NO_CMDS,
            *over]
     for attempt in range(LOCK_RETRIES + 1):

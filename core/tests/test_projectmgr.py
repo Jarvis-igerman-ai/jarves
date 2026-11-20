@@ -1269,6 +1269,8 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     (repo / ".git" / "config").write_text("[core\n broken")              # review R5: a git failure is not NO_BRANCH
     r = m.call("ship_plan", project="demo", apply=True)
     assert r["code"] == "GIT_ERROR" and "could not be read" in r["text"]
+    r = m.call("ship_plan", project="demo")                              # #1468 R4: the plan path too, not "no commit"
+    assert r["code"] == "GIT_ERROR" and "could not be read" in r["text"] and "commit" not in r
 
 
 def test_a_diff_command_in_the_shared_config_cannot_skip_the_review(env, tmp_path):

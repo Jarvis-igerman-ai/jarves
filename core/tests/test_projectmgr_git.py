@@ -311,15 +311,46 @@ def test_only_repository_scope_command_settings_are_overridden(monkeypatch, tmp_
     keys = ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor", "credential.helper",
             "gpg.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand", "filter.Lfs2.clean",
             "credential.https://example.invalid.helper", "core.gitProxy", "core.alternateRefsCommand",
-            "remote.origin.uploadpack", "remote.origin.receivepack", "remote.origin.vcs")       # review R2
+            "remote.origin.uploadpack", "remote.origin.receivepack", "remote.origin.vcs",       # review R2
+            "trailer.sign.command", "trailer.sign.cmd")                                         # #1468 R3
     for key in keys:
         subprocess.run(["git", "config", key, "evil"], cwd=repo, check=True)
     over = gitops._config_overrides(repo)
     pairs = dict(x.split("=", 1) for x in over[1::2])
-    assert over[0::2] == ["-c"] * len(keys) and "filter.lfs.clean" not in pairs
+    assert "filter.lfs.clean" not in pairs and pairs.pop("gpg.openpgp.program") == "gpg"    # #1468 R1: always set
     assert pairs.pop("gpg.program") == "gpg" and pairs.pop("gpg.ssh.program") == "ssh-keygen"
     assert pairs.pop("gpg.x509.program") == "gpgsm" and pairs.pop("filter.Lfs2.clean") == ""
-    assert len(pairs) == len(keys) - 4 and set(pairs.values()) == {""}
+    assert {k.lower() for k in pairs} == {k.lower() for k in keys} - {"gpg.program", "gpg.ssh.program",
+                                                                      "gpg.x509.program", "filter.lfs2.clean"}
+    assert set(pairs.values()) == {""}
+
+
+def test_signing_programs_are_set_on_every_call_from_the_owner_scope_only(monkeypatch, tmp_path):
+    """PR #1468 R1: the signing programs and `gpg.ssh.defaultKeyCommand` have fixed names, so they are set on every
+    call (the owner's global value, else git's default) and never depend on the repository-scope read, which an agent
+    can race."""
+    home = tmp_path / "owner-home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    pairs = dict(x.split("=", 1) for x in gitops._config_overrides(_repo(tmp_path))[1::2])
+    assert pairs == {"gpg.program": "owner-gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+                     "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+    calls: list = []
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
+    gitops.git(tmp_path, "commit", "-m", "x")                       # the read saw nothing: still set
+    assert "gpg.ssh.defaultkeycommand=" in calls[0] and "gpg.program=gpg" in calls[0]
+
+
+@pytest.mark.parametrize("cmd", ["diff", "show", "log"])
+def test_patch_output_never_runs_an_external_diff(monkeypatch, tmp_path, cmd):
+    """PR #1468 R2: `diff.external` has a fixed name, so a patch diff must not depend on the config read: every
+    diff/show/log call passes --no-ext-diff."""
+    calls: list = []
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
+    gitops.git(tmp_path, cmd, "HEAD~1")
+    assert calls[0][calls[0].index(cmd):] == [cmd, "--no-ext-diff", "HEAD~1"]
 
 
 def test_an_unreadable_shared_config_fails_closed(tmp_path):

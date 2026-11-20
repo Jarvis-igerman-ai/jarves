@@ -38,6 +38,15 @@ def _res(ok: bool, code: str = "ok", text: str = "", **kw) -> dict:
     return {"ok": ok, "code": code, "text": text, **kw}
 
 
+def _integration_commit(path: str, br: str, outcome: str) -> tuple[str, dict | None]:
+    """(commit of `br` or "" when it has none, None) or ("", GIT_ERROR result): rc 1 is a missing branch, any other
+    failure (e.g. a refused or unreadable config, rc 128) is git's own error, never reported as "no commit" (#1407)."""
+    rp = gitops.git(path, "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False)
+    if rp.returncode not in (0, 1):
+        return "", _res(False, "GIT_ERROR", f"git failed, {outcome}: " + clean(rp.stderr or "unknown", 200))
+    return rp.stdout.strip(), None
+
+
 def _age(ts: float | None, now: float) -> str:
     if not ts:
         return ""
@@ -914,10 +923,9 @@ class Manager(StageEngine):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
             # #1407: the prompt names the exact commit and the merge takes that commit, so a later commit on the
             # integration branch (an agent can move it) never reaches your branch unapproved
-            rp = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False)
-            if rp.returncode not in (0, 1):                 # git itself failed (e.g. its config): not a missing branch
-                return _res(False, "GIT_ERROR", "git failed, nothing merged: " + clean(rp.stderr or "unknown", 200))
-            sha = rp.stdout.strip()
+            sha, err = _integration_commit(p["path"], br, "nothing merged")
+            if err:
+                return err
             if not sha:
                 return _res(False, "NO_BRANCH", f"the integration branch {br} has no commit to merge")
             if not yes and not self._approve(f"Merge {br} at {sha[:12]} into {st['branch']} in {p['path']}? (no push)",
@@ -933,8 +941,10 @@ class Manager(StageEngine):
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         br = gitops.integration_branch(p["id"])
         # #1407: resolve the commit first; the stat and the commands describe that commit, not the branch an agent can
-        # still move. commit="" when the branch has no commit (review round 3 R3)
-        ref = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"{br}^{{commit}}", check=False).stdout.strip()
+        # still move. commit="" when the branch has no commit (review round 3 R3); a git failure is GIT_ERROR (#1468 R4)
+        ref, err = _integration_commit(p["path"], br, "no plan")
+        if err:
+            return err
         try:
             stat = (gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{ref}", check=False).stdout.strip()
                     or "no changes") if ref else "no commit"
