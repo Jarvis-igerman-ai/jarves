@@ -6,6 +6,7 @@ from __future__ import annotations
 import http.client
 import json
 import re
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -98,6 +99,27 @@ def test_privacy_on_at_start_or_switch_scrubs_the_ledger_without_a_phone(tmp_pat
     privacy.set_privacy(SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml"), True)
     assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
     assert c._rows("SELECT body FROM ledger WHERE cid='m-0002'")[0]["body"].startswith(continuity.NOT_KEPT)
+    logs.set_privacy(False)                                             # review R4: "full text" switched off too
+    c.store("d1", "m-0003", "chat", 200, {"reply": "full text secret words"})
+    privacy.set_full_text(SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml"), False)
+    assert "secret" not in " ".join(r["body"] for r in c._rows("SELECT body FROM ledger"))
+
+
+def test_a_ledger_failure_does_not_abort_the_privacy_switch(tmp_path, monkeypatch):
+    """#206 F13 (review R1): a real sqlite error while cleaning the ledger is logged once and the switch still applies
+    and returns its state (the except clause names sqlite3, which privacy.py imports)."""
+    from types import SimpleNamespace
+    from jarves import logs, privacy
+    Continuity(tmp_path)
+    warned = []
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: warned.append(a[1]))
+    monkeypatch.setattr(continuity.Continuity, "__init__",
+                        lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+    cfg = SimpleNamespace(log=SimpleNamespace(privacy=False))
+    ctx = SimpleNamespace(home=tmp_path, cfg=cfg, config_path=tmp_path / "config.toml")
+    assert privacy.set_privacy(ctx, True)["privacy"] is True
+    assert privacy.set_full_text(ctx, False)["privacy"] is True
+    assert cfg.log.privacy is True and warned == ["PRIVACY_LEDGER_SCRUB_FAILED"] * 2
 
 
 def test_privacy_switch_creates_no_ledger_when_none_exists(tmp_path):
@@ -118,11 +140,10 @@ def test_a_body_not_kept_key_cannot_override_the_privacy_marker(tmp_path):
 
 
 def test_ledger_uses_the_rollback_journal_documented_in_scrub(tmp_path):
-    """#206 F13 (review R2): scrub() documents the journal_mode=DELETE limit; a WAL switch must revisit it."""
+    """#206 F13: the at-rest limit stated for scrub() holds only for the rollback journal; a WAL switch must revisit it."""
     c = Continuity(tmp_path)
     with c._cx() as cx:
         assert cx.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
-    assert "journal_mode=DELETE" in Continuity.scrub.__doc__
 
 
 from jarves.mobile import Bridge

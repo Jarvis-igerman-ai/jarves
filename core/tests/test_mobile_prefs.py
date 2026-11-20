@@ -233,3 +233,47 @@ def test_prefs_js_is_served_csp_safe_and_translated():
     assert re.search(r"[֐-׿]", js)
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert '/m/prefs.js' in html and 'id="prefsRoot"' in html and 'id="tabbtn-prefs"' in html
+
+
+_PAGE = r"""
+const fs = require("fs");
+const mk = (tag) => ({ tag, kids: [], text: "", on: {}, set textContent(v) { this.text = String(v); }, get textContent() { return this.text; },
+  appendChild(c) { this.kids.push(c); return c; }, append(...c) { this.kids.push(...c); }, replaceChildren(...c) { this.kids = c; },
+  setAttribute() {}, addEventListener(e, f) { this.on[e] = f; } });
+global.document = { createElement: mk }; global.window = {};
+eval(fs.readFileSync(process.argv[1], "utf8"));
+const [list, replay] = JSON.parse(process.argv[2]);
+const all = (n) => [n, ...n.kids.flatMap(all)];
+let loads = 0;
+const cx = { lang: () => "en", api: async () => { loads++; return list; }, post: async () => replay };
+const root = mk("div");
+const tick = () => new Promise((r) => setTimeout(r, 0));
+(async () => {
+  window.JarvesPrefs.mount(root, cx); await tick();
+  all(root).find((n) => n.tag === "button" && n.text === "Confirm").on.click(); await tick(); await tick();
+  console.log(JSON.stringify({ loads, texts: all(root).map((n) => n.text).filter(Boolean) }));
+})();
+"""
+
+
+def test_the_phone_page_shows_a_privacy_mode_confirm_resend_like_a_live_answer(srv, prefs, monkeypatch):
+    """#206 F13 (review R3): the thinner NOT_KEPT replay of a confirm (no 'state') still shows "Saved." on the phone
+    page, because the page reloads the list after every action instead of reading the answer body."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available")
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    _, listing = call(srv, "GET", "/api/m/prefs", tok)                                # the page as the owner saw it
+    body = {"id": "pref-priv-0003", "op": "confirm", "pref": b}
+    assert call(srv, "POST", "/api/m/prefs/op", tok, body)[1]["state"] == "confirmed"
+    st, replay = call(srv, "POST", "/api/m/prefs/op", tok, body)
+    assert st == 200 and replay["replay"] is True and replay["code"] == "NOT_KEPT" and "state" not in replay
+    out = subprocess.run([node, "-e", _PAGE, str(MOBILE_DIR / "prefs.js"), json.dumps([listing, replay])],
+                         capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert out.returncode == 0, out.stderr
+    page = json.loads(out.stdout)
+    assert page["loads"] == 2 and "Saved." in page["texts"] and not any("Could not" in t for t in page["texts"])
