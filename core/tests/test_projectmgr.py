@@ -1253,3 +1253,8 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     r = m.call("ship_plan", project="demo", apply=True)
     assert r["ok"] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
     assert approved[:12] in seen[0]
+    late = sh(integ, "git", "rev-parse", "HEAD").strip()
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == late and all(late in c for c in plan["commands"][:2])    # the commands name the commit
+    sh(repo, "git", "update-ref", "-d", "refs/heads/" + gitops.integration_branch(1))
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "NO_BRANCH"

@@ -266,31 +266,66 @@ def test_commands_named_in_the_shared_config_never_run(tmp_path):
     repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "cmd-ran.txt"
     gitops.git(repo, "config", "user.name", "Owner")
     gitops.git(repo, "config", "user.email", "owner@example.invalid")
-    evil = tmp_path / "evil-bin"
-    _hook(evil, "cmd", marker)
-    cmd = (evil / "cmd").as_posix()
-    (repo / ".gitattributes").write_text("* filter=x merge=m diff=d\n", encoding="utf-8")
+    _hook(tmp_path / "evil-bin", "cmd", marker)
+    cmd = (tmp_path / "evil-bin" / "cmd").as_posix()
+    (repo / ".gitattributes").write_text("* filter=x merge=m diff=d\n*.p filter=p\n", encoding="utf-8")
+    (repo / "q.p").write_text("p", encoding="utf-8")
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
-    for key in ("filter.x.clean", "filter.x.smudge", "merge.m.driver", "diff.d.command",
-                "diff.d.textconv", "diff.external", "gpg.program", "hook.x.command"):
+    for key in ("filter.x.clean", "filter.x.smudge", "merge.m.driver", "diff.d.command", "diff.external",
+                "gpg.program", "hook.x.command"):
         subprocess.run(["git", "config", key, cmd], cwd=repo, check=True)
     subprocess.run(["git", "config", "hook.x.event", "pre-commit"], cwd=repo, check=True)
-    (repo / "f.txt").write_text("changed", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "reset", "-q"], cwd=repo, capture_output=True, check=True)
+    (repo / "f.txt").write_text("main side", encoding="utf-8")
+    subprocess.run(["git", "add", "f.txt"], cwd=repo, capture_output=True, check=True)
     assert marker.exists()                          # the setup works: without the fix git runs the clean filter
     marker.unlink()
-    subprocess.run(["git", "config", "filter.x.process", cmd], cwd=repo, check=True)
-    assert subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True).returncode != 0   # the process filter
-    gitops.git(repo, "add", "-A")
+    subprocess.run(["git", "config", "filter.p.process", cmd], cwd=repo, check=True)
     gitops.git(repo, "commit", "-qm", "main side", "--no-verify")
-    gitops.ensure_integration(home, str(repo), 1, base="HEAD~1")
-    wt, br = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    gitops.ensure_integration(home, str(repo), 1, base="HEAD~1")    # worktree add: smudge and process filters
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
     (wt / "f.txt").write_text("task side", encoding="utf-8")
     assert gitops.commit_all(wt, "task") and gitops.changed_files(wt, "HEAD~1") == ["f.txt"]
     gitops.diffstat(wt, "HEAD~1")
+    gitops.git(wt, "diff", "HEAD~1", check=False)                   # a patch diff: diff.<x>.command / diff.external
     assert gitops.merge_in(wt, "main") == ["f.txt"]                  # the merge driver would run on this conflict
-    subprocess.run(["git", "config", "commit.gpgsign", "true"], cwd=repo, check=True)
-    gitops.merge_in(repo, br, ident=False)                          # the ship path: the owner's own signing settings
+    wt2, br2 = gitops.new_task_worktree(home, str(repo), 1, 2, 1)
+    (wt2 / "new.txt").write_text("n", encoding="utf-8")
+    assert gitops.commit_all(wt2, "new")
+    for key, value in (("commit.gpgsign", "true"), ("gpg.format", "openpgp")):
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+    gitops.merge_in(repo, br2, ident=False)                         # the ship path: the owner's own signing settings
     assert not marker.exists()
+
+
+def test_only_repository_scope_command_settings_are_overridden(monkeypatch, tmp_path):
+    """#1390: every command key set in the repository's own config is overridden (signing programs fall back to git's
+    default program, the rest to empty); the owner's global settings (e.g. a git-lfs filter) are left alone."""
+    home = tmp_path / "owner-home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[filter \"lfs\"]\n\tclean = git-lfs clean -- %f\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    repo = _repo(tmp_path)
+    keys = ("core.sshCommand", "core.askPass", "core.pager", "core.editor", "sequence.editor", "credential.helper",
+            "gpg.program", "gpg.ssh.program", "gpg.x509.program", "gpg.ssh.defaultKeyCommand", "filter.Lfs2.clean")
+    for key in keys:
+        subprocess.run(["git", "config", key, "evil"], cwd=repo, check=True)
+    over = gitops._config_overrides(repo)
+    pairs = dict(x.split("=", 1) for x in over[1::2])
+    assert over[0::2] == ["-c"] * len(keys) and "filter.lfs.clean" not in pairs
+    assert pairs.pop("gpg.program") == "gpg" and pairs.pop("gpg.ssh.program") == "ssh-keygen"
+    assert pairs.pop("gpg.x509.program") == "gpgsm" and pairs.pop("filter.Lfs2.clean") == ""
+    assert len(pairs) == len(keys) - 4 and set(pairs.values()) == {""}
+
+
+def test_an_unreadable_shared_config_fails_closed(tmp_path):
+    """#1390: when the overrides cannot be read, the git command does not run (an error, or rc 128 with check=False)."""
+    repo = _repo(tmp_path)
+    (repo / ".git" / "config").write_text("[core\n broken", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="could not be read"):
+        gitops.git(repo, "status")
+    assert gitops.git(repo, "status", check=False).returncode == 128 and not gitops.is_repo(str(repo))
+    (repo / ".git" / "config").write_text('[filter "a=b"]\n\tclean = evil\n', encoding="utf-8")    # "-c" cannot name it
+    with pytest.raises(gitops.GitError, match="could not be read"):
+        gitops.git(repo, "add", "-A")
