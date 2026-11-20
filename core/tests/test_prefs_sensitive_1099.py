@@ -29,6 +29,7 @@ LEAKY = [
     "id x7Kp_Q2vR9-mT4wZ8nB3_cY6hJ1-dF5sL0",                      # random segments joined by _ and -
     "Zx9Qw3Er7Ty1Ui5Op2As",                                      # 20-char letter+digit run, entropy 4.3 (R3 boundary)
     "0123456789abcdef0a1b",                                      # 20-char hex run, entropy 3.9 (R3 boundary)
+    "hooks.example.com/services/T0AB12CD/B0EF34GH/Xy7Kq2",       # credential split over short URL segments (R3)
 ]
 SAFE = [
     "short answers in the morning",
@@ -61,6 +62,13 @@ SAFE = [
     "9af144bface62e59ef2b",                                    # 20-char hex, entropy 3.35 < 3.5 (R3 boundary)
     "serial AAAA1111BBBB2222CCCC",                             # 20-char code with repeats, entropy 2.3 (R3)
 ]
+
+def test_known_shapes_come_from_the_log_redactor():
+    # AKIA... (all upper case) and sk-... are caught only by logs.has_secret (no second pattern list here) (R4)
+    from jarves import logs
+    assert logs.has_secret("AKIA" + "ABCDEFGHIJKLMNOP") and logs.has_secret("use sk-proj-AbCdEfGhIjKlMnOp for answers")
+    assert not logs.has_secret("prefer Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk")      # this one needs the entropy branch
+
 
 TOKEN_TEXT = "use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather"
 

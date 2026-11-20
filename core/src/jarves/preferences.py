@@ -55,7 +55,8 @@ _SENSITIVE = re.compile(
 # - and _ split these runs (word slugs stay ordinary); a dashed run is scored whole by _random_dashed below.
 # A run containing / is scored whole (base64 secrets such as AWS secret keys contain /) unless it is a URL path: it
 # follows '.', ':' or '/' (host.tld/..., scheme://...) or every segment is a plain path word; then only its segments
-# are scored, so example.com/owner/repo/pull/1450 stays ordinary. A bare 40-hex string is still refused on purpose:
+# are scored, plus its non-word segments joined (a webhook credential split over short segments), so
+# example.com/owner/repo/pull/1450 stays ordinary. A bare 40-hex string is still refused on purpose:
 # it is indistinguishable from a 40-hex API token, and a short commit id (7-12 chars) is allowed.
 _KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
 _PATH_WORD = re.compile(r"[a-z]*|[A-Z][a-z]*|\d+")
@@ -85,7 +86,8 @@ def _scored_parts(t: str, m: re.Match) -> list[str]:
     run = m.group()
     if "/" in run and ((m.start() and t[m.start() - 1] in ".:/") or
                        all(_PATH_WORD.fullmatch(seg) for seg in run.split("/"))):
-        return run.split("/")                                 # a URL path: score its segments only
+        segs = run.split("/")                                 # a URL path: score its segments, and the non-word
+        return segs + ["".join(x for x in segs if not _PATH_WORD.fullmatch(x))]   # ones joined (split credentials)
     return [run]
 
 
