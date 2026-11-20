@@ -12,6 +12,7 @@ Browser: the same launch path as the other *_browser.py tests (apc.launch_kwargs
 Chrome/Edge, msedge on Windows); the CI core job installs the 'browser' extra. Missing = a failure, never a skip."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -19,6 +20,7 @@ import pytest
 from test_dashboard import dash  # noqa: F401  (fixture)
 
 from jarves import approvals as appr
+from jarves import dashboard
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import all_pages_check as apc  # noqa: E402
@@ -37,11 +39,18 @@ UNLOAD = """(pagehideFirst) => {
   if (pagehideFirst) { ph(); hide(); } else { hide(); ph(); } }"""
 # records the real unload events (console for a closed page, sessionStorage for the next same-origin document): the
 # test proves the browser really ran its unload steps, and these listeners also make headless Chromium run the
-# departing page's handlers the way a desktop tab close does (without them the old code's leak was not reproduced)
+# departing page's handlers the way a desktop tab close does (without them the old code's leak was not reproduced;
+# observed with Playwright 1.64 headless Chromium). Because this rests on browser behaviour, the leak guard below runs
+# the same real close against the leaky variant and requires a hidden beat: a browser update that stops running the
+# departing page's handlers fails that guard instead of silently passing the leaky code.
+# The sentinel / navigation target /api/health is diag/service.py's route; DASHBOARD_FRESH_S is approvals.py's 15 s.
 WATCH = """() => { const rec = (e) => { console.log(e);
     sessionStorage.setItem('unload', (sessionStorage.getItem('unload') || '') + e + ' '); };
   window.addEventListener('pagehide', () => rec('pagehide'));
   document.addEventListener('visibilitychange', () => rec('visibilitychange')); }"""
+# the fixed (deferred, unload-aware) hide beat in approvals.js; the leak guard serves a copy that beats at once on
+# every hide instead (the first #477 attempt, 703f433), which leaked a 90 s beat from a closing tab
+LEAK_GUARD = "setTimeout(() => { if (document.hidden && !leaving) refresh(); }, 0);"
 DRAIN = "() => new Promise(r => setTimeout(() => setTimeout(r, 0), 0))"     # let deferred (setTimeout 0) tasks run
 
 
@@ -56,8 +65,7 @@ def browser():
             b.close()
 
 
-@pytest.fixture
-def tab(browser, dash, home):  # noqa: F811
+def _open(browser, dash, home):  # noqa: F811
     ctx = browser.new_context()
     urls: list[str] = []
     ctx.on("request", lambda r: urls.append(r.url))
@@ -68,10 +76,33 @@ def tab(browser, dash, home):  # noqa: F811
                         timeout=30000)
     assert any("/api/approvals" in u for u in urls) and not _hidden_beats(urls)
     base = _marker_mtime(home)                               # written by the load's visible beat: the baseline
+    return ctx, p, urls, base
+
+
+@pytest.fixture
+def tab(browser, dash, home):  # noqa: F811
+    t = _open(browser, dash, home)
     try:
-        yield ctx, p, urls, base
+        yield t
     finally:
-        ctx.close()
+        t[0].close()
+
+
+@pytest.fixture
+def leaky_tab(browser, dash, home, tmp_path, monkeypatch):  # noqa: F811
+    # the server serves a static copy whose approvals.js has the leaky hide beat (no request routing: a routed context
+    # delays a departing page's requests, which would hide the leak)
+    static = tmp_path / "static"
+    shutil.copytree(dashboard.STATIC, static)
+    js = (static / "approvals.js").read_text(encoding="utf-8")
+    assert LEAK_GUARD in js, "approvals.js changed: update LEAK_GUARD so the leak guard still bites"
+    (static / "approvals.js").write_text(js.replace(LEAK_GUARD, "refresh();"), encoding="utf-8")
+    monkeypatch.setattr(dashboard, "STATIC", static)
+    t = _open(browser, dash, home)
+    try:
+        yield t
+    finally:
+        t[0].close()
 
 
 def _hidden_beats(urls):
@@ -106,18 +137,31 @@ def test_synthetic_unload_sends_no_hidden_beat(tab, pagehide_first):
     assert not _hidden_beats(urls)
 
 
-@pytest.mark.parametrize("how", ["close", "navigate"])
-def test_real_close_or_navigation_sends_no_hidden_beat(tab, home, dash, how):  # noqa: F811
-    ctx, p, urls, base = tab
+def _real_unload(p, dash, how):  # noqa: F811
     order: list[str] = []
     p.on("console", lambda m: order.append(m.text))
     p.evaluate(WATCH)
     if how == "close":
         p.close(run_before_unload=False)                     # returns once the page is gone (lifecycle complete)
-        assert _unload_events(order)[:2] == ["pagehide", "visibilitychange"]   # the real unload steps ran (Chromium's order)
-    else:
-        p.goto(dash.url.split("/?")[0] + "/api/health", wait_until="load")   # returns once the old document unloaded
-        seen = p.evaluate("() => sessionStorage.getItem('unload') || ''").split()
-        assert _unload_events(seen)[:2] == ["pagehide", "visibilitychange"]
+        return _unload_events(order)
+    p.goto(dash.url.split("/?")[0] + "/api/health", wait_until="load")   # returns once the old document unloaded
+    return _unload_events(p.evaluate("() => sessionStorage.getItem('unload') || ''").split())
+
+
+def test_leak_guard_leaky_variant_is_caught_on_real_close(leaky_tab, dash):  # noqa: F811
+    # guard for the browser-behaviour dependency: the real close must still let a hide beat out of the leaky variant.
+    # (Same-tab navigation does not let one out even from the leaky variant in this Chromium, so only close is guarded.)
+    ctx, p, urls, _ = leaky_tab
+    assert _real_unload(p, dash, "close")[:2] == ["pagehide", "visibilitychange"]
+    q = ctx.new_page()                                       # the closed page is gone: a fresh page is the sentinel
+    with q.expect_request(lambda r: "/api/health" in r.url, timeout=5000):
+        q.goto(dash.url.split("/?")[0] + "/api/health")
+    assert _hidden_beats(urls), "real close no longer runs the departing page's handlers: the close test is moot"
+
+
+@pytest.mark.parametrize("how", ["close", "navigate"])
+def test_real_close_or_navigation_sends_no_hidden_beat(tab, home, dash, how):  # noqa: F811
+    ctx, p, urls, base = tab
+    assert _real_unload(p, dash, how)[:2] == ["pagehide", "visibilitychange"]   # the real unload steps ran
     assert not _hidden_beats(urls)
     assert _marker_mtime(home) - base <= appr.DASHBOARD_FRESH_S   # server side: not dated into the 90 s hidden window
