@@ -370,8 +370,27 @@ def test_only_browser_recordings_are_excluded_not_user_folders_named_recordings(
 def test_cli_sets_manual_and_checkpoint_retention_issue_1016(profile, capsys):
     """#1016: only --daily/--weekly were settable; the manual and checkpoint limits (the big archives) had no CLI."""
     from jarves import cli
-    assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "1"]) == 0
+    assert cli.main(["backup", "settings", "--manual", "2", "--checkpoints", "3"]) == 0
     s = backup.get_settings(profile)
-    assert s["manual"] == 2 and s["checkpoints"] == 1
+    assert s["manual"] == 2 and s["checkpoints"] == 3
     assert cli.main(["backup", "settings", "--manual", "-1"]) == 1          # refused by set_settings, nothing stored
     assert "between 0 and 365" in capsys.readouterr().out and backup.get_settings(profile)["manual"] == 2
+    for n in ("0", "1"):                       # fewer than 2 would let the first start prune the rollback archive
+        assert cli.main(["backup", "settings", "--checkpoints", n]) == 1
+        assert "between 2 and 365" in capsys.readouterr().out
+    assert backup.get_settings(profile)["checkpoints"] == 3
+
+
+def test_pre_update_checkpoint_survives_first_start_checkpoint_issue_1016(profile, monkeypatch):
+    """#1016: the pre-update checkpoint is the only rollback archive. The new version's first start writes another
+    checkpoint and prunes; even a stored `checkpoints` of 0 (older versions accepted it) must keep the first one."""
+    db = sqlite3.connect(profile / "memory.db")
+    db.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('backup.checkpoints', '0')")
+    db.commit()
+    db.close()
+    pre = backup.create(profile, "pre-migration", note="pre-update-4.5.0-to-4.5.1", now=time.time() - 120)
+    monkeypatch.setattr(backup, "__version__", "9.9.9")
+    first_start = backup.startup_checkpoint(profile)
+    assert first_start is not None and first_start != pre
+    assert pre.is_file() and backup.verify(pre)["ok"] and first_start.is_file()

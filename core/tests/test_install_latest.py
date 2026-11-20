@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -141,8 +142,56 @@ def test_install_writes_one_backup_not_a_manual_one_too_issue_1016(tmp_path):
     assert not hasattr(il.Deps, "backup_now") and "backup_now" not in il.Deps.__dataclass_fields__
     f = Fake(tmp=tmp_path)
     rep = il.run(f.deps())
-    assert rep.ok and f.calls.count("prepare") == 1 and "backup" not in f.calls
+    assert rep.ok and f.calls.count("prepare") == 1
     assert ("backup before install", True, "pre-update.zip") in rep.checks and rep.revert_id == "pre-update.zip"
+
+
+def _real_checkpoint_prepare(home):
+    """prepare() with the real pre-update backup (updates.backup_before_update -> backup.checkpoint)."""
+    from jarves.updates import backup_before_update
+
+    def prepare(ch):
+        bak = backup_before_update(home, "pre-update-4.5.0-to-4.5.1")
+        return {"installer": "C:/x/JARVES-Setup-4.5.1-beta.9.exe", "backup": str(bak), "version": "4.5.1",
+                "signed": True}
+    return prepare
+
+
+def test_install_leaves_exactly_one_archive_issue_1016(tmp_path):
+    from jarves import backup
+    db = sqlite3.connect(tmp_path / "memory.db")
+    db.execute("CREATE TABLE t (x)")
+    db.commit()
+    db.close()
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.prepare = _real_checkpoint_prepare(tmp_path)
+    rep = il.run(d)
+    archives = backup.list_backups(tmp_path)
+    assert rep.ok and [b["kind"] for b in archives] == ["pre-migration"]
+    assert rep.revert_id == archives[0]["name"]
+
+
+def test_real_backup_failure_code_stops_at_backup_issue_1016(tmp_path, monkeypatch):
+    from jarves import backup
+    monkeypatch.setattr(backup, "checkpoint", lambda *a, **k: (_ for _ in ()).throw(
+        backup.BackupError("BACKUP_FAILED", "disk full", "free space")))
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.prepare = _real_checkpoint_prepare(tmp_path)
+    rep = il.run(d)
+    assert not rep.ok and not rep.changed and rep.stopped_at == "backup"
+    assert ("backup before install", False, il.BACKUP_FAILED) in rep.checks and f.calls == []
+
+
+def test_prepare_without_a_backup_stops_before_anything_changes_issue_1016(tmp_path):
+    f = Fake(tmp=tmp_path)
+    d = f.deps()
+    d.prepare = lambda ch: {"installer": "C:/x/JARVES-Setup-4.5.1-beta.9.exe", "backup": "", "version": "4.5.1",
+                            "signed": True}
+    rep = il.run(d, channel="beta")
+    assert not rep.ok and not rep.changed and rep.stopped_at == "backup" and f.calls == []   # not even set_channel
+    assert ("backup before install", False, "no pre-update backup") in rep.checks
 
 
 def test_verification_failure_stops_before_stopping_the_core(tmp_path):

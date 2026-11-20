@@ -40,6 +40,7 @@ CHANNELS = ("stable", "beta")
 LOCK_FILE = "install-latest.lock"
 STATE_FILE = "install-latest-state.json"
 REPORT_FILE = "install-latest-report.txt"
+BACKUP_FAILED = "UPDATE_BACKUP_FAILED"            # updates.backup_before_update's code (test pins the two together)
 PID_FILE = "install-latest.pid"                   # setup process id written by the parent; "cancel" = setup never started
 SETUP_WAIT_S = 1200
 SETUP_SEEN_S = 300                                # how long the waiter looks for the setup process before it judges nothing
@@ -270,19 +271,23 @@ def _begin(deps: Deps, channel: str | None, dry_run: bool) -> Report:
     try:
         prep = deps.prepare(ch)                           # also writes the verified pre-update backup (#1016: only one)
     except Exception as e:                                # noqa: BLE001  (UpdateError and anything else: no traceback)
-        if getattr(e, "code", "") == "UPDATE_BACKUP_FAILED":
+        if getattr(e, "code", "") == BACKUP_FAILED:
             rep.add("backup before install", False, e.code)
             rep.stopped_at = "backup"
         else:
             rep.add("verify installer (signature, SHA256)", False, _err(e))
             rep.stopped_at = "verify"
         return rep
+    rep.revert_id = Path(str(prep.get("backup") or "")).name
+    if not rep.revert_id:                                 # #1016: no install without the one rollback archive
+        rep.add("backup before install", False, "no pre-update backup")
+        rep.stopped_at = "backup"
+        return rep
+    rep.add("backup before install", True, rep.revert_id)
     if ch != deps.channel:
         deps.set_channel(ch)                              # same switch as `jarvis update --channel`, only once verified
     rep.add("verify installer (signature, SHA256)", True, f"{Path(prep['installer']).name}, "
                                                            f"{'signed' if prep.get('signed') else 'unsigned'}")
-    rep.revert_id = Path(str(prep.get("backup") or "")).name
-    rep.add("backup before install", bool(rep.revert_id), rep.revert_id)
     core_up = deps.core_running()
     was = deps.detect_running(core_up)                    # read BEFORE anything is stopped (#293)
     try:

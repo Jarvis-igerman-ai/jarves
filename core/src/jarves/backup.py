@@ -15,7 +15,8 @@ restore on a new machine the user signs in again (`jarvis key`, `jarvis chatgpt 
 
 Retention (adjustable, memory.db settings `backup.*`): automatic backups keep the newest per day for the last
 7 days that have one and the newest per ISO week for the last 4 weeks; manual ones the last 10; pre-migration /
-pre-restore checkpoints the last 5 each. Only automatic backups are thinned by the day/week rule.
+pre-restore checkpoints the last 5 each (at least 2, #1016: the first start after an update must not prune the
+rollback archive). Only automatic backups are thinned by the day/week rule.
 
 Restore: verify first (zip CRC, every SHA-256, PRAGMA integrity_check of every db); refuse while the Core runs on
 that data dir; take a pre-restore checkpoint; stage into a temp dir on the same disk, then swap file by file; any
@@ -60,6 +61,9 @@ _SKIP_SUFFIX = (".tmp", ".lock", "-wal", "-shm", "-journal", ".partial")
 MAX_FILE_BYTES = 512 * 1024 * 1024
 SQLITE_MAGIC = b"SQLite format 3\x00"
 DEFAULTS = {"daily": 7, "weekly": 4, "manual": 10, "checkpoints": 5, "include_faces": False, "auto": True}
+# #1016: the pre-update checkpoint is the only rollback archive; the first start of the new version writes another
+# checkpoint, so at least 2 of each checkpoint kind are kept or that start would prune the rollback archive.
+MIN_KEEP = {"daily": 1, "checkpoints": 2}
 STATE_FILE = "backup_state.json"
 _lock = threading.Lock()
 
@@ -98,8 +102,9 @@ def set_settings(home: Path, changes: dict) -> dict:
                 n = int(v)
             except (TypeError, ValueError):
                 raise ValueError(f"{k} must be a whole number")
-            if not 0 <= n <= 365 or (k == "daily" and n < 1):
-                raise ValueError(f"{k} must be between {1 if k == 'daily' else 0} and 365")
+            low = MIN_KEEP.get(k, 0)
+            if not low <= n <= 365:
+                raise ValueError(f"{k} must be between {low} and 365")
             clean[k] = n
         elif k in ("include_faces", "auto"):
             if not isinstance(v, bool):
@@ -377,7 +382,8 @@ def prune(home: Path) -> list[str]:
         weeks.setdefault("%d-W%02d" % d.isocalendar()[:2], b["name"])
     keep |= set(list(days.values())[:s["daily"]]) | set(list(weeks.values())[:s["weekly"]])
     for kind, n in (("manual", s["manual"]), ("pre-migration", s["checkpoints"]), ("pre-restore", s["checkpoints"])):
-        keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, 1)]}
+        floor = MIN_KEEP["checkpoints"] if kind != "manual" else 1   # also for older stored values below it
+        keep |= {b["name"] for b in [x for x in items if x["kind"] == kind][:max(n, floor)]}
     if autos:
         keep.add(autos[0]["name"])
     gone = []
