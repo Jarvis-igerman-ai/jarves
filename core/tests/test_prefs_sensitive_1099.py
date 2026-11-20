@@ -22,6 +22,9 @@ LEAKY = [
     "my key is 3f2a9c1e-b7d4-4e8a-9c5f-a1b2c3d4e5f6",            # UUID-shaped key (R1)
     "see commit 9af144bface62e59ef2b17acc36aaaa77f8b6ee8",       # bare 40-hex: same shape as a hex API token (R2)
     "טוקן",                                                      # Hebrew bare token: refused alone (R3)
+    "remember wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",         # base64 secret with / (AWS secret-key shape)
+    "my secret: I hum while cooking",                            # labelled "secret:" refused on the safe side
+    "the key QxZvBnMkLpWrTyUiOpAsDfGhJkLzXcVb",                  # letter-only random mixed case
 ]
 SAFE = [
     "short answers in the morning",
@@ -38,6 +41,9 @@ SAFE = [
     "https://github.com/Jarvis-igerman-ai/jarves/pull/1450",
     "see commit 9af144b",                                      # short commit id (R2)
     "send a token of thanks",                                  # English bare token: ordinary word (R3)
+    "call it ThisIsMyVeryLongPreferenceName",                  # CamelCase words: not random mixed case
+    "SupercalifragilisticExpialidocious songs",                # long letter-only word
+    "docs at example.com/Guides/Setup/Step2/Wifi/Router",      # URL path with capitalised segments
 ]
 
 TOKEN_TEXT = "use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather"
@@ -78,7 +84,7 @@ def test_suggest_refuses_token_text_and_stores_nothing(tmp_path):
     from jarves import preferences as prefs_mod
     from jarves.userdata import open_db
     p = prefs_mod.Preferences(open_db(tmp_path))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="sensitive"):
         p.suggest("use Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk for the weather", "owner said so")
     assert p.items("proposed") == []
 

@@ -51,24 +51,44 @@ _SENSITIVE = re.compile(
     r"api[\s_-]?key|(?:private|access|secret)[\s_-]?key|(?:access|auth|bearer|refresh|api)[\s_-]?token|"
     r"client[\s_-]?secret|\b(?:tokens?|secrets?)\s*[:=]|"
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)   # UUID-shaped keys (dashed runs)
-# An unlabelled credential: a long run of key alphabet with letters AND digits and high per-character entropy.
-# - and _ split runs so word slugs stay ordinary (prefixed dashed tokens are caught by logs.has_secret above);
-# / splits too, so URL paths (example.com/owner/repo/pull/1450) stay ordinary. A bare 40-hex string is still refused
-# on purpose: it is indistinguishable from a 40-hex API token, and a short commit id (7-12 chars) is allowed.
-_KEYISH = re.compile(r"[A-Za-z0-9+=]{20,}")
-_MIN_ENTROPY = 3.5                # bits per character; English words and slugs stay well below this
+# An unlabelled credential: a long run of the base64 key alphabet with high per-character entropy.
+# - and _ split runs so word slugs stay ordinary (prefixed dashed tokens are caught by logs.has_secret above).
+# A run containing / is scored whole (base64 secrets such as AWS secret keys contain /) unless it is a URL path: it
+# follows '.', ':' or '/' (host.tld/..., scheme://...) or every segment is a plain path word; then only its segments
+# are scored, so example.com/owner/repo/pull/1450 stays ordinary. A bare 40-hex string is still refused on purpose:
+# it is indistinguishable from a 40-hex API token, and a short commit id (7-12 chars) is allowed.
+_KEYISH = re.compile(r"[A-Za-z0-9+/=]{20,}")
+_PATH_WORD = re.compile(r"[a-z]*|[A-Z][a-z]*|\d+")
+_MIN_ENTROPY = 3.5                # bits per character for letter+digit runs; English words and slugs stay below this
+_MIN_ENTROPY_LETTERS = 4.2        # letter-only runs need more: random mixed case (CamelCase words stay well below)
 
 
 def _entropy(s: str) -> float:
     return -sum(c / len(s) * math.log2(c / len(s)) for c in map(s.count, set(s)))
 
 
+def _random_run(s: str) -> bool:
+    if len(s) < 20 or not re.search(r"[A-Za-z]", s):
+        return False
+    if re.search(r"\d", s):
+        return _entropy(s) >= _MIN_ENTROPY
+    upper = sum(c.isupper() for c in s) / len(s)              # random mixed case is about half upper case
+    return len(s) >= 24 and 0.3 <= upper <= 0.7 and _entropy(s) >= _MIN_ENTROPY_LETTERS
+
+
+def _scored_parts(t: str, m: re.Match) -> list[str]:
+    run = m.group()
+    if "/" in run and ((m.start() and t[m.start() - 1] in ".:/") or
+                       all(_PATH_WORD.fullmatch(seg) for seg in run.split("/"))):
+        return run.split("/")                                 # a URL path: score its segments only
+    return [run]
+
+
 def looks_sensitive(text: str) -> bool:
     t = text or ""
     if _SENSITIVE.search(t) or logs.has_secret(t):            # keywords, numbers, and the known token shapes
         return True
-    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and _entropy(m) >= _MIN_ENTROPY
-               for m in _KEYISH.findall(t))
+    return any(_random_run(p) for m in _KEYISH.finditer(t) for p in _scored_parts(t, m))
 
 
 def normalize(text: str) -> str:
