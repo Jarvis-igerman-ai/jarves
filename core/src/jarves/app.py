@@ -205,6 +205,7 @@ class Core:
         self._tasks: set[asyncio.Task] = set()     # short fire-and-forget tasks (error notices); awaited on stop
         self.stopping = False
         self._greeted = False
+        self._live_opened = 0               # live sessions _start_live has assigned (#520: wake greeting claim)
         self.voice_mode = "off"
         self._voice_connecting = False
         # the last things the OWNER said (typed or heard), in memory only: assisted dialing checks that a number the
@@ -1566,6 +1567,7 @@ class Core:
             await live.stop()
             return
         self.live = live
+        self._live_opened += 1
         await self.link.broadcast("status", self.snapshot())
         for task in (self.tasks.unannounced() if self.tasks is not None else []):
             self._spawn(self._task_finished(task))     # finished while no conversation was open
@@ -2067,15 +2069,14 @@ class Core:
     async def _start_wake_live(self) -> None:
         """#520: wake_greeting() claims _greeted (no second start greeting while connecting); a wake session that
         did not open releases the claim, unless a greeting had already happened before this wake."""
-        was_greeted, live_before = self._greeted, self.live
+        was_greeted, opened_before = self._greeted, self._live_opened
         greeting = self.wake_greeting()
         try:
             await self._start_live(ack=True, greeting=greeting)
         finally:
-            # _start_live assigns self.live only on its success path; _voice_connecting keeps a second start out
-            # while this one connects, so a new self.live here is this wake's session.
-            started = self.live is not None and self.live is not live_before
-            if greeting and not was_greeted and not started:
+            # counted when _start_live assigns self.live, so a session that opened and already ended still counts;
+            # if any session opened meanwhile, the claim is kept (never a second greeting)
+            if greeting and not was_greeted and self._live_opened == opened_before:
                 self._greeted = False
 
     def wake_greeting(self) -> str | None:

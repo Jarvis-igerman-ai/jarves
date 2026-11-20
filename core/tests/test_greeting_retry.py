@@ -195,13 +195,13 @@ def test_tts_fallback_counter_increments_and_is_not_a_start(tmp_path):
 def _wake_core(start_ok: bool, greeted: bool = False, live=None):
     from jarves.app import Core
     c = _ns()
-    c._greeted, c.live, c.calls = greeted, live, []
+    c._greeted, c.live, c.calls, c._live_opened = greeted, live, [], 0
     c.wake_greeting = lambda: Core.wake_greeting(c)
 
     async def start(**kw):
         c.calls.append(kw)
         if start_ok:
-            c.live = object()
+            c.live, c._live_opened = object(), c._live_opened + 1
     c._start_live = start
     return c
 
@@ -222,6 +222,19 @@ def test_wake_greeting_claim_is_released_when_the_session_does_not_start():
     before = _wake_core(start_ok=False, greeted=True)
     asyncio.run(Core._start_wake_live(before))
     assert before._greeted
+
+
+def test_wake_greeting_claim_stands_when_the_session_opened_and_already_ended():
+    """#520 review R1: a session that opened, greeted and ended before _start_live returned keeps the claim."""
+    from jarves.app import Core
+    c = _wake_core(start_ok=False)
+
+    async def open_then_end(**kw):
+        c._live_opened += 1                              # _start_live assigned self.live ...
+        c.live = None                                    # ... and on_end already freed the slot
+    c._start_live = open_then_end
+    asyncio.run(Core._start_wake_live(c))
+    assert c._greeted
 
 
 def test_wake_greeting_claim_is_released_when_start_raises_before_opening():
