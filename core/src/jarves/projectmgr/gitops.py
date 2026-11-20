@@ -97,12 +97,18 @@ NO_CMDS = [x for k in ("core.sshCommand", "core.askPass", "core.pager", "core.ed
 _REFUSED = re.compile(r"^(includeif|hook)\.")
 CONFIG_REFUSED = ("the repository's git config could not be read, or uses a conditional include (includeIf) or a "
                   "config hook (hook.<name>)")
+# `git config --show-scope` (the config read) needs git 2.26 or newer; older git exits 129 (PR #1486 R4)
+GIT_TOO_OLD = "git 2.26 or newer is needed (JARVES reads the repository's config with --show-scope): update git"
 # fixed-name signing keys: set on every call to the owner's global/system value, else git's default, so the repository
 # scope never counts and an agent racing the read gains nothing (#1468 R1)
 _SIGNING_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                      "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
 _OPENPGP = ("gpg.program", "gpg.openpgp.program")
 _PATCH_CMDS = ("diff", "show", "log")
+# textconv runs by default in these (blame too): a blanked repository `diff.<x>.textconv` is skipped with --no-textconv.
+# JARVES calls no other textconv-by-default command; add one here if it ever does (PR #1486 R5)
+_TEXTCONV_CMDS = (*_PATCH_CMDS, "blame")
+_NO_CMD_KEYS = {k.split("=")[0].lower() for k in NO_CMDS[1::2]}
 _OWNER_SCOPES = ("system", "global")
 
 
@@ -110,10 +116,12 @@ def _git_env() -> dict[str, str]:
     return child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"})
 
 
-def _config_overrides(cwd: str | Path) -> list[str] | None:
-    """`-c key=` for every RUN_KEYS entry set at repository scope, read right before each command (the config can
-    change between commands), plus every signing key from the owner's scope (_SIGNING_DEFAULTS). None: the config could not be read (git exits 1 when nothing matches), or
-    a key cannot be overridden safely.
+def _config_overrides(cwd: str | Path) -> list[str] | str:
+    """`-c key=<owner value>` for every RUN_KEYS entry set at repository scope (the owner's own global/system value of
+    that key, else "", so a repository copy of e.g. `filter.lfs.clean` never hides the owner's: PR #1486 R3), read
+    right before each command (the config can change between commands), plus every signing key from the owner's scope
+    (_SIGNING_DEFAULTS). A str: why the config could not be used (unreadable, too old a git, or a key that cannot be
+    overridden safely; git exits 1 when nothing matches).
     Accepted residual risk (P1 #1483, PR #1468 round 3 R1): `<section>.<name>.*` keys (filter, merge and diff
     drivers) depend on this read, so an agent that toggles one between this read and git's own read can still win."""
     try:
@@ -123,24 +131,27 @@ def _config_overrides(cwd: str | Path) -> list[str] | None:
                            capture_output=True, text=True, timeout=30, creationflags=_NOWIN, env=_git_env(),
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
-        return None
+        return CONFIG_REFUSED
+    if p.returncode == 129 and "show-scope" in (p.stderr or ""):
+        return GIT_TOO_OLD
     if p.returncode not in (0, 1):
-        return None
-    parts, out, seen, sign = p.stdout.split("\0"), [], set(), dict(_SIGNING_DEFAULTS)
+        return CONFIG_REFUSED
+    parts, out, seen, sign, owner = p.stdout.split("\0"), [], set(), dict(_SIGNING_DEFAULTS), {}
     for scope, entry in zip(parts[0::2], parts[1::2]):
         key, _, value = entry.partition("\n")
         if scope in _OWNER_SCOPES:
+            owner[key] = value                      # system, then global (git's order): the last one wins
             if key.lower() in sign:                 # system, then global: the last one wins, as in git; gpg.program
                 for k in _OPENPGP if key.lower() in _OPENPGP else (key.lower(),):   # and gpg.openpgp.program are
                     sign[k] = value                 # one setting in git (#1486 R1)
             continue
         if "=" in key or _REFUSED.match(key.lower()):
-            return None                             # `-c` would split the name at "="; the others: see _REFUSED
+            return CONFIG_REFUSED                            # `-c` would split the name at "="; the others: see _REFUSED
         if not RUN_KEYS.match(key.lower()) or key.lower() in sign:
             continue
         if key not in seen:
             seen.add(key)
-            out += ["-c", f"{key}="]
+            out += ["-c", f"{key}={'' if key.lower() in _NO_CMD_KEYS else owner.get(key, '')}"]
     return out + [x for k, v in sign.items() for x in ("-c", f"{k}={v}")]
 
 
@@ -154,12 +165,13 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Every other command the repository's own config names (filter and merge
     drivers, diff commands, signing programs: RUN_KEYS) is overridden too (#1390), see _config_overrides."""
     over = _config_overrides(cwd)
-    if over is None:
+    if isinstance(over, str):
         if check:
-            raise GitError(CONFIG_REFUSED)
-        return subprocess.CompletedProcess(["git", *args], 128, "", CONFIG_REFUSED)
-    if args and args[0] in _PATCH_CMDS:             # diff.external has a fixed name: never from the config (#1468 R2);
-        args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])   # a blanked textconv cannot run (#1486 R2)
+            raise GitError(over)
+        return subprocess.CompletedProcess(["git", *args], 128, "", over)
+    if args and args[0] in _TEXTCONV_CMDS:          # diff.external has a fixed name: never from the config (#1468 R2);
+        args = (args[0], *(["--no-ext-diff"] if args[0] in _PATCH_CMDS else []), "--no-textconv", *args[1:])
+        # a blanked textconv cannot run (#1486 R2, R5)
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *NO_AUTO, *NO_CMDS,
            *over]
     for attempt in range(LOCK_RETRIES + 1):
@@ -315,15 +327,19 @@ def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> li
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189).
     message: the merge commit's message (default: git's own, e.g. "Merge commit '<sha>'" for a commit); a fast-forward
-    makes no merge commit (#1486 R3: an owner with no git identity can still take a fast-forward)."""
-    common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
+    makes no merge commit (#1486 R3: an owner with no git identity can still take a fast-forward).
+    Raises GitError when git itself fails (e.g. a refused config): never reported as a conflict (PR #1486 R1)."""
+    common = git(wt, "rev-parse", "--git-common-dir").stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
         p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
-        files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
+        u = git(wt, "diff", "--name-only", "--diff-filter=U", check=False)
         git(wt, "merge", "--abort", check=False)
+        if u.returncode:
+            raise GitError(" ".join((p.stderr or u.stderr or "git failed").split())[:300])
+        files = [x for x in u.stdout.split() if x]
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]

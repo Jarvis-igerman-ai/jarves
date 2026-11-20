@@ -486,3 +486,54 @@ def test_a_submodule_filter_never_runs_from_a_jarves_command(tmp_path):
     subprocess.run(["git", "config", "submodule.recurse", "true"], cwd=repo, check=True)
     gitops.git(repo, "checkout", "-q", "HEAD~1")                    # recursing would check out `b` in the submodule
     assert not marker.exists()
+
+
+def test_a_repository_copy_of_an_owner_command_key_keeps_the_owners_value(monkeypatch, tmp_path):
+    """PR #1486 R3: a repository-scope key named like an owner global key (`git lfs install --local`) was blanked,
+    which also hid the owner's own value; the owner's value is passed instead."""
+    home = tmp_path / "owner-home"
+    home.mkdir()
+    (home / ".gitconfig").write_text("[filter \"lfs\"]\n\tclean = git-lfs clean -- %f\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    repo = _repo(tmp_path)
+    for key in ("filter.lfs.clean", "core.pager"):
+        subprocess.run(["git", "config", key, "evil"], cwd=repo, check=True)
+    pairs = dict(x.split("=", 1) for x in gitops._config_overrides(repo)[1::2])
+    assert pairs["filter.lfs.clean"] == "git-lfs clean -- %f" and pairs["core.pager"] == ""
+
+
+def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_path):
+    """PR #1486 R4: git older than 2.26 exits 129 on `config --show-scope`; the error named the config instead."""
+    real = subprocess.run
+
+    def run(argv, **kw):
+        if "--show-scope" in argv:
+            return subprocess.CompletedProcess(argv, 129, "", "error: unknown option `show-scope'\nusage: ...")
+        return real(argv, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    with pytest.raises(gitops.GitError, match="2.26 or newer"):
+        gitops.git(tmp_path, "status")
+    assert "2.26" in gitops.git(tmp_path, "status", check=False).stderr
+
+
+def test_blame_never_runs_a_blanked_repository_textconv(tmp_path):
+    """PR #1486 R5: blame runs textconv by default; a repository `diff.<x>.textconv` blanked to "" made it fail."""
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_text("*.txt diff=evil\n", encoding="utf-8")
+    subprocess.run(["git", "config", "diff.evil.textconv", "evil-textconv"], cwd=repo, check=True)
+    assert "init" not in gitops.git(repo, "blame", "--", "f.txt").stderr
+
+
+def test_a_refused_config_during_a_merge_raises_instead_of_a_conflict(monkeypatch, tmp_path):
+    """PR #1486 R1: a merge refused by the config (rc 128, no conflict files listed) was reported as a conflict."""
+    repo = _repo(tmp_path)
+    real = gitops.git
+
+    def git(cwd, *args, **kw):
+        if args[:1] == ("merge",) and "--abort" not in args or args[:2] == ("diff", "--name-only"):
+            return subprocess.CompletedProcess(["git", *args], 128, "", gitops.CONFIG_REFUSED)
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    with pytest.raises(gitops.GitError, match="could not be read"):
+        gitops.merge_in(repo, "main")

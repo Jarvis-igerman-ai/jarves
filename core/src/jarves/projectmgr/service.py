@@ -932,8 +932,11 @@ class Manager(StageEngine):
                                              "project_ship", {"project": p["name"], "branch": st["branch"],
                                                               "commit": sha}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
-                                        message=f"Merge {br} at {sha[:12]}")
+            try:
+                conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
+                                            message=f"Merge {br} at {sha[:12]}")
+            except gitops.GitError as e:                    # git's own failure, never a "conflict" (PR #1486 R1)
+                return _res(False, "GIT_ERROR", "git failed, nothing merged: " + clean(e, 200))
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration commit merged into the owner branch", id=p["id"])

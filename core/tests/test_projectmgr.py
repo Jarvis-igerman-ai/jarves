@@ -1345,3 +1345,46 @@ def test_ship_plan_reports_a_failed_diff_as_git_error(env, monkeypatch):
         ["git", *a], 128, "", gitops.CONFIG_REFUSED) if a[:2] == ("diff", "--shortstat") else real(cwd, *a, **kw))
     r = m.call("ship_plan", project="demo")
     assert not r["ok"] and r["code"] == "GIT_ERROR" and "could not be read" in r["text"]
+
+
+def test_ship_apply_reports_a_refused_merge_as_git_error_not_a_conflict(env, monkeypatch):
+    """PR #1486 R1: a merge refused by the config said `CONFLICT "merge conflict, nothing changed: ..."`."""
+    m, repo, _ = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    real = gitops.git
+
+    def git(cwd, *args, **kw):
+        if args[:1] == ("merge",) and "--abort" not in args or args[:2] == ("diff", "--name-only"):
+            return subprocess.CompletedProcess(["git", *args], 128, "", gitops.CONFIG_REFUSED)
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    m._ask = lambda *a, **k: True
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["code"] == "GIT_ERROR" and "could not be read" in r["text"] and not (repo / "a.txt").exists(), r
+
+
+def test_a_failed_diff_size_or_tested_commit_is_never_read_as_empty(env, monkeypatch):
+    """PR #1486 R2: `_diff_size` read a failed git as 0 lines, and the test stage recorded an empty tested commit."""
+    from jarves.projectmgr import engine
+    monkeypatch.setattr(gitops, "git", lambda cwd, *a, **kw: subprocess.CompletedProcess(
+        ["git", *a], 128, "", gitops.CONFIG_REFUSED))
+    assert engine._diff_size(Path("."), "main") is None
+    monkeypatch.undo()
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    real = gitops.git
+    integ = str(gitops.project_root(home, 1) / "integration")
+
+    def git(cwd, *args, **kw):
+        if args == ("rev-parse", "HEAD") and str(cwd) == integ:
+            return subprocess.CompletedProcess(["git", *args], 128, "", gitops.CONFIG_REFUSED)
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] != "done" and "git failed" in (t["reason"] or ""), (t["status"], t["reason"])

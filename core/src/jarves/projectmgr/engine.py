@@ -321,7 +321,10 @@ class StageEngine:
         if kind == "reproduce":
             if not files:
                 return ("fail", "no reproduction test was written")
-            head = gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
+            h = gitops.git(wt, "rev-parse", "HEAD", check=False)
+            if h.returncode:                                        # never an empty reproduction commit (PR #1486 R2)
+                return ("stop", "failed", _git_failed(h))
+            head = h.stdout.strip()
             self._set_job(t, repro={"files": files[:6], "commit": head, "cmd": repro.get("cmd") or []})
             return self._confirm_repro(p, self.db.task(t["id"]), wt)
         return ("next",)
@@ -400,7 +403,12 @@ class StageEngine:
                 notes.append(f"{name}: changed files it may not")
                 continue
             if has_check:
-                if gitops.merge_in(wt, base):
+                try:
+                    unmerged = gitops.merge_in(wt, base)
+                except gitops.GitError as e:                        # merge_in raises git's own failure (#1486 R1)
+                    notes.append(f"{name}: git failed {clean(e, 80)}")
+                    continue
+                if unmerged:
                     notes.append(f"{name}: does not merge with earlier tasks")
                     continue
                 ok, _out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
@@ -408,6 +416,9 @@ class StageEngine:
                     notes.append(f"{name}: the check failed")
                     continue
             size = _diff_size(wt, base)
+            if size is None:                                        # a failed git is not a 0-line change (PR #1486 R2)
+                notes.append(f"{name}: git failed")
+                continue
             good.append((size, k, name, wt, br, res))
         good.sort(key=lambda x: (x[0], x[1]))
         winner = good[0] if good else None
@@ -541,7 +552,10 @@ class StageEngine:
                 elif touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
-            tested = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+            tg = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False)
+            if tg.returncode:                                       # never record an empty tested commit (PR #1486 R2)
+                ok, outs = False, [_git_failed(tg)]
+            tested = tg.stdout.strip()
         if self._stopped(t, cancel):
             return ("end",)
         if not ok:
@@ -562,7 +576,7 @@ class StageEngine:
                 return ("end",)
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
-                head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+                head = gitops.git(self._integration(p), "rev-parse", "HEAD").stdout.strip()   # GitError: below
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
@@ -593,7 +607,10 @@ class StageEngine:
         if not argv:
             return ("park", "no release command is set for this project (jarvis project config --release "
                             "\"...\" on the PC): release it yourself, then say done")
-        sha = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
+        rs = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False)
+        if rs.returncode:                                           # the prompt always names a commit (PR #1486 R2)
+            return ("stop", "blocked", "not released: " + _git_failed(rs))
+        sha = rs.stdout.strip()
         if not self._approve(f"Release {p['name']} at {sha[:10]}: {' '.join(argv)[:300]}?", "project_release",
                              {"project": p["name"], "commit": sha[:12]}):
             return ("park", "the release was not approved: say done when you released it yourself, or approve it "
@@ -767,11 +784,19 @@ def _repro_touched(wt: Path, repro: dict) -> tuple[list[str], str]:
     """(reproduction-test files the fix changed, "") or ([], git's error): a failed git (e.g. a refused config, no
     output) never counts as "not touched" (PR #1486)."""
     d = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"], check=False)
-    return (d.stdout.split(), "") if d.returncode == 0 else ([], "git failed: " + clean(d.stderr or "unknown", 200))
+    return (d.stdout.split(), "") if d.returncode == 0 else ([], _git_failed(d))
 
 
-def _diff_size(wt: Path, base: str) -> int:
-    out = gitops.git(wt, "diff", "--numstat", f"{base}...HEAD", check=False).stdout
+def _git_failed(d) -> str:
+    return "git failed: " + clean(d.stderr or "unknown", 200)
+
+
+def _diff_size(wt: Path, base: str) -> int | None:
+    """Changed lines against `base`; None when git fails (PR #1486 R2: never 0 for a failure)."""
+    d = gitops.git(wt, "diff", "--numstat", f"{base}...HEAD", check=False)
+    if d.returncode:
+        return None
+    out = d.stdout
     n = 0
     for line in out.splitlines():
         a, _, rest = line.partition("\t")
