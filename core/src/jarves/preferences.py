@@ -46,8 +46,9 @@ _SENSITIVE = re.compile(
     # credential words and well-known key/token prefixes (#1099)
     r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?keys?\b|(?:access|auth|refresh)[\s_-]?tokens?\b|(?:secret|private)[\s_-]?keys?\b|"
     r"\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\b(?:sk|pk|rk)_(?:live|test)_[a-z0-9]{12,}|\bgh[pousr]_[a-z0-9]{20,}|"
+    r"\bgithub_pat_[a-z0-9_]{20,}|\bglpat-[a-z0-9_-]{20,}|"
     r"\bxox[abprs]-[a-z0-9-]{8,}|\bAIza[a-z0-9_-]{30,}|\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.", re.I)
-_AWS_KEY_ID = re.compile(r"\bAKIA[A-Z0-9]{12,}")   # upper case only, so matched case-sensitively
+_AWS_KEY_ID = re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{12,}")   # long-term/temporary AWS key ids: upper case only, so matched case-sensitively
 # "bearer" + a token that has a digit or a lower->upper change (plain English like "bearer instruments" passes)
 _BEARER = re.compile(r"\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", re.I)
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
@@ -62,8 +63,9 @@ def _token_shaped(run: str) -> bool:
 
 
 def looks_sensitive(text: object) -> bool:
-    """True when text must not be stored. Fails closed: a non-text value counts as sensitive."""
-    if text is None:
+    """True when text must not be stored. Empty values (None, "", 0, []) are not; any other non-text value
+    fails closed (counts as sensitive) instead of raising."""
+    if not text:
         return False
     if isinstance(text, (bytes, bytearray)):
         text = bytes(text).decode("utf-8", errors="replace")

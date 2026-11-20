@@ -9,7 +9,7 @@ from jarves.preferences import looks_sensitive
 TOKENS = [
     "use sk-abcDEF123ghiJKL456mno for the model",
     "use sk-abcdefghijklmnop for the model",               # all lower case: only the sk- prefix rule
-    "stripe sk_live_abcdef123456ghij",                       # lower case + digits: only the sk_live_ rule
+    "stripe sk_live_abcdefghijklmnop",                       # lower case: only the sk_live_ rule
     "stripe pk_test_abcdefghijklmnop",
     "my github token is ghp_abcdefghijklmnopqrstuvwxyz",    # lower case: only the gh?_ prefix rule
     "AKIAABCDEFGHIJKLMNOP is the aws id",                    # no lower case: only the AKIA rule
@@ -17,7 +17,10 @@ TOKENS = [
     "AIzaSyA-bcdEFGhij_KLMnopQRStuvWXyz01234",
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.sig",
     "config Qx7Lm2Rt8Vx3Bk9Np4Hs",                           # no prefix/keyword: only the mixed-case run rule
-    "d41d8cd98f00b204e9800998ecf8427e",                      # 32 hex
+    "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",                      # 32 hex, no 6-digit run: only the hex rule
+    "github_pat_abcdefghijklmnopqrstuvwxyz",                 # lower case: only the github_pat_ rule
+    "gitlab glpat-abcdefghijklmnopqrstuv",                   # lower case: only the glpat- rule
+    "ASIAABCDEFGHIJKLMNOP is a temporary aws id",            # no lower case: only the ASIA rule
     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",              # '/' splits runs below 20: only the base64 rule
     "Authorization: Bearer abcdefgh1234",
     "Authorization: Bearer abcdEFGHijkl",
@@ -61,7 +64,8 @@ def test_ordinary_preferences_stay_allowed(text):
 
 
 def test_none_bytes_and_other_types():
-    assert not looks_sensitive(None)
+    for empty in (None, "", b"", 0, False, [], {}):
+        assert not looks_sensitive(empty)  # empty values stay "not sensitive", as before the change
     assert looks_sensitive(b"use sk-abcdefghijklmnop")
     assert not looks_sensitive(b"short answers please")
     for value in (12, ["sk-abcdefghijklmnop"], object()):
@@ -70,7 +74,7 @@ def test_none_bytes_and_other_types():
 
 @pytest.mark.parametrize("text", [
     "Wake-me-at-7-on-Monday",                                # hyphen-joined mixed case with a digit
-    "fix after 24fd0a5990d2f3df1abbf4655836533d3b6fcce1",    # git SHA (32+ hex)
+    "fix after a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",    # git SHA (32+ hex, no 6-digit run)
     "rename Base64EncoderFactoryHelper",                     # CamelCase identifier with a digit
     "Users/Name/Music/Playlist2024/Favourites",              # mixed-case path with a digit (base64 rule)
 ])
