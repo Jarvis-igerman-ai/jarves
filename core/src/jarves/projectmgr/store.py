@@ -58,7 +58,8 @@ MIGRATIONS = {
               ("job", "TEXT NOT NULL DEFAULT '{}'"), ("waiting", "TEXT NOT NULL DEFAULT ''"),
               ("kind", "TEXT NOT NULL DEFAULT 'task'"), ("pid_start", "TEXT NOT NULL DEFAULT ''")],
     "projects": [("flow", "TEXT NOT NULL DEFAULT ''"), ("github", "TEXT NOT NULL DEFAULT 'off'"),
-                 ("release_cmd", "TEXT NOT NULL DEFAULT '[]'"), ("cloud", "TEXT NOT NULL DEFAULT '{}'")],
+                 ("release_cmd", "TEXT NOT NULL DEFAULT '[]'"), ("cloud", "TEXT NOT NULL DEFAULT '{}'"),
+                 ("integration_sha", "TEXT NOT NULL DEFAULT ''")],
 }
 
 
