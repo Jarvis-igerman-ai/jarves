@@ -185,3 +185,16 @@ def test_label_check_timeout_or_oserror_still_files_issue(monkeypatch, capsys):
         factory_sim.file_issue(["x"], "tail")
         assert _create_labels(calls) == ["showstopper", "P1"]
         assert "label check failed; filing without the 'testing' label" in capsys.readouterr().out
+
+
+def test_label_check_uses_short_timeout(monkeypatch):
+    calls = []  # #897 review R2: a hung `gh label list` must not delay the failure report by a full minute
+    base = _fake_gh(calls)
+    timeouts = {}
+
+    def fake_run(cmd, **kw):
+        timeouts[cmd[1]] = kw.get("timeout")
+        return base(cmd, **kw)
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "tail")
+    assert timeouts["label"] == factory_sim.LABEL_CHECK_TIMEOUT_S == 15

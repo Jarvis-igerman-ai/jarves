@@ -57,11 +57,14 @@ def _summary(tail: str, limit: int = 600) -> str:
     return text[:limit]
 
 
+LABEL_CHECK_TIMEOUT_S = 15  # #897: short, so a hung `gh label list` barely delays the failure report
+
+
 def _has_label(repo: str, name: str) -> bool:
     """True only when `gh label list` succeeds and returns a label called `name`; anything else is False."""
     try:
         got = subprocess.run(["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--limit", "100"],
-                             capture_output=True, text=True, timeout=60)
+                             capture_output=True, text=True, timeout=LABEL_CHECK_TIMEOUT_S)
         labels = json.loads(got.stdout) if got.returncode == 0 else None
     except (OSError, subprocess.SubprocessError, ValueError):
         labels = None
