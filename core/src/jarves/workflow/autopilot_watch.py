@@ -363,7 +363,7 @@ def _factory_sim_alerts(home, now):
     path = Path(home) / "factory_sim_last.json"
     if not path.exists():
         return [{"kind": "factory_sim_missing",
-                 "summary": "Nightly factory simulation has never run here; install it: "
+                 "summary": "No nightly factory simulation result found; to install the schedule run: "
                             "python core/tools/factory_sim.py --schedule-command",
                  "task_id": None, "agent_id": None}]
     data = json.loads(path.read_text(encoding="utf-8"))

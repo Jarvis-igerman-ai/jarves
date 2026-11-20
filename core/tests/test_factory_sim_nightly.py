@@ -28,6 +28,7 @@ def test_record_fail_files_issue_and_alerts(tmp_path, monkeypatch):
 def test_stale_and_missing(tmp_path):
     missing = factory_sim_alerts(tmp_path)  # #897: an uninstalled schedule must be visible
     assert [a["kind"] for a in missing] == ["factory_sim_missing"]
+    assert missing[0]["summary"].startswith("No nightly factory simulation result found")
     assert "--schedule-command" in missing[0]["summary"]
     (tmp_path / "factory_sim_last.json").write_text(json.dumps({"at": 100.0, "ok": True}))
     assert factory_sim_alerts(tmp_path, now=100.0 + 37 * 3600)[0]["kind"] == "factory_sim_stale"
@@ -69,7 +70,7 @@ def test_file_issue_body_has_no_raw_output(monkeypatch):
     assert labels == ["showstopper", "P1", "testing"]  # #897: the auto-issue carries an area label
 
 
-def test_issue_is_filed_without_area_label_when_that_label_is_missing(monkeypatch):
+def test_issue_is_filed_without_area_label_when_that_label_is_missing(monkeypatch, capsys):
     import subprocess
     calls = []
 
@@ -82,6 +83,7 @@ def test_issue_is_filed_without_area_label_when_that_label_is_missing(monkeypatc
     factory_sim.file_issue(["x"], "tail")
     creates = [c for c in calls if "create" in c]
     assert len(creates) == 2 and "testing" not in creates[1] and "showstopper" in creates[1]
+    assert "area label 'testing' not found; filing without it" in capsys.readouterr().out
 
 
 def test_issue_create_is_not_retried_after_other_failure(monkeypatch, capsys):
