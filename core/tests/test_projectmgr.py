@@ -1228,3 +1228,28 @@ def test_f6_read_only_git_still_works():
     for cmd in ("git status", "git diff", "git diff --stat", "git log --oneline -5"):
         assert any(_rule_matches(r, cmd) for r in allow if r.startswith("Bash(")), cmd
     assert not any(r.startswith(("Edit", "Write")) for r in allow)
+
+
+def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
+    """#1407: the ship approval named only the integration BRANCH, and the merge then took whatever that branch
+    pointed at. A commit added to the branch while the prompt is open must not reach the owner's branch, and the
+    prompt shows the commit it merges."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    approved = sh(integ, "git", "rev-parse", "HEAD").strip()
+    seen = []
+
+    def ask(prompt, **_):
+        seen.append(prompt)
+        (integ / "late.txt").write_text("not approved\n")
+        sh(integ, "git", "add", "-A")
+        sh(integ, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "late", "--no-verify")
+        return True
+    m._ask = ask
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    assert approved[:12] in seen[0]

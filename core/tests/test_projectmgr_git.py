@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if "--get-regexp" in argv:                  # the shared-config read before each command (#1390): none set
+            return subprocess.CompletedProcess(argv, 1, "", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,40 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def test_commands_named_in_the_shared_config_never_run(tmp_path):
+    """#1390 / #1407 item 3: besides hooks and fsmonitor, the shared (agent-writable) repository config can name
+    filter drivers, a merge driver, diff commands and a signing program. With a `.gitattributes` naming them, add,
+    worktree add, commit, diff and merge (also the ship path with the owner's identity) must run none of them."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "cmd-ran.txt"
+    gitops.git(repo, "config", "user.name", "Owner")
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
+    evil = tmp_path / "evil-bin"
+    _hook(evil, "cmd", marker)
+    cmd = (evil / "cmd").as_posix()
+    (repo / ".gitattributes").write_text("* filter=x merge=m diff=d\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
+    for key in ("filter.x.clean", "filter.x.smudge", "merge.m.driver", "diff.d.command",
+                "diff.d.textconv", "diff.external", "gpg.program", "hook.x.command"):
+        subprocess.run(["git", "config", key, cmd], cwd=repo, check=True)
+    subprocess.run(["git", "config", "hook.x.event", "pre-commit"], cwd=repo, check=True)
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "reset", "-q"], cwd=repo, capture_output=True, check=True)
+    assert marker.exists()                          # the setup works: without the fix git runs the clean filter
+    marker.unlink()
+    subprocess.run(["git", "config", "filter.x.process", cmd], cwd=repo, check=True)
+    assert subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True).returncode != 0   # the process filter
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main side", "--no-verify")
+    gitops.ensure_integration(home, str(repo), 1, base="HEAD~1")
+    wt, br = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    (wt / "f.txt").write_text("task side", encoding="utf-8")
+    assert gitops.commit_all(wt, "task") and gitops.changed_files(wt, "HEAD~1") == ["f.txt"]
+    gitops.diffstat(wt, "HEAD~1")
+    assert gitops.merge_in(wt, "main") == ["f.txt"]                  # the merge driver would run on this conflict
+    subprocess.run(["git", "config", "commit.gpgsign", "true"], cwd=repo, check=True)
+    gitops.merge_in(repo, br, ident=False)                          # the ship path: the owner's own signing settings
+    assert not marker.exists()
