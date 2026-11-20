@@ -135,3 +135,32 @@ def test_automerge_enqueue_survives_risk_class_exit_1():
     run = yaml.safe_load((WORKFLOWS / "automerge.yml").read_text(encoding="utf-8"))["jobs"]["enqueue"]["steps"][-1]["run"]
     assert "set +e" in run
     assert re.search(r"risk_class\.py[^\n]*2>&1\) \|\| true", run)
+
+
+def test_release_secrets_step_runs_only_on_a_tag_ref_after_a_fail_closed_guard():
+    """#544: the only step reading RELEASES_TOKEN / JARVES_UPDATE_SIGNING_KEY needs a real tag ref (a branch named
+    like v4.5.0 is refused), and a guard right before it fails a real publish attempted from any other ref."""
+    import os
+    import shutil
+    import subprocess
+    doc, job = _release()
+    steps = job["steps"]
+    idx = [i for i, s in enumerate(steps) if "secrets." in str(s)]
+    assert len(idx) == 1 and "secrets." not in str(doc.get("env", {})) + str(job.get("env", {}))
+    publish, guard = steps[idx[0]], steps[idx[0] - 1]
+    for part in ("env.DRY_RUN != 'true'", "github.ref_type == 'tag'", "startsWith(github.ref, 'refs/tags/v')"):
+        assert part in publish["if"], part
+    assert guard.get("id") == "publish_guard" and "env.DRY_RUN != 'true'" in guard["if"] and "if" in guard
+    assert "secrets." not in str(guard) and job["env"]["REF_TYPE"] == "${{ github.ref_type }}"
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        return  # the structure above is checked everywhere; the script itself runs on the Linux runner
+    def run(**env):
+        full = {"PATH": os.environ.get("PATH", ""), "TAG": "v4.5.0", **env}
+        return subprocess.run([bash, "-e", "-c", guard["run"]], env=full, capture_output=True, text=True, timeout=30)
+    ok = run(REF_TYPE="tag", GITHUB_REF="refs/tags/v4.5.0")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    for bad in ({"REF_TYPE": "branch", "GITHUB_REF": "refs/heads/v4.5.0"}, {"REF_TYPE": "tag", "GITHUB_REF": "refs/tags/v4.5.1"},
+                {"REF_TYPE": "", "GITHUB_REF": ""}):
+        r = run(**bad)
+        assert r.returncode != 0 and "::error::" in r.stdout, bad
