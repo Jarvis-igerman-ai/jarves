@@ -11,11 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from typing import Any
 
 import httpx
 
 from . import logs, usage
-from .brain import (INSTRUCTIONS, render_instructions, BackendTrace, BrainUnavailable, billing_summary, cited_urls,
+from .brain import (INSTRUCTIONS, render_instructions, BackendTrace, LiveName, BrainUnavailable, billing_summary, cited_urls,
                     with_sources)
 from .budget import Budget, BudgetExceeded
 from .chatgpt_auth import RESOURCE, ChatGPTAuth, ChatGPTAuthError
@@ -48,11 +49,11 @@ def plain_tool_name(item: dict) -> str:
     return name.split(".", 1)[1] if name.startswith(NAMESPACE + ".") else name
 
 
-class ChatGPTBrain:
+class ChatGPTBrain(LiveName):
     connection = "chatgpt"
 
     def __init__(self, cfg: AIConfig, registry: SkillRegistry, memory: MemoryStore, auth: ChatGPTAuth,
-                 name: str = "JARVES", *, transport: httpx.AsyncBaseTransport | None = None,
+                 name: Any = "JARVES", *, transport: httpx.AsyncBaseTransport | None = None,
                  budget: Budget | None = None) -> None:
         self.cfg, self.registry, self.memory, self.auth, self.name = cfg, registry, memory, auth, name
         self.budget = budget or Budget(memory, cfg)     # shared Core Budget; None = own one on the same counter
