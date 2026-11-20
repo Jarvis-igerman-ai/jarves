@@ -465,11 +465,12 @@ def test_autopilot_notify_op_reaches_the_owner_channel(world):
     o.notify = old
 
 
-def test_autopilot_worker_default_list_matches_owner_rights_and_never_a_bypass(world):
-    """P1: a headless worker could not run one test (popup timed out while the owner slept). Same working rights, no bypass."""
+def test_autopilot_worker_default_list_is_read_only_and_never_a_bypass(world):
+    """#1311: the default headless worker list is read-only (no pytest, no commit; the owner's `worker_allowed_tools`
+    override restores them) and never a bypass mode. Supersedes the earlier "same rights as the owner" default."""
     from jarves.orchestrator import claude
     rules = claude.autopilot_allowed_tools(r"C:\py\python.exe")
-    assert "Bash(python:*)" not in rules and "Bash(pytest:*)" in rules and "Bash(gh pr:*)" in rules and "Bash(git push jarves:*)" not in rules and "Bash(jarvis:*)" not in rules
+    assert "Bash(python:*)" not in rules and "Bash(pytest:*)" not in rules and "Bash(gh pr view:*)" in rules and "Bash(gh pr:*)" not in rules and "Bash(git push jarves:*)" not in rules and "Bash(jarvis:*)" not in rules
     assert "Bash(git push*)" in claude.WORKER_DENY and "Bash(jarvis hotfix*)" in claude.WORKER_DENY
     for hard_stop in ("Bash(git push:*)", "Bash(git tag:*)", "Bash(rm:*)", "Bash(gh release:*)", "Bash(powershell:*)",
                       "Bash(schtasks:*)", "Bash(taskkill:*)"):
