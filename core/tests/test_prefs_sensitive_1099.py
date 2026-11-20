@@ -46,6 +46,7 @@ SAFE = [
     "my private keyboard layout is Dvorak",      # keyword must end the word (review R1)
     "the secret keyboard shortcut opens notes",
     "access keyboard settings by voice",
+    "the laws keys chapter",                     # vendor name must start a word (review of #1489, R1)
 ]
 # review of #1479, R1: vendor names before key/token, and a bare key/token/secret followed by a value
 VENDOR_OR_VALUE = [
@@ -55,6 +56,7 @@ VENDOR_OR_VALUE = [
     "the token is Abcdefghijkl1",                # one digit run: the entropy rule does not fire
     "secret: hunter2isGreat",
     "my key = qwertyuiop9",
+    "my key is hunter2",                         # 7 chars: the value minimum is 6 (review of #1489, R3)
 ]
 SAFE_WORDING = [
     "the key is to stay calm",
@@ -62,6 +64,8 @@ SAFE_WORDING = [
     "the secret to good coffee is fresh beans",
     "a token of thanks after dinner",
     "the key is 2024",
+    "the key is ab12c",                          # 5 chars: below the value minimum (boundary pin)
+    "the token: abcdefghij",                       # value without a digit: not refused (boundary pin)
 ]
 SHA = "ab17fe59578af69d56815eb69b4dbcb72a864efe"   # a real 40-hex commit id of this branch
 SAFE_DRAFTS = [
@@ -114,6 +118,13 @@ def test_sha_with_six_digit_run_is_still_refused_known_gap_1482():
     # KNOWN GAP (#1482), pinned so it stays visible (the repo forbids xfail): the old \\d{6,} rule refuses a commit
     # SHA containing a 6-digit run, so SAFE_DRAFTS above only proves SHAs without one. Flip this when #1482 lands.
     assert prefs_mod.looks_sensitive("revert commit 3f2a1b9c0d123456ef7890abcdef1234567890ab")
+
+
+def test_lowercase_hex_key_is_not_refused_known_gap_1482():
+    # KNOWN GAP (#1482), pinned on purpose: the entropy rule needs upper AND lower case so commit SHAs stay allowed
+    # in dev drafts; a 32-char lowercase hex key without a 6-digit run therefore passes. Flip when #1482 lands.
+    hexkey = "9f3a" + "c2e8" + "b71d" + "4e05" + "a6f9" + "d3c1" + "8b2e" + "7f4a"
+    assert len(hexkey) == 32 and not prefs_mod.looks_sensitive(f"remember {hexkey}")
 
 
 def test_goals_share_the_refusal(home):

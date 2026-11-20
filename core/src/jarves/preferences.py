@@ -49,10 +49,10 @@ _SENSITIVE = re.compile(
     r"(?:api|access|secret|private)[\s_-]*keys?(?![a-z])|(?:access|auth|refresh)[\s_-]*tokens?(?![a-z])|"
     r"\bbearer\s+(?:token\b|[A-Za-z0-9._~+/-]{16,})|"
     r"client[\s_-]*secrets?(?![a-z])|"
-    # a vendor name before key/token/secret ("my openai key"), and a bare key/token/secret given a value with a digit
-    r"(?:openai|anthropic|github|gitlab|google|slack|stripe|aws|azure|discord|telegram|twilio)[\s_-]*"
+    # a vendor word before key/token/secret ("my openai key"), and a bare key/token/secret given a 6+ char value with a digit
+    r"\b(?:openai|anthropic|github|gitlab|google|slack|stripe|aws|azure|discord|telegram|twilio)[\s_-]*"
     r"(?:api[\s_-]*)?(?:keys?|tokens?|secrets?)(?![a-z])|"
-    r"\b(?:key|token|secret)s?\s*(?:is|=|:)\s*(?=[A-Za-z0-9_+/=.-]*\d)[A-Za-z0-9_+/=.-]{8,}|טוקן|מפתח\s+(?:ה[-\s]*)?(?:api|גישה|פרטי)", re.I)
+    r"\b(?:key|token|secret)s?\s*(?:is|=|:)\s*(?=[A-Za-z0-9_+/=.-]*\d)[A-Za-z0-9_+/=.-]{6,}|טוקן|מפתח\s+(?:ה[-\s]*)?(?:api|גישה|פרטי)", re.I)
 # A long unbroken run of letters, digits and token punctuation (#1099): a key/token without a known vendor prefix.
 _TOKENISH = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
 _ENTROPY_BITS = 4.0               # bits per character over the run
