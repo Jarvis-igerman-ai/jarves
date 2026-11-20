@@ -310,7 +310,7 @@ class FlatButton:
 
 
 # ---------------------------------------------------------------------- the window
-def new_root(tk, *, attempts: int = 5, sleep=time.sleep):
+def new_root(tk, *, attempts: int = 5, sleep=None):
     """tk.Tk(), retried on Windows' transient Tcl init failures ("couldn't read file ...auto.tcl", 'invalid command
     name "tcl_findLibrary"'); any other TclError is raised at once. Shared with the listening dot (#520)."""
     for attempt in range(attempts):
@@ -321,7 +321,7 @@ def new_root(tk, *, attempts: int = 5, sleep=time.sleep):
                                                   "tcl_findLibrary", "tk_getFileLibrary", "can't find a usable"))
             if attempt == attempts - 1 or not transient:
                 raise
-            sleep(0.25 * (attempt + 1))
+            (sleep or time.sleep)(0.25 * (attempt + 1))     # looked up at call time (tests patch time.sleep)
 
 
 def build(req: dict, out: Path, test_invoke: str | None = None, *, theme: str | None = None,

@@ -170,7 +170,6 @@ def test_never_inside_greeting_pending_window(lc):
 def test_dot_retries_transient_tcl_init_errors_like_the_popup():
     """#520: the dot's tk.Tk() had no retry for Windows' transient Tcl init failures (tcl_findLibrary) and
     died silently; it now shares the approval popup's retry helper. Fake Tk module: no tkinter or display needed."""
-    import inspect
     from jarves import approval_popup
 
     class TclError(Exception):
@@ -193,4 +192,38 @@ def test_dot_retries_transient_tcl_init_errors_like_the_popup():
     with pytest.raises(TclError):                        # a real (non-transient) error is not retried
         approval_popup.new_root(mod, sleep=naps.append)
     assert len(tries) == 1
-    assert "new_root(" in inspect.getsource(indicator.TkDotBackend._run)
+
+
+def test_dot_backend_survives_one_transient_tcl_error(monkeypatch):
+    """#520 (behaviour): the real TkDotBackend._run with a fake tkinter whose first Tk() fails with the transient
+    tcl_findLibrary error: it retries and builds the dot instead of dying silently. No display, no clock."""
+    import sys
+    import types
+    from jarves import approval_popup
+    calls = []
+
+    class Stub:
+        def __getattr__(self, name):
+            def rec(*a, **k):
+                calls.append(name)
+                return 100
+            return rec
+
+    class TclError(Exception):
+        pass
+
+    tk_calls = []
+
+    def Tk():
+        tk_calls.append(1)
+        if len(tk_calls) == 1:
+            raise TclError('invalid command name "tcl_findLibrary"')
+        return Stub()
+    fake = types.ModuleType("tkinter")
+    fake.Tk, fake.TclError, fake.Canvas = Tk, TclError, lambda *a, **k: Stub()
+    monkeypatch.setitem(sys.modules, "tkinter", fake)
+    naps = []
+    monkeypatch.setattr(approval_popup.time, "sleep", naps.append)
+    indicator.TkDotBackend()._run()
+    assert len(tk_calls) == 2 and naps == [0.25]
+    assert calls[0] == "overrideredirect" and "mainloop" in calls
