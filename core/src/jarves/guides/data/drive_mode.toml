@@ -31,6 +31,10 @@ he = "בנהיגה: שאלות קצרות, שעה, מזג אוויר, טיימר
 en = "While driving: short questions, time, weather, timers, music and a navigation link are allowed. A call or message only to a known contact with one spoken confirmation."
 
 [[steps]]
+he = "יומן בנהיגה: שמות האירועים מוקראים רק כשבהגדרות שמור שאתם לבד (drive_briefing.passenger = alone). בברירת המחדל (ask) או כשיש נוסע (present) הקריאה נשמרת ברשימה \"כשתעצרו\" ולא מוקראת."
+en = "Calendar while driving: event titles are read aloud only when Settings says you are alone (drive_briefing.passenger = alone). On the default (ask) or with a passenger (present) the read is saved to the \"when you stop\" list and not read aloud."
+
+[[steps]]
 he = "מצב נהיגה אף פעם לא מאשר בעצמו: כל שאלת אישור רגילה עדיין נשאלת. הודעה מוכנה מראש נשלחת רק כשאמרתם אותה בקול, לאיש קשר ששמרתם. בקשה שבאה מתוך מייל, אתר או הודעה, וכל דבר שדורש מסך, נשמרת ברשימה ולא מבוצעת. רק אתם מכבים את המצב: JARVES לא יכול לכבות אותו בעצמו."
 en = "Drive mode never approves anything itself: every normal approval question is still asked. A message is sent only when you said it out loud, to a contact you saved. A request that came from a mail, a web page or a message, and anything that needs a screen, is saved to the list and not run. Only you turn the mode off: JARVES cannot turn it off by itself."
 

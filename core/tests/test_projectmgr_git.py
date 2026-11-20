@@ -2,6 +2,7 @@
 No network; a throw-away local repository."""
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -123,3 +124,134 @@ def test_ordinary_paths_with_similar_names_are_not_protected(path):
 def test_agent_tool_rules_deny_edits_to_github_workflows():
     from jarves.projectmgr import runners
     assert "Edit(.github/**)" in runners.DENY and "Write(.github/**)" in runners.DENY
+
+
+def _hook(folder: Path, name: str, marker: Path) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    h = folder / name
+    h.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\n", encoding="utf-8")
+    h.chmod(0o755)
+
+
+# every hook JARVES's own commands could trigger (#1381): index writes run post-index-change, ref writes run
+# reference-transaction, merges, commits and checkouts run the rest
+HOOKS = ("post-merge", "pre-merge-commit", "commit-msg", "prepare-commit-msg", "pre-commit", "post-commit",
+         "post-checkout", "post-index-change", "reference-transaction", "post-rewrite")
+
+
+def test_merges_never_run_hooks_from_the_shared_git_folder_or_config(tmp_path):
+    """#1381 item 1: an agent that writes `.git/hooks` or sets `core.hooksPath` in the shared config must not get code
+    run by JARVES's merges (merge_in, its abort, fast_forward; ship uses merge_in with the owner's identity)."""
+    repo, marker = _repo(tmp_path), tmp_path / "hook-ran.txt"
+    gitops.git(repo, "config", "user.name", "Owner")                              # ident=False: the owner's identity
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
+    for br in ("side", "side2", "main"):                                          # three divergent tips
+        gitops.git(repo, "checkout", "-q", *(["main"] if br == "main" else ["-b", br, "main"]))
+        (repo / f"{br}.txt").write_text(br, encoding="utf-8")
+        gitops.git(repo, "add", "-A")
+        gitops.git(repo, "commit", "-qm", br, "--no-verify")
+    for name in HOOKS:
+        _hook(repo / ".git" / "hooks", name, marker)
+    assert gitops.merge_in(repo, "side") == [] and (repo / "side.txt").exists()   # a real merge commit
+    assert gitops.merge_in(repo, "side2", ident=False) == [] and (repo / "side2.txt").exists()   # the ship path
+    assert gitops.git(repo, "log", "-1", "--format=%an").stdout.strip() == "Owner"
+    assert gitops.merge_in(repo, "main~1") == []                                  # already merged: nothing to do
+    gitops.git(repo, "checkout", "-qb", "ff", "HEAD~1")
+    gitops.fast_forward(repo, "main")
+    assert not marker.exists()
+
+
+def _evil_config(repo: Path, tmp_path: Path, marker: Path) -> None:
+    """What an agent that can write the shared `.git/config` sets: a hooks folder with every hook, and an fsmonitor
+    command, which git runs on every index refresh (add, status, diff, merge) whatever `core.hooksPath` says."""
+    for name in HOOKS:
+        _hook(tmp_path / "evil-hooks", name, marker)
+    _hook(tmp_path / "evil-bin", "fsmonitor", marker)
+    subprocess.run(["git", "config", "core.hooksPath", str(tmp_path / "evil-hooks")], cwd=repo, check=True)
+    subprocess.run(["git", "config", "core.fsmonitor", (tmp_path / "evil-bin" / "fsmonitor").as_posix()], cwd=repo,
+                   check=True)
+
+
+def test_hooks_and_fsmonitor_set_in_the_shared_config_never_run(tmp_path):
+    """#1381 review R1 and R5: a merge commit, a fast-forward, worktree add and a commit with `core.hooksPath` and
+    `core.fsmonitor` set in the shared config run neither."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "hook-ran.txt"
+    gitops.git(repo, "config", "user.name", "Owner")                    # ident=False needs the owner's identity
+    gitops.git(repo, "config", "user.email", "owner@example.invalid")
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "side.txt").write_text("s", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "side", "--no-verify")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "main.txt").write_text("m", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "main", "--no-verify")
+    _evil_config(repo, tmp_path, marker)
+    subprocess.run(["git", "status"], cwd=repo, capture_output=True, check=True)     # the setup itself works
+    assert marker.exists()
+    marker.unlink()
+    assert gitops.merge_in(repo, "side", ident=False) == [] and (repo / "side.txt").exists()     # merge commit
+    gitops.git(repo, "checkout", "-qb", "ff", "side")
+    gitops.fast_forward(repo, "main")
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a") and gitops.changed_files(wt, "main") == ["a.py"]
+    assert not marker.exists()
+
+
+def test_symlinks_and_gitlinks_in_scope_count_as_protected(tmp_path):
+    """#1381 item 2: `is_protected` only reads path text, so a symlink in scope pointing into `.github/` or a gitlink
+    (submodule entry) in scope passed the scope check. link_files reports both; the engine treats them as protected."""
+    repo = _repo(tmp_path)
+    base = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=repo, input="../.github/workflows",
+                          capture_output=True, text=True, check=True).stdout.strip()
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},src/link")
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},src/sub")
+    (repo / "src").mkdir()
+    (repo / "src" / "ok.py").write_text("1", encoding="utf-8")
+    gitops.git(repo, "add", "src/ok.py")
+    gitops.git(repo, "commit", "-qm", "links", "--no-verify")
+    files = gitops.changed_files(repo, base)
+    assert gitops.violations(files, ["src/"]) == ([], [])                       # the path text alone looks harmless
+    assert sorted(gitops.link_files(repo, base)) == ["src/link", "src/sub"]
+
+
+def test_worktree_creation_and_commits_never_run_shared_hooks(tmp_path):
+    """#1381 review: worktree add runs `post-checkout`, `commit --no-verify` still runs `prepare-commit-msg` and
+    `post-commit`, `add -A` runs `post-index-change`, branch create/delete runs `reference-transaction`. JARVES's own
+    git commands run no shared hook at all."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "hook-ran.txt"
+    for name in HOOKS:
+        _hook(repo / ".git" / "hooks", name, marker)
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a")
+    gitops.detached_worktree(home, str(repo), 1, gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+    gitops.remove_worktree(str(repo), wt, gitops.task_branch(1, 1, 1))           # branch -D: a ref write
+    assert gitops.git(repo, "branch", "--list", gitops.task_branch(1, 1, 1)).stdout.strip() == ""
+    assert not marker.exists()
+
+
+def test_the_hooks_path_can_never_become_a_folder_an_agent_fills():
+    """#1381 review R1: a shared temp folder could be filled by a racing agent between a check and git's hook lookup.
+    The hooks path sits below an existing file, so nobody can create it as a folder, and every git call uses it."""
+    assert not os.path.isdir(gitops.NO_HOOKS)
+    with pytest.raises(OSError):
+        os.makedirs(gitops.NO_HOOKS)
+    with pytest.raises(OSError):
+        (Path(gitops.NO_HOOKS) / "post-merge").write_text("#!/bin/sh\n", encoding="utf-8")
+
+
+def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
+    """#1381 review R3: the one `git()` helper puts both overrides in front of every command, with either identity."""
+    calls: list = []
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
+    gitops.git(tmp_path, "merge", "x")
+    gitops.git(tmp_path, "merge", "x", ident=False)
+    for argv in calls:
+        pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
+        assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
+        assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
