@@ -44,7 +44,9 @@ _SENSITIVE = re.compile(
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
     # credential words and well-known key/token prefixes (#1099)
-    r"טוקן|מפתח\s+(?:ה)?api|api[\s_-]?keys?\b|(?:access|auth|refresh)[\s_-]?tokens?\b|(?:secret|private)[\s_-]?keys?\b|"
+    # (?<![a-z]) = leading word edge that still matches after "_" or a digit (OPENAI_API_KEY, aws2_secret_key)
+    r"טוקן|מפתח\s+(?:ה)?api|(?<![a-z])api[\s_-]?keys?\b|(?<![a-z])(?:access|o?auth|refresh)[\s_-]?tokens?\b|"
+    r"(?<![a-z])(?:secret|private)[\s_-]?keys?\b|"
     r"\b(?:sk|pk|rk)-[a-z0-9_-]{12,}|\b(?:sk|pk|rk)_(?:live|test)_[a-z0-9]{12,}|\bgh[pousr]_[a-z0-9]{20,}|"
     r"\bgithub_pat_[a-z0-9_]{20,}|\bglpat-[a-z0-9_-]{20,}|"
     r"\bxox[abprs]-[a-z0-9-]{8,}|\bAIza[a-z0-9_-]{30,}|\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.", re.I)

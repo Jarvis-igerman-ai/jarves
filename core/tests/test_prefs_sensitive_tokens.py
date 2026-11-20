@@ -24,6 +24,10 @@ TOKENS = [
     "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",              # '/' splits runs below 20: only the base64 rule
     "Authorization: Bearer abcdefgh1234",
     "Authorization: Bearer abcdEFGHijkl",
+    # lower case, no digits: each caught only by its own prefix rule, not by the mixed-case run rule
+    "slack xoxb-abcdefghijkl",                               # only the xox?- rule
+    "google AIzaabcdefghijklmnopqrstuvwxyzabcd",             # only the AIza rule
+    "jwt eyJabcdefgh.abcdefghij.x",                          # only the eyJ rule
 ]
 KEYWORDS = [
     "remember my api key please",
@@ -34,6 +38,9 @@ KEYWORDS = [
     "store both api keys and refresh tokens",
     "הטוקן שלי הוא כחול",
     "מפתח API של השירות",
+    "set OPENAI_API_KEY in the env",                         # after "_": the leading edge still matches
+    "my oauth token is in the drawer",
+    "aws_secret_key is on the sticky note",
 ]
 SAFE = [
     "I prefer short answers in the morning",
@@ -49,6 +56,8 @@ SAFE = [
     "Morning/Evening/Weekend routines are fine",             # mixed case, no digit
     "wJalrXUtnFEMI/K7MDENG",                                 # under 30 chars
     "akiaabcdefghijklmnop",                                  # AKIA is case-sensitive
+    "the okapi keys at the zoo exhibit",                     # "api keys" inside a longer word: leading edge
+    "a reaccess token booth",                                # "access token" inside a longer word
     "",
 ]
 
