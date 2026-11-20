@@ -42,12 +42,25 @@ def test_f13_privacy_on_ledger_keeps_no_words_but_still_dedupes(tmp_path, privac
 
 def test_f13_rows_from_before_privacy_lose_their_words_and_freed_bytes_are_overwritten(tmp_path, privacy_on):
     logs.set_privacy(False)
-    Continuity(tmp_path).store("ph", "m1", "chat", 200, {"reply": "old secret", "ok": True})
+    long = "old secret " * 2000                                 # spills onto overflow pages that the scrub frees
+    Continuity(tmp_path).store("ph", "m1", "chat", 200, {"reply": long, "ok": True})
     logs.set_privacy(True)
     c = Continuity(tmp_path)                                    # a Core start with privacy on cleans the ledger
     assert not any("secret" in b for b in _bodies(c))
     assert c.seen("ph", "m1") == {"not_kept": True}
     assert c._cx().execute("PRAGMA secure_delete").fetchone()[0] == 1
+    assert c._cx().execute("PRAGMA journal_mode").fetchone()[0] == "delete"   # no -wal file can keep old pages
+    assert not list(tmp_path.glob("continuity.db-*"))                          # no journal left behind
+    assert b"old secret" not in c.path.read_bytes()                           # the raw file holds no old words
+
+
+def test_f13_the_phone_ledger_is_opened_lazily_so_the_privacy_setting_is_loaded_first(tmp_path, privacy_on):
+    logs.set_privacy(False)
+    Continuity(tmp_path).store("ph", "m1", "chat", 200, {"reply": "old secret", "ok": True})
+    logs.set_privacy(True)                       # the Core's logs.setup(privacy=...) runs before any ledger use
+    mob = mobile.MobileAccess(tmp_path)
+    assert mob._cont is None                     # building MobileAccess does not open the ledger
+    assert mob.cont.seen("ph", "m1") == {"not_kept": True}
 
 
 def test_f13_privacy_on_chat_resend_gets_a_defined_message(tmp_path, privacy_on):
