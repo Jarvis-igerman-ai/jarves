@@ -13,3 +13,9 @@ Plan once #1091 merges (base: the new main):
 4. Hermetic tests with a fake bridge. No message text in logs, tests or PRs.
 
 Expected size is above the 200-line budget; it may be split (client and CLI, then dashboard and guide).
+
+## Status, 20 Nov 2026
+
+Still blocked. PR #1091 and PR #1215 (JAR-272, the bridge endpoint) were both
+closed without merging on 16 Nov 2026. `origin/main` (df7606a) has no
+`/history/backfill` route. JAR-272 has to be re-landed before this Core work can start.
