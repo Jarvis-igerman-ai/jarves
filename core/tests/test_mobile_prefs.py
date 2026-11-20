@@ -159,6 +159,24 @@ def test_a_reproposing_edit_logs_what_really_happened(home, monkeypatch):
     assert p.get(b)["state"] == "proposed" and p.get(a)["state"] == "proposed"
 
 
+def test_privacy_mode_command_resend_gets_a_defined_code_and_message(srv, prefs, monkeypatch):
+    """#206 F13 (review R2): a command answered from a privacy-mode ledger row is still a defined answer: an error
+    resend carries error/error_he for the phone page, a success resend keeps ok and gets code NOT_KEPT."""
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    bad = {"id": "pref-priv-0001", "op": "edit", "pref": a, "text": "my password is hunter2"}
+    assert call(srv, "POST", "/api/m/prefs/op", tok, bad)[0] == 400
+    st, out = call(srv, "POST", "/api/m/prefs/op", tok, bad)
+    en, he = mobile._MSG["NOT_KEPT"]
+    assert st == 400 and out["replay"] is True and out["code"] == "NOT_KEPT"
+    assert out["error"] == en and out["error_he"] == he and "hunter2" not in json.dumps(out)
+    good = {"id": "pref-priv-0002", "op": "decline", "pref": b}
+    assert call(srv, "POST", "/api/m/prefs/op", tok, good)[1]["ok"] is True
+    st, out = call(srv, "POST", "/api/m/prefs/op", tok, good)
+    assert st == 200 and out["replay"] is True and out["ok"] is True and out["code"] == "NOT_KEPT"
+
+
 def test_a_resent_command_runs_once(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)

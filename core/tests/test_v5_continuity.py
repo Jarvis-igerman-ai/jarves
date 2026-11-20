@@ -395,6 +395,17 @@ def test_privacy_on_chat_resend_after_a_pc_restart_gets_a_defined_message(srv, f
     assert fake.chats == ["hi"]
 
 
+def test_a_privacy_mode_resend_keeps_a_known_refusal_code_and_its_message():
+    """#206 F13 (review R1): a kept refusal code (CHAT_RATE) is replayed with its own message, not overwritten."""
+    en, he = mobile._MSG["CHAT_RATE"]
+    out = mobile._not_kept({"not_kept": True, "code": "CHAT_RATE"}, 429, chat=True)
+    assert out["code"] == "CHAT_RATE" and out["reply"] == he and out["error"] == en and out["error_he"] == he
+    unknown = mobile._not_kept({"not_kept": True, "code": "GOAL_OK"}, 200, chat=True)
+    assert unknown["code"] == "NOT_KEPT" and unknown["reply_en"] == mobile._MSG["NOT_KEPT"][0] and "error" not in unknown
+    live = {"reply": "echo", "ok": True}
+    assert mobile._not_kept(live, 200, chat=True) is live
+
+
 def test_a_late_replayed_chat_is_refused_stale(srv, fake):
     tok, _ = pair(srv)
     st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "late", "id": "msg-bbbbbbbb", "age_s": 9999})

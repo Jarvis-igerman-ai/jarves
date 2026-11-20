@@ -467,10 +467,7 @@ class MobileAccess:
             self._replay_failed = True
             return None
         self._replay_failed = False
-        if hit is not None and hit.get("not_kept") and "reply" not in hit:     # privacy mode kept no words (#206 F13)
-            en, he = _MSG["NOT_KEPT"]
-            hit = {**hit, "code": "NOT_KEPT", "reply": he, "reply_en": en}
-        return hit
+        return _not_kept(hit, chat=True) if hit is not None else None
 
     def remember(self, device: str, mid: str, reply: dict) -> None:
         now = self.clock()
@@ -662,6 +659,21 @@ def _err(key: str, **fmt) -> dict:
 
 
 _UNREADABLE, _TOO_BIG = _err("UNREADABLE"), _err("TOO_BIG")
+
+
+def _not_kept(obj: dict, status: int = 200, chat: bool = False) -> dict:
+    """#206 F13: a resend answered from a privacy-mode ledger row (its words were not kept) still gets a defined code and
+    message: the kept refusal code when it is a known one, else NOT_KEPT. Live answers pass through unchanged."""
+    if not obj.get("not_kept"):
+        return obj
+    key = obj["code"] if obj.get("code") in _MSG else "NOT_KEPT"
+    en, he = _MSG[key]
+    out = {**obj, "code": key}
+    if chat and "reply" not in obj:
+        out.update(reply=he, reply_en=en)
+    if status >= 400 and "error" not in obj:
+        out.update(error=en, error_he=he)
+    return out
 
 
 def _body(h, limit: int) -> bytes | None:
@@ -950,7 +962,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+        return done(status, {**_not_kept(obj, status), "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/audio" and method == "GET":        # mic / cloud-audio indicator (V5 G5): true state, read-only
         if not need("status"):
             return
@@ -977,7 +989,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "plan", lambda: mobile_plans.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
+        return done(status, {**_not_kept(obj, status), "replay": True} if again else obj, op=str(d.get("op", ""))[:20], plan=str(d.get("plan", ""))[:9])
     if path == "/api/m/browser" or path.startswith("/api/m/browser/"):
         # Browser pilot viewer (V7 B4 #399): beta, https only, paired + scope
         if not need("browser"):
@@ -1018,7 +1030,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "pref", lambda: mobile_prefs.action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
+        return done(status, {**_not_kept(obj, status), "replay": True} if again else obj, op=str(d.get("op", ""))[:20], pref=str(d.get("pref", ""))[:9])
     if path == "/api/m/drive" and method == "GET":        # Drive tab (V6 #218): drive mode read-only, queue COUNT + tool names
         if not need("drive"):
             return
@@ -1132,7 +1144,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         status, obj, again = mob.cont.execute(dev["id"], cid, "signals", lambda: signals_action(mob, d, dev["id"]),
                                               age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
+        return done(status, {**_not_kept(obj, status), "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/approvals" and method == "GET":
         if not need("approvals") or not need_page("approvals"):
             return
@@ -1157,7 +1169,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         status, obj, again = mob.cont.execute(
             dev["id"], cid, "approval", lambda: answer_approval(mob, m.group(1), d["approved"], dev["id"], **extra),
             age_s=d.get("age_s"))
-        return done(status, {**obj, "replay": True} if again else obj, decision="approve" if d["approved"] else "deny")
+        return done(status, {**_not_kept(obj, status), "replay": True} if again else obj, decision="approve" if d["approved"] else "deny")
     return h._json(404, _err("NOT_FOUND"))
 
 
