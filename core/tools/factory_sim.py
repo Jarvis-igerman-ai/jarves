@@ -9,6 +9,7 @@ C:\\work\\claude-j-run.py are reported NOT RUN when that file is missing. Exit c
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -35,7 +36,6 @@ def schedule_command() -> str:
 
 def record(home: str, results: list, failed: int, tail: str) -> None:
     """Write <home>/factory_sim_last.json (read by the workflow dashboard) and, on failure, file one issue."""
-    import json
     import time
     folder = Path(home) if home else default_home()
     folder.mkdir(parents=True, exist_ok=True)
@@ -59,12 +59,11 @@ def _summary(tail: str, limit: int = 600) -> str:
 
 def _has_label(repo: str, name: str) -> bool:
     """True only when `gh label list` succeeds and returns a label called `name`; anything else is False."""
-    got = subprocess.run(["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--limit", "100"],
-                         capture_output=True, text=True, timeout=60)
-    import json
     try:
+        got = subprocess.run(["gh", "label", "list", "--repo", repo, "--search", name, "--json", "name", "--limit", "100"],
+                             capture_output=True, text=True, timeout=60)
         labels = json.loads(got.stdout) if got.returncode == 0 else None
-    except ValueError:
+    except (OSError, subprocess.SubprocessError, ValueError):
         labels = None
     if not isinstance(labels, list):
         print(f"label check failed; filing without the '{name}' label")

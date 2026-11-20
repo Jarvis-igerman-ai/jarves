@@ -168,3 +168,20 @@ def test_nightly_nonzero_pytest_exit_is_failure_even_if_scenarios_passed(tmp_pat
     assert factory_sim.main(["--nightly", "--home", str(tmp_path)]) == 1
     data = json.loads((tmp_path / "factory_sim_last.json").read_text())
     assert data["ok"] is False and filed
+
+
+def test_label_check_timeout_or_oserror_still_files_issue(monkeypatch, capsys):
+    import subprocess  # #897 review R1: a hung or missing `gh label list` must not lose the failure report
+    for exc in (subprocess.TimeoutExpired(["gh"], 60), OSError("gh not found")):
+        calls = []
+        base = _fake_gh(calls)
+
+        def fake_run(cmd, _exc=exc, **kw):
+            if cmd[:3] == ["gh", "label", "list"]:
+                calls.append(cmd)
+                raise _exc
+            return base(cmd, **kw)
+        monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+        factory_sim.file_issue(["x"], "tail")
+        assert _create_labels(calls) == ["showstopper", "P1"]
+        assert "label check failed; filing without the 'testing' label" in capsys.readouterr().out
