@@ -136,14 +136,15 @@ def rev(cwd: str | Path, ref: str) -> str:
     return p.stdout.strip() if p.returncode == 0 else ""
 
 
-def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -> tuple[Path, str]:
-    """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
+def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int, start: str = "") -> tuple[Path, str]:
+    """A fresh worktree on a fresh branch from `start` (the recorded integration commit, #1352), else the CURRENT
+    integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "worktree", "add", "-b", br, str(wt), start or integration_branch(pid))
     return wt, br
 
 

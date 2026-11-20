@@ -8,8 +8,8 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import sqlite3
 import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -376,7 +376,9 @@ def test_moving_the_integration_ref_never_hides_protected_files_1352(env):
     finish(m)
     t = m.db.tasks(1)[0]
     assert t["status"] == "blocked" and "moved outside JARVES" in t["reason"], t["reason"]
+    assert f"reset --hard {start[:12]}" in t["reason"]                            # review R4: how to restore it
     assert m.call("ship_plan", project="demo", apply=True)["code"] == "MOVED"
+    assert m.call("ship_plan", project="demo")["code"] == "MOVED"             # review R2: the preview too
     assert m.db.project(1)["integration_sha"] == start                       # JARVES's record was never moved
     assert not (repo / ".github").exists()
 
@@ -556,8 +558,7 @@ def test_release_is_rechecked_under_the_merge_lock_1352(env):
     def ask(*a, **k):                     # a JARVES merge is in progress when the approval comes back
         merging.acquire()
 
-        def merge_lands():
-            time.sleep(0.3)
+        def merge_lands():                # clock-free: either order parks, the lock only orders the two
             evil = sh(repo, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit-tree", "HEAD^{tree}", "-p",
                       "HEAD", "-m", "merged").strip()
             sh(repo, "git", "update-ref", "refs/heads/jarves/p1/integration", evil)
@@ -571,6 +572,65 @@ def test_release_is_rechecked_under_the_merge_lock_1352(env):
     t = m.db.by_seq(1, 1)
     assert "changed while the release" in (t["waiting"] or t["reason"] or ""), dict(t)
     assert not flag.exists()
+
+
+def test_test_stage_flow_with_owner_work_outside_the_scope_still_merges_1352(env):
+    """Review R1 on #1459 @ 4d02fc6: the pre-merge re-check exempts what _after_code exempts (the owner's own edits)."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "import sys; sys.exit(0)"])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"], dict(t)
+    (Path(t["worktree"]) / "mine.txt").write_text("in scope\n")
+    (Path(t["worktree"]) / "other.txt").write_text("outside the scope, by the owner\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    assert (gitops.project_root(home, 1) / "integration" / "other.txt").exists()
+
+
+def test_a_failed_record_write_merges_nothing_1352(env, monkeypatch):
+    """Review R3 on #1459 @ 4d02fc6: the ref and the record never disagree after a database error."""
+    m, repo, home = env
+    open_project(m, repo)
+    start = m.db.project(1)["integration_sha"]
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    real = m.db.update_project
+
+    def flaky(pid, **f):
+        if f.get("integration_sha") not in (None, start):
+            raise sqlite3.OperationalError("database is locked")
+        return real(pid, **f)
+    monkeypatch.setattr(m.db, "update_project", flaky)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "failed" and "could not record the merge" in t["reason"], t["reason"]
+    assert sh(repo, "git", "rev-parse", "jarves/p1/integration").strip() == start == m.db.project(1)["integration_sha"]
+
+
+def test_a_failed_record_restore_is_logged_1352(env, monkeypatch, caplog):
+    """Review R3: a fast-forward refused after the record write puts the record back; a failed put-back is logged."""
+    m, repo, home = env
+    open_project(m, repo)
+    start = m.db.project(1)["integration_sha"]
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    real = m.db.update_project
+
+    def no_restore(pid, **f):
+        if f.get("integration_sha") == start:
+            raise sqlite3.OperationalError("database is locked")
+        return real(pid, **f)
+    monkeypatch.setattr(m.db, "update_project", no_restore)
+    monkeypatch.setattr(gitops, "fast_forward", lambda wt, new: (_ for _ in ()).throw(gitops.GitError("refused")))
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.tasks(1)[0]["status"] == "blocked"                            # record and ref disagree: nothing merges
+    assert "integration record not restored" in caplog.text
+    assert sh(repo, "git", "rev-parse", "jarves/p1/integration").strip() == start
 
 
 def test_agent_blocked_and_failed_runs(env):

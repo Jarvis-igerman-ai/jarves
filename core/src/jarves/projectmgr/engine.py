@@ -11,6 +11,7 @@ text for the next card), repro {files, cmd}, kept (branch of work done without a
 """
 from __future__ import annotations
 
+import sqlite3
 import threading
 from pathlib import Path
 
@@ -238,8 +239,9 @@ class StageEngine:
             return ""
         logs.warn("projects", "INTEGRATION_MOVED", "integration branch moved outside JARVES", id=p["id"],
                   previous=sha[:12], found=now[:12])
-        return (f"the integration branch {br} was moved outside JARVES (expected {sha[:10] or '?'}, found "
-                f"{now[:10] or 'nothing'}); nothing is merged until it is back at {sha[:10] or 'a checked commit'}")
+        wt = gitops.project_root(self.home, p["id"]) / "integration"
+        fix = f"; restore it: git -C \"{wt}\" reset --hard {sha[:12]}" if sha else ""   # review R4: the way back
+        return f"{br} was moved outside JARVES (found {now[:10] or 'nothing'}): nothing is merged until it is back{fix}"
 
     @staticmethod
     def _merge_msg(p, sha: str) -> str:
@@ -251,7 +253,7 @@ class StageEngine:
         if t["worktree"] and Path(t["worktree"]).exists():
             return Path(t["worktree"]), t["branch"]
         att = max(1, t["attempts"])
-        wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], att)
+        wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], att, start=self._int_sha(p))
         self.db.update_task(t["id"], worktree=str(wt), branch=br)
         return wt, br
 
@@ -313,7 +315,7 @@ class StageEngine:
         reproduction test untouched by the fix, record the handoff."""
         moved = self._int_moved(p)
         if moved:
-            return ("stop", "blocked", moved + f" (the task's work is on {br})")
+            return ("stop", "blocked", f"the work is on {br}; " + moved)
         base = self._int_sha(p)
         h = cards.parse_handoff(text)
         try:
@@ -394,7 +396,8 @@ class StageEngine:
                 results[k] = (spec, None, None, None, name)
                 return
             try:
-                wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], t["attempts"] * 10 + k)
+                wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], t["attempts"] * 10 + k,
+                                                start=base)
             except (gitops.GitError, OSError) as e:
                 results[k] = (spec, None, None, None, clean(e, 120))
                 return
@@ -627,10 +630,21 @@ class StageEngine:
                 if outside and not any(s["kind"] == "work" and s.get("by") == "owner" for s in stages):
                     return ("stop", "blocked", "changed files outside the scope: " + ", ".join(outside[:5]) +
                             f" (not merged; the work is on branch {br})")
-                gitops.fast_forward(self._integration(p), new)
-                if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
-                    raise gitops.GitError("the integration branch is not at the merged commit")
-                self.db.update_project(p["id"], integration_sha=new)
+                try:                                                # recorded first: a failed write merges nothing
+                    self.db.update_project(p["id"], integration_sha=new)
+                except sqlite3.Error as e:
+                    return ("stop", "failed", f"could not record the merge, nothing was merged: {clean(e, 200)}")
+                try:
+                    gitops.fast_forward(self._integration(p), new)
+                    if gitops.rev(p["path"], gitops.integration_branch(p["id"])) != new:
+                        raise gitops.GitError("the integration branch is not at the merged commit")
+                except gitops.GitError:
+                    try:
+                        self.db.update_project(p["id"], integration_sha=head)   # nothing merged: the record goes back
+                    except sqlite3.Error as e:
+                        logs.warn("projects", "INTEGRATION_RECORD_FAILED", "integration record not restored", id=p["id"],
+                                  error=clean(e, 120))
+                    raise
             except gitops.GitError as e:
                 moved = self._int_moved(p)                         # #1352 R5: moved during the merge window
                 return ("stop", "blocked", moved) if moved else ("stop", "failed", f"merge failed: {clean(e, 200)}")
@@ -722,7 +736,7 @@ class StageEngine:
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
-            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {base}...HEAD, then approve or reject with what "
+            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {self._int_sha(p)}...HEAD, then approve or reject with what "
                       "to change",
             "merge": f"approve merging task #{t['seq']} into {base}",
             "release": f"release {p['name']} yourself, then say done",
