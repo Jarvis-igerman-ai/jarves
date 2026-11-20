@@ -10,7 +10,7 @@ PY, CON, HOME = "C:/py/python.exe", "C:/r/core/tools/workflow_console.py", "C:/h
 # Each prefix can write an arbitrary path or execute code the worker wrote (issue #1311 list, plus ruff --output-file).
 WRITE_OR_EXEC = ["Bash(pytest:*)", f"Bash({PY} -m pytest:*)", "Bash(npm:*)", "Bash(npx:*)", "Bash(ruff:*)",
                  "Bash(git add:*)", "Bash(git commit:*)", "Bash(git merge:*)", "Bash(git rebase:*)",
-                 "Bash(git switch:*)", "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git branch:*)"]
+                 "Bash(git switch:*)", "Bash(git worktree:*)", "Bash(git fetch:*)", "Bash(git branch:*)", "Bash(mkdir:*)"]
 
 
 @pytest.mark.parametrize("rule", WRITE_OR_EXEC)
@@ -46,7 +46,8 @@ def _worker_may_run(cmd: str) -> bool:
     "git diff --output=../h/autopilot.json", "git diff --out=../h/x", "git diff --outp=../h/x", "git diff --ou ../h/x",
     "git log --output=../h/x", "git log --out=../h/x", "git log -p --outpu=../h/x", "git diff --stat --out=../h/x",
     "gh run download 1 -D ../h", "gh pr checkout 7", "gh issue develop 5 --checkout", "pytest -q", "npm test",
-    f"{PY} -m pytest -q", "ruff check --output-file ../h/x", "git commit -m x"])
+    f"{PY} -m pytest -q", "ruff check --output-file ../h/x", "git commit -m x", "mkdir ../h/x",
+    "gh pr view 7 --web", "gh issue list -w", "gh run view 9 --web", "gh pr checks 7 --watch"])
 def test_write_or_exec_commands_are_not_runnable_by_a_default_worker(cmd):
     """#1311 R2/R3: option abbreviations (`--out`, `--outp`) and local-write gh subcommands fall outside every allow rule."""
     assert not _worker_may_run(cmd)
@@ -56,6 +57,12 @@ def test_write_or_exec_commands_are_not_runnable_by_a_default_worker(cmd):
                                  "gh pr checks 7", "gh run view 9 --log", "gh issue list", "ls -la", "grep -rn x ."])
 def test_read_only_commands_stay_runnable(cmd):
     assert _worker_may_run(cmd)
+
+
+@pytest.mark.parametrize("path", ["**/.git/**", "**/.git"])
+def test_git_dir_and_config_are_not_editable(path):
+    """#1311 R4: hooks and config (core.fsmonitor, diff.external) under a .git dir or a worktree's .git file are denied."""
+    assert f"Edit({path})" in WORKER_DENY
 
 
 def test_owner_override_is_still_used_verbatim():
