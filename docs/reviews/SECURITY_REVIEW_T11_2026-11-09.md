@@ -1,8 +1,9 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09. Check date for everything below: 2026-11-21. Line references were re-checked against `origin/main`
-76cd30c, and issue states were read from GitHub. The fix merges #1101, #1351 and #1366 are ancestors of 24b9ca3;
-#1381 (JAR-600) merged after it.
+Date: 2026-11-09. Check date for everything below: 2026-11-21. Every `file:line` reference is a location at
+`origin/main` 76cd30c (re-checked; none is a review-time location), and issue states were read from GitHub. "At review
+time" describes the old behaviour only, never a line number. The fix merges #1101, #1351 and #1366 are ancestors of
+24b9ca3; #1381 (JAR-600) merged after it.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -34,18 +35,20 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 | 8 | continuity | P3 | `store()` and ledger bodies ignore privacy mode | #1517 |
 | 9 | goal_plans | P3 | step `args` not sensitivity-checked (title and `why` are) | #1517 |
 | 10 | projectmgr/runners | P3 | OpenCode prompt passed in argv | #1517 |
+| 11 | projectmgr/gitops | P3 | `CODEOWNERS` outside `.github/` (root, `docs/`) not in `PROTECTED` | #1517 (added here) |
+| 12 | projectmgr/gitops | P3 | nested `**/.claude/` (e.g. `sub/.claude/settings.json`) not matched | #1517 (added here) |
 
 ## projectmgr
 
-- **#1 P1: `.github/` unprotected** (`gitops.py:21`). At review time, `PROTECTED` did not list `.github/`, and
+- **#1 P1: `.github/` unprotected** (`PROTECTED`, `gitops.py:21`). At review time, `PROTECTED` did not list `.github/`, and
   `forge.push_branch` pushes `jarves/p<N>/...` branches. The impact is stated in #1096. **Fixed on main by #1101
   (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. #1381 (JAR-600) also counts a changed
-  symlink or gitlink as protected (`link_files`, `gitops.py:186`). `CODEOWNERS` outside `.github/` is still not listed.
+  symlink or gitlink as protected (`link_files`, `gitops.py:186`). Remaining gap: #11.
 - **#2 P2: case-sensitive protection** (`gitops.py:216-221`). The check was a case-sensitive `startswith`, so on
   Windows/macOS a change to `.CLAUDE/settings.json` reached the same directory without being flagged. **Fixed on main
   by #1101**: `is_protected()` casefolds the path and normalises `\` to `/`; #1351 (JAR-574) also refuses Windows 8.3
-  short names (`CLAUDE~1/`). Nested `**/.claude/` is still not matched; only `PROTECTED_NAMES` match in any folder.
-- **#3 P2: stale PID kill** (startup loop in `_recover` at `service.py:97-103`). At review time, the stored `pid` of
+  short names (`CLAUDE~1/`). Remaining gap: #12 (only `PROTECTED_NAMES` match in any folder).
+- **#3 P2: stale PID kill** (startup loop in `_recover`, `service.py:97-103`). At review time, the stored `pid` of
   every `running/review` task got `taskkill /F /T` (or `killpg`) at startup; after a reboot that PID can belong to an
   unrelated process, and `/T` kills its whole tree. **Fixed on main by #1366 (JAR-575)**: `_kill_owned`
   (`service.py:1299`) kills via `_kill_pid` (`service.py:1313`) only when the stored `pid_start` marker matches the
@@ -57,6 +60,10 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
   `worktree add ... start`. `start` is validated with `rev-parse --verify` first (good), and `forge.push_branch` is
   regex-restricted (good). The merge/diff refs are built internally. Add `--end-of-options` or reject a leading `-`
   for defence in depth.
+- **#11 P3: `CODEOWNERS` outside `.github/`.** GitHub also reads `CODEOWNERS` from the repo root and `docs/`; neither
+  is in `PROTECTED` or `PROTECTED_NAMES` (`gitops.py:21-23`), so an agent branch could change review ownership there.
+- **#12 P3: nested `.claude/`.** `is_protected()` (`gitops.py:216-221`) matches `PROTECTED` prefixes from the repo
+  root only, so `sub/.claude/settings.json` is not flagged. Claude Code reads `.claude/` from the folder it starts in.
 - **#10 P3: OpenCode prompt in argv** (`runners.py:265`). Other local users can see it in the process list, and its
   size is bounded by the OS command-line limit. `--` prevents option injection. The API key is passed only when
   `allow_openrouter` is on. Claude/Codex use stdin.
@@ -103,7 +110,9 @@ One issue per defect (AGENTS.md rule 8):
 - P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Not fixed on main; issue open. The fix
   proposed in [#1108](https://github.com/Jarvis-igerman-ai/jarves/pull/1108) was closed without merging.
 - This report fixes no code. #1099 stays open until a fix merges with evidence.
-- P3 #5-#10: hardening notes tracked together in one issue,
-  [#1517](https://github.com/Jarvis-igerman-ai/jarves/issues/1517), split from #1254. They are not in
+- P3 #5-#12: hardening notes tracked together in one issue,
+  [#1517](https://github.com/Jarvis-igerman-ai/jarves/issues/1517), split from #1254. Its body (2026-11-21) lists
+  #5-#10; #11 and #12 are the two remaining gaps of #1 and #2 and belong to the same scope (this report is their
+  source). They are not in
   `docs/reviews/FINDINGS_LEDGER.md` because its rules keep `security`-labelled items as issues (like #206). #1254 now
   tracks only the council recovery.
