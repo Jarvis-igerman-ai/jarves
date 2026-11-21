@@ -194,3 +194,64 @@ def test_jarvis_resolved_absolute_or_scenario_fails(tmp_path, monkeypatch):
 def test_required_list_comes_from_flag(tmp_path):
     assert pid.main(["metrics", "--demos", str(tmp_path), "--required", ""]) == 0
     assert pid.main(["metrics", "--demos", str(tmp_path), "--required", "JAR-5"]) == 1
+
+
+class FakeRoute:
+    """Stands in for a Playwright Route; `chain` maps url -> (status, location or None)."""
+    def __init__(self, url, chain):
+        self.request, self.chain, self.fetched, self.outcome = type("R", (), {"url": url})(), chain, [], None
+
+    def fetch(self, url=None, max_redirects=None):
+        assert max_redirects == 0   # the browser never follows a redirect on its own
+        self.fetched.append(url)
+        status, loc = self.chain[url]
+        return type("Resp", (), {"status": status, "headers": {"location": loc} if loc else {}})()
+
+    def fulfill(self, response):
+        self.outcome = ("fulfill", response.status)
+
+    def abort(self):
+        self.outcome = ("abort", None)
+
+
+BASE = "http://127.0.0.1:8765"
+
+
+@pytest.mark.parametrize("chain,outcome,fetched", [
+    ({BASE + "/": (200, None)}, ("fulfill", 200), [BASE + "/"]),
+    ({BASE + "/": (302, "/home"), BASE + "/home": (200, None)}, ("fulfill", 200), [BASE + "/", BASE + "/home"]),
+    ({BASE + "/": (302, "http://evil.example/")}, ("abort", None), [BASE + "/"]),
+    ({BASE + "/": (301, "/a"), BASE + "/a": (307, "//evil.example/x")}, ("abort", None), [BASE + "/", BASE + "/a"]),
+    ({BASE + "/": (302, "/")}, ("abort", None), [BASE + "/"] * 6),   # redirect loop stops
+])
+def test_guarded_route_follows_only_same_origin_redirects(chain, outcome, fetched):
+    r = FakeRoute(BASE + "/", chain)
+    pid.guarded_route(r, BASE)
+    assert r.outcome == outcome and r.fetched == fetched
+
+
+def test_guarded_route_aborts_off_origin_without_fetching():
+    r = FakeRoute("http://evil.example/", {})
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("abort", None) and r.fetched == []
+
+
+@pytest.mark.parametrize("url,ok", [("ws://127.0.0.1:8765/api/ws", True), ("wss://127.0.0.1:8765/", False),
+                                    ("ws://evil.example/", False), ("ws://127.0.0.1:9/", False)])
+def test_websockets_pinned_to_checked_origin(url, ok):
+    calls = []
+    ws = type("WS", (), {"url": url, "connect_to_server": lambda self: calls.append("connect"),
+                         "close": lambda self, **k: calls.append("close")})()
+    pid.guarded_websocket(ws, BASE)
+    assert calls == (["connect"] if ok else ["close"])
+
+
+def test_browser_context_blocks_service_workers():
+    assert pid.context_options("/tmp/v")["service_workers"] == "block"
+
+
+def test_runner_decodes_non_ascii_output_as_utf8(tmp_path):
+    script = tmp_path / "say.py"
+    script.write_text("import sys; sys.stdout.buffer.write('שלום'.encode() + b'\\xff')", encoding="utf-8")
+    code, out = pid.subprocess_runner(sys.executable)([str(script)])
+    assert code == 0 and out.startswith("שלום")

@@ -7,7 +7,8 @@ that has no demo yet, record PASS/FAIL and save a screenshot, a short video and 
 FILE is a JSON list of {"ticket", "merged", "user_facing", "argv", "page", "caption"}. `argv` is passed to the installed
 `jarvis` program without a shell and only when it equals one of the whole argv lists in ALLOWED (else refused, never
 run). `--jarvis` is resolved to an absolute path (never the current folder). The browser may only load the checked loopback
-origin: every other request is aborted and a redirect off it is a FAIL. A ticket stays pending (retried next pass) until it has a PASS demo.
+origin: requests elsewhere are aborted, redirects are followed here hop by hop and aborted when any hop leaves the origin,
+WebSockets to another origin are closed and service workers are blocked; a page that still ends up elsewhere is a FAIL. A ticket stays pending (retried next pass) until it has a PASS demo.
 Each demo is <demos>/<ticket>/demo.json (written atomically) plus demo.png and demo.webm (Playwright, headless).
 `metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the --required tickets missing.
 """
@@ -23,7 +24,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 REQUIRED = (  # default for --required (this ticket's acceptance list)
     "JAR-188", "JAR-189", "JAR-191", "JAR-193", "JAR-210", "JAR-214")
@@ -34,6 +35,8 @@ PAGE_RE = re.compile(r"/(?!/)[A-Za-z0-9/_.\-?=&#]*")
 TICKET_RE = re.compile(r"[A-Z]+-\d+")
 DAY_S = 86400
 DEFAULT_PORT = {"http": 80, "https": 443}
+WS_SCHEME = {"ws": "http", "wss": "https"}
+MAX_HOPS = 5
 
 
 def load_tickets(path: Path) -> list[dict]:
@@ -69,6 +72,33 @@ def same_origin(url: str, base: str) -> bool:
                 and (u.port or DEFAULT_PORT.get(u.scheme)) == (b.port or DEFAULT_PORT[b.scheme]))
     except ValueError:
         return False
+
+
+def guarded_route(route, base: str) -> None:
+    """Fetch a request ourselves without automatic redirects; every hop must stay on the checked origin."""
+    url = route.request.url
+    for _ in range(MAX_HOPS + 1):
+        if not same_origin(url, base):
+            return route.abort()
+        resp = route.fetch(url=url, max_redirects=0)
+        loc = resp.headers.get("location")
+        if not (300 <= resp.status < 400 and loc):
+            return route.fulfill(response=resp)
+        url = urljoin(url, loc)
+    return route.abort()   # too many redirects
+
+
+def guarded_websocket(ws, base: str) -> None:
+    """Connect a WebSocket to the server only when it targets the checked origin; otherwise close it unconnected."""
+    scheme, sep, rest = str(ws.url).partition("://")
+    if sep and scheme in WS_SCHEME and same_origin(f"{WS_SCHEME[scheme]}://{rest}", base):
+        ws.connect_to_server()
+    else:
+        ws.close()
+
+
+def context_options(video_dir: str) -> dict:
+    return {"record_video_dir": video_dir, "viewport": {"width": 1280, "height": 720}, "service_workers": "block"}
 
 
 def redact(text: str) -> str:
@@ -165,7 +195,8 @@ def subprocess_runner(exe: str | None):
     def go(argv: list[str]) -> tuple[int, str]:
         if not exe:
             raise ValueError("DEMO_JARVIS_NOT_FOUND: no absolute jarvis program on PATH or --jarvis")
-        p = subprocess.run([exe, *argv], capture_output=True, text=True, timeout=180, check=False)
+        p = subprocess.run([exe, *argv], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=180, check=False)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     return go
 
@@ -178,9 +209,10 @@ def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and
         with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
             b = pw.chromium.launch()
             try:
-                ctx = b.new_context(record_video_dir=tmp, viewport={"width": 1280, "height": 720})
+                ctx = b.new_context(**context_options(tmp))
                 try:
-                    ctx.route("**/*", lambda r: r.continue_() if same_origin(r.request.url, base) else r.abort())
+                    ctx.route("**/*", lambda r: guarded_route(r, base))
+                    ctx.route_web_socket(re.compile(".*"), lambda ws: guarded_websocket(ws, base))
                     page = ctx.new_page()
                     page.goto(base + page_path, wait_until="networkidle", timeout=30000)
                     if not same_origin(page.url, base):
