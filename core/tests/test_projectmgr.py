@@ -1251,6 +1251,24 @@ def test_task_branch_moved_after_the_check_is_not_merged_1461(env):
     assert t["status"] == "blocked" and "moved after" in t["reason"] and br in t["reason"]
 
 
+def test_task_branch_moved_after_an_agent_review_is_not_merged_1461(env):
+    """#1461 without a check stage: the agent review's commit is what the merge may take."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work review gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and m.db.events(t["id"], 50)[-1]["kind"] == "waiting"
+    wt = Path(t["worktree"])
+    (wt / "a.txt").write_text("never reviewed\n")
+    sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qam", "sibling")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert not (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+    assert m.db.by_seq(1, 1)["status"] == "blocked"
+
+
 def test_owner_facing_text_names_the_integration_commit_1469(env):
     """#1469: the owner's review command, the merge prompt, the 'merged into' event and the card name the commit."""
     m, repo, home = env
