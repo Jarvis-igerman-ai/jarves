@@ -12,8 +12,9 @@ Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md` and the V6 review. T
 Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) arrived truncated (1 of 12). The other
 11 findings never arrived and are **not reflected here** (UNVERIFIED whether they are covered). #979 has no GitHub
 review or comment that contains the council text. Recovery from the bridge is tracked in
-[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254). This report is incomplete until then: once #1254
-recovers the text, it gets an addendum here or a follow-up ticket.
+[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254). This report is incomplete until then. #1254 is the
+follow-up ticket for the addendum: it is unassigned and has no deadline, and once it recovers the text, that text is
+added here as an addendum.
 Disclosure: this repo is public. #1 and #2 were fixed on main by #1101 (JAR-317) and hardened by #1351 (JAR-574); #3
 was fixed by #1366 (JAR-575). #4 is open public issue #1099 (its proposed fix in #1108 was closed unmerged).
 
@@ -27,12 +28,12 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 | 2 | projectmgr/gitops | P2 | `PROTECTED` check was case-sensitive | fixed on main by #1101, #1351; #1097 closed |
 | 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | fixed on main by #1366; #1098 closed |
 | 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | open, #1099 |
-| 5 | projectmgr/gitops | P3 | `remove_worktree` guard is `"projects" in parts` | #1254 |
-| 6 | projectmgr/gitops, service | P3 | refs passed to git without `--` / leading `-` check | #1254 |
-| 7 | devstatus | P3 | read token reuses `JARVES_UPDATE_TOKEN`; cache holds issue/PR titles in plain JSON | #1254 |
-| 8 | continuity | P3 | `store()` and ledger bodies ignore privacy mode | #1254 |
-| 9 | goal_plans | P3 | step `args` not sensitivity-checked (title and `why` are) | #1254 |
-| 10 | projectmgr/runners | P3 | OpenCode prompt passed in argv | #1254 |
+| 5 | projectmgr/gitops | P3 | `remove_worktree` guard is `"projects" in parts` | #1517 |
+| 6 | projectmgr/gitops, service | P3 | refs passed to git without `--` / leading `-` check | #1517 |
+| 7 | devstatus | P3 | read token reuses `JARVES_UPDATE_TOKEN`; cache holds issue/PR titles in plain JSON | #1517 |
+| 8 | continuity | P3 | `store()` and ledger bodies ignore privacy mode | #1517 |
+| 9 | goal_plans | P3 | step `args` not sensitivity-checked (title and `why` are) | #1517 |
+| 10 | projectmgr/runners | P3 | OpenCode prompt passed in argv | #1517 |
 
 ## projectmgr
 
@@ -102,6 +103,7 @@ One issue per defect (AGENTS.md rule 8):
 - P2 #4: [#1099](https://github.com/Jarvis-igerman-ai/jarves/issues/1099). Not fixed on main; issue open. The fix
   proposed in [#1108](https://github.com/Jarvis-igerman-ai/jarves/pull/1108) was closed without merging.
 - This report fixes no code. #1099 stays open until a fix merges with evidence.
-- P3 #5-#10: hardening notes with no separate issue each, tracked in
-  [#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254) until they move into
-  `docs/reviews/FINDINGS_LEDGER.md` or get fixed.
+- P3 #5-#10: hardening notes tracked together in one issue,
+  [#1517](https://github.com/Jarvis-igerman-ai/jarves/issues/1517), split from #1254. They are not in
+  `docs/reviews/FINDINGS_LEDGER.md` because its rules keep `security`-labelled items as issues (like #206). #1254 now
+  tracks only the council recovery.
