@@ -84,12 +84,18 @@ _ALIAS = {"gpg.openpgp.program": "gpg.program"}         # git reads both keys in
 # `core.gitProxy` (first match wins, so `-c` cannot replace it) is switched off by an empty GIT_PROXY_COMMAND, which
 # git reads before the config.
 # diff.external, diff.<x>.command and diff.<x>.textconv: every diff/show/log/blame gets --no-ext-diff/--no-textconv.
-# git takes the FIRST `remote.<x>.receivepack`, so `-c` cannot replace it: a push names git's own program instead
-# (JARVES never fetches, so `uploadpack` is never read). blame runs textconv by default too.
+# git takes the FIRST `remote.<x>.receivepack`/`uploadpack`, so `-c` cannot replace them: a push, fetch, pull or
+# ls-remote names git's own program instead. blame runs textconv by default too.
+_UPLOAD = ("--upload-pack=git-upload-pack",)
 _ARG_FIXES = {"diff": ("--no-ext-diff", "--no-textconv"), "show": ("--no-ext-diff", "--no-textconv"),
               "log": ("--no-ext-diff", "--no-textconv"), "push": ("--receive-pack=git-receive-pack",),
-              "blame": ("--no-textconv",)}
-_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_PROXY_COMMAND": ""}
+              "blame": ("--no-textconv",), "fetch": _UPLOAD, "pull": _UPLOAD, "ls-remote": _UPLOAD}
+# GIT_ALLOW_PROTOCOL replaces every `protocol.*.allow` setting: only https and ssh (the forge's GitHub push). A
+# remote, pushurl or `insteadOf`/`pushInsteadOf` from the shared config can then never point a push at a local
+# repository (whose receive-pack runs ITS hooks, the -c overrides do not reach it), an ext:: command or a
+# `git-remote-<name>` helper (`<name>::` URLs, `remote.<x>.vcs`).
+_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_PROXY_COMMAND": "", "GIT_ALLOW_PROTOCOL": "https:ssh"}
+_TRUE = ("true", "yes", "on", "1")
 
 
 def _multi(key: str) -> bool:
@@ -116,14 +122,18 @@ def _config_overrides(cwd: str | Path) -> list[str]:
     owner: dict[str, str] = {}
     owner_helpers: list[str] = []
     shared: list[str] = []
+    required: set[str] = set()                           # filters the shared config marks required
     items = p.stdout.split("\0")
     for scope, entry in zip(items[0::2], items[1::2]):
-        key, _, value = entry.partition("\n")
+        key, nl, value = entry.partition("\n")
+        local = scope not in ("system", "global")
+        if local and key.startswith("filter.") and key.endswith(".required"):
+            (required.add if not nl or value.lower() in _TRUE else required.discard)(key[:-len(".required")])
         if _cmd_default(key) is None:
             continue
-        if scope in ("system", "global"):
+        if not local:
             owner[_ALIAS.get(key, key)] = value
-            if _multi(key):
+            if _multi(key) and "=" not in key:           # `-c` cannot express a URL with '='; that helper is skipped
                 owner_helpers.append(f"{key}={value}")
         elif key not in shared:
             shared.append(key)
@@ -139,8 +149,10 @@ def _config_overrides(cwd: str | Path) -> list[str]:
         pre += ["-c", f"{key}={value}"]
         if key.startswith("hook.") and not value:        # newer git: a config hook can also be switched off by name
             pre += ["-c", key.rsplit(".", 1)[0] + ".enabled=false"]
-        if key.startswith("filter.") and not value:      # a switched-off filter must not fail as "required"
-            pre += ["-c", key.rsplit(".", 1)[0] + ".required=false"]
+        name = key.rsplit(".", 1)[0]
+        if key.startswith("filter.") and not value and name in required:     # never commit unfiltered content
+            raise GitError(f"refusing to run with {name} switched off: the repository's own config marks it required"
+                           " (e.g. git lfs install --local); set that filter in your global git config")
     return pre
 
 
@@ -153,13 +165,14 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. No other command named in the shared config runs either (#1390): filters,
     merge drivers, ssh/editor/pager/askpass/credential/gpg programs and config hooks are overridden by
-    `_config_overrides`; external diff and textconv are off, a push runs git's own receive-pack, ext:: is refused,
-    core.gitProxy is off. `args` must start with the subcommand, so the flags above land in the right place.
+    `_config_overrides`; external diff and textconv are off, a push/fetch runs git's own pack programs, only the
+    https and ssh transports are allowed, core.gitProxy is off. `args` must start with the subcommand, so the flags
+    above land in the right place.
     `stdin`: text for git's standard input (e.g. `credential fill`)."""
     if not args or args[0].startswith("-"):
         raise GitError("git() takes the subcommand first, not a global option")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           "-c", "protocol.ext.allow=never", *_config_overrides(cwd)]
+           *_config_overrides(cwd)]
     if args[0] in _ARG_FIXES:
         args = (args[0], *_ARG_FIXES[args[0]], *args[1:])
     for attempt in range(LOCK_RETRIES + 1):

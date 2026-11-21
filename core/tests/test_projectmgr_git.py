@@ -286,14 +286,13 @@ def owner_home(tmp_path, monkeypatch) -> Path:
 
 def test_shared_config_filters_never_run_on_add_commit_or_checkout(tmp_path, owner_home):
     """#1390: `filter.<x>.clean/smudge/process` in the shared config run on add and checkout for any file a
-    `.gitattributes` entry maps to them, here also through `include.path` and with `required=true`."""
+    `.gitattributes` entry maps to them, here also through `include.path`."""
     repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
     (repo / ".gitattributes").write_text("*.txt filter=evil\n*.md filter=inc\n", encoding="utf-8")
     gitops.commit_all(repo, "attrs")
     (tmp_path / "inc.cfg").write_text(f'[filter "inc"]\n\tclean = "{_cmd(marker)}"\n', encoding="utf-8")
     _set(repo, "filter.evil.clean", _cmd(marker), "filter.evil.smudge", _cmd(marker),
-         "filter.evil.process", _cmd(marker, "false"), "filter.evil.required", "true",
-         "include.path", (tmp_path / "inc.cfg").as_posix())
+         "filter.evil.process", _cmd(marker, "false"), "include.path", (tmp_path / "inc.cfg").as_posix())
     (repo / "g.txt").write_text("g", encoding="utf-8")
     (repo / "h.md").write_text("h", encoding="utf-8")
     assert gitops.commit_all(repo, "files")
@@ -338,23 +337,51 @@ def test_shared_config_external_diff_and_textconv_never_run(tmp_path, owner_home
     assert not marker.exists()
 
 
-def test_shared_config_ssh_pack_proxy_and_ext_commands_never_run(tmp_path, owner_home):
-    """#1390: forge pushes with JARVES's git; `core.sshCommand`, `remote.<x>.receivepack`, `core.gitProxy` and an
-    `ext::` remote (allowed by `protocol.ext.allow`) are commands set in the shared config. The owner's global
-    sshCommand (`exit 1`, so no real ssh runs) is the one used."""
+def test_shared_config_push_targets_and_commands_never_run(tmp_path, owner_home):
+    """#1390 (review R1, R3): the shared config can point a push at a local repository an agent made, whose
+    receive-pack runs ITS hooks (the -c overrides do not reach it): through `remote.<x>.url` or a `pushInsteadOf`
+    rewrite. It can also name `core.sshCommand`, `remote.<x>.receivepack`, `core.gitProxy`, an `ext::` or a
+    `<helper>::` remote. Only https and ssh run; the owner's global sshCommand (`exit 1`, no real ssh) is used."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     (owner_home / ".gitconfig").write_text('[core]\n\tsshCommand = "exit 1"\n', encoding="utf-8")
     bare = tmp_path / "bare.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _hook(bare / "hooks", "pre-receive", marker)
     _hook(tmp_path / "bin", "proxy", marker)                    # git starts a proxy without a shell: a script
     _set(repo, "remote.origin.url", bare.as_posix(), "remote.origin.receivepack", _cmd(marker, "false"),
+         f"url.{bare.as_posix()}.pushInsteadOf", "https://github.com/o/r",
          "remote.ssh.url", "ssh://jarves@127.0.0.1:1/r", "core.sshCommand", _cmd(marker, "false"),
          "remote.gp.url", "git://127.0.0.1:1/r", "core.gitProxy", (tmp_path / "bin" / "proxy").as_posix(),
-         "remote.ext.url", f"ext::sh -c {_cmd(marker, 'false')!r}", "protocol.ext.allow", "always")
-    assert gitops.git(repo, "push", "--no-verify", "origin", "main:main").returncode == 0
-    for name in ("ssh", "gp", "ext"):
-        assert gitops.git(repo, "push", "--no-verify", name, "main:main", check=False).returncode != 0
+         "remote.ext.url", f"ext::sh -c {_cmd(marker, 'false')!r}", "protocol.ext.allow", "always",
+         "protocol.file.allow", "always", "remote.v.url", "x", "remote.v.vcs", "jarvestest")
+    for target in ("origin", "https://github.com/o/r", "ssh", "gp", "ext", "v"):
+        p = gitops.git(repo, "push", "--no-verify", target, "main:main", check=False)
+        assert p.returncode != 0, target
+    assert "not allowed" in gitops.git(repo, "push", "origin", "main:main", check=False).stderr
     assert not marker.exists()
+    assert subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "--verify", "-q", "main"]).returncode != 0
+
+
+def test_fetch_pull_and_ls_remote_name_gits_own_upload_pack(monkeypatch, tmp_path):
+    """#1390 review R2: git takes the first `remote.<x>.uploadpack`, so these name git's own program."""
+    calls: list = []
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
+    for sub in ("fetch", "pull", "ls-remote"):
+        gitops.git(tmp_path, sub, "origin")
+    assert all(a[a.index(s) + 1] == "--upload-pack=git-upload-pack"
+               for a, s in zip(calls, ("fetch", "pull", "ls-remote")))
+
+
+def test_a_repository_only_required_filter_stops_the_call(tmp_path, owner_home):
+    """#1390 review R4: switching off a filter the repository marks required (`git lfs install --local`) would
+    commit unfiltered content into the owner's branch; JARVES stops instead and names the fix."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _set(repo, "filter.lfs.clean", _cmd(marker), "filter.lfs.required", "true")
+    with pytest.raises(gitops.GitError, match="global git config"):
+        gitops.git(repo, "status", check=False)
+    _set(repo, "filter.lfs.required", "false")                 # a later false wins, as in git
+    assert gitops.git(repo, "status").returncode == 0 and not marker.exists()
 
 
 def test_a_shared_credential_helper_never_runs_beside_the_owners(tmp_path, owner_home):
@@ -404,7 +431,8 @@ def test_every_command_key_set_in_the_shared_config_gets_a_safe_value(tmp_path, 
     the owner's global value when there is one, else git's safe default."""
     repo = _repo(tmp_path)
     (owner_home / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n[credential]\n\thelper = a\n\thelper = b\n"
-                                           '[credential "https://y.invalid"]\n\thelper = c\n', encoding="utf-8")
+                                           '[credential "https://y.invalid"]\n\thelper = c\n'
+                                           '[credential "https://h/?a=b"]\n\thelper = d\n', encoding="utf-8")
     keys = ("core.editor", "sequence.editor", "core.pager", "core.askPass", "credential.helper",
             "credential.https://x.invalid.helper", "gpg.openpgp.program", "gpg.ssh.program", "hook.evil.command",
             "core.sshCommand", "gpg.ssh.defaultKeyCommand", "trailer.t.cmd", "trailer.t.command")
@@ -412,6 +440,7 @@ def test_every_command_key_set_in_the_shared_config_gets_a_safe_value(tmp_path, 
     pairs = gitops._config_overrides(repo)[1::2]
     assert pairs[:4] == ["credential.helper=", "credential.helper=a", "credential.helper=b",
                          "credential.https://y.invalid.helper=c"]           # cleared once, then the owner's, in order
+    assert not any(x.endswith("helper=d") for x in pairs)      # review R5: a URL with '=' cannot be a -c key
     assert dict(x.split("=", 1) for x in pairs[4:]) == {
         "core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
         "gpg.openpgp.program": "owner-gpg",
