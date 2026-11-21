@@ -43,16 +43,16 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
-# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 20 chars before or after
+# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 40 chars before or after
 # them (then they are refused too: fails safe). The word counts on its own or after `_` (API_KEY=), as a camelCase
-# tail (apiKey, accessToken) or ending a joined name right before `=`/`:` (APIKEY=, "secretkey":).
+# tail (apiKey, accessToken, APIKey) or ending a joined name right before `=`/`:` (APIKEY=, "secretkey":).
 _CRED_WORD = r"keys?|tokens?|secrets?|webhook|hmac|signature|bearer|pat|auth|credentials?"
 _CRED = (r"(?:(?<![^\W_])(?:" + _CRED_WORD + r"|[ובלמשכ]{0,2}ה?(?:מפתח|טוקן|סוד)(?:ות|ים)?)(?![^\W_])"
-         r"|(?-i:(?<=[a-z])(?:Key|Token|Secret|Auth|Credential)s?(?![a-z]))"
+         r"|(?-i:(?<=[A-Za-z])(?:Key|Token|Secret|Auth|Credential)s?(?![a-z]))"
          r"|(?<![^\W_])(?:api|access|secret|client|private|app|bot|auth|session|refresh|signing|master|admin)"
          r"(?:key|token|secret)s?(?=[\"']?\s*[=:]))")
 _HEX = r"(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])"
-_HEX_SECRET = re.compile(_CRED + r"[^\n]{0,20}?" + _HEX + "|" + _HEX + r"[^\n]{0,20}?" + _CRED
+_HEX_SECRET = re.compile(_CRED + r"[^\n]{0,40}?" + _HEX + "|" + _HEX + r"[^\n]{0,40}?" + _CRED
                          + r"|(?<![0-9a-f])[0-9a-f]{41,}(?![0-9a-f])", re.I)
 # Base32 (TOTP seeds): one run of 16+, or 4+ groups of four split by a space or '-' as setup screens show them.
 _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z2-7]{16,}|[A-Za-z2-7]{4}(?:[ -][A-Za-z2-7]{4}){3,})=*(?![A-Za-z0-9])")
@@ -72,8 +72,10 @@ def _base32_groups(groups: list[str]) -> bool:
     s = "".join(groups)
     if not (s.isupper() or s.islower()) or not re.search("[2-7]", s) or re.fullmatch("[0-9a-fA-F]+", s):
         return False                      # mixed case, no base32 digit, or plain hex (SHAs are judged above)
-    if len(groups) == 1:                  # unbroken run: 2+ digit groups, so words like base64urlencoded pass
-        return len(re.findall("[2-7]+", s)) >= 2
+    if len(groups) == 1:                  # unbroken run: 3+ digit groups, or 2 with few vowels (random letters are
+        digits = len(re.findall("[2-7]+", s))  # ~19% vowels, words ~40%), so ipv4address2fallback passes
+        letters = re.sub("[2-7]", "", s.lower())
+        return digits >= 3 or (digits == 2 and sum(c in "aeiou" for c in letters) < 0.25 * len(letters))
     return any(re.search("[A-Za-z]", g) and re.search("[2-7]", g) for g in groups)
 
 

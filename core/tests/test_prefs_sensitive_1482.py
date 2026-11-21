@@ -33,6 +33,8 @@ LEAKY = [
     "my credential: cac0e7d816b7c1d886ed2d5dfe767db4",                           # R2: wider word list
     "u4Rq8ZpLx2Kc9Tm/Wn3Vb7Hy1Ja6Df0+Gs5Ek2Qo",                                 # R4: base64 with '/' and '+'
     "TOKEN=CAC0E7D816B7C1D886ED2D5DFE767DB4",                                    # review 3 R1: upper-case hex
+    "APIKey cac0e7d816b7c1d886ed2d5dfe767db4",                                   # review 4 R1: acronym + camel tail
+    "my api key for the payment service is cac0e7d816b7c1d886ed2d5dfe767db4",    # review 4 R2: word 28 chars away
     "sha256 of the build is 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",  # review 3 R2: 64-hex digest refused on purpose
 ]
 SAFE = [
@@ -93,12 +95,61 @@ def test_seeded_detection_rates_for_random_secret_shapes():
 
     assert rate(lambda: "token " + rnd("0123456789abcdef", 32)) == 1.0
     assert rate(lambda: rnd("0123456789abcdef", 41)) == 1.0
-    assert rate(lambda: rnd(b32, 16)) >= 0.78       # unbroken 16-char seed needs 2 digit groups (review 2 R3)
+    assert rate(lambda: rnd(b32, 16)) >= 0.7        # unbroken 16-char seed: 3 digit groups or 2 + few vowels
     assert rate(lambda: rnd(b32, 32).lower()) >= 0.97
     assert rate(lambda: " ".join(rnd(b32, 4) for _ in range(4))) >= 0.9
     assert rate(lambda: rnd(string.ascii_letters + string.digits, 20)) >= 0.85
     assert rate(lambda: "/".join(rnd(string.ascii_letters + string.digits, 15) for _ in range(3))) >= 0.9
     assert rate(lambda: "-".join(rnd(string.ascii_letters + string.digits, 8) for _ in range(4))) >= 0.85
+
+
+# Review 4 R3: identifiers and prose with digits that must not be refused (false-positive corpus).
+FP_CORPUS = [
+    "set ipv4address2fallback to true", "rename sha256checksum2file", "call oauth2redirect3handler on login",
+    "use base64urlencode2step", "convert h264to265converter output", "x264encoder2pass is slow", "IPV4ADDRESS2FALLBACK",
+    "the regression since commit 5d4a5f84be1b703ff001e75d0cdccb785f087a78 is fixed and the keyboard works again",
+    "remind me about the 3pm meeting with the design team", "I like python3 and ubuntu24 for my servers",
+    "set the volume to 70 percent in the kitchen", "MyComponent2Header renders twice", "ApiKeyboardLayout2Test",
+]
+
+
+@pytest.mark.parametrize("text", FP_CORPUS)
+def test_false_positive_corpus_is_not_sensitive(text):
+    assert not looks_sensitive(text)
+
+
+SECRET = "my api key for the payment service is cac0e7d816b7c1d886ed2d5dfe767db4"
+
+
+def _plans(db):
+    from jarves.goal_plans import PlanStore
+    return PlanStore(db)
+
+
+@pytest.mark.parametrize("write", [
+    lambda p, g, pl: p.suggest(SECRET, "said by the owner"),
+    lambda p, g, pl: p.suggest("Speak slowly", SECRET),
+    lambda p, g, pl: p.edit(p.add_confirmed("Speak slowly")["item"]["id"], SECRET),
+    lambda p, g, pl: g.add(SECRET),
+    lambda p, g, pl: g.add("Learn Spanish", details=SECRET),
+    lambda p, g, pl: g.add("Learn Spanish", steps=[SECRET]),
+    lambda p, g, pl: g.update(g.add("Learn Spanish")["id"], details=SECRET),
+    lambda p, g, pl: g.add_step(g.add("Learn Spanish")["id"], SECRET),
+    lambda p, g, pl: pl.propose(SECRET, [{"tool": "noop", "args": {}}]),
+    lambda p, g, pl: pl.propose("Weekly tidy", [{"tool": "noop", "args": {}, "why": SECRET}]),
+], ids=["pref-suggest", "pref-evidence", "pref-edit", "goal-add", "goal-details", "goal-steps", "goal-update",
+        "goal-add-step", "plan-title", "plan-step-why"])
+def test_every_write_path_refuses_a_1482_secret(home, write):
+    """Review 4 R4: each write path that calls looks_sensitive refuses the secret and stores nothing with it."""
+    from jarves.goals import Goals
+    from jarves.preferences import Preferences
+    from jarves.userdata import open_db
+    db = open_db(home)
+    p, g, pl = Preferences(db), Goals(db), _plans(db)
+    with pytest.raises(ValueError, match="sensitive"):
+        write(p, g, pl)
+    for table in ("learned_prefs", "goals", "goal_steps", "goal_plans"):
+        assert all("cac0e7d816b7c1d886ed2d5dfe767db4" not in str(dict(r)) for r in db.rows(f"SELECT * FROM {table}"))
 
 
 def test_prompt_block_hides_a_stored_item_that_now_looks_sensitive_but_keeps_it_listed(home):
