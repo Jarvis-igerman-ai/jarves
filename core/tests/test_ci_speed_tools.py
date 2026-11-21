@@ -75,6 +75,50 @@ def test_jar584_ordinary_core_and_workflow_prs_still_skip_the_installer():
         assert not ci_plan.classify([f], "pull_request")["installer"], f
 
 
+_STALE_PLAN = 'PR_INSTALLER = (r"^(packaging/|godot/)")\n'          # a pre-JAR-584 PR rule, as on an old merge base
+
+
+def _cli(tmp_path, files, *extra):
+    lst = tmp_path / "files.txt"
+    lst.write_text("\n".join(files), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "core" / "tools" / "ci_plan.py"), "classify", "--files-from", str(lst), *extra],
+                       capture_output=True, text=True, check=True)
+    return dict(x.split("=", 1) for x in r.stdout.splitlines() if not x.startswith("plan=")), r.stderr
+
+
+def test_jar624_pr_on_a_stale_merge_base_still_gets_the_current_base_installer_rule(tmp_path, monkeypatch):
+    """JAR-624: GitHub tested #1424 on a stale merge commit (base eadd904, before JAR-584), so the classifier was the
+    old one and the installer job was 'skipped'. The PR run also applies the CURRENT base branch's PR_INSTALLER, read
+    from that file without executing it; it can only add the installer job, never remove one."""
+    base = tmp_path / "base_ci_plan.py"
+    base.write_text(ci_plan.Path(ci_plan.__file__).read_text(encoding="utf-8"), encoding="utf-8")
+    assert ci_plan.base_pr_installer(base) == ci_plan.PR_INSTALLER
+    files = ["core/src/jarves/auto_update.py", "core/tests/test_auto_update.py"]
+    current = ci_plan.PR_INSTALLER
+    monkeypatch.setattr(ci_plan, "PR_INSTALLER", "^(packaging/|godot/)")          # the stale checked-out classifier
+    assert not ci_plan.classify(files, "pull_request")["installer"]                 # what #1424 got: 'skipped'
+    assert ci_plan.classify(files, "pull_request", extra_installer_rule=current)["installer"]
+    monkeypatch.setattr(ci_plan, "PR_INSTALLER", current)
+    flags, _ = _cli(tmp_path, files, "--base-rules-from", str(base))
+    assert flags["installer"] == "true"
+    for f, kw in ((["core/src/jarves/cli.py"], {}), (files, {"draft": True})):        # no widening; a draft stays fast
+        assert not ci_plan.classify(f, "pull_request", extra_installer_rule=ci_plan.PR_INSTALLER, **kw)["installer"]
+    old = tmp_path / "old_ci_plan.py"
+    old.write_text(_STALE_PLAN, encoding="utf-8")
+    assert ci_plan.classify(["packaging/x.ps1"], "pull_request", extra_installer_rule=ci_plan.base_pr_installer(old))["installer"]
+    assert ci_plan.classify(files, "merge_group", extra_installer_rule="^$")["installer"]       # group rule unchanged
+
+
+@pytest.mark.parametrize("text", ["", "PR_INSTALLER = 3\n", "PR_INSTALLER = f(x)\n", "PR_INSTALLER = '('\n", "def (:\n"])
+def test_jar624_unreadable_base_rule_is_reported_and_the_checked_out_rule_still_applies(tmp_path, text):
+    base = tmp_path / "base_ci_plan.py"
+    base.write_text(text, encoding="utf-8")
+    assert ci_plan.base_pr_installer(base) is None
+    assert ci_plan.base_pr_installer(tmp_path / "missing.py") is None
+    flags, err = _cli(tmp_path, ["core/src/jarves/auto_update.py"], "--base-rules-from", str(base))
+    assert flags["installer"] == "true" and "CI_PLAN_BASE_RULE_UNAVAILABLE" in err
+
+
 def test_main_push_and_workflow_changes_run_everything_and_a_proven_tree_runs_nothing():
     assert all(ci_plan.classify([], "push").values())
     assert all(ci_plan.classify([".github/workflows/jarves-checks.yml"]).values())
@@ -774,3 +818,12 @@ def test_root_md_and_glob_read_docs_are_not_docs_only(tmp_path):
     assert got == {"CHANGELOG.md", "docs/reviews/BUG_TABLE_V50.md"}
     assert ci_plan.classify(["CHANGELOG.md"])["code"]               # real repo: test_manual_test_sheet reads it
     assert ci_plan.classify(["docs/reviews/BUG_TABLE_V50_2026-10-25.md"])["code"]
+
+
+def test_jar624_pr_classify_step_reads_the_current_base_rule():
+    wf = yaml.safe_load((ROOT / ".github/workflows/jarves-checks.yml").read_text(encoding="utf-8"))
+    job = wf["jobs"]["changes"]
+    run = next(s["run"] for s in job["steps"] if s.get("id") == "c")
+    assert job["env"]["BASE_REF"] == "${{ github.base_ref }}"
+    assert 'git show "origin/$BASE_REF:core/tools/ci_plan.py"' in run and "--base-rules-from" in run
+    assert run.index("--base-rules-from") < run.index("ci_plan.py classify")

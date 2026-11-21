@@ -1,0 +1,1 @@
+- Fixed: a pull request that touches the update or release paths now builds the Windows installer even when GitHub tests it on a stale merge base: the CI classifier also applies the base branch's current installer rule (it can only add the job), so a rule change on main reaches open PRs (JAR-624).

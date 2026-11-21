@@ -56,6 +56,25 @@ PR_INSTALLER = (r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cm
                 r"|\.github/workflows/(release|package)\.yml$)")
 
 
+def base_pr_installer(path: Path) -> str | None:
+    """JAR-624: the PR_INSTALLER rule of the CURRENT base branch's ci_plan.py, read without executing that file.
+
+    GitHub can start a pull_request run on a stale test-merge commit (#1424 ran on a merge into eadd904, before JAR-584
+    widened the rule), so the checked-out classifier is old. None (and a stderr line) when the file is missing, not
+    Python, or has no compilable string PR_INSTALLER; the checked-out rule then applies alone."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        rule = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "PR_INSTALLER" for t in n.targets))
+        if not isinstance(rule, str):
+            raise TypeError("PR_INSTALLER is not a string")
+        re.compile(rule)
+        return rule
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError, TypeError, StopIteration, re.error) as e:
+        print(f"CI_PLAN_BASE_RULE_UNAVAILABLE {path}: {type(e).__name__}; using the checked-out rule", file=sys.stderr)
+        return None
+
+
 def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[str]:
     """Changed doc-class files (docs/, root *.md ...) that a Core test reads from disk, so a docs-only change can
     still fail that test.
@@ -90,7 +109,7 @@ def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[s
 
 
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
-             reuse_tests_only: bool = False) -> dict[str, bool]:
+             reuse_tests_only: bool = False, extra_installer_rule: str | None = None) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
     request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89)."""
     if reused or draft:
@@ -118,7 +137,9 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     read = docs_read_by_tests([f for f in files if DOCS.match(f)])   # docs a Core test reads: Linux shards must run
     out = {k: any(re.match(p, f) for f in files) for k, p in RULES.items()}
     if event == "pull_request":
-        out["installer"] = any(re.match(PR_INSTALLER, f) for f in files)
+        # JAR-624: the current base branch's rule may only ADD the installer job (a stale merge base must not hide it)
+        out["installer"] = any(re.match(PR_INSTALLER, f) or (extra_installer_rule and re.match(extra_installer_rule, f))
+                               for f in files)
     out["code"] = bool(rest) or bool(read)
     out["full"] = any(not (GUIDES.match(f) or CHANGELOG.match(f)) for f in rest)   # guides/changelog-only: Linux shard
     if not out["full"]:
@@ -259,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
     c.add_argument("--reuse-tests-only", action="store_true", help="exact green PR tests exist; main still builds installer")
     c.add_argument("--draft", action="store_true", help="a draft pull request: only the fast checks run")
+    c.add_argument("--base-rules-from", type=Path, help="the base branch's current ci_plan.py: its PR installer rule "
+                   "also applies on a pull_request (JAR-624, stale test-merge commits)")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
     s.add_argument("--os", required=True)
@@ -277,7 +300,8 @@ def main(argv: list[str] | None = None) -> int:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
             files = _git_files() if a.event in ("pull_request", "merge_group") else []
-        for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only).items():
+        extra = base_pr_installer(a.base_rules_from) if a.base_rules_from else None
+        for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only, extra).items():
             print(f"{k}={'true' if v else 'false'}")
         print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))
         return 0
