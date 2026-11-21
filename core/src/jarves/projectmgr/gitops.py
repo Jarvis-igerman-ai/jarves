@@ -74,15 +74,26 @@ NO_HOOKS = _no_hooks_path()
 # default>`: "" turns a filter off, ":" is git's no-op editor, the rest are git's own defaults.
 _CMD_KEYS = {"core.sshcommand": "ssh", "core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
              "credential.helper": "", "gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-             "gpg.ssh.program": "ssh-keygen"}
+             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
 _CMD_SUB = {("filter", "clean"): "", ("filter", "smudge"): "", ("filter", "process"): "", ("hook", "command"): "",
-            ("credential", "helper"): "", ("merge", "driver"): "git merge-file --marker-size=%L %A %O %B"}
+            ("credential", "helper"): "", ("merge", "driver"): "git merge-file --marker-size=%L %A %O %B",
+            ("trailer", "cmd"): "", ("trailer", "command"): ""}
 _ALIAS = {"gpg.openpgp.program": "gpg.program"}         # git reads both keys into one setting
-# diff.external, diff.<x>.command and diff.<x>.textconv: every diff/show/log gets --no-ext-diff --no-textconv.
+# git runs EVERY credential helper from every scope; an empty value of any matching key clears the one list. So when
+# the repository sets any helper key, the list is cleared once and the owner's helper entries are replayed in order.
+# `core.gitProxy` (first match wins, so `-c` cannot replace it) is switched off by an empty GIT_PROXY_COMMAND, which
+# git reads before the config.
+# diff.external, diff.<x>.command and diff.<x>.textconv: every diff/show/log/blame gets --no-ext-diff/--no-textconv.
 # git takes the FIRST `remote.<x>.receivepack`, so `-c` cannot replace it: a push names git's own program instead
-# (JARVES never fetches, so `uploadpack` is never read).
+# (JARVES never fetches, so `uploadpack` is never read). blame runs textconv by default too.
 _ARG_FIXES = {"diff": ("--no-ext-diff", "--no-textconv"), "show": ("--no-ext-diff", "--no-textconv"),
-              "log": ("--no-ext-diff", "--no-textconv"), "push": ("--receive-pack=git-receive-pack",)}
+              "log": ("--no-ext-diff", "--no-textconv"), "push": ("--receive-pack=git-receive-pack",),
+              "blame": ("--no-textconv",)}
+_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_PROXY_COMMAND": ""}
+
+
+def _multi(key: str) -> bool:
+    return key.startswith("credential.") and key.endswith(".helper")
 
 
 def _cmd_default(key: str) -> str | None:
@@ -98,11 +109,12 @@ def _config_overrides(cwd: str | Path) -> list[str]:
     unreadable config raises GitError even for check=False callers, so it never reads as empty output."""
     p = subprocess.run(["git", "config", "--list", "--show-scope", "--includes", "-z"], cwd=str(cwd),
                        capture_output=True, text=True, timeout=30, creationflags=_NOWIN, encoding="utf-8",
-                       errors="replace", env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
+                       errors="replace", env=child_env(_ENV))
     if p.returncode != 0:
         raise GitError(("git config unreadable, nothing run (git 2.26 or newer is needed): "
                         + (p.stderr or "").strip())[:300])
     owner: dict[str, str] = {}
+    owner_helpers: list[str] = []
     shared: list[str] = []
     items = p.stdout.split("\0")
     for scope, entry in zip(items[0::2], items[1::2]):
@@ -111,21 +123,29 @@ def _config_overrides(cwd: str | Path) -> list[str]:
             continue
         if scope in ("system", "global"):
             owner[_ALIAS.get(key, key)] = value
+            if _multi(key):
+                owner_helpers.append(f"{key}={value}")
         elif key not in shared:
             shared.append(key)
     pre: list[str] = []
+    if any(_multi(k) for k in shared):
+        pre += [x for v in ("credential.helper=", *owner_helpers) for x in ("-c", v)]
     for key in shared:
         if "=" in key:                                   # `-c` would split it at the wrong place
             raise GitError(f"refusing a shared git config key with '=' in its name: {key[:80]}")
+        if _multi(key):
+            continue
         value = owner.get(_ALIAS.get(key, key), _cmd_default(key))
         pre += ["-c", f"{key}={value}"]
+        if key.startswith("hook.") and not value:        # newer git: a config hook can also be switched off by name
+            pre += ["-c", key.rsplit(".", 1)[0] + ".enabled=false"]
         if key.startswith("filter.") and not value:      # a switched-off filter must not fail as "required"
             pre += ["-c", key.rsplit(".", 1)[0] + ".required=false"]
     return pre
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        stdin: str | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
@@ -133,15 +153,19 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. No other command named in the shared config runs either (#1390): filters,
     merge drivers, ssh/editor/pager/askpass/credential/gpg programs and config hooks are overridden by
-    `_config_overrides`; external diff and textconv are off, a push runs git's own receive-pack, ext:: is refused."""
+    `_config_overrides`; external diff and textconv are off, a push runs git's own receive-pack, ext:: is refused,
+    core.gitProxy is off. `args` must start with the subcommand, so the flags above land in the right place.
+    `stdin`: text for git's standard input (e.g. `credential fill`)."""
+    if not args or args[0].startswith("-"):
+        raise GitError("git() takes the subcommand first, not a global option")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "protocol.ext.allow=never", *_config_overrides(cwd)]
-    if args and args[0] in _ARG_FIXES:
+    if args[0] in _ARG_FIXES:
         args = (args[0], *_ARG_FIXES[args[0]], *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=child_env(_ENV), encoding="utf-8", errors="replace",
+                           input=stdin)
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))

@@ -271,7 +271,20 @@ def _set(repo: Path, *pairs: str) -> None:
         subprocess.run(["git", "config", key, value], cwd=repo, check=True)
 
 
-def test_shared_config_filters_never_run_on_add_commit_or_checkout(tmp_path):
+@pytest.fixture
+def owner_home(tmp_path, monkeypatch) -> Path:
+    """#1390 review R7: no developer or system git config in these tests; the test writes the owner's global one."""
+    home = tmp_path / "owner-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_GLOBAL", raising=False)
+    monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    return home
+
+
+def test_shared_config_filters_never_run_on_add_commit_or_checkout(tmp_path, owner_home):
     """#1390: `filter.<x>.clean/smudge/process` in the shared config run on add and checkout for any file a
     `.gitattributes` entry maps to them, here also through `include.path` and with `required=true`."""
     repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
@@ -289,7 +302,7 @@ def test_shared_config_filters_never_run_on_add_commit_or_checkout(tmp_path):
     assert not marker.exists()
 
 
-def test_a_shared_config_merge_driver_never_runs_and_the_merge_still_works(tmp_path):
+def test_a_shared_config_merge_driver_never_runs_and_the_merge_still_works(tmp_path, owner_home):
     """#1390: `merge.<x>.driver` runs on a three-way merge of a file `.gitattributes` maps to it; JARVES uses git's
     own text merge instead, so the merge result is the normal one."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
@@ -307,44 +320,59 @@ def test_a_shared_config_merge_driver_never_runs_and_the_merge_still_works(tmp_p
     assert (repo / "m.txt").read_text(encoding="utf-8") == "A\nb\nc\nd\nE\n" and not marker.exists()
 
 
-def test_shared_config_external_diff_and_textconv_never_run(tmp_path):
-    """#1390: `diff.external`, `diff.<x>.command` and `diff.<x>.textconv` run on diff/show/log -p; JARVES's own
-    diffs still produce the plain patch."""
+def test_shared_config_external_diff_and_textconv_never_run(tmp_path, owner_home):
+    """#1390: `diff.external`, `diff.<x>.command` and `diff.<x>.textconv` run on diff/show/log -p/blame; JARVES's
+    own calls still produce the plain output. A leading global option is refused (the flags need the subcommand)."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     (repo / ".gitattributes").write_text("*.txt diff=evil\n", encoding="utf-8")
     gitops.commit_all(repo, "attrs")
-    (repo / "f.txt").write_text("y", encoding="utf-8")
+    (repo / "f.txt").write_text("y\n", encoding="utf-8")
     gitops.commit_all(repo, "change")
     _set(repo, "diff.external", _cmd(marker, "false"), "diff.evil.command", _cmd(marker, "false"),
          "diff.evil.textconv", _cmd(marker))
     assert "+y" in gitops.git(repo, "diff", "HEAD~1", "HEAD").stdout
     assert "+y" in gitops.git(repo, "show", "HEAD").stdout and "+y" in gitops.git(repo, "log", "-p", "-1").stdout
+    assert gitops.git(repo, "blame", "--porcelain", "f.txt").stdout.rstrip().endswith("\ty")
+    with pytest.raises(gitops.GitError, match="subcommand first"):
+        gitops.git(repo, "-C", str(repo), "diff", "HEAD~1", check=False)
     assert not marker.exists()
 
 
-def test_shared_config_ssh_pack_and_ext_commands_never_run_on_a_push(tmp_path):
-    """#1390: forge pushes with JARVES's git; `core.sshCommand`, `remote.<x>.receivepack` and an `ext::` remote
-    (allowed by `protocol.ext.allow`) are commands set in the shared config."""
+def test_shared_config_ssh_pack_proxy_and_ext_commands_never_run(tmp_path, owner_home):
+    """#1390: forge pushes with JARVES's git; `core.sshCommand`, `remote.<x>.receivepack`, `core.gitProxy` and an
+    `ext::` remote (allowed by `protocol.ext.allow`) are commands set in the shared config. The owner's global
+    sshCommand (`exit 1`, so no real ssh runs) is the one used."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (owner_home / ".gitconfig").write_text('[core]\n\tsshCommand = "exit 1"\n', encoding="utf-8")
     bare = tmp_path / "bare.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _hook(tmp_path / "bin", "proxy", marker)                    # git starts a proxy without a shell: a script
     _set(repo, "remote.origin.url", bare.as_posix(), "remote.origin.receivepack", _cmd(marker, "false"),
          "remote.ssh.url", "ssh://jarves@127.0.0.1:1/r", "core.sshCommand", _cmd(marker, "false"),
+         "remote.gp.url", "git://127.0.0.1:1/r", "core.gitProxy", (tmp_path / "bin" / "proxy").as_posix(),
          "remote.ext.url", f"ext::sh -c {_cmd(marker, 'false')!r}", "protocol.ext.allow", "always")
     assert gitops.git(repo, "push", "--no-verify", "origin", "main:main").returncode == 0
-    for name in ("ssh", "ext"):
+    for name in ("ssh", "gp", "ext"):
         assert gitops.git(repo, "push", "--no-verify", name, "main:main", check=False).returncode != 0
     assert not marker.exists()
 
 
-def test_the_owners_global_command_is_kept_when_the_shared_config_names_another(tmp_path, monkeypatch):
+def test_a_shared_credential_helper_never_runs_beside_the_owners(tmp_path, owner_home):
+    """#1390 review R1: git runs every credential helper from every scope; restating the owner's helper would only
+    add it again. The repository's helper must not run, the owner's must."""
+    repo, owner, evil = _repo(tmp_path), tmp_path / "owner.txt", tmp_path / "ran.txt"
+    (owner_home / ".gitconfig").write_text(f'[credential]\n\thelper = "!{_cmd(owner, "true")}"\n', encoding="utf-8")
+    _set(repo, "credential.helper", f"!{_cmd(evil, 'true')}",
+         "credential.https://x.invalid.helper", f"!{_cmd(evil, 'true')}")
+    gitops.git(repo, "credential", "fill", stdin="protocol=https\nhost=x.invalid\n\n", check=False)
+    assert owner.exists() and not evil.exists()
+
+
+def test_the_owners_global_command_is_kept_when_the_shared_config_names_another(tmp_path, owner_home):
     """#1390: a repository copy of an owner key (an owner's global filter, then overridden in `.git/config`)
     gets the owner's global value back, not a blank one."""
     repo, owner, evil = _repo(tmp_path), tmp_path / "owner.txt", tmp_path / "ran.txt"
-    (tmp_path / "h").mkdir()
-    (tmp_path / "h" / ".gitconfig").write_text(f'[filter "own"]\n\tclean = "{_cmd(owner)}"\n', encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path / "h"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "h" / "xdg"))
+    (owner_home / ".gitconfig").write_text(f'[filter "own"]\n\tclean = "{_cmd(owner)}"\n', encoding="utf-8")
     (repo / ".gitattributes").write_text("*.bin filter=own\n", encoding="utf-8")
     _set(repo, "filter.own.clean", _cmd(evil))
     (repo / "x.bin").write_text("b", encoding="utf-8")
@@ -352,17 +380,17 @@ def test_the_owners_global_command_is_kept_when_the_shared_config_names_another(
     assert owner.exists() and not evil.exists()
 
 
-def test_an_unreadable_shared_config_stops_every_git_call(tmp_path):
+def test_an_unreadable_shared_config_stops_every_git_call(tmp_path, owner_home):
     """#1390: a config git cannot read (or an include it refuses) must never read as empty output to a
     check=False caller, which would skip a review or a scope check."""
     repo = _repo(tmp_path)
     (repo / ".git" / "config").write_text("[core\n", encoding="utf-8")
     with pytest.raises(gitops.GitError, match="config unreadable"):
         gitops.git(repo, "diff", "--name-only", "HEAD", check=False)
-    assert gitops.is_repo(str(repo)) is False
+    assert gitops.is_repo(str(repo)) is False      # its one caller (project add) then refuses with NOT_GIT
 
 
-def test_a_shared_command_key_with_an_equals_sign_is_refused(tmp_path):
+def test_a_shared_command_key_with_an_equals_sign_is_refused(tmp_path, owner_home):
     """#1390: `-c` splits at the first '=', so `filter.a=b.clean` cannot be overridden; the call stops instead."""
     repo = _repo(tmp_path)
     _set(repo, "filter.a=b.clean", "evil")
@@ -370,21 +398,22 @@ def test_a_shared_command_key_with_an_equals_sign_is_refused(tmp_path):
         gitops.git(repo, "status", check=False)
 
 
-def test_every_command_key_set_in_the_shared_config_gets_a_safe_value(tmp_path, monkeypatch):
-    """#1390: editor, pager, askpass, credential, gpg (both names of the openpgp program) and config-hook keys at
-    repository scope are replaced: by the owner's global value when there is one, else git's safe default."""
+def test_every_command_key_set_in_the_shared_config_gets_a_safe_value(tmp_path, owner_home):
+    """#1390: editor, pager, askpass, credential (list cleared, then the owner's helpers), gpg (both names of the
+    openpgp program, ssh default-key command), trailer and config-hook keys at repository scope are replaced: by
+    the owner's global value when there is one, else git's safe default."""
     repo = _repo(tmp_path)
-    (tmp_path / "h").mkdir()
-    (tmp_path / "h" / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path / "h"))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "h" / "xdg"))
+    (owner_home / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n[credential]\n\thelper = a\n\thelper = b\n"
+                                           '[credential "https://y.invalid"]\n\thelper = c\n', encoding="utf-8")
     keys = ("core.editor", "sequence.editor", "core.pager", "core.askPass", "credential.helper",
             "credential.https://x.invalid.helper", "gpg.openpgp.program", "gpg.ssh.program", "hook.evil.command",
-            "core.sshCommand")
+            "core.sshCommand", "gpg.ssh.defaultKeyCommand", "trailer.t.cmd", "trailer.t.command")
     _set(repo, *[x for k in keys for x in (k, "evil")])
-    pairs = gitops._config_overrides(repo)
-    got = dict(p.split("=", 1) for p in pairs[1::2])
-    assert got == {"core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
-                   "credential.helper": "", "credential.https://x.invalid.helper": "",
-                   "gpg.openpgp.program": "owner-gpg", "gpg.ssh.program": "ssh-keygen", "hook.evil.command": "",
-                   "core.sshcommand": "ssh"}
+    pairs = gitops._config_overrides(repo)[1::2]
+    assert pairs[:4] == ["credential.helper=", "credential.helper=a", "credential.helper=b",
+                         "credential.https://y.invalid.helper=c"]           # cleared once, then the owner's, in order
+    assert dict(x.split("=", 1) for x in pairs[4:]) == {
+        "core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
+        "gpg.openpgp.program": "owner-gpg",
+        "gpg.ssh.program": "ssh-keygen", "hook.evil.command": "", "hook.evil.enabled": "false",
+        "core.sshcommand": "ssh", "gpg.ssh.defaultkeycommand": "", "trailer.t.cmd": "", "trailer.t.command": ""}
