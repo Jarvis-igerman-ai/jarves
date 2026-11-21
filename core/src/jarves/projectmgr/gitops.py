@@ -70,19 +70,23 @@ NO_HOOKS = _no_hooks_path()
 
 
 DIFF_CMDS = ("diff", "show", "log")
-_DRIVER = re.compile(r"^(filter|merge|hook)\.(.+)\.(clean|smudge|process|driver|command)$", re.S)
+_DRIVER = re.compile(r"^(filter|merge)\.(.+)\.(clean|smudge|process|driver|required)$", re.S)
+_HOOK = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)
 _SIGN = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
          "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": "",
          "gpg.format": "openpgp", "user.signingkey": ""}      # format and key: the owner's too (review R4)
 _UNTRUSTED = ("local", "worktree")      # the shared .git/config (+ includes) and config.worktree: agent-writable
+FILTER_FAIL = "exit 1"                  # a repository-only filter fails (required), never stores raw content
 
 
 def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[str] | subprocess.CompletedProcess:
     """`-c` pairs that override every command the repository's own config names at this read (#1407; a later write
-    before git's own read is not covered, #1533); the owner's global/system
-    config is kept, also for a repository copy of the same key. A filter driver gets no command and is not required (the file is used as it is), a merge driver
-    `exit 1` (always a conflict, never a silent result), a config-defined hook `exit 0`; signing programs always come
-    from the owner's scope (else the git default). A failed read is returned as is (the caller fails closed)."""
+    before git's own read is not covered, #1533); the owner's global/system config is kept, also for a repository
+    copy of the same key. A filter the repository config sets but the owner does not fails closed (`exit 1`,
+    required): a file it applies to stops the command instead of being stored unconverted (git-crypt). A merge
+    driver gets `exit 1` (always a conflict), any config-defined hook (`hook.<name>.command`/`.event`) `exit 0`;
+    signing settings always come from the owner's scope (else git's default: the committer email as key).
+    A failed read is returned as is (the caller fails closed)."""
     p = subprocess.run(["git", *pre, "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
                        text=True, timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
                        encoding="utf-8", errors="replace")
@@ -93,27 +97,41 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
     items = p.stdout.split("\0")
     owner: dict[str, str] = {}
     out: dict[str, str] = {}
+    filters: dict[str, set[str]] = {}           # filter name -> keys the repository config sets
+    email = ""
     for scope, entry in zip(items[0::2], items[1::2]):
         key, _, value = entry.partition("\n")
+        if key == "user.email":
+            email = value                       # the effective committer email: git's fallback signing key
         if scope not in _UNTRUSTED:
-            if key in _SIGN or _DRIVER.match(key) or key.endswith(".required"):
+            if key in _SIGN or _DRIVER.match(key):
                 owner[key] = value
                 if key in ("gpg.program", "gpg.openpgp.program"):
                     owner["pgp"] = value                # the last of the two wins, as in git
             continue
-        m = _DRIVER.match(key)
-        if m and "=" in key:                    # `-c` would split the key there: refuse, never half-apply
+        m, h = _DRIVER.match(key), _HOOK.match(key)
+        if (m or h) and "=" in key:             # `-c` would split the key there: refuse, never half-apply
             return subprocess.CompletedProcess(p.args, 128, "", f"refusing the config key {key!r} (#1407)")
-        if m and m.group(1) == "filter":        # a repository copy of an owner key keeps the owner's value
-            req = f"filter.{m.group(2)}.required"
-            out[key], out[req] = owner.get(key, ""), owner.get(req, "false")    # the owner's required flag stays
-        elif m:
-            out[key] = owner.get(key) or ("exit 1" if m.group(1) == "merge" else "exit 0")
+        if h:                                   # also `.event`: never attach any (owner) command to an event
+            out[f"hook.{h.group(1)}.command"] = "exit 0"
+        elif m and m.group(1) == "filter":
+            filters.setdefault(m.group(2), set()).add(key)
+        elif m and m.group(3) == "driver":
+            out[key] = owner.get(key) or "exit 1"
         elif key in _SIGN:
             out.update({k: "" for k in _SIGN})
+    for name, keys in filters.items():
+        req = f"filter.{name}.required"
+        cmds = keys - {req}
+        if all(k in owner for k in cmds):       # a repository copy of the owner's filter: the owner's values
+            out.update({k: owner[k] for k in cmds}, **{req: owner.get(req, "false")})
+        else:
+            out.update({k: FILTER_FAIL for k in cmds}, **{req: "true"})
     if "gpg.program" in out:                    # git reads gpg.program and gpg.openpgp.program into one setting
         pgp = owner.get("pgp") or "gpg"
         out.update({k: owner.get(k) or d for k, d in _SIGN.items()}, **{"gpg.program": pgp, "gpg.openpgp.program": pgp})
+        if not out["user.signingkey"] and out["gpg.format"] != "ssh":
+            out["user.signingkey"] = email      # an empty key is used as is; git's own default is the committer
     return [x for k, v in out.items() for x in ("-c", f"{k}={v}")]
 
 
@@ -145,8 +163,17 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
             break
         time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
-        raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
+        raise GitError(_hint((p.stderr or p.stdout or "git failed").strip()[:300]))
     return p
+
+
+def _hint(err: str) -> str:
+    """What the owner can do about a #1407 override that stopped git."""
+    if f"'{FILTER_FAIL}'" in err:
+        return err + " (a filter set only in the repository's git config does not run: set it in your global config)"
+    if "gpg" in err.lower() or "signing" in err.lower():
+        return err + " (check your global git signing settings: user.signingkey, gpg.format, gpg.program)"
+    return err
 
 
 def is_repo(path: str) -> bool:
@@ -309,7 +336,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> li
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
-    return [f"(not merged: {why})"]
+    return [f"(not merged: {_hint(why)})"]
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:

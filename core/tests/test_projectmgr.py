@@ -1398,3 +1398,21 @@ def test_commit_of_names_the_ref_it_could_not_resolve(tmp_path):
     gitops.git(tmp_path, "init", "-q")
     with pytest.raises(gitops.GitError, match="no commit for jarves/p9/integration: .+"):
         gitops.commit_of(tmp_path, "jarves/p9/integration")
+
+
+def test_owner_merge_of_a_task_already_on_the_moved_integration_branch_does_not_park(env):
+    """#1407 review round 3 R5: when the task tip is already an ancestor of the moved integration branch, the merge
+    fast-forwards the task branch; that is not "moved during the merge" and needs no second approval."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    tip = sh(wt, "git", "rev-parse", "HEAD").strip()
+    integ = gitops.project_root(home, 1) / "integration"
+    sh(integ, "git", "merge", "-q", "--ff-only", tip)                # the task commit lands on the integration branch
+    for n in ("later", "later2"):                                    # ... and moves on past it (2 commits: ^1 != tip)
+        (integ / f"{n}.txt").write_text(n + "\n")
+        gitops.commit_all(integ, n)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert "moved during the merge" not in (t["waiting"] or ""), t
+    assert any("merged commit" in e["text"] for e in m.db.events(t["id"], 40))

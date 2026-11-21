@@ -272,15 +272,14 @@ def test_commands_named_in_the_repository_config_never_run(tmp_path, monkeypatch
     monkeypatch.setenv("USERPROFILE", str(owner_home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     repo, evil = _repo(tmp_path), (tmp_path / "bin" / "evil").as_posix()
-    for k, v in (("user.name", "Owner"), ("user.email", "o@example.invalid"), ("filter.x.clean", evil),
-                 ("filter.x.smudge", evil), ("filter.x.required", "true"), ("merge.x.driver", evil),
+    for k, v in (("user.name", "Owner"), ("user.email", "o@example.invalid"), ("merge.x.driver", evil),
                  ("gpg.openpgp.program", evil)):
         subprocess.run(["git", "config", k, v], cwd=repo, check=True)
-    (repo / ".gitattributes").write_text("*.txt filter=x merge=x\n", encoding="utf-8")
+    (repo / ".gitattributes").write_text("*.txt merge=x\n", encoding="utf-8")
     gitops.git(repo, "checkout", "-qb", "side")
     (repo / "f.txt").write_text("side", encoding="utf-8")
-    assert gitops.commit_all(repo, "side")                                   # add runs the clean filter
-    gitops.git(repo, "checkout", "-q", "main")                               # checkout runs the smudge filter
+    assert gitops.commit_all(repo, "side")
+    gitops.git(repo, "checkout", "-q", "main")
     (repo / "f.txt").write_text("main", encoding="utf-8")
     assert gitops.commit_all(repo, "main")
     assert gitops.merge_in(repo, "side") == ["f.txt"]                        # the driver never decides: a conflict
@@ -302,14 +301,17 @@ def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monk
     calls: list = []
     conf = ("local\0hook.x.command\nevil\0local\0merge.y.driver\nevil\0global\0filter.lfs.clean\ngit-lfs\0"
             "global\0filter.lfs.smudge\ngit-lfs s\0global\0filter.lfs.required\ntrue\0local\0filter.lfs.smudge\nevil\0"
-            "local\0filter.lfs.process\nevil\0")
+            "local\0filter.lfs.required\nfalse\0local\0filter.enc.process\nevil\0global\0hook.own.command\nmine\0"
+            "local\0hook.own.event\npre-commit\0")
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
     gitops.git(tmp_path, "diff", "--shortstat", "a...b")
     pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
     assert "hook.x.command=exit 0" in pairs and "merge.y.driver=exit 1" in pairs
     assert not any(p.startswith("filter.lfs.clean") for p in pairs)            # the owner's own filter is kept
     assert "filter.lfs.smudge=git-lfs s" in pairs                              # a repository copy: the owner's
-    assert "filter.lfs.process=" in pairs and "filter.lfs.required=true" in pairs   # review R3: owner's flag kept
+    assert "filter.lfs.required=true" in pairs                                 # review R3: owner's flag kept
+    assert "filter.enc.process=exit 1" in pairs and "filter.enc.required=true" in pairs   # round 3 R1: fails closed
+    assert "hook.own.command=exit 0" in pairs           # round 3 R3: a repository `.event` never runs the owner's hook
     assert calls[0][calls[0].index("diff") + 1:][:2] == ["--no-ext-diff", "--no-textconv"]
     calls.clear()
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, "global\0user.signingkey\nOWNER\0"
@@ -331,3 +333,31 @@ def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_pat
     monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 129, "", "usage"))
     with pytest.raises(gitops.GitError, match="git 2.26 or newer"):
         gitops.git(tmp_path, "status")
+
+
+def test_a_filter_set_only_in_the_repository_config_stops_the_commit(tmp_path):
+    """#1407 review round 3 R1: a repository-only filter (git-crypt writes `.git/config` only) must not be skipped
+    silently: the file would be committed unconverted (plaintext). The command stops, naming the cause."""
+    repo = _repo(tmp_path)
+    for k, v in (("filter.x.clean", "tr a-z A-Z"), ("filter.x.smudge", "cat"), ("filter.x.required", "false")):
+        subprocess.run(["git", "config", k, v], cwd=repo, check=True)
+    (repo / ".gitattributes").write_text("*.txt filter=x\n", encoding="utf-8")
+    before = gitops.commit_of(repo, "HEAD")
+    (repo / "s.txt").write_text("secret\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="global config"):
+        gitops.commit_all(repo, "f")
+    assert gitops.commit_of(repo, "HEAD") == before
+    staged = subprocess.run(["git", "ls-files", "-s", "s.txt"], cwd=repo, capture_output=True, text=True).stdout
+    assert not staged                                                        # never stored raw
+
+
+def test_signing_without_an_owner_key_uses_the_committer_email(monkeypatch, tmp_path):
+    """#1407 review round 3 R2: a repository signing key with no owner key gave `user.signingkey=` (empty), which git
+    uses as is; git's own default is the committer identity."""
+    calls: list = []
+    conf = "global\0user.email\no@example.invalid\0local\0user.signingkey\nREPO\0"
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
+    gitops.git(tmp_path, "merge", "x", ident=False)
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    assert "user.signingkey=o@example.invalid" in pairs
+    assert "signing settings" in gitops._hint("error: gpg failed to sign the data")

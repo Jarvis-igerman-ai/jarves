@@ -572,7 +572,9 @@ class StageEngine:
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     merged = gitops.commit_of(wt, "HEAD")
-                    if approved and merged != tip and gitops.commit_of(wt, merged + "^1") != tip:
+                    ff = merged == head and gitops.git(wt, "merge-base", "--is-ancestor", tip, merged,
+                                                       check=False).returncode == 0     # no own commits: fast-forward
+                    if approved and merged != tip and not ff and gitops.commit_of(wt, merged + "^1") != tip:
                         return ("park", f"the task branch moved during the merge: approve task #{t['seq']} again")
                     tip = merged
                     if conflicts:
