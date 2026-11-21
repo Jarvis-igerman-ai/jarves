@@ -24,6 +24,14 @@ LEAKY = [
     "Xk9fLm2QzRtPwYbNcVdH",                                                      # boundary: 20-char base62
     "use tk-live-aZ3kQ7m-PxR2tLw_NcYbVd4E as the key",                           # R2: base64url with '-' and '_'
     "x_Xk9fLm2QzR-tPwYbNcVdH",                                                   # R2: 19+ chars only when joined
+    '"apiKey": "cac0e7d816b7c1d886ed2d5dfe767db4"',                             # review 2 R1: camelCase tail
+    "apikey=cac0e7d816b7c1d886ed2d5dfe767db4",                                   # R1: joined name before '='
+    "accessToken=b084f9e0094f68db07f3501e4eab9e3fbecd52da",                      # R1: camelCase, 40 hex
+    "secretkey=cac0e7d816b7c1d886ed2d5dfe767db4",                                # R1: joined name before '='
+    "cac0e7d816b7c1d886ed2d5dfe767db4 is my webhook secret",                     # R2: credential word after the value
+    "bearer b084f9e0094f68db07f3501e4eab9e3fbecd52da",                           # R2: wider word list
+    "my credential: cac0e7d816b7c1d886ed2d5dfe767db4",                           # R2: wider word list
+    "u4Rq8ZpLx2Kc9Tm/Wn3Vb7Hy1Ja6Df0+Gs5Ek2Qo",                                 # R4: base64 with '/' and '+'
 ]
 SAFE = [
     "fixed in commit 3f9a2c1, see the log",                                      # 7-char short SHA
@@ -38,6 +46,9 @@ SAFE = [
     "call 2345 next week",                                                       # four 4-char words, one number
     "THIS WORD WILL MAKE SENSE",                                                 # upper-case 4-char words
     "I prefer short answers in the morning",
+    "decode the base64urlencoded sha256checksumfile",                           # R3: one digit group: a word
+    "monkey: cac0e7d816b7c1d886ed2d5dfe767db4",                                 # 'key' inside a word, before ':'
+    "src/Components/Header2/IndexPage/Layout",                                   # R4: a path, not random
 ]
 
 
@@ -77,8 +88,22 @@ def test_seeded_detection_rates_for_random_secret_shapes():
 
     assert rate(lambda: "token " + rnd("0123456789abcdef", 32)) == 1.0
     assert rate(lambda: rnd("0123456789abcdef", 41)) == 1.0
-    assert rate(lambda: rnd(b32, 16)) >= 0.93                                    # misses seeds with no digit 2-7
-    assert rate(lambda: rnd(b32, 16).lower()) >= 0.93
+    assert rate(lambda: rnd(b32, 16)) >= 0.78       # unbroken 16-char seed needs 2 digit groups (review 2 R3)
+    assert rate(lambda: rnd(b32, 32).lower()) >= 0.97
     assert rate(lambda: " ".join(rnd(b32, 4) for _ in range(4))) >= 0.9
     assert rate(lambda: rnd(string.ascii_letters + string.digits, 20)) >= 0.85
+    assert rate(lambda: "/".join(rnd(string.ascii_letters + string.digits, 15) for _ in range(3))) >= 0.9
     assert rate(lambda: "-".join(rnd(string.ascii_letters + string.digits, 8) for _ in range(4))) >= 0.85
+
+
+def test_prompt_block_hides_a_stored_item_that_now_looks_sensitive_but_keeps_it_listed(home):
+    """Review 2 R5: the read path only leaves such an item out of the instructions; it is not deleted or hidden."""
+    from jarves import preferences as prefs_mod
+    from jarves.userdata import open_db
+    p = prefs_mod.Preferences(open_db(home))
+    ok = p.add_confirmed("I prefer short answers")["item"]
+    p.db.x("UPDATE learned_prefs SET text=? WHERE id=?", (f"the key fix is {SHA}", ok["id"]))  # stored pre-upgrade
+    p.add_confirmed("Speak slowly")
+    assert {r["text"] for r in p.items("confirmed")} == {f"the key fix is {SHA}", "Speak slowly"}
+    block = prefs_mod.prompt_block(p)
+    assert "Speak slowly" in block and SHA not in block
