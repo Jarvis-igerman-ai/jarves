@@ -92,7 +92,9 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert st == 200 and [x["id"] for x in v["items"]] == [a] and [x["id"] for x in v["proposed"]] == [b]
     assert v["in_prompt"] is True and "music" in v["topics"]
     assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
-    assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
+    st, out = op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")
+    assert st == 200 and out["state"] == "proposed"                                    # #206 H2: new words need a new confirm
+    assert p.get(a)["state"] == "proposed" and op(srv, tok, op="confirm", pref=a)[1]["state"] == "confirmed"
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
     assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True

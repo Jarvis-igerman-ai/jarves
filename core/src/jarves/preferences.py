@@ -138,11 +138,18 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
-                      (t, norm, self.clock(), pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
-            return self._view(self.get(pid))
+        if repropose:          # #206 H2: guarded writes, so a confirm racing this edit cannot keep the new words confirmed
+            for _ in range(3):
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? "
+                             "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
+                              id=pid, by=by)
+                    return self._view(self.get(pid))
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=? AND state<>'confirmed'",
+                             (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+                    return self._view(self.get(pid))
+            raise KeyError(pid)                # removed meanwhile (or kept changing): nothing written
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))

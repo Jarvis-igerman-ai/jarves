@@ -148,6 +148,9 @@ class Bridge:
     voice_transcribe: Callable[[bytes, str], str] | None = None            # (wav, device) -> transcript only, no reply (hands-free Drive voice, #219)
 
 
+NOT_KEPT_REPLY = "התשובה לא נשמרה (מצב פרטיות): שאלו שוב אם צריך. / The answer was not kept (privacy mode): ask again if needed."
+
+
 class MobileAccess:
     """Device store (hashed tokens), pairing codes, rate limits, settings and audit for the phone API."""
 
@@ -477,6 +480,8 @@ class MobileAccess:
                 self._replies.pop(k, None)
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
+        if logs.privacy():           # #206 F13: the ledger is on disk, so in privacy mode it keeps a fixed note, not the words
+            reply = {"reply": NOT_KEPT_REPLY, "ok": bool(reply.get("ok")), "not_kept": True}
         try:
             self.cont.store(device, mid, "chat", 200, reply)
         except Exception:
