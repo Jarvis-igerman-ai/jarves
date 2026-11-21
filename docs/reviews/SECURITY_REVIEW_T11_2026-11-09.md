@@ -1,8 +1,8 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
 Date: 2026-11-09 (findings authored); re-checked 2026-11-21. Every `file:line` reference and every issue state below
-is as of that re-check against `origin/main` df23acb (the cited files are unchanged since 76cd30c); "at review time"
-describes only the old 2026-11-09 behaviour, never a line number.
+is as of that re-check against `origin/main` df23acb (the files cited by line are unchanged since 76cd30c); "at
+review time" describes only the old 2026-11-09 behaviour, never a line number.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -98,7 +98,7 @@ check command.
   rule, with tests. Positives: proposals need owner confirmation and evidence, expire, are capped, and a model edit
   re-proposes.
 
-## P0-P2 disposition
+## Disposition
 One issue per defect (AGENTS.md rule 8):
 - P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Fixed on main by #1101 (JAR-317) and #1351
   (JAR-574); issue closed.
