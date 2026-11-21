@@ -663,6 +663,9 @@ class StageEngine:
             except (gitops.GitError, OSError) as e:
                 return ("stop", "failed", f"worktree failed: {clean(e, 200)}")
             if kind == "work":            # each park starts a new turn: commit what is in the folder, mark here
+                # Your "done" does not come back here: answer() stores approved={"stage": i}, and the approved branch
+                # at the top of this method calls _after_code, so the mark always predates your edit. commit_all is
+                # a no-op on a clean folder (no empty commits).
                 try:
                     gitops.commit_all(wt, f"task {t['seq']}: before your edit"[:120])
                     self._set_job(t, owner_from=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())

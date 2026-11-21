@@ -1006,6 +1006,8 @@ def test_owner_turn_mark_is_cleared_when_protected_files_block(env):
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["job"].get("owner_from")
+    log = gitops.git(t["worktree"], "log", "--oneline", "--grep", "before your edit").stdout
+    assert log == ""                                              # a clean folder at the park: no empty commit
     (Path(t["worktree"]) / ".github").mkdir()
     (Path(t["worktree"]) / ".github" / "x.yml").write_text("on: push\n")
     assert m.call("answer", project="demo", task=1, answer="done")["ok"]
@@ -1013,6 +1015,28 @@ def test_owner_turn_mark_is_cleared_when_protected_files_block(env):
     t = m.db.by_seq(1, 1)
     assert t["status"] == "blocked" and "protected" in t["reason"]
     assert "owner_from" not in t["job"]
+
+
+def test_owner_earlier_turn_out_of_scope_file_blocks_a_later_turn(env):
+    """#1500 review R1 (documented, safe direction): an out-of-scope file you wrote in an earlier turn was only a
+    warning then, but a later owner turn covers only its own window, so that file blocks the later turn."""
+    m, repo, _ = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner test work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    (wt / "notes.md").write_text("turn one\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"], (t["status"], t["reason"])
+    (wt / "mine.txt").write_text("turn two\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "notes.md" in t["reason"], (t["status"], t["reason"])
 
 
 def test_owner_reproduce_turn_keeps_its_behaviour(env):
