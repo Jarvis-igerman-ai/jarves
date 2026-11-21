@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -77,7 +78,7 @@ def _at_rest(body) -> dict:
     UPPER_CASE error code only, never words. The live answer to the phone is not changed."""
     kept = {k: v for k, v in body.items() if k != "not_kept" and (
         v is None or isinstance(v, (bool, int, float)) or
-        (k == "code" and isinstance(v, str) and len(v) <= 40 and v.replace("_", "").isalpha() and v.isupper()))
+        (k == "code" and isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", v)))
     } if isinstance(body, dict) else {}
     return {"not_kept": True, **kept}
 

@@ -460,9 +460,9 @@ def test_nan_age_is_refused_like_a_stale_one(cont):
 
 
 # ---------------------------------------------------------------- #206 F13: no words at rest in privacy mode
-def test_206_f13_privacy_mode_resend_ledger_keeps_no_words(cont):
+def test_206_f13_privacy_mode_resend_ledger_keeps_no_words(cont, monkeypatch):
     from jarves import logs
-    logs.set_privacy(True)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
     live = cont.execute("p1", "cmd-00000206", "pref", lambda: (200, {"ok": True, "n": 2, "note": "secret words"}))
     assert live == (200, {"ok": True, "n": 2, "note": "secret words"}, False)          # the live answer is unchanged
     cont.store("p1", "msg-00000206", "chat", 200, {"reply": "secret reply", "ok": True, "code": "CHAT_RATE"})
@@ -472,18 +472,18 @@ def test_206_f13_privacy_mode_resend_ledger_keeps_no_words(cont):
     assert cont.seen("p1", "msg-00000206") == {"not_kept": True, "ok": True, "code": "CHAT_RATE"}
 
 
-def test_206_f13_rows_kept_before_privacy_lose_their_words_at_the_next_write(cont):
+def test_206_f13_rows_kept_before_privacy_lose_their_words_at_the_next_write(cont, monkeypatch):
     from jarves import logs
     cont.store("p1", "msg-00000001", "chat", 200, {"reply": "old secret", "ok": True})     # privacy off: text kept
-    logs.set_privacy(True)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
     cont.store("p1", "msg-00000002", "chat", 200, {"ok": True})
     assert cont.seen("p1", "msg-00000001") == {"not_kept": True}
     assert not any("secret" in r["body"] for r in cont._rows("SELECT body FROM ledger"))
 
 
-def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fake):
+def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fake, monkeypatch):
     from jarves import logs
-    logs.set_privacy(True)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
     tok, _ = pair(srv)
     assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})[1]["reply"] == "echo: hi"
     srv.mobile._replies.clear()                                        # PC restart: only the ledger is left
@@ -505,14 +505,36 @@ def test_206_f13_privacy_on_scrubs_old_rows_at_open_and_on_read_without_a_new_wr
     a.store("p1", "msg-00000011", "chat", 200, {"reply": "old secret", "ok": True})       # privacy off: text kept
     a.store("p1", "msg-00000012", "chat", 200, {"reply": "older secret", "ok": True})
     a._x("UPDATE ledger SET ts=? WHERE cid='msg-00000012'", (clk() - continuity.LEDGER_TTL_S - 1,))
-    logs.set_privacy(True)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
     assert a.seen("p1", "msg-00000011") == {"not_kept": True}                            # a read alone scrubs
     assert [r["cid"] for r in a._rows("SELECT cid FROM ledger")] == ["msg-00000011"]      # the expired row is gone
-    logs.set_privacy(False)
+    monkeypatch.setattr(logs, "privacy", lambda: False)
     a.store("p1", "msg-00000013", "chat", 200, {"reply": "third secret", "ok": True})
-    logs.set_privacy(True)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
     Continuity(home, clock=clk)                                                           # a Core start alone scrubs
     assert not any("secret" in r["body"] for r in a._rows("SELECT body FROM ledger"))
     monkeypatch.setattr(Continuity, "_clean", lambda *a, **k: pytest.fail("a clean ledger was written"))
     assert a.seen("p1", "msg-00000013") == {"not_kept": True}
     assert a._rows("PRAGMA secure_delete") == [{"secure_delete": 1}]
+
+
+def test_206_f13_privacy_mode_success_resends_stay_successes_on_every_command_route(srv, fake, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    monkeypatch.setattr(mobile, "answer_approval", lambda mob, aid, ok, dev: (200, {"ok": True, "note": "secret"}))
+    tok, _ = pair(srv, scopes=["chat", "status", "tasks", "approvals"])
+    srv.mobile.cont.configure_signals(on=True)
+    routes = [("/api/m/goals/op", {"op": "status", "goal": 1, "status": "paused", "id": "goal-00000207"}),
+              ("/api/m/signals", {"op": "snooze", "minutes": 30, "id": "sig-00000207"}),
+              ("/api/m/approvals/0123456789abcdef", {"approved": True, "id": "appr-207-yes"})]
+    for path, body in routes:                       # the phone JS ignores a success body; r.ok must stay true
+        assert call(srv, "POST", path, tok, body)[0] == 200
+        st, out = call(srv, "POST", path, tok, body)
+        assert st == 200 and out["replay"] is True and out["code"] == "NOT_KEPT" and "error" not in out, path
+    assert fake.goals.calls == [("status", 1, "paused", "phone")]
+
+
+def test_206_f13_only_a_plain_upper_case_code_is_kept_at_rest():
+    assert continuity._at_rest({"code": "CHAT_RATE2"}) == {"not_kept": True, "code": "CHAT_RATE2"}
+    for bad in ("Aשלום_עולם", "A words here", "lower", "_X", "A" * 41):
+        assert continuity._at_rest({"code": bad}) == {"not_kept": True}, bad
