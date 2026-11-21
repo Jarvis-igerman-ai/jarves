@@ -47,17 +47,29 @@ def test_failures_are_recorded_and_pass_pct(tmp_path):
     pid.run(rows, tmp_path, run_scenario=lambda argv: (0 if argv == ["status"] else 2, "boom"),
             capture=fake_capture, clock=lambda: NOW)
     assert json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["result"] == "FAIL"
-    assert pid.metrics(tmp_path, now=NOW)["scenario_pass_pct"] == round(5 / 6 * 100, 1)
-
-
-def test_capture_error_is_fail_without_media(tmp_path):
-    def broken(page, img, vid):
-        raise OSError("no browser")
-    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=broken, clock=lambda: NOW)
-    rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
-    assert rec["result"] == "FAIL" and rec["image"] is None and "no browser" in rec["error"]
     m = pid.metrics(tmp_path, now=NOW)
-    assert (m["with_image"], m["with_video"]) == (0, 0)
+    assert m["scenario_pass_pct"] == round(5 / 6 * 100, 1) and m["missing"] == ["JAR-188"]   # FAIL is not a demo
+
+
+class PlaywrightLikeError(Exception):
+    pass
+
+
+@pytest.mark.parametrize("exc", [OSError("no browser"), ImportError("no browser"), PlaywrightLikeError("no browser")])
+def test_capture_error_is_fail_and_retried_next_pass(tmp_path, exc):
+    def broken(page, img, vid):
+        img.write_bytes(b"partial")
+        raise exc
+    rows = tickets()[:2]
+    assert pid.run(rows, tmp_path, run_scenario=lambda a: (0, ""), capture=broken,
+                   clock=lambda: NOW) == ["JAR-188", "JAR-189"]   # the error did not abort the remaining tickets
+    rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
+    assert rec["result"] == "FAIL" and rec["video"] is None and "no browser" in rec["error"]
+    assert (tmp_path / "JAR-189" / "demo.json").is_file()   # the error did not abort the remaining tickets
+    assert pid.metrics(tmp_path, now=NOW)["with_video"] == 0
+    assert pid.run(rows, tmp_path, run_scenario=lambda a: (0, ""), capture=fake_capture,
+                   clock=lambda: NOW) == ["JAR-188", "JAR-189"]   # FAIL tickets are retried
+    assert pid.metrics(tmp_path, now=NOW)["scenario_pass_pct"] == 100.0
 
 
 def test_unknown_when_no_demos_and_old_demos_not_counted(tmp_path):
@@ -70,13 +82,44 @@ def test_unknown_when_no_demos_and_old_demos_not_counted(tmp_path):
     assert pid.metrics(tmp_path, now=NOW)["demos_24h"] == 1
 
 
-@pytest.mark.parametrize("argv", [["update", "install"], ["--x"], [], "status", [1]])
+@pytest.mark.parametrize("argv", [["update", "install"], ["doctor", "--fix"], ["features", "enable", "x"], ["--x"],
+                                  [], "status", [1]])
 def test_scenario_argv_must_be_allowlisted(tmp_path, argv):
     row = dict(tickets()[0], argv=argv)
     pid.run([row], tmp_path, run_scenario=lambda a: pytest.fail("must not run"), capture=fake_capture,
             clock=lambda: NOW)
     rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
-    assert rec["result"] == "FAIL" and rec["error"].startswith("DEMO_SCENARIO_REFUSED")
+    assert rec["result"] == "FAIL" and "DEMO_SCENARIO_REFUSED" in rec["error"]
+
+
+@pytest.mark.parametrize("page", ["//evil.example/x", "http://evil.example/", "@evil.example", "x"])
+def test_page_must_be_a_local_path(tmp_path, page):
+    row = dict(tickets()[0], page=page)
+    pid.run([row], tmp_path, run_scenario=lambda a: (0, ""), capture=lambda *a: pytest.fail("must not capture"),
+            clock=lambda: NOW)
+    assert "DEMO_PAGE_REFUSED" in json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["error"]
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8765", "http://localhost:8765/", "http://[::1]:8765"])
+def test_loopback_url_allowed(url):
+    assert pid.check_url(url) == url
+
+
+@pytest.mark.parametrize("url", ["http://example.com", "http://127.0.0.1.evil.com", "file:///etc/passwd",
+                                 "http://10.0.0.5:8765", "ftp://localhost"])
+def test_non_loopback_url_refused(tmp_path, url, capsys):
+    with pytest.raises(ValueError, match="DEMO_URL_REFUSED"):
+        pid.check_url(url)
+    t = tmp_path / "t.json"
+    t.write_text("[]", encoding="utf-8")
+    assert pid.main(["run", "--tickets", str(t), "--demos", str(tmp_path / "d"), "--dashboard-url", url]) == 2
+    assert "DEMO_URL_REFUSED" in capsys.readouterr().err
+
+
+def test_exit_code_follows_pass_state_not_24h_window(tmp_path, monkeypatch):
+    pid.run(tickets(), tmp_path, run_scenario=lambda a: (0, ""), capture=fake_capture, clock=lambda: NOW)
+    monkeypatch.setattr(pid.time, "time", lambda: NOW + 3 * 86400)
+    assert pid.main(["metrics", "--demos", str(tmp_path)]) == 0
 
 
 def test_load_tickets_rejects_malformed(tmp_path):

@@ -5,7 +5,8 @@ that has no demo yet, record PASS/FAIL and save a screenshot, a short video and 
     python core/tools/post_install_demos.py metrics [--demos DIR]
 
 FILE is a JSON list of {"ticket", "merged", "user_facing", "argv", "page", "caption"}. `argv` is passed to the installed
-`jarvis` program without a shell and only for read-only commands in ALLOWED (anything else is refused, never run).
+`jarvis` program without a shell and only when it equals one of the whole argv lists in ALLOWED (else refused, never
+run). The dashboard URL must be loopback; a ticket stays pending (retried next pass) until it has a PASS demo.
 Each demo is <demos>/<ticket>/demo.json (written atomically) plus demo.png and demo.webm (Playwright, headless).
 `metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the REQUIRED tickets missing.
 """
@@ -15,14 +16,18 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 REQUIRED = ("JAR-188", "JAR-189", "JAR-191", "JAR-193", "JAR-210", "JAR-214")
-ALLOWED = {"status", "doctor", "selftest", "version", "features", "guides", "help"}
+ALLOWED = {("status",), ("doctor",), ("selftest",), ("version",), ("features",), ("guides",), ("help",)}
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+PAGE_RE = re.compile(r"^/(?!/)[A-Za-z0-9/_.\-?=&#]*$")
 TICKET_RE = re.compile(r"^[A-Z]+-\d+$")
 DAY_S = 86400
 
@@ -38,9 +43,16 @@ def load_tickets(path: Path) -> list[dict]:
 
 
 def _check_argv(argv) -> list[str]:
-    if not (isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv) and argv[0] in ALLOWED):
+    if not (isinstance(argv, list) and all(isinstance(a, str) for a in argv) and tuple(argv) in ALLOWED):
         raise ValueError(f"DEMO_SCENARIO_REFUSED: {argv!r} is not an allowed read-only jarvis command")
     return argv
+
+
+def check_url(url: str) -> str:
+    u = urlparse(str(url))
+    if u.scheme not in ("http", "https") or u.hostname not in LOOPBACK:
+        raise ValueError(f"DEMO_URL_REFUSED: {url!r} is not a loopback http(s) dashboard URL")
+    return url
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -55,7 +67,12 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def has_demo(demos: Path, ticket: str) -> bool:
-    return (Path(demos) / ticket / "demo.json").is_file()
+    """True only for a PASS record with image and video; FAIL or corrupt records are retried."""
+    try:
+        r = json.loads((Path(demos) / ticket / "demo.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(r, dict) and r.get("result") == "PASS" and bool(r.get("image")) and bool(r.get("video"))
 
 
 def record(row: dict, demos: Path, run_scenario, capture, clock=time.time) -> dict:
@@ -67,19 +84,24 @@ def record(row: dict, demos: Path, run_scenario, capture, clock=time.time) -> di
     try:
         code, out = run_scenario(_check_argv(row.get("argv")))
         rec["exit_code"], rec["output_tail"] = code, str(out)[-400:]
+        page = str(row.get("page") or "/")
+        if not PAGE_RE.match(page):
+            raise ValueError(f"DEMO_PAGE_REFUSED: {page!r}")
         img, vid = d / "demo.png", d / "demo.webm"
-        capture(str(row.get("page") or "/"), img, vid)
+        for f in (img, vid):
+            f.unlink(missing_ok=True)   # never count media left over from an earlier failed pass
+        capture(page, img, vid)
         rec["image"] = img.name if img.is_file() else None
         rec["video"] = vid.name if vid.is_file() else None
         rec["result"] = "PASS" if code == 0 and rec["image"] and rec["video"] else "FAIL"
-    except (ValueError, OSError, RuntimeError, subprocess.SubprocessError) as e:
-        rec["error"] = str(e)[:300]
+    except Exception as e:  # noqa: BLE001 - any scenario/browser error (ImportError, Playwright Error) is a FAIL record
+        rec["error"] = f"{type(e).__name__}: {e}"[:300]
     _write_json(d / "demo.json", rec)
     return rec
 
 
 def run(rows: list[dict], demos: Path, run_scenario, capture, clock=time.time) -> list[str]:
-    """Record a demo for every merged user-facing ticket without one; returns the tickets handled."""
+    """Record a demo for every merged user-facing ticket without a PASS demo; returns the tickets handled."""
     done = []
     for row in rows:
         if row.get("merged") is True and row.get("user_facing") is True and not has_demo(demos, row["ticket"]):
@@ -113,19 +135,25 @@ def subprocess_runner(exe: str):
 
 
 def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and the installed beta
+    base = check_url(base_url).rstrip("/")
+
     def go(page_path: str, img: Path, vid: Path) -> None:
         from playwright.sync_api import sync_playwright
         with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
             b = pw.chromium.launch()
-            ctx = b.new_context(record_video_dir=tmp, viewport={"width": 1280, "height": 720})
-            page = ctx.new_page()
-            page.goto(base_url.rstrip("/") + page_path, wait_until="networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
-            page.screenshot(path=str(img))
-            video = page.video
-            ctx.close()
-            b.close()
-            os.replace(video.path(), vid)   # the video file is complete only after the context closes
+            try:
+                ctx = b.new_context(record_video_dir=tmp, viewport={"width": 1280, "height": 720})
+                try:
+                    page = ctx.new_page()
+                    page.goto(base + page_path, wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(3000)
+                    page.screenshot(path=str(img))
+                    video = page.video
+                finally:
+                    ctx.close()   # the video file is complete only after the context closes
+            finally:
+                b.close()
+            shutil.move(video.path(), vid)   # works across drives, unlike os.replace
     return go
 
 
@@ -145,12 +173,17 @@ def main(argv=None) -> int:
         except ValueError as e:
             print(e, file=sys.stderr)
             return 2
+        try:
+            capture = playwright_capture(a.dashboard_url)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
         a.demos.mkdir(parents=True, exist_ok=True)
-        done = run(rows, a.demos, subprocess_runner(a.jarvis), playwright_capture(a.dashboard_url))
+        done = run(rows, a.demos, subprocess_runner(a.jarvis), capture)
         print(f"recorded {len(done)} demo(s): {', '.join(done) or '-'}")
     m = metrics(a.demos)
     print(json.dumps(m))
-    return 0 if m["demos_24h"] and not m["missing"] else 1
+    return 0 if not m["missing"] else 1   # PASS state of the listed tickets, not the 24 h window
 
 
 if __name__ == "__main__":
