@@ -43,10 +43,50 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
+# #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 20 chars before them
+# (then they are refused too: fails safe). `_` separates words, so API_KEY= / WEBHOOK_SECRET= count.
+_HEX_SECRET = re.compile(
+    r"(?<![^\W_])(?:keys?|tokens?|secrets?|webhook|hmac|signature|[ובלמשכ]{0,2}ה?(?:מפתח|טוקן|סוד)(?:ות|ים)?)(?![^\W_])"
+    r"[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
+    r"(?<![0-9a-f])[0-9a-f]{41,}(?![0-9a-f])", re.I)
+# Base32 (TOTP seeds): one run of 16+, or 4+ groups of four split by a space or '-' as setup screens show them.
+_BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])(?:[A-Za-z2-7]{16,}|[A-Za-z2-7]{4}(?:[ -][A-Za-z2-7]{4}){3,})=*(?![A-Za-z0-9])")
+_BASE62_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9]{20,}(?![A-Za-z0-9])")
+_BASE64URL_RUN = re.compile(r"(?<![\w-])[\w-]{20,}(?![\w-])", re.A)   # 'sk-proj-…' style: scored with '-'/'_' removed
+
+
+def _base32(run: str) -> bool:
+    groups = run.rstrip("=").replace("-", " ").split()
+    if len(groups) > 1:                   # neighbouring 4-letter words may join the chain: try windows of 4-8 groups
+        return any(_base32_groups(groups[i:i + n]) for n in range(4, 9) for i in range(len(groups) - n + 1))
+    return _base32_groups(groups)
+
+
+def _base32_groups(groups: list[str]) -> bool:
+    s = "".join(groups)
+    if not (s.isupper() or s.islower()) or not re.search("[2-7]", s) or re.fullmatch("[0-9a-fA-F]+", s):
+        return False                      # mixed case, no base32 digit, or plain hex (SHAs are judged above)
+    return len(groups) == 1 or any(re.search("[A-Za-z]", g) and re.search("[2-7]", g) for g in groups)
+
+
+def _cls(c: str) -> int:
+    return 0 if c.isdigit() else 1 if c.isupper() else 2
+
+
+def _random_base62(run: str) -> bool:
+    """Mixed upper/lower/digit run whose character class flips often (random), unlike CamelCase words."""
+    run = run.replace("-", "").replace("_", "")
+    if len(run) < 20 or len({_cls(c) for c in run}) < 3:
+        return False
+    flips = sum(_cls(a) != _cls(b) for a, b in zip(run, run[1:]))
+    return flips >= 0.45 * (len(run) - 1)
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    return bool(_SENSITIVE.search(t) or _HEX_SECRET.search(t)
+                or any(_base32(m.group()) for m in _BASE32_RUN.finditer(t))
+                or any(_random_base62(m.group()) for r in (_BASE62_RUN, _BASE64URL_RUN) for m in r.finditer(t)))
 
 
 def normalize(text: str) -> str:
