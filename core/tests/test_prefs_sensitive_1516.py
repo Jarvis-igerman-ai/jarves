@@ -28,7 +28,6 @@ SAFE = [
     "the 2fa commit was deadbeefcafe2345abcd",       # review R3: hex in base32 letters next to a seed word
     "THE 2FA COMMIT WAS DEADBEEFCAFEBABEFACE",       # upper-case digit-free hex
     "הקבוצה מפסידה JBSWYDPEHPK3PXPQ",                # review R4: סיד inside מפסידה is not a seed word
-    "JBSWYDPEHPK3PXPQ",                              # bare run with one digit group, no seed word (out of scope)
 ]
 
 
@@ -59,6 +58,12 @@ def test_word_adjacent_16_char_seed_rate_is_high():
     with_digit = [s.lower() for s in seeds if any(c in "234567" for c in s)]
     assert all(looks_sensitive(f"my totp seed: {s}") for s in with_digit)
     assert len(with_digit) / len(seeds) >= 0.9       # rate over ALL lowercase seeds; misses are pinned below
+
+
+def test_known_miss_bare_seed_without_a_seed_word():
+    # Known leak, NOT desired behaviour: a bare one-digit-group run with no seed word nearby passes. The full base32
+    # rule belongs to #1482; that work may flip this assertion when it lands.
+    assert not looks_sensitive("JBSWYDPEHPK3PXPQ")
 
 
 def test_known_miss_digit_free_lowercase_seed():

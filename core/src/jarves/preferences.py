@@ -51,6 +51,8 @@ _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
 _SEED_WORD = re.compile(r"(?<![a-z])(?:totp|otp|2fa|mfa|seed|authenticator)s?(?![a-z])|"
                         r"(?<![א-ת])[הושבלמכ]{0,2}(?:סיד|מאמת|אימות|אוטנטיקטור)(?:ים|ות)?(?![א-ת])", re.I)
 _SEED_NEAR = 20
+_B32_DIGIT = re.compile(r"[2-7]")
+_HEX_ONLY = re.compile(r"[0-9a-fA-F]+")
 
 
 def _seed_near_word(text: str) -> bool:
@@ -59,9 +61,9 @@ def _seed_near_word(text: str) -> bool:
         return False
     for m in _BASE32_RUN.finditer(text):
         run = m.group()
-        if not run.isupper() and not (run.islower() and re.search(r"[2-7]", run)):
+        if not run.isupper() and not (run.islower() and _B32_DIGIT.search(run)):
             continue
-        if re.fullmatch(r"[0-9a-fA-F]+", run):
+        if _HEX_ONLY.fullmatch(run):
             continue
         if any(ws <= m.end() + _SEED_NEAR and we >= m.start() - _SEED_NEAR for ws, we in words):
             return True
