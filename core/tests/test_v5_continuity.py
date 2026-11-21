@@ -489,7 +489,9 @@ def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fak
     srv.mobile._replies.clear()                                        # PC restart: only the ledger is left
     st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})
     assert st == 200 and out["replay"] is True and out["code"] == "NOT_KEPT"
-    assert out["reply"] == mobile._MSG["NOT_KEPT"][1] and out["reply_en"] == mobile._MSG["NOT_KEPT"][0]
+    assert out["reply"] == mobile._MSG["NOT_KEPT"][0] and out["reply_he"] == mobile._MSG["NOT_KEPT"][1]
+    he = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc", "lang": "he"})[1]
+    assert he["reply"] == mobile._MSG["NOT_KEPT"][1] and he["reply_en"] == mobile._MSG["NOT_KEPT"][0]
     assert fake.chats == ["hi"] and not any("echo" in r["body"] for r in srv.mobile.cont._rows("SELECT body FROM ledger"))
     tok, _ = pair(srv, scopes=["chat", "tasks"])
     body = {"id": "goal-00000206", "op": "nonsense"}
@@ -516,6 +518,7 @@ def test_206_f13_privacy_on_scrubs_old_rows_at_open_and_on_read_without_a_new_wr
     monkeypatch.setattr(Continuity, "_clean", lambda *a, **k: pytest.fail("a clean ledger was written"))
     assert a.seen("p1", "msg-00000013") == {"not_kept": True}
     assert a._rows("PRAGMA secure_delete") == [{"secure_delete": 1}]
+    assert a._rows("PRAGMA journal_mode") == [{"journal_mode": "delete"}]                 # R2: no WAL residue
 
 
 def test_206_f13_privacy_mode_success_resends_stay_successes_on_every_command_route(srv, fake, monkeypatch):
@@ -538,3 +541,18 @@ def test_206_f13_only_a_plain_upper_case_code_is_kept_at_rest():
     assert continuity._at_rest({"code": "CHAT_RATE2"}) == {"not_kept": True, "code": "CHAT_RATE2"}
     for bad in ("Aשלום_עולם", "A words here", "lower", "_X", "A" * 41):
         assert continuity._at_rest({"code": bad}) == {"not_kept": True}, bad
+    assert continuity._at_rest({"n": 2, "My secret title": 3, "שלום": 1, 7: 1, "ok_2": True}) == \
+        {"not_kept": True, "n": 2, "ok_2": True}                      # R1: keys from user data stay out too
+
+
+def test_206_f13_resend_messages_never_show_braces_and_keep_the_replaced_code():
+    """R4/R5: a templated message falls back to NOT_KEPT (no literal {braces}); the original code is kept."""
+    out = mobile._resent({"not_kept": True, "code": "NO_SCOPE"}, 403)
+    assert out["code"] == "NOT_KEPT" and out["code_kept"] == "NO_SCOPE" and "{" not in out["error"] + out["error_he"]
+    out = mobile._resent({"not_kept": True, "code": "MADE_UP_CODE"}, 200)
+    assert out["code"] == "NOT_KEPT" and out["code_kept"] == "MADE_UP_CODE" and "error" not in out
+    out = mobile._resent({"not_kept": True, "code": "STALE"}, 410)
+    assert out["code"] == "STALE" and "code_kept" not in out and out["error"] == mobile._MSG["STALE"][0]
+    for code, (en, he) in mobile._MSG.items():
+        r = mobile._resent({"not_kept": True, "code": code}, 400, chat=True)
+        assert "{" not in r["reply"] + r["reply_en"] + r["reply_he"], code

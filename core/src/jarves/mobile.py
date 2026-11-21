@@ -657,17 +657,21 @@ def _err(key: str, **fmt) -> dict:
     return {"error": en.format(**fmt), "error_he": he.format(**fmt)}
 
 
-def _resent(obj: dict, status: int = 200, *, chat: bool = False) -> dict:
+def _resent(obj: dict, status: int = 200, *, chat: bool = False, lang: object = None) -> dict:
     """A resend answered from the command ledger. In privacy mode the ledger kept no words (#206 F13): the phone gets
-    a defined code and message (a known kept refusal code keeps its own message) instead of a blank answer."""
+    a defined code and message instead of a blank answer. A kept refusal code keeps its own message unless that
+    message needs details the ledger did not keep ({placeholders}); a replaced code stays in `code_kept`."""
     out = {**obj, "replay": True}
     if not obj.get("not_kept"):
         return out
-    code = obj["code"] if obj.get("code") in _MSG else "NOT_KEPT"
+    kept = obj.get("code")
+    code = kept if kept in _MSG and "{" not in "".join(_MSG[kept]) else "NOT_KEPT"
+    if isinstance(kept, str) and kept != code:
+        out["code_kept"] = kept
     en, he = _MSG[code]
     out["code"] = code
-    if chat:
-        out.update(reply=he, reply_en=en)
+    if chat:                                     # `reply` in the asking phone's language, like `error` (English default)
+        out.update(reply=he if lang == "he" else en, reply_en=en, reply_he=he)
     elif status >= 400:
         out.update(error=en, error_he=he)
     return out
@@ -876,7 +880,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if mid:
             again = mob.replay(dev["id"], mid)
             if again is not None:                                # a resend: answer from memory, no second run
-                return done(200, _resent(again, chat=True), replay="yes")
+                return done(200, _resent(again, chat=True, lang=d.get("lang")), replay="yes")
             if mob.cont.stale(d.get("age_s")):                   # queued while offline for too long: never run it late
                 return done(410, {**_err("STALE"), "code": "STALE"})
         if not mob.rate_ok("chat:" + dev["id"], CHAT_RATE_PER_MIN):

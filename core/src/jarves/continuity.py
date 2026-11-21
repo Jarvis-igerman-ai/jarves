@@ -71,12 +71,14 @@ CREATE TABLE IF NOT EXISTS signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
 
 
 NOT_KEPT = '{"not_kept": true'           # how every privacy-mode ledger body starts (json.dumps of _at_rest)
+_KEY = re.compile(r"[a-z_][a-z0-9_]{0,39}")   # the only keys a privacy-mode ledger body keeps
 
 
 def _at_rest(body) -> dict:
     """The resend-ledger copy of an answer while privacy mode is on (#206 F13): numbers, flags, null and an
-    UPPER_CASE error code only, never words. The live answer to the phone is not changed."""
-    kept = {k: v for k, v in body.items() if k != "not_kept" and (
+    UPPER_CASE error code only, never words, under plain identifier keys only (a key built from user data, such as
+    a title, is dropped). The live answer to the phone is not changed."""
+    kept = {k: v for k, v in body.items() if k != "not_kept" and isinstance(k, str) and _KEY.fullmatch(k) and (
         v is None or isinstance(v, (bool, int, float)) or
         (k == "code" and isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", v)))
     } if isinstance(body, dict) else {}
@@ -99,6 +101,7 @@ class Continuity:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         cx.row_factory = sqlite3.Row
         cx.execute("PRAGMA secure_delete=ON")          # freed pages are overwritten, so replaced words do not linger
+        cx.execute("PRAGMA journal_mode=DELETE")       # the default, pinned: no WAL file keeps old page images (#206)
         return cx
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
