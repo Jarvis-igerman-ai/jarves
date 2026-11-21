@@ -119,9 +119,9 @@ class Continuity:
                         body = json.loads(r["body"])
                     except ValueError:
                         body = None                    # unreadable: keep nothing of it
-                    if body != _at_rest(body):
-                        cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?",
-                                   (json.dumps(_at_rest(body)), r["device"], r["cid"]))
+                    kept = json.dumps(_at_rest(body))
+                    if r["body"] != kept:          # text compare: a NaN number is not "changed" on every scan
+                        cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?", (kept, r["device"], r["cid"]))
                 oldest = cx.execute("SELECT MIN(ts) FROM ledger").fetchone()[0]
             self._expire_at = math.inf if oldest is None else oldest + LEDGER_TTL_S
             self._words = self._words and not private

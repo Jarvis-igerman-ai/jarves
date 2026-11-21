@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import re
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,6 +17,8 @@ import pytest
 from jarves import calm, continuity, dashboard, mobile
 from jarves.config import Config
 from jarves.continuity import Continuity
+
+SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 @pytest.fixture(autouse=True)
@@ -490,7 +495,10 @@ def test_206_f13_privacy_on_scrubs_older_rows_at_open_even_one_starting_with_not
 def test_206_r4_continuity_opens_before_logging_is_set_up(home, clk, monkeypatch):
     from jarves import logs
     monkeypatch.setattr(logs, "_flag", None)                     # logs.setup() not run yet: the default privacy holds
-    monkeypatch.setattr(logs, "_privacy", True)
+    fresh = subprocess.run([sys.executable, "-c", "from jarves import logs; print(logs.privacy())"], text=True,
+                           capture_output=True, check=True, env={**os.environ, "PYTHONPATH": str(SRC)})
+    assert fresh.stdout.strip() == "True"                         # an untouched module: privacy on before setup()
+    monkeypatch.setattr(logs, "_privacy", True)                   # the same default here (other tests may change it)
     Continuity(home, clock=clk).store("p1", "msg-00000021", "chat", 200, {"reply": "secret"})
     assert Continuity(home, clock=clk).seen("p1", "msg-00000021") == {"not_kept": True}
 
@@ -532,3 +540,23 @@ def test_206_r7_a_clean_ledger_is_not_scanned_or_locked_again_until_something_ch
     assert a.seen("p1", "msg-00000032") == {"not_kept": True} and len(scans) == 1
     clk.t += continuity.LEDGER_TTL_S + 1                                            # a row may have expired: scan again
     assert a.seen("p1", "msg-00000032") is None and len(scans) == 2
+
+
+def test_206_r4b_a_kept_nan_number_is_not_rewritten_on_every_scan(home, clk, monkeypatch):
+    """Review R4: a scan must be stable for a NaN number (compared as stored text, not by NaN equality)."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    a = Continuity(home, clock=clk)
+    a._x("INSERT INTO ledger (device, cid, kind, status, body, ts) VALUES ('p1','msg-41','pref',200,?,?)",
+         ('{"not_kept": true, "n": NaN}', clk()))
+    writes, real = [], a._cx
+
+    def counting():
+        cx = real()
+        cx.set_trace_callback(lambda sql: writes.append(sql) if sql.startswith("UPDATE ledger") else None)
+        return cx
+    monkeypatch.setattr(a, "_cx", counting)
+    a._words = True                                               # force a scan, as after a privacy-off write
+    a.scrub()
+    assert writes == []
+    assert a._rows("SELECT body FROM ledger") == [{"body": '{"not_kept": true, "n": NaN}'}]

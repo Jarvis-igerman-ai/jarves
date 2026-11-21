@@ -199,7 +199,7 @@ def test_206_h2_a_confirm_racing_a_reproposing_edit_leaves_the_new_wording_propo
     assert p.get(b)["text"] == "Play jazz while I cook" and p.get(b)["state"] == "proposed"
 
 
-def test_206_r6_the_race_logs_what_the_statement_really_did(prefs, monkeypatch, caplog):
+def test_206_r6_the_race_logs_what_the_statement_really_did(prefs, monkeypatch):
     p, a, b = prefs
     real, raced = p.get, []
 
@@ -209,6 +209,27 @@ def test_206_r6_the_race_logs_what_the_statement_really_did(prefs, monkeypatch, 
             raced.append(p.db.x("UPDATE learned_prefs SET state='confirmed' WHERE id=?", (pid,)).rowcount)
         return before
     monkeypatch.setattr(p, "get", stale_get)
-    caplog.clear()
+    codes = []
+    monkeypatch.setattr(logs, "info", lambda area, code, *a, **k: codes.append(code))
     p.edit(b, "Play jazz while I cook", repropose=True)
-    assert "a confirmed preference was reworded" in caplog.text and "preference edited" not in caplog.text
+    assert codes == ["PREF_REPROPOSED"]
+
+
+def test_206_r2_a_reproposing_edit_of_a_gone_item_raises_and_changes_nothing(prefs):
+    p, a, b = prefs
+    p.db.x("DELETE FROM learned_prefs WHERE id=?", (a,))
+    p_get = p.get
+    p.get = lambda pid: {"id": pid, "state": "confirmed"}         # the edit read the row just before it was removed
+    with pytest.raises(KeyError):
+        p.edit(a, "I like very short answers in the morning", repropose=True)
+    p.get = p_get
+    assert p.get(a) is None and p.db.rows("SELECT text FROM learned_prefs") == [{"text": "Play jazz while cooking"}]
+
+
+def test_206_r5_phone_command_handlers_never_read_a_success_body():
+    """A privacy-mode resend answers 200 with code NOT_KEPT and fewer fields: the phone handlers must use only r.ok."""
+    for name, route in (("prefs.js", "/api/m/prefs/op"), ("plans.js", "/api/m/plans/op"), ("app.js", "/api/m/goals/op"),
+                        ("app.js", "/api/m/signals"), ("app.js", '/api/m/approvals/" + p.id')):
+        js = (MOBILE_DIR / name).read_text(encoding="utf-8")
+        assert re.search(r'try \{ await (cx\.)?post\("' + re.escape(route), js), (name, route)   # awaited, not assigned
+    assert 'if (!r.ok) {' in (MOBILE_DIR / "app.js").read_text(encoding="utf-8")         # api() throws on errors only
