@@ -140,10 +140,13 @@ jobs:
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
           [ "$reuse_tests_only" = "true" ] && args+=(--reuse-tests-only)
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$reused" != "true" ] && [ "$DRAFT" != "true" ]; then
             # JAR-624: GitHub can start a PR run on a stale test-merge commit (#1424 ran on a base from before JAR-584), so
             # the checked-out classifier is old; the base branch's CURRENT PR installer rule also applies (it only adds jobs)
             # read via the API, not a fetch: the clone's refs and shallow state (the HEAD^1..HEAD file list) stay untouched
+            # SCOPE: this step itself comes from the test-merge commit, so it protects only merge bases that already contain
+            # JAR-624, and it carries forward PR_INSTALLER ONLY: a later change to RULES, DOCS or GUIDES does NOT reach a
+            # stale-base run. Skipped on a reused tree or a draft PR, where classify returns before any rule is read.
             if gh api "repos/$GITHUB_REPOSITORY/contents/core/tools/ci_plan.py?ref=$BASE_REF" \
                -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/base_ci_plan.py"; then
               args+=(--base-rules-from "$RUNNER_TEMP/base_ci_plan.py"); echo "installer rule: also the $BASE_REF base branch's (via API)"

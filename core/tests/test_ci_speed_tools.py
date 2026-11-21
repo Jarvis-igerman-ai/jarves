@@ -135,6 +135,15 @@ def test_jar624_unreadable_base_rule_is_reported_and_the_checked_out_rule_still_
     assert flags["installer"] == "true" and "CI_PLAN_BASE_RULE_UNAVAILABLE" in err
 
 
+def test_jar624_base_rule_fetch_is_skipped_when_classify_would_ignore_it():
+    """classify returns early on a reused tree or a draft PR, so the contents API call (and its warning) is skipped."""
+    script = next(s["run"] for s in _wf("jarves-checks.yml")["jobs"]["changes"]["steps"] if s.get("id") == "c")
+    fetch = next(line for line in script.splitlines() if "base_ci_plan.py" in line and "args+=" not in line and "then" in line)
+    guard = next(line for line in script.splitlines() if 'GITHUB_EVENT_NAME" = "pull_request" ] &&' in line)
+    assert '"$reused" != "true"' in guard and '"$DRAFT" != "true"' in guard
+    assert script.index(guard) < script.index(fetch)
+
+
 def test_main_push_and_workflow_changes_run_everything_and_a_proven_tree_runs_nothing():
     assert all(ci_plan.classify([], "push").values())
     assert all(ci_plan.classify([".github/workflows/jarves-checks.yml"]).values())

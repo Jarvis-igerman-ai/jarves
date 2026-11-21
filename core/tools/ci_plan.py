@@ -111,7 +111,11 @@ def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[s
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
              reuse_tests_only: bool = False, extra_installer_rule: str | None = None) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
-    request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89)."""
+    request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89).
+
+    `extra_installer_rule` (JAR-624, the base branch's PR_INSTALLER) is ORed in on a pull_request and can only ADD the
+    installer job. So a PR that intentionally NARROWS PR_INSTALLER still runs the installer in its own run (safe); the
+    narrowed rule takes effect for PRs opened after it merges."""
     if reused or draft:
         return {k: False for k in FLAGS}
     if reuse_tests_only:
