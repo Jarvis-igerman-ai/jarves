@@ -198,12 +198,16 @@ def test_required_list_comes_from_flag(tmp_path):
 
 class FakeRoute:
     """Stands in for a Playwright Route; `chain` maps url -> (status, location or None)."""
-    def __init__(self, url, chain):
-        self.request, self.chain, self.fetched, self.outcome = type("R", (), {"url": url})(), chain, [], None
+    def __init__(self, url, chain, method="GET"):
+        self.request = type("R", (), {"url": url, "method": method})()
+        self.chain, self.fetched, self.overrides, self.outcome = chain, [], [], None
 
-    def fetch(self, url=None, max_redirects=None):
+    def fetch(self, url=None, max_redirects=None, **override):
         assert max_redirects == 0   # the browser never follows a redirect on its own
         self.fetched.append(url)
+        self.overrides.append(override)
+        if isinstance(self.chain, Exception):
+            raise self.chain
         status, loc = self.chain[url]
         return type("Resp", (), {"status": status, "headers": {"location": loc} if loc else {}})()
 
@@ -255,3 +259,24 @@ def test_runner_decodes_non_ascii_output_as_utf8(tmp_path):
     script.write_text("import sys; sys.stdout.buffer.write('שלום'.encode() + b'\\xff')", encoding="utf-8")
     code, out = pid.subprocess_runner(sys.executable)([str(script)])
     assert code == 0 and out.startswith("שלום")
+
+
+@pytest.mark.parametrize("method,status,second", [
+    ("POST", 303, {"method": "GET", "post_data": ""}), ("POST", 302, {"method": "GET", "post_data": ""}),
+    ("POST", 301, {"method": "GET", "post_data": ""}), ("GET", 303, {"method": "GET", "post_data": ""}),
+    ("POST", 307, {}), ("POST", 308, {}), ("GET", 302, {})])
+def test_redirect_switches_to_get_like_a_browser(method, status, second):
+    r = FakeRoute(BASE + "/form", {BASE + "/form": (status, "/done"), BASE + "/done": (200, None)}, method=method)
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("fulfill", 200) and r.overrides == [{}, second]
+
+
+def test_fetch_error_aborts_route_at_once():
+    r = FakeRoute(BASE + "/", ConnectionResetError("dashboard down"))
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("abort", None)
+
+
+def test_browser_launch_disables_webrtc_udp_and_dns_prefetch():
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in pid.LAUNCH_ARGS
+    assert "--dns-prefetch-disable" in pid.LAUNCH_ARGS

@@ -8,7 +8,8 @@ FILE is a JSON list of {"ticket", "merged", "user_facing", "argv", "page", "capt
 `jarvis` program without a shell and only when it equals one of the whole argv lists in ALLOWED (else refused, never
 run). `--jarvis` is resolved to an absolute path (never the current folder). The browser may only load the checked loopback
 origin: requests elsewhere are aborted, redirects are followed here hop by hop and aborted when any hop leaves the origin,
-WebSockets to another origin are closed and service workers are blocked; a page that still ends up elsewhere is a FAIL. A ticket stays pending (retried next pass) until it has a PASS demo.
+WebSockets to another origin are closed, service workers are blocked, WebRTC UDP and DNS prefetch are switched off at
+launch; a page that still ends up elsewhere is a FAIL. Not covered: preconnect hints (UNVERIFIED, not exercised). A ticket stays pending (retried next pass) until it has a PASS demo.
 Each demo is <demos>/<ticket>/demo.json (written atomically) plus demo.png and demo.webm (Playwright, headless).
 `metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the --required tickets missing.
 """
@@ -37,6 +38,8 @@ DAY_S = 86400
 DEFAULT_PORT = {"http": 80, "https": 443}
 WS_SCHEME = {"ws": "http", "wss": "https"}
 MAX_HOPS = 5
+# traffic Playwright routing cannot see: WebRTC ICE/STUN over UDP and DNS prefetch (preconnect hints are not covered)
+LAUNCH_ARGS = ("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--dns-prefetch-disable")
 
 
 def load_tickets(path: Path) -> list[dict]:
@@ -76,14 +79,19 @@ def same_origin(url: str, base: str) -> bool:
 
 def guarded_route(route, base: str) -> None:
     """Fetch a request ourselves without automatic redirects; every hop must stay on the checked origin."""
-    url = route.request.url
+    url, method, override = route.request.url, str(route.request.method).upper(), {}
     for _ in range(MAX_HOPS + 1):
         if not same_origin(url, base):
             return route.abort()
-        resp = route.fetch(url=url, max_redirects=0)
+        try:
+            resp = route.fetch(url=url, max_redirects=0, **override)
+        except Exception:  # noqa: BLE001 - dashboard down/reset: abort now; goto then fails and the ticket records FAIL
+            return route.abort()
         loc = resp.headers.get("location")
         if not (300 <= resp.status < 400 and loc):
             return route.fulfill(response=resp)
+        if resp.status == 303 or (resp.status in (301, 302) and method != "GET"):
+            method, override = "GET", {"method": "GET", "post_data": ""}   # like a browser: next hop is a bodiless GET
         url = urljoin(url, loc)
     return route.abort()   # too many redirects
 
@@ -207,7 +215,7 @@ def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and
     def go(page_path: str, img: Path, vid: Path) -> None:
         from playwright.sync_api import sync_playwright
         with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
-            b = pw.chromium.launch()
+            b = pw.chromium.launch(args=list(LAUNCH_ARGS))
             try:
                 ctx = b.new_context(**context_options(tmp))
                 try:
