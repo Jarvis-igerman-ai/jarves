@@ -22,8 +22,10 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _fake_run(outcomes, calls):
+def _fake_run(outcomes, calls, config=""):
     def run(argv, **kw):
+        if "config" in argv and "--show-scope" in argv:               # the #1407 config read: not counted
+            return subprocess.CompletedProcess(argv, 0, config, "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,60 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def test_commands_named_in_the_repository_config_never_run(tmp_path, monkeypatch):
+    """#1407 item 3: filter and merge drivers (picked by a `.gitattributes` in the worktree) and signing programs set in
+    the shared `.git/config` run no code; the owner's own global signing program is still the one used."""
+    owner_home, marker, owner_marker = tmp_path / "owner", tmp_path / "ran.txt", tmp_path / "owner-gpg.txt"
+    _hook(tmp_path / "bin", "evil", marker)
+    _hook(tmp_path / "bin", "owner-gpg", owner_marker)
+    owner_home.mkdir()
+    (owner_home / ".gitconfig").write_text(f"[gpg]\n\tprogram = {(tmp_path / 'bin' / 'owner-gpg').as_posix()}\n",
+                                           encoding="utf-8")
+    monkeypatch.setenv("HOME", str(owner_home))
+    monkeypatch.setenv("USERPROFILE", str(owner_home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    repo, evil = _repo(tmp_path), (tmp_path / "bin" / "evil").as_posix()
+    for k, v in (("user.name", "Owner"), ("user.email", "o@example.invalid"), ("filter.x.clean", evil),
+                 ("filter.x.smudge", evil), ("filter.x.required", "true"), ("merge.x.driver", evil),
+                 ("gpg.openpgp.program", evil)):
+        subprocess.run(["git", "config", k, v], cwd=repo, check=True)
+    (repo / ".gitattributes").write_text("*.txt filter=x merge=x\n", encoding="utf-8")
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "f.txt").write_text("side", encoding="utf-8")
+    assert gitops.commit_all(repo, "side")                                   # add runs the clean filter
+    gitops.git(repo, "checkout", "-q", "main")                               # checkout runs the smudge filter
+    (repo / "f.txt").write_text("main", encoding="utf-8")
+    assert gitops.commit_all(repo, "main")
+    assert gitops.merge_in(repo, "side") == ["f.txt"]                        # the driver never decides: a conflict
+    assert not marker.exists()
+    subprocess.run(["git", "config", "commit.gpgsign", "true"], cwd=repo, check=True)
+    (repo / "g.md").write_text("g", encoding="utf-8")
+    gitops.git(repo, "checkout", "-qb", "side2")
+    gitops.commit_all(repo, "g")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "h.md").write_text("h", encoding="utf-8")
+    gitops.commit_all(repo, "h")
+    gitops.merge_in(repo, "side2", ident=False)                              # the ship path signs as the owner
+    assert owner_marker.exists() and not marker.exists()
+
+
+def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monkeypatch, tmp_path):
+    """#1407 item 3: config-defined hooks (`hook.<name>.command`, newer git than CI's 2.43) get a no-op command, diff
+    commands never run an external diff or textconv, and a config git cannot read stops the command."""
+    calls: list = []
+    conf = "local\0hook.x.command\nevil\0local\0merge.y.driver\nevil\0global\0filter.lfs.clean\ngit-lfs\0"
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
+    gitops.git(tmp_path, "diff", "--shortstat", "a...b")
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    assert "hook.x.command=exit 0" in pairs and "merge.y.driver=exit 1" in pairs
+    assert not any(p.startswith("filter.lfs") for p in pairs)                  # the owner's own filter is kept
+    assert calls[0][calls[0].index("diff") + 1:][:2] == ["--no-ext-diff", "--no-textconv"]
+    monkeypatch.undo()
+    repo = _repo(tmp_path)
+    with open(repo / ".git" / "config", "a", encoding="utf-8") as fh:
+        fh.write("[broken\n")
+    with pytest.raises(gitops.GitError):
+        gitops.git(repo, "status")
+    assert not gitops.is_repo(str(repo))
