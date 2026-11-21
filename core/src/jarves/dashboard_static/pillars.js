@@ -114,7 +114,7 @@
       p.evidence ? el("div", { class: "muted small", dir: "auto" }, tx("מה שאמרת: ", "What you said: ") + p.evidence) : null,
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" }, buttons));
     const btn = (label, fn, cls) => el("button", { type: "button", class: cls || "ghost", onclick: fn }, label);
-    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => op(p.id, "confirm"), "primary"),
+    const proposed = d.proposed.map((p) => row(p, [btn(tx("אישור, לזכור", "Confirm, remember it"), () => op(p.id, "confirm", { updated: p.updated }), "primary"),
       btn(tx("עריכה", "Edit"), edit(p)), btn(tx("לא לזכור", "Do not remember"), () => op(p.id, "decline"))]));
     const items = d.items.map((p) => row(p, [btn(tx("עריכה", "Edit"), edit(p)),
       p.stale ? btn(tx("אישור מחדש", "Reaffirm"), () => op(p.id, "reaffirm"), "primary") : null,

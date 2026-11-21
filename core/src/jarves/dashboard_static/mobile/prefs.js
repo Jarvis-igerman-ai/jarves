@@ -47,7 +47,7 @@
       box.appendChild(el("div", "", t("ask")));
       acts.append(btn(t("yes"), () => op({ op: "remove", pref: p.id }, "gone"), true), btn(t("cancel"), () => { asking = 0; paint(d); }));
     } else {
-      if (kind !== "confirmed") acts.appendChild(btn(t("confirm"), () => op({ op: "confirm", pref: p.id }, "saved"), true));
+      if (kind !== "confirmed") acts.appendChild(btn(t("confirm"), () => op({ op: "confirm", pref: p.id, updated: p.updated }, "saved"), true));
       if (kind === "proposed") acts.appendChild(btn(t("decline"), () => op({ op: "decline", pref: p.id }, "saved")));
       if (kind === "confirmed" && p.stale) acts.appendChild(btn(t("again"), () => op({ op: "reaffirm", pref: p.id }, "saved"), true));
       if (kind !== "declined") acts.appendChild(btn(t("edit"), () => { editing = p.id; paint(d); }));

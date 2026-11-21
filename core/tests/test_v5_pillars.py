@@ -315,7 +315,7 @@ def test_dashboard_and_cli_show_edit_and_remove_every_learned_item(home, capsys)
     try:
         st, body = prefs_mod.api_prefs(ctx, None, None)
         assert st == 200 and body["proposed"][0]["evidence"] == "I prefer tea to coffee" and body["items"] == []
-        assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid})[0] == 200
+        assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": body["proposed"][0]["updated"]})[0] == 200
         assert prefs_mod.api_prefs(ctx, None, None)[1]["items"][0]["text"] == "prefers tea"
         assert prefs_mod.api_pref_op(ctx, None, {"op": "edit", "id": pid, "text": "prefers green tea"})[0] == 200
         assert prefs_mod.api_pref_op(ctx, None, {"op": "edit", "id": pid, "text": "password 12345678"})[0] == 400

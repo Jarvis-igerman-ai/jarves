@@ -91,7 +91,7 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     st, v = call(srv, "GET", "/api/m/prefs", tok)
     assert st == 200 and [x["id"] for x in v["items"]] == [a] and [x["id"] for x in v["proposed"]] == [b]
     assert v["in_prompt"] is True and "music" in v["topics"]
-    assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
+    assert op(srv, tok, op="confirm", pref=b, updated=v["proposed"][0]["updated"])[1]["state"] == "confirmed"
     assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
     assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
@@ -136,7 +136,7 @@ def test_privacy_mode_keeps_no_text_in_the_audit_the_ledger_or_the_logs(srv, pre
     assert v["privacy"] is True
     assert [x["text"] for x in v["items"]] == ["I like short answers in the morning"]     # the owner's phone sees it
     op(srv, tok, op="edit", pref=a, text="Brief answers please, every morning")
-    op(srv, tok, op="confirm", pref=b)
+    op(srv, tok, op="confirm", pref=b, updated=p.get(b)["updated"])
     audit = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
     assert "Brief answers" not in audit and "jazz" not in audit and '"pref"' in audit
     ledger = srv.mobile.cont._rows("SELECT body FROM ledger")

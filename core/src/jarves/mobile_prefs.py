@@ -59,6 +59,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
+    from .preferences import PrefChanged, shown_version
     p = store(mob)
     if not p.get(pid):
         return 404, {"error": "no such preference"}
@@ -66,7 +67,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     try:
         # answers hold ids and counts only: the command ledger stores them, and text must not rest there (privacy)
         if op == "confirm":
-            r = p.confirm(pid, by=by)
+            r = p.confirm(pid, by=by, shown=shown_version(d.get("updated")))
             return 200, {"ok": True, "pref": pid, "state": "confirmed", "conflicts": len(r["conflicts"])}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by=by), "pref": pid}
@@ -76,6 +77,8 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             p.edit(pid, str(d.get("text", ""))[:400], by=by)
             return 200, {"ok": True, "pref": pid}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
+    except PrefChanged as e:                                  # #1514: edited after the phone showed it
+        return 409, {"error": str(e), "code": PrefChanged.code}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}
     except KeyError:

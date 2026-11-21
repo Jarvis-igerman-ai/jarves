@@ -11,10 +11,11 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from . import calm
 from . import features as feat
@@ -53,8 +54,21 @@ def normalize(text: str) -> str:
     return " ".join(_PUNCT.sub(" ", _NIQQUD.sub("", str(text).casefold())).split())
 
 
+def shown_version(v) -> float:
+    """The `updated` version a page sent with a confirm (#1514). Required on the dashboard and phone: ValueError when
+    it is missing or not a finite number."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        raise ValueError("updated (the version of the wording you were shown) must be a number")
+    return float(v)
+
+
 def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
+
+
+class PrefChanged(ValueError):
+    """The item changed after the owner was shown it (#1514): the confirm is refused, the page reloads."""
+    code = "PREF_CHANGED"
 
 
 class Preferences:
@@ -104,12 +118,19 @@ class Preferences:
             r["status"] = "confirmed"
         return r
 
-    def confirm(self, pid: int, *, by: str = "user") -> dict:
+    def confirm(self, pid: int, *, by: str = "user", shown: float | None = None) -> dict:
+        """`shown` (#1514): the `updated` version of the wording the owner was shown. When given, the UPDATE only lands
+        if the item is still that version; an edit in between raises PrefChanged and nothing is confirmed."""
         r = self.get(pid)
         if not r:
             raise KeyError(pid)
         now = self.clock()
-        self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", (now, now, pid))
+        sql, args = "UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", [now, now, pid]
+        if shown is not None:
+            sql, args = sql + " AND updated=?", args + [float(shown)]
+        if not self.db.x(sql, tuple(args)).rowcount:
+            logs.info("prefs", "PREF_CHANGED", "confirm refused: the preference changed after it was shown", id=pid, by=by)
+            raise PrefChanged("this preference changed after it was shown: reload to see the new wording")
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
@@ -138,12 +159,14 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
+        # the version always moves forward on a reword, even within one clock tick, so a confirm of the old wording fails
+        now = max(self.clock(), float(cur["updated"] or 0) + 0.001)
         if repropose and cur["state"] == "confirmed":
             self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
-                      (t, norm, self.clock(), pid))
+                      (t, norm, now, pid))
             logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
             return self._view(self.get(pid))
-        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, now, pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
 
@@ -242,6 +265,11 @@ class IdArgs(BaseModel):
     id: int = Field(..., ge=1)
 
 
+class ConfirmArgs(BaseModel):
+    id: int = Field(..., ge=1)
+    _shown: float | None = PrivateAttr(None)    # #1514: the version the approval popup showed (not a model argument)
+
+
 class EditArgs(BaseModel):
     id: int = Field(..., ge=1)
     text: str = Field(..., min_length=3, max_length=MAX_TEXT)
@@ -268,10 +296,13 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "proposed, not saved yet: ask the owner whether to remember it", r)
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
-            async def confirm(a: IdArgs):
+            async def confirm(a: ConfirmArgs):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                r = prefs.confirm(a.id, by="voice")
+                try:
+                    r = prefs.confirm(a.id, by="voice", shown=a._shown)
+                except PrefChanged as e:
+                    return ToolResult(False, str(e), code=PrefChanged.code)
                 msg = "remembered"
                 if r["conflicts"]:
                     msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])
@@ -304,14 +335,17 @@ def make_skill(prefs: Preferences):
             async def forget_impact(_a: IdArgs):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
-            def confirm_meta(a: IdArgs) -> dict:
+            def confirm_meta(a: ConfirmArgs) -> dict:
                 r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
-                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}} if r else {}
+                if not r:
+                    return {}
+                a._shown = r["updated"]       # #1514: the confirm after this approval only lands on this exact wording
+                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
-                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, IdArgs,
+                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, ConfirmArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?",
                      approval_meta=confirm_meta),
                 Tool("pref_decline", "Owner said no: 'no do not keep that preference', 'לא תשמור את ההעדפה'.", decline, IdArgs, permission="action"),
@@ -368,7 +402,7 @@ def api_pref_op(ctx, m, body):
         return 404, {"error": "no such preference"}
     try:
         if op == "confirm":
-            return 200, p.confirm(pid, by="dashboard")
+            return 200, p.confirm(pid, by="dashboard", shown=shown_version(b.get("updated")))
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
@@ -377,6 +411,8 @@ def api_pref_op(ctx, m, body):
             return 200, {"item": p.edit(pid, str(b.get("text", "")), by="dashboard")}
         if op == "remove":
             return 200, {"ok": p.remove(pid, by="dashboard")}
+    except PrefChanged as e:
+        return 409, {"error": str(e), "code": PrefChanged.code}
     except ValueError as e:
         return 400, {"error": str(e)}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
