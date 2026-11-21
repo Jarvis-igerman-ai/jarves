@@ -102,7 +102,7 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
     email = ""
     for scope, entry in zip(items[0::2], items[1::2]):
         key, _, value = entry.partition("\n")
-        if key == "user.email" and scope not in _UNTRUSTED:
+        if key == "user.email" and scope in ("global", "system"):    # never `command` (IDENT) or the repo
             email = value                       # the owner's committer email: the fallback signing key (review R4)
         if scope not in _UNTRUSTED:
             if key in _SIGN or _DRIVER.match(key):

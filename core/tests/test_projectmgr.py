@@ -3,6 +3,7 @@ git worktrees driven by a fake agent executable (a Python script that speaks Cla
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -245,6 +246,7 @@ def test_parallel_tasks_merge_and_dependent_gets_handoff(env):
     assert {f for f in os.listdir(integ / "src")} == {"a.py", "b.py", "c.py"}
     prompt_c = (gitops.project_root(home, 1) / "wt" / "last_prompt_3.txt")
     assert "Handoff from finished task #1" in prompt_c.read_text() and "finished task" in prompt_c.read_text()
+    assert re.search(r"branch jarves/p1/integration at commit [0-9a-f]{12}\)", prompt_c.read_text())   # #1407
     assert not (repo / "src").exists()                                         # the owner's checkout is untouched
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     assert "pushed" not in sh(repo, "git", "log", "--all", "--format=%s")
@@ -1544,3 +1546,37 @@ def test_owner_merge_changed_prompt_with_a_git_failure_stops_the_task(env, monke
     monkeypatch.setattr(gitops, "commit_of", boom)
     r = m.call("answer", project="demo", task=1, answer="approve")
     assert r["code"] == "GIT_ERROR" and m.db.by_seq(1, 1)["status"] == "failed", (r, m.db.by_seq(1, 1))
+
+
+def test_owner_merge_never_lands_a_forged_merge_commit(env, monkeypatch):
+    """#1407 restart round 2 R1: a commit with parents (tip, integration HEAD) but another tree, forged during the
+    merge, is not a merge of the approved commit: it parks naming it and the integration branch never gets it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.merge_in
+
+    def forge(path, branch, **kw):
+        tip, head = sh(path, "git", "rev-parse", "HEAD").strip(), sh(integ, "git", "rev-parse", "HEAD").strip()
+        (Path(path) / "evil.txt").write_text("evil\n")
+        sh(path, "git", "add", "-A")
+        tree = sh(path, "git", "write-tree").strip()
+        x = sh(path, "git", "-c", "user.name=x", "-c", "user.email=x@x", "commit-tree", tree, "-p", tip, "-p", head,
+               "-m", "forged").strip()
+        sh(path, "git", "reset", "-q", "--hard", x)
+        return real(path, branch, **kw)                               # "Already up to date"
+    monkeypatch.setattr(gitops, "merge_in", forge)
+    finish(m)
+    monkeypatch.setattr(gitops, "merge_in", real)
+    assert "changed after your approval" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    assert not (integ / "evil.txt").exists()
+    (wt / "evil.txt").unlink()
+    gitops.commit_all(wt, "drop evil")
+    assert m.call("answer", project="demo", task=1, answer="approve")["code"] == "CHANGED"   # names the new commit
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)
+    assert (integ / "a.txt").exists() and not (integ / "evil.txt").exists()      # the commit named and approved

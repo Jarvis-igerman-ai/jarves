@@ -387,3 +387,13 @@ def test_read_only_ref_lookups_skip_the_config_read(monkeypatch, tmp_path):
     assert len(argvs) == 2 and not any("--show-scope" in a for a in argvs)
     gitops.git(tmp_path, "status")
     assert len(argvs) == 4 and "--show-scope" in argvs[2]
+
+
+def test_fallback_signing_key_is_never_the_jarves_identity_email(monkeypatch, tmp_path):
+    """#1407 restart round 2 R3: `command`-scope `user.email` (IDENT's jarves@localhost) is not the owner's email."""
+    calls: list = []
+    conf = "global\0user.email\no@example.invalid\0local\0user.signingkey\nREPO\0command\0user.email\njarves@localhost\0"
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
+    gitops.git(tmp_path, "commit", "-m", "x")
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    assert "user.signingkey=o@example.invalid" in pairs, pairs

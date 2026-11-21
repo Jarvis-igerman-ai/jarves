@@ -583,11 +583,12 @@ class StageEngine:
                     return self._repark_merge(t)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
-                    conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
+                    head = gitops.commit_of(self._integration(p), "HEAD")   # merge this exact commit, not the name
+                    if approved and gitops.commit_of(wt, "HEAD") != tip:
+                        return self._repark_merge(t)
+                    conflicts = gitops.merge_in(wt, head, message=f"Merge {base} at {head[:12]}")
                     merged = gitops.commit_of(wt, "HEAD")
-                    ff = merged == head and gitops.git(wt, "merge-base", "--is-ancestor", tip, merged,
-                                                       check=False).returncode == 0     # no own commits: fast-forward
-                    if approved and merged != tip and not ff and gitops.commit_of(wt, merged + "^1") != tip:
+                    if approved and merged != tip and not self._is_merge_of(wt, merged, tip, head):
                         return self._repark_merge(t)                # names and binds the new commit (R1)
                     tip = merged
                     if conflicts:
@@ -648,6 +649,19 @@ class StageEngine:
         dirty = bool(gitops.git(wt, "status", "--porcelain", check=False).stdout.strip())
         return head, dirty
 
+    @staticmethod
+    def _is_merge_of(wt, merged: str, tip: str, head: str) -> bool:
+        """#1407: `merged` is exactly `tip` merged with `head`: a fast-forward to `head` (tip already in it), or a
+        commit with parents (tip, head) whose tree is git's own merge of the two (a forged merge commit is not)."""
+        if merged == head:
+            return gitops.git(wt, "merge-base", "--is-ancestor", tip, head, check=False).returncode == 0
+        parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", merged, check=False).stdout.split()[1:]
+        if parents != [tip, head]:
+            return False
+        want = gitops.git(wt, "merge-tree", "--write-tree", tip, head, check=False)
+        tree = gitops.git(wt, "rev-parse", "--verify", f"{merged}^{{tree}}", check=False).stdout.strip()
+        return want.returncode == 0 and bool(tree) and want.stdout.split()[:1] == [tree]
+
     def _repark_merge(self, t):
         """The task changed after your approval (#1407): commit any edits, then ask again naming that exact commit."""
         try:
@@ -674,6 +688,10 @@ class StageEngine:
                 head = gitops.git(wt, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
                 if head != br:
                     return ("park", f"the folder {wt} is not on the task branch {br} any more: switch back, then say done")
+                base = gitops.integration_branch(p["id"])
+                if gitops.git(wt, "merge-base", "--is-ancestor", base, "HEAD", check=False).returncode != 0 and \
+                        gitops.git(wt, "merge-base", "--is-ancestor", f"{base}@{{1}}", "HEAD", check=False).returncode != 0:
+                    pass                                            # rebased by hand: the merge stage re-merges
                 return self._after_code(p, t, wt, br, "", "work", owner=True)
             return ("next",)
         base = gitops.integration_branch(p["id"])
