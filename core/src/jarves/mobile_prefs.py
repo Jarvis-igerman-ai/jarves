@@ -60,6 +60,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
     p = store(mob)
+    from .preferences import PrefConflict                     # lazy, like store(): the module loads only when used
     if not p.get(pid):
         return 404, {"error": "no such preference"}
     by = "phone"
@@ -80,3 +81,5 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         return 400, {"error": str(e)}
     except KeyError:
         return 404, {"error": "no such preference"}
+    except PrefConflict:                                      # #206 H2: it still exists but kept changing; nothing written
+        return 409, {"error": "the preference changed meanwhile: try again", "code": "PREF_CONFLICT"}

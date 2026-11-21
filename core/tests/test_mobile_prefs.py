@@ -9,7 +9,7 @@ import pytest
 
 from jarves import dashboard, logs, mobile
 from jarves.config import Config
-from jarves.preferences import Preferences
+from jarves.preferences import PrefConflict, Preferences
 from jarves.userdata import open_db
 
 HOST = "192.168.50.7"
@@ -111,6 +111,9 @@ def test_206_h2_edit_of_a_missing_or_vanishing_pref_is_404_not_500(srv, prefs, m
     monkeypatch.setattr(Preferences, "edit", lambda self, *x, **k: (_ for _ in ()).throw(KeyError(a)))  # removed meanwhile
     st, out = op(srv, tok, op="edit", pref=a, text="I like long answers")
     assert st == 404 and out["error"] == "no such preference"
+    monkeypatch.setattr(Preferences, "edit", lambda self, *x, **k: (_ for _ in ()).throw(PrefConflict(a)))  # kept changing
+    st, out = op(srv, tok, op="edit", pref=a, text="I like long answers")
+    assert st == 409 and out["code"] == "PREF_CONFLICT"
 
 
 def test_the_same_rules_as_the_desktop(srv, prefs):

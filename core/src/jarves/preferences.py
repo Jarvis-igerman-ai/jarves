@@ -57,6 +57,10 @@ def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+class PrefConflict(RuntimeError):
+    """#206 H2: the item kept changing state while it was being edited; nothing was written, the caller may retry."""
+
+
 class Preferences:
     def __init__(self, db: UserDB, *, clock=time.time) -> None:
         self.db, self.clock = db, clock
@@ -149,7 +153,11 @@ class Preferences:
                              (t, norm, self.clock(), pid)).rowcount:
                     logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
                     return self._view(self.get(pid))
-            raise KeyError(pid)                # removed meanwhile (or kept changing): nothing written
+            if not self.get(pid):
+                raise KeyError(pid)            # removed meanwhile: nothing written
+            logs.warn("prefs", "PREF_EDIT_CONFLICT", "the preference kept changing during the edit: nothing written",
+                      id=pid, by=by)
+            raise PrefConflict(pid)
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
@@ -301,6 +309,8 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "updated; it needs the owner's confirmation again before it is remembered", {"item": prefs.edit(a.id, a.text, by="voice", repropose=True)})
                 except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except PrefConflict:
+                    return ToolResult(False, "it changed meanwhile: try again", code="PREF_CONFLICT")
                 except ValueError as e:
                     return ToolResult(False, str(e), code="PREF_REFUSED")
 

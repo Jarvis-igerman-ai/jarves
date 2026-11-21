@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from jarves import guides, logs, mobile
-from jarves.preferences import Preferences
+from jarves.preferences import PrefConflict, Preferences, make_skill
 from jarves.userdata import open_db
 
 from test_v5_goal_plans import Env, steps
@@ -128,6 +128,41 @@ def test_h2_reproposing_edit_cannot_leave_a_confirm_that_raced_it(home, monkeypa
     p.edit(pid, "Play loud jazz while cooking", by="phone", repropose=True)
     r = p.get(pid)
     assert r["text"] == "Play loud jazz while cooking" and r["state"] == "proposed"
+
+
+class _LosesEveryRace:
+    """Wraps the db so every guarded UPDATE of learned_prefs finds the state changed (a confirm/decline each time)."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, k):
+        return getattr(self._db, k)
+
+    def x(self, sql, args=()):
+        if sql.startswith("UPDATE learned_prefs SET text="):
+            return type("R", (), {"rowcount": 0})()
+        return self._db.x(sql, args)
+
+
+async def test_h2_edit_that_keeps_losing_the_race_is_a_conflict_not_not_found(home):
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    p.db = _LosesEveryRace(p.db)
+    with pytest.raises(PrefConflict):
+        p.edit(pid, "I like long answers", by="phone", repropose=True)
+    assert p.get(pid)["text"] == "I like short answers in the morning"          # nothing written
+    tool = next(t for t in make_skill(p).tools() if t.name == "pref_edit")
+    res = await tool.handler(tool.args(id=pid, text="I like long answers"))
+    assert res.ok is False and res.code == "PREF_CONFLICT"
+
+
+def test_r1_phone_goal_page_ignores_the_op_answer_and_redraws_from_sync():
+    """The stored goal answer has no title/text in privacy mode (F13); the phone page must never draw it."""
+    js = (Path(__file__).resolve().parents[1] / "src/jarves/dashboard_static/mobile/app.js").read_text(encoding="utf-8")
+    calls = [ln for ln in js.splitlines() if "/api/m/goals/op" in ln]
+    assert calls and all("await post(\"/api/m/goals/op\"" in ln and "= await post(\"/api/m/goals/op\"" not in ln
+                         and "syncNow()" in ln.split("/api/m/goals/op", 1)[1] for ln in calls)
 
 
 # ---------------------------------------------------------------- H3 / H4: stated in the guides
