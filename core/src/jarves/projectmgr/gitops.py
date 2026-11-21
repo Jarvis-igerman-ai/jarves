@@ -142,13 +142,15 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
-    git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
+    git would otherwise run on every index refresh; `submodule.recurse=false` keeps checkout, reset and `worktree add`
+    out of submodules (whose own config the overrides cannot name). This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Commands named in the repository's own config, as read just before the
     command, are overridden too (#1407, see `_config_overrides`); a config entry written between that read and the
     command's own read is not (open race, #1533). diff/show/log never run an external diff or textconv command
     (projectmgr calls no blame, `cat-file --textconv` or `stash show -p`). Cost: one extra `git config` process per
     call except rev-parse/merge-base, which run no such command; needs git 2.38 or newer (merge-tree --write-tree)."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "submodule.recurse=false"]     # no checkout/reset/worktree add child in a submodule (review R1)
     over = [] if args and args[0] in NO_CONFIG_CMDS else _config_overrides(cwd, pre, timeout)
     if isinstance(over, subprocess.CompletedProcess):          # the config cannot be read: fail closed
         if check:
@@ -269,8 +271,9 @@ def _add_all(wt: Path) -> None:
     for x in links:
         sub = Path(wt) / x
         if (sub / ".git").exists():
-            sha = git(sub, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
-            git(wt, "update-index", "--cacheinfo", f"160000,{sha},{x}")
+            r = git(sub, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False)
+            if r.returncode == 0:                   # an unborn submodule: its pointer stays (review R4)
+                git(wt, "update-index", "--cacheinfo", f"160000,{r.stdout.strip()},{x}")
         elif not sub.exists():
             git(wt, "update-index", "--force-remove", "--", x)
         else:                                       # a submodule replaced by plain files: stage them

@@ -399,6 +399,19 @@ def test_fallback_signing_key_is_never_the_jarves_identity_email(monkeypatch, tm
     assert "user.signingkey=o@example.invalid" in pairs, pairs
 
 
+def test_an_unborn_submodule_does_not_stop_commit_all(tmp_path):
+    """#1407 review round 4 R4: a submodule without a commit keeps its pointer; the rest is still committed."""
+    repo = _repo(tmp_path)
+    old = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"160000,{old},lib")
+    (repo / "lib").mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo / "lib", check=True)
+    (repo / "new.txt").write_text("n", encoding="utf-8")
+    assert gitops.commit_all(repo, "with unborn")
+    assert set(gitops.git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split()) == {"lib", "new.txt"}
+    assert gitops.git(repo, "ls-files", "-s", "lib").stdout.split()[1] == old
+
+
 def test_a_filter_in_a_submodule_config_never_runs(tmp_path):
     """#1407 restart round 3 R1: status, diff and `add -A` start `git status` inside a submodule, which reads the
     submodule's own config (a filter the `-c` overrides cannot name). None runs; a moved submodule is still staged."""
@@ -427,4 +440,12 @@ def test_a_filter_in_a_submodule_config_never_runs(tmp_path):
     subprocess.run([*own, "commit", "-qm", "z"], cwd=sub, check=True)
     assert gitops.commit_all(repo, "pointer")
     assert gitops.git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split() == ["lib"]
+    assert not marker.exists()
+    # review round 4 R1: `submodule.recurse` in the shared config must not make checkout/worktree add recurse
+    subprocess.run(["git", "config", "submodule.recurse", "true"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "filter.y.smudge", (tmp_path / "bin" / "evil").as_posix()], cwd=sub, check=True)
+    head = gitops.current_branch(str(repo))
+    gitops.git(repo, "checkout", "-q", "HEAD~1")
+    gitops.git(repo, "checkout", "-q", head)
+    gitops.git(repo, "worktree", "add", "-q", "--detach", str(tmp_path / "wt"), "HEAD")
     assert not marker.exists()
