@@ -32,12 +32,15 @@ LEAKY = [
     "bearer b084f9e0094f68db07f3501e4eab9e3fbecd52da",                           # R2: wider word list
     "my credential: cac0e7d816b7c1d886ed2d5dfe767db4",                           # R2: wider word list
     "u4Rq8ZpLx2Kc9Tm/Wn3Vb7Hy1Ja6Df0+Gs5Ek2Qo",                                 # R4: base64 with '/' and '+'
+    "TOKEN=CAC0E7D816B7C1D886ED2D5DFE767DB4",                                    # review 3 R1: upper-case hex
+    "sha256 of the build is 6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",  # review 3 R2: 64-hex digest refused on purpose
 ]
 SAFE = [
     "fixed in commit 3f9a2c1, see the log",                                      # 7-char short SHA
     f"regression since {SHA} on main",                                           # 40-char SHA, no credential word
     "the keyboard layout from 12a2d26dfc9cbe3f1fc3082e1efacab1 build",           # 'keyboard' is not 'key'
     "monkey cac0e7d816b7c1d886ed2d5dfe767db4",                                   # 'key' inside a word
+    "apiKeyboard cac0e7d816b7c1d886ed2d5dfe767db4",                              # review 3 R1: camelCase near-miss
     "token cac0e7d816b7c1d886ed2d5dfe767db",                                     # boundary: 31 hex after a word
     "6b26aee60ab93d4337af4a7b1c7f527fe5b6b7df",                                  # boundary: 40 hex alone
     "Xk9fLm2QzRtPwYbNcVd",                                                       # boundary: 19 base62
@@ -64,7 +67,9 @@ def test_shas_identifiers_and_prose_are_not_sensitive(text):
 
 def test_dev_draft_quoting_a_sha_near_a_credential_word_is_refused_with_a_reason_but_kept_without_it(home):
     """R3: the user-visible effect of the fail-safe rule. A 32+ hex run right after 'key'/'token' is refused with
-    the 'looks sensitive' message and nothing is stored; the same SHA quoted without the word is saved."""
+    the 'looks sensitive' message and nothing is stored; the same SHA quoted without the word is saved.
+    Review 3 R2: any 41+ hex run on its own (a SHA-256/SHA-512 digest such as "sha256 of the build is <64 hex>") is
+    also refused on purpose: a digest and a 64-hex API key look the same, so the rule fails safe (pinned in LEAKY)."""
     st = Store(home / "store.db")
     diag_db.ensure(st)
     with pytest.raises(ValueError, match="looks sensitive"):
