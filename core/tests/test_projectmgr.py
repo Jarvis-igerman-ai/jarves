@@ -955,10 +955,12 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     assert t["status"] == "waiting" and "your turn" in t["waiting"]
     wt = Path(t["worktree"])
     (wt / "mine.txt").write_text("by hand\n")
+    (wt / "notes.md").write_text("mine too\n")                         # your own out-of-scope edit: only a warning
     assert m.call("answer", project="demo", task=1, answer="done")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    assert any(e["kind"] == "warning" and "notes.md" in e["text"] for e in m.db.events(t["id"], 40))
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     (wt / "mine.txt").write_text("changed after the approval\n")                      # the approval no longer holds
     finish(m)
@@ -968,6 +970,31 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
     assert (gitops.project_root(home, 1) / "integration" / "mine.txt").read_text() == "changed after the approval\n"
+
+
+def test_owner_scope_warning_covers_only_the_owners_own_edit(env):
+    """#1500 (#1407 item 2): the owner-code stage's scope warning covered every out-of-scope file on the task branch,
+    so a file the check command left in the task folder rode in on the owner's "done" as only a warning."""
+    m, repo, _ = env
+    gen = [sys.executable, "-c", "open('generated.txt', 'w').write('from the check')"]
+    open_project(m, repo, check=gen)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner test work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    (wt / "mine.txt").write_text("one\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)                                   # the test stage leaves generated.txt; the second owner turn parks
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"], (t["status"], t["waiting"], t["reason"])
+    (wt / "mine.txt").write_text("two\n")
+    (wt / "notes.md").write_text("my own note\n")                     # the owner's own out-of-scope edit
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "generated.txt" in t["reason"], (t["status"], t["reason"])
+    assert "notes.md" not in t["reason"]
 
 
 def test_gate_reject_stops_and_answer_needs_waiting(env):

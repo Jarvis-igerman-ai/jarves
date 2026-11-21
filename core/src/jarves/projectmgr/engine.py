@@ -296,6 +296,17 @@ class StageEngine:
         prot += [f for f in links if f not in prot]
         if prot:
             return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) + f" (not merged; on {br})")
+        mine: set[str] = set()
+        if owner:                     # only what changed since your turn began is yours (#1500); none recorded: none
+            mark = self._job(t).get("owner_from") or ""
+            self._set_job(t, owner_from=None)
+            try:
+                out = gitops.git(wt, "diff", "--name-only", "-z", "--no-renames", mark, "HEAD").stdout if mark else ""
+            except gitops.GitError as e:
+                return ("stop", "failed", f"git failed: {clean(e, 200)}")
+            mine = {x.replace("\\", "/") for x in out.split("\0") if x}
+            if [f for f in outside if f not in mine]:
+                owner, outside = False, [f for f in outside if f not in mine]
         if outside and not owner:
             self.db.update_task(t["id"], handoff=cards.auto_handoff(text, gitops.diffstat(wt, base)), handoff_kind="auto")
             return ("stop", "blocked", "changed files outside the scope: " + ", ".join(outside[:5]) +
@@ -649,6 +660,12 @@ class StageEngine:
                 wt, br = self._ensure_worktree(p, t)
             except (gitops.GitError, OSError) as e:
                 return ("stop", "failed", f"worktree failed: {clean(e, 200)}")
+            if kind == "work" and not self._job(t).get("owner_from"):   # what is in the folder is not yours yet:
+                try:                                                    # commit it, mark where your turn starts
+                    gitops.commit_all(wt, f"task {t['seq']}: before your edit"[:120])
+                    self._set_job(t, owner_from=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+                except gitops.GitError as e:
+                    return ("stop", "failed", f"git failed: {clean(e, 200)}")
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
