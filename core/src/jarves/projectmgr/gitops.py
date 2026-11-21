@@ -69,6 +69,61 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+# Shared-config keys that name a command git runs (#1390). An agent can write the shared `.git/config` (or a file it
+# includes), so for each key set at repository scope JARVES passes `-c key=<owner's global/system value or a safe
+# default>`: "" turns a filter off, ":" is git's no-op editor, the rest are git's own defaults.
+_CMD_KEYS = {"core.sshcommand": "ssh", "core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
+             "credential.helper": "", "gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+             "gpg.ssh.program": "ssh-keygen"}
+_CMD_SUB = {("filter", "clean"): "", ("filter", "smudge"): "", ("filter", "process"): "", ("hook", "command"): "",
+            ("credential", "helper"): "", ("merge", "driver"): "git merge-file --marker-size=%L %A %O %B"}
+_ALIAS = {"gpg.openpgp.program": "gpg.program"}         # git reads both keys into one setting
+# diff.external, diff.<x>.command and diff.<x>.textconv: every diff/show/log gets --no-ext-diff --no-textconv.
+# git takes the FIRST `remote.<x>.receivepack`, so `-c` cannot replace it: a push names git's own program instead
+# (JARVES never fetches, so `uploadpack` is never read).
+_ARG_FIXES = {"diff": ("--no-ext-diff", "--no-textconv"), "show": ("--no-ext-diff", "--no-textconv"),
+              "log": ("--no-ext-diff", "--no-textconv"), "push": ("--receive-pack=git-receive-pack",)}
+
+
+def _cmd_default(key: str) -> str | None:
+    if key in _CMD_KEYS:
+        return _CMD_KEYS[key]
+    sec, _, rest = key.partition(".")
+    sub, _, var = rest.rpartition(".")
+    return _CMD_SUB.get((sec, var)) if sub else None
+
+
+def _config_overrides(cwd: str | Path) -> list[str]:
+    """`-c` pairs that replace every command-naming key set at local/worktree scope (included files count). An
+    unreadable config raises GitError even for check=False callers, so it never reads as empty output."""
+    p = subprocess.run(["git", "config", "--list", "--show-scope", "--includes", "-z"], cwd=str(cwd),
+                       capture_output=True, text=True, timeout=30, creationflags=_NOWIN, encoding="utf-8",
+                       errors="replace", env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
+    if p.returncode != 0:
+        raise GitError(("git config unreadable, nothing run (git 2.26 or newer is needed): "
+                        + (p.stderr or "").strip())[:300])
+    owner: dict[str, str] = {}
+    shared: list[str] = []
+    items = p.stdout.split("\0")
+    for scope, entry in zip(items[0::2], items[1::2]):
+        key, _, value = entry.partition("\n")
+        if _cmd_default(key) is None:
+            continue
+        if scope in ("system", "global"):
+            owner[_ALIAS.get(key, key)] = value
+        elif key not in shared:
+            shared.append(key)
+    pre: list[str] = []
+    for key in shared:
+        if "=" in key:                                   # `-c` would split it at the wrong place
+            raise GitError(f"refusing a shared git config key with '=' in its name: {key[:80]}")
+        value = owner.get(_ALIAS.get(key, key), _cmd_default(key))
+        pre += ["-c", f"{key}={value}"]
+        if key.startswith("filter.") and not value:      # a switched-off filter must not fail as "required"
+            pre += ["-c", key.rsplit(".", 1)[0] + ".required=false"]
+    return pre
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
@@ -76,9 +131,13 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. No other command named in the shared config runs either (#1390): filters,
+    merge drivers, ssh/editor/pager/askpass/credential/gpg programs and config hooks are overridden by
+    `_config_overrides`; external diff and textconv are off, a push runs git's own receive-pack, ext:: is refused."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "protocol.ext.allow=never", *_config_overrides(cwd)]
+    if args and args[0] in _ARG_FIXES:
+        args = (args[0], *_ARG_FIXES[args[0]], *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -94,7 +153,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, GitError):
         return False
 
 

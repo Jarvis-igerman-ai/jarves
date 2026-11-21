@@ -35,6 +35,7 @@ LOCK = "fatal: Unable to create 'C:/r/.git/index.lock': File exists."
 
 def test_a_held_lock_file_is_retried_then_succeeds(monkeypatch, tmp_path):
     calls: list = []
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, LOCK), (128, LOCK), (0, "")], calls))
     monkeypatch.setattr(gitops.time, "sleep", lambda s: None)
     assert gitops.git(tmp_path, "status").returncode == 0 and len(calls) == 3
@@ -42,6 +43,7 @@ def test_a_held_lock_file_is_retried_then_succeeds(monkeypatch, tmp_path):
 
 def test_a_lock_that_never_clears_fails_after_the_retries(monkeypatch, tmp_path):
     calls: list = []
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, LOCK)], calls))
     monkeypatch.setattr(gitops.time, "sleep", lambda s: None)
     with pytest.raises(gitops.GitError):
@@ -51,6 +53,7 @@ def test_a_lock_that_never_clears_fails_after_the_retries(monkeypatch, tmp_path)
 
 def test_other_failures_are_never_retried(monkeypatch, tmp_path):
     calls: list = []
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, "fatal: not a git repository")], calls))
     with pytest.raises(gitops.GitError):
         gitops.git(tmp_path, "status")
@@ -248,6 +251,7 @@ def test_the_hooks_path_can_never_become_a_folder_an_agent_fills():
 def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
     """#1381 review R3: the one `git()` helper puts both overrides in front of every command, with either identity."""
     calls: list = []
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     gitops.git(tmp_path, "merge", "x")
     gitops.git(tmp_path, "merge", "x", ident=False)
@@ -255,3 +259,132 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def _cmd(marker: Path, tail: str = "cat") -> str:
+    """A shell command for a git config value that leaves a trace, then behaves (`cat` passes a filter's data on)."""
+    return f"echo ran >> '{marker.as_posix()}'; {tail}"
+
+
+def _set(repo: Path, *pairs: str) -> None:
+    for key, value in zip(pairs[0::2], pairs[1::2]):        # plain git: the agent's write, not a JARVES call
+        subprocess.run(["git", "config", key, value], cwd=repo, check=True)
+
+
+def test_shared_config_filters_never_run_on_add_commit_or_checkout(tmp_path):
+    """#1390: `filter.<x>.clean/smudge/process` in the shared config run on add and checkout for any file a
+    `.gitattributes` entry maps to them, here also through `include.path` and with `required=true`."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
+    (repo / ".gitattributes").write_text("*.txt filter=evil\n*.md filter=inc\n", encoding="utf-8")
+    gitops.commit_all(repo, "attrs")
+    (tmp_path / "inc.cfg").write_text(f'[filter "inc"]\n\tclean = "{_cmd(marker)}"\n', encoding="utf-8")
+    _set(repo, "filter.evil.clean", _cmd(marker), "filter.evil.smudge", _cmd(marker),
+         "filter.evil.process", _cmd(marker, "false"), "filter.evil.required", "true",
+         "include.path", (tmp_path / "inc.cfg").as_posix())
+    (repo / "g.txt").write_text("g", encoding="utf-8")
+    (repo / "h.md").write_text("h", encoding="utf-8")
+    assert gitops.commit_all(repo, "files")
+    gitops.ensure_integration(home, str(repo), 1)                                    # a checkout (smudge)
+    assert (home / "projects" / "1" / "integration" / "g.txt").read_text(encoding="utf-8") == "g"
+    assert not marker.exists()
+
+
+def test_a_shared_config_merge_driver_never_runs_and_the_merge_still_works(tmp_path):
+    """#1390: `merge.<x>.driver` runs on a three-way merge of a file `.gitattributes` maps to it; JARVES uses git's
+    own text merge instead, so the merge result is the normal one."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / ".gitattributes").write_text("*.txt merge=evil\n", encoding="utf-8")
+    (repo / "m.txt").write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
+    gitops.commit_all(repo, "base")
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "m.txt").write_text("A\nb\nc\nd\ne\n", encoding="utf-8")
+    gitops.commit_all(repo, "side")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("a\nb\nc\nd\nE\n", encoding="utf-8")
+    gitops.commit_all(repo, "main")
+    _set(repo, "merge.evil.driver", _cmd(marker, "false"))
+    assert gitops.merge_in(repo, "side") == []
+    assert (repo / "m.txt").read_text(encoding="utf-8") == "A\nb\nc\nd\nE\n" and not marker.exists()
+
+
+def test_shared_config_external_diff_and_textconv_never_run(tmp_path):
+    """#1390: `diff.external`, `diff.<x>.command` and `diff.<x>.textconv` run on diff/show/log -p; JARVES's own
+    diffs still produce the plain patch."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / ".gitattributes").write_text("*.txt diff=evil\n", encoding="utf-8")
+    gitops.commit_all(repo, "attrs")
+    (repo / "f.txt").write_text("y", encoding="utf-8")
+    gitops.commit_all(repo, "change")
+    _set(repo, "diff.external", _cmd(marker, "false"), "diff.evil.command", _cmd(marker, "false"),
+         "diff.evil.textconv", _cmd(marker))
+    assert "+y" in gitops.git(repo, "diff", "HEAD~1", "HEAD").stdout
+    assert "+y" in gitops.git(repo, "show", "HEAD").stdout and "+y" in gitops.git(repo, "log", "-p", "-1").stdout
+    assert not marker.exists()
+
+
+def test_shared_config_ssh_pack_and_ext_commands_never_run_on_a_push(tmp_path):
+    """#1390: forge pushes with JARVES's git; `core.sshCommand`, `remote.<x>.receivepack` and an `ext::` remote
+    (allowed by `protocol.ext.allow`) are commands set in the shared config."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _set(repo, "remote.origin.url", bare.as_posix(), "remote.origin.receivepack", _cmd(marker, "false"),
+         "remote.ssh.url", "ssh://jarves@127.0.0.1:1/r", "core.sshCommand", _cmd(marker, "false"),
+         "remote.ext.url", f"ext::sh -c {_cmd(marker, 'false')!r}", "protocol.ext.allow", "always")
+    assert gitops.git(repo, "push", "--no-verify", "origin", "main:main").returncode == 0
+    for name in ("ssh", "ext"):
+        assert gitops.git(repo, "push", "--no-verify", name, "main:main", check=False).returncode != 0
+    assert not marker.exists()
+
+
+def test_the_owners_global_command_is_kept_when_the_shared_config_names_another(tmp_path, monkeypatch):
+    """#1390: a repository copy of an owner key (an owner's global filter, then overridden in `.git/config`)
+    gets the owner's global value back, not a blank one."""
+    repo, owner, evil = _repo(tmp_path), tmp_path / "owner.txt", tmp_path / "ran.txt"
+    (tmp_path / "h").mkdir()
+    (tmp_path / "h" / ".gitconfig").write_text(f'[filter "own"]\n\tclean = "{_cmd(owner)}"\n', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "h" / "xdg"))
+    (repo / ".gitattributes").write_text("*.bin filter=own\n", encoding="utf-8")
+    _set(repo, "filter.own.clean", _cmd(evil))
+    (repo / "x.bin").write_text("b", encoding="utf-8")
+    assert gitops.commit_all(repo, "bin")
+    assert owner.exists() and not evil.exists()
+
+
+def test_an_unreadable_shared_config_stops_every_git_call(tmp_path):
+    """#1390: a config git cannot read (or an include it refuses) must never read as empty output to a
+    check=False caller, which would skip a review or a scope check."""
+    repo = _repo(tmp_path)
+    (repo / ".git" / "config").write_text("[core\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="config unreadable"):
+        gitops.git(repo, "diff", "--name-only", "HEAD", check=False)
+    assert gitops.is_repo(str(repo)) is False
+
+
+def test_a_shared_command_key_with_an_equals_sign_is_refused(tmp_path):
+    """#1390: `-c` splits at the first '=', so `filter.a=b.clean` cannot be overridden; the call stops instead."""
+    repo = _repo(tmp_path)
+    _set(repo, "filter.a=b.clean", "evil")
+    with pytest.raises(gitops.GitError, match="refusing a shared git config key"):
+        gitops.git(repo, "status", check=False)
+
+
+def test_every_command_key_set_in_the_shared_config_gets_a_safe_value(tmp_path, monkeypatch):
+    """#1390: editor, pager, askpass, credential, gpg (both names of the openpgp program) and config-hook keys at
+    repository scope are replaced: by the owner's global value when there is one, else git's safe default."""
+    repo = _repo(tmp_path)
+    (tmp_path / "h").mkdir()
+    (tmp_path / "h" / ".gitconfig").write_text("[gpg]\n\tprogram = owner-gpg\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "h" / "xdg"))
+    keys = ("core.editor", "sequence.editor", "core.pager", "core.askPass", "credential.helper",
+            "credential.https://x.invalid.helper", "gpg.openpgp.program", "gpg.ssh.program", "hook.evil.command",
+            "core.sshCommand")
+    _set(repo, *[x for k in keys for x in (k, "evil")])
+    pairs = gitops._config_overrides(repo)
+    got = dict(p.split("=", 1) for p in pairs[1::2])
+    assert got == {"core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
+                   "credential.helper": "", "credential.https://x.invalid.helper": "",
+                   "gpg.openpgp.program": "owner-gpg", "gpg.ssh.program": "ssh-keygen", "hook.evil.command": "",
+                   "core.sshcommand": "ssh"}
