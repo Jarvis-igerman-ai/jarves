@@ -198,3 +198,13 @@ def test_206_h2_a_confirm_racing_a_reproposing_edit_leaves_the_new_wording_propo
     p.edit(b, "Play jazz while I cook", repropose=True)
     monkeypatch.undo()
     assert p.get(b)["text"] == "Play jazz while I cook" and p.get(b)["state"] == "proposed"
+
+
+def test_206_f13_a_privacy_mode_resend_of_a_success_stays_a_success(srv, prefs, monkeypatch):
+    p, a, b = prefs
+    tok, _ = pair(srv)
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    body = {"id": "pref-resend-0206", "op": "edit", "pref": a, "text": "Brief answers please, every morning"}
+    assert call(srv, "POST", "/api/m/prefs/op", tok, body)[1]["state"] == "proposed"
+    st, out = call(srv, "POST", "/api/m/prefs/op", tok, body)                  # the phone's fetch sees r.ok: no error shown
+    assert st == 200 and out["ok"] is True and out["replay"] is True and out["code"] == "NOT_KEPT" and "error" not in out

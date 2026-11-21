@@ -497,3 +497,22 @@ def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fak
     again = call(srv, "POST", "/api/m/goals/op", tok, body)
     assert first[0] >= 400 and again[0] == first[0] and again[1]["replay"] is True
     assert again[1]["error"] and again[1]["error_he"] and again[1]["code"]
+
+
+def test_206_f13_privacy_on_scrubs_old_rows_at_open_and_on_read_without_a_new_write(home, clk, monkeypatch):
+    from jarves import logs
+    a = Continuity(home, clock=clk)
+    a.store("p1", "msg-00000011", "chat", 200, {"reply": "old secret", "ok": True})       # privacy off: text kept
+    a.store("p1", "msg-00000012", "chat", 200, {"reply": "older secret", "ok": True})
+    a._x("UPDATE ledger SET ts=? WHERE cid='msg-00000012'", (clk() - continuity.LEDGER_TTL_S - 1,))
+    logs.set_privacy(True)
+    assert a.seen("p1", "msg-00000011") == {"not_kept": True}                            # a read alone scrubs
+    assert [r["cid"] for r in a._rows("SELECT cid FROM ledger")] == ["msg-00000011"]      # the expired row is gone
+    logs.set_privacy(False)
+    a.store("p1", "msg-00000013", "chat", 200, {"reply": "third secret", "ok": True})
+    logs.set_privacy(True)
+    Continuity(home, clock=clk)                                                           # a Core start alone scrubs
+    assert not any("secret" in r["body"] for r in a._rows("SELECT body FROM ledger"))
+    monkeypatch.setattr(Continuity, "_clean", lambda *a, **k: pytest.fail("a clean ledger was written"))
+    assert a.seen("p1", "msg-00000013") == {"not_kept": True}
+    assert a._rows("PRAGMA secure_delete") == [{"secure_delete": 1}]
