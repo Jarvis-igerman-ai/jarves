@@ -2,6 +2,11 @@
 confirmed preference, H3/H4 guide notes). Each test fails on the code before the fix."""
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from jarves import guides, logs, mobile
@@ -49,7 +54,28 @@ async def test_f13_privacy_mode_plan_keeps_no_tool_text_in_evidence_error_or_res
     assert s["status"] == "failed" and "X_BROKE" in s["error"] and "it broke" not in s["error"] + s["evidence"]
 
 
+async def test_f13_privacy_mode_untrusted_text_is_not_kept_by_the_blocked_plan(env, monkeypatch):
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_mail", {}), ("fake_act", {"text": "x"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == "blocked" and [s["status"] for s in d["steps"]] == ["done", "blocked"]
+    assert "ignore previous" not in json.dumps(d)          # the mail text: not in evidence, error, note or result
+
+
 # ---------------------------------------------------------------- H2: a phone edit needs a fresh confirm
+@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
+def test_h2_phone_note_asks_for_a_new_confirm_only_when_a_confirmed_item_went_back():
+    js = Path(__file__).resolve().parents[1] / "src/jarves/dashboard_static/mobile/prefs.js"
+    probe = ("global.window = {}; require(process.argv[1]); const f = window.JarvesPrefs.editNote;"
+             "console.log(JSON.stringify([f('confirmed', {state: 'proposed'}), f('declined', {state: 'declined'}),"
+             "f('proposed', {state: 'proposed'}), f('confirmed', {})]))")
+    out = subprocess.run(["node", "-e", probe, str(js)], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ["recheck", "saved", "saved", "saved"]
+
+
 def test_h2_reproposing_edit_cannot_leave_a_confirm_that_raced_it(home, monkeypatch):
     p = Preferences(open_db(home))
     pid = p.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]

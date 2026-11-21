@@ -16,6 +16,8 @@
       said: "אמרתם", off: "השימוש בהעדפות בשיחות כבוי במחשב.", 
       saved: "נשמר.", recheck: "נשמר. אשרו שוב כדי שישמש.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
   };
+  // #206 H2: only a confirmed item that the server sent back to "proposed" needs a new confirm; others just saved
+  const editNote = (kind, r) => (kind === "confirmed" && r && r.state === "proposed" ? "recheck" : "saved");
   const newId = () => "pref-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   let root = null, cx = null, busy = false, editing = 0, asking = 0, note = "";
   const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
@@ -27,7 +29,7 @@
   }
   async function op(body, ok) {
     if (busy) return; busy = true;
-    try { await cx.post("/api/m/prefs/op", { ...body, id: newId() }); note = t(ok); editing = asking = 0; }
+    try { const r = await cx.post("/api/m/prefs/op", { ...body, id: newId() }); note = t(typeof ok === "function" ? ok(r) : ok); editing = asking = 0; }
     catch (e) { note = t("failed") + ": " + e.message; }
     busy = false; load();
   }
@@ -42,7 +44,7 @@
     if (editing === p.id) {
       const lab = el("label"); const sp = el("span", "", t("label")); const inp = el("input"); inp.maxLength = 200; inp.value = p.text; inp.setAttribute("aria-label", t("label"));
       lab.append(sp, inp); li.appendChild(lab);
-      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, "recheck"), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
+      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, (r) => editNote(kind, r)), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
     } else if (asking === p.id) {
       box.appendChild(el("div", "", t("ask")));
       acts.append(btn(t("yes"), () => op({ op: "remove", pref: p.id }, "gone"), true), btn(t("cancel"), () => { asking = 0; paint(d); }));
@@ -75,5 +77,6 @@
     refresh() { if (root && !editing && !asking && !busy) load(); },
     unmount() { root = null; },
     catalogs: T,
+    editNote,
   };
 })();
