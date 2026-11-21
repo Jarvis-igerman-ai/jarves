@@ -7,9 +7,12 @@ that has no demo yet, record PASS/FAIL and save a screenshot, a short video and 
 FILE is a JSON list of {"ticket", "merged", "user_facing", "argv", "page", "caption"}. `argv` is passed to the installed
 `jarvis` program without a shell and only when it equals one of the whole argv lists in ALLOWED (else refused, never
 run). `--jarvis` is resolved to an absolute path (never the current folder). The browser may only load the checked loopback
-origin: requests elsewhere are aborted, redirects are followed here hop by hop and aborted when any hop leaves the origin,
-WebSockets to another origin are closed, service workers are blocked, WebRTC UDP and DNS prefetch are switched off at
-launch; a page that still ends up elsewhere is a FAIL. Not covered: preconnect hints (UNVERIFIED, not exercised). A ticket stays pending (retried next pass) until it has a PASS demo.
+origin: requests elsewhere are aborted; redirects are followed here hop by hop, each target rebuilt canonically (backslash,
+whitespace or control characters refused) and aborted when any hop leaves the origin; the demo page's own redirects are
+resolved before the browser loads the final URL; WebSockets to another origin are never connected, service workers are blocked,
+WebRTC UDP and DNS prefetch are switched off at launch; a page that still ends up elsewhere is a FAIL. Tested in real
+Chromium against a loopback fixture (test_post_install_demos_browser.py); preconnect hints are not covered (UNVERIFIED).
+A ticket stays pending (retried next pass) until it has a PASS demo.
 Each demo is <demos>/<ticket>/demo.json (written atomically) plus demo.png and demo.webm (Playwright, headless).
 `metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the --required tickets missing.
 """
@@ -38,6 +41,7 @@ DAY_S = 86400
 DEFAULT_PORT = {"http": 80, "https": 443}
 WS_SCHEME = {"ws": "http", "wss": "https"}
 MAX_HOPS = 5
+HOP_RE = re.compile(r"/[A-Za-z0-9/_.~%!$&'()*+,;=:@\-]*(\?[A-Za-z0-9/_.~%!$&'()*+,;=:@?\-]*)?")   # rebuilt redirect path
 # traffic Playwright routing cannot see: WebRTC ICE/STUN over UDP and DNS prefetch (preconnect hints are not covered)
 LAUNCH_ARGS = ("--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--dns-prefetch-disable")
 
@@ -77,32 +81,67 @@ def same_origin(url: str, base: str) -> bool:
         return False
 
 
-def guarded_route(route, base: str) -> None:
-    """Fetch a request ourselves without automatic redirects; every hop must stay on the checked origin."""
-    url, method, override = route.request.url, str(route.request.method).upper(), {}
-    for _ in range(MAX_HOPS + 1):
-        if not same_origin(url, base):
-            return route.abort()
-        try:
-            resp = route.fetch(url=url, max_redirects=0, **override)
-        except Exception:  # noqa: BLE001 - dashboard down/reset: abort now; goto then fails and the ticket records FAIL
-            return route.abort()
+def next_hop(url: str, loc: str, base: str) -> str | None:
+    """Canonical URL of a redirect target, or None when it leaves the checked origin or is ambiguous. Backslashes,
+    whitespace and control characters are refused (Chromium and urllib parse them differently) and the result is
+    rebuilt from the checked base plus a strict path, so the URL fetched is exactly the URL checked."""
+    if any(c == "\\" or ord(c) <= 0x20 or ord(c) == 0x7F for c in str(loc)):
+        return None
+    nxt = urljoin(url, loc)
+    if not same_origin(nxt, base):
+        return None
+    parts = urlsplit(nxt)
+    path = parts.path + (f"?{parts.query}" if parts.query else "")
+    return base + path if HOP_RE.fullmatch(path) else None
+
+
+def follow(fetch, url: str, method: str, base: str):
+    """Fetch hop by hop with fetch(url, override) (never automatic redirects). Returns (response, final url, hops), or
+    None when a hop leaves the origin, is ambiguous or the chain is longer than MAX_HOPS."""
+    method, override = str(method).upper(), {}
+    for hops in range(MAX_HOPS + 1):
+        resp = fetch(url, override)
         loc = resp.headers.get("location")
         if not (300 <= resp.status < 400 and loc):
-            return route.fulfill(response=resp)
+            return resp, url, hops
         if resp.status == 303 or (resp.status in (301, 302) and method != "GET"):
             method, override = "GET", {"method": "GET", "post_data": ""}   # like a browser: next hop is a bodiless GET
-        url = urljoin(url, loc)
-    return route.abort()   # too many redirects
+        url = next_hop(url, loc, base)
+        if url is None:
+            return None
+    return None   # too many redirects
+
+
+def guarded_route(route, base: str) -> None:
+    """Every hop must stay on the checked origin. A sub-resource is answered with its final response; a page load that
+    redirects is aborted, because the browser would show it under the pre-redirect URL (relative links resolve wrong):
+    start_url resolves the first page's redirects before goto, so the browser loads the final URL itself."""
+    req = route.request
+    if not same_origin(req.url, base):
+        return route.abort()
+    try:
+        got = follow(lambda u, o: route.fetch(url=u, max_redirects=0, **o), req.url, req.method, base)
+    except Exception:  # noqa: BLE001 - dashboard down/reset: abort now; goto then fails and the ticket records FAIL
+        return route.abort()
+    if got is None or (got[2] and req.is_navigation_request()):
+        return route.abort()
+    return route.fulfill(response=got[0])
+
+
+def start_url(request, url: str, base: str) -> str:
+    """Final same-origin URL of the demo page (request = an un-routed Playwright APIRequestContext, GET only)."""
+    got = follow(lambda u, _o: request.fetch(u, max_redirects=0), url, "GET", base)
+    if got is None:
+        raise ValueError(f"DEMO_URL_REFUSED: {url} redirects off {base} or too often")
+    return got[1]
 
 
 def guarded_websocket(ws, base: str) -> None:
-    """Connect a WebSocket to the server only when it targets the checked origin; otherwise close it unconnected."""
+    """Connect a WebSocket to the server only when it targets the checked origin. Otherwise it is left unconnected
+    (Playwright keeps it as a mock that never reaches a server); calling ws.close() here deadlocks the sync API."""
     scheme, sep, rest = str(ws.url).partition("://")
     if sep and scheme in WS_SCHEME and same_origin(f"{WS_SCHEME[scheme]}://{rest}", base):
         ws.connect_to_server()
-    else:
-        ws.close()
 
 
 def context_options(video_dir: str) -> dict:
@@ -209,20 +248,21 @@ def subprocess_runner(exe: str | None):
     return go
 
 
-def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and the installed beta
+def playwright_capture(base_url: str, launch: dict | None = None):
+    """Real-Chromium capture; core/tests/test_post_install_demos_browser.py runs it against a loopback fixture server."""
     base = check_url(base_url)
 
     def go(page_path: str, img: Path, vid: Path) -> None:
         from playwright.sync_api import sync_playwright
         with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
-            b = pw.chromium.launch(args=list(LAUNCH_ARGS))
+            b = pw.chromium.launch(args=list(LAUNCH_ARGS), **(launch or {}))
             try:
                 ctx = b.new_context(**context_options(tmp))
                 try:
                     ctx.route("**/*", lambda r: guarded_route(r, base))
                     ctx.route_web_socket(re.compile(".*"), lambda ws: guarded_websocket(ws, base))
                     page = ctx.new_page()
-                    page.goto(base + page_path, wait_until="networkidle", timeout=30000)
+                    page.goto(start_url(ctx.request, base + page_path, base), wait_until="networkidle", timeout=30000)
                     if not same_origin(page.url, base):
                         raise ValueError(f"DEMO_URL_REFUSED: navigated off {base}")
                     page.wait_for_timeout(3000)

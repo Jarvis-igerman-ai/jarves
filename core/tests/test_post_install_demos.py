@@ -198,8 +198,8 @@ def test_required_list_comes_from_flag(tmp_path):
 
 class FakeRoute:
     """Stands in for a Playwright Route; `chain` maps url -> (status, location or None)."""
-    def __init__(self, url, chain, method="GET"):
-        self.request = type("R", (), {"url": url, "method": method})()
+    def __init__(self, url, chain, method="GET", nav=False):
+        self.request = type("R", (), {"url": url, "method": method, "is_navigation_request": lambda self: nav})()
         self.chain, self.fetched, self.overrides, self.outcome = chain, [], [], None
 
     def fetch(self, url=None, max_redirects=None, **override):
@@ -247,7 +247,7 @@ def test_websockets_pinned_to_checked_origin(url, ok):
     ws = type("WS", (), {"url": url, "connect_to_server": lambda self: calls.append("connect"),
                          "close": lambda self, **k: calls.append("close")})()
     pid.guarded_websocket(ws, BASE)
-    assert calls == (["connect"] if ok else ["close"])
+    assert calls == (["connect"] if ok else [])   # never close(): it deadlocks the sync API
 
 
 def test_browser_context_blocks_service_workers():
@@ -280,3 +280,35 @@ def test_fetch_error_aborts_route_at_once():
 def test_browser_launch_disables_webrtc_udp_and_dns_prefetch():
     assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in pid.LAUNCH_ARGS
     assert "--dns-prefetch-disable" in pid.LAUNCH_ARGS
+
+
+@pytest.mark.parametrize("loc,want", [
+    ("/app/", BASE + "/app/"), ("x?a=1#frag", BASE + "/x?a=1"), ("http://127.0.0.1:8765/ok", BASE + "/ok"),
+    ("/\\evil.example/x", None), ("\\\\evil.example/x", None), ("/a b", None), ("/\tx", None),
+    ("//evil.example/", None), ("/caf\u00e9", None)])
+def test_redirect_target_rebuilt_canonically_or_refused(loc, want):
+    assert pid.next_hop(BASE + "/", loc, BASE) == want
+
+
+def test_backslash_redirect_aborts_before_any_second_fetch():
+    r = FakeRoute(BASE + "/", {BASE + "/": (302, "/\\evil.example/x")})
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("abort", None) and r.fetched == [BASE + "/"]
+
+
+def test_page_load_that_redirects_is_aborted_not_shown_under_old_url():
+    chain = {BASE + "/": (302, "/app/"), BASE + "/app/": (200, None)}
+    r = FakeRoute(BASE + "/", chain, nav=True)
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("abort", None)
+    r = FakeRoute(BASE + "/app/", chain, nav=True)
+    pid.guarded_route(r, BASE)
+    assert r.outcome == ("fulfill", 200)
+
+
+def test_start_url_resolves_same_origin_redirects_or_refuses():
+    chain = {BASE + "/": (302, "/app/"), BASE + "/app/": (200, None), BASE + "/off": (302, "http://evil.example/")}
+    req = type("Req", (), {"fetch": lambda self, u, max_redirects: FakeRoute(u, chain).fetch(u, max_redirects)})()
+    assert pid.start_url(req, BASE + "/", BASE) == BASE + "/app/"
+    with pytest.raises(ValueError, match="DEMO_URL_REFUSED"):
+        pid.start_url(req, BASE + "/off", BASE)
