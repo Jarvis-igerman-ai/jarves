@@ -588,7 +588,7 @@ class StageEngine:
                     ff = merged == head and gitops.git(wt, "merge-base", "--is-ancestor", tip, merged,
                                                        check=False).returncode == 0     # no own commits: fast-forward
                     if approved and merged != tip and not ff and gitops.commit_of(wt, merged + "^1") != tip:
-                        return ("park", f"the task branch moved during the merge: approve task #{t['seq']} again")
+                        return self._repark_merge(t)                # names and binds the new commit (R1)
                     tip = merged
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
@@ -752,11 +752,15 @@ class StageEngine:
                         pass
                     t = self.db.task(t["id"])
                 cur, shown = self._tree(t)[0], self._job(t).get("shown")    # ONE read: checked = stored (#1407)
-                if st["kind"] == "merge" and shown and cur != shown:    # approve only the commit you were shown
-                    txt = self._owner_stage(p, t, st, i, stages)[-1]     # a fresh prompt naming the new commit
-                    self.db.update_task(t["id"], waiting=clean(txt, 400))
-                    return self._res(False, "CHANGED", "the code changed since you were asked: " + txt)
-                self._set_job(t, approved={"stage": i, "tree": shown if st["kind"] == "merge" and shown else cur})
+                bound = st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists()
+                if bound and cur != shown:      # approve only the commit you were shown; none shown: ask again
+                    r = self._owner_stage(p, t, st, i, stages)     # a fresh prompt naming the new commit
+                    if r[0] != "park":                              # git failed: stop the task, never park on it
+                        self._fail(t, r[1], r[2], p)
+                        return self._res(False, "GIT_ERROR", r[2])
+                    self.db.update_task(t["id"], waiting=clean(r[1], 400))
+                    return self._res(False, "CHANGED", "the code changed since you were asked: " + r[1])
+                self._set_job(t, approved={"stage": i, "tree": cur})
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:
                 self.db.update_task(t["id"], stage=pl.next_index(stages, i), status="todo", waiting="",

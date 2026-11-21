@@ -1503,3 +1503,44 @@ def test_owner_merge_of_a_task_already_on_the_moved_integration_branch_does_not_
     t = m.db.by_seq(1, 1)
     assert "moved during the merge" not in (t["waiting"] or ""), t
     assert any("merged commit" in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_owner_merge_reparked_during_the_merge_still_binds_the_named_commit(env, monkeypatch):
+    """#1407 restart R1: the "moved during the merge" park names and binds the new commit; a later commit is not
+    approved under it (it used to park with no bound commit, so the next approve took whatever HEAD was)."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")                               # the integration branch moved: a real merge
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.merge_in
+
+    def racing(path, branch, **kw):                                 # another writer commits during the merge
+        (Path(path) / "rogue.txt").write_text("rogue\n")
+        gitops.commit_all(path, "rogue")
+        return real(path, branch, **kw)
+    monkeypatch.setattr(gitops, "merge_in", racing)
+    finish(m)
+    monkeypatch.setattr(gitops, "merge_in", real)
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert f"(now commit {head})" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")
+    assert m.call("answer", project="demo", task=1, answer="approve")["code"] == "CHANGED"
+    finish(m)
+    assert not (integ / "late.txt").exists()
+
+
+def test_owner_merge_changed_prompt_with_a_git_failure_stops_the_task(env, monkeypatch):
+    """#1407 restart R3: a git failure while re-asking stops the task; its error is never shown as "CHANGED"."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")
+
+    def boom(*a):
+        raise gitops.GitError("bad ref")
+    monkeypatch.setattr(gitops, "commit_of", boom)
+    r = m.call("answer", project="demo", task=1, answer="approve")
+    assert r["code"] == "GIT_ERROR" and m.db.by_seq(1, 1)["status"] == "failed", (r, m.db.by_seq(1, 1))

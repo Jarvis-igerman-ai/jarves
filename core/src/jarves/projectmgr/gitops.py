@@ -70,6 +70,7 @@ NO_HOOKS = _no_hooks_path()
 
 
 DIFF_CMDS = ("diff", "show", "log")
+NO_CONFIG_CMDS = ("rev-parse", "merge-base")   # run no config-named command: no extra config read (review R5)
 _DRIVER = re.compile(r"^(filter|merge)\.(.+)\.(clean|smudge|process|driver|required)$", re.S)
 _HOOK = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)
 _SIGN = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
@@ -101,8 +102,8 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
     email = ""
     for scope, entry in zip(items[0::2], items[1::2]):
         key, _, value = entry.partition("\n")
-        if key == "user.email":
-            email = value                       # the effective committer email: git's fallback signing key
+        if key == "user.email" and scope not in _UNTRUSTED:
+            email = value                       # the owner's committer email: the fallback signing key (review R4)
         if scope not in _UNTRUSTED:
             if key in _SIGN or _DRIVER.match(key):
                 owner[key] = value
@@ -146,9 +147,9 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     command, are overridden too (#1407, see `_config_overrides`); a config entry written between that read and the
     command's own read is not (open race, #1533). diff/show/log never run an external diff or textconv command
     (projectmgr calls no blame, `cat-file --textconv` or `stash show -p`). Cost: one extra `git config` process per
-    call; needs git 2.26 or newer."""
+    call except rev-parse/merge-base, which run no such command; needs git 2.26 or newer."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
-    over = _config_overrides(cwd, pre, timeout)
+    over = [] if args and args[0] in NO_CONFIG_CMDS else _config_overrides(cwd, pre, timeout)
     if isinstance(over, subprocess.CompletedProcess):          # the config cannot be read: fail closed
         if check:
             raise GitError((over.stderr or "git config failed").strip()[:300])

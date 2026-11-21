@@ -361,3 +361,29 @@ def test_signing_without_an_owner_key_uses_the_committer_email(monkeypatch, tmp_
     pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
     assert "user.signingkey=o@example.invalid" in pairs
     assert "signing settings" in gitops._hint("error: gpg failed to sign the data")
+
+
+def test_fallback_signing_key_never_comes_from_the_repository_email(monkeypatch, tmp_path):
+    """#1407 restart R4: the fallback signing key is the owner's email, never a `user.email` from `.git/config`."""
+    calls: list = []
+    conf = "global\0user.email\no@example.invalid\0local\0user.email\nagent@example.invalid\0" \
+           "local\0user.signingkey\nREPO\0"
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
+    gitops.git(tmp_path, "merge", "x", ident=False)
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    assert "user.signingkey=o@example.invalid" in pairs, pairs
+
+
+def test_read_only_ref_lookups_skip_the_config_read(monkeypatch, tmp_path):
+    """#1407 restart R5: rev-parse/merge-base run no config-named command, so the hot paths spawn one process."""
+    argvs: list = []
+
+    def run(argv, **kw):
+        argvs.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    gitops.git(tmp_path, "rev-parse", "HEAD")
+    gitops.git(tmp_path, "merge-base", "--is-ancestor", "a", "b")
+    assert len(argvs) == 2 and not any("--show-scope" in a for a in argvs)
+    gitops.git(tmp_path, "status")
+    assert len(argvs) == 4 and "--show-scope" in argvs[2]
