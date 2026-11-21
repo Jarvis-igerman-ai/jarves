@@ -660,7 +660,8 @@ def _err(key: str, **fmt) -> dict:
 def _resent(obj: dict, status: int = 200, *, chat: bool = False, lang: object = None) -> dict:
     """A resend answered from the command ledger. In privacy mode the ledger kept no words (#206 F13): the phone gets
     a defined code and message instead of a blank answer. A kept code keeps its own message unless that message needs
-    details the ledger did not keep ({placeholders}); a replaced code stays in `code_kept`."""
+    details the ledger did not keep ({placeholders}); a replaced code stays in `code_kept`. The phone's command
+    handlers (prefs.js, plans.js, app.js goals/approvals/signals) read only `r.ok` and `error`, so a 200 stays a success."""
     out = {**obj, "replay": True}
     if not obj.get("not_kept"):
         return out

@@ -197,3 +197,18 @@ def test_206_h2_a_confirm_racing_a_reproposing_edit_leaves_the_new_wording_propo
     p.edit(b, "Play jazz while I cook", repropose=True)
     monkeypatch.undo()
     assert p.get(b)["text"] == "Play jazz while I cook" and p.get(b)["state"] == "proposed"
+
+
+def test_206_r6_the_race_logs_what_the_statement_really_did(prefs, monkeypatch, caplog):
+    p, a, b = prefs
+    real, raced = p.get, []
+
+    def stale_get(pid):                                       # the edit read 'proposed', then a confirm landed
+        before = real(pid)
+        if not raced:
+            raced.append(p.db.x("UPDATE learned_prefs SET state='confirmed' WHERE id=?", (pid,)).rowcount)
+        return before
+    monkeypatch.setattr(p, "get", stale_get)
+    caplog.clear()
+    p.edit(b, "Play jazz while I cook", repropose=True)
+    assert "a confirmed preference was reworded" in caplog.text and "preference edited" not in caplog.text

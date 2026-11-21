@@ -511,3 +511,24 @@ def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fak
     assert st == 200 and out["code"] == "NOT_KEPT" and "error" not in out
     out = mobile._resent({"not_kept": True, "code": "NO_SCOPE"}, 403)   # a templated message is never shown with {braces}
     assert out["code"] == "NOT_KEPT" and out["code_kept"] == "NO_SCOPE" and "{" not in out["error"] + out["error_he"]
+
+
+def test_206_r7_a_clean_ledger_is_not_scanned_or_locked_again_until_something_changes(home, clk, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    a = Continuity(home, clock=clk)
+    a.store("p1", "msg-00000031", "chat", 200, {"reply": "secret"})
+    scans, real = [], a._cx
+
+    def counting():
+        cx = real()
+        cx.set_trace_callback(lambda sql: scans.append(sql) if sql.startswith("BEGIN IMMEDIATE") else None)
+        return cx
+    monkeypatch.setattr(a, "_cx", counting)
+    assert a.seen("p1", "msg-00000031") == {"not_kept": True} and scans == []      # privacy rows only: no new scan
+    monkeypatch.setattr(logs, "privacy", lambda: False)
+    a.store("p1", "msg-00000032", "chat", 200, {"reply": "words"})                  # a privacy-off write may keep words
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    assert a.seen("p1", "msg-00000032") == {"not_kept": True} and len(scans) == 1
+    clk.t += continuity.LEDGER_TTL_S + 1                                            # a row may have expired: scan again
+    assert a.seen("p1", "msg-00000032") is None and len(scans) == 2

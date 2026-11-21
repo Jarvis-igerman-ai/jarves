@@ -89,7 +89,9 @@ class Continuity:
         self.home, self.clock = Path(home), clock
         self.quiet = quiet or (lambda ts: False)       # the Core passes calm.quiet_hours_now
         self.path = self.home / DB_FILE
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()                 # re-entrant: execute() -> store() -> scrub() nest it (#206)
+        self._words = True                             # a ledger body may still hold words (set by a privacy-off write)
+        self._expire_at = 0.0                          # earliest time a ledger row can expire (0: check at once)
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
@@ -106,17 +108,23 @@ class Continuity:
         """Drop expired ledger rows; in privacy mode also rewrite every body that is not already its own `_at_rest`
         copy (#206 F13). Each body is parsed, so a privacy-off body cannot pass for a scrubbed one by its prefix."""
         private, now = logs.privacy(), self.clock()
-        with self._lock, closing(self._cx()) as cx, cx:
-            cx.execute("BEGIN IMMEDIATE")
-            cx.execute("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
-            for r in cx.execute("SELECT device, cid, body FROM ledger").fetchall() if private else ():
-                try:
-                    body = json.loads(r["body"])
-                except ValueError:
-                    body = None                        # unreadable: keep nothing of it
-                if body != _at_rest(body):
-                    cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?",
-                               (json.dumps(_at_rest(body)), r["device"], r["cid"]))
+        with self._lock:
+            if now <= self._expire_at and not (private and self._words):
+                return                                 # nothing can have expired or kept words since the last scrub
+            with closing(self._cx()) as cx, cx:
+                cx.execute("BEGIN IMMEDIATE")
+                cx.execute("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
+                for r in cx.execute("SELECT device, cid, body FROM ledger").fetchall() if private else ():
+                    try:
+                        body = json.loads(r["body"])
+                    except ValueError:
+                        body = None                    # unreadable: keep nothing of it
+                    if body != _at_rest(body):
+                        cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?",
+                                   (json.dumps(_at_rest(body)), r["device"], r["cid"]))
+                oldest = cx.execute("SELECT MIN(ts) FROM ledger").fetchone()[0]
+            self._expire_at = math.inf if oldest is None else oldest + LEDGER_TTL_S
+            self._words = self._words and not private
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:
@@ -155,10 +163,12 @@ class Continuity:
     def store(self, device: str, cid: str, kind: str, status: int, body: dict, now: float | None = None) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules). Privacy mode: the
         row keeps no words (`_at_rest`) and older rows are scrubbed (#206 F13)."""
+        private, ts = logs.privacy(), self.clock() if now is None else now
         with self._lock:
             self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                    (device, cid, kind, int(status), json.dumps(_at_rest(body) if logs.privacy() else body),
-                     self.clock() if now is None else now))
+                    (device, cid, kind, int(status), json.dumps(_at_rest(body) if private else body), ts))
+            self._words = self._words or not private
+            self._expire_at = min(self._expire_at, ts + LEDGER_TTL_S)
             self.scrub()
 
     @staticmethod
