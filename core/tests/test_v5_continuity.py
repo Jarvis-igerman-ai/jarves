@@ -457,3 +457,57 @@ def test_sync_hides_the_turns_when_the_chat_page_is_not_granted(srv, fake):
 def test_nan_age_is_refused_like_a_stale_one(cont):
     """F9 #206: NaN compared False against the window and counted as fresh."""
     assert cont.stale(float("nan")) and cont.stale(float("inf")) and not cont.stale(-5) and not cont.stale(None)
+
+
+# ---------------------------------------------------------------- #206 F13: no words at rest in privacy mode
+def test_206_f13_privacy_mode_ledger_keeps_only_allowlisted_numbers_flags_and_a_code(cont, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    live = cont.execute("p1", "cmd-00000206", "pref", lambda: (200, {"ok": True, "n": 2, "note": "secret", "age": 41}))
+    assert live == (200, {"ok": True, "n": 2, "note": "secret", "age": 41}, False)      # the live answer is unchanged
+    cont.store("p1", "msg-00000206", "chat", 200, {"reply": "secret reply", "code": "CHAT_RATE", "My title": 3})
+    assert not any("secret" in r["body"] or "41" in r["body"] for r in cont._rows("SELECT body FROM ledger"))
+    assert cont.execute("p1", "cmd-00000206", "pref", lambda: (500, {}))[1:] == ({"not_kept": True, "ok": True, "n": 2}, True)
+    assert cont.seen("p1", "msg-00000206") == {"not_kept": True, "code": "CHAT_RATE"}
+    assert continuity._at_rest({"code": "A words here"}) == {"not_kept": True}           # R2: only allowlisted keys
+
+
+def test_206_f13_privacy_on_scrubs_older_rows_at_open_even_one_starting_with_not_kept(home, clk, monkeypatch):
+    from jarves import logs
+    a = Continuity(home, clock=clk)
+    a.store("p1", "msg-00000011", "chat", 200, {"not_kept": True, "reply": "old secret"})  # R1: privacy off, same prefix
+    a.store("p1", "msg-00000012", "chat", 200, {"reply": "older secret"})
+    a._x("UPDATE ledger SET ts=? WHERE cid='msg-00000012'", (clk() - continuity.LEDGER_TTL_S - 1,))
+    a._x("INSERT INTO ledger (device, cid, kind, status, body, ts) VALUES ('p1','msg-13','chat',200,'secret{',?)", (clk(),))
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    Continuity(home, clock=clk)                                                          # a Core start alone scrubs
+    assert a._rows("SELECT cid, body FROM ledger ORDER BY cid") == [
+        {"cid": "msg-00000011", "body": '{"not_kept": true}'}, {"cid": "msg-13", "body": '{"not_kept": true}'}]
+    assert a._rows("PRAGMA secure_delete") == [{"secure_delete": 1}]
+    assert a._rows("PRAGMA journal_mode") == [{"journal_mode": "delete"}]
+
+
+def test_206_r4_continuity_opens_before_logging_is_set_up(home, clk, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "_flag", None)                     # logs.setup() not run yet: the default privacy holds
+    monkeypatch.setattr(logs, "_privacy", True)
+    Continuity(home, clock=clk).store("p1", "msg-00000021", "chat", 200, {"reply": "secret"})
+    assert Continuity(home, clock=clk).seen("p1", "msg-00000021") == {"not_kept": True}
+
+
+def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fake, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    tok, _ = pair(srv, scopes=["chat", "status", "tasks"])
+    assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})[1]["reply"] == "echo: hi"
+    srv.mobile._replies.clear()                                        # PC restart: only the ledger is left
+    st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc", "lang": "he"})
+    assert st == 200 and out["replay"] is True and out["code"] == "NOT_KEPT"
+    assert out["reply"] == mobile._MSG["NOT_KEPT"][1] and out["reply_en"] == mobile._MSG["NOT_KEPT"][0]
+    assert fake.chats == ["hi"]
+    body = {"op": "status", "goal": 1, "status": "paused", "id": "goal-00000207"}
+    assert call(srv, "POST", "/api/m/goals/op", tok, body)[0] == 200
+    st, out = call(srv, "POST", "/api/m/goals/op", tok, body)          # a success stays a success: no error shown
+    assert st == 200 and out["code"] == "NOT_KEPT" and "error" not in out
+    out = mobile._resent({"not_kept": True, "code": "NO_SCOPE"}, 403)   # a templated message is never shown with {braces}
+    assert out["code"] == "NOT_KEPT" and out["code_kept"] == "NO_SCOPE" and "{" not in out["error"] + out["error_he"]

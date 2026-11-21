@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Callable
 
@@ -68,6 +70,19 @@ CREATE TABLE IF NOT EXISTS signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
 """
 
 
+_KEEP = ("ok", "n", "pref", "goal", "plan")    # the only keys a privacy-mode ledger body keeps, besides `code` (#206 F13)
+
+
+def _at_rest(body) -> dict:
+    """The resend-ledger copy of an answer while privacy mode is on (#206 F13): allowlisted keys holding a flag or a
+    number, plus an UPPER_CASE error `code`; never words. The live answer to the phone is not changed."""
+    b = body if isinstance(body, dict) else {}
+    kept = {k: b[k] for k in _KEEP if isinstance(b.get(k), (bool, int, float))}
+    if isinstance(b.get("code"), str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", b["code"]):
+        kept["code"] = b["code"]
+    return {"not_kept": True, **kept}
+
+
 class Continuity:
     def __init__(self, home: Path, *, clock: Callable[[], float] = time.time,
                  quiet: Callable[[float], bool] | None = None) -> None:
@@ -78,11 +93,30 @@ class Continuity:
         self.home.mkdir(parents=True, exist_ok=True)
         with self._cx() as cx:
             cx.executescript(SCHEMA)
+        self.scrub()                                   # privacy on at start: older rows lose their words now (#206)
 
     def _cx(self) -> sqlite3.Connection:
         cx = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         cx.row_factory = sqlite3.Row
+        cx.execute("PRAGMA secure_delete=ON")          # freed pages are overwritten, so replaced words do not linger
+        cx.execute("PRAGMA journal_mode=DELETE")       # pinned default: no WAL file keeps old page images (#206)
         return cx
+
+    def scrub(self) -> None:
+        """Drop expired ledger rows; in privacy mode also rewrite every body that is not already its own `_at_rest`
+        copy (#206 F13). Each body is parsed, so a privacy-off body cannot pass for a scrubbed one by its prefix."""
+        private, now = logs.privacy(), self.clock()
+        with self._lock, closing(self._cx()) as cx, cx:
+            cx.execute("BEGIN IMMEDIATE")
+            cx.execute("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
+            for r in cx.execute("SELECT device, cid, body FROM ledger").fetchall() if private else ():
+                try:
+                    body = json.loads(r["body"])
+                except ValueError:
+                    body = None                        # unreadable: keep nothing of it
+                if body != _at_rest(body):
+                    cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?",
+                               (json.dumps(_at_rest(body)), r["device"], r["cid"]))
 
     def _rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._cx() as cx:
@@ -103,6 +137,7 @@ class Continuity:
             st, body = fn()
             return st, body, False
         with self._lock:
+            self.scrub()
             hit = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
             if hit and now - hit[0]["ts"] <= LEDGER_TTL_S:
                 logs.info("continuity", "COMMAND_REPLAYED", "a resent command was answered from the ledger",
@@ -114,15 +149,17 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
-                self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
-                self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
+                self.store(device, cid, kind, st, body, now)
             return st, body, False
 
-    def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
-        """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
-        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+    def store(self, device: str, cid: str, kind: str, status: int, body: dict, now: float | None = None) -> None:
+        """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules). Privacy mode: the
+        row keeps no words (`_at_rest`) and older rows are scrubbed (#206 F13)."""
+        with self._lock:
+            self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                    (device, cid, kind, int(status), json.dumps(_at_rest(body) if logs.privacy() else body),
+                     self.clock() if now is None else now))
+            self.scrub()
 
     @staticmethod
     def stale(age_s) -> bool:
@@ -135,6 +172,7 @@ class Continuity:
             return False
 
     def seen(self, device: str, cid: str, max_age: float = LEDGER_TTL_S) -> dict | None:
+        self.scrub()
         r = self._rows("SELECT status, body, ts FROM ledger WHERE device=? AND cid=?", (device, cid))
         if r and self.clock() - r[0]["ts"] <= max_age:
             return json.loads(r[0]["body"])

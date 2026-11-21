@@ -120,7 +120,8 @@ def steps(*pairs):
     return [{"tool": t, "args": a, "why": f"because {i}"} for i, (t, a) in enumerate(pairs)]
 
 
-async def test_draft_never_runs_then_approved_plan_runs_with_evidence(env):
+async def test_draft_never_runs_then_approved_plan_runs_with_evidence(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)        # tool text is kept only with privacy off (#206 F13)
     p = env.store.propose("morning", steps(("fake_read", {"text": "a"}), ("fake_act", {"text": "b"})))
     assert p["state"] == "draft" and await env.runner.tick() == 0 and env.ran == []
     env.store.approve(p["id"])
@@ -614,3 +615,14 @@ def test_813_runner_writes_do_not_overwrite_a_cancel(env):
     assert env.store.get(p["id"])["state"] == "cancelled"
     assert env.runner._finish(p["id"])["state"] == "cancelled"
     assert env.store._set_if(p["id"], ("ready", "running"), "running") is False
+
+
+async def test_206_f13_privacy_mode_keeps_no_tool_text_with_plan_steps(env, monkeypatch):
+    from jarves import logs
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_read", {"text": "secret"}), ("fake_bad", {})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert [(s["evidence"], s["error"]) for s in d["steps"]] == [("", ""), ("", "X_BROKE")]
+    assert "read secret" not in d["result"] and "it broke" not in d["note"]
