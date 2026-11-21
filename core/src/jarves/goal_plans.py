@@ -55,6 +55,7 @@ EVIDENCE_CHARS = 240
 RESULT_CHARS = 900
 ROUTE = "plan"
 SCRUB_RETRY_S = 30.0                # #1526: a failed privacy scrub is tried again after this delay
+SCRUB_CHUNK = 500                   # #1526: rows per table per scrub transaction, so one tick never stalls the loop
 OPEN = ("draft", "ready", "running", "paused", "blocked")
 TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
@@ -94,16 +95,17 @@ class PlanStore:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
         self.wal_pending = False              # #1526: scrubbed, but a reader kept the -wal file from being truncated
+        self.scrub_more = False               # #1526: the last scrub hit SCRUB_CHUNK; more rows remain
 
     def scrub_private(self) -> int:
-        """#1526: privacy mode on -> blank the text written before it (step evidence / error, plan result / note) in
-        ONE transaction; status and error codes stay. Freed pages are overwritten (secure_delete, restored after),
-        then checkpoint_wal() runs. busy_timeout is 0 throughout, so a lock held elsewhere fails at once instead of
+        """#1526: privacy mode on -> blank the text written before it (step evidence / error, plan result / note), at
+        most SCRUB_CHUNK rows per table in ONE transaction (scrub_more = rows remain, checkpoint after the last chunk);
+        status and error codes stay. Freed pages are overwritten (secure_delete, restored after). busy_timeout is 0 throughout, so a lock held elsewhere fails at once instead of
         stalling the event loop. Returns the rows changed (0 when privacy is off), -1 when the transaction failed
         (rolled back). A busy checkpoint leaves wal_pending set; the committed count still counts."""
         if not logs.privacy():
             return 0
-        n, con = 0, self.db._db
+        n, more, con = 0, False, self.db._db
         with self.db._lock:
             prev = con.execute("PRAGMA secure_delete").fetchone()[0]
             wait = con.execute("PRAGMA busy_timeout").fetchone()[0]
@@ -112,12 +114,15 @@ class PlanStore:
                 con.execute("PRAGMA busy_timeout=0")
                 try:
                     con.execute("BEGIN IMMEDIATE")
-                    for r in con.execute(f"SELECT id, error FROM goal_plan_steps WHERE {_DIRTY}").fetchall():
+                    rows = con.execute(f"SELECT id, error FROM goal_plan_steps WHERE {_DIRTY} LIMIT ?",
+                                       (SCRUB_CHUNK,)).fetchall()
+                    for r in rows:
                         con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?",
                                     (_code_only(r["error"]), r["id"]))
-                        n += 1
-                    n += con.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
+                    plans = con.execute("UPDATE goal_plans SET result='', note='' WHERE id IN (SELECT id FROM "
+                                        "goal_plans WHERE result<>'' OR note<>'' LIMIT ?)", (SCRUB_CHUNK,)).rowcount
                     con.commit()
+                    n, more = len(rows) + plans, SCRUB_CHUNK in (len(rows), plans)
                 except BaseException:
                     con.rollback()
                     raise
@@ -126,11 +131,13 @@ class PlanStore:
                           error_type=type(e).__name__)
                 return -1
             finally:
+                self.scrub_more = more
                 con.execute(f"PRAGMA secure_delete={int(prev)}")
                 con.execute(f"PRAGMA busy_timeout={int(wait)}")
         if n:
             logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
-        self.checkpoint_wal()
+        if not more:
+            self.checkpoint_wal()
         return n
 
     def checkpoint_wal(self) -> bool:
@@ -138,17 +145,17 @@ class PlanStore:
         are gone. True when done (or not in WAL mode). A reader that keeps it busy -> False, wal_pending stays set and
         PLAN_PRIVACY_CHECKPOINT_BUSY is logged once per incident; the runner retries after SCRUB_RETRY_S."""
         con = self.db._db
+        busy, err, wait = 0, "", None
         with self.db._lock:
-            if con.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-                busy, err = 0, ""
-            else:
-                wait = con.execute("PRAGMA busy_timeout").fetchone()[0]
-                con.execute("PRAGMA busy_timeout=0")
-                try:
-                    busy, err = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], ""
-                except sqlite3.Error as e:            # e.g. "database is locked": the same as busy, retried later
-                    busy, err = 1, type(e).__name__
-                finally:
+            try:                                      # every read here, the journal mode too: an error = busy
+                if con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+                    wait = con.execute("PRAGMA busy_timeout").fetchone()[0]
+                    con.execute("PRAGMA busy_timeout=0")
+                    busy = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            except sqlite3.Error as e:                # e.g. "database is locked": the same as busy, retried later
+                busy, err = 1, type(e).__name__
+            finally:
+                if wait is not None:
                     con.execute(f"PRAGMA busy_timeout={int(wait)}")
         if busy and not self.wal_pending:
             logs.warn("goals", "PLAN_PRIVACY_CHECKPOINT_BUSY", "a reader keeps old plan pages in the -wal file",
@@ -477,8 +484,8 @@ class PlanRunner:
         except Exception:                      # never let a scrub fault stop plans or retry on every tick
             logs.error("goals", "PLAN_PRIVACY_SCRUB_CRASH", "privacy scrub raised", exc=True)
             ok = False
-        self._private = self._private or ok
-        if not ok or self.store.wal_pending:
+        self._private = self._private or (ok and not self.store.scrub_more)    # more chunks: next tick, no delay
+        if not ok or (self.store.wal_pending and not self.store.scrub_more):
             self._scrub_at = self.clock() + SCRUB_RETRY_S
 
     async def tick(self) -> int:

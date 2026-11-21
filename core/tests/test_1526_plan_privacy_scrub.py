@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
 from jarves import goal_plans as gp
 from test_v5_goal_plans import Env, steps
 
@@ -100,8 +101,8 @@ async def test_1526_busy_checkpoint_is_retried_until_the_wal_file_is_truncated(t
     e.clock.t += gp.SCRUB_RETRY_S
     await e.runner.tick()                                    # only the checkpoint runs again, and now it finishes
     assert not e.store.wal_pending and wal.stat().st_size == 0
-    assert b"read secret" not in (tmp_path / "memory.db").read_bytes()   # tool output; args/titles are the owner's
-    # own plan (not tool output) and stay by design: outside #1526's evidence/error/result/note scope
+    assert b"read secret" not in (tmp_path / "memory.db").read_bytes()   # tool output; #1526 names exactly
+    # goal_plan_steps.evidence/error and goal_plans.result/note; args/titles are the owner's approved plan
     assert "PLAN_PRIVACY_WAL_TRUNCATED" in [c for c, _ in logged]
     assert [c for c, _ in logged].count("PLAN_PRIVACY_SCRUBBED") == 1
     e.db.close()
@@ -145,6 +146,25 @@ async def test_1526_a_held_write_lock_fails_the_scrub_without_waiting(tmp_path, 
     e.db.close()
 
 
+async def test_1526_a_large_history_is_scrubbed_in_bounded_chunks_one_per_tick(tmp_path, monkeypatch):
+    e, logged = Env(tmp_path), []
+    await _plans_with_text(e, monkeypatch, logged)           # 4 rows with text (round 3 R2: no long loop stall)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    monkeypatch.setattr(gp, "SCRUB_CHUNK", 1)
+    checkpoints = []
+    monkeypatch.setattr(e.store, "checkpoint_wal", lambda: checkpoints.append(1) or True)
+    left = []
+    for _ in range(2):
+        await e.runner.tick()                                # no retry delay between chunks
+        left.append(len(_words_left(e.db)))
+    assert left == [2, 0] and checkpoints == [] and e.store.scrub_more     # 1 step + 1 plan per transaction
+    await e.runner.tick()                                    # the last chunk finds nothing more: now the checkpoint
+    assert checkpoints == [1] and not e.store.scrub_more
+    await e.runner.tick()
+    assert checkpoints == [1]                                # done: nothing runs again
+    e.db.close()
+
+
 def test_1526_kept_codes_and_the_sql_clean_test_are_one_definition():
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE goal_plan_steps (evidence TEXT, error TEXT)")
@@ -158,13 +178,13 @@ def test_1526_kept_codes_and_the_sql_clean_test_are_one_definition():
 
 
 class _CheckpointRaises:
-    """The real connection, except that the WAL checkpoint raises (another writer holds the lock)."""
+    """The real connection, except that one checkpoint statement raises (another writer holds the lock)."""
 
-    def __init__(self, con):
-        self.con = con
+    def __init__(self, con, bad):
+        self.con, self.bad = con, bad
 
     def execute(self, sql, *a):
-        if "wal_checkpoint" in sql:
+        if self.bad in sql:
             raise sqlite3.OperationalError("database is locked")
         return self.con.execute(sql, *a)
 
@@ -172,12 +192,13 @@ class _CheckpointRaises:
         return getattr(self.con, name)
 
 
-async def test_1526_a_raising_checkpoint_is_treated_as_busy_and_only_it_is_retried(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bad", ["wal_checkpoint", "journal_mode"])     # round 3 R1: the mode read too
+async def test_1526_a_raising_checkpoint_is_treated_as_busy_and_only_it_is_retried(tmp_path, monkeypatch, bad):
     e, logged = Env(tmp_path), []
     await _plans_with_text(e, monkeypatch, logged)
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
     real = e.db._db
-    e.db._db = _CheckpointRaises(real)
+    e.db._db = _CheckpointRaises(real, bad)
     await e.runner.tick()
     assert _words_left(e.db) == [] and e.store.wal_pending
     assert ("PLAN_PRIVACY_CHECKPOINT_BUSY", {"error_type": "OperationalError"}) in logged
