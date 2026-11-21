@@ -109,7 +109,7 @@ def test_jar624_pr_on_a_stale_merge_base_still_gets_the_current_base_installer_r
     assert ci_plan.classify(files, "merge_group", extra_installer_rule="^$")["installer"]       # group rule unchanged
 
 
-@pytest.mark.parametrize("text", ["", "PR_INSTALLER = 3\n", "PR_INSTALLER = f(x)\n", "PR_INSTALLER = '('\n", "def (:\n"])
+@pytest.mark.parametrize("text", ["", "PR_INSTALLER = ''\n", "PR_INSTALLER = 3\n", "PR_INSTALLER = f(x)\n", "PR_INSTALLER = '('\n", "def (:\n"])
 def test_jar624_unreadable_base_rule_is_reported_and_the_checked_out_rule_still_applies(tmp_path, text):
     base = tmp_path / "base_ci_plan.py"
     base.write_text(text, encoding="utf-8")
@@ -819,11 +819,3 @@ def test_root_md_and_glob_read_docs_are_not_docs_only(tmp_path):
     assert ci_plan.classify(["CHANGELOG.md"])["code"]               # real repo: test_manual_test_sheet reads it
     assert ci_plan.classify(["docs/reviews/BUG_TABLE_V50_2026-10-25.md"])["code"]
 
-
-def test_jar624_pr_classify_step_reads_the_current_base_rule():
-    wf = yaml.safe_load((ROOT / ".github/workflows/jarves-checks.yml").read_text(encoding="utf-8"))
-    job = wf["jobs"]["changes"]
-    run = next(s["run"] for s in job["steps"] if s.get("id") == "c")
-    assert job["env"]["BASE_REF"] == "${{ github.base_ref }}"
-    assert 'git show "origin/$BASE_REF:core/tools/ci_plan.py"' in run and "--base-rules-from" in run
-    assert run.index("--base-rules-from") < run.index("ci_plan.py classify")

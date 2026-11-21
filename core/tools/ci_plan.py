@@ -61,13 +61,13 @@ def base_pr_installer(path: Path) -> str | None:
 
     GitHub can start a pull_request run on a stale test-merge commit (#1424 ran on a merge into eadd904, before JAR-584
     widened the rule), so the checked-out classifier is old. None (and a stderr line) when the file is missing, not
-    Python, or has no compilable string PR_INSTALLER; the checked-out rule then applies alone."""
+    Python, or has no compilable non-empty string PR_INSTALLER; the checked-out rule then applies alone."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         rule = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
                     and any(isinstance(t, ast.Name) and t.id == "PR_INSTALLER" for t in n.targets))
-        if not isinstance(rule, str):
-            raise TypeError("PR_INSTALLER is not a string")
+        if not isinstance(rule, str) or not rule:
+            raise TypeError("PR_INSTALLER is not a non-empty string")
         re.compile(rule)
         return rule
     except (OSError, UnicodeDecodeError, SyntaxError, ValueError, TypeError, StopIteration, re.error) as e:
@@ -138,7 +138,7 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     out = {k: any(re.match(p, f) for f in files) for k, p in RULES.items()}
     if event == "pull_request":
         # JAR-624: the current base branch's rule may only ADD the installer job (a stale merge base must not hide it)
-        out["installer"] = any(re.match(PR_INSTALLER, f) or (extra_installer_rule and re.match(extra_installer_rule, f))
+        out["installer"] = any(re.match(PR_INSTALLER, f) or (extra_installer_rule is not None and re.match(extra_installer_rule, f))
                                for f in files)
     out["code"] = bool(rest) or bool(read)
     out["full"] = any(not (GUIDES.match(f) or CHANGELOG.match(f)) for f in rest)   # guides/changelog-only: Linux shard

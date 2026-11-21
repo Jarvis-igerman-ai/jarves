@@ -143,8 +143,9 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             # JAR-624: GitHub can start a PR run on a stale test-merge commit (#1424 ran on a base from before JAR-584), so
             # the checked-out classifier is old; the base branch's CURRENT PR installer rule also applies (it only adds jobs)
-            if git fetch --no-tags --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
-               && git show "origin/$BASE_REF:core/tools/ci_plan.py" > "$RUNNER_TEMP/base_ci_plan.py"; then
+            # read via the API, not a fetch: the clone's refs and shallow state (the HEAD^1..HEAD file list) stay untouched
+            if gh api "repos/$GITHUB_REPOSITORY/contents/core/tools/ci_plan.py?ref=$BASE_REF" \
+               -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/base_ci_plan.py"; then
               args+=(--base-rules-from "$RUNNER_TEMP/base_ci_plan.py")
             else echo "CI_PLAN_BASE_RULE_UNAVAILABLE: origin/$BASE_REF not readable; using the checked-out rule"; fi
           fi
