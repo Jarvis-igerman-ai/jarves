@@ -100,7 +100,8 @@ async def test_1526_busy_checkpoint_is_retried_until_the_wal_file_is_truncated(t
     e.clock.t += gp.SCRUB_RETRY_S
     await e.runner.tick()                                    # only the checkpoint runs again, and now it finishes
     assert not e.store.wal_pending and wal.stat().st_size == 0
-    assert b"read secret" not in (tmp_path / "memory.db").read_bytes()
+    assert b"read secret" not in (tmp_path / "memory.db").read_bytes()   # tool output; args/titles are the owner's
+    # own plan (not tool output) and stay by design: outside #1526's evidence/error/result/note scope
     assert "PLAN_PRIVACY_WAL_TRUNCATED" in [c for c, _ in logged]
     assert [c for c, _ in logged].count("PLAN_PRIVACY_SCRUBBED") == 1
     e.db.close()
@@ -144,11 +145,47 @@ async def test_1526_a_held_write_lock_fails_the_scrub_without_waiting(tmp_path, 
     e.db.close()
 
 
-def test_1526_kept_codes_and_the_sql_clean_test_are_one_definition(tmp_path):
+def test_1526_kept_codes_and_the_sql_clean_test_are_one_definition():
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE goal_plan_steps (evidence TEXT, error TEXT)")
-    for err in ("X_BROKE", "_", "1_2", "A__B", "BROKE", "x_broke", "X_" + "A" * 63, "X_BROKE: it broke", ""):
+    for err in ("X_BROKE", "_", "1_2", "A__B", "BROKE", "x_broke", "X_" + "A" * 63, "X_BROKE: it broke", "",
+                "MY_PIN_1234", "HTTP_404"):
         db.execute("DELETE FROM goal_plan_steps")
         db.execute("INSERT INTO goal_plan_steps VALUES ('', ?)", (err,))
         clean = not db.execute(f"SELECT 1 FROM goal_plan_steps WHERE {gp._DIRTY}").fetchone()
         assert clean == (gp._code_only(err) == err), err     # a row is left alone exactly when it is already a code
+    assert gp._code_only("MY_PIN_1234: x") == "" and gp._code_only("X_BROKE: x") == "X_BROKE"   # digits never kept
+
+
+class _CheckpointRaises:
+    """The real connection, except that the WAL checkpoint raises (another writer holds the lock)."""
+
+    def __init__(self, con):
+        self.con = con
+
+    def execute(self, sql, *a):
+        if "wal_checkpoint" in sql:
+            raise sqlite3.OperationalError("database is locked")
+        return self.con.execute(sql, *a)
+
+    def __getattr__(self, name):
+        return getattr(self.con, name)
+
+
+async def test_1526_a_raising_checkpoint_is_treated_as_busy_and_only_it_is_retried(tmp_path, monkeypatch):
+    e, logged = Env(tmp_path), []
+    await _plans_with_text(e, monkeypatch, logged)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    real = e.db._db
+    e.db._db = _CheckpointRaises(real)
+    await e.runner.tick()
+    assert _words_left(e.db) == [] and e.store.wal_pending
+    assert ("PLAN_PRIVACY_CHECKPOINT_BUSY", {"error_type": "OperationalError"}) in logged
+    assert "PLAN_PRIVACY_SCRUB_CRASH" not in [c for c, _ in logged]
+    assert e.db.row("PRAGMA busy_timeout")["timeout"] == 5000
+    e.db._db = real
+    e.clock.t += gp.SCRUB_RETRY_S
+    await e.runner.tick()                                    # only the checkpoint again; the scrub is not repeated
+    assert not e.store.wal_pending and (tmp_path / "memory.db-wal").stat().st_size == 0
+    assert [c for c, _ in logged].count("PLAN_PRIVACY_SCRUBBED") == 1
+    e.db.close()

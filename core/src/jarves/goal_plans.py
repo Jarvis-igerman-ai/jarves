@@ -70,12 +70,14 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-# #1526: ONE definition of a kept error code: only A-Z 0-9 _, with at least one "_" (a bare upper-case word may be
-# the owner's), at most 64 chars. _CODE and the SQL _DIRTY below say the same thing, so every scrubbed row is clean
-# under _DIRTY and a later scrub never re-reads or rewrites it.
+# #1526: ONE definition of a kept error code: only A-Z and _, with at least one "_" (a bare upper-case word may be
+# the owner's), at most 64 chars, and NO digits (a PIN or number never survives). Step errors are written by this
+# executor as "<ToolResult.code>: <message>" or as fixed phrases; ToolResult.code comes from constants in tool source
+# code, not from owner text, and the message after ":" is always blanked. _CODE and the SQL _DIRTY below say the same
+# thing, so every scrubbed row is clean under _DIRTY and a later scrub never re-reads or rewrites it.
 CODE_MAX = 64
-_CODE = re.compile(r"[A-Z0-9_]*_[A-Z0-9_]*")
-_DIRTY = ("evidence<>'' OR (error<>'' AND (error GLOB '*[^A-Z0-9_]*' OR error NOT GLOB '*_*' "
+_CODE = re.compile(r"[A-Z_]*_[A-Z_]*")
+_DIRTY = ("evidence<>'' OR (error<>'' AND (error GLOB '*[^A-Z_]*' OR error NOT GLOB '*_*' "
           f"OR length(error)>{CODE_MAX}))")
 
 
@@ -138,16 +140,19 @@ class PlanStore:
         con = self.db._db
         with self.db._lock:
             if con.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
-                busy = 0
+                busy, err = 0, ""
             else:
                 wait = con.execute("PRAGMA busy_timeout").fetchone()[0]
                 con.execute("PRAGMA busy_timeout=0")
                 try:
-                    busy = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+                    busy, err = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], ""
+                except sqlite3.Error as e:            # e.g. "database is locked": the same as busy, retried later
+                    busy, err = 1, type(e).__name__
                 finally:
                     con.execute(f"PRAGMA busy_timeout={int(wait)}")
         if busy and not self.wal_pending:
-            logs.warn("goals", "PLAN_PRIVACY_CHECKPOINT_BUSY", "a reader keeps old plan pages in the -wal file")
+            logs.warn("goals", "PLAN_PRIVACY_CHECKPOINT_BUSY", "a reader keeps old plan pages in the -wal file",
+                      error_type=err or "busy")
         elif not busy and self.wal_pending:
             logs.info("goals", "PLAN_PRIVACY_WAL_TRUNCATED", "old plan pages removed from the -wal file")
         self.wal_pending = bool(busy)
