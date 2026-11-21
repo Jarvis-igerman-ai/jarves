@@ -43,10 +43,32 @@ _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
+# #1516: an unbroken base32 run (16+ chars, one case, a digit 2-7, not plain hex) within 20 chars of a seed word
+# is an authenticator/TOTP seed. The seed word is required so identifiers such as `sha256checksumfile` still pass.
+_BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
+_SEED_WORD = re.compile(r"(?<![a-z])(?:totp|otp|2fa|mfa|seed|authenticator)s?(?![a-z])|"
+                        r"סיד|מאמת|אימות|אוטנטיקטור", re.I)
+_SEED_NEAR = 20
+
+
+def _seed_near_word(text: str) -> bool:
+    words = [m.span() for m in _SEED_WORD.finditer(text)]
+    if not words:
+        return False
+    for m in _BASE32_RUN.finditer(text):
+        run = m.group()
+        if not (run.isupper() or run.islower()) or not re.search(r"[2-7]", run):
+            continue
+        if re.fullmatch(r"[0-9a-fA-F]+", run) or _SEED_WORD.search(run):
+            continue
+        if any(ws <= m.end() + _SEED_NEAR and we >= m.start() - _SEED_NEAR for ws, we in words):
+            return True
+    return False
 
 
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    text = text or ""
+    return bool(_SENSITIVE.search(text)) or _seed_near_word(text)
 
 
 def normalize(text: str) -> str:
