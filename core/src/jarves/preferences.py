@@ -47,13 +47,17 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d|"
     # #1099: well-known credential prefixes (a real key in any text is refused, whoever stores it)
     r"\bbearer\s+[a-z0-9._~+/-]{16,}|\bsk-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|"
-    r"\baiza[0-9a-z_-]{20,}|\bxox[abprs]-[a-z0-9-]{10,}|\beyj[a-z0-9_-]{8,}\.|-----begin [a-z ]*private key", re.I)
+    r"\baiza[0-9a-z_-]{20,}|\bxox[abprs]-[a-z0-9-]{10,}|\b(?-i:eyJ)[a-z0-9_-]{8,}\.|-----begin [a-z ]*private key", re.I)
 # #1099, preference path only (`strict=True`): key/token wording and random-looking strings. Goals and dev drafts may
 # legitimately say "add API key support" or carry commit SHAs, UUIDs and code ids, so they keep the rules above.
 _KEY_WORDS = re.compile(
     r"הטוקן\s+שלי|טוקן\s+(?:ה-?)?(?:גישה|api|אימות)|מפתח\s+(?:ה-?)?api|\bapi[\s_-]?keys?\b|"
     r"\b(?:access|auth|api|bearer|refresh|session)[\s_-]?tokens?\b|\bsecret[\s_-]?keys?\b|\bprivate\s+key\b", re.I)
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9+=]{20,}")   # split at _ - . / so snake_case, kebab-case, dotted names, paths pass
+# Standard base64 may contain '/', which _TOKEN_RUN splits at; a slash run counts only when the whole run looks random
+# AND some segment is not word-shaped, so paths like /Users/Igal/Projects2 still pass.
+_B64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}")
+_WORDISH = re.compile(r"(?:[A-Z]?[a-z]+|[A-Z]{2,}(?![a-z])|\d+)+")
 _HEX_RUN = re.compile(r"\b[0-9a-f]{32,}\b", re.I)
 _MIN_ENTROPY = 3.5                 # bits per character for letter+digit runs
 _MIN_ENTROPY_LETTERS = 4.0         # stricter for letter-only runs (24+ chars, mixed case), so CamelCase words pass
@@ -77,8 +81,14 @@ def _random_run(run: str) -> bool:
     return False
 
 
+def _b64_run(run: str) -> bool:
+    return ("/" in run and _random_run(run.replace("/", ""))
+            and any(len(seg) > 2 and not _WORDISH.fullmatch(seg) for seg in run.split("/")))
+
+
 def _high_entropy(text: str) -> bool:
-    return bool(_HEX_RUN.search(text)) or any(_random_run(r) for r in _TOKEN_RUN.findall(text))
+    return (bool(_HEX_RUN.search(text)) or any(_random_run(r) for r in _TOKEN_RUN.findall(text))
+            or any(_b64_run(r) for r in _B64_RUN.findall(text)))
 
 
 def looks_sensitive(text: str, *, strict: bool = False) -> bool:
@@ -215,27 +225,33 @@ class Preferences:
                                         (me["topic"], pid))
                 if difflib.SequenceMatcher(None, me["norm"], r["norm"]).ratio() >= CONFLICT_RATIO]
 
+    def usable(self) -> list[dict]:
+        """Confirmed, not stale, not sensitive (#1099: items stored before the stricter rule are skipped, logged once)."""
+        rows = []
+        for r in self.items("confirmed"):
+            if r["stale"]:
+                continue
+            if looks_sensitive(r["text"], strict=True):
+                if r["id"] not in _SKIP_LOGGED:        # bounded: once per item per process, not on every prompt
+                    _SKIP_LOGGED.add(r["id"])
+                    logs.info("prefs", "PREF_SKIPPED_SENSITIVE", "confirmed preference kept out of instructions",
+                              id=r["id"])
+                continue
+            rows.append(r)
+        return rows
+
     def for_prompt(self, limit: int = 20) -> list[str]:
-        """What may influence behaviour: confirmed, not stale. Proposals and declined items never appear."""
-        return [r["text"] for r in self.items("confirmed") if not r["stale"]][:limit]
+        """What may influence behaviour: `usable()` items. Proposals, declined and sensitive items never appear."""
+        return [r["text"] for r in self.usable()][:limit]
 
 
 _SKIP_LOGGED: set[int] = set()
 
 
 def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:
-    """The instruction block: confirmed, not stale, not sensitive items, newest first, within the token budget."""
+    """The instruction block: `prefs.usable()` items, newest first, within the token budget."""
     from .context_trace import estimate_tokens
-    rows = []
-    for r in prefs.items("confirmed"):
-        if r["stale"]:
-            continue
-        if looks_sensitive(r["text"], strict=True):
-            if r["id"] not in _SKIP_LOGGED:            # bounded: once per item per process, not on every prompt
-                _SKIP_LOGGED.add(r["id"])
-                logs.info("prefs", "PREF_SKIPPED_SENSITIVE", "confirmed preference kept out of instructions", id=r["id"])
-            continue
-        rows.append(r)
+    rows = prefs.usable()
     rows.sort(key=lambda r: -(r["confirmed_at"] or r["updated"]))
     out, used = [], estimate_tokens(PROMPT_HEAD)
     for r in rows:

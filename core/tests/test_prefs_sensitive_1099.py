@@ -32,6 +32,7 @@ PREF_ONLY_SECRETS = [
     "QxLmVbKpRtZwNcHyFdJgSaUe",                                  # 24 mixed-case letters, no digit
     "dead1beef2cafe3f00d4bad5a1b2c3d4e5f6",                      # 36-char hex, no 6-digit run
     "k3j9x2m8q7w4z1p6r5t0y8u2",                                  # lowercase base36, digit-heavy
+    "secret DrKq1pph8cKb/gjxx4X" + "UgsJchO39r3",                  # standard base64 with '/': pieces under 20 chars
 ]
 # Ordinary text: allowed on BOTH paths.
 SAFE_TEXTS = [
@@ -48,6 +49,10 @@ SAFE_TEXTS = [
     "keep backups in /home/user/projects/myapp2",                # path
     "name files like notes_2026_backup_final",
     "the file core/tests/test_prefs_1099.py",
+    "I visited Eyjafjallajokull.",                               # 'eyj' word, not a case-exact JWT 'eyJ' header
+    "EYJAFJALLAJOKULL. was loud",
+    "keep it in /Users/IgalGerman/Downloads/Report2026Final",   # mixed-case path with digits
+    "copy to C:/Work/Jarvis/Core/Src2",
 ]
 
 
@@ -99,5 +104,5 @@ def test_prompt_block_skips_a_sensitive_confirmed_item_and_logs_once(home, monke
     seen = []
     monkeypatch.setattr(prefs_mod.logs, "info", lambda *a, **k: seen.append((a[1], k)))
     monkeypatch.setattr(prefs_mod, "_SKIP_LOGGED", set())
-    assert prefs_mod.prompt_block(p) == "" and prefs_mod.prompt_block(p) == ""
+    assert prefs_mod.prompt_block(p) == "" and prefs_mod.prompt_block(p) == "" and p.for_prompt() == []
     assert seen == [("PREF_SKIPPED_SENSITIVE", {"id": pid})]
