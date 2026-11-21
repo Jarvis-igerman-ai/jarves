@@ -1228,3 +1228,21 @@ def test_f6_read_only_git_still_works():
     for cmd in ("git status", "git diff", "git diff --stat", "git log --oneline -5"):
         assert any(_rule_matches(r, cmd) for r in allow if r.startswith("Bash(")), cmd
     assert not any(r.startswith(("Edit", "Write")) for r in allow)
+
+
+def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
+    """#1508: an empty `base...HEAD` diff skipped the review even with uncommitted edits in the task folder; the merge
+    stage then committed and merged them unreviewed. A dirty folder with nothing committed now blocks instead."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner review merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["worktree"]
+    p = m.db.project(t["project_id"])
+    assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean and empty: nothing to review
+    (Path(t["worktree"]) / "mine.txt").write_text("never reviewed\n")                  # in scope, never committed
+    r = m._st_review(p, t, {"kind": "review"}, ["claude"])
+    assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+    assert not (gitops.project_root(home, 1) / "reviews_default").exists()            # no reviewer was asked

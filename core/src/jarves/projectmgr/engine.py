@@ -459,6 +459,9 @@ class StageEngine:
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
+            if self._tree(t)[1]:                                    # #1508: merge would commit these unreviewed
+                return ("stop", "blocked", "uncommitted edits in the task folder were never reviewed: commit them "
+                                           "through a work stage or remove them")
             return ("next",)
         if self._day_cap():
             return ("requeue", self._day_cap())
