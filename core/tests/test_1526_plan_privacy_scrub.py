@@ -120,6 +120,8 @@ async def test_1526_r1_r2_no_old_words_in_the_db_or_wal_file_and_secure_delete_i
     e = Env(tmp_path)
     try:
         await _failed_plan(e)
+        assert e.db.row("PRAGMA journal_mode")["journal_mode"] == "wal"   # the checkpoint branch really runs
+        assert b"it broke" in (tmp_path / "memory.db-wal").read_bytes()   # and the words were in the -wal file before
         e.db.x("PRAGMA secure_delete=OFF")                       # some SQLite builds default to ON: start from OFF
         monkeypatch.setattr(logs, "_privacy", True)
         assert e.store.scrub_private() == 2
@@ -169,4 +171,55 @@ async def test_1526_r6_r7_scrub_runs_off_the_event_loop_and_a_bare_upper_case_wo
         assert threaded == ["scrub_private"] and _texts(e.db) == []
         assert gp._code_only("NOT_APPROVED: no") == "NOT_APPROVED" and gp._code_only("DENIED: x") == ""
     finally:
+        e.db.close()
+
+
+async def test_1526_round2_r3_the_core_run_loop_scrubs_with_the_feature_off(tmp_path, monkeypatch):
+    class Off:
+        def active(self, _name):
+            return False
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        await _failed_plan(e)
+        monkeypatch.setattr(logs, "_privacy", True)
+
+        async def once(_s):
+            runner.stop()                                        # one loop pass, no real waiting
+        runner = gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock, features=Off(), sleep=once)
+        await runner.run()                                       # what Operations.start() runs, feature on or off
+        assert _texts(e.db) == ["X_BROKE"]
+    finally:
+        e.db.close()
+
+
+async def test_1526_round2_r4_a_failed_secure_delete_restore_never_masks_the_original_error(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    e = Env(tmp_path)
+    real = e.db._db
+
+    class BadRestore:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def execute(self, sql, *a):
+            if sql.startswith("PRAGMA secure_delete=") and sql != "PRAGMA secure_delete=ON":
+                raise sqlite3.OperationalError("disk I/O error")
+            return real.execute(sql, *a)
+    try:
+        e.db._db = BadRestore()
+        with pytest.raises(KeyError) as err:
+            with e.db.immediate(secure=True):
+                raise KeyError("body failed")
+        assert "restoring secure_delete also failed: OperationalError" in err.value.__notes__
+        with pytest.raises(sqlite3.OperationalError):            # no earlier error: the restore failure is raised
+            with e.db.immediate(secure=True):
+                pass
+        assert not real.in_transaction
+    finally:
+        e.db._db = real
         e.db.close()

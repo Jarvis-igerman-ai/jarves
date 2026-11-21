@@ -189,6 +189,7 @@ class UserDB:
             if con.in_transaction:
                 raise sqlite3.OperationalError("a transaction is already open on this connection")
             prev = con.execute("PRAGMA secure_delete").fetchone()[0] if secure else None
+            failed: BaseException | None = None
             try:
                 if secure:
                     con.execute("PRAGMA secure_delete=ON")
@@ -203,9 +204,17 @@ class UserDB:
                 if secure and con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
                     if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
                         raise sqlite3.OperationalError("wal checkpoint busy: old pages may remain in the -wal file")
+            except BaseException as e:
+                failed = e
+                raise
             finally:
                 if secure:
-                    con.execute(f"PRAGMA secure_delete={int(prev)}")
+                    try:
+                        con.execute(f"PRAGMA secure_delete={int(prev)}")
+                    except sqlite3.Error as e:
+                        if failed is None:
+                            raise
+                        failed.add_note(f"restoring secure_delete also failed: {type(e).__name__}")   # never masks it
 
     def rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._lock:
