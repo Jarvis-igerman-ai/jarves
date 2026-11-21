@@ -159,3 +159,38 @@ def test_output_tail_redacts_home_and_user(tmp_path, monkeypatch):
             capture=fake_capture, clock=lambda: NOW)
     tail = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["output_tail"]
     assert tail == "log at ~/x.log by <user>; malice ok"
+
+
+def test_error_field_redacts_home_and_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(pid.Path, "home", classmethod(lambda cls: Path(r"C:\Users\alice")))
+    monkeypatch.setenv("USERNAME", "alice")
+
+    def broken(page, img, vid):
+        raise OSError(r"Executable doesn't exist at c:\users\alice\ms-playwright and C:/Users/alice/x; alice")
+    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=broken, clock=lambda: NOW)
+    err = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["error"]
+    assert "alice" not in err and r"at ~\ms-playwright and ~/x; <user>" in err
+
+
+@pytest.mark.parametrize("url,ok", [("http://127.0.0.1:8765/api/x?a=1", True), ("http://127.0.0.1:8765", True),
+                                    ("http://127.0.0.1:8766/", False), ("https://127.0.0.1:8765/", False),
+                                    ("http://localhost:8765/", False), ("http://evil.example/", False),
+                                    ("http://u@127.0.0.1:8765/", False), ("data:text/html,x", False),
+                                    ("http://127.0.0.1:99999/", False)])
+def test_browser_requests_pinned_to_checked_origin(url, ok):
+    assert pid.same_origin(url, pid.check_url("http://127.0.0.1:8765")) is ok
+    assert pid.same_origin("http://localhost/x", pid.check_url("http://localhost")) is True
+
+
+def test_jarvis_resolved_absolute_or_scenario_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(pid.shutil, "which", lambda exe: str(Path("jarvis.exe")))   # Windows current-folder hit
+    assert pid.resolve_jarvis("jarvis") is None
+    monkeypatch.setattr(pid.shutil, "which", lambda exe: str(tmp_path / "jarvis.cmd"))
+    assert pid.resolve_jarvis("jarvis") == str(tmp_path / "jarvis.cmd")
+    pid.run(tickets()[:1], tmp_path, run_scenario=pid.subprocess_runner(None), capture=fake_capture, clock=lambda: NOW)
+    assert "DEMO_JARVIS_NOT_FOUND" in json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["error"]
+
+
+def test_required_list_comes_from_flag(tmp_path):
+    assert pid.main(["metrics", "--demos", str(tmp_path), "--required", ""]) == 0
+    assert pid.main(["metrics", "--demos", str(tmp_path), "--required", "JAR-5"]) == 1

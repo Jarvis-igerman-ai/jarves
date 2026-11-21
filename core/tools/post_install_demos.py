@@ -2,13 +2,14 @@
 that has no demo yet, record PASS/FAIL and save a screenshot, a short video and a one-line caption to <data>/demos.
 
     python core/tools/post_install_demos.py run --tickets FILE [--demos DIR] [--jarvis EXE] [--dashboard-url URL]
-    python core/tools/post_install_demos.py metrics [--demos DIR]
+    python core/tools/post_install_demos.py metrics [--demos DIR] [--required JAR-1,JAR-2]
 
 FILE is a JSON list of {"ticket", "merged", "user_facing", "argv", "page", "caption"}. `argv` is passed to the installed
 `jarvis` program without a shell and only when it equals one of the whole argv lists in ALLOWED (else refused, never
-run). The dashboard URL must be loopback; a ticket stays pending (retried next pass) until it has a PASS demo.
+run). `--jarvis` is resolved to an absolute path (never the current folder). The browser may only load the checked loopback
+origin: every other request is aborted and a redirect off it is a FAIL. A ticket stays pending (retried next pass) until it has a PASS demo.
 Each demo is <demos>/<ticket>/demo.json (written atomically) plus demo.png and demo.webm (Playwright, headless).
-`metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the REQUIRED tickets missing.
+`metrics` prints demos_24h, with_image, with_video, scenario_pass_pct (null = unknown) and the --required tickets missing.
 """
 from __future__ import annotations
 
@@ -22,14 +23,17 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
-REQUIRED = ("JAR-188", "JAR-189", "JAR-191", "JAR-193", "JAR-210", "JAR-214")
+REQUIRED = (  # default for --required (this ticket's acceptance list)
+    "JAR-188", "JAR-189", "JAR-191", "JAR-193", "JAR-210", "JAR-214")
 ALLOWED = {("status",), ("doctor",), ("selftest",), ("version",), ("features",), ("guides",), ("help",)}
 # whole-URL allowlist: no userinfo, backslash, whitespace, path, query or fragment (Chromium parses those differently)
 URL_RE = re.compile(r"(https?)://(127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?/?")
 PAGE_RE = re.compile(r"/(?!/)[A-Za-z0-9/_.\-?=&#]*")
 TICKET_RE = re.compile(r"[A-Z]+-\d+")
 DAY_S = 86400
+DEFAULT_PORT = {"http": 80, "https": 443}
 
 
 def load_tickets(path: Path) -> list[dict]:
@@ -57,10 +61,22 @@ def check_url(url: str) -> str:
     return f"{scheme}://{host}" + (f":{int(port)}" if port else "")
 
 
+def same_origin(url: str, base: str) -> bool:
+    """True only when url has the scheme, host and port of the checked base and no userinfo."""
+    try:
+        u, b = urlsplit(str(url)), urlsplit(base)
+        return (not u.username and u.scheme == b.scheme and u.hostname == b.hostname
+                and (u.port or DEFAULT_PORT.get(u.scheme)) == (b.port or DEFAULT_PORT[b.scheme]))
+    except ValueError:
+        return False
+
+
 def redact(text: str) -> str:
-    """Hide the home folder and user name in saved scenario output (data/demos may be shared as evidence)."""
+    """Hide the home folder and user name in saved output and errors (data/demos may be shared as evidence)."""
     home = str(Path.home())
-    text = text.replace(home, "~") if len(home) > 1 else text
+    if len(home) > 1:
+        for form in {home, home.replace("\\", "/"), home.replace("/", "\\")}:
+            text = re.sub(re.escape(form), "~", text, flags=re.IGNORECASE)
     user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
     return re.sub(rf"\b{re.escape(user)}\b", "<user>", text) if len(user) > 2 else text
 
@@ -107,7 +123,7 @@ def record(row: dict, demos: Path, run_scenario, capture, clock=time.time) -> di
         rec["video"] = vid.name if vid.is_file() else None
         rec["result"] = "PASS" if code == 0 and rec["image"] and rec["video"] else "FAIL"
     except Exception as e:  # noqa: BLE001 - any scenario/browser error (ImportError, Playwright Error) is a FAIL record
-        rec["error"] = f"{type(e).__name__}: {e}"[:300]
+        rec["error"] = redact(f"{type(e).__name__}: {e}")[:300]
     _write_json(d / "demo.json", rec)
     return rec
 
@@ -122,7 +138,7 @@ def run(rows: list[dict], demos: Path, run_scenario, capture, clock=time.time) -
     return done
 
 
-def metrics(demos: Path, now: float | None = None) -> dict:
+def metrics(demos: Path, now: float | None = None, required=REQUIRED) -> dict:
     now = time.time() if now is None else now
     recs = []
     for p in sorted(Path(demos).glob("*/demo.json")):
@@ -136,11 +152,19 @@ def metrics(demos: Path, now: float | None = None) -> dict:
     return {"demos_24h": len(recs), "with_image": sum(bool(r.get("image")) for r in recs),
             "with_video": sum(bool(r.get("video")) for r in recs),
             "scenario_pass_pct": round(passed / len(recs) * 100, 1) if recs else None,
-            "missing": [t for t in REQUIRED if not has_demo(demos, t)]}
+            "missing": [t for t in required if not has_demo(demos, t)]}
 
 
-def subprocess_runner(exe: str):
+def resolve_jarvis(exe: str) -> str | None:
+    """Absolute path of the jarvis program, or None. A relative hit (the Windows current folder) is refused."""
+    found = shutil.which(exe)
+    return found if found and os.path.isabs(found) else None
+
+
+def subprocess_runner(exe: str | None):
     def go(argv: list[str]) -> tuple[int, str]:
+        if not exe:
+            raise ValueError("DEMO_JARVIS_NOT_FOUND: no absolute jarvis program on PATH or --jarvis")
         p = subprocess.run([exe, *argv], capture_output=True, text=True, timeout=180, check=False)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     return go
@@ -156,8 +180,11 @@ def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and
             try:
                 ctx = b.new_context(record_video_dir=tmp, viewport={"width": 1280, "height": 720})
                 try:
+                    ctx.route("**/*", lambda r: r.continue_() if same_origin(r.request.url, base) else r.abort())
                     page = ctx.new_page()
                     page.goto(base + page_path, wait_until="networkidle", timeout=30000)
+                    if not same_origin(page.url, base):
+                        raise ValueError(f"DEMO_URL_REFUSED: navigated off {base}")
                     page.wait_for_timeout(3000)
                     page.screenshot(path=str(img))
                     video = page.video
@@ -176,7 +203,9 @@ def main(argv=None) -> int:
     ap.add_argument("--demos", type=Path, default=Path("data") / "demos")
     ap.add_argument("--jarvis", default="jarvis")
     ap.add_argument("--dashboard-url", default="http://127.0.0.1:8765")
+    ap.add_argument("--required", default=",".join(REQUIRED), help="comma-separated tickets that must have a demo")
     a = ap.parse_args(argv)
+    required = [t for t in a.required.split(",") if TICKET_RE.fullmatch(t.strip())]
     if a.cmd == "run":
         if not a.tickets:
             ap.error("run needs --tickets")
@@ -191,9 +220,11 @@ def main(argv=None) -> int:
             print(e, file=sys.stderr)
             return 2
         a.demos.mkdir(parents=True, exist_ok=True)
-        done = run(rows, a.demos, subprocess_runner(a.jarvis), capture)
+        exe = resolve_jarvis(a.jarvis)
+        print(f"jarvis: {redact(exe) if exe else 'NOT FOUND'}", file=sys.stderr)
+        done = run(rows, a.demos, subprocess_runner(exe), capture)
         print(f"recorded {len(done)} demo(s): {', '.join(done) or '-'}")
-    m = metrics(a.demos)
+    m = metrics(a.demos, required=[t.strip() for t in required])
     print(json.dumps(m))
     return 0 if not m["missing"] else 1   # PASS state of the listed tickets, not the 24 h window
 
