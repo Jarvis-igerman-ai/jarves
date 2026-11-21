@@ -78,7 +78,7 @@ _UNTRUSTED = ("local", "worktree")      # the shared .git/config (+ includes) an
 
 def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[str] | subprocess.CompletedProcess:
     """`-c` pairs that neutralise every command the repository's own config names (#1407); the owner's global/system
-    config is kept. A filter driver gets no command and is not required (the file is used as it is), a merge driver
+    config is kept, also for a repository copy of the same key. A filter driver gets no command and is not required (the file is used as it is), a merge driver
     `exit 1` (always a conflict, never a silent result), a config-defined hook `exit 0`; signing programs always come
     from the owner's scope (else the git default). A failed read is returned as is (the caller fails closed)."""
     p = subprocess.run(["git", *pre, "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
@@ -92,7 +92,7 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
     for scope, entry in zip(items[0::2], items[1::2]):
         key, _, value = entry.partition("\n")
         if scope not in _UNTRUSTED:
-            if key in _SIGN:
+            if key in _SIGN or _DRIVER.match(key) or key.endswith(".required"):
                 owner[key] = value
                 if key in ("gpg.program", "gpg.openpgp.program"):
                     owner["pgp"] = value                # the last of the two wins, as in git
@@ -100,11 +100,11 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
         m = _DRIVER.match(key)
         if m and "=" in key:                    # `-c` would split the key there: refuse, never half-apply
             return subprocess.CompletedProcess(p.args, 128, "", f"refusing the config key {key!r} (#1407)")
-        if m and m.group(1) == "filter":
-            out[key] = ""
-            out[f"filter.{m.group(2)}.required"] = "false"
+        if m and m.group(1) == "filter":        # a repository copy of an owner key keeps the owner's value
+            req = f"filter.{m.group(2)}.required"
+            out[key], out[req] = owner.get(key, ""), owner.get(req, "false") if key in owner else "false"
         elif m:
-            out[key] = "exit 1" if m.group(1) == "merge" else "exit 0"
+            out[key] = owner.get(key) or ("exit 1" if m.group(1) == "merge" else "exit 0")
         elif key in _SIGN:
             out.update({k: "" for k in _SIGN})
     if "gpg.program" in out:                    # git reads gpg.program and gpg.openpgp.program into one setting
@@ -151,6 +151,11 @@ def is_repo(path: str) -> bool:
 
 def current_branch(path: str) -> str:
     return git(path, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+
+def commit_of(path: str | Path, ref: str) -> str:
+    """The full commit `ref` names now (#1407): owner text and approvals name this, never a branch that can move."""
+    return git(path, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").stdout.strip()
 
 
 def project_root(home: Path, pid: int) -> Path:

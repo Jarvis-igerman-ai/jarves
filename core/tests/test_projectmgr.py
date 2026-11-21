@@ -1252,3 +1252,61 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+
+
+def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
+    """#1407 items 1-2: the ship prompt and commands name the integration commit, and a branch moved during the
+    approval prompt is not merged (the approved commit is)."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    sha = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == sha and all(sha in c for c in plan["commands"][:2])
+    seen = []
+
+    def ask(prompt, *a, **k):
+        seen.append(prompt)
+        integ = gitops.project_root(home, 1) / "integration"
+        (integ / "late.txt").write_text("late\n")
+        gitops.commit_all(integ, "late")                       # the branch moves after the owner saw the prompt
+        return True
+    m._ask = ask
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and r["commit"] == sha and sha[:12] in seen[0], (r, seen)
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
+def test_owner_review_and_merge_text_name_commits(env):
+    """#1407 item 1: the owner's review command and merge approval name commits, not the integration branch."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "work"}, {"kind": "review", "by": "owner"}, {"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    base = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()[:12]
+    head = sh(t["worktree"], "git", "rev-parse", "HEAD").strip()[:12]
+    assert t["status"] == "waiting" and f"diff {base}...{head}" in t["waiting"], t["waiting"]
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert f"(commit {head})" in t["waiting"] and gitops.integration_branch(1) in t["waiting"], t["waiting"]
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    assert any(f"merged commit {head}" in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_ship_plan_reports_an_unresolvable_commit_as_git_error(env, monkeypatch):
+    """#1407: without a commit to name, ship neither shows a branch-only plan nor asks to merge."""
+    m, repo, _ = env
+    open_project(m, repo)
+
+    def boom(*a):
+        raise gitops.GitError("bad ref")
+    monkeypatch.setattr(gitops, "commit_of", boom)
+    assert m.call("ship_plan", project="demo")["code"] == "GIT_ERROR"
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "GIT_ERROR"
