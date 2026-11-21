@@ -86,27 +86,43 @@ def _cli(tmp_path, files, *extra):
     return dict(x.split("=", 1) for x in r.stdout.splitlines() if not x.startswith("plan=")), r.stderr
 
 
-def test_jar624_pr_on_a_stale_merge_base_still_gets_the_current_base_installer_rule(tmp_path, monkeypatch):
-    """JAR-624: GitHub tested #1424 on a stale merge commit (base eadd904, before JAR-584), so the classifier was the
-    old one and the installer job was 'skipped'. The PR run also applies the CURRENT base branch's PR_INSTALLER, read
-    from that file without executing it; it can only add the installer job, never remove one."""
+_JAR624_FILES = ["core/src/jarves/auto_update.py", "core/tests/test_auto_update.py"]
+
+
+def test_jar624_stale_checked_out_rule_alone_skips_but_the_base_rule_adds_the_installer(monkeypatch):
+    """JAR-624: GitHub tested #1424 on a stale merge commit (base eadd904, before JAR-584): the old classifier skipped
+    the installer. The current base branch's PR_INSTALLER, ORed in, adds it back."""
+    current = ci_plan.PR_INSTALLER
+    monkeypatch.setattr(ci_plan, "PR_INSTALLER", "^(packaging/|godot/)")          # the stale checked-out classifier
+    assert not ci_plan.classify(_JAR624_FILES, "pull_request")["installer"]          # what #1424 got: 'skipped'
+    assert ci_plan.classify(_JAR624_FILES, "pull_request", extra_installer_rule=current)["installer"]
+
+
+def test_jar624_base_rule_is_read_without_executing_and_the_cli_applies_it(tmp_path):
     base = tmp_path / "base_ci_plan.py"
     base.write_text(ci_plan.Path(ci_plan.__file__).read_text(encoding="utf-8"), encoding="utf-8")
     assert ci_plan.base_pr_installer(base) == ci_plan.PR_INSTALLER
-    files = ["core/src/jarves/auto_update.py", "core/tests/test_auto_update.py"]
-    current = ci_plan.PR_INSTALLER
-    monkeypatch.setattr(ci_plan, "PR_INSTALLER", "^(packaging/|godot/)")          # the stale checked-out classifier
-    assert not ci_plan.classify(files, "pull_request")["installer"]                 # what #1424 got: 'skipped'
-    assert ci_plan.classify(files, "pull_request", extra_installer_rule=current)["installer"]
-    monkeypatch.setattr(ci_plan, "PR_INSTALLER", current)
-    flags, _ = _cli(tmp_path, files, "--base-rules-from", str(base))
-    assert flags["installer"] == "true"
-    for f, kw in ((["core/src/jarves/cli.py"], {}), (files, {"draft": True})):        # no widening; a draft stays fast
-        assert not ci_plan.classify(f, "pull_request", extra_installer_rule=ci_plan.PR_INSTALLER, **kw)["installer"]
     old = tmp_path / "old_ci_plan.py"
     old.write_text(_STALE_PLAN, encoding="utf-8")
-    assert ci_plan.classify(["packaging/x.ps1"], "pull_request", extra_installer_rule=ci_plan.base_pr_installer(old))["installer"]
-    assert ci_plan.classify(files, "merge_group", extra_installer_rule="^$")["installer"]       # group rule unchanged
+    assert ci_plan.base_pr_installer(old) == "^(packaging/|godot/)"
+    flags, err = _cli(tmp_path, _JAR624_FILES, "--base-rules-from", str(base))
+    assert flags["installer"] == "true" and "CI_PLAN_BASE_RULE_UNAVAILABLE" not in err
+
+
+def test_jar624_base_rule_does_not_widen_ordinary_core_prs():
+    assert not ci_plan.classify(["core/src/jarves/cli.py"], "pull_request",
+                                extra_installer_rule=ci_plan.PR_INSTALLER)["installer"]
+
+
+def test_jar624_draft_pr_stays_fast_with_the_base_rule():
+    assert not ci_plan.classify(_JAR624_FILES, "pull_request", draft=True,
+                                extra_installer_rule=ci_plan.PR_INSTALLER)["installer"]
+
+
+def test_jar624_merge_group_ignores_the_base_rule():
+    assert ci_plan.classify(_JAR624_FILES, "merge_group", extra_installer_rule="^$")["installer"]       # RULES unchanged
+    assert not ci_plan.classify(["core/tests/test_x.py"], "merge_group",
+                                extra_installer_rule=ci_plan.PR_INSTALLER)["installer"]
 
 
 @pytest.mark.parametrize("text", ["", "PR_INSTALLER = ''\n", "PR_INSTALLER = 3\n", "PR_INSTALLER = f(x)\n", "PR_INSTALLER = '('\n", "def (:\n"])
@@ -818,4 +834,3 @@ def test_root_md_and_glob_read_docs_are_not_docs_only(tmp_path):
     assert got == {"CHANGELOG.md", "docs/reviews/BUG_TABLE_V50.md"}
     assert ci_plan.classify(["CHANGELOG.md"])["code"]               # real repo: test_manual_test_sheet reads it
     assert ci_plan.classify(["docs/reviews/BUG_TABLE_V50_2026-10-25.md"])["code"]
-

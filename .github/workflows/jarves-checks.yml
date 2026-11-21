@@ -146,8 +146,8 @@ jobs:
             # read via the API, not a fetch: the clone's refs and shallow state (the HEAD^1..HEAD file list) stay untouched
             if gh api "repos/$GITHUB_REPOSITORY/contents/core/tools/ci_plan.py?ref=$BASE_REF" \
                -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/base_ci_plan.py"; then
-              args+=(--base-rules-from "$RUNNER_TEMP/base_ci_plan.py")
-            else echo "CI_PLAN_BASE_RULE_UNAVAILABLE: origin/$BASE_REF not readable; using the checked-out rule"; fi
+              args+=(--base-rules-from "$RUNNER_TEMP/base_ci_plan.py"); echo "installer rule: also the $BASE_REF base branch's (via API)"
+            else echo "::warning::CI_PLAN_BASE_RULE_UNAVAILABLE: $BASE_REF base branch ci_plan.py not readable via API; using the checked-out rule"; fi
           fi
           draft=false; [ "$DRAFT" = "true" ] && { draft=true; args+=(--draft); echo "draft PR: fast checks only (mark it ready for the full run)"; }
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out

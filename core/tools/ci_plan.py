@@ -71,7 +71,7 @@ def base_pr_installer(path: Path) -> str | None:
         re.compile(rule)
         return rule
     except (OSError, UnicodeDecodeError, SyntaxError, ValueError, TypeError, StopIteration, re.error) as e:
-        print(f"CI_PLAN_BASE_RULE_UNAVAILABLE {path}: {type(e).__name__}; using the checked-out rule", file=sys.stderr)
+        print(f"::warning::CI_PLAN_BASE_RULE_UNAVAILABLE {path}: {type(e).__name__}; using the checked-out rule", file=sys.stderr)
         return None
 
 
