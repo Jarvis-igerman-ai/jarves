@@ -101,12 +101,11 @@
     const msg = msgSpan();
     msg.textContent = prefNote; prefNote = "";
     const op = (id, o, extra) => act(msg, () => post("/api/prefs/op", Object.assign({ op: o, id: id }, extra || {})));
-    const confirmIt = (p) => post("/api/prefs/op", { op: "confirm", id: p.id, updated: p.updated }).then(() => route(true), (e) => {
-      if (e.code !== "PREF_CHANGED") { msg.textContent = tx("נכשל: ", "Failed: ") + JL.t(e.message); return; }
-      prefNote = tx("ההעדפה השתנתה מאז שהוצגה. זה הנוסח החדש: אשרו שוב אם הוא נכון.",
-        "This preference changed since it was shown. Here is the new wording: confirm again if it is right.");
-      route(true);
-    });
+    // #1514: through act() like every button; a changed wording is not a failure: act() reloads and the note explains
+    const confirmIt = (p) => act(msg, () => post("/api/prefs/op", { op: "confirm", id: p.id, updated: p.updated }).catch((e) => {
+      if (e.code !== "PREF_CHANGED") throw e;
+      prefNote = JL.t("This preference changed since it was shown. Here is the new wording: confirm again if it is right.");
+    }));
     const text = el("input", { type: "text", dir: "auto", maxlength: "200", style: "min-width:260px;flex:1", "aria-label": tx("העדפה חדשה", "New preference"),
       placeholder: tx("העדפה שתרצה שאזכור", "A preference you want remembered") });
     const topic = el("select", { "aria-label": tx("נושא", "Topic") }, d.topics.map((t) => el("option", { value: t }, topicText(t))));
