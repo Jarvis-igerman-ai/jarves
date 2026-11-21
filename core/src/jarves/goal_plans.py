@@ -111,7 +111,7 @@ class PlanStore:
                 logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
                 return -1
         if n:
-            logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", rows=n)
+            logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
         return n
 
     # ------------------------------------------------------------------ reading

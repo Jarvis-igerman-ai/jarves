@@ -43,9 +43,12 @@ async def test_1526_a_new_runner_with_privacy_on_scrubs_at_start_and_privacy_off
         await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()   # restart, privacy still off
         assert any("secret words" in t for t in _texts(e.db))
 
+        infos = []
+        monkeypatch.setattr(logs, "info", lambda _c, code, *_a, **k: infos.append((code, k)))
         monkeypatch.setattr(logs, "_privacy", True)               # the Core starts with privacy on
         await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()
         assert _texts(e.db) == []
+        assert ("PLAN_PRIVACY_SCRUBBED", {"count": 2}) in infos  # one step row and one plan row, no text in the log
         assert e.store.scrub_private() == 0                       # nothing left: idempotent, no rewrite
     finally:
         e.db.close()
