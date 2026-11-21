@@ -20,7 +20,7 @@ APP = (b"<html><body><img src='a.png'><script>fetch('/seen?' + location.pathname
 
 def _server(host, routes, log):
     class H(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
+        def do_GET(self):
             log.append(self.path)
             status, headers, body = routes(self.path)
             self.send_response(status)
@@ -41,8 +41,8 @@ def sites():
     evil_log, dash_log = [], []
     evil = _server("localhost", lambda p: (200, {"Content-Type": "text/plain"}, b"evil"), evil_log)
     ep = evil.server_address[1]
-    redirects = {"/": "/app/", "/bs": "/\\localhost:%d/x" % ep, "/chain": "/hop2", "/hop2": "http://localhost:%d/y" % ep,
-                 "/off": "http://localhost:%d/z" % ep}
+    redirects = {"/": "/app/", "/bs": f"/\\localhost:{ep}/x", "/chain": "/hop2", "/hop2": f"http://localhost:{ep}/y",
+                 "/off": f"http://localhost:{ep}/z"}
 
     def dash_routes(p):
         if p in redirects:
