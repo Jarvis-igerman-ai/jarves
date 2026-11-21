@@ -74,7 +74,10 @@ NO_HOOKS = _no_hooks_path()
 # default>`: "" turns a filter off, ":" is git's no-op editor, the rest are git's own defaults.
 _CMD_KEYS = {"core.sshcommand": "ssh", "core.editor": ":", "sequence.editor": ":", "core.pager": "", "core.askpass": "",
              "credential.helper": "", "gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+             "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": "",
+             # fetch runs it with the shell when objects/info/alternates exists (blank would run the path); this is
+             # git's own built-in listing, the trailing `#` drops the `"$@"` git appends
+             "core.alternaterefscommand": "git --git-dir=\"$1\" for-each-ref --format='%(objectname)' #"}
 _CMD_SUB = {("filter", "clean"): "", ("filter", "smudge"): "", ("filter", "process"): "", ("hook", "command"): "",
             ("credential", "helper"): "", ("merge", "driver"): "git merge-file --marker-size=%L %A %O %B",
             ("trailer", "cmd"): "", ("trailer", "command"): ""}
@@ -86,10 +89,27 @@ _ALIAS = {"gpg.openpgp.program": "gpg.program"}         # git reads both keys in
 # diff.external, diff.<x>.command and diff.<x>.textconv: every diff/show/log/blame gets --no-ext-diff/--no-textconv.
 # git takes the FIRST `remote.<x>.receivepack`/`uploadpack`, so `-c` cannot replace them: a push, fetch, pull or
 # ls-remote names git's own program instead. blame runs textconv by default too.
-_UPLOAD = ("--upload-pack=git-upload-pack",)
-_ARG_FIXES = {"diff": ("--no-ext-diff", "--no-textconv"), "show": ("--no-ext-diff", "--no-textconv"),
-              "log": ("--no-ext-diff", "--no-textconv"), "push": ("--receive-pack=git-receive-pack",),
-              "blame": ("--no-textconv",), "fetch": _UPLOAD, "pull": _UPLOAD, "ls-remote": _UPLOAD}
+# Submodules: a git child inside a submodule reads that submodule's own config (`.git/modules/<x>/config` or an
+# embedded `.git`), which the overrides above do not cover. So JARVES never recurses: `submodule.recurse` and the
+# fetch/push defaults are off (`-c`, last value wins), and the per-submodule keys that override those defaults
+# (`submodule.<x>.fetchRecurseSubmodules`, `submodule.<x>.ignore`) lose to the command-line flags below; status and
+# diff never look inside a submodule's work tree, and diff never runs an inline submodule diff.
+_NO_RECURSE = ["-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c",
+               "push.recurseSubmodules=no", "-c", "status.submoduleSummary=false"]
+_UPLOAD = ("--upload-pack=git-upload-pack", "--no-recurse-submodules")
+_NO_EXT = ("--no-ext-diff", "--no-textconv", "--submodule=short")
+_ARG_FIXES = {"diff": (*_NO_EXT, "--ignore-submodules=dirty"), "show": _NO_EXT, "log": _NO_EXT,
+              "push": ("--receive-pack=git-receive-pack", "--recurse-submodules=no"),
+              "status": ("--ignore-submodules=dirty",), "blame": ("--no-textconv",), "fetch": _UPLOAD,
+              "pull": _UPLOAD, "ls-remote": ("--upload-pack=git-upload-pack",)}
+# The closed list of subcommands git() runs (#1390 review): the flags above are proven for these only, so other
+# porcelain that runs external diffs or textconv (`stash show -p`, `format-patch`, `range-diff`, `whatchanged`) is
+# refused instead of being run without them. `stash` is allowed only as `stash create`.
+_SUBCOMMANDS = frozenset({"add", "blame", "branch", "checkout", "commit", "config", "credential", "diff", "fetch",
+                          "init", "log", "ls-remote", "merge", "merge-base", "mv", "pull", "push", "remote",
+                          "rev-list", "rev-parse", "show", "stash create", "status", "update-index", "worktree"})
+# subcommands that write file content into objects or the work tree: a switched-off required filter matters there
+_CONTENT = frozenset({"add", "checkout", "commit", "merge", "pull", "stash create", "update-index", "worktree"})
 # GIT_ALLOW_PROTOCOL replaces every `protocol.*.allow` setting: only https and ssh (the forge's GitHub push). A
 # remote, pushurl or `insteadOf`/`pushInsteadOf` from the shared config can then never point a push at a local
 # repository (whose receive-pack runs ITS hooks, the -c overrides do not reach it), an ext:: command or a
@@ -110,9 +130,10 @@ def _cmd_default(key: str) -> str | None:
     return _CMD_SUB.get((sec, var)) if sub else None
 
 
-def _config_overrides(cwd: str | Path) -> list[str]:
+def _config_overrides(cwd: str | Path, content: bool = True) -> list[str]:
     """`-c` pairs that replace every command-naming key set at local/worktree scope (included files count). An
-    unreadable config raises GitError even for check=False callers, so it never reads as empty output."""
+    unreadable config raises GitError even for check=False callers, so it never reads as empty output.
+    content=False: a read-only call (status, diff, rev-parse...) still runs when a required filter is switched off."""
     p = subprocess.run(["git", "config", "--list", "--show-scope", "--includes", "-z"], cwd=str(cwd),
                        capture_output=True, text=True, timeout=30, creationflags=_NOWIN, encoding="utf-8",
                        errors="replace", env=child_env(_ENV))
@@ -150,7 +171,7 @@ def _config_overrides(cwd: str | Path) -> list[str]:
         if key.startswith("hook.") and not value:        # newer git: a config hook can also be switched off by name
             pre += ["-c", key.rsplit(".", 1)[0] + ".enabled=false"]
         name = key.rsplit(".", 1)[0]
-        if key.startswith("filter.") and not value and name in required:     # never commit unfiltered content
+        if content and key.startswith("filter.") and not value and name in required:     # never commit unfiltered content
             raise GitError(f"refusing to run with {name} switched off: the repository's own config marks it required"
                            " (e.g. git lfs install --local); set that filter in your global git config")
     return pre
@@ -166,13 +187,17 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. No other command named in the shared config runs either (#1390): filters,
     merge drivers, ssh/editor/pager/askpass/credential/gpg programs and config hooks are overridden by
     `_config_overrides`; external diff and textconv are off, a push/fetch runs git's own pack programs, only the
-    https and ssh transports are allowed, core.gitProxy is off. `args` must start with the subcommand, so the flags
-    above land in the right place.
+    https and ssh transports are allowed, core.gitProxy is off, nothing recurses into a submodule (whose own config
+    the overrides do not cover). `args` must start with a subcommand from `_SUBCOMMANDS`, so the flags above land in
+    the right place.
     `stdin`: text for git's standard input (e.g. `credential fill`)."""
     if not args or args[0].startswith("-"):
         raise GitError("git() takes the subcommand first, not a global option")
+    sub = " ".join(args[:2]) if args[0] == "stash" else args[0]
+    if sub not in _SUBCOMMANDS:
+        raise GitError(f"git() does not run '{sub[:40]}': not on the reviewed subcommand list")
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           *_config_overrides(cwd)]
+           *_NO_RECURSE, *_config_overrides(cwd, content=sub in _CONTENT)]
     if args[0] in _ARG_FIXES:
         args = (args[0], *_ARG_FIXES[args[0]], *args[1:])
     for attempt in range(LOCK_RETRIES + 1):

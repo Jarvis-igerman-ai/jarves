@@ -35,7 +35,7 @@ LOCK = "fatal: Unable to create 'C:/r/.git/index.lock': File exists."
 
 def test_a_held_lock_file_is_retried_then_succeeds(monkeypatch, tmp_path):
     calls: list = []
-    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd, **kw: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, LOCK), (128, LOCK), (0, "")], calls))
     monkeypatch.setattr(gitops.time, "sleep", lambda s: None)
     assert gitops.git(tmp_path, "status").returncode == 0 and len(calls) == 3
@@ -43,7 +43,7 @@ def test_a_held_lock_file_is_retried_then_succeeds(monkeypatch, tmp_path):
 
 def test_a_lock_that_never_clears_fails_after_the_retries(monkeypatch, tmp_path):
     calls: list = []
-    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd, **kw: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, LOCK)], calls))
     monkeypatch.setattr(gitops.time, "sleep", lambda s: None)
     with pytest.raises(gitops.GitError):
@@ -53,7 +53,7 @@ def test_a_lock_that_never_clears_fails_after_the_retries(monkeypatch, tmp_path)
 
 def test_other_failures_are_never_retried(monkeypatch, tmp_path):
     calls: list = []
-    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd, **kw: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(128, "fatal: not a git repository")], calls))
     with pytest.raises(gitops.GitError):
         gitops.git(tmp_path, "status")
@@ -251,7 +251,7 @@ def test_the_hooks_path_can_never_become_a_folder_an_agent_fills():
 def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
     """#1381 review R3: the one `git()` helper puts both overrides in front of every command, with either identity."""
     calls: list = []
-    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd, **kw: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     gitops.git(tmp_path, "merge", "x")
     gitops.git(tmp_path, "merge", "x", ident=False)
@@ -365,7 +365,7 @@ def test_shared_config_push_targets_and_commands_never_run(tmp_path, owner_home)
 def test_fetch_pull_and_ls_remote_name_gits_own_upload_pack(monkeypatch, tmp_path):
     """#1390 review R2: git takes the first `remote.<x>.uploadpack`, so these name git's own program."""
     calls: list = []
-    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd: [])
+    monkeypatch.setattr(gitops, "_config_overrides", lambda cwd, **kw: [])
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls))
     for sub in ("fetch", "pull", "ls-remote"):
         gitops.git(tmp_path, sub, "origin")
@@ -378,10 +378,79 @@ def test_a_repository_only_required_filter_stops_the_call(tmp_path, owner_home):
     commit unfiltered content into the owner's branch; JARVES stops instead and names the fix."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     _set(repo, "filter.lfs.clean", _cmd(marker), "filter.lfs.required", "true")
+    (repo / "a.bin").write_text("x", encoding="utf-8")
+    assert gitops.is_repo(str(repo)) and gitops.git(repo, "status").returncode == 0     # review R5: reads still run
     with pytest.raises(gitops.GitError, match="global git config"):
-        gitops.git(repo, "status", check=False)
+        gitops.git(repo, "add", "-A", check=False)
     _set(repo, "filter.lfs.required", "false")                 # a later false wins, as in git
-    assert gitops.git(repo, "status").returncode == 0 and not marker.exists()
+    assert gitops.git(repo, "add", "-A").returncode == 0 and not marker.exists()
+
+
+def _ssh_shim(tmp_path: Path, owner_home: Path) -> str:
+    """The owner's global sshCommand: runs the remote command (git-upload-pack) on this machine, so a real ssh
+    fetch happens without a network."""
+    shim = tmp_path / "bin" / "ssh-shim"
+    shim.parent.mkdir(exist_ok=True)
+    shim.write_text('#!/bin/sh\nfor a; do :; done\nexec sh -c "$a"\n', encoding="utf-8")
+    shim.chmod(0o755)
+    (owner_home / ".gitconfig").write_text(f'[core]\n\tsshCommand = "{shim.as_posix()}"\n', encoding="utf-8")
+    return f"ssh://localhost{(tmp_path / 'up.git').as_posix()}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the ssh shim is a POSIX shell script")
+def test_a_shared_alternate_refs_command_never_runs_on_a_fetch(tmp_path, owner_home):
+    """#1390 review R1: with `objects/info/alternates` present, fetch runs `core.alternateRefsCommand` with the
+    shell. JARVES runs git's own listing instead and the fetch still works."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    url = _ssh_shim(tmp_path, owner_home)
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(tmp_path / "up.git")], check=True)
+    (tmp_path / "other").mkdir()
+    other = _repo(tmp_path / "other")
+    (repo / ".git" / "objects" / "info" / "alternates").write_text(
+        (other / ".git" / "objects").as_posix() + "\n", encoding="utf-8")
+    _set(repo, "core.alternateRefsCommand", _cmd(marker, "true"), "remote.up.url", url)
+    gitops.git(repo, "fetch", "up")
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the ssh shim is a POSIX shell script")
+def test_nothing_recurses_into_a_submodule_whose_own_config_names_commands(tmp_path, owner_home):
+    """#1390 review R2: a git child inside a submodule reads the submodule's own config, which the overrides do not
+    cover. `submodule.recurse`, fetch's on-demand default and a per-submodule `fetchRecurseSubmodules`/`ignore` would
+    start such children on checkout, fetch, status and diff; JARVES never recurses."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (tmp_path / "subsrc").mkdir()
+    sub = _repo(tmp_path / "subsrc")
+    (sub / ".gitattributes").write_text("*.txt filter=evil diff=evil\n", encoding="utf-8")
+    gitops.commit_all(sub, "attrs")
+    subprocess.run(["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "s"],
+                   cwd=repo, check=True, capture_output=True)
+    gitops.commit_all(repo, "submodule")
+    url = _ssh_shim(tmp_path, owner_home)
+    subprocess.run(["git", "clone", "-q", "--bare", str(repo), str(tmp_path / "up.git")], check=True)
+    mod = repo / ".git" / "modules" / "s"
+    for k, v in (("filter.evil.clean", _cmd(marker)), ("filter.evil.smudge", _cmd(marker)),
+                 ("diff.evil.textconv", _cmd(marker)), ("core.sshCommand", _cmd(marker, "false")),
+                 ("core.fsmonitor", "false"), ("remote.origin.url", url)):
+        subprocess.run(["git", "--git-dir", str(mod), "config", k, v], check=True)
+    _set(repo, "submodule.recurse", "true", "submodule.s.fetchRecurseSubmodules", "true",
+         "submodule.s.ignore", "none", "diff.submodule", "diff", "remote.up.url", url)
+    (repo / "s" / "f.txt").write_text("dirty\n", encoding="utf-8")      # stat-dirty: a status child would clean it
+    gitops.git(repo, "status", "--porcelain")
+    gitops.git(repo, "diff", "--name-only")
+    assert not marker.exists(), "status/diff"
+    gitops.git(repo, "diff", "HEAD~1", "HEAD")
+    gitops.ensure_integration(tmp_path / "home", str(repo), 1)
+    assert not marker.exists(), "checkout"
+    gitops.git(repo, "fetch", "up", check=False)
+    assert not marker.exists(), "fetch"
+
+
+def test_git_runs_only_the_reviewed_subcommands(tmp_path):
+    """#1390 review R3: porcelain that produces diffs without the flags above is refused, not run."""
+    for argv in (("stash", "show", "-p"), ("format-patch", "-1"), ("range-diff", "a...b"), ("whatchanged",)):
+        with pytest.raises(gitops.GitError, match="reviewed subcommand list"):
+            gitops.git(tmp_path, *argv, check=False)
 
 
 def test_a_shared_credential_helper_never_runs_beside_the_owners(tmp_path, owner_home):
