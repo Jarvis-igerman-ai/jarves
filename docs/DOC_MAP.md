@@ -204,6 +204,7 @@ Reports and bug tables are evidence of a past run, not instructions. A package's
 | V4 campaign | [bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE.md), [voice bug table](reviews/SWV4_CAMPAIGN_BUG_TABLE_VOICE.md), [features](reviews/SWV4_CAMPAIGN_FEATURES.md), [voice](reviews/SWV4_CAMPAIGN_VOICE.md) |
 | V5 | [acceptance sheet](reviews/SWV5_ACCEPTANCE.md), [security review](reviews/SWV5_SECURITY_REVIEW.md), [V5 pillars security review](reviews/V5_SECURITY_REVIEW_PILLARS_2026-10-25.md), [5.0 bug table](reviews/BUG_TABLE_V50_2026-10-25.md) |
 | V6 | [V6 security and privacy review](reviews/V6_SECURITY_REVIEW_2026-10-25.md), [6.0 bug table](reviews/BUG_TABLE_V60_2026-10-25.md) |
+| Backlog T11 security review | [goal plans, continuity, devstatus, projectmgr, preferences](reviews/SECURITY_REVIEW_T11_2026-11-09.md) |
 | Raw suite output | [V3 voice suite raw](reviews/swv3_campaign_voice/SUITE_RAW_REPORT.md), [V4 voice suite raw](reviews/swv4_campaign_voice/SUITE_RAW_REPORT.md) |
 | Previous NOW brief (SW-V1 era, 18-24 Oct 2026, unchanged) | [NOW_SWV1_18OCT2026](archive/reviews/NOW_SWV1_18OCT2026.md) |
 | Screenshots | `docs/reviews/swv2_*`, `swv3_*` image folders (evidence only) |
