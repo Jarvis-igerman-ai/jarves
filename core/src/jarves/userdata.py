@@ -7,6 +7,7 @@ Times are UTC epoch seconds (REAL); local wall-clock meaning (timezone, DST) liv
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import threading
@@ -176,6 +177,35 @@ class UserDB:
             cur = self._db.execute(sql, args)
             self._db.commit()
             return cur
+
+    @contextlib.contextmanager
+    def immediate(self, *, secure: bool = False):
+        """ONE write transaction (BEGIN IMMEDIATE .. COMMIT) under the lock; ANY exception rolls it back and re-raises.
+        It refuses (sqlite3.OperationalError) to start inside a transaction it did not open. secure=True: freed space
+        is overwritten (secure_delete, restored afterwards) and in WAL mode the -wal file is checkpointed and
+        truncated so old page images do not stay there; a checkpoint that cannot finish raises."""
+        with self._lock:
+            con = self._db
+            if con.in_transaction:
+                raise sqlite3.OperationalError("a transaction is already open on this connection")
+            prev = con.execute("PRAGMA secure_delete").fetchone()[0] if secure else None
+            try:
+                if secure:
+                    con.execute("PRAGMA secure_delete=ON")
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    yield con
+                    con.commit()
+                except BaseException:
+                    if con.in_transaction:
+                        con.rollback()
+                    raise
+                if secure and con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+                    if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                        raise sqlite3.OperationalError("wal checkpoint busy: old pages may remain in the -wal file")
+            finally:
+                if secure:
+                    con.execute(f"PRAGMA secure_delete={int(prev)}")
 
     def rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._lock:

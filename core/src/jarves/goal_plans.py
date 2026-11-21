@@ -54,6 +54,7 @@ STEP_GRACE_S = 5.0
 EVIDENCE_CHARS = 240
 RESULT_CHARS = 900
 ROUTE = "plan"
+SCRUB_THREAD_ROWS = 2000           # #1526: above this many step rows the privacy scrub runs in a worker thread
 OPEN = ("draft", "ready", "running", "paused", "blocked")
 TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
@@ -69,13 +70,13 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-_CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
+_CODE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")   # a code has a "_": a bare upper-case word may be the owner's
 
 
 def _code_only(error: object) -> str:
     """The UPPER_CASE code that starts a step error ("X_BROKE: it broke" -> "X_BROKE"); anything else -> ""."""
     head = str(error or "").split(":", 1)[0].strip()
-    return head if _CODE.fullmatch(head) else ""
+    return head if len(head) <= 64 and _CODE.fullmatch(head) else ""
 
 
 class PlanStore:
@@ -90,26 +91,17 @@ class PlanStore:
         transaction; status and error codes stay. Returns the rows changed (0 when privacy is off), -1 on a DB error."""
         if not logs.privacy():
             return 0
-        db = self.db
-        with db._lock:
-            con = db._db
-            try:
-                if con.in_transaction:
-                    con.commit()
-                con.execute("PRAGMA secure_delete=ON")       # freed pages are overwritten, the old words do not linger
-                con.execute("BEGIN IMMEDIATE")
+        try:
+            with self.db.immediate(secure=True) as con:   # freed space and the -wal file keep no old words
                 n = 0
                 for r in con.execute("SELECT id, error FROM goal_plan_steps WHERE evidence<>'' OR error<>''").fetchall():
                     code = _code_only(r["error"])
                     n += con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=? AND "
                                      "(evidence<>'' OR error<>?)", (code, r["id"], code)).rowcount
                 n += con.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
-                con.commit()
-            except sqlite3.Error as e:
-                if con.in_transaction:
-                    con.rollback()
-                logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
-                return -1
+        except sqlite3.Error as e:                         # any other exception is rolled back and raised by immediate()
+            logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
+            return -1
         if n:
             logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
         return n
@@ -423,7 +415,9 @@ class PlanRunner:
         """Advance every ready / running plan; returns how many were touched."""
         private = logs.privacy()
         if private and not self._private:          # #1526: Core start with privacy on, or privacy just turned on
-            private = self.store.scrub_private() >= 0              # a failed scrub (-1) is tried again next tick
+            big = (self.store.db.row("SELECT COUNT(*) n FROM goal_plan_steps") or {}).get("n", 0) > SCRUB_THREAD_ROWS
+            n = await asyncio.to_thread(self.store.scrub_private) if big else self.store.scrub_private()
+            private = n >= 0                       # a large table is scrubbed off the event loop; -1 is retried next tick
         self._private = private
         if not self._on():
             return 0

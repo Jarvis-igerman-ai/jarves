@@ -106,3 +106,67 @@ async def test_1526_a_failed_scrub_rolls_back_logs_a_code_and_is_tried_again(tmp
     finally:
         e.db._db = real
         e.db.close()
+
+
+async def _failed_plan(e):
+    p = e.store.propose("bad", steps(("fake_bad", {})))
+    e.store.approve(p["id"])
+    await e.runner.tick()
+    assert any("it broke" in t for t in _texts(e.db))
+
+
+async def test_1526_r1_r2_no_old_words_in_the_db_or_wal_file_and_secure_delete_is_restored(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        await _failed_plan(e)
+        e.db.x("PRAGMA secure_delete=OFF")                       # some SQLite builds default to ON: start from OFF
+        monkeypatch.setattr(logs, "_privacy", True)
+        assert e.store.scrub_private() == 2
+        for f in (tmp_path / "memory.db", tmp_path / "memory.db-wal"):
+            assert not f.exists() or b"it broke" not in f.read_bytes(), f.name
+        assert e.db.row("PRAGMA secure_delete")["secure_delete"] == 0   # restored, not left on for the connection
+    finally:
+        e.db.close()
+
+
+async def test_1526_r3_r4_never_commits_a_foreign_transaction_and_any_error_rolls_back(tmp_path, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        await _failed_plan(e)
+        monkeypatch.setattr(logs, "_privacy", True)
+        e.db._db.execute("INSERT INTO agent_settings (key, value) VALUES ('pending', '1')")   # someone else's write
+        assert e.db._db.in_transaction and e.store.scrub_private() == -1
+        assert e.db._db.in_transaction                           # left open for its owner: not committed by the scrub
+        e.db._db.rollback()
+        monkeypatch.setattr(gp, "_code_only", lambda _x: {}["boom"])
+        with pytest.raises(KeyError):
+            e.store.scrub_private()
+        assert not e.db._db.in_transaction and any("it broke" in t for t in _texts(e.db))
+    finally:
+        e.db.close()
+
+
+async def test_1526_r6_r7_scrub_runs_off_the_event_loop_and_a_bare_upper_case_word_is_not_kept(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        await _failed_plan(e)
+        e.db.x("UPDATE goal_plan_steps SET error='PROJECTX: secret plan'")
+        threaded, real = [], asyncio.to_thread
+        monkeypatch.setattr(asyncio, "to_thread", lambda fn, *a: threaded.append(fn.__name__) or real(fn, *a))
+        monkeypatch.setattr(logs, "_privacy", True)
+        await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()
+        assert threaded == [] and _texts(e.db) == []             # a small table: inline, no thread start-up delay
+        e.db.x("UPDATE goal_plans SET note='old note'")
+        monkeypatch.setattr(gp, "SCRUB_THREAD_ROWS", 0)          # a large table
+        await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()
+        assert threaded == ["scrub_private"] and _texts(e.db) == []
+        assert gp._code_only("NOT_APPROVED: no") == "NOT_APPROVED" and gp._code_only("DENIED: x") == ""
+    finally:
+        e.db.close()
