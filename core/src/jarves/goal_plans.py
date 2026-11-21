@@ -527,7 +527,8 @@ class PlanRunner:
                 self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
                 return st.get(pid)
             msg = _at_rest(_short(res.message, 120))
-            self._fail(pid, step, f"{res.code}: {msg}" if msg else str(res.code), t0, evidence=res.message)
+            code = str(res.code or "") or "failed"                  # never a stored "None"
+            self._fail(pid, step, f"{code}: {msg}" if msg else code, t0, evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:

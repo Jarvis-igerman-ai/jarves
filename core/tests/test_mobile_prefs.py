@@ -104,6 +104,15 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     assert p.get(a) is None
 
 
+def test_206_h2_edit_of_a_missing_or_vanishing_pref_is_404_not_500(srv, prefs, monkeypatch):
+    p, a, _b = prefs
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=9999, text="anything at all")[0] == 404
+    monkeypatch.setattr(Preferences, "edit", lambda self, *x, **k: (_ for _ in ()).throw(KeyError(a)))  # removed meanwhile
+    st, out = op(srv, tok, op="edit", pref=a, text="I like long answers")
+    assert st == 404 and out["error"] == "no such preference"
+
+
 def test_the_same_rules_as_the_desktop(srv, prefs):
     p, a, b = prefs
     tok, _ = pair(srv)

@@ -3,6 +3,7 @@ confirmed preference, H3/H4 guide notes). Each test fails on the code before the
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -64,8 +65,45 @@ async def test_f13_privacy_mode_untrusted_text_is_not_kept_by_the_blocked_plan(e
     assert "ignore previous" not in json.dumps(d)          # the mail text: not in evidence, error, note or result
 
 
+async def test_f13_privacy_mode_failure_without_a_code_stores_a_fixed_word(env, monkeypatch):
+    from jarves.skills import NoArgs, Skill, Tool, ToolResult
+
+    async def nocode(_a: NoArgs):
+        return ToolResult(False, "secret detail", code=None)
+
+    class NoCode(Skill):
+        name = "nocode"
+        description = "no code"
+
+        def tools(self):
+            return [Tool("fake_nocode", "n", nocode, NoArgs, permission="read")]
+    env.reg.register(NoCode())
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_nocode", {})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["steps"][0]["error"] == "failed" and "None" not in json.dumps(d) and "secret" not in json.dumps(d)
+
+
 # ---------------------------------------------------------------- H2: a phone edit needs a fresh confirm
-@pytest.mark.skipif(not shutil.which("node"), reason="node is not installed")
+def test_h2_reproposing_edit_of_a_removed_pref_writes_nothing_and_raises_keyerror(home, monkeypatch):
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    real_get = p.get
+
+    def gone_get(i):                        # removed between edit()'s read and its write
+        row = real_get(i)
+        monkeypatch.setattr(p, "get", real_get)
+        p.remove(i, by="test")
+        return row
+    monkeypatch.setattr(p, "get", gone_get)
+    with pytest.raises(KeyError):
+        p.edit(pid, "I like long answers", by="phone", repropose=True)
+    assert p.get(pid) is None
+
+
+@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
 def test_h2_phone_note_asks_for_a_new_confirm_only_when_a_confirmed_item_went_back():
     js = Path(__file__).resolve().parents[1] / "src/jarves/dashboard_static/mobile/prefs.js"
     probe = ("global.window = {}; require(process.argv[1]); const f = window.JarvesPrefs.editNote;"
