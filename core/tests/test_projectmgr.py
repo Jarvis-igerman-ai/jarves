@@ -1246,3 +1246,9 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
     assert not (gitops.project_root(home, 1) / "reviews_default").exists()            # no reviewer was asked
+    wt = Path(t["worktree"])                                   # review R1: a committed change does not hide extra edits
+    gitops.commit_all(wt, "committed in-scope change")
+    assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean: reviewed and approved
+    (wt / "mine.txt").write_text("edited after the commit\n")
+    r = m._st_review(p, t, {"kind": "review"}, ["claude"])
+    assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
