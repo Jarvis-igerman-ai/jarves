@@ -1,8 +1,8 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
 Date: 2026-11-09 (findings authored); re-checked 2026-11-21. Every `file:line` reference and every issue state below
-is as of that re-check against `origin/main` df23acb (the files cited by line are unchanged since 76cd30c); "at
-review time" describes only the old 2026-11-09 behaviour, never a line number.
+is as of that re-check against `origin/main` df23acb; "at review time" describes only the old 2026-11-09 behaviour,
+never a line number.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -23,7 +23,7 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 
 | # | Module | Sev | Finding | Fix route |
 |---|---|---|---|---|
-| 1 | projectmgr/gitops | P1 | `.github/` was not in `PROTECTED` | fixed on main by #1101, #1351; #1096 closed |
+| 1 | projectmgr/gitops | P1 | `.github/` was not in `PROTECTED` | fixed on main by #1101, #1351, #1408; #1096 closed |
 | 2 | projectmgr/gitops | P2 | `PROTECTED` check was case-sensitive | fixed on main by #1101, #1351; #1097 closed |
 | 3 | projectmgr/service | P2 | startup kills stored PIDs without identity check | fixed on main by #1366; #1098 closed |
 | 4 | preferences (shared by goal_plans, goals, devmanager) | P2 | `looks_sensitive` misses key/token-shaped text | open, #1099 |
@@ -40,8 +40,8 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 
 - **#1 P1: `.github/` unprotected** (`PROTECTED`, `gitops.py:21`). At review time, `PROTECTED` did not list
   `.github/`, and `forge.push_branch` pushes `jarves/p<N>/...` branches. The impact is stated in #1096. **Fixed on
-  main by #1101 (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. #1381 (JAR-600) also counts
-  a changed symlink or gitlink as protected (`link_files`, `gitops.py:186`). Remaining gap: #11.
+  main by #1101 (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. #1408 (JAR-600, issue #1381)
+  also counts a changed symlink or gitlink as protected (`link_files`, `gitops.py:186`). Remaining gap: #11.
 - **#2 P2: case-sensitive protection** (`gitops.py:216-221`). The check was a case-sensitive `startswith`, so on
   Windows/macOS a change to `.CLAUDE/settings.json` reached the same directory without being flagged. **Fixed on main
   by #1101**: `is_protected()` casefolds the path and normalises `\` to `/`; #1351 (JAR-574) also refuses Windows 8.3
@@ -101,7 +101,7 @@ check command.
 ## Disposition
 One issue per defect (AGENTS.md rule 8):
 - P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Fixed on main by #1101 (JAR-317) and #1351
-  (JAR-574); issue closed.
+  (JAR-574); #1408 (JAR-600) also protects changed symlinks/gitlinks; issue closed.
 - P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Same fixes; issue closed.
 - P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Fixed on main by #1366 (JAR-575); issue
   closed.
