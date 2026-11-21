@@ -1,6 +1,8 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09. All line references were re-checked against `origin/main` 76cd30c on 2026-11-21.
+Date: 2026-11-09. Check date for everything below: 2026-11-21. Line references were re-checked against `origin/main`
+76cd30c, and issue states were read from GitHub. The fix merges #1101, #1351 and #1366 are ancestors of 24b9ca3;
+#1381 (JAR-600) merged after it.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -10,7 +12,8 @@ Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md` and the V6 review. T
 Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) arrived truncated (1 of 12). The other
 11 findings never arrived and are **not reflected here** (UNVERIFIED whether they are covered). #979 has no GitHub
 review or comment that contains the council text. Recovery from the bridge is tracked in
-[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254).
+[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254). This report is incomplete until then: once #1254
+recovers the text, it gets an addendum here or a follow-up ticket.
 Disclosure: this repo is public. #1 and #2 were fixed on main by #1101 (JAR-317) and hardened by #1351 (JAR-574); #3
 was fixed by #1366 (JAR-575). #4 is open public issue #1099 (its proposed fix in #1108 was closed unmerged).
 
@@ -92,7 +95,7 @@ check command.
 ## P0-P2 disposition
 One issue per defect (AGENTS.md rule 8):
 - P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Fixed on main by #1101 (JAR-317) and #1351
-  (JAR-574); issue closed (state checked 2026-11-20).
+  (JAR-574); issue closed.
 - P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Same fixes; issue closed.
 - P2 #3: [#1098](https://github.com/Jarvis-igerman-ai/jarves/issues/1098). Fixed on main by #1366 (JAR-575); issue
   closed.
