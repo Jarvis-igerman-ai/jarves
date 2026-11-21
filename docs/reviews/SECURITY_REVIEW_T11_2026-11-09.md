@@ -12,9 +12,8 @@ Earlier reviews: `V5_SECURITY_REVIEW_PILLARS_2026-10-25.md` and the V6 review. T
 Gap: the council review of the first version (PR #979: opus 7, gpt 5 findings) arrived truncated (1 of 12). The other
 11 findings never arrived and are **not reflected here** (UNVERIFIED whether they are covered). #979 has no GitHub
 review or comment that contains the council text. Recovery from the bridge is tracked in
-[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254). This report is incomplete until then. #1254 is the
-follow-up ticket for the addendum: it is unassigned and has no deadline, and once it recovers the text, that text is
-added here as an addendum.
+[#1254](https://github.com/Jarvis-igerman-ai/jarves/issues/1254). This report is incomplete until then; the
+recovered text is added here as an addendum.
 Disclosure: this repo is public. #1 and #2 were fixed on main by #1101 (JAR-317) and hardened by #1351 (JAR-574); #3
 was fixed by #1366 (JAR-575). #4 is open public issue #1099 (its proposed fix in #1108 was closed unmerged).
 
