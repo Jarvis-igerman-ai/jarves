@@ -311,6 +311,12 @@ def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monk
     assert "filter.lfs.smudge=git-lfs s" in pairs                              # a repository copy: the owner's
     assert "filter.lfs.process=" in pairs and "filter.lfs.required=true" in pairs   # review R3: owner's flag kept
     assert calls[0][calls[0].index("diff") + 1:][:2] == ["--no-ext-diff", "--no-textconv"]
+    calls.clear()
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, "global\0user.signingkey\nOWNER\0"
+                                                            "local\0user.signingkey\nAGENT\0local\0gpg.format\nssh\0"))
+    gitops.git(tmp_path, "merge", "x", ident=False)                # round 2 R4: format and key are the owner's
+    pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
+    assert "user.signingkey=OWNER" in pairs and "gpg.format=openpgp" in pairs
     monkeypatch.undo()
     repo = _repo(tmp_path)
     with open(repo / ".git" / "config", "a", encoding="utf-8") as fh:

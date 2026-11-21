@@ -72,7 +72,8 @@ NO_HOOKS = _no_hooks_path()
 DIFF_CMDS = ("diff", "show", "log")
 _DRIVER = re.compile(r"^(filter|merge|hook)\.(.+)\.(clean|smudge|process|driver|command)$", re.S)
 _SIGN = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-         "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": ""}
+         "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": "",
+         "gpg.format": "openpgp", "user.signingkey": ""}      # format and key: the owner's too (review R4)
 _UNTRUSTED = ("local", "worktree")      # the shared .git/config (+ includes) and config.worktree: agent-writable
 
 
@@ -161,7 +162,10 @@ def current_branch(path: str) -> str:
 
 def commit_of(path: str | Path, ref: str) -> str:
     """The full commit `ref` names now (#1407): owner text and approvals name this, never a branch that can move."""
-    return git(path, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").stdout.strip()
+    try:
+        return git(path, "rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
+    except GitError as e:
+        raise GitError(f"no commit for {ref}: {e}") from None
 
 
 def project_root(home: Path, pid: int) -> Path:
@@ -290,14 +294,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

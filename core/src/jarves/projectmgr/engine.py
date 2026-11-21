@@ -567,8 +567,7 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 tip = gitops.commit_of(wt, "HEAD")
                 if approved and tip != approved:
-                    return ("park", f"the code changed after your approval (now commit {tip[:12]}): approve merging "
-                                    f"task #{t['seq']} again")
+                    return self._repark_merge(t)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
@@ -634,15 +633,26 @@ class StageEngine:
         dirty = bool(gitops.git(wt, "status", "--porcelain", check=False).stdout.strip())
         return head, dirty
 
+    def _repark_merge(self, t):
+        """The task changed after your approval (#1407): commit any edits, then ask again naming that exact commit."""
+        try:
+            gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: edit after the approval"[:120])
+            head = gitops.commit_of(t["worktree"], "HEAD")
+        except (gitops.GitError, OSError) as e:
+            return ("stop", "failed", f"git failed: {clean(e, 200)}")
+        self._set_job(t, shown=head)
+        return ("park", f"the code changed after your approval: approve merging task #{t['seq']} (now commit "
+                        f"{head[:12]}) again")
+
     def _owner_stage(self, p, t, st, i, stages):
         kind = st["kind"]
         appr = self._job(t).get("approved") or {}
         if appr.get("stage") == i:                                  # you approved; JARVES does the part it owns
-            self._set_job(t, approved=None)
+            self._set_job(t, approved=None, shown=None)
             if kind == "merge":
                 head, dirty = self._tree(t)
                 if dirty or (appr.get("tree") and appr["tree"] != head):
-                    return ("park", f"the code changed after your approval: approve merging task #{t['seq']} again")
+                    return self._repark_merge(t)
                 return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event(), approved=appr.get("tree", ""))
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
@@ -717,12 +727,12 @@ class StageEngine:
                     except gitops.GitError:
                         pass
                     t = self.db.task(t["id"])
-                    shown = self._job(t).get("shown")
-                    if shown and self._tree(t)[0] != shown:         # #1407: approve only the commit you were shown
-                        txt = self._owner_stage(p, t, st, i, stages)[-1]     # a fresh prompt naming the new commit
-                        self.db.update_task(t["id"], waiting=clean(txt, 400))
-                        return self._res(False, "CHANGED", "the code changed since you were asked: " + txt)
-                self._set_job(t, approved={"stage": i, "tree": self._tree(t)[0]})
+                cur, shown = self._tree(t)[0], self._job(t).get("shown")    # ONE read: checked = stored (#1407)
+                if st["kind"] == "merge" and shown and cur != shown:    # approve only the commit you were shown
+                    txt = self._owner_stage(p, t, st, i, stages)[-1]     # a fresh prompt naming the new commit
+                    self.db.update_task(t["id"], waiting=clean(txt, 400))
+                    return self._res(False, "CHANGED", "the code changed since you were asked: " + txt)
+                self._set_job(t, approved={"stage": i, "tree": shown if st["kind"] == "merge" and shown else cur})
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:
                 self.db.update_task(t["id"], stage=pl.next_index(stages, i), status="todo", waiting="",
