@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
 
@@ -52,6 +54,7 @@ STEP_GRACE_S = 5.0
 EVIDENCE_CHARS = 240
 RESULT_CHARS = 900
 ROUTE = "plan"
+SCRUB_RETRY_S = 30.0                # #1526: a failed privacy scrub is tried again after this delay
 OPEN = ("draft", "ready", "running", "paused", "blocked")
 TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
@@ -67,12 +70,66 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+_CODE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")   # a code has a "_": a bare upper-case word may be the owner's
+# #1526: a step row still holding words. A kept code (only A-Z 0-9 _, with a "_", at most 64 chars) is clean, so a
+# scrubbed row never matches again and a later scrub does not rewrite it.
+_DIRTY = ("evidence<>'' OR (error<>'' AND (error GLOB '*[^A-Z0-9_]*' OR error NOT GLOB '*_*' OR length(error)>64))")
+
+
+def _code_only(error: object) -> str:
+    """The UPPER_CASE code that starts a step error ("X_BROKE: it broke" -> "X_BROKE"); anything else -> ""."""
+    head = str(error or "").split(":", 1)[0].strip()
+    return head if len(head) <= 64 and _CODE.fullmatch(head) else ""
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+
+    def scrub_private(self) -> int:
+        """#1526: privacy mode on -> blank the text written before it (step evidence / error, plan result / note) in
+        ONE transaction; status and error codes stay. Freed pages are overwritten (secure_delete, restored after)
+        and the -wal file is checkpointed and truncated. Returns the rows changed (0 when privacy is off), -1 when
+        the transaction failed (rolled back). A checkpoint kept busy by a reader is logged; the commit still counts."""
+        if not logs.privacy():
+            return 0
+        n, busy, con = 0, 0, self.db._db
+        with self.db._lock:
+            prev = con.execute("PRAGMA secure_delete").fetchone()[0]
+            try:
+                con.execute("PRAGMA secure_delete=ON")
+                con.execute("BEGIN IMMEDIATE")
+                try:
+                    for r in con.execute(f"SELECT id, error FROM goal_plan_steps WHERE {_DIRTY}").fetchall():
+                        con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?",
+                                    (_code_only(r["error"]), r["id"]))
+                        n += 1
+                    n += con.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
+                    con.commit()
+                except BaseException:
+                    con.rollback()
+                    raise
+                if con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+                    wait = con.execute("PRAGMA busy_timeout").fetchone()[0]
+                    con.execute("PRAGMA busy_timeout=0")      # a reader must not hold the DB lock here for seconds
+                    try:
+                        busy = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+                    finally:
+                        con.execute(f"PRAGMA busy_timeout={int(wait)}")
+            except sqlite3.Error as e:
+                logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text",
+                          error_type=type(e).__name__)
+                return -1
+            finally:
+                con.execute(f"PRAGMA secure_delete={int(prev)}")
+        if n:
+            logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
+        if busy:
+            logs.warn("goals", "PLAN_PRIVACY_CHECKPOINT_BUSY", "a reader keeps old plan pages in the -wal file")
+        return n
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -374,12 +431,21 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._private = False                 # #1526: older plan text already scrubbed for privacy mode
+        self._scrub_at = 0.0                  # #1526: no scrub retry before this time after a failure
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        private = logs.privacy()
+        if private and not self._private and self.clock() >= self._scrub_at:   # Core start, or privacy turned on
+            if self.store.scrub_private() < 0:     # one short transaction, once per switch-on (not per tick)
+                private, self._scrub_at = False, self.clock() + SCRUB_RETRY_S
+        elif private and not self._private:
+            private = False                                                    # waiting to retry a failed scrub
+        self._private = private
         if not self._on():
             return 0
         n = 0
