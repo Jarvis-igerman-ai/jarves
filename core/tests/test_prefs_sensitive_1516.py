@@ -18,6 +18,7 @@ LEAKY = [
     "מאמת: JBSWYDPEHPK3PXPQ",
     "my totp seed is JBSWYDPEHPKAPXPQ",              # review R1: upper case, no digit
     "my totp seed is OTP3JBSWYDPEHPKQ",              # review R2: the run starts with a seed word
+    "key: OTP3JBSWYDPEHPKQ",                         # intended: `OTP` + digit inside the run is the only seed word
 ]
 SAFE = [
     "base64urlencoded sha256checksumfile",           # identifiers in a dev draft, no seed word
@@ -60,10 +61,16 @@ def test_word_adjacent_16_char_seed_rate_is_high():
     assert len(with_digit) / len(seeds) >= 0.9       # rate over ALL lowercase seeds; misses are pinned below
 
 
+@pytest.mark.xfail(strict=True, reason="#1482: bare base32 seed with no seed word nearby is not refused yet")
 def test_known_miss_bare_seed_without_a_seed_word():
-    # Known leak, NOT desired behaviour: a bare one-digit-group run with no seed word nearby passes. The full base32
-    # rule belongs to #1482; that work may flip this assertion when it lands.
-    assert not looks_sensitive("JBSWYDPEHPK3PXPQ")
+    # Known leak, pinned as a strict xfail: the full base32 rule belongs to #1482, which will turn this into a pass.
+    assert looks_sensitive("JBSWYDPEHPK3PXPQ")
+
+
+@pytest.mark.xfail(strict=True, reason="#1482: seeds shown in 4-char groups are not refused yet")
+def test_known_miss_grouped_seed_next_to_a_seed_word():
+    # #1516 covers unbroken runs only; spaced/grouped base32 seeds belong to #1482.
+    assert looks_sensitive("totp seed JBSW YDPE HPK3 PXPQ")
 
 
 def test_known_miss_digit_free_lowercase_seed():
