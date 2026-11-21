@@ -46,13 +46,16 @@ _SENSITIVE = re.compile(
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
     # #1099: key/token wording and well-known credential prefixes
-    r"טוקן|מפתח\s+(?:ה)?api|\bapi[\s_-]?keys?\b|\b(?:access|auth|api|bearer|refresh|session)[\s_-]?tokens?\b|"
-    r"\bsecret[\s_-]?keys?\b|\bprivate\s+key\b|\bbearer\s+\S|"
+    r"הטוקן\s+שלי|טוקן\s+(?:ה-?)?(?:גישה|api|אימות)|מפתח\s+(?:ה-?)?api|\bapi[\s_-]?keys?\b|\b(?:access|auth|api|bearer|refresh|session)[\s_-]?tokens?\b|"
+    r"\bsecret[\s_-]?keys?\b|\bprivate\s+key\b|\bbearer\s+[a-z0-9._~+/-]{16,}|"
     r"\bsk-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|\baiza[0-9a-z_-]{20,}|"
     r"\bxox[abprs]-[a-z0-9-]{10,}|\beyj[a-z0-9_-]{8,}\.", re.I)
-# #1099: a long unbroken run of key characters mixing letters and digits with high entropy is a likely secret.
+# #1099: a long unbroken run of key characters that looks random is a likely secret. Applied only where the caller
+# asks (the preference path): goals and dev drafts may legitimately carry commit SHAs, UUIDs and code ids.
 _TOKEN_RUN = re.compile(r"[A-Za-z0-9_+/=-]{20,}")
-_MIN_ENTROPY = 3.5                 # bits per character; English words and simple ids stay below this
+_HEX_RUN = re.compile(r"\b[0-9a-f]{32,}\b", re.I)
+_MIN_ENTROPY = 3.5                 # bits per character for letter+digit runs; English words and simple ids stay below
+_MIN_ENTROPY_LETTERS = 4.0         # stricter for letter-only runs (24+ chars, mixed case), so CamelCase words pass
 
 
 def _entropy(s: str) -> float:
@@ -61,15 +64,22 @@ def _entropy(s: str) -> float:
 
 
 def _high_entropy(text: str) -> bool:
+    if _HEX_RUN.search(text):
+        return True
     for run in _TOKEN_RUN.findall(text):
-        if re.search(r"[A-Za-z]", run) and re.search(r"\d", run) and _entropy(run) >= _MIN_ENTROPY:
+        letters, digit = re.search(r"[A-Za-z]", run), re.search(r"\d", run)
+        if letters and digit and _entropy(run) >= _MIN_ENTROPY:
+            return True
+        if not digit and len(run) >= 24 and re.search(r"[a-z]", run) and re.search(r"[A-Z]", run) \
+                and _entropy(run) >= _MIN_ENTROPY_LETTERS:
             return True
     return False
 
 
-def looks_sensitive(text: str) -> bool:
+def looks_sensitive(text: str, *, entropy: bool = False) -> bool:
+    """Keyword/prefix/number rules for every caller; `entropy=True` adds the random-looking-string rule (#1099)."""
     t = text or ""
-    return bool(_SENSITIVE.search(t)) or _high_entropy(t)
+    return bool(_SENSITIVE.search(t)) or (entropy and _high_entropy(t))
 
 
 def normalize(text: str) -> str:
@@ -102,7 +112,7 @@ class Preferences:
             raise ValueError("nothing to remember")
         if not ev:
             raise ValueError("a suggestion needs the owner's own words as evidence")
-        if looks_sensitive(t) or looks_sensitive(ev):
+        if looks_sensitive(t, entropy=True) or looks_sensitive(ev, entropy=True):
             logs.info("prefs", "PREF_REFUSED_SENSITIVE", "sensitive preference not stored", by=by)
             raise ValueError("this looks sensitive (secret, number, health or money detail): not stored")
         self._expire()
@@ -152,7 +162,7 @@ class Preferences:
         """Reword an item. `repropose` (the model's edit, V5 sec F2): a confirmed item goes back to 'proposed' so the
         new wording needs a fresh confirm before it can reach the instructions."""
         t = _clean(text, MAX_TEXT)
-        if not t or looks_sensitive(t):
+        if not t or looks_sensitive(t, entropy=True):
             raise ValueError("empty or sensitive text: not stored")
         norm = normalize(t)
         other = self.db.row("SELECT id FROM learned_prefs WHERE norm=? AND id<>?", (norm, pid))
@@ -207,7 +217,7 @@ class Preferences:
 def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:
     """The instruction block: confirmed, not stale, not sensitive items, newest first, within the token budget."""
     from .context_trace import estimate_tokens
-    rows = sorted((r for r in prefs.items("confirmed") if not r["stale"] and not looks_sensitive(r["text"])),
+    rows = sorted((r for r in prefs.items("confirmed") if not r["stale"] and not looks_sensitive(r["text"], entropy=True)),
                   key=lambda r: -(r["confirmed_at"] or r["updated"]))
     out, used = [], estimate_tokens(PROMPT_HEAD)
     for r in rows:
