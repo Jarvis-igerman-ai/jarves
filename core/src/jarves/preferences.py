@@ -46,7 +46,7 @@ _SENSITIVE = re.compile(
 # #1482 secret shapes. Git SHAs (7-40 hex) stay allowed unless a credential word is within 20 chars before them
 # (then they are refused too: fails safe).
 _HEX_SECRET = re.compile(
-    r"\b(?:keys?|tokens?|secrets?|webhook|hmac|signature|ה?(?:מפתח|טוקן|סוד))\b[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
+    r"\b(?:keys?|tokens?|secrets?|webhook|hmac|signature|[ובלמשכ]{0,2}ה?(?:מפתח|טוקן|סוד))\b[^\n]{0,20}?(?<![0-9a-f])[0-9a-f]{32,}(?![0-9a-f])|"
     r"(?<![0-9a-f])[0-9a-f]{41,}(?![0-9a-f])", re.I)
 _BASE32_SECRET = re.compile(r"(?<![A-Za-z0-9_])(?=[A-Z]*[2-7])[A-Z2-7]{16,}=*(?![A-Za-z0-9_])")
 _BASE62_RUN = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z0-9]{20,}(?![A-Za-z0-9_])")

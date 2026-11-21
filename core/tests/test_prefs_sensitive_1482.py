@@ -16,6 +16,8 @@ LEAKY = [
     "המפתח שלי b084f9e0094f68db07f3501e4eab9e3fbecd52da",                            # Hebrew credential word + 40 hex
     "טוקן cac0e7d816b7c1d886ed2d5dfe767db4",                                         # Hebrew 'token' + 32 hex
     "הסוד: 59dbbb9210cfabbba394c0e43d68ad47",                                        # Hebrew 'secret' + 32 hex
+    "והמפתח שלי b084f9e0094f68db07f3501e4eab9e3fbecd52da",                           # Hebrew prefix letters + 'key' + 40 hex
+    "שלח לטוקן cac0e7d816b7c1d886ed2d5dfe767db4",                                    # prefix ל + 'token' + 32 hex
     "the key fix is 5d4a5f84be1b703ff001e75d0cdccb785f087a78",                       # SHA right after 'key': refused on purpose (fails safe)
     "token cac0e7d816b7c1d886ed2d5dfe767db4",                                        # boundary: exactly 32 hex after a word
     "6b26aee60ab93d4337af4a7b1c7f527fe5b6b7df1",                                     # boundary: exactly 41 hex alone
@@ -59,9 +61,20 @@ def test_lowercase_hex_secret_suggestion_is_refused_and_not_stored(home):
 
 def test_dev_draft_with_a_lowercase_hex_secret_is_refused_and_not_stored(home):
     from jarves import devmanager as dev_mod
-    from test_v5_followups import make_store
-    st = make_store(home)
+    from jarves.diag import db as diag_db
+    from jarves.store import Store
+    st = Store(home / "store.db")
+    diag_db.ensure(st)
     with pytest.raises(ValueError):
         dev_mod.suggest(st, "Webhook setup", "the webhook secret is cac0e7d816b7c1d886ed2d5dfe767db4", by="voice")
     assert dev_mod.listing(st) == []
     st.close()
+
+
+def test_goal_with_a_lowercase_hex_secret_is_refused_and_not_stored(home):
+    from jarves import goals as goals_mod
+    from jarves.userdata import open_db
+    g = goals_mod.Goals(open_db(home))
+    with pytest.raises(ValueError):
+        g.add("Set up the bot", "token cac0e7d816b7c1d886ed2d5dfe767db4", by="voice")
+    assert g.list() == []
