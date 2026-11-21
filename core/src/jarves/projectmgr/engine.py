@@ -152,7 +152,7 @@ class StageEngine:
                 gitops.remove_worktree(p["path"], Path(t["worktree"]), t["branch"])
             self.db.update_task(t["id"], worktree="", branch="", stage=target, status="todo", reason=clean(reason, 300),
                                 pid=0)
-            self._set_job(t, tested_base=None, tested_head=None, approved=None)
+            self._set_job(t, tested_base=None, tested_head=None, approved=None, shown=None)
             self.db.event(t["id"], "manager", "retry", clean(reason, 300))
             return
         if rule.startswith("back:"):
@@ -166,7 +166,7 @@ class StageEngine:
                     return
                 self.db.update_task(t["id"], rounds=t["rounds"] + 1, stage=target, status="todo",
                                     reason=clean(reason, 300), pid=0)
-                self._set_job(t, tested_base=None, tested_head=None, approved=None)
+                self._set_job(t, tested_base=None, tested_head=None, approved=None, shown=None)
                 self.db.event(t["id"], "manager", "back", clean(reason, 300))
                 return
         self._fail(t, "blocked", f"{st['kind']} failed: {reason}", p)
@@ -246,6 +246,8 @@ class StageEngine:
         head = self._head(wt)
         if not seen or (head and head in (seen, approved)):
             return ""
+        if not head:
+            return f"could not read the task commit of {t['branch']} after the check/review: not merged"
         return f"the task branch {t['branch']} moved after the check/review (to {head[:12]}, checked {seen[:12]}): " \
                "not merged"
 
@@ -256,8 +258,9 @@ class StageEngine:
                 if ln.strip()]
         if left:
             gitops.git(wt, "add", "-A")                             # new files too: stash create keeps the index
-            saved = gitops.git(wt, "stash", "create", f"task {t['seq']}: not merged").stdout.strip()
+            saved = gitops.git(wt, "stash", "create", f"task {t['seq']}: not merged", check=False).stdout.strip()
             if not saved:
+                gitops.git(wt, "reset", "-q", check=False)          # leave the index as it was
                 raise gitops.GitError("could not save the uncommitted files")
             ref = f"refs/jarves/dropped/{t['branch'] or 'task'}-{saved[:12]}"
             gitops.git(wt, "update-ref", ref, saved)
@@ -318,6 +321,7 @@ class StageEngine:
         h = cards.parse_handoff(text)
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+            self._set_job(t, tested_head=None, approved=None, shown=None)  # a new code round: the next check sees it
             files = gitops.changed_files(wt, base)
             links = gitops.link_files(wt, base)
         except gitops.GitError as e:
@@ -748,17 +752,19 @@ class StageEngine:
                                      task_id=t["id"])
             if st["by"] == "owner" and st["kind"] in ("merge", "work"):
                 if st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists():
-                    before = self._tree(t)[0]
+                    before, shown = self._tree(t)[0], self._job(t).get("shown", "")
                     try:
                         gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
                     except gitops.GitError as e:                    # still dirty: the merge stage re-asks
                         self.db.event(t["id"], "manager", "warning", f"your edit could not be committed: {clean(e, 150)}")
-                    edited = self._tree(t)[0] != before             # your own edit: you approve it by answering
+                    after = self._tree(t)[0]
                     t = self.db.task(t["id"])
-                    shown = "" if edited else self._job(t).get("shown", "")
+                    # your own edit is approved by answering only on top of the commit the prompt named; on a moved
+                    # branch the approval stays on the named commit, so the merge stage re-asks with the new one
+                    tree = after if after != before and before == shown else (shown or before)
                 else:
-                    shown = ""
-                self._set_job(t, approved={"stage": i, "tree": shown or self._tree(t)[0]})
+                    tree = self._tree(t)[0]
+                self._set_job(t, approved={"stage": i, "tree": tree})
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:
                 self.db.update_task(t["id"], stage=pl.next_index(stages, i), status="todo", waiting="",

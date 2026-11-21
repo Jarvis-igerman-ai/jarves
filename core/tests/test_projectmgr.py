@@ -1386,3 +1386,70 @@ def test_owner_edit_before_approving_the_merge_merges_without_a_second_prompt_14
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
     assert (gitops.project_root(home, 1) / "integration" / "a.txt").read_text() == "owner fix\n"
+
+
+def test_owner_edit_on_a_moved_branch_does_not_approve_the_unseen_commit_1461(env):
+    """Review round 3 R1: an owner edit on top of a sibling's commit must not approve the sibling's unseen commit."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt", "b.txt"],
+           flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    wt = Path(t["worktree"])
+    moved = _sibling_commit(wt, "moved\n")
+    (wt / "b.txt").write_text("owner fix\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert t["status"] == "waiting" and not (integ / "a.txt").exists() and not (integ / "b.txt").exists()
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()
+    assert head != moved and head[:12] in t["waiting"] and "not the checked commit" in t["waiting"]
+
+
+def test_a_later_code_stage_after_a_check_is_checked_and_merged_1461(env):
+    """Review round 3 R2: a code stage after a check starts a new commit; the next check records it and it merges."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt", "b.txt"],
+           flow="work test work:owner test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"]
+    (Path(t["worktree"]) / "b.txt").write_text("second round\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert t["status"] == "done", t["reason"]
+    assert (integ / "b.txt").read_text() == "second round\n"
+
+
+def test_unreadable_task_commit_is_blocked_with_a_clear_reason_1461(env, monkeypatch):
+    """Review round 3 R5: a failed rev-parse blocks (fail-safe) and says so instead of printing an empty sha."""
+    m, repo, home = env
+    monkeypatch.setattr(type(m), "_head", lambda self, wt: "")
+    t = {"id": 0, "branch": "jarves/p1/t1-a1", "job": {"tested_head": "a" * 40}}
+    monkeypatch.setattr(m.db, "task", lambda _id: t)
+    why = m._moved(t, "unused")
+    assert why.startswith("could not read the task commit of jarves/p1/t1-a1") and "to )" not in why
+
+
+def test_retry_clears_the_shown_merge_commit_1461(env):
+    """Review round 3 R3: a retry or send-back forgets the commit an old merge prompt named."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    r = m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
+               flow=[{"kind": "work"}, {"kind": "test"}, {"kind": "merge", "by": "owner", "on_fail": "back:work"}])
+    assert r["ok"], r
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and m._job(t).get("shown")
+    assert m.call("answer", project="demo", task=1, answer="reject", text="redo")["ok"]
+    t = m.db.by_seq(1, 1)
+    assert [e["kind"] for e in m.db.events(t["id"], 50)][-1] == "back" and not m._job(t).get("shown")
