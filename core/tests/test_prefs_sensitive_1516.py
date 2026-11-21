@@ -16,6 +16,8 @@ LEAKY = [
     "JBSWYDPEHPK3PXPQ is my google authenticator seed",
     "הסיד של האימות הוא JBSWYDPEHPK3PXPQ",
     "מאמת: JBSWYDPEHPK3PXPQ",
+    "my totp seed is JBSWYDPEHPKAPXPQ",              # review R1: upper case, no digit
+    "my totp seed is OTP3JBSWYDPEHPKQ",              # review R2: the run starts with a seed word
 ]
 SAFE = [
     "base64urlencoded sha256checksumfile",           # identifiers in a dev draft, no seed word
@@ -23,7 +25,9 @@ SAFE = [
     "use the authenticator app on my phone",         # seed word, no base32 run
     "seed the database with ipv4address rows",       # word run under 16 chars
     "my totp app shows 1234 digits",                 # digits only, not a 16-char run
-    "the 2fa commit was 3ee96db4a1c2f0e9b8d7",       # hex SHA next to a seed word is not base32
+    "the 2fa commit was deadbeefcafe2345abcd",       # review R3: hex in base32 letters next to a seed word
+    "THE 2FA COMMIT WAS DEADBEEFCAFEBABEFACE",       # upper-case digit-free hex
+    "הקבוצה מפסידה JBSWYDPEHPK3PXPQ",                # review R4: סיד inside מפסידה is not a seed word
     "JBSWYDPEHPK3PXPQ",                              # bare run with one digit group, no seed word (out of scope)
 ]
 
@@ -50,10 +54,16 @@ def test_seed_word_further_than_20_chars_does_not_count():
 def test_word_adjacent_16_char_seed_rate_is_high():
     rng = random.Random(1516)
     seeds = ["".join(rng.choice(B32) for _ in range(16)) for _ in range(400)]
-    seeds = [s for s in seeds if any(c in "234567" for c in s)]
-    for case in (str.upper, str.lower):
-        hits = sum(looks_sensitive(f"my totp seed: {case(s)}") for s in seeds)
-        assert hits / len(seeds) >= 0.99
+    upper = sum(looks_sensitive(f"my totp seed: {s}") for s in seeds)
+    assert upper == len(seeds)                       # every upper-case seed, digit-free ones included
+    with_digit = [s.lower() for s in seeds if any(c in "234567" for c in s)]
+    assert all(looks_sensitive(f"my totp seed: {s}") for s in with_digit)
+    assert len(with_digit) / len(seeds) >= 0.9       # rate over ALL lowercase seeds; misses are pinned below
+
+
+def test_known_miss_digit_free_lowercase_seed():
+    # Trade-off: a digit-free lowercase run is indistinguishable from a long lowercase word, so it passes.
+    assert not looks_sensitive("my totp seed: jbswydpehpkapxpq")
 
 
 def test_suggest_refuses_a_word_adjacent_seed_and_stores_nothing(tmp_path):
