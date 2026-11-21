@@ -456,6 +456,10 @@ class StageEngine:
     def _st_review(self, p, t, st, acts):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
+        _head, dirty = self._tree(t)                                # dirty: `git status --porcelain` is not empty
+        if dirty:                                                   # #1508: reviewers see only commits; merge's
+            return ("stop", "blocked", "uncommitted edits in the task folder were never reviewed: commit them "
+                                       "through a work stage or remove them")   # commit_all would fold these in
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
