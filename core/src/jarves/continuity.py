@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
 """
 
 
+NOT_KEPT = '{"not_kept": true'           # how every privacy-mode ledger body starts (json.dumps of _at_rest)
+
+
+def _at_rest(body) -> dict:
+    """The resend-ledger copy of an answer while privacy mode is on (#206 F13): numbers, flags, null and an
+    UPPER_CASE error code only, never words. The live answer to the phone is not changed."""
+    kept = {k: v for k, v in body.items() if k != "not_kept" and (
+        v is None or isinstance(v, (bool, int, float)) or
+        (k == "code" and isinstance(v, str) and len(v) <= 40 and v.replace("_", "").isalpha() and v.isupper()))
+    } if isinstance(body, dict) else {}
+    return {"not_kept": True, **kept}
+
+
 class Continuity:
     def __init__(self, home: Path, *, clock: Callable[[], float] = time.time,
                  quiet: Callable[[float], bool] | None = None) -> None:
@@ -114,15 +127,24 @@ class Continuity:
                              "code": "STALE"}, False
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
-                self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
-                self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
+                self._put(device, cid, kind, st, body, now)
             return st, body, False
 
     def store(self, device: str, cid: str, kind: str, status: int, body: dict) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules)."""
-        self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                (device, cid, kind, int(status), json.dumps(body), self.clock()))
+        self._put(device, cid, kind, status, body, self.clock())
+
+    def _put(self, device: str, cid: str, kind: str, status: int, body: dict, now: float) -> None:
+        """Store one answer and drop expired ones. Privacy mode (#206 F13): the row keeps no words (`_at_rest`), and
+        rows written before privacy was switched on lose theirs in the same locked write."""
+        private = logs.privacy()
+        with self._lock, self._cx() as cx:
+            cx.execute("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
+                       (device, cid, kind, int(status), json.dumps(_at_rest(body) if private else body), now))
+            cx.execute("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
+            if private:
+                cx.execute("UPDATE ledger SET body=? WHERE substr(body, 1, ?) <> ?",
+                           (json.dumps({"not_kept": True}), len(NOT_KEPT), NOT_KEPT))
 
     @staticmethod
     def stale(age_s) -> bool:

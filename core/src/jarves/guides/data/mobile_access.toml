@@ -12,8 +12,8 @@ expect_he = "מצמידים את הטלפון פעם אחת בסריקת קוד 
 expect_en = "Pair the phone once by scanning the QR code shown on the computer. Then you can type to JARVES, and talk to it if a secure connection is set up. Approvals are answered in the popup on the computer unless you switch on phone approvals; requests that need a code are approved on the computer only. You can disconnect any phone at any time."
 cost_he = "חינם."
 cost_en = "Free."
-privacy_he = "רק ברשת הביתית, בלי שרת בענן. בלי חיבור מאובטח אפשר לכתוב אבל לא לדבר, ומישהו שכבר מחובר ל-Wi-Fi שלכם יכול תיאורטית לראות את התנועה. יומן הביקורת לא שומר תוכן הודעות. כיבוי המתג עוצר את הגישה מיד."
-privacy_en = "Home network only, no cloud server. Without a secure connection you can type but not talk, and someone already on your Wi-Fi could in theory see the traffic. The audit log never keeps message text. Switching it off stops access at once."
+privacy_he = "רק ברשת הביתית, בלי שרת בענן. בלי חיבור מאובטח אפשר לכתוב אבל לא לדבר, ומישהו שכבר מחובר ל-Wi-Fi שלכם יכול תיאורטית לראות את התנועה. יומן הביקורת לא שומר תוכן הודעות. כיבוי המתג עוצר את הגישה מיד. הרשאת status מראה לטלפון גם אם המיקרופון של המחשב פועל עכשיו, וזה רומז אם אתם ליד המחשב."
+privacy_en = "Home network only, no cloud server. Without a secure connection you can type but not talk, and someone already on your Wi-Fi could in theory see the traffic. The audit log never keeps message text. Switching it off stops access at once. The status permission also shows the phone whether the computer microphone is in use right now, which hints at your presence."
 
 [[steps]]
 he = "בלוח הבקרה פתחו את העמוד \"טלפון\" ולחצו \"הפעלת גישה מהטלפון\" (סיכון גבוה, יש אישור). לא צריך שורת פקודה ולא הפעלה מחדש: JARVES יוצר תעודה עצמית, מאזין ברשת הביתית עם TLS ומציג QR וקוד בן 8 ספרות. אם הלוח לא יכול להתכוונן לבד, העמוד אומר את הצעד היחיד: jarvis features on mobile_access ואז jarvis dashboard --mobile --tls-selfsigned."

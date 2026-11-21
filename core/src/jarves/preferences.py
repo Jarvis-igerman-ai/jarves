@@ -138,11 +138,19 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
-                      (t, norm, self.clock(), pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
-            return self._view(self.get(pid))
+        if repropose:
+            # one guarded statement each (#206 H2): a confirm racing this edit cannot make the new wording active
+            for _ in range(3):
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? "
+                             "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
+                              id=pid, by=by)
+                    return self._view(self.get(pid))
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=? AND state<>'confirmed'",
+                             (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+                    return self._view(self.get(pid))
+            raise KeyError(pid)                   # gone, or its state kept flipping: nothing was changed
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))

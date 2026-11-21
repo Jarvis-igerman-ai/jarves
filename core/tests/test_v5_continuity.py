@@ -457,3 +457,43 @@ def test_sync_hides_the_turns_when_the_chat_page_is_not_granted(srv, fake):
 def test_nan_age_is_refused_like_a_stale_one(cont):
     """F9 #206: NaN compared False against the window and counted as fresh."""
     assert cont.stale(float("nan")) and cont.stale(float("inf")) and not cont.stale(-5) and not cont.stale(None)
+
+
+# ---------------------------------------------------------------- #206 F13: no words at rest in privacy mode
+def test_206_f13_privacy_mode_resend_ledger_keeps_no_words(cont):
+    from jarves import logs
+    logs.set_privacy(True)
+    live = cont.execute("p1", "cmd-00000206", "pref", lambda: (200, {"ok": True, "n": 2, "note": "secret words"}))
+    assert live == (200, {"ok": True, "n": 2, "note": "secret words"}, False)          # the live answer is unchanged
+    cont.store("p1", "msg-00000206", "chat", 200, {"reply": "secret reply", "ok": True, "code": "CHAT_RATE"})
+    bodies = [r["body"] for r in cont._rows("SELECT body FROM ledger")]
+    assert len(bodies) == 2 and not any("secret" in b for b in bodies)
+    assert cont.execute("p1", "cmd-00000206", "pref", lambda: (500, {}))[1:] == ({"not_kept": True, "ok": True, "n": 2}, True)
+    assert cont.seen("p1", "msg-00000206") == {"not_kept": True, "ok": True, "code": "CHAT_RATE"}
+
+
+def test_206_f13_rows_kept_before_privacy_lose_their_words_at_the_next_write(cont):
+    from jarves import logs
+    cont.store("p1", "msg-00000001", "chat", 200, {"reply": "old secret", "ok": True})     # privacy off: text kept
+    logs.set_privacy(True)
+    cont.store("p1", "msg-00000002", "chat", 200, {"ok": True})
+    assert cont.seen("p1", "msg-00000001") == {"not_kept": True}
+    assert not any("secret" in r["body"] for r in cont._rows("SELECT body FROM ledger"))
+
+
+def test_206_f13_privacy_mode_resends_get_a_defined_message_not_a_blank(srv, fake):
+    from jarves import logs
+    logs.set_privacy(True)
+    tok, _ = pair(srv)
+    assert call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})[1]["reply"] == "echo: hi"
+    srv.mobile._replies.clear()                                        # PC restart: only the ledger is left
+    st, out = call(srv, "POST", "/api/m/chat", tok, {"text": "hi", "id": "msg-cccccccc"})
+    assert st == 200 and out["replay"] is True and out["code"] == "NOT_KEPT"
+    assert out["reply"] == mobile._MSG["NOT_KEPT"][1] and out["reply_en"] == mobile._MSG["NOT_KEPT"][0]
+    assert fake.chats == ["hi"] and not any("echo" in r["body"] for r in srv.mobile.cont._rows("SELECT body FROM ledger"))
+    tok, _ = pair(srv, scopes=["chat", "tasks"])
+    body = {"id": "goal-00000206", "op": "nonsense"}
+    first = call(srv, "POST", "/api/m/goals/op", tok, body)
+    again = call(srv, "POST", "/api/m/goals/op", tok, body)
+    assert first[0] >= 400 and again[0] == first[0] and again[1]["replay"] is True
+    assert again[1]["error"] and again[1]["error_he"] and again[1]["code"]
