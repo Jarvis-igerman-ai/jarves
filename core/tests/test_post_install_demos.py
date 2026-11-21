@@ -1,0 +1,92 @@
+"""Hermetic tests for core/tools/post_install_demos.py: fake scenario runner and capture, frozen clock."""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import post_install_demos as pid  # noqa: E402
+
+NOW = 1_800_000_000.0
+
+
+def tickets(*extra):
+    rows = [{"ticket": t, "merged": True, "user_facing": True, "argv": ["status"], "page": "/",
+             "caption": f"{t} works"} for t in pid.REQUIRED]
+    return rows + list(extra)
+
+
+def fake_capture(page, img, vid):
+    img.write_bytes(b"png")
+    vid.write_bytes(b"webm")
+
+
+def test_records_demo_for_every_required_ticket_and_metrics(tmp_path):
+    ran = []
+    res = pid.run(tickets({"ticket": "JAR-1", "merged": True, "user_facing": False, "argv": ["status"]},
+                          {"ticket": "JAR-2", "merged": False, "user_facing": True, "argv": ["status"]}),
+                  tmp_path, run_scenario=lambda argv: ran.append(argv) or (0, "ok"),
+                  capture=fake_capture, clock=lambda: NOW)
+    assert sorted(res) == sorted(pid.REQUIRED)
+    rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
+    assert rec["result"] == "PASS" and rec["caption"] == "JAR-188 works"
+    assert (tmp_path / "JAR-188" / rec["image"]).read_bytes() == b"png"
+    assert (tmp_path / "JAR-188" / rec["video"]).read_bytes() == b"webm"
+    m = pid.metrics(tmp_path, now=NOW + 60)
+    assert m == {"demos_24h": 6, "with_image": 6, "with_video": 6, "scenario_pass_pct": 100.0, "missing": []}
+    # second run: every ticket already has a demo -> nothing runs again
+    assert pid.run(tickets(), tmp_path, run_scenario=lambda a: (1, ""), capture=fake_capture, clock=lambda: NOW) == []
+
+
+def test_failures_are_recorded_and_pass_pct(tmp_path):
+    rows = tickets()
+    rows[0]["argv"] = ["doctor"]
+    pid.run(rows, tmp_path, run_scenario=lambda argv: (0 if argv == ["status"] else 2, "boom"),
+            capture=fake_capture, clock=lambda: NOW)
+    assert json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["result"] == "FAIL"
+    assert pid.metrics(tmp_path, now=NOW)["scenario_pass_pct"] == round(5 / 6 * 100, 1)
+
+
+def test_capture_error_is_fail_without_media(tmp_path):
+    def broken(page, img, vid):
+        raise OSError("no browser")
+    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=broken, clock=lambda: NOW)
+    rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
+    assert rec["result"] == "FAIL" and rec["image"] is None and "no browser" in rec["error"]
+    m = pid.metrics(tmp_path, now=NOW)
+    assert (m["with_image"], m["with_video"]) == (0, 0)
+
+
+def test_unknown_when_no_demos_and_old_demos_not_counted(tmp_path):
+    m = pid.metrics(tmp_path, now=NOW)
+    assert m["scenario_pass_pct"] is None and m["demos_24h"] == 0 and m["missing"] == list(pid.REQUIRED)
+    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=fake_capture, clock=lambda: NOW)
+    assert pid.metrics(tmp_path, now=NOW + 2 * 86400)["demos_24h"] == 0
+    (tmp_path / "JAR-189").mkdir()
+    (tmp_path / "JAR-189" / "demo.json").write_text("{bad", encoding="utf-8")   # corrupt record is ignored
+    assert pid.metrics(tmp_path, now=NOW)["demos_24h"] == 1
+
+
+@pytest.mark.parametrize("argv", [["update", "install"], ["--x"], [], "status", [1]])
+def test_scenario_argv_must_be_allowlisted(tmp_path, argv):
+    row = dict(tickets()[0], argv=argv)
+    pid.run([row], tmp_path, run_scenario=lambda a: pytest.fail("must not run"), capture=fake_capture,
+            clock=lambda: NOW)
+    rec = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))
+    assert rec["result"] == "FAIL" and rec["error"].startswith("DEMO_SCENARIO_REFUSED")
+
+
+def test_load_tickets_rejects_malformed(tmp_path):
+    p = tmp_path / "t.json"
+    p.write_text('{"ticket": "x"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="DEMO_TICKETS_INVALID"):
+        pid.load_tickets(p)
+    p.write_text('[1, {"ticket": "JAR-9"}]', encoding="utf-8")
+    assert pid.load_tickets(p) == [{"ticket": "JAR-9"}]
+    p.write_text("not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="DEMO_TICKETS_INVALID"):
+        pid.load_tickets(p)
+
