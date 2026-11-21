@@ -560,3 +560,14 @@ def test_206_r4b_a_kept_nan_number_is_not_rewritten_on_every_scan(home, clk, mon
     a.scrub()
     assert writes == []
     assert a._rows("SELECT body FROM ledger") == [{"body": '{"not_kept": true, "n": NaN}'}]
+
+
+def test_206_r3_store_and_scrub_read_privacy_while_holding_the_lock(cont, monkeypatch):
+    """Review R3: a privacy flip between the read and the lock let one privacy-off write land after a scrub."""
+    from jarves import logs
+    held = []
+    monkeypatch.setattr(logs, "privacy", lambda: held.append(cont._lock._is_owned()) or True)
+    cont._expire_at = 0.0
+    cont.store("p1", "msg-00000303", "chat", 200, {"reply": "secret"})
+    cont.scrub()
+    assert held and all(held)

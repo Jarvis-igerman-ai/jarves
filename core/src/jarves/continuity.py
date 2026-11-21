@@ -102,13 +102,16 @@ class Continuity:
         cx.row_factory = sqlite3.Row
         cx.execute("PRAGMA secure_delete=ON")          # freed pages are overwritten, so replaced words do not linger
         cx.execute("PRAGMA journal_mode=DELETE")       # pinned default: no WAL file keeps old page images (#206)
+        # Residual limit (#206 review): a deleted rollback journal or rewritten page can survive in free filesystem
+        # space until overwritten. MEMORY journaling is not used: this file also holds the journal and notices,
+        # and a crash mid-write would corrupt it.
         return cx
 
     def scrub(self) -> None:
         """Drop expired ledger rows; in privacy mode also rewrite every body that is not already its own `_at_rest`
         copy (#206 F13). Each body is parsed, so a privacy-off body cannot pass for a scrubbed one by its prefix."""
-        private, now = logs.privacy(), self.clock()
-        with self._lock:
+        with self._lock:                               # privacy is read under the lock: no write slips past a scrub
+            private, now = logs.privacy(), self.clock()
             if now <= self._expire_at and not (private and self._words):
                 return                                 # nothing can have expired or kept words since the last scrub
             with closing(self._cx()) as cx, cx:
@@ -163,8 +166,8 @@ class Continuity:
     def store(self, device: str, cid: str, kind: str, status: int, body: dict, now: float | None = None) -> None:
         """Remember an answer that a caller produced itself (chat keeps its own busy/rate rules). Privacy mode: the
         row keeps no words (`_at_rest`) and older rows are scrubbed (#206 F13)."""
-        private, ts = logs.privacy(), self.clock() if now is None else now
         with self._lock:
+            private, ts = logs.privacy(), self.clock() if now is None else now
             self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
                     (device, cid, kind, int(status), json.dumps(_at_rest(body) if private else body), ts))
             self._words = self._words or not private

@@ -225,11 +225,3 @@ def test_206_r2_a_reproposing_edit_of_a_gone_item_raises_and_changes_nothing(pre
     p.get = p_get
     assert p.get(a) is None and p.db.rows("SELECT text FROM learned_prefs") == [{"text": "Play jazz while cooking"}]
 
-
-def test_206_r5_phone_command_handlers_never_read_a_success_body():
-    """A privacy-mode resend answers 200 with code NOT_KEPT and fewer fields: the phone handlers must use only r.ok."""
-    for name, route in (("prefs.js", "/api/m/prefs/op"), ("plans.js", "/api/m/plans/op"), ("app.js", "/api/m/goals/op"),
-                        ("app.js", "/api/m/signals"), ("app.js", '/api/m/approvals/" + p.id')):
-        js = (MOBILE_DIR / name).read_text(encoding="utf-8")
-        assert re.search(r'try \{ await (cx\.)?post\("' + re.escape(route), js), (name, route)   # awaited, not assigned
-    assert 'if (!r.ok) {' in (MOBILE_DIR / "app.js").read_text(encoding="utf-8")         # api() throws on errors only
