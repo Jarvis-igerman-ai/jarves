@@ -18,9 +18,6 @@ from . import logs
 
 SCOPE = "prefs"
 PHONE_OPS = ("confirm", "decline", "reaffirm", "edit", "remove")      # no add and no clear-all from a phone
-# #1514: a page cached from before the version guard confirms without `updated`; it is told to reload, never confirmed
-OLD_PAGE = {"error": "this page is out of date: reload it, then confirm again", "code": "PREF_PAGE_OLD",
-            "error_he": "העמוד הזה ישן: רעננו אותו ואשרו שוב"}
 CHANGED_HE = "ההעדפה השתנתה מאז שהוצגה: רעננו כדי לראות את הנוסח החדש"
 
 
@@ -63,7 +60,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
-    from .preferences import PrefChanged, shown_version
+    from .preferences import OLD_PAGE, PrefChanged, shown_version
     p = store(mob)
     if not p.get(pid):
         return 404, {"error": "no such preference"}

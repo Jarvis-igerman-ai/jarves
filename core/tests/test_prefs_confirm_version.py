@@ -234,3 +234,20 @@ def test_the_model_cannot_supply_the_shown_version(prefs):
     reg.confirm.accepts_meta = True
     assert not asyncio.run(reg.call("pref_confirm", {"id": pid, "_shown": v}, origin="model")).ok
     assert p.get(pid)["state"] == "proposed"
+
+
+def test_dashboard_confirm_from_an_old_page_is_told_to_reload(prefs):
+    p, pid, _ = prefs
+    st, body = prefs_mod.api_pref_op(SimpleNamespace(_prefs=p), None, {"op": "confirm", "id": pid})
+    assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and p.get(pid)["state"] == "proposed"
+
+
+@pytest.mark.parametrize("shown", [None, "current"])
+def test_confirm_of_an_item_removed_after_the_read_is_not_found_not_changed(prefs, shown):
+    p, pid, ver = prefs
+    row, real_get = p.get(pid), p.get
+    p.remove(pid, by="dashboard")
+    p.get = lambda i: row if i == pid else real_get(i)    # the removal lands between get() and the UPDATE
+    with pytest.raises(KeyError):
+        p.confirm(pid, by="cli", shown=ver if shown else None)
+    assert prefs_mod.api_pref_op(SimpleNamespace(_prefs=p), None, {"op": "confirm", "id": pid, "updated": ver})[0] == 404

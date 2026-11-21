@@ -69,6 +69,11 @@ def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+# #1514: a page cached from before the version guard confirms without `updated`; it is told to reload, never confirmed
+OLD_PAGE = {"error": "this page is out of date: reload it, then confirm again", "code": "PREF_PAGE_OLD",
+            "error_he": "העמוד הזה ישן: רעננו אותו ואשרו שוב"}
+
+
 class PrefChanged(ValueError):
     """The item changed after the owner was shown it (#1514): the confirm is refused, the page reloads."""
     code = "PREF_CHANGED"
@@ -132,6 +137,8 @@ class Preferences:
         if shown is not None:
             sql, args = sql + " AND updated=?", args + [float(shown)]
         if not self.db.x(sql, tuple(args)).rowcount:
+            if not self.db.row("SELECT id FROM learned_prefs WHERE id=?", (pid,)):
+                raise KeyError(pid)                           # removed after get(): gone, not "changed"
             logs.info("prefs", "PREF_CHANGED", "confirm refused: the preference changed after it was shown", id=pid, by=by)
             raise PrefChanged("this preference changed after it was shown: reload to see the new wording")
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
@@ -407,6 +414,8 @@ def api_pref_op(ctx, m, body):
         return 404, {"error": "no such preference"}
     try:
         if op == "confirm":
+            if "updated" not in b:
+                return 400, dict(OLD_PAGE)
             return 200, p.confirm(pid, by="dashboard", shown=shown_version(b.get("updated")))
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
@@ -420,6 +429,8 @@ def api_pref_op(ctx, m, body):
         return 409, {"error": str(e), "code": PrefChanged.code}
     except ValueError as e:
         return 400, {"error": str(e)}
+    except KeyError:                                          # removed while the request was in flight
+        return 404, {"error": "no such preference"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 
 
