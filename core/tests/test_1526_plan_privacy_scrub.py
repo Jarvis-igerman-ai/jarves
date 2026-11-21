@@ -1,0 +1,105 @@
+"""#1526: plan text written before privacy mode was switched on is scrubbed when privacy turns on (or at Core start
+with privacy on). Step evidence / error and the plan's result / note lose their words; status and codes stay."""
+from __future__ import annotations
+
+from jarves import goal_plans as gp
+from jarves import logs
+from test_v5_goal_plans import Env, steps
+
+
+def _texts(db) -> list[str]:
+    rows = db.rows("SELECT evidence, error FROM goal_plan_steps") + db.rows("SELECT result, note FROM goal_plans")
+    return [v for r in rows for v in r.values() if v]
+
+
+async def test_1526_privacy_on_scrubs_older_plan_step_text_and_keeps_status_and_codes(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        done = e.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+        bad = e.store.propose("bad", steps(("fake_bad", {})))
+        for p in (done, bad):
+            e.store.approve(p["id"])
+        await e.runner.tick()
+        assert any("secret words" in t for t in _texts(e.db)) and any("it broke" in t for t in _texts(e.db))
+
+        logs.set_privacy(True)                                   # the owner switches privacy on
+        await e.runner.tick()
+        assert _texts(e.db) == ["X_BROKE"]                       # only the step's error code is left
+        d, b = e.store.get(done["id"]), e.store.get(bad["id"])
+        assert d["state"] == "done" and d["steps"][0]["status"] == "done"
+        assert b["state"] == "failed" and b["steps"][0]["status"] == "failed"
+    finally:
+        e.db.close()
+
+
+async def test_1526_a_new_runner_with_privacy_on_scrubs_at_start_and_privacy_off_keeps_text(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        p = e.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+        e.store.approve(p["id"])
+        await e.runner.tick()
+        await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()   # restart, privacy still off
+        assert any("secret words" in t for t in _texts(e.db))
+
+        monkeypatch.setattr(logs, "_privacy", True)               # the Core starts with privacy on
+        await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock).tick()
+        assert _texts(e.db) == []
+        assert e.store.scrub_private() == 0                       # nothing left: idempotent, no rewrite
+    finally:
+        e.db.close()
+
+
+async def test_1526_scrub_runs_even_when_the_goal_plans_feature_is_off(tmp_path, monkeypatch):
+    class Off:
+        def active(self, _name):
+            return False
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        p = e.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+        e.store.approve(p["id"])
+        await e.runner.tick()
+        monkeypatch.setattr(logs, "_privacy", True)
+        assert await gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock, features=Off()).tick() == 0
+        assert _texts(e.db) == []
+    finally:
+        e.db.close()
+
+
+async def test_1526_a_failed_scrub_rolls_back_logs_a_code_and_is_tried_again(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        p = e.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+        e.store.approve(p["id"])
+        await e.runner.tick()
+        real, warned = e.db._db, []
+
+        class Locked:                                            # another process holds the write lock
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *a):
+                if sql.startswith("UPDATE goal_plans"):
+                    raise sqlite3.OperationalError("database is locked")
+                return real.execute(sql, *a)
+
+        monkeypatch.setattr(logs, "warn", lambda _c, code, *_a, **_k: warned.append(code))
+        monkeypatch.setattr(logs, "_privacy", True)
+        e.db._db = Locked()
+        assert e.store.scrub_private() == -1 and warned == ["PLAN_PRIVACY_SCRUB_FAILED"]
+        assert not real.in_transaction and any("secret words" in t for t in _texts(e.db))   # rolled back, not half done
+        runner = gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock)
+        await runner.tick()
+        assert any("secret words" in t for t in _texts(e.db))
+        e.db._db = real                                          # the lock is gone: the next tick scrubs
+        await runner.tick()
+        assert _texts(e.db) == []
+    finally:
+        e.db._db = real
+        e.db.close()

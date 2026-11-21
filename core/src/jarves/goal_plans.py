@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
 
@@ -67,12 +69,50 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+_CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
+
+
+def _code_only(error: object) -> str:
+    """The UPPER_CASE code that starts a step error ("X_BROKE: it broke" -> "X_BROKE"); anything else -> ""."""
+    head = str(error or "").split(":", 1)[0].strip()
+    return head if _CODE.fullmatch(head) else ""
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+
+    def scrub_private(self) -> int:
+        """#1526: privacy mode on -> blank text written before it (step evidence / error, plan result / note) in ONE
+        transaction; status and error codes stay. Returns the rows changed (0 when privacy is off), -1 on a DB error."""
+        if not logs.privacy():
+            return 0
+        db = self.db
+        with db._lock:
+            con = db._db
+            try:
+                if con.in_transaction:
+                    con.commit()
+                con.execute("PRAGMA secure_delete=ON")       # freed pages are overwritten, the old words do not linger
+                con.execute("BEGIN IMMEDIATE")
+                n = 0
+                for r in con.execute("SELECT id, error FROM goal_plan_steps WHERE evidence<>'' OR error<>''").fetchall():
+                    code = _code_only(r["error"])
+                    n += con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=? AND "
+                                     "(evidence<>'' OR error<>?)", (code, r["id"], code)).rowcount
+                n += con.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
+                con.commit()
+            except sqlite3.Error as e:
+                if con.in_transaction:
+                    con.rollback()
+                logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
+                return -1
+        if n:
+            logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", rows=n)
+        return n
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -374,12 +414,17 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._private = False                 # privacy already applied to older plan text (#1526)
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        private = logs.privacy()
+        if private and not self._private:          # #1526: Core start with privacy on, or privacy just turned on
+            private = self.store.scrub_private() >= 0              # a failed scrub (-1) is tried again next tick
+        self._private = private
         if not self._on():
             return 0
         n = 0
