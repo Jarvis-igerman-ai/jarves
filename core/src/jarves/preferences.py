@@ -37,6 +37,9 @@ PROPOSAL_TTL_S = 14 * 86400       # an unanswered suggestion disappears (never s
 STALE_S = 180 * 86400             # a confirmed item not re-confirmed this long is not used until reaffirmed
 CONFLICT_RATIO = 0.55
 TOPICS = ("voice", "schedule", "food", "music", "communication", "other")
+# #1514: every write moves `updated` (the version a confirm is checked against) strictly forward, in the same statement,
+# even within one clock tick, so a version a stale page still holds can never come back
+_BUMP = "updated=MAX(?, COALESCE(updated, 0) + 0.001)"
 _PUNCT = re.compile(r"[^\w\s]+")
 _NIQQUD = re.compile(r"[֑-ׇ]")
 # Text that must never be learned: credentials, card/ID/phone-like numbers, and health or money details.
@@ -125,7 +128,7 @@ class Preferences:
         if not r:
             raise KeyError(pid)
         now = self.clock()
-        sql, args = "UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", [now, now, pid]
+        sql, args = "UPDATE learned_prefs SET state='confirmed', confirmed_at=?, " + _BUMP + " WHERE id=?", [now, now, pid]
         if shown is not None:
             sql, args = sql + " AND updated=?", args + [float(shown)]
         if not self.db.x(sql, tuple(args)).rowcount:
@@ -135,13 +138,13 @@ class Preferences:
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
     def decline(self, pid: int, *, by: str = "user") -> bool:
-        n = self.db.x("UPDATE learned_prefs SET state='declined', updated=? WHERE id=?", (self.clock(), pid)).rowcount
+        n = self.db.x("UPDATE learned_prefs SET state='declined', " + _BUMP + " WHERE id=?", (self.clock(), pid)).rowcount
         logs.info("prefs", "PREF_DECLINED", "preference declined", id=pid, by=by)
         return bool(n)
 
     def reaffirm(self, pid: int, *, by: str = "user") -> bool:
         now = self.clock()
-        n = self.db.x("UPDATE learned_prefs SET confirmed_at=?, updated=? WHERE id=? AND state='confirmed'",
+        n = self.db.x("UPDATE learned_prefs SET confirmed_at=?, " + _BUMP + " WHERE id=? AND state='confirmed'",
                       (now, now, pid)).rowcount
         logs.info("prefs", "PREF_REAFFIRMED", "preference reaffirmed", id=pid, by=by)
         return bool(n)
@@ -159,14 +162,13 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        # the version always moves forward on a reword, even within one clock tick, so a confirm of the old wording fails
-        now = max(self.clock(), float(cur["updated"] or 0) + 0.001)
+        now = self.clock()
         if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
+            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, " + _BUMP + " WHERE id=?",
                       (t, norm, now, pid))
             logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
             return self._view(self.get(pid))
-        self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, now, pid))
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, " + _BUMP + " WHERE id=?", (t, norm, now, pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
 
@@ -299,6 +301,9 @@ def make_skill(prefs: Preferences):
             async def confirm(a: ConfirmArgs):
                 if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                if a._shown is None:          # #1514: no approval popup showed the wording: fail closed
+                    logs.warn("prefs", "PREF_NOT_SHOWN", "voice confirm refused: no approval showed the wording", id=a.id)
+                    return ToolResult(False, "the owner was not shown this preference: ask again", code="PREF_NOT_SHOWN")
                 try:
                     r = prefs.confirm(a.id, by="voice", shown=a._shown)
                 except PrefChanged as e:

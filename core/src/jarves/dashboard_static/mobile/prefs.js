@@ -8,13 +8,15 @@
       confirm: "Confirm", decline: "Decline", forget: "Forget", edit: "Correct", save: "Save", cancel: "Cancel", again: "Still true",
       stale: "Not re-confirmed for a long time: not used until you say it is still true.", conflict: "Looks like another confirmed preference",
       said: "You said", off: "Using preferences in conversations is switched off on the computer.", 
-      saved: "Saved.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget" },
+      saved: "Saved.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget",
+      changed: "This preference changed since it was shown. Here is the new wording: confirm again if it is right." },
     he: { intro: "מה ש-JARVES למד עליכם. רק מה שאישרתם משמש בשיחות.", empty: "עוד לא נלמד כלום.",
       confirmed: "מאושר", proposed: "ממתין לתשובה שלכם", declined: "נדחה (נשמר כדי שלא ישאלו שוב)",
       confirm: "אישור", decline: "דחייה", forget: "שכחו", edit: "תיקון", save: "שמירה", cancel: "ביטול", again: "עדיין נכון",
       stale: "לא אושר מחדש זמן רב: לא בשימוש עד שתאמרו שזה עדיין נכון.", conflict: "דומה להעדפה מאושרת אחרת",
       said: "אמרתם", off: "השימוש בהעדפות בשיחות כבוי במחשב.", 
-      saved: "נשמר.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
+      saved: "נשמר.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח",
+      changed: "ההעדפה השתנתה מאז שהוצגה. זה הנוסח החדש: אשרו שוב אם הוא נכון." },
   };
   const newId = () => "pref-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   let root = null, cx = null, busy = false, editing = 0, asking = 0, note = "";
@@ -28,7 +30,7 @@
   async function op(body, ok) {
     if (busy) return; busy = true;
     try { await cx.post("/api/m/prefs/op", { ...body, id: newId() }); note = t(ok); editing = asking = 0; }
-    catch (e) { note = t("failed") + ": " + e.message; }
+    catch (e) { note = e.code === "PREF_CHANGED" ? t("changed") : t("failed") + ": " + e.message; }   // #1514: load() below shows the new wording
     busy = false; load();
   }
   function btn(label, fn, primary) { const b = el("button", primary ? "primary" : "", label); b.type = "button"; b.addEventListener("click", fn); return b; }
