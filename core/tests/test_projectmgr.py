@@ -1228,3 +1228,50 @@ def test_f6_read_only_git_still_works():
     for cmd in ("git status", "git diff", "git diff --stat", "git log --oneline -5"):
         assert any(_rule_matches(r, cmd) for r in allow if r.startswith("Bash(")), cmd
     assert not any(r.startswith(("Edit", "Write")) for r in allow)
+
+
+def test_task_branch_moved_after_the_check_is_not_merged_1461(env):
+    """#1461: a sibling moves the task branch after test/review; the merge must not take the unchecked commit."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
+           flow="work test review:owner merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["worktree"]
+    wt, br = Path(t["worktree"]), t["branch"]
+    (wt / "a.txt").write_text("never checked\n")                                    # a sibling's commit on the branch
+    sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qam", "sibling")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert not (integ / "a.txt").exists()
+    assert t["status"] == "blocked" and "moved after" in t["reason"] and br in t["reason"]
+
+
+def test_owner_facing_text_names_the_integration_commit_1469(env):
+    """#1469: the owner's review command, the merge prompt, the 'merged into' event and the card name the commit."""
+    m, repo, home = env
+    open_project(m, repo)
+    a = task(m, "A", "FAKE write a.txt=1", scope=["a.txt"], flow="work review:owner merge:owner")
+    task(m, "B", "FAKE write b.txt=2", scope=["b.txt"], deps=[a])
+    m.call("resume", project="demo")
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and f"diff {sha}...HEAD" in t["waiting"] and "integration..." not in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    head = sh(Path(t["worktree"]), "git", "rev-parse", "HEAD").strip()
+    assert "approve merging" in t["waiting"] and head[:12] in t["waiting"] and sha[:12] in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    merged = [e["text"] for e in m.db.events(t["id"], 50) if e["kind"] == "merged"]
+    new = sh(integ, "git", "log", "-1", "--format=%H", "--", "a.txt").strip()
+    assert merged and f"at {new[:12]}" in merged[-1]
+    card = (gitops.project_root(home, 1) / "wt" / "last_prompt_2.txt").read_text()
+    assert f"commit {new[:12]}" in card
