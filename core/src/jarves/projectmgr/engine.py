@@ -292,14 +292,16 @@ class StageEngine:
         scope = t["scope"]
         if kind == "reproduce" and not scope:
             scope = ["test", "tests", "spec", "*test*", "*/test*", "*spec*"]
+        mark = ""
+        if owner:                     # only what changed since your turn began is yours (#1500); none recorded: none
+            mark = self._job(t).get("owner_from") or ""
+            self._set_job(t, owner_from=None)           # used once, on every path (a stale mark would widen it)
         prot, outside = gitops.violations(files, scope)
         prot += [f for f in links if f not in prot]
         if prot:
             return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) + f" (not merged; on {br})")
         mine: set[str] = set()
-        if owner:                     # only what changed since your turn began is yours (#1500); none recorded: none
-            mark = self._job(t).get("owner_from") or ""
-            self._set_job(t, owner_from=None)
+        if owner:
             try:
                 out = gitops.git(wt, "diff", "--name-only", "-z", "--no-renames", mark, "HEAD").stdout if mark else ""
             except gitops.GitError as e:
@@ -660,8 +662,8 @@ class StageEngine:
                 wt, br = self._ensure_worktree(p, t)
             except (gitops.GitError, OSError) as e:
                 return ("stop", "failed", f"worktree failed: {clean(e, 200)}")
-            if kind == "work" and not self._job(t).get("owner_from"):   # what is in the folder is not yours yet:
-                try:                                                    # commit it, mark where your turn starts
+            if kind == "work":            # each park starts a new turn: commit what is in the folder, mark here
+                try:
                     gitops.commit_all(wt, f"task {t['seq']}: before your edit"[:120])
                     self._set_job(t, owner_from=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
                 except gitops.GitError as e:

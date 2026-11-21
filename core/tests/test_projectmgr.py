@@ -997,6 +997,42 @@ def test_owner_scope_warning_covers_only_the_owners_own_edit(env):
     assert "notes.md" not in t["reason"]
 
 
+def test_owner_turn_mark_is_cleared_when_protected_files_block(env):
+    """#1500 review: a block on protected files must not leave the turn's mark behind for a later turn to reuse."""
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["job"].get("owner_from")
+    (Path(t["worktree"]) / ".github").mkdir()
+    (Path(t["worktree"]) / ".github" / "x.yml").write_text("on: push\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "protected" in t["reason"]
+    assert "owner_from" not in t["job"]
+
+
+def test_owner_reproduce_turn_keeps_its_behaviour(env):
+    """#1500 review: the owner's reproduce turn never reaches the scope check; its out-of-scope test file is not
+    blocked (unchanged behaviour; only the owner's work turn is marked)."""
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="reproduce:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "failing test" in t["waiting"] and not t["job"].get("owner_from")
+    (Path(t["worktree"]) / "test_mine.py").write_text("def test_x(): assert False\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"], (t["status"], t["reason"])
+
+
 def test_gate_reject_stops_and_answer_needs_waiting(env):
     m, repo, _ = env
     open_project(m, repo)
