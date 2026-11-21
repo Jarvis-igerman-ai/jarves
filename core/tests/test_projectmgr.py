@@ -1230,8 +1230,10 @@ def test_f6_read_only_git_still_works():
     assert not any(r.startswith(("Edit", "Write")) for r in allow)
 
 
-def test_task_branch_moved_after_the_check_is_not_merged_1461(env):
-    """#1461: a sibling moves the task branch after test/review; the merge must not take the unchecked commit."""
+@pytest.mark.parametrize("integration_moved", [False, True])
+def test_task_branch_moved_after_the_check_is_not_merged_1461(env, integration_moved):
+    """#1461: a sibling moves the task branch after test/review; the merge must not take the unchecked commit, also
+    when the integration branch moved too and the merge re-runs the check (review R2: a re-check is not a review)."""
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
@@ -1243,18 +1245,20 @@ def test_task_branch_moved_after_the_check_is_not_merged_1461(env):
     wt, br = Path(t["worktree"]), t["branch"]
     (wt / "a.txt").write_text("never checked\n")                                    # a sibling's commit on the branch
     sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qam", "sibling")
+    integ = gitops.project_root(home, 1) / "integration"
+    if integration_moved:
+        sh(integ, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-q", "--allow-empty", "-m", "newer")
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
-    integ = gitops.project_root(home, 1) / "integration"
     assert not (integ / "a.txt").exists()
     assert t["status"] == "blocked" and "moved after" in t["reason"] and br in t["reason"]
 
 
 def test_task_branch_moved_after_an_agent_review_is_not_merged_1461(env):
-    """#1461 without a check stage: the agent review's commit is what the merge may take."""
+    """#1461 review-only flow: with a project check configured the merge's re-check must not excuse a moved branch."""
     m, repo, home = env
-    open_project(m, repo)
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
     m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work review gate merge")
     m.call("resume", project="demo")
     finish(m)
@@ -1293,3 +1297,71 @@ def test_owner_facing_text_names_the_integration_commit_1469(env):
     assert merged and f"at {new[:12]}" in merged[-1]
     card = (gitops.project_root(home, 1) / "wt" / "last_prompt_2.txt").read_text()
     assert f"commit {new[:12]}" in card
+
+
+def _sibling_commit(wt: Path, text: str) -> str:
+    (wt / "a.txt").write_text(text)
+    sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qam", "sibling")
+    return sh(wt, "git", "rev-parse", "HEAD").strip()
+
+
+def test_branch_moved_between_check_and_agent_review_is_not_merged_1461(env):
+    """Review R1: a passing agent review must not adopt a commit the check never saw."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"],
+           flow="work test gate review merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting"
+    moved = _sibling_commit(Path(t["worktree"]), "never checked\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert not (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+    assert t["status"] == "blocked" and "moved after" in t["reason"]
+    assert sh(Path(t["worktree"]), "git", "rev-parse", "HEAD").strip() == moved     # R5: no auto-commit when blocked
+
+
+def test_owner_approves_only_the_commit_the_prompt_named_1461(env):
+    """Review R3/R4: a move while the merge approval is open re-asks, naming the new commit and the checked one."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    checked = sh(Path(t["worktree"]), "git", "rev-parse", "HEAD").strip()
+    assert "approve merging" in t["waiting"] and checked[:12] in t["waiting"] and "not the checked" not in t["waiting"]
+    moved = _sibling_commit(Path(t["worktree"]), "moved\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]          # approves what the prompt named
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert t["status"] == "waiting" and not (integ / "a.txt").exists()
+    assert moved[:12] in t["waiting"] and f"not the checked commit {checked[:12]}" in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]          # now that exact commit
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done" and (integ / "a.txt").read_text() == "moved\n"
+
+
+def test_uncommitted_edits_after_the_check_are_never_merged_1461(env):
+    """Review R5: only the checked commit merges; edits left in the folder are named and dropped."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt", "b.txt"],
+           flow="work test review:owner merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    (wt / "a.txt").write_text("unchecked edit\n")
+    (wt / "b.txt").write_text("unchecked new file\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert (integ / "a.txt").read_text() == "1\n" and not (integ / "b.txt").exists()
+    warn = [e["text"] for e in m.db.events(t["id"], 50) if e["kind"] == "warning"]
+    assert warn and "a.txt" in warn[-1] and "b.txt" in warn[-1]

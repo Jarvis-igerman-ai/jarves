@@ -240,6 +240,25 @@ class StageEngine:
     def _head(self, wt) -> str:
         return gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
 
+    def _moved(self, t, wt, approved: str = "") -> str:
+        """#1461: every check/review and the merge need the task commit the earlier ones saw (or one you approved)."""
+        seen = self._job(t).get("tested_head")
+        head = self._head(wt)
+        if not seen or (head and head in (seen, approved)):
+            return ""
+        return f"the task branch {t['branch']} moved after the check/review (to {head[:12]}, checked {seen[:12]}): " \
+               "not merged"
+
+    def _drop_uncommitted(self, t, wt) -> None:
+        """After a recorded check/review only that commit goes on: edits left in the folder are named, then dropped."""
+        left = [ln[3:] for ln in gitops.git(wt, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
+                if ln.strip()]
+        if left:
+            self.db.event(t["id"], "manager", "warning", "uncommitted files after the check/review are not merged: "
+                          + ", ".join(left[:5]))
+            gitops.git(wt, "reset", "-q", "--hard")
+            gitops.git(wt, "clean", "-fdq")
+
     def _last_failure(self, t) -> str:
         last = [e for e in self.db.events(t["id"], 30) if e["kind"] == "check_failed"]
         return last[-1]["text"] if last and t["attempts"] >= 1 else ""
@@ -463,6 +482,9 @@ class StageEngine:
     def _st_review(self, p, t, st, acts):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
+        why = self._moved(t, t["worktree"])                         # review R1: never adopt a commit the check missed
+        if why:
+            return ("stop", "blocked", why)
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
@@ -522,7 +544,13 @@ class StageEngine:
                 return ("end",)
             if has_wt:
                 try:
-                    gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                    why = self._moved(t, wt)
+                    if why:
+                        return ("stop", "blocked", why)
+                    if self._job(t).get("tested_head"):
+                        self._drop_uncommitted(t, wt)
+                    else:
+                        gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                     conflicts = gitops.merge_in(wt, base)
                 except gitops.GitError as e:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
@@ -565,11 +593,14 @@ class StageEngine:
             if self._stopped(t, cancel):
                 return ("end",)
             try:
-                start = self._head(wt)                              # #1461: before commit_all, as the check saw it
-                seen = self._job(t).get("tested_head")
-                gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                why = self._moved(t, wt, approved)                  # #1461: before anything is committed or merged
+                if why:
+                    return ("stop", "blocked", why)
+                if self._job(t).get("tested_head"):
+                    self._drop_uncommitted(t, wt)
+                else:
+                    gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 head = self._integration_sha(p)
-                rechecked = False
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
@@ -583,10 +614,6 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                        rechecked = True
-                if seen and start not in (seen, approved) and not rechecked:
-                    return ("stop", "blocked", f"the task branch {br} moved after the check/review (to {start[:12]}, "
-                                               f"checked {seen[:12]}): not merged")
                 new = self._head(wt)
                 gitops.fast_forward(self._integration(p), new)      # the exact commit, not the movable branch name
             except gitops.GitError as e:
@@ -643,7 +670,9 @@ class StageEngine:
             if kind == "merge":
                 head, dirty = self._tree(t)
                 if dirty or (appr.get("tree") and appr["tree"] != head):
-                    return ("park", f"the code changed after your approval: approve merging task #{t['seq']} again")
+                    self._set_job(t, shown=head)
+                    return ("park", f"the code changed after your approval: approve merging task #{t['seq']} again "
+                                    f"(now commit {head[:12]}{self._unchecked(t, head)})")
                 return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event(), approved=head)
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
@@ -662,14 +691,17 @@ class StageEngine:
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
         sha = self._integration_sha(p)                              # #1469: name the commit, not the branch
-        mine = self._head(t["worktree"])[:12] if t["worktree"] else "no commit"
+        mine = self._head(t["worktree"]) if t["worktree"] else ""
+        if kind == "merge":
+            self._set_job(t, shown=mine or None)                    # the approval binds to the commit named here
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
             "review": f"review task #{t['seq']}: git -C \"{where}\" diff {sha}...HEAD, then approve or reject with what "
                       "to change",
-            "merge": f"approve merging task #{t['seq']} (commit {mine}) into {base} at {sha[:12]}",
+            "merge": f"approve merging task #{t['seq']} (commit {mine[:12] or 'none'}{self._unchecked(t, mine)}) into {base} at "
+                     f"{sha[:12]}",
             "release": f"release {p['name']} yourself, then say done",
             "gate": st.get("question") or f"approve to continue task #{t['seq']}",
             "debate": "decide this question yourself and answer with your decision",
@@ -677,6 +709,10 @@ class StageEngine:
             "cmd": f"run the command for task #{t['seq']} yourself, then say pass or fail",
         }.get(kind, f"your turn on task #{t['seq']} ({kind}), then say done")
         return ("park", text)
+
+    def _unchecked(self, t, head: str) -> str:
+        seen = self._job(t).get("tested_head")
+        return f", not the checked commit {seen[:12]}" if seen and head and head != seen else ""
 
     def answer(self, project: str = "", task="", answer: str = "approve", text: str = "", **_) -> dict:
         """The owner answers a waiting task: approve / done / pass -> go on; reject / fail -> the stage's on_fail
@@ -705,11 +741,14 @@ class StageEngine:
             if st["by"] == "owner" and st["kind"] in ("merge", "work"):
                 if st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists():
                     try:
-                        gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
+                        edited = gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
                     except gitops.GitError:
-                        pass
+                        edited = True                               # unknown state: bind to HEAD, as before
                     t = self.db.task(t["id"])
-                self._set_job(t, approved={"stage": i, "tree": self._tree(t)[0]})
+                    shown = "" if edited else self._job(t).get("shown", "")
+                else:
+                    shown = ""
+                self._set_job(t, approved={"stage": i, "tree": shown or self._tree(t)[0]})
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:
                 self.db.update_task(t["id"], stage=pl.next_index(stages, i), status="todo", waiting="",
