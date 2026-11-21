@@ -301,13 +301,15 @@ def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monk
     commands never run an external diff or textconv, and a config git cannot read stops the command."""
     calls: list = []
     conf = ("local\0hook.x.command\nevil\0local\0merge.y.driver\nevil\0global\0filter.lfs.clean\ngit-lfs\0"
-            "global\0filter.lfs.smudge\ngit-lfs s\0local\0filter.lfs.smudge\nevil\0")
+            "global\0filter.lfs.smudge\ngit-lfs s\0global\0filter.lfs.required\ntrue\0local\0filter.lfs.smudge\nevil\0"
+            "local\0filter.lfs.process\nevil\0")
     monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(0, "")], calls, conf))
     gitops.git(tmp_path, "diff", "--shortstat", "a...b")
     pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
     assert "hook.x.command=exit 0" in pairs and "merge.y.driver=exit 1" in pairs
     assert not any(p.startswith("filter.lfs.clean") for p in pairs)            # the owner's own filter is kept
     assert "filter.lfs.smudge=git-lfs s" in pairs                              # a repository copy: the owner's
+    assert "filter.lfs.process=" in pairs and "filter.lfs.required=true" in pairs   # review R3: owner's flag kept
     assert calls[0][calls[0].index("diff") + 1:][:2] == ["--no-ext-diff", "--no-textconv"]
     monkeypatch.undo()
     repo = _repo(tmp_path)
@@ -316,3 +318,10 @@ def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monk
     with pytest.raises(gitops.GitError):
         gitops.git(repo, "status")
     assert not gitops.is_repo(str(repo))
+
+
+def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_path):
+    """#1407 review R4: git older than 2.26 rejects `--show-scope` (exit 129); the error names the version needed."""
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 129, "", "usage"))
+    with pytest.raises(gitops.GitError, match="git 2.26 or newer"):
+        gitops.git(tmp_path, "status")

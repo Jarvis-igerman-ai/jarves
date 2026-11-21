@@ -964,6 +964,9 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and "changed after your approval" in t["waiting"]
+    r = m.call("answer", project="demo", task=1, answer="approve")      # #1407: the edit is a commit you were not shown
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert r["code"] == "CHANGED" and f"(commit {head})" in m.db.by_seq(1, 1)["waiting"], r
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
@@ -1310,3 +1313,44 @@ def test_ship_plan_reports_an_unresolvable_commit_as_git_error(env, monkeypatch)
     monkeypatch.setattr(gitops, "commit_of", boom)
     assert m.call("ship_plan", project="demo")["code"] == "GIT_ERROR"
     assert m.call("ship_plan", project="demo", apply=True)["code"] == "GIT_ERROR"
+
+
+def _owner_merge_waiting(m, repo):
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "work"}, {"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    return t, Path(t["worktree"])
+
+
+def test_owner_merge_approval_binds_the_commit_shown_in_the_prompt(env):
+    """#1407 review R1: a commit added to the task branch after the prompt is never approved under it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")                                   # the branch moves while the owner reads the prompt
+    r = m.call("answer", project="demo", task=1, answer="approve")
+    late = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert r["code"] == "CHANGED" and f"(commit {late})" in m.db.by_seq(1, 1)["waiting"], r
+    finish(m)
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+
+
+def test_owner_merge_never_merges_a_branch_moved_after_the_approval_check(env, monkeypatch):
+    """#1407 review R1: the merge fast-forwards to the approved commit; a branch moved inside the merge stage parks."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.commit_all
+
+    def racing(path, msg):                                          # another writer moves the branch right here
+        (Path(path) / "late.txt").write_text("late\n")
+        return real(path, msg)
+    monkeypatch.setattr(gitops, "commit_all", racing)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], t
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()

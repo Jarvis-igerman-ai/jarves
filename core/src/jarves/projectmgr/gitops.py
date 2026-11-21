@@ -77,13 +77,16 @@ _UNTRUSTED = ("local", "worktree")      # the shared .git/config (+ includes) an
 
 
 def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[str] | subprocess.CompletedProcess:
-    """`-c` pairs that neutralise every command the repository's own config names (#1407); the owner's global/system
+    """`-c` pairs that override every command the repository's own config names at this read (#1407; a later write
+    before git's own read is not covered, #1533); the owner's global/system
     config is kept, also for a repository copy of the same key. A filter driver gets no command and is not required (the file is used as it is), a merge driver
     `exit 1` (always a conflict, never a silent result), a config-defined hook `exit 0`; signing programs always come
     from the owner's scope (else the git default). A failed read is returned as is (the caller fails closed)."""
     p = subprocess.run(["git", *pre, "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
                        text=True, timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
                        encoding="utf-8", errors="replace")
+    if p.returncode == 129:                     # an unknown option: `--show-scope` needs git 2.26
+        return subprocess.CompletedProcess(p.args, 129, "", "JARVES projects need git 2.26 or newer (#1407)")
     if p.returncode != 0:
         return p
     items = p.stdout.split("\0")
@@ -102,7 +105,7 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
             return subprocess.CompletedProcess(p.args, 128, "", f"refusing the config key {key!r} (#1407)")
         if m and m.group(1) == "filter":        # a repository copy of an owner key keeps the owner's value
             req = f"filter.{m.group(2)}.required"
-            out[key], out[req] = owner.get(key, ""), owner.get(req, "false") if key in owner else "false"
+            out[key], out[req] = owner.get(key, ""), owner.get(req, "false")    # the owner's required flag stays
         elif m:
             out[key] = owner.get(key) or ("exit 1" if m.group(1) == "merge" else "exit 0")
         elif key in _SIGN:
@@ -120,8 +123,11 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Commands named in the repository's own config are neutralised too (#1407,
-    see `_config_overrides`), and diff/show/log never run an external diff or textconv command."""
+    JARVES merges into the owner's branch. Commands named in the repository's own config, as read just before the
+    command, are overridden too (#1407, see `_config_overrides`); a config entry written between that read and the
+    command's own read is not (open race, #1533). diff/show/log never run an external diff or textconv command
+    (projectmgr calls no blame, `cat-file --textconv` or `stash show -p`). Cost: one extra `git config` process per
+    call; needs git 2.26 or newer."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     over = _config_overrides(cwd, pre, timeout)
     if isinstance(over, subprocess.CompletedProcess):          # the config cannot be read: fail closed
