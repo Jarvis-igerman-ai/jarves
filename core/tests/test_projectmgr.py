@@ -1335,6 +1335,8 @@ def test_owner_approves_only_the_commit_the_prompt_named_1461(env):
     checked = sh(Path(t["worktree"]), "git", "rev-parse", "HEAD").strip()
     assert "approve merging" in t["waiting"] and checked[:12] in t["waiting"] and "not the checked" not in t["waiting"]
     moved = _sibling_commit(Path(t["worktree"]), "moved\n")
+    finish(m)                                                                       # review R3: a pass while waiting
+    assert m.db.by_seq(1, 1)["status"] == "waiting"
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]          # approves what the prompt named
     finish(m)
     t = m.db.by_seq(1, 1)
@@ -1365,3 +1367,22 @@ def test_uncommitted_edits_after_the_check_are_never_merged_1461(env):
     assert (integ / "a.txt").read_text() == "1\n" and not (integ / "b.txt").exists()
     warn = [e["text"] for e in m.db.events(t["id"], 50) if e["kind"] == "warning"]
     assert warn and "a.txt" in warn[-1] and "b.txt" in warn[-1]
+    ref = warn[-1].split("saved as ")[1].split()[0]                                  # review R1: recoverable, not lost
+    assert sh(repo, "git", "show", f"{ref}:a.txt") == "unchecked edit\n"
+    assert sh(repo, "git", "show", f"{ref}:b.txt") == "unchecked new file\n"
+
+
+def test_owner_edit_before_approving_the_merge_merges_without_a_second_prompt_1461(env):
+    """Review round 2 R2: the owner's own edit while the merge approval is open is committed and approved at once."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", scope=["a.txt"], flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    (Path(t["worktree"]) / "a.txt").write_text("owner fix\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert (gitops.project_root(home, 1) / "integration" / "a.txt").read_text() == "owner fix\n"

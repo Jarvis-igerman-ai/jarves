@@ -250,12 +250,19 @@ class StageEngine:
                "not merged"
 
     def _drop_uncommitted(self, t, wt) -> None:
-        """After a recorded check/review only that commit goes on: edits left in the folder are named, then dropped."""
+        """After a recorded check/review only that commit goes on: edits left in the folder are saved under a ref
+        (never lost), named, then removed from the folder."""
         left = [ln[3:] for ln in gitops.git(wt, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
                 if ln.strip()]
         if left:
-            self.db.event(t["id"], "manager", "warning", "uncommitted files after the check/review are not merged: "
-                          + ", ".join(left[:5]))
+            gitops.git(wt, "add", "-A")                             # new files too: stash create keeps the index
+            saved = gitops.git(wt, "stash", "create", f"task {t['seq']}: not merged").stdout.strip()
+            if not saved:
+                raise gitops.GitError("could not save the uncommitted files")
+            ref = f"refs/jarves/dropped/{t['branch'] or 'task'}-{saved[:12]}"
+            gitops.git(wt, "update-ref", ref, saved)
+            self.db.event(t["id"], "manager", "warning", f"{len(left)} uncommitted file(s) after the check/review are "
+                          f"not merged, saved as {ref} (git stash apply {ref}): " + ", ".join(left[:5]))
             gitops.git(wt, "reset", "-q", "--hard")
             gitops.git(wt, "clean", "-fdq")
 
@@ -589,6 +596,7 @@ class StageEngine:
         wt, br = Path(t["worktree"]), t["branch"]
         base = gitops.integration_branch(p["id"])
         has_check = any(s["kind"] in ("test", "verify") and not s.get("skip") for s in stages) and p["check_cmd"]
+        new = ""
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
@@ -740,10 +748,12 @@ class StageEngine:
                                      task_id=t["id"])
             if st["by"] == "owner" and st["kind"] in ("merge", "work"):
                 if st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists():
+                    before = self._tree(t)[0]
                     try:
-                        edited = gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
-                    except gitops.GitError:
-                        edited = True                               # unknown state: bind to HEAD, as before
+                        gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
+                    except gitops.GitError as e:                    # still dirty: the merge stage re-asks
+                        self.db.event(t["id"], "manager", "warning", f"your edit could not be committed: {clean(e, 150)}")
+                    edited = self._tree(t)[0] != before             # your own edit: you approve it by answering
                     t = self.db.task(t["id"])
                     shown = "" if edited else self._job(t).get("shown", "")
                 else:
