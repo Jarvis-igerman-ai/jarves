@@ -88,7 +88,7 @@ async def test_1526_a_failed_scrub_rolls_back_logs_a_code_and_is_tried_again(tmp
                 return getattr(real, name)
 
             def execute(self, sql, *a):
-                if sql.startswith("UPDATE goal_plans"):
+                if sql.startswith("UPDATE goal_plan_steps"):
                     raise sqlite3.OperationalError("database is locked")
                 return real.execute(sql, *a)
 
@@ -100,7 +100,11 @@ async def test_1526_a_failed_scrub_rolls_back_logs_a_code_and_is_tried_again(tmp
         runner = gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock)
         await runner.tick()
         assert any("secret words" in t for t in _texts(e.db))
-        e.db._db = real                                          # the lock is gone: the next tick scrubs
+        e.db._db = real                                          # the lock is gone, but the runner backs off
+        e.clock.t += gp.SCRUB_RETRY_S - 1
+        await runner.tick()
+        assert any("secret words" in t for t in _texts(e.db))
+        e.clock.t += 1                                           # 30 s later: the next tick scrubs
         await runner.tick()
         assert _texts(e.db) == []
     finally:
@@ -222,4 +226,69 @@ async def test_1526_round2_r4_a_failed_secure_delete_restore_never_masks_the_ori
         assert not real.in_transaction
     finally:
         e.db._db = real
+        e.db.close()
+
+
+async def test_1526_round3_r1_a_busy_checkpoint_logs_its_own_code_once_and_backs_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    real, warned, calls = e.db._db, [], []
+    try:
+        await _failed_plan(e)
+
+        class Busy:                                              # another connection holds a long read
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def execute(self, sql, *a):
+                return real.execute("SELECT 1, 0, 0" if sql == "PRAGMA wal_checkpoint(TRUNCATE)" else sql, *a)
+
+        monkeypatch.setattr(logs, "warn", lambda _c, code, *_a, **_k: warned.append(code))
+        monkeypatch.setattr(logs, "_privacy", True)
+        e.db._db = Busy()
+        assert e.store.scrub_private() == -1 and _texts(e.db) == ["X_BROKE"]   # the commit landed
+        assert e.store.scrub_private() == -1 and warned == ["PLAN_PRIVACY_CHECKPOINT_BUSY"]   # logged once
+        real_scrub = e.store.scrub_private
+        monkeypatch.setattr(e.store, "scrub_private", lambda: calls.append(e.clock()) or real_scrub())
+        runner = gp.PlanRunner(e.store, e.reg, budget=e.budget, clock=e.clock)
+        t0 = e.clock.t
+        for dt in (0, 1, 29, 30, 31, 89, 90):                    # retries at +0, +30, +90 (30 s, then 60 s)
+            e.clock.t = t0 + dt
+            await runner.tick()
+        assert calls == [t0, t0 + 30, t0 + 90] and warned == ["PLAN_PRIVACY_CHECKPOINT_BUSY"]
+        e.db._db = real                                          # the reader is gone
+        e.clock.t = t0 + 90 + 120
+        await runner.tick()
+        assert runner._private and e.store._busy_logged is False  # a later busy incident is logged again
+    finally:
+        e.db._db = real
+        e.db.close()
+
+
+async def test_1526_round3_r2_scrub_goes_in_batches_and_stops_when_privacy_goes_off(tmp_path, monkeypatch):
+    monkeypatch.setattr(logs, "_privacy", False)
+    e = Env(tmp_path)
+    try:
+        for _ in range(3):
+            await _failed_plan(e)
+        monkeypatch.setattr(gp, "SCRUB_BATCH", 1)
+        real, entered = e.db.immediate, []
+
+        def batch(**k):                                          # the owner turns privacy off after the first batch
+            entered.append(k)
+            monkeypatch.setattr(logs, "_privacy", len(entered) < 2)
+            return real(**k)
+        monkeypatch.setattr(e.db, "immediate", batch)
+        monkeypatch.setattr(logs, "_privacy", True)
+        assert e.store.scrub_private() == gp.SCRUB_STOPPED
+        assert len(entered) == 2 and all(k == {"secure": True, "truncate_wal": False} for k in entered)
+        left = [r["id"] for r in e.db.rows("SELECT id FROM goal_plan_steps WHERE evidence<>''")]
+        assert len(left) == 1 and e.db.rows("SELECT note FROM goal_plans WHERE note<>''")   # 2 batches done, rest kept
+        entered.clear()
+        monkeypatch.setattr(e.db, "immediate", lambda **k: entered.append(k) or real(**k))
+        monkeypatch.setattr(logs, "_privacy", True)
+        assert e.store.scrub_private() == 4                      # 1 step row left + 3 plan rows
+        assert entered[-1] == {"secure": True} and len(entered) == 5   # 4 step batches, then plans + -wal truncate
+        assert _texts(e.db) == ["X_BROKE"] * 3
+    finally:
         e.db.close()

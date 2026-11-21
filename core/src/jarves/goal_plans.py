@@ -36,6 +36,7 @@ from . import calm
 from . import features as feat
 from . import logs
 from .preferences import looks_sensitive
+from .userdata import CheckpointBusy
 
 FEATURE = "goal_plans"
 feat.register(FEATURE, "תוכניות ליעדים", "Goal plans", True, skills=["goal_plans"],
@@ -55,6 +56,10 @@ EVIDENCE_CHARS = 240
 RESULT_CHARS = 900
 ROUTE = "plan"
 SCRUB_THREAD_ROWS = 2000           # #1526: above this many step rows the privacy scrub runs in a worker thread
+SCRUB_BATCH = 500                  # #1526: step rows per scrub transaction; the DB lock is free between batches, so a
+                                   # coroutine touching the DB waits for one batch at most, not the whole scrub
+SCRUB_RETRY_S, SCRUB_RETRY_MAX_S = 30.0, 900.0   # #1526: a failed scrub is retried after 30 s, doubling to 15 min
+SCRUB_STOPPED = -2                 # #1526: privacy was turned off in the middle of the scrub
 OPEN = ("draft", "ready", "running", "paused", "blocked")
 TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
@@ -85,23 +90,41 @@ class PlanStore:
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+        self._busy_logged = False             # PLAN_PRIVACY_CHECKPOINT_BUSY is logged once per incident (#1526)
 
     def scrub_private(self) -> int:
-        """#1526: privacy mode on -> blank text written before it (step evidence / error, plan result / note) in ONE
-        transaction; status and error codes stay. Returns the rows changed (0 when privacy is off), -1 on a DB error."""
+        """#1526: privacy mode on -> blank text written before it (step evidence / error, plan result / note); status
+        and error codes stay. Step rows go in id-ordered batches (each its own transaction, privacy re-checked between
+        them); the last transaction blanks the plan rows and truncates the -wal file. Returns the rows changed (0 when
+        privacy is off), SCRUB_STOPPED when privacy went off mid-scrub, -1 on a DB error (a failed batch rolls back)."""
         if not logs.privacy():
             return 0
+        n, last = 0, 0
         try:
-            with self.db.immediate(secure=True) as con:   # freed space and the -wal file keep no old words
-                n = 0
-                for r in con.execute("SELECT id, error FROM goal_plan_steps WHERE evidence<>'' OR error<>''").fetchall():
-                    code = _code_only(r["error"])
-                    n += con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=? AND "
-                                     "(evidence<>'' OR error<>?)", (code, r["id"], code)).rowcount
+            while True:
+                with self.db.immediate(secure=True, truncate_wal=False) as con:   # freed space keeps no old words
+                    rows = con.execute("SELECT id, error FROM goal_plan_steps WHERE id>? AND (evidence<>'' OR error<>'')"
+                                       " ORDER BY id LIMIT ?", (last, SCRUB_BATCH)).fetchall()
+                    for r in rows:
+                        code = _code_only(r["error"])
+                        n += con.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=? AND "
+                                         "(evidence<>'' OR error<>?)", (code, r["id"], code)).rowcount
+                if len(rows) < SCRUB_BATCH:
+                    break
+                last = rows[-1]["id"]
+                if not logs.privacy():
+                    return SCRUB_STOPPED
+            with self.db.immediate(secure=True) as con:   # last: plan rows, then the -wal file keeps no old words
                 n += con.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
+        except CheckpointBusy:                             # committed; a reader keeps the -wal file: retry, log once
+            if not self._busy_logged:
+                logs.warn("goals", "PLAN_PRIVACY_CHECKPOINT_BUSY", "a reader keeps old plan text in the -wal file")
+                self._busy_logged = True
+            return -1
         except sqlite3.Error as e:                         # any other exception is rolled back and raised by immediate()
             logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text", error_type=type(e).__name__)
             return -1
+        self._busy_logged = False
         if n:
             logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text scrubbed for privacy mode", count=n)
         return n
@@ -407,6 +430,7 @@ class PlanRunner:
         self._busy: set[int] = set()
         self._stop = False
         self._private = False                 # privacy already applied to older plan text (#1526)
+        self._scrub_fails, self._scrub_retry_at = 0, 0.0   # back-off after a failed scrub (#1526)
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
@@ -415,9 +439,18 @@ class PlanRunner:
         """Advance every ready / running plan; returns how many were touched."""
         private = logs.privacy()
         if private and not self._private:          # #1526: Core start with privacy on, or privacy just turned on
-            big = (self.store.db.row("SELECT COUNT(*) n FROM goal_plan_steps") or {}).get("n", 0) > SCRUB_THREAD_ROWS
-            n = await asyncio.to_thread(self.store.scrub_private) if big else self.store.scrub_private()
-            private = n >= 0                       # a large table is scrubbed off the event loop; -1 is retried next tick
+            if self.clock() < self._scrub_retry_at:
+                private = False                    # backing off after a failed scrub
+            else:
+                big = (self.store.db.row("SELECT COUNT(*) n FROM goal_plan_steps") or {}).get("n", 0) > SCRUB_THREAD_ROWS
+                n = await asyncio.to_thread(self.store.scrub_private) if big else self.store.scrub_private()
+                private = n >= 0                   # a large table is scrubbed off the event loop
+                if n == -1:
+                    self._scrub_fails += 1
+                    delay = min(SCRUB_RETRY_MAX_S, SCRUB_RETRY_S * 2 ** (self._scrub_fails - 1))
+                    self._scrub_retry_at = self.clock() + delay
+                else:
+                    self._scrub_fails, self._scrub_retry_at = 0, 0.0
         self._private = private
         if not self._on():
             return 0

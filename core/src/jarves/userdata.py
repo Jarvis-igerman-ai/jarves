@@ -156,6 +156,10 @@ DEFAULTS: dict[str, Any] = {
 }
 
 
+class CheckpointBusy(sqlite3.OperationalError):
+    """The write committed, but a reader kept the -wal file from being checkpointed and truncated."""
+
+
 class UserDB:
     def __init__(self, path: Path | str) -> None:
         self.path = str(path)
@@ -179,11 +183,12 @@ class UserDB:
             return cur
 
     @contextlib.contextmanager
-    def immediate(self, *, secure: bool = False):
+    def immediate(self, *, secure: bool = False, truncate_wal: bool | None = None):
         """ONE write transaction (BEGIN IMMEDIATE .. COMMIT) under the lock; ANY exception rolls it back and re-raises.
         It refuses (sqlite3.OperationalError) to start inside a transaction it did not open. secure=True: freed space
         is overwritten (secure_delete, restored afterwards) and in WAL mode the -wal file is checkpointed and
-        truncated so old page images do not stay there; a checkpoint that cannot finish raises."""
+        truncated so old page images do not stay there (truncate_wal=False skips that for a batch that is not the last);
+        a checkpoint that cannot finish raises CheckpointBusy AFTER the commit landed."""
         with self._lock:
             con = self._db
             if con.in_transaction:
@@ -201,9 +206,10 @@ class UserDB:
                     if con.in_transaction:
                         con.rollback()
                     raise
-                if secure and con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
+                wal = secure if truncate_wal is None else truncate_wal
+                if wal and con.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal":
                     if con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
-                        raise sqlite3.OperationalError("wal checkpoint busy: old pages may remain in the -wal file")
+                        raise CheckpointBusy("wal checkpoint busy: old pages may remain in the -wal file")
             except BaseException as e:
                 failed = e
                 raise
