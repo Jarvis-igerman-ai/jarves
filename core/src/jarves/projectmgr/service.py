@@ -930,6 +930,9 @@ class Manager(StageEngine):
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         br = gitops.integration_branch(p["id"])
         try:
+            if gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", check=False).returncode == 1:
+                return _res(True, "ok", f"{p['name']}: nothing to ship yet (no integration branch {br}).", branch=br,
+                            commit="", worktree=str(wt), commands=[])      # review R3: not created yet
             sha = gitops.commit_of(p["path"], br)
             stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}").stdout.strip() or "no changes"
         except (OSError, gitops.GitError) as e:

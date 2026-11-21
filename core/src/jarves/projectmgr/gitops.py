@@ -92,7 +92,7 @@ def _config_overrides(cwd: str | Path, pre: list[str], timeout: float) -> list[s
                        text=True, timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
                        encoding="utf-8", errors="replace")
     if p.returncode == 129:                     # an unknown option: `--show-scope` needs git 2.26
-        return subprocess.CompletedProcess(p.args, 129, "", "JARVES projects need git 2.26 or newer (#1407)")
+        return subprocess.CompletedProcess(p.args, 129, "", "JARVES projects need git 2.38 or newer (#1407)")
     if p.returncode != 0:
         return p
     items = p.stdout.split("\0")
@@ -147,13 +147,15 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     command, are overridden too (#1407, see `_config_overrides`); a config entry written between that read and the
     command's own read is not (open race, #1533). diff/show/log never run an external diff or textconv command
     (projectmgr calls no blame, `cat-file --textconv` or `stash show -p`). Cost: one extra `git config` process per
-    call except rev-parse/merge-base, which run no such command; needs git 2.26 or newer."""
+    call except rev-parse/merge-base, which run no such command; needs git 2.38 or newer (merge-tree --write-tree)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     over = [] if args and args[0] in NO_CONFIG_CMDS else _config_overrides(cwd, pre, timeout)
     if isinstance(over, subprocess.CompletedProcess):          # the config cannot be read: fail closed
         if check:
             raise GitError((over.stderr or "git config failed").strip()[:300])
         return over
+    if args and args[0] in ("status", "diff"):     # no child git in a submodule (its own config, review R1)
+        args = (args[0], "--ignore-submodules=dirty", *args[1:])
     if args and args[0] in DIFF_CMDS:
         args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
@@ -258,8 +260,26 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
             git(repo, "branch", "-D", branch, check=False)
 
 
+def _add_all(wt: Path) -> None:
+    """`git add -A` without the child `git status` it runs inside each submodule (review R1): that child reads the
+    submodule's own config, whose filters the `-c` overrides cannot name. Submodule pointers are staged directly."""
+    idx = git(wt, "ls-files", "-s", "-z").stdout.split("\0")
+    links = [e.split("\t", 1)[1] for e in idx if e.startswith("160000 ") and "\t" in e]
+    git(wt, "add", "-A", "--", ".", *[f":(exclude,literal){x}" for x in links])
+    for x in links:
+        sub = Path(wt) / x
+        if (sub / ".git").exists():
+            sha = git(sub, "rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+            git(wt, "update-index", "--cacheinfo", f"160000,{sha},{x}")
+        elif not sub.exists():
+            git(wt, "update-index", "--force-remove", "--", x)
+        else:                                       # a submodule replaced by plain files: stage them
+            git(wt, "update-index", "--force-remove", "--", x)
+            git(wt, "add", "-A", "--", f":(literal){x}")
+
+
 def commit_all(wt: Path, message: str) -> bool:
-    git(wt, "add", "-A")
+    _add_all(wt)
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
     git(wt, "commit", "-m", message[:200], "--no-verify")

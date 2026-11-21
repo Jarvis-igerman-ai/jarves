@@ -231,7 +231,10 @@ class StageEngine:
         kept = [f"task #{d['seq']}'s work is on branch {self._job(d)['kept']}" for d in deps if self._job(d).get("kept")]
         base = gitops.integration_branch(p["id"])
         if merged:
-            sha = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()[:12]
+            try:
+                sha = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()[:12]
+            except (OSError, gitops.GitError):                  # no integration folder: the bare branch name
+                sha = ""
             base += f" at commit {sha}" if sha else ""                                       # #1407
         return cards.build_card(p, t, deps, cap=self.cfg.context_chars, failure=failure, notes=t["notes"],
                                 integration=base if merged else "", feedback=self._job(t).get("feedback"), kept=kept)
@@ -652,7 +655,9 @@ class StageEngine:
     @staticmethod
     def _is_merge_of(wt, merged: str, tip: str, head: str) -> bool:
         """#1407: `merged` is exactly `tip` merged with `head`: a fast-forward to `head` (tip already in it), or a
-        commit with parents (tip, head) whose tree is git's own merge of the two (a forged merge commit is not)."""
+        commit with parents (tip, head) whose tree is git's own merge of the two (a forged merge commit is not).
+        Fails closed: a git without `merge-tree --write-tree` (older than 2.38), or a tree that differs only by
+        worktree attribute handling (eol conversion), asks the owner once more, naming the merge commit."""
         if merged == head:
             return gitops.git(wt, "merge-base", "--is-ancestor", tip, head, check=False).returncode == 0
         parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", merged, check=False).stdout.split()[1:]

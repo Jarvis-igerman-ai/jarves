@@ -331,7 +331,7 @@ def test_config_hooks_are_neutralised_and_an_unreadable_config_fails_closed(monk
 def test_a_git_without_show_scope_names_the_minimum_version(monkeypatch, tmp_path):
     """#1407 review R4: git older than 2.26 rejects `--show-scope` (exit 129); the error names the version needed."""
     monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 129, "", "usage"))
-    with pytest.raises(gitops.GitError, match="git 2.26 or newer"):
+    with pytest.raises(gitops.GitError, match="git 2.38 or newer"):
         gitops.git(tmp_path, "status")
 
 
@@ -397,3 +397,34 @@ def test_fallback_signing_key_is_never_the_jarves_identity_email(monkeypatch, tm
     gitops.git(tmp_path, "commit", "-m", "x")
     pairs = [calls[0][i + 1] for i, a in enumerate(calls[0][:-1]) if a == "-c"]
     assert "user.signingkey=o@example.invalid" in pairs, pairs
+
+
+def test_a_filter_in_a_submodule_config_never_runs(tmp_path):
+    """#1407 restart round 3 R1: status, diff and `add -A` start `git status` inside a submodule, which reads the
+    submodule's own config (a filter the `-c` overrides cannot name). None runs; a moved submodule is still staged."""
+    marker = tmp_path / "ran.txt"
+    _hook(tmp_path / "bin", "evil", marker)
+    lib, repo = tmp_path / "lib", _repo(tmp_path)
+    lib.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=lib, check=True)
+    (lib / "x.txt").write_text("x", encoding="utf-8")
+    gitops.commit_all(lib, "x")
+    subprocess.run(["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "lib"], cwd=repo,
+                   check=True, capture_output=True)
+    gitops.commit_all(repo, "sub")
+    sub = repo / "lib"
+    subprocess.run(["git", "config", "filter.y.clean", (tmp_path / "bin" / "evil").as_posix()], cwd=sub, check=True)
+    (sub / ".gitattributes").write_text("* filter=y\n", encoding="utf-8")
+    for call in (lambda: gitops.git(repo, "status", "--porcelain"), lambda: gitops.git(repo, "diff"),
+                 lambda: gitops.commit_all(repo, "nothing")):
+        st = (sub / "x.txt").stat()
+        os.utime(sub / "x.txt", ns=(st.st_atime_ns, st.st_mtime_ns - 10**10))   # stat-dirty, same size: refresh
+        call()
+        assert not marker.exists()
+    (sub / "z.md").write_text("z", encoding="utf-8")
+    own = ["git", "-c", "filter.y.clean=cat", "-c", "user.name=a", "-c", "user.email=a@a"]   # the test's own git
+    subprocess.run([*own, "add", "z.md"], cwd=sub, check=True)
+    subprocess.run([*own, "commit", "-qm", "z"], cwd=sub, check=True)
+    assert gitops.commit_all(repo, "pointer")
+    assert gitops.git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split() == ["lib"]
+    assert not marker.exists()

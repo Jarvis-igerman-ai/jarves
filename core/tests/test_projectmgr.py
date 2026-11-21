@@ -1580,3 +1580,49 @@ def test_owner_merge_never_lands_a_forged_merge_commit(env, monkeypatch):
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)
     assert (integ / "a.txt").exists() and not (integ / "evil.txt").exists()      # the commit named and approved
+
+
+def test_owner_merge_without_merge_tree_reparks_once_and_converges(env, monkeypatch):
+    """#1407 restart round 3 R2: a git without `merge-tree --write-tree` (older than 2.38) fails closed: the merge
+    asks once more naming the merge commit, and one approve of that commit then lands it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.git
+
+    def old_git(cwd, *args, **kw):
+        if args[:1] == ("merge-tree",):
+            return subprocess.CompletedProcess(args, 129, "", "unknown option `write-tree'")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", old_git)
+    finish(m)
+    assert "changed after your approval" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)
+    assert (integ / "a.txt").exists() and (integ / "other.txt").exists()
+
+
+def test_ship_plan_without_an_integration_branch_is_nothing_to_ship(env):
+    """#1407 restart round 3 R3: no integration branch yet is an ok "nothing to ship", not GIT_ERROR."""
+    m, repo, home = env
+    open_project(m, repo)
+    sh(repo, "git", "update-ref", "-d", f"refs/heads/{gitops.integration_branch(1)}")
+    r = m.call("ship_plan", project="demo")
+    assert r["ok"] and "nothing to ship" in r["text"] and not r["commands"], r
+
+
+def test_card_without_the_integration_folder_names_the_bare_branch(env):
+    """#1407 restart round 3 R4: a missing integration folder never breaks the agent card."""
+    m, repo, home = env
+    open_project(m, repo)
+    a = task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    task(m, "B", "FAKE write b.txt=1", scope=["b.txt"], deps=[a])
+    m.call("resume", project="demo")
+    finish(m)
+    shutil.rmtree(gitops.project_root(home, 1) / "integration")
+    card = m._card(m.db.project(1), m.db.by_seq(1, 2))
+    assert f"(branch {gitops.integration_branch(1)})" in card
