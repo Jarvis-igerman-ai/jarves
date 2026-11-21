@@ -1,6 +1,6 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09. All line references were re-checked against `origin/main` 24b9ca3 on 2026-11-20.
+Date: 2026-11-09. All line references were re-checked against `origin/main` 76cd30c on 2026-11-21.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
 was run: every finding is **UNVERIFIED by test** unless it says otherwise.
@@ -35,9 +35,9 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
 
 - **#1 P1: `.github/` unprotected** (`gitops.py:21`). At review time, `PROTECTED` did not list `.github/`, and
   `forge.push_branch` pushes `jarves/p<N>/...` branches. The impact is stated in #1096. **Fixed on main by #1101
-  (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. `CODEOWNERS` outside `.github/` is still
-  not listed.
-- **#2 P2: case-sensitive protection** (`gitops.py:186-191`). The check was a case-sensitive `startswith`, so on
+  (JAR-317)**: `.github/` was added, and `test_projectmgr_git.py` covers it. #1381 (JAR-600) also counts a changed
+  symlink or gitlink as protected (`link_files`, `gitops.py:186`). `CODEOWNERS` outside `.github/` is still not listed.
+- **#2 P2: case-sensitive protection** (`gitops.py:216-221`). The check was a case-sensitive `startswith`, so on
   Windows/macOS a change to `.CLAUDE/settings.json` reached the same directory without being flagged. **Fixed on main
   by #1101**: `is_protected()` casefolds the path and normalises `\` to `/`; #1351 (JAR-574) also refuses Windows 8.3
   short names (`CLAUDE~1/`). Nested `**/.claude/` is still not matched; only `PROTECTED_NAMES` match in any folder.
@@ -46,9 +46,9 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
   unrelated process, and `/T` kills its whole tree. **Fixed on main by #1366 (JAR-575)**: `_kill_owned`
   (`service.py:1299`) kills via `_kill_pid` (`service.py:1313`) only when the stored `pid_start` marker matches the
   live process, and fails closed otherwise.
-- **#5 P3: `remove_worktree`** (`gitops.py:135`) refuses only paths without a `projects` component, so a path such as
-  `C:\Users\x\projects\repo` would still reach `shutil.rmtree`. Current callers build paths under `<home>/projects`.
-  Harden with `resolve()` + `is_relative_to(project_root)`.
+- **#5 P3: `remove_worktree`** (`gitops.py:154-156`) refuses only paths without a `projects` component, so a path
+  such as `C:\Users\x\projects\repo` would still reach `shutil.rmtree`. Current callers build paths under
+  `<home>/projects`. Harden with `resolve()` + `is_relative_to(project_root)`.
 - **#6 P3: git ref arguments.** The `base`/`branch` strings reach `git diff base...HEAD`, `git merge branch` and
   `worktree add ... start`. `start` is validated with `rev-parse --verify` first (good), and `forge.push_branch` is
   regex-restricted (good). The merge/diff refs are built internally. Add `--end-of-options` or reject a leading `-`
