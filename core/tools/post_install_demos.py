@@ -22,13 +22,13 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
 
 REQUIRED = ("JAR-188", "JAR-189", "JAR-191", "JAR-193", "JAR-210", "JAR-214")
 ALLOWED = {("status",), ("doctor",), ("selftest",), ("version",), ("features",), ("guides",), ("help",)}
-LOOPBACK = {"127.0.0.1", "localhost", "::1"}
-PAGE_RE = re.compile(r"^/(?!/)[A-Za-z0-9/_.\-?=&#]*$")
-TICKET_RE = re.compile(r"^[A-Z]+-\d+$")
+# whole-URL allowlist: no userinfo, backslash, whitespace, path, query or fragment (Chromium parses those differently)
+URL_RE = re.compile(r"(https?)://(127\.0\.0\.1|localhost|\[::1\])(?::(\d{1,5}))?/?")
+PAGE_RE = re.compile(r"/(?!/)[A-Za-z0-9/_.\-?=&#]*")
+TICKET_RE = re.compile(r"[A-Z]+-\d+")
 DAY_S = 86400
 
 
@@ -39,7 +39,7 @@ def load_tickets(path: Path) -> list[dict]:
         raise ValueError(f"DEMO_TICKETS_INVALID: {e}") from e
     if not isinstance(rows, list):
         raise ValueError("DEMO_TICKETS_INVALID: expected a JSON list")
-    return [r for r in rows if isinstance(r, dict) and TICKET_RE.match(str(r.get("ticket", "")))]
+    return [r for r in rows if isinstance(r, dict) and TICKET_RE.fullmatch(str(r.get("ticket", "")))]
 
 
 def _check_argv(argv) -> list[str]:
@@ -49,10 +49,20 @@ def _check_argv(argv) -> list[str]:
 
 
 def check_url(url: str) -> str:
-    u = urlparse(str(url))
-    if u.scheme not in ("http", "https") or u.hostname not in LOOPBACK:
+    """Returns the base URL rebuilt from the checked parts only (never the raw string)."""
+    m = URL_RE.fullmatch(str(url))
+    if not m or (m.group(3) and not 0 < int(m.group(3)) < 65536):
         raise ValueError(f"DEMO_URL_REFUSED: {url!r} is not a loopback http(s) dashboard URL")
-    return url
+    scheme, host, port = m.groups()
+    return f"{scheme}://{host}" + (f":{int(port)}" if port else "")
+
+
+def redact(text: str) -> str:
+    """Hide the home folder and user name in saved scenario output (data/demos may be shared as evidence)."""
+    home = str(Path.home())
+    text = text.replace(home, "~") if len(home) > 1 else text
+    user = os.environ.get("USERNAME") or os.environ.get("USER") or ""
+    return re.sub(rf"\b{re.escape(user)}\b", "<user>", text) if len(user) > 2 else text
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -72,7 +82,9 @@ def has_demo(demos: Path, ticket: str) -> bool:
         r = json.loads((Path(demos) / ticket / "demo.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    return isinstance(r, dict) and r.get("result") == "PASS" and bool(r.get("image")) and bool(r.get("video"))
+    return (isinstance(r, dict) and r.get("result") == "PASS"
+            and all(r.get(k) == n and (Path(demos) / ticket / n).is_file()
+                    for k, n in (("image", "demo.png"), ("video", "demo.webm"))))
 
 
 def record(row: dict, demos: Path, run_scenario, capture, clock=time.time) -> dict:
@@ -83,9 +95,9 @@ def record(row: dict, demos: Path, run_scenario, capture, clock=time.time) -> di
            "at": clock(), "result": "FAIL", "image": None, "video": None, "error": None}
     try:
         code, out = run_scenario(_check_argv(row.get("argv")))
-        rec["exit_code"], rec["output_tail"] = code, str(out)[-400:]
+        rec["exit_code"], rec["output_tail"] = code, redact(str(out))[-400:]
         page = str(row.get("page") or "/")
-        if not PAGE_RE.match(page):
+        if not PAGE_RE.fullmatch(page):
             raise ValueError(f"DEMO_PAGE_REFUSED: {page!r}")
         img, vid = d / "demo.png", d / "demo.webm"
         for f in (img, vid):
@@ -135,7 +147,7 @@ def subprocess_runner(exe: str):
 
 
 def playwright_capture(base_url: str):  # pragma: no cover - needs a browser and the installed beta
-    base = check_url(base_url).rstrip("/")
+    base = check_url(base_url)
 
     def go(page_path: str, img: Path, vid: Path) -> None:
         from playwright.sync_api import sync_playwright

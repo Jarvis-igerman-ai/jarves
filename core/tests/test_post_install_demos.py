@@ -92,7 +92,8 @@ def test_scenario_argv_must_be_allowlisted(tmp_path, argv):
     assert rec["result"] == "FAIL" and "DEMO_SCENARIO_REFUSED" in rec["error"]
 
 
-@pytest.mark.parametrize("page", ["//evil.example/x", "http://evil.example/", "@evil.example", "x"])
+@pytest.mark.parametrize("page", ["//evil.example/x", "http://evil.example/", "@evil.example", "x", "/x\n",
+                                  "/\\evil.example"])
 def test_page_must_be_a_local_path(tmp_path, page):
     row = dict(tickets()[0], page=page)
     pid.run([row], tmp_path, run_scenario=lambda a: (0, ""), capture=lambda *a: pytest.fail("must not capture"),
@@ -100,13 +101,19 @@ def test_page_must_be_a_local_path(tmp_path, page):
     assert "DEMO_PAGE_REFUSED" in json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["error"]
 
 
-@pytest.mark.parametrize("url", ["http://127.0.0.1:8765", "http://localhost:8765/", "http://[::1]:8765"])
-def test_loopback_url_allowed(url):
-    assert pid.check_url(url) == url
+@pytest.mark.parametrize("url,base", [("http://127.0.0.1:8765", "http://127.0.0.1:8765"),
+                                      ("http://localhost:08765/", "http://localhost:8765"),
+                                      ("https://[::1]:8765", "https://[::1]:8765"), ("http://localhost", "http://localhost")])
+def test_loopback_url_allowed_and_rebuilt(url, base):
+    assert pid.check_url(url) == base
 
 
 @pytest.mark.parametrize("url", ["http://example.com", "http://127.0.0.1.evil.com", "file:///etc/passwd",
-                                 "http://10.0.0.5:8765", "ftp://localhost"])
+                                 "http://10.0.0.5:8765", "ftp://localhost",
+                                 "http://evil.example\\@localhost:8765", "http://user@localhost:8765",
+                                 "http://user:pw@127.0.0.1:8765", "http://localhost:8765/x", "http://localhost:8765?a=1",
+                                 "http://localhost:8765#f", "http://localhost:8765\n", " http://localhost:8765",
+                                 "http://localhost:0", "http://localhost:70000", "HTTP://evil.example"])
 def test_non_loopback_url_refused(tmp_path, url, capsys):
     with pytest.raises(ValueError, match="DEMO_URL_REFUSED"):
         pid.check_url(url)
@@ -127,9 +134,28 @@ def test_load_tickets_rejects_malformed(tmp_path):
     p.write_text('{"ticket": "x"}', encoding="utf-8")
     with pytest.raises(ValueError, match="DEMO_TICKETS_INVALID"):
         pid.load_tickets(p)
-    p.write_text('[1, {"ticket": "JAR-9"}]', encoding="utf-8")
+    p.write_text('[1, {"ticket": "JAR-9"}, {"ticket": "JAR-8\\n"}]', encoding="utf-8")
     assert pid.load_tickets(p) == [{"ticket": "JAR-9"}]
     p.write_text("not json", encoding="utf-8")
     with pytest.raises(ValueError, match="DEMO_TICKETS_INVALID"):
         pid.load_tickets(p)
 
+
+
+def test_deleted_media_makes_ticket_pending_again(tmp_path):
+    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=fake_capture, clock=lambda: NOW)
+    assert pid.has_demo(tmp_path, "JAR-188")
+    (tmp_path / "JAR-188" / "demo.webm").unlink()
+    assert not pid.has_demo(tmp_path, "JAR-188") and "JAR-188" in pid.metrics(tmp_path, now=NOW)["missing"]
+    assert pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, ""), capture=fake_capture,
+                   clock=lambda: NOW) == ["JAR-188"]
+
+
+def test_output_tail_redacts_home_and_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(pid.Path, "home", classmethod(lambda cls: Path("/home/alice")))
+    monkeypatch.setenv("USER", "alice")
+    monkeypatch.delenv("USERNAME", raising=False)
+    pid.run(tickets()[:1], tmp_path, run_scenario=lambda a: (0, "log at /home/alice/x.log by alice; malice ok"),
+            capture=fake_capture, clock=lambda: NOW)
+    tail = json.loads((tmp_path / "JAR-188" / "demo.json").read_text(encoding="utf-8"))["output_tail"]
+    assert tail == "log at ~/x.log by <user>; malice ok"
