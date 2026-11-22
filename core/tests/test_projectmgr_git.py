@@ -282,7 +282,9 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
     assert gitops.common_dir(empty) is None
-    assert runners.ClaudeRunner(cfg).build("p", str(empty)).argv == runners.ClaudeRunner(cfg).build("p", "/w").argv
+    other = tmp_path / "other-empty"                           # hermetic: never walks a real host root such as /w
+    other.mkdir()
+    assert runners.ClaudeRunner(cfg).build("p", str(empty)).argv == runners.ClaudeRunner(cfg).build("p", str(other)).argv
     # a plain checkout: `.git` is the shared dir itself, so its four rules appear exactly once
     plain = runners.ClaudeRunner(cfg).build("p", str(repo)).argv
     own = rule(repo / ".git")
@@ -396,6 +398,34 @@ def test_a_project_on_a_mapped_network_drive_is_refused(monkeypatch, tmp_path):
     # so the run is refused (documented in the changelog), never run with a deny rule that matches nothing
     from jarves.projectmgr import runners
     repo = _repo(tmp_path)
-    monkeypatch.setattr(runners.Path, "resolve", lambda self, *a, **k: Path(r"\\srv\share\r\.git"))
+    real_resolve = runners.Path.resolve
+    monkeypatch.setattr(runners.Path, "resolve", lambda self, *a, **k:
+                        Path(r"\\srv\share\r\.git") if self.name == ".git" else real_resolve(self, *a, **k))
     with pytest.raises(ValueError, match="no permission-rule form"):
         runners._shared_git_deny(str(repo))
+
+
+def test_a_cwd_symlink_outside_the_repo_into_a_subfolder_still_gets_the_rules(monkeypatch, tmp_path):
+    # council (gpt) blocker: `/outside/link -> /repo/pkg` has no `.git` among its lexical parents, but git works
+    # in /repo; the shared git dir and the worktree pointer must still be denied. Simulated through `resolve`
+    # (no real symlink) so it also runs on Windows, where CI forbids skips.
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    wt = tmp_path / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "t1", str(wt))
+    (wt / "pkg").mkdir()
+    link = tmp_path / "outside" / "link"
+    link.mkdir(parents=True)
+    expected = runners._shared_git_deny(str(wt / "pkg"))
+    real_resolve = runners.Path.resolve
+
+    def resolve(self, *a, **k):
+        r = real_resolve(self, *a, **k)
+        try:
+            return real_resolve(wt / "pkg") / r.relative_to(real_resolve(link))
+        except ValueError:
+            return r
+    monkeypatch.setattr(runners.Path, "resolve", resolve)
+    monkeypatch.setattr(gitops, "common_dir", lambda p: real_resolve(repo / ".git"))   # git sees the physical cwd
+    denied = runners._shared_git_deny(str(link))
+    assert expected and set(expected) <= set(denied)

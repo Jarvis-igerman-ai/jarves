@@ -182,21 +182,25 @@ def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
     (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it.
     The worktree's own `.git` pointer is denied too: repointed at a planted gitdir, git would read that config.
-    The worktree is found like git finds it: the nearest `<cwd or a parent>/.git` (cwd may be a subfolder). Only a cwd
-    with no `.git` in any parent gets no rules; anything that cannot be inspected or resolved is refused, not run open.
+    The worktree is found the nearest `<cwd or a parent>/.git` (cwd may be a subfolder), along the given parents and,
+    like git (which works in the physical cwd), along the parents of the resolved cwd (a symlink into a repo subfolder).
+    Only a cwd with no `.git` on either walk gets no rules; anything that cannot be inspected or resolved is refused.
     Each path is denied as given and resolved (a symlinked folder), and in lower case on Windows (case-insensitive)."""
     try:
-        start = Path(os.path.abspath(cwd))
-        top = next((d for d in (start, *start.parents) if _has_git_entry(d)), None)
+        given = Path(os.path.abspath(cwd))
+        tops = [next((d for d in (s, *s.parents) if _has_git_entry(d)), None) for s in (given, given.resolve())]
     except OSError as e:
         raise ValueError(f"cannot inspect the git folder of this worktree: {e}") from e
-    if top is None:
+    except RuntimeError as e:                                # a symlink loop: RuntimeError before Python 3.13
+        raise ValueError(f"cannot resolve the git folder of this worktree: {e}") from e
+    tops = [t for t in dict.fromkeys(tops) if t is not None]
+    if not tops:
         return []
     common = gitops.common_dir(cwd)
     if common is None:
         raise ValueError("cannot find the shared git folder of this worktree (git 2.31 or newer is needed)")
     try:
-        roots = [abs_rule_path(f) for p in (top / ".git", common) for f in (p, p.resolve())]
+        roots = [abs_rule_path(f) for p in (*(t / ".git" for t in tops), common) for f in (p, p.resolve())]
     except (OSError, RuntimeError) as e:                     # a symlink loop: RuntimeError before Python 3.13
         raise ValueError(f"cannot resolve the git folder of this worktree: {e}") from e
     rules = []
