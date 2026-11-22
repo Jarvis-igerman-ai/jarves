@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if "--show-scope" in argv:                          # the config read of #1407, not the call under test
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,70 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+@pytest.fixture
+def no_user_config(monkeypatch, tmp_path):
+    """Hermetic: the machine's global git config (a signing program, say) must not decide these tests."""
+    for k in ("HOME", "XDG_CONFIG_HOME", "USERPROFILE"):
+        monkeypatch.setenv(k, str(tmp_path / "home"))
+
+
+def _spy(tmp_path: Path, name: str) -> tuple[str, Path]:
+    """A config-named command that leaves a marker file if git ever runs it (#1407)."""
+    marker = tmp_path / f"ran-{name}"
+    return f'echo ran > "{marker.as_posix()}"; cat', marker
+
+
+def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config):
+    repo = _repo(tmp_path)
+    cmd, marker = _spy(tmp_path, "filter")
+    gitops.git(repo, "config", "filter.evil.clean", cmd)
+    gitops.git(repo, "config", "filter.evil.required", "true")
+    (repo / ".gitattributes").write_text("*.txt filter=evil\n", encoding="utf-8")
+    (repo / "g.txt").write_text("y", encoding="utf-8")
+    assert gitops.commit_all(repo, "with attributes") and not marker.exists()
+
+
+def test_a_merge_driver_from_the_repo_config_never_runs(tmp_path, no_user_config):
+    repo = _repo(tmp_path)
+    cmd, marker = _spy(tmp_path, "merge")
+    gitops.git(repo, "config", "merge.evil.driver", cmd)
+    (repo / ".gitattributes").write_text("f.txt merge=evil\n", encoding="utf-8")
+    gitops.commit_all(repo, "attributes")
+    gitops.git(repo, "checkout", "-q", "-b", "side")
+    (repo / "f.txt").write_text("side", encoding="utf-8")
+    gitops.commit_all(repo, "side")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "f.txt").write_text("main", encoding="utf-8")
+    gitops.commit_all(repo, "main")
+    assert gitops.merge_in(repo, "side") == ["f.txt"] and not marker.exists()      # a conflict, nothing ran
+
+
+def test_a_signing_program_from_the_repo_config_never_runs_on_the_owner_merge(tmp_path, no_user_config):
+    repo = _repo(tmp_path)
+    marker = tmp_path / "ran-gpg"
+    spy = tmp_path / "gpg-spy.sh"                       # gpg.program is run directly, not through a shell
+    spy.write_text(f'#!/bin/sh\necho ran > "{marker.as_posix()}"\nexit 1\n', encoding="utf-8")
+    spy.chmod(0o755)
+    cmd = spy.as_posix()
+    gitops.git(repo, "checkout", "-q", "-b", "side")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    gitops.commit_all(repo, "side")
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m", encoding="utf-8")
+    gitops.commit_all(repo, "main")
+    for k, v in (("gpg.program", cmd), ("commit.gpgsign", "true"), ("user.name", "Owner"), ("user.email", "o@x")):
+        gitops.git(repo, "config", k, v)
+    assert gitops.merge_in(repo, "side", ident=False) == [] and not marker.exists()
+    assert (repo / "s.txt").exists()
+
+
+def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_path, no_user_config):
+    repo = _repo(tmp_path)
+    gitops.git(repo, "config", "hook.evil.command", "rm -rf /")      # newer git runs these; 2.43 does not
+    gitops.git(repo, "config", "gpg.ssh.program", "evil")
+    pre = gitops.config_overrides(repo)
+    assert "hook.evil.command=exit 0" in pre and "gpg.ssh.program=ssh-keygen" in pre
+    assert not any("evil" in x and "=" in x and x.endswith("evil") for x in pre)
+    assert "commit.gpgsign=false" in gitops.config_overrides(repo, ident=False)

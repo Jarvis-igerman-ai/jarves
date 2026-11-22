@@ -67,6 +67,52 @@ def _no_hooks_path() -> str:
 
 
 NO_HOOKS = _no_hooks_path()
+TRUSTED_SCOPES = ("system", "global", "command")        # local/worktree config (and its includes) is agent-writable
+# commands git takes from config (#1407): an agent-writable value is replaced, so git never runs it
+_RUN_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process)|merge\.(.+)\.driver|hook\.(.+)\.command"
+                      r"|gpg(\.[^.]+)?\.program)$")
+_SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag)\.gpgsign)$")
+_GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+                "gpg.ssh.program": "ssh-keygen"}
+
+
+def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
+    """`-c` pairs that neutralise every config-named command (filter/merge drivers, config hooks, gpg programs) set
+    in the agent-writable local/worktree config (#1407); the owner's global/system value is kept. ident=False (a merge
+    into your branch): untrusted signing settings turn signing off, so your key never signs on an agent's say-so.
+    Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533."""
+    try:
+        p = subprocess.run(["git", "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
+                           timeout=30, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
+    except subprocess.SubprocessError as e:                 # OSError (no such folder) propagates as before
+        raise GitError(f"could not read the git config: {e}") from e
+    if p.returncode != 0:
+        raise GitError("could not read the git config: " + p.stderr.decode("utf-8", "replace").strip()[:200])
+    items = p.stdout.decode("utf-8", "replace").split("\0")
+    trusted: dict[str, str] = {}
+    out: list[str] = []
+    signing = False
+    for scope, kv in zip(items[0::2], items[1::2]):
+        key, _, val = kv.partition("\n")
+        key = key.lower()
+        if scope in TRUSTED_SCOPES:
+            trusted[key] = val
+            continue
+        signing = signing or bool(_SIGN_KEY.match(key))
+        m = _RUN_KEY.match(key)
+        if not m:
+            continue
+        if m.group(2):
+            out += ["-c", f"{key}=", "-c", f"filter.{m.group(2)}.required=false"]
+        elif m.group(4):
+            out += ["-c", f"{key}=exit 1"]                  # a conflict, never the agent's program
+        elif m.group(5):
+            out += ["-c", f"{key}=exit 0"]
+        else:
+            out += ["-c", f"{key}={trusted.get(key, _GPG_DEFAULT.get(key, 'gpg'))}"]
+    if signing and not ident:
+        out += ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+    return out
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -76,9 +122,9 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. Other config-named commands: `config_overrides` (#1407)."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           *config_overrides(cwd, ident)]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -94,7 +140,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, GitError):
         return False
 
 
