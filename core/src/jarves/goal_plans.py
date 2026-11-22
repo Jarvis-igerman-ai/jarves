@@ -67,6 +67,30 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _kept(text: object, n: int = EVIDENCE_CHARS) -> str:
+    """Tool output kept on a step: none while privacy is on (status and codes stay), else the short text (#1526)."""
+    return "" if logs.privacy() else _short(text, n)
+
+
+def scrub_private_text(db) -> int:
+    """Privacy on: blank the tool output text stored earlier (step evidence/error, plan result/note) in ONE
+    transaction; states, statuses and codes stay. Returns the number of rows changed (#1526)."""
+    with db._lock:
+        cx = db._db
+        try:
+            n = cx.execute("UPDATE goal_plan_steps SET evidence='', error='' "
+                           "WHERE COALESCE(evidence,'')<>'' OR COALESCE(error,'')<>''").rowcount
+            n += cx.execute("UPDATE goal_plans SET result='', note='' "
+                            "WHERE COALESCE(result,'')<>'' OR COALESCE(note,'')<>''").rowcount
+            cx.commit()
+        except Exception:
+            cx.rollback()
+            raise
+    if n:
+        logs.info("goals", "PLAN_TEXT_SCRUBBED", "plan text erased because privacy is on", count=n)
+    return n
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
@@ -505,7 +529,7 @@ class PlanRunner:
                 if tool.untrusted_output:
                     st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
                 st.db.x("UPDATE goal_plan_steps SET status='done', finished=?, evidence=?, error='' WHERE id=?",
-                        (self.clock(), _short(res.message), step["id"]))
+                        (self.clock(), _kept(res.message), step["id"]))
                 logs.info("goals", "PLAN_STEP_DONE", "plan step done", id=pid, step=step["idx"], tool=step["tool"])
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
@@ -521,7 +545,8 @@ class PlanRunner:
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
                 self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
                 return st.get(pid)
-            self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
+            self._fail(pid, step, res.code if logs.privacy() else f"{res.code}: {_short(res.message, 120)}", t0,
+                       evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
@@ -532,7 +557,7 @@ class PlanRunner:
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
-                        (status, self.clock(), _short(why, 200), _short(evidence), step["id"]))
+                        (status, self.clock(), _short(why, 200), _kept(evidence), step["id"]))
         self._stop_plan(pid, "failed", f"step {step['idx'] + 1}: {why}", finished=self.clock())
 
     def _finish(self, pid: int) -> dict:
