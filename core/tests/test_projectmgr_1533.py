@@ -91,3 +91,48 @@ def test_claude_agents_may_not_edit_the_shared_git_folder(tmp_path):
     common = "/" + common[0].lower() + common[2:] if common[1:2] == ":" else common
     deny = argv[argv.index("--disallowedTools"):]
     assert f"Edit(/{common}/**)" in deny and f"Write(/{common}/**)" in deny
+
+
+def test_an_edit_after_the_last_run_ended_is_kept_and_commit_all_works(tmp_path):
+    """Review R1: the baseline ends with the last guarded run; a later owner (or JARVES) config edit is kept."""
+    repo, wt = _task(tmp_path)
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
+    with open(repo / ".git" / "config", "a", encoding="utf-8") as h:
+        h.write("[x]\n\ty = 1\n")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a") and "[x]" in (repo / ".git" / "config").read_text(encoding="utf-8")
+    assert gitops._GUARDS == {}
+
+
+def test_a_check_that_times_out_still_reports_the_changed_files(monkeypatch, tmp_path):
+    """Review R3: a timeout no longer hides a change to the shared git files."""
+    repo, wt = _task(tmp_path)
+    real = gitops.subprocess.run
+
+    def run(argv, **kw):
+        if argv[0] != "CHECK":
+            return real(argv, **kw)
+        real(_plant(repo, tmp_path), check=True)
+        raise gitops.subprocess.TimeoutExpired(argv, 1)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    ok, out = gitops.run_check(wt, ["CHECK"])
+    assert not ok and out.startswith("check timed out; the check changed the shared git files")
+    assert not (repo / ".git" / "info" / "attributes").exists()
+
+
+def test_a_failed_put_back_is_not_reported_as_a_check_that_could_not_start(monkeypatch, tmp_path):
+    """Review R3: an OSError while putting the files back says so (fails closed), not 'could not start'."""
+    repo, wt = _task(tmp_path)
+
+    def broken(f, data):
+        raise PermissionError("read-only")
+    monkeypatch.setattr(gitops, "_put_back", broken)
+    ok, out = gitops.run_check(wt, _plant(repo, tmp_path))
+    assert not ok and "could not be checked or put back: read-only" in out and "could not start" not in out
+
+
+def test_runner_run_keeps_its_explicit_keywords():
+    """Review R4: a misspelled keyword fails at `run` itself, before any agent starts."""
+    import inspect
+    params = inspect.signature(runners.Runner.run).parameters
+    assert "timeout" in params and all(p.kind != p.VAR_KEYWORD for p in params.values())

@@ -94,10 +94,14 @@ class Runner:
     def parse(self, stdout: str, rc: int) -> Result:
         raise NotImplementedError
 
-    def run(self, prompt: str, cwd: str, **kw) -> Result:
-        """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533)."""
+    def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
+            check_argv: list[str] | None = None, timeout: float = 1800, on_start=None,
+            cancel: threading.Event | None = None, team: bool = False) -> Result:
+        """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533).
+        Subclasses override build/parse, never run (the guard lives here)."""
         with gitops.shared_config_guard(cwd) as changed:
-            r = self._run(prompt, cwd, **kw)
+            r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                          timeout=timeout, on_start=on_start, cancel=cancel, team=team)
         return Result(error="the agent " + gitops.tamper_text(changed), session_id=r.session_id, cost_usd=r.cost_usd,
                       tokens=r.tokens) if changed else r
 

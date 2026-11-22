@@ -94,10 +94,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 
 
 # #1533: files in the repository's common git folder that every worktree (and the owner's own checkout) reads. An agent
-# or a check running its code that writes them could make git run a command (filter/merge driver, fsmonitor, hook) for
-# JARVES or later for the owner; no git option skips them. While any agent or check runs in a repository, JARVES keeps
-# ONE baseline of them: a change is put back (unique temp file + os.replace) and fails that run, and commit_all
-# refuses to run git while they differ. A process can still write between JARVES's check and git's own read.
+# or a check running its code that writes them could make git run a command (filter/merge driver, config-defined
+# hook) for JARVES or later for the owner; no git option skips them. (Hook FILES in `.git/hooks` and `core.hooksPath`
+# never run for JARVES git: see `git`, #1381.) While any agent or check runs in a repository, JARVES keeps ONE baseline
+# of them: a change is put back (unique temp file + os.replace) and fails that run, and commit_all refuses to run git
+# while they differ. The baseline ends with the last run, so later edits (yours, or JARVES's own) are kept. A process
+# can still write between JARVES's check and git's own read.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
 _GUARDS: dict[Path, list] = {}          # common dir -> [active runs, {file: bytes or None (absent)}]
 _GUARD_LOCK = threading.Lock()
@@ -142,7 +144,7 @@ def _restore(common: Path) -> list[str]:
     """Put back every shared file that differs from the baseline; the names that differed."""
     with _GUARD_LOCK:
         g = _GUARDS.get(common)
-        if not g:
+        if not g or g[0] <= 0:                  # no agent or check is running there: nothing to compare with
             return []
         changed = []
         for f in sorted(set(g[1]) | _shared_files(common)):
@@ -159,10 +161,10 @@ def shared_config_guard(cwd: str | Path):
     common, changed = common_dir(cwd), []
     if common is not None:
         with _GUARD_LOCK:
-            g = _GUARDS.setdefault(common, [0, {}])
-            if not g[0]:
-                g[1] = {f: _read(f) for f in _shared_files(common)}
-            g[0] += 1
+            if common in _GUARDS:
+                _GUARDS[common][0] += 1
+            else:                               # the first run there takes the baseline every later run shares
+                _GUARDS[common] = [1, {f: _read(f) for f in _shared_files(common)}]
     try:
         yield changed
     finally:
@@ -172,6 +174,8 @@ def shared_config_guard(cwd: str | Path):
             finally:
                 with _GUARD_LOCK:
                     _GUARDS[common][0] -= 1
+                    if _GUARDS[common][0] <= 0:     # the last run ended: the baseline goes with it (review R1)
+                        del _GUARDS[common]
 
 
 def tamper_text(changed: list[str]) -> str:
@@ -347,17 +351,23 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
+    p, why = None, ""
     try:
         with shared_config_guard(wt) as changed:
-            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
-                               creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
-                               stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return False, "check timed out"
-    except OSError as e:
-        return False, f"check could not start: {e}"
+            try:
+                p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
+                                   creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
+                                   stdin=subprocess.DEVNULL)
+            except subprocess.TimeoutExpired:
+                why = "check timed out"
+            except OSError as e:
+                why = f"check could not start: {e}"
+    except OSError as e:                        # reading or putting back the shared git files (#1533)
+        return False, f"{why + '; ' if why else ''}the shared git files could not be checked or put back: {e}"
     if changed:
-        return False, "the check " + tamper_text(changed)
+        return False, (why + "; " if why else "") + "the check " + tamper_text(changed)
+    if why:
+        return False, why
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
 
