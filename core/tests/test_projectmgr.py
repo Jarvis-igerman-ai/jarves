@@ -1237,6 +1237,42 @@ def test_owner_merge_prompt_with_a_removed_task_folder_moves_on_1461(env):
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and "approve merging" in t["waiting"], (t["status"], t["reason"])
+    assert "(commit )" not in t["waiting"] and "(commit" not in t["waiting"], t["waiting"]
+
+
+@pytest.mark.parametrize("edit", [True, False])
+def test_sibling_commit_inside_the_owner_merge_answer_is_not_approved_1461(env, monkeypatch, edit):
+    """Review round 3 R1: a sibling moves the branch between answer()'s read and its commit of your edit."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    shown = _rev(t["worktree"])
+    if edit:
+        (Path(t["worktree"]) / "b").write_text("mine\n")
+    real = gitops.commit_all
+    with monkeypatch.context() as mp:
+        mp.setattr(gitops, "commit_all", lambda wt, *a, **k: (_sibling_commit(wt), real(wt, *a, **k))[1])
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    assert m.db.by_seq(1, 1)["job"]["approved"]["tree"] == shown
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after the check/review" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+
+
+def test_files_left_by_the_first_check_are_named_at_a_second_check_1461(env):
+    """Review round 3 R3: a second check stage names leftover files, not a branch move."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "open('generated.txt', 'w').write('x')"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "uncommitted files appeared" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
 
 
 def test_task_branch_moved_during_the_review_is_not_merged_1461(env, monkeypatch):
