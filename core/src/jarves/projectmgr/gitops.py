@@ -107,6 +107,10 @@ def _reset_keys(entries: list[tuple[str, str, str]]) -> set[str]:
 # in a partial clone a missing object starts `git fetch`, which would run the shared ssh command or helper (#1632 R1),
 # so this fast path runs only where GIT_NO_LAZY_FETCH works and any failure retries on the full path.
 _INERT = ("rev-parse", "rev-list", "merge-base")
+# the only flags the fast path takes (the ones JARVES uses); any other flag (`rev-list --alternate-refs` runs
+# core.alternateRefsCommand) takes the full path (#1632 round 3 R4)
+_INERT_FLAGS = frozenset({"--verify", "--quiet", "-q", "--abbrev-ref", "--short", "--count", "--git-dir",
+                          "--git-common-dir", "--show-toplevel", "--is-ancestor"})
 # upstream releases with GIT_NO_LAZY_FETCH (2.45.1 and the CVE-2024-32465 maintenance releases); a distro backport
 # under an older number simply takes the full path
 _NO_LAZY_FETCH = {(2, 39): 4, (2, 40): 2, (2, 41): 1, (2, 42): 2, (2, 43): 4, (2, 44): 1}
@@ -169,7 +173,8 @@ def config_overrides(entries: list[tuple[str, str, str]]) -> list[tuple[str, str
         # comes back under its own key in order, so each one that matches runs once, whatever URL key it uses (R2)
         out += [("credential.helper", "")] + [(k, v) for k, v in trusted if k.startswith("credential.")]
     hooks = sorted({m.group(1) for _, k, _ in entries if (m := _HOOK.fullmatch(k))})
-    return out + [(f"hook.{name}.event", "") for name in hooks]
+    # an empty event list, and a no-op command in case a git does not clear the list on an empty value
+    return out + [pair for name in hooks for pair in ((f"hook.{name}.event", ""), (f"hook.{name}.command", ":"))]
 
 
 def _override_env(pairs: list[tuple[str, str]]) -> dict[str, str]:
@@ -205,7 +210,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
            "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]
-    if args and args[0] in _INERT and _lazy_fetch_switch():
+    if (args and args[0] in _INERT and all(a in _INERT_FLAGS for a in args[1:] if a.startswith("-"))
+            and _lazy_fetch_switch()):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({**FIXED_ENV, "GIT_NO_LAZY_FETCH": "1"}),
                            encoding="utf-8", errors="replace")
@@ -265,7 +271,14 @@ def _add_worktree(repo: str, wt: Path, *args: str) -> None:
     """`worktree add` would check out in a child git whose config JARVES never read (R1, #1390): add it empty, then
     check it out with a separate call from inside the new worktree, whose own config is read first."""
     git(repo, "worktree", "add", "--no-checkout", *args)
-    git(wt, "reset", "-q", "--hard")
+    try:
+        git(wt, "reset", "-q", "--hard")
+    except (GitError, OSError, subprocess.SubprocessError):
+        # a half worktree (empty index: "every file deleted") must not stay: ensure_integration would return it as-is
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        shutil.rmtree(wt, ignore_errors=True)
+        git(repo, "worktree", "prune", check=False)
+        raise
 
 
 def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:

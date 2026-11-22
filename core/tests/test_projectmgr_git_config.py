@@ -20,6 +20,7 @@ def _own_git_config(monkeypatch, tmp_path):
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [])      # #1632 round 3 R2: no git-version cache leaks between tests
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -250,7 +251,8 @@ def test_worktrees_are_checked_out_by_a_git_that_reads_their_own_config(monkeypa
     with --no-checkout and checks it out in a separate call from inside the new worktree."""
     repo, home, seen = _repo(tmp_path), tmp_path / "home", []
     real = subprocess.run
-    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append((argv, kw["cwd"])) or real(argv, **kw))
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda argv, **kw: seen.append((argv, kw.get("cwd"))) or real(argv, **kw))
     gitops.ensure_integration(home, str(repo), 1)
     wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
     rel = gitops.detached_worktree(home, str(repo), 1, gitops.git(repo, "rev-parse", "HEAD").stdout.strip())
@@ -306,11 +308,13 @@ def test_config_hook_events_are_undone_on_every_git(monkeypatch, tmp_path):
     repo, seen = _repo(tmp_path), []
     _shared_config(repo, '[hook "ev"]\n\tcommand = "touch x"\n\tevent = pre-commit\n')
     real = subprocess.run
-    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append((argv, kw["env"])) or real(argv, **kw))
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda argv, **kw: seen.append((argv, kw.get("env"))) or real(argv, **kw))
     gitops.git(repo, "commit", "-q", "--allow-empty", "-m", "x")
     env = next(e for a, e in seen if "commit" in a)
     pairs = [(env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"]) for i in range(int(env["GIT_CONFIG_COUNT"]))]
     assert ("hook.ev.event", "") in pairs
+    assert ("hook.ev.command", ":") in pairs        # round 3 R3: a no-op even if an empty event does not clear the list
 
 
 def test_inert_git_calls_spawn_one_process(monkeypatch, tmp_path):
@@ -319,7 +323,8 @@ def test_inert_git_calls_spawn_one_process(monkeypatch, tmp_path):
     the config before and after (#1632 R1)."""
     repo, seen = _repo(tmp_path), []
     real = subprocess.run
-    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append((argv, kw["env"])) or real(argv, **kw))
+    monkeypatch.setattr(gitops.subprocess, "run",
+                        lambda argv, **kw: seen.append((argv, kw.get("env"))) or real(argv, **kw))
     monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [True])
     for args in (("rev-parse", "HEAD"), ("rev-list", "--count", "HEAD"), ("merge-base", "HEAD", "HEAD")):
         seen.clear()
@@ -327,7 +332,9 @@ def test_inert_git_calls_spawn_one_process(monkeypatch, tmp_path):
         assert len(seen) == 1 and "protocol.ext.allow=never" in seen[0][0]
         assert seen[0][1]["GIT_NO_LAZY_FETCH"] == "1"
     for lazy_ok, args, spawned in ((True, ("rev-parse", "--verify", "-q", "nope"), 4),
-                                   (False, ("rev-parse", "HEAD"), 3), (True, ("status", "--porcelain"), 3)):
+                                   (False, ("rev-parse", "HEAD"), 3), (True, ("status", "--porcelain"), 3),
+                                   (True, ("rev-list", "--alternate-refs", "HEAD"), 3),       # round 3 R4
+                                   (True, ("rev-parse", "--show-toplevel", "--parseopt"), 3)):
         monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [lazy_ok])
         seen.clear()
         gitops.git(repo, *args, check=False)
@@ -439,6 +446,8 @@ def test_a_lazy_fetch_in_a_partial_clone_never_runs_the_shared_ssh_command(monke
     _plain(tmp_path, "-c", "protocol.file.allow=always", "clone", "-q", "--filter=tree:0", "--no-checkout",
            server.as_uri(), str(clone))
     subprocess.run(["git", "remote", "set-url", "origin", "ssh://127.0.0.1:9/x"], cwd=clone, check=True)
+    # round 3 R5: the owner's own ssh command (restored by the overrides) fails at once, so no real ssh ever starts
+    subprocess.run(["git", "config", "--global", "core.sshCommand", "false"], cwd=clone, check=True)
     _shared_config(clone, f'[core]\n\tsshCommand = "{_runs(marker, "exit 1")}"\n')
     _plain(clone, "rev-parse", "HEAD:f.txt")                  # the tree of HEAD is missing: lazy fetch over ssh
     assert marker.exists()
@@ -451,3 +460,25 @@ def test_a_lazy_fetch_in_a_partial_clone_never_runs_the_shared_ssh_command(monke
     for args in (("rev-parse", "HEAD:f.txt"), ("rev-list", "--objects", "HEAD"), ("merge-base", "HEAD", "HEAD")):
         gitops.git(clone, *args, check=False)
     assert not marker.exists()
+
+
+def test_a_worktree_whose_checkout_fails_is_removed_again(monkeypatch, tmp_path):
+    """#1632 round 3 R1: `worktree add --no-checkout` then `reset --hard`; if the reset fails, no half worktree (empty
+    index: "every file deleted") may stay registered, or ensure_integration would return it as-is next time."""
+    repo, home = _repo(tmp_path), tmp_path / "home"
+    real = gitops.git
+
+    def failing(cwd, *args, **kw):
+        if args[:1] == ("reset",):
+            raise gitops.GitError("the shared git config changed while git ran: filter.ev.smudge")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", failing)
+    for make in (lambda: gitops.ensure_integration(home, str(repo), 1),
+                 lambda: gitops.detached_worktree(home, str(repo), 1, real(repo, "rev-parse", "HEAD").stdout.strip())):
+        with pytest.raises(gitops.GitError, match="changed while"):
+            make()
+    listed = real(repo, "worktree", "list", "--porcelain").stdout
+    assert listed.count("worktree ") == 1 and not (home / "projects" / "1" / "integration").exists()
+    monkeypatch.setattr(gitops, "git", real)
+    wt = gitops.ensure_integration(home, str(repo), 1)
+    assert real(wt, "status", "--porcelain").stdout == "" and (wt / "f.txt").exists()
