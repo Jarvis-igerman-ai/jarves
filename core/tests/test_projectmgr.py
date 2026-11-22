@@ -1370,6 +1370,40 @@ def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
 
 
+def test_ship_names_the_integration_branch_not_a_same_named_tag(env):
+    """JAR-678 (#1561 review R1): a tag `jarves/p1/integration` wins a short-name lookup; ship never names or merges it."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    sha = sh(repo, "git", "rev-parse", f"refs/heads/{gitops.integration_branch(1)}").strip()
+    other = sh(repo, "git", "rev-parse", f"{sha}^").strip()
+    sh(repo, "git", "tag", gitops.integration_branch(1), other)
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == sha and all(other not in c for c in plan["commands"]), plan
+    seen = []
+    m._ask = lambda prompt, *a, **k: seen.append(prompt) or True
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and r["commit"] == sha and sha[:12] in seen[0] and (repo / "a.txt").exists(), (r, seen)
+
+
+def test_owner_merge_without_a_task_folder_names_no_task_commit(env):
+    """JAR-678 (#1561 review R2): with no task folder the merge prompt never shows the integration commit as the
+    task's commit; it says there is nothing to merge."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "nothing to merge" in t["waiting"] and "(commit" not in t["waiting"], t
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
 def test_owner_review_and_merge_text_name_commits(env):
     """#1407 item 1: the owner's review command and merge approval name commits, not the integration branch."""
     m, repo, home = env

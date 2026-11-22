@@ -710,7 +710,7 @@ class StageEngine:
                 return ("stop", "failed", f"git failed: {clean(e, 200)}")
             if kind == "merge" and wt_ok:
                 self._set_job(t, shown=head)                        # the commit this prompt names (answer binds it)
-            head = head[:12] or ("HEAD" if kind == "review" else base_sha)    # no task folder: review `where`
+            head = head[:12] or "HEAD"                              # no task folder: review `where`
         if kind in ("work", "reproduce"):
             try:
                 wt, br = self._ensure_worktree(p, t)
@@ -734,7 +734,9 @@ class StageEngine:
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
             "review": f"review task #{t['seq']}: git -C \"{where}\" diff {base_sha}...{head}, then approve or reject with what "
                       "to change",
-            "merge": f"approve merging task #{t['seq']} (commit {head}) into {base} (now at {base_sha})",
+            "merge": f"approve merging task #{t['seq']} (commit {head}) into {base} (now at {base_sha})" if
+                     t["worktree"] and Path(t["worktree"]).exists() else
+                     f"task #{t['seq']} has no task folder, so there is nothing to merge: approve to continue",
             "release": f"release {p['name']} yourself, then say done",
             "gate": st.get("question") or f"approve to continue task #{t['seq']}",
             "debate": "decide this question yourself and answer with your decision",

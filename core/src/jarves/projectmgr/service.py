@@ -913,7 +913,7 @@ class Manager(StageEngine):
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
             try:                    # #1407: the approval names a commit and exactly that commit is merged
-                sha = gitops.commit_of(p["path"], br)
+                sha = gitops.commit_of(p["path"], f"refs/heads/{br}")    # never a same-named tag (R1)
             except gitops.GitError as e:
                 return _res(False, "GIT_ERROR", f"git failed: {clean(e, 200)}")
             if not yes and not self._approve(f"Merge {br} at commit {sha[:12]} into {st['branch']} in {p['path']}? "
@@ -933,7 +933,7 @@ class Manager(StageEngine):
             if gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", check=False).returncode == 1:
                 return _res(True, "ok", f"{p['name']}: nothing to ship yet (no integration branch {br}).", branch=br,
                             commit="", worktree=str(wt), commands=[])      # review R3: not created yet
-            sha = gitops.commit_of(p["path"], br)
+            sha = gitops.commit_of(p["path"], f"refs/heads/{br}")
             r = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}", check=False)   # the stat may fail;
             stat = (r.stdout.strip() or "no changes") if r.returncode == 0 else "unknown"   # the commit may not
         except (OSError, gitops.GitError) as e:
