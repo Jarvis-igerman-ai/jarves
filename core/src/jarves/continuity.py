@@ -94,10 +94,12 @@ class Continuity:
 
     # ------------------------------------------------------------------ idempotent commands
     def execute(self, device: str, cid: str | None, kind: str, fn: Callable[[], tuple[int, dict]],
-                *, age_s: float | None = None) -> tuple[int, dict, bool]:
+                *, age_s: float | None = None,
+                at_rest: Callable[[dict], dict] | None = None) -> tuple[int, dict, bool]:
         """Run `fn` (returns (status, body)) once per (device, cid). Returns (status, body, replayed).
         Without a cid the command simply runs. A resend gets the stored answer and does not run again. A command the
-        client queued longer than REPLAY_WINDOW_S ago is refused with code STALE (and not stored: the user may resend)."""
+        client queued longer than REPLAY_WINDOW_S ago is refused with code STALE (and not stored: the user may resend).
+        `at_rest` (#206 F13): in privacy mode the ledger stores at_rest(body), the answer without its text."""
         now = self.clock()
         if not cid:
             st, body = fn()
@@ -115,7 +117,7 @@ class Continuity:
             st, body = fn()
             if st < 500:                                      # a server failure may be retried; a decision is final
                 self._x("INSERT OR REPLACE INTO ledger (device, cid, kind, status, body, ts) VALUES (?,?,?,?,?,?)",
-                        (device, cid, kind, int(st), json.dumps(body), now))
+                        (device, cid, kind, int(st), json.dumps(at_rest(body) if at_rest and logs.privacy() else body), now))
                 self._x("DELETE FROM ledger WHERE ts < ?", (now - LEDGER_TTL_S,))
             return st, body, False
 
