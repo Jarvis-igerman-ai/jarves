@@ -12,6 +12,8 @@ LEAKY = [
     "2fa: KRSXGZLBMNQW4ZDF",                          # one digit group, "2fa" before
     "authenticator key abcdefghijklmn4z",            # lowercase, one digit group
     "המאמת שלי JBSWYTDPEHPKXPX5",                     # Hebrew seed word
+    "הסוד abcdefghijklmn4z",                          # Hebrew seed word with a prefix letter
+    "otp codes: abcdefghijklmn4z",                   # plural / token next to punctuation
     "JBSWY3DPEHPK3PXP",                               # two digit groups, no word needed
     "keep jbswy3dpehpk3pxp for later",               # lowercase, two groups
 ]
@@ -25,6 +27,8 @@ SAFE = [
     "I prefer short answers in the morning",
     "internationalization",                           # long word, no digits
     "call getOtpSecret4Value in the handler",        # seed word only inside the run itself (review R1)
+    "footprint abcdefghijklmn4z",                    # "otp" inside an ordinary word (review 2, R1)
+    "יסוד abcdefghijklmn4z",                          # "סוד" inside an ordinary Hebrew word (review 2, R1)
 ]
 
 

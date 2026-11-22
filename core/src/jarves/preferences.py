@@ -50,7 +50,9 @@ _SENSITIVE = re.compile(
 # development words such as "base64urlencoded" or "sha256checksumfile" in drafts and plans are not refused.
 _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
 _DIGIT_GROUP = re.compile(r"[2-7]+")
-_SEED_WORD = re.compile(r"totp|otp|seed|2fa|mfa|authenticator|מאמת|אימות|זרע|סוד", re.I)
+# Whole tokens only, so "footprint" or "יסוד" is no seed word; Hebrew allows one prefix letter (e.g. "המאמת").
+_SEED_WORD = re.compile(r"(?<![A-Za-z0-9])(?:totp|otp|seed|2fa|mfa|authenticator)s?(?![A-Za-z0-9])"
+                        r"|(?<![\u05d0-\u05ea])[הובלמשכ]?(?:מאמת|אימות|זרע|סוד)(?![\u05d0-\u05ea])", re.I)
 _SEED_NEAR = 20
 
 
