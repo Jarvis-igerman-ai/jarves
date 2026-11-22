@@ -7,11 +7,15 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 from . import gitops
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
+PUSH_BASE = "https://github.com/"        # the only push target (#1595); tests point it at a local folder
+_SLUG_OK = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 
 
@@ -68,11 +72,38 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
-def push_branch(path: str, branch: str) -> None:
-    """A normal push of one branch to origin (never --force, never a tag, never the default branch)."""
+def push_branch(path: str, branch: str, slug: str) -> None:
+    """A normal push of one branch (never --force, never a tag, never the default branch) to the pinned
+    `https://github.com/<slug>.git` (#1595). `slug` must come from the caller's own trusted record, never from the
+    agent-writable `remote.origin.url`; this function has no caller yet (GitHub write mode does not push today).
+    The push runs from a private throw-away repository that borrows the project's objects (alternates), with
+    GIT_CONFIG_GLOBAL set to an empty file and GIT_CONFIG_NOSYSTEM=1: no repository, global, XDG or system config is
+    read (agent-written code runs as the owner's user and can write all of them), so no `url.*.insteadOf`/
+    `pushInsteadOf`, `http.*`, credential helper or remote URL from there applies. Only JARVES's own settings do: the
+    owner's gh login as the one credential helper (`gh auth git-credential`) and `http.sslVerify=true`. The owner's
+    environment (HTTPS_PROXY, SSL_CERT_FILE) still applies. The two `rev-parse` calls below still run in the project
+    repository with its config; rev-parse runs no filter, driver or transport, and `core.hooksPath`/`core.fsmonitor`
+    are neutralised."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    gitops.git(path, "push", "--no-verify", "origin", f"{branch}:{branch}", timeout=300, ident=False)
+    if not _SLUG_OK.match(slug or "") or ".." in slug:
+        raise ForgeError("push target must be owner/repo")
+    cmd = gh_cmd()
+    if not cmd:
+        raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
+    helper = "!'" + cmd[0].replace("'", "'\\''") + "' auth git-credential"
+    sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
+    objects = (Path(path) / gitops.git(path, "rev-parse", "--git-path", "objects").stdout.strip()).resolve()
+    with tempfile.TemporaryDirectory(prefix="jarves-push-") as d:
+        repo, empty = Path(d) / "r.git", Path(d) / "empty.gitconfig"
+        empty.write_bytes(b"")
+        env = {"GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1",
+               **{k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR") if os.environ.get(k)}}
+        gitops.git(d, "init", "-q", "--bare", str(repo), ident=False, env=env)
+        (repo / "objects" / "info" / "alternates").write_text(str(objects) + "\n", encoding="utf-8")
+        gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
+                   "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
+                   ident=False, env=env)
 
 
 def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:

@@ -255,3 +255,279 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+PLANT = '[filter "evil"]\n\tclean = sh -c "touch pwned"\n'
+
+
+def test_a_check_command_that_writes_the_shared_git_config_is_rejected_and_undone(tmp_path):
+    """#1592: the check command runs agent-written code; a planted config entry is restored and the check fails."""
+    import sys
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    argv = [sys.executable, "-c", f"open({str(cfg)!r}, 'ab').write({PLANT.encode()!r})"]
+    ok, out = gitops.run_check(repo, argv)
+    assert not ok and "git config file" in out
+    assert cfg.read_bytes() == before
+    kept = out.split("kept in ", 1)[1].split()[0]                 # R2: the replaced content is kept and named
+    assert Path(kept).read_bytes() == before + PLANT.encode()
+
+
+def test_git_calls_restore_the_shared_config_while_a_run_is_active(tmp_path):
+    """#1592: another task's git call during a run never reads an entry the run planted; the run is flagged."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(before + PLANT.encode())
+        gitops.git(repo, "status")
+        assert cfg.read_bytes() == before
+    assert guard["changed"] and not gitops._GUARDS
+
+
+def test_an_unchanged_config_passes_the_guard(tmp_path):
+    repo = _repo(tmp_path)
+    ok, _ = gitops.run_check(repo, ["git", "--version"])
+    assert ok and not gitops._GUARDS
+
+
+def test_an_agent_run_that_writes_the_shared_git_config_is_rejected_and_undone(tmp_path):
+    """#1592: the agent itself (or a check it runs through its allowed Bash rule) plants a config entry."""
+    import sys
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+
+    class Planter(runners.Runner):
+        name = "planter"
+
+        def build(self, prompt, cwd, **kw):
+            return runners.Spec([sys.executable, "-c", f"open({str(cfg)!r}, 'ab').write({PLANT.encode()!r})"], None, {})
+
+        def parse(self, stdout, rc):
+            return runners.Result(ok=rc == 0, text="done")
+
+    r = Planter().run("x", str(repo))
+    assert not r.ok and "git config file" in r.error
+    assert cfg.read_bytes() == before
+
+
+def test_a_check_that_times_out_still_reports_the_timeout(monkeypatch, tmp_path):
+    repo = _repo(tmp_path)
+    real = subprocess.run
+
+    def run(argv, **kw):
+        if argv[0] == "git":
+            return real(argv, **kw)
+        raise subprocess.TimeoutExpired(argv, 1)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    assert gitops.run_check(repo, ["slow"]) == (False, "check timed out") and not gitops._GUARDS
+
+
+def test_a_config_replaced_by_a_folder_is_restored_and_the_guard_cleans_up(tmp_path, monkeypatch):
+    """#1592 review R1/R2: a folder in place of the config never leaves a stale guard that breaks later git calls."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    logged: list = []
+    monkeypatch.setattr(gitops.logs, "warn", lambda *a, **f: logged.append((a[1], f)))
+    with gitops.config_guard(repo) as guard:
+        cfg.unlink()
+        cfg.mkdir()
+        (cfg / "x").write_text("planted")
+        assert gitops.git(repo, "status", check=False).returncode == 0
+    assert cfg.read_bytes() == before and guard["changed"] and not gitops._GUARDS
+    assert (Path(guard["kept"]) / "x").read_text() == "planted"
+    assert logged[0][0] == "PROJECT_GIT_CONFIG_RESTORED" and logged[0][1]["backup"] == guard["kept"]
+    gitops.git(repo, "status")
+
+
+def test_a_config_that_cannot_be_restored_stops_git_and_leaves_no_temp_file(tmp_path, monkeypatch):
+    """#1592 review R1/R3: a failed restore (Windows: the file held open) runs no git command on the planted
+    config, raises nothing unexpected, removes its temp file and still cleans up the guard."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+        monkeypatch.setattr(gitops.os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError("held")))
+        assert gitops.git(repo, "status", check=False).returncode == 1
+        with pytest.raises(gitops.GitError):
+            gitops.git(repo, "status")
+    assert guard["unrestored"] and "could NOT be restored" in gitops.guard_note(guard)
+    assert gitops._GUARDS                                   # round-4 R2: still guarded after the run ended
+    assert not list((repo / ".git").glob("config.jarves-*.tmp"))
+
+
+def test_a_planted_global_git_config_is_removed_and_the_check_fails(tmp_path, monkeypatch):
+    """#1592 review R1: the check runs as the owner's user and can write ~/.gitconfig (a global filter runs on the
+    next git call); the guard covers the global and XDG config files too."""
+    import sys
+    repo = _repo(tmp_path)
+    glob = Path(os.environ["HOME"]) / ".gitconfig"
+    argv = [sys.executable, "-c", f"open({str(glob)!r}, 'wb').write({PLANT.encode()!r})"]
+    ok, out = gitops.run_check(repo, argv)
+    assert not ok and "git config file" in out and not glob.exists()
+    assert (Path(out.split("kept in ", 1)[1].split()[0])).read_text() == PLANT
+
+
+def test_a_rewritten_worktree_pointer_is_restored(tmp_path):
+    """#1592 review R1: rewriting the worktree's `.git` file would point later git calls at an unguarded config."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "b1", str(wt), "main")
+    gitfile = wt / ".git"
+    before = gitfile.read_bytes()
+    with gitops.config_guard(wt) as guard:
+        gitfile.write_text(f"gitdir: {tmp_path / 'elsewhere'}\n")
+    assert guard["changed"] and gitfile.read_bytes() == before
+
+
+def test_jarves_worktree_and_branch_calls_write_no_config_during_a_run(tmp_path):
+    """#1592 review R3: JARVES's own git calls during another task's run do not change the config, even with
+    branch.autoSetupMerge=always, so no run is falsely rejected."""
+    repo = _repo(tmp_path)
+    gitops.git(repo, "config", "branch.autoSetupMerge", "always")
+    with gitops.config_guard(repo) as guard:
+        wt = tmp_path / "projects" / "wt2"
+        gitops.git(repo, "worktree", "add", "-b", "b2", str(wt), "main")
+        gitops.remove_worktree(str(repo), wt, "b2")
+    assert not guard["changed"]
+
+
+class _FlagLock:
+    """An RLock that tells the test whether the guard code holds it (review R5: no private RLock API)."""
+
+    def __init__(self):
+        self._lock, self.depth = threading.RLock(), 0
+
+    def __enter__(self):
+        self._lock.acquire()
+        self.depth += 1
+
+    def __exit__(self, *exc):
+        self.depth -= 1
+        self._lock.release()
+
+
+def test_a_run_ending_while_another_starts_never_makes_its_planted_entry_trusted(tmp_path, monkeypatch):
+    """#1592 review R1: run A planted an entry and ends while run B takes its snapshot. B's trusted copy must be
+    the clean file, so JARVES never writes the planted entry back."""
+    import contextlib
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    a = contextlib.ExitStack()
+    a_state = a.enter_context(gitops.config_guard(repo))
+    cfg.write_bytes(clean + PLANT.encode())
+    real = gitops._read
+    lock = _FlagLock()
+    monkeypatch.setattr(gitops, "_GUARDS_LOCK", lock)
+
+    def read(path):
+        if Path(path) != cfg or lock.depth:
+            return real(path)
+        cfg.write_bytes(clean + PLANT.encode())     # a snapshot outside the lock: A plants again just before it
+        data = real(path)
+        a.close()                                   # and A ends right after it
+        return data
+    monkeypatch.setattr(gitops, "_read", read)
+    with gitops.config_guard(repo) as b_state:
+        a.close()                                                        # A ends after B started
+        assert gitops._GUARDS[str(cfg.resolve())]["data"] == clean
+        assert gitops.git(repo, "status", check=False).returncode == 0 and cfg.read_bytes() == clean
+    assert a_state["changed"] and not b_state["changed"] and cfg.read_bytes() == clean and not gitops._GUARDS
+
+
+def test_equal_run_states_are_tracked_by_identity(tmp_path):
+    """Review R1 follow-on: two runs' fresh states compare equal; the one that ends first must not unregister the
+    other, which would miss a later change."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    with gitops.config_guard(repo) as first:
+        with gitops.config_guard(repo) as second:
+            pass
+        assert not second["changed"]
+        cfg.write_bytes(clean + PLANT.encode())
+    assert first["changed"] and cfg.read_bytes() == clean
+
+
+def test_a_restore_that_keeps_failing_keeps_one_backup_and_logs_once(tmp_path, monkeypatch):
+    """#1592 review R2: every git call during the run refuses, but the same unrestorable content is kept and
+    logged only once (bounded logs, no pile of backup folders)."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    logged: list = []
+    monkeypatch.setattr(gitops.logs, "warn", lambda *a, **f: logged.append(a[1]))
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+        monkeypatch.setattr(gitops, "_restore", lambda p, d, m=None: (_ for _ in ()).throw(PermissionError("held")))
+        for _ in range(3):
+            assert gitops.git(repo, "status", check=False).returncode == 1
+    assert guard["unrestored"] and logged == ["PROJECT_GIT_CONFIG_RESTORED"]
+    assert len(list((repo / ".git").glob("config.jarves-rejected-*"))) == 1
+
+
+def test_a_planted_config_worktree_file_is_removed(tmp_path):
+    """#1592 round-4 R1: with extensions.worktreeConfig on, git also reads `<gitdir>/config.worktree`."""
+    import sys
+    repo = _repo(tmp_path)
+    gitops.git(repo, "config", "extensions.worktreeConfig", "true")
+    cw = repo / ".git" / "config.worktree"
+    ok, out = gitops.run_check(repo, [sys.executable, "-c", f"open({str(cw)!r}, 'wb').write({PLANT.encode()!r})"])
+    assert not ok and "git config file" in out and not cw.exists()
+
+
+def test_planted_included_config_files_are_restored(tmp_path):
+    """#1592 round-4 R1: a file the owner's config includes (existing, or named but missing) is guarded too."""
+    repo = _repo(tmp_path)
+    home = Path(os.environ["HOME"])
+    work, extra = home / ".gitconfig-work", home / "missing.cfg"
+    work.write_bytes(b"[user]\n\tname = owner\n")
+    (home / ".gitconfig").write_bytes(b"[include]\n\tpath = ~/.gitconfig-work\n\tpath = missing.cfg\n")
+    with gitops.config_guard(repo) as guard:
+        work.write_bytes(work.read_bytes() + PLANT.encode())
+        extra.write_bytes(PLANT.encode())
+    assert guard["changed"] and work.read_bytes() == b"[user]\n\tname = owner\n" and not extra.exists()
+
+
+def test_an_unrestored_config_still_stops_git_after_the_run_ends(tmp_path, monkeypatch):
+    """#1592 round-4 R2: the guard stays (quarantined) when the run ends unrestored; the next git call retries the
+    restore, refuses while it fails, and clears the guard once it works."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    real = gitops._restore
+    monkeypatch.setattr(gitops, "_restore", lambda p, d, m=None: (_ for _ in ()).throw(PermissionError("held")))
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(clean + PLANT.encode())
+    assert guard["unrestored"] and gitops._GUARDS
+    assert gitops.git(repo, "status", check=False).returncode == 1          # the next task's git call refuses
+    monkeypatch.setattr(gitops, "_restore", real)
+    assert gitops.git(repo, "status", check=False).returncode == 0 and cfg.read_bytes() == clean
+    assert not gitops._GUARDS
+
+
+def test_a_failed_backup_still_restores_the_config(tmp_path, monkeypatch):
+    """#1592 round-4 R2: when keeping the replaced content fails (mkdtemp), the restore is still tried."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    monkeypatch.setattr(gitops.tempfile, "mkdtemp", lambda **k: (_ for _ in ()).throw(PermissionError("ro")))
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(clean + PLANT.encode())
+    assert guard["changed"] and not guard.get("unrestored") and cfg.read_bytes() == clean and not gitops._GUARDS
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_a_restored_config_keeps_its_permission_bits(tmp_path):
+    """#1592 round-4 R4: mkstemp makes 0600 files; the restored config keeps the mode it had."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    cfg.chmod(0o644)
+    with gitops.config_guard(repo):
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+        cfg.chmod(0o600)
+    assert cfg.stat().st_mode & 0o777 == 0o644

@@ -1273,9 +1273,9 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+        forge.push_branch(str(repo), "main", "o/r")                       # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "jarves/p1/../escape")
+        forge.push_branch(str(repo), "jarves/p1/../escape", "o/r")
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
@@ -1339,3 +1339,48 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+
+
+def test_push_ignores_url_rewrites_in_the_shared_git_config(tmp_path, monkeypatch):
+    """#1595: an agent-written insteadOf/pushInsteadOf in the shared config never redirects the owner-identity push."""
+    from jarves.projectmgr import forge
+    good, evil = tmp_path / "remotes" / "o" / "r.git", tmp_path / "evil.git"
+    for b in (good, evil):
+        b.parent.mkdir(parents=True, exist_ok=True)
+        sh(tmp_path, "git", "init", "-q", "--bare", str(b))
+    base = (tmp_path / "remotes").as_uri() + "/"
+    monkeypatch.setattr(forge, "PUSH_BASE", base)
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    (repo / "f.txt").write_text("x")
+    sh(repo, "git", "add", "-A")
+    sh(repo, "git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "i", "--no-verify")
+    sh(repo, "git", "branch", "jarves/p1/t1-a1")
+    sh(repo, "git", "remote", "add", "origin", base + "o/r.git")
+    for key in ("insteadOf", "pushInsteadOf"):
+        sh(repo, "git", "config", f"url.{evil.as_uri()}.{key}", base + "o/r.git")
+    sh(repo, "git", "config", "http.sslVerify", "false")
+    home = tmp_path / "home"                                   # review R1: a planted GLOBAL rewrite as well
+    (home / ".config" / "git").mkdir(parents=True)
+    for f in (home / ".gitconfig", home / ".config" / "git" / "config"):
+        f.write_text(f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {base}\n\tinsteadOf = {base}\n')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
+    seen: list = []
+    real_git = forge.gitops.git
+
+    def spy(cwd, *args, **kw):
+        if "push" in args:                                      # what the pushing git can see, same options/env
+            pre = args[:args.index("push")]
+            seen.append(real_git(cwd, *pre, "config", "--list", "--show-scope", check=False, env=kw.get("env")).stdout)
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(forge.gitops, "git", spy)
+    forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert seen and not any(k in seen[0].lower() for k in ("insteadof", "remote.origin", "sslverify=false"))
+    assert "credential.helper=!'gh' auth git-credential" in seen[0] and "sslverify=true" in seen[0].lower()
+    assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
+    assert not sh(evil, "git", "branch", "--list").strip()
+    with pytest.raises(forge.ForgeError):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r/../x")      # the slug is checked
