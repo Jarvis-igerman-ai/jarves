@@ -104,7 +104,9 @@ class Runner:
         except ValueError as e:
             return Result(error=str(e))
         with gitops.config_guard(cwd) as guard:        # #1592: agent-run code may not change git config
-            r = self._spawn(spec, cwd, timeout, on_start, cancel)
+            r = None if guard.get("refused") else self._spawn(spec, cwd, timeout, on_start, cancel)
+        if guard.get("refused"):
+            return Result(error="the agent run was refused (#1592)" + gitops.guard_note(guard))
         if guard["changed"]:
             return Result(error="the agent changed a git config file and the run was rejected (#1592)"
                           + gitops.guard_note(guard))

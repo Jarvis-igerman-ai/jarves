@@ -257,23 +257,19 @@ def _no_real_autostart(monkeypatch):
                                                                            "--background"]))
 
 
-_GIT_GUARD_MODULES = ("test_projectmgr", "test_projectmgr_git", "test_206_hardening", "test_reopened_fixes")
-
-
 @pytest.fixture(autouse=True)
-def _git_config_home(request, monkeypatch):
-    """projectmgr's git config guard (#1592) snapshots, restores and backs up the global git config. Tests that reach
-    `run_check` or `Runner.run` get their own HOME, so they never touch the developer's real ~/.gitconfig."""
-    if request.module.__name__.rsplit(".", 1)[-1] not in _GIT_GUARD_MODULES:
-        yield
-        return
-    home = request.getfixturevalue("tmp_path_factory").mktemp("githome")
+def _git_config_home(tmp_path_factory, monkeypatch):
+    """projectmgr's git config guard (#1592) snapshots, restores and backs up the global git config. Every test gets
+    its own HOME, so no test that reaches `run_check` or `Runner.run` touches the developer's real ~/.gitconfig, and
+    a test's quarantined (unrestored) guard never stops a later test's git (round-5 R5)."""
+    home = tmp_path_factory.mktemp("githome")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     yield
-    from jarves.projectmgr import gitops
-    gitops._GUARDS.clear()                # a test's quarantined (unrestored) guard must not stop the next test's git
+    gitops = sys.modules.get("jarves.projectmgr.gitops")
+    if gitops is not None:
+        gitops._GUARDS.clear()
 
 
 @pytest.fixture

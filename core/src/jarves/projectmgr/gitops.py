@@ -133,17 +133,22 @@ def _global_configs() -> list[Path]:
     return [home / ".gitconfig", xdg / "git" / "config"]
 
 
-def _guarded_files(wt: str | Path) -> list[Path]:
-    """Every file `config_guard` watches for the repository at `wt`; [] when `wt` is not a git repository."""
+def _guarded_files(wt: str | Path) -> dict[str, str | None]:
+    """Every file `config_guard` watches for the repository at `wt`, mapped to the folder a rejected copy is kept in
+    (None: next to the file); {} when `wt` is not a git repository. A worktree's `.git` pointer is kept in its gitdir,
+    never inside the worktree, where it would be untracked content (round-5 R3)."""
     p = git(wt, "rev-parse", "--git-common-dir", "--git-dir", check=False)
     lines = p.stdout.split("\n")
     if p.returncode != 0 or len(lines) < 2 or not lines[0].strip():
-        return []
+        return {}
     common, gdir = ((Path(wt) / x.strip()).resolve() for x in lines[:2])
     files = [common / "config", common / "config.worktree", *_global_configs()]
     if gdir != common:                     # a linked worktree: its pointer files
         files += [Path(wt) / ".git", gdir / "commondir", gdir / "gitdir", gdir / "config.worktree"]
-    return [Path(os.path.abspath(f)) for f in files + _config_files(wt)]
+    out: dict[str, str | None] = {os.path.abspath(f): None for f in files + _config_files(wt)}
+    if gdir != common:
+        out[os.path.abspath(Path(wt) / ".git")] = str(gdir)
+    return out
 
 
 def _config_files(wt: str | Path) -> list[Path]:
@@ -164,12 +169,12 @@ def _config_files(wt: str | Path) -> list[Path]:
     return out
 
 
-def _keep_rejected(path: Path, move: bool = False) -> str:
+def _keep_rejected(path: Path, move: bool = False, side_dir: str | None = None) -> str:
     """Move (a folder, or move=True) or copy what replaced the trusted file into a fresh `<name>.jarves-rejected-*`
     folder (nothing is lost). '' when nothing was there."""
     if not os.path.lexists(path):
         return ""
-    side = Path(tempfile.mkdtemp(prefix=f"{path.name}.jarves-rejected-", dir=path.parent))
+    side = Path(tempfile.mkdtemp(prefix=f"{path.name}.jarves-rejected-", dir=side_dir or path.parent))
     if move or (path.is_dir() and not path.is_symlink()):
         os.replace(path, side / path.name)
     else:
@@ -247,7 +252,7 @@ def check_guards() -> bool:
             kept, err = "", ""
             if new:
                 try:
-                    kept = _keep_rejected(path, move=g["data"] is None)
+                    kept = _keep_rejected(path, move=g["data"] is None, side_dir=g.get("side"))
                 except OSError as e:      # round-4 R2: no backup, but the restore is still tried
                     err = f"backup failed: {e}"[:200]
             try:
@@ -269,6 +274,8 @@ def check_guards() -> bool:
 
 def guard_note(state: dict) -> str:
     """The rejection text's tail: where the replaced config was kept, or that it could not be restored."""
+    if state.get("refused"):
+        return "; it did not run: an earlier change to a git config file could NOT be restored, check it first"
     if state.get("unrestored"):
         return "; it could NOT be restored: check it before running git there"
     return "; it was restored" + (f", the replaced content is kept in {state['kept']}" if state.get("kept") else "")
@@ -279,20 +286,26 @@ def config_guard(wt: str | Path):
     """Guard the git config files of the repository at `wt` (`_guarded_files`) while agent-written code runs. Yields a dict whose
     "changed" is True after the block when the config was changed (it is already restored). Not a repository: no-op."""
     state = {"changed": False}
+    if _GUARDS and not check_guards():    # round-5 R1: a config is still unrestored, so `_guarded_files` cannot be
+        state.update(changed=True, unrestored=True, refused=True)     # trusted: reject before anything runs
+        yield state
+        return
     try:
         files = _guarded_files(wt)
     except (OSError, subprocess.SubprocessError):
-        files = []
+        files = {}
     if not files:
+        if _GUARDS and not check_guards():    # a quarantine began meanwhile: a refused git call is not "no repo"
+            state.update(changed=True, unrestored=True, refused=True)
         yield state
         return
-    keys, held = list(dict.fromkeys(str(f) for f in files)), []
+    keys, held = list(files), []
     with _GUARDS_LOCK:                    # review R1: snapshot under the lock, after restoring, only for new keys:
         check_guards()                    # a run ending meanwhile can never hand us its planted bytes as trusted
         for k in keys:
             if k not in _GUARDS:
                 try:
-                    _GUARDS[k] = {"data": _read(Path(k)), "mode": _mode(Path(k)), "runs": []}
+                    _GUARDS[k] = {"data": _read(Path(k)), "mode": _mode(Path(k)), "side": files[k], "runs": []}
                 except OSError:           # unreadable now (a folder): nothing trusted to restore
                     continue
             _GUARDS[k]["runs"].append(state)
@@ -479,6 +492,8 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     with config_guard(wt) as guard:
+        if guard.get("refused"):                                   # round-5 R1: never started
+            return False, "the check was refused (#1592)" + guard_note(guard)
         try:
             p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
                                env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)

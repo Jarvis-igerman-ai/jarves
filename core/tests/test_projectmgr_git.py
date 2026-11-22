@@ -521,13 +521,57 @@ def test_a_failed_backup_still_restores_the_config(tmp_path, monkeypatch):
     assert guard["changed"] and not guard.get("unrestored") and cfg.read_bytes() == clean and not gitops._GUARDS
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
 def test_a_restored_config_keeps_its_permission_bits(tmp_path):
-    """#1592 round-4 R4: mkstemp makes 0600 files; the restored config keeps the mode it had."""
+    """#1592 round-4 R4: mkstemp makes 0600 files; the restored config keeps the mode it had (on Windows chmod only
+    sets the read-only bit, so there the check is the writable mode staying as it was)."""
     repo = _repo(tmp_path)
     cfg = repo / ".git" / "config"
     cfg.chmod(0o644)
+    before = cfg.stat().st_mode & 0o777
     with gitops.config_guard(repo):
         cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
         cfg.chmod(0o600)
-    assert cfg.stat().st_mode & 0o777 == 0o644
+    assert cfg.stat().st_mode & 0o777 == before
+
+
+def test_a_run_started_during_a_quarantine_is_rejected_and_not_spawned(tmp_path, monkeypatch):
+    """#1592 round-5 R1: while a restore keeps failing, a new check or agent run never starts unguarded."""
+    import sys
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    monkeypatch.setattr(gitops, "_restore", lambda p, d, m=None: (_ for _ in ()).throw(PermissionError("held")))
+    with gitops.config_guard(repo):
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+    marker = tmp_path / "ran"
+    planter = [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('x')"]
+    ok, out = gitops.run_check(repo, planter)
+    assert not ok and "could NOT be restored" in out and not marker.exists()
+
+    class Planter(runners.Runner):
+        name = "planter"
+
+        def build(self, prompt, cwd, **kw):
+            return runners.Spec(planter, None, {})
+
+        def parse(self, stdout, rc):
+            return runners.Result(ok=rc == 0, text="done")
+    r = Planter().run("x", str(repo))
+    assert not r.ok and "could NOT be restored" in r.error and not marker.exists()
+
+
+def test_a_rejected_worktree_pointer_is_kept_outside_the_worktree(tmp_path):
+    """#1592 round-5 R3: the backup of a planted `.git` pointer never lands in the worktree as untracked content."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "b1", str(wt), "main")
+    with gitops.config_guard(wt) as guard:
+        (wt / ".git").write_text(f"gitdir: {tmp_path / 'elsewhere'}\n")
+    assert guard["changed"] and guard["kept"] and wt not in Path(guard["kept"]).parents
+    assert not gitops.git(wt, "status", "--porcelain").stdout.strip()
+
+
+def test_the_push_pins_the_windows_tls_backend():
+    """#1595 round-5 R4: GIT_CONFIG_NOSYSTEM drops Git for Windows' system http.sslBackend; the push pins schannel."""
+    from jarves.projectmgr import forge
+    assert forge._tls_pins("nt") == ["-c", "http.sslBackend=schannel"] and forge._tls_pins("posix") == []

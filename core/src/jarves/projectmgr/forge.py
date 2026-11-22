@@ -72,6 +72,12 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
+def _tls_pins(name: str = os.name) -> list[str]:
+    """GIT_CONFIG_NOSYSTEM=1 also drops Git for Windows' system `http.sslBackend=schannel` (the Windows certificate
+    store); without it the push would check GitHub's certificate against git's bundled CA file (round-5 R4)."""
+    return ["-c", "http.sslBackend=schannel"] if name == "nt" else []
+
+
 def push_branch(path: str, branch: str, slug: str) -> None:
     """A normal push of one branch (never --force, never a tag, never the default branch) to the pinned
     `https://github.com/<slug>.git` (#1595). `slug` must come from the caller's own trusted record, never from the
@@ -100,9 +106,9 @@ def push_branch(path: str, branch: str, slug: str) -> None:
         env = {"GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1",
                **{k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR") if os.environ.get(k)}}
         gitops.git(d, "init", "-q", "--bare", str(repo), ident=False, env=env)
-        (repo / "objects" / "info" / "alternates").write_text(str(objects) + "\n", encoding="utf-8")
+        (repo / "objects" / "info" / "alternates").write_bytes(str(objects).encode() + b"\n")   # no CRLF on Windows
         gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
-                   "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
+                   *_tls_pins(), "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
                    ident=False, env=env)
 
 
