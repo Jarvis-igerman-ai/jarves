@@ -45,8 +45,135 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
+# Secret-shaped values without a known vendor prefix (#1482). Git commit SHAs (7-40 hex) stay allowed in drafts.
+_SHA = re.compile(r"(?<![0-9A-Za-z])(?=(?:[0-9]*[a-f]){2})[0-9a-f]{7,40}(?![0-9A-Za-z])|"
+                  r"(?<![0-9A-Za-z])(?=(?:[0-9]*[A-F]){2})[0-9A-F]{7,40}(?![0-9A-Za-z])")
+_HEX = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-f]{32,}|[0-9A-F]{32,})(?![0-9A-Za-z])")
+_BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
+_BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
+_BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
+# credential words (English and Hebrew); '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
+# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and only known inflections, so מפתחים/סודה are not credential words
+_CRED_WORD = (r"(?:(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
+              r"|(?<![א-ת])[והשבכלמ]{0,3}(?:סיסמ(?:ה|א|ת|אות|ות|תי|תך|תו)?|טוק(?:ן|נים|ני|נו)|אסימו(?:ן|נים|ני|נו)"
+              r"|מפתח(?:ות|ה|ו|י|ך)?|סוד(?:ות|י|ו)?)(?![א-ת]))")
+_CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
+_CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
+_HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
+
+
+_WORD_TOK = re.compile(r"[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]+|[A-Z](?![A-Za-z])|[0-9]+")
+_HASH_LENS = {32, 40, 64, 128}       # md5, sha1/git, sha256, sha512 hex lengths
+
+
+def _camel(run: str) -> bool:
+    """An identifier made of words, acronyms and numbers (``getUserByIdAndName2024``, ``ConfigLoaderV3x``)."""
+    toks = _WORD_TOK.findall(run)
+    return bool(toks) and "".join(toks) == run and len(run) / len(toks) >= 3
+
+
+def _mixed(run: str) -> bool:
+    """Random base62/base64: upper, lower and digits, with the letter case switching often (CamelCase rarely does)."""
+    if _camel(run):
+        return False
+    letters = [c for c in run if c.isalpha()]
+    if not any(c.isdigit() for c in run) or len(letters) < 8:
+        return False
+    up = sum(c.isupper() for c in letters)
+    if not 0.25 <= up / len(letters) <= 0.75:
+        return False
+    switches = sum(a.isupper() != b.isupper() for a, b in zip(letters, letters[1:]))
+    return switches >= len(letters) // 4
+
+
+def _random_long(run: str) -> bool:
+    """A 32+ char run with upper and lower case, not words, and many distinct characters (a random key).
+
+    Catches the long random tokens whose case happens not to switch often enough for ``_mixed``.
+    """
+    s = re.sub(r"[+/=]", "", run)
+    return (len(s) >= 32 and any(c.isupper() for c in s) and any(c.islower() for c in s)
+            and not _wordy(s) and len(set(s)) / len(s) >= 0.5)
+
+
+def _wordy(s: str) -> bool:
+    """CamelCase made of real words. Random letters split into camel tokens too, but a long run of them has few
+    vowels; short words (``HttpClientV2``) may have few vowels, so the vowel test applies from 20 chars."""
+    letters = [c for c in s if c.isalpha()]
+    return _camel(s) and (len(s) < 20 or sum(c in "aeiouAEIOU" for c in letters) >= 0.25 * len(letters))
+
+
+def _path_word(seg: str) -> bool:
+    """A path segment made of words (``src``, ``ConfigLoaderV3x``), not random characters."""
+    seg = seg.replace("+", "")
+    return not seg or seg.islower() or _wordy(seg) or not _mixed(seg) and len(seg) < 8
+
+
+def _cred_near(t: str, m: re.Match) -> bool:
+    """A credential word up to four words before the value or three words after it."""
+    return bool(_CRED_BEFORE.search(t[max(0, m.start() - 60):m.start()]) or _CRED_AFTER.search(t[m.end():m.end() + 40]))
+
+
+def _secret_shaped(t: str) -> bool:
+    for m in _HEX.finditer(t):
+        if _cred_near(t, m):
+            return True
+        n = len(m.group(0))
+        if n != 40 and not (n in _HASH_LENS and _HASH_NEAR.search(t[max(0, m.start() - 40):m.start()])):
+            return True              # 32+ char hex alone, or of no digest length: a key or webhook secret
+    for m in _BASE32.finditer(t):
+        run = m.group(0).rstrip("=")
+        if sum(c in "234567" for c in run) >= 2 and sum(c.isalpha() for c in run) >= len(run) // 2:
+            return True              # TOTP seeds and other base32 secrets
+    if any(_mixed(m.group(0)) or _random_long(m.group(0)) for m in _BASE62.finditer(t)):
+        return True
+    # base64 with '+' or '/' inside. A path (absolute or relative) has '/' too, so a '/' run is judged per segment:
+    # random segments are mixed case, path segments are words. Segments of 20+ chars are also checked by _BASE62.
+    # A random key can split at '/' into short segments that are each too short to judge, so the joined run is
+    # refused when it looks random and not every segment is a path word (#1482 review R2).
+    for r in (m.group(0).rstrip("=") for m in _BASE64.finditer(t)):
+        joined = re.sub(r"[+/]", "", r)
+        if "/" in r:
+            segs = r.split("/")
+            if _mixed(joined) and any(_mixed(seg.replace("+", "")) for seg in segs):
+                return True
+            if (_mixed(joined) or _random_long(joined)) and not all(_path_word(seg) for seg in segs):
+                return True
+        elif "+" in r and (_mixed(joined) or _random_long(joined)):
+            return True
+    return False
+
+
+def _drop_sha(m: re.Match) -> str:
+    """Hide a commit-SHA candidate from the long-number rule, unless a credential word sits near it."""
+    return m.group(0) if _cred_near(m.string, m) else " "
+
+
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    """Refuse credentials, long numbers, health/money words and secret-shaped values (#1482).
+
+    Not caught (known gaps, out of scope for #1482): all-lowercase or all-uppercase letter+digit tokens
+    outside hex/base32, base32 with fewer than two digits 2-7, lowercase base32, and base64url (``-``/``_``)
+    values, unless ``logs.has_secret`` or another rule here matches them (follow-up #1604).
+    Random mixed-case tokens are judged by a heuristic (case switches, distinct characters, vowels), so some slip
+    through: measured on seeded samples, about 7-9% of 20-char and about 4-5% of 24-char base62 tokens, under 0.5%
+    of 32-char tokens and about 0.05% of base64-encoded 32-byte keys. The test pins these rates.
+
+    Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
+    the long-number rule unless a credential word (key, token, secret, password, סיסמה, מפתח, טוקן, סוד, ...; ``_`` separates words, so
+    ``GITHUB_TOKEN=`` counts) sits up to four words before or three words after it, so "my id is 12345678ab" is
+    allowed. A 40-char hex value with such a word near it is refused; "fixed in <sha>, key rotation bug" is
+    therefore refused too (safe side).
+    A hex value of a digest length (32, 40, 64 or 128 chars) is allowed when a hash word (commit, sha256, md5,
+    checksum, digest, hash, rev...) sits within two words before it and no credential word does, so
+    "commit <32 hex>" passes; other 32+ char hex lengths are refused even after a hash word.
+    Identifiers whose words average under three letters (``UserByIdV4Test``) can still be refused as random
+    tokens, and uppercase constants of 16+ chars with two or more digits 2-7 (``AES256GCMENCRYPTION``) can be
+    refused as base32 seeds; both errors are on the safe side.
+    """
+    t = text or ""
+    # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)
+    return bool(_SENSITIVE.search(_SHA.sub(_drop_sha, t))) or logs.has_secret(t) or _secret_shaped(t)
 
 
 def normalize(text: str) -> str:

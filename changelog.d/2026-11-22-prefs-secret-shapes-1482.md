@@ -1,0 +1,1 @@
+- Fixed: learned preferences, goals and development drafts now refuse secret-shaped values without a vendor prefix (long hex keys, base32 TOTP seeds, short random tokens, base64 keys, and SHA-shaped values next to a key/token/secret word in English or Hebrew), while git commit SHAs, named checksums, file paths and CamelCase identifiers stay allowed (#1482).
