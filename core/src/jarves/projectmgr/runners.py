@@ -173,8 +173,8 @@ def _shared_git_deny(cwd: str) -> list[str]:
     try:
         dot_git = Path(cwd).resolve() / ".git"
         present = dot_git.exists()
-    except OSError:
-        return []
+    except OSError as e:
+        raise ValueError(f"cannot inspect the git folder of this worktree: {e}") from e
     if not present:
         return []
     common = gitops.common_dir(cwd)

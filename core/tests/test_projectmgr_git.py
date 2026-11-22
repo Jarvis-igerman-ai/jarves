@@ -279,8 +279,14 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
     ptr = rule(wt / ".git")
     assert all(f"{t}({ptr}{s})" in denied for t in ("Edit", "Write") for s in ("", "/**"))
     # a folder that is not a repository gets no extra rule and no error
-    assert gitops.common_dir(tmp_path / "nowhere") is None
-    assert runners.ClaudeRunner(cfg).build("p", str(tmp_path)).argv.count("--disallowedTools") == 1
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert gitops.common_dir(empty) is None
+    assert runners.ClaudeRunner(cfg).build("p", str(empty)).argv == runners.ClaudeRunner(cfg).build("p", "/w").argv
+    # a plain checkout: `.git` is the shared dir itself, so its four rules appear exactly once
+    plain = runners.ClaudeRunner(cfg).build("p", str(repo)).argv
+    own = rule(repo / ".git")
+    assert all(plain.count(f"{t}({own}{s})") == 1 for t in ("Edit", "Write") for s in ("", "/**"))
 
 
 @pytest.mark.parametrize("path,rule", [("/home/u/r/.git", "//home/u/r/.git"), (r"C:\work\r\.git", "//c/work/r/.git")])
@@ -305,3 +311,23 @@ def test_a_worktree_whose_shared_git_dir_cannot_be_found_is_refused_not_run_open
     monkeypatch.setattr(runners.subprocess, "Popen", lambda *a, **k: started.append(a))
     r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
     assert not r.ok and "shared git folder" in r.error and started == []
+
+
+def test_a_worktree_whose_git_entry_cannot_be_inspected_is_refused(monkeypatch, tmp_path):
+    # council (gpt) blocker: an OSError while inspecting `<cwd>/.git` must refuse the run, not drop the #1533 rules
+    from jarves.config import Config
+    from jarves.projectmgr import runners
+
+    def broken(self, *a, **k):
+        raise PermissionError("access denied")
+    cfg = Config().projects
+    cfg.claude_command = ["claude"]
+    started: list = []
+
+    def popen(*a, **k):
+        started.append(a)
+        raise OSError("the agent must not start")
+    monkeypatch.setattr(runners.subprocess, "Popen", popen)
+    monkeypatch.setattr(runners.Path, "exists", broken)
+    r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
+    assert not r.ok and "cannot inspect the git folder" in r.error and started == []
