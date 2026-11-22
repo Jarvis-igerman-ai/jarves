@@ -49,7 +49,10 @@ _SENSITIVE = re.compile(
 _KEY_VALUE = re.compile(
     r"(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
     r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד)"
-    r"(?:\s+[^\s:=]+){0,2}?\s*(?:[:=]|\bis\b|\bwas\b|הוא|היא|זה)\s*\S", re.I)
+    r"(?:\s+[^\s:=]+){0,2}?(?:\s*[:=]\s*\S|"
+    # after a spoken "is/was/הוא/היא/זה" (whole words only) the value must look like a credential: one word of 6+
+    # characters with a digit or symbol, so "the token is expired" or "the access key was rotated" stay allowed
+    r"\s+(?:is|was|הוא|היא|זה)\s+(?=[^\s.,;!?]*[\d_+/=-])[^\s.,;!?]{6,})", re.I)
 # An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
 # split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either.
 _KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")

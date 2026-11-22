@@ -6,7 +6,7 @@ from jarves.userdata import open_db
 
 KEYS = [
     "my key is sk-abcDEFghiJKLmnoPQR",                       # OpenAI-style key (shared token shapes)
-    "use ghp_abcdefghijklmnopqrstuvwxyz0123 for github",           # GitHub token
+    "use ghp_abcdefghijklmnopqrstuvwxyz0123456789 for github",           # GitHub token
     "aws AKIAABCDEFGHIJKLMNOP please",                             # AWS key id
     "remember Zx9fQ2LmB7vT4kRw8YpN3sHd",                           # unprefixed high-entropy string
     "my api key is hunter-two-x",                                  # keyword + value: api key
@@ -15,11 +15,11 @@ KEYS = [
     "my secret key is open-sesame",                                # keyword + value: secret key
     "private key: begin here",                                     # keyword + value: private key
     "access key was hello-world",                                  # keyword + value: access key
-    "my github token for work is abc",                             # up to two words between keyword and value
-    "הטוקן שלי הוא abc",                                           # Hebrew: token
-    "מפתח API הוא abc",                                            # Hebrew: API key
+    "my github token for work is abc12345",                             # up to two words between keyword and value
+    "הטוקן שלי הוא abc12345",                                           # Hebrew: token
+    "מפתח API הוא abc12345",                                            # Hebrew: API key
     "מפתח הגישה שלי: abc",                                         # Hebrew: access key
-    "מפתח סוד זה abc",                                             # Hebrew: secret key
+    "מפתח סוד זה abc12345",                                             # Hebrew: secret key
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -37,6 +37,12 @@ PLAIN = [
     "revert commit 9fceb02d0ae598e95dc970b74767f19372d61af8",     # 40-char git SHA (pure hex)
     "ticket 3f2a9c1e-7b4d-4e8a-9c2f-1a5b7d9e3c6f",                 # UUID
     "rename test_prefs_sensitive_1099 to test_keys_42",            # snake_case identifier with digits
+    # #1099 review 2: Hebrew markers are whole words; a state description is not a value
+    "לזהות טוקן חדש",
+    "טוקן חדש לזהות",
+    "the token is expired after an hour",
+    "the access key was rotated.",
+    "the api key is valid.",
 ]
 
 
@@ -64,9 +70,11 @@ def test_suggest_refuses_a_key_and_stores_nothing(home):
 
 def test_dev_task_naming_a_token_is_kept_but_one_carrying_a_key_is_refused(home):
     """#1099 review R1: the same gate guards dev drafts; naming a token is fine, pasting one is not."""
-    from test_v5_followups import make_store
     from jarves import devmanager
-    st = make_store(home)
+    from jarves.diag import db as diag_db
+    from jarves.store import Store
+    st = Store(home / "store.db")
+    diag_db.ensure(st)
     assert devmanager.suggest(st, "fix token refresh expiry", "move the API key loader to settings")["status"] == "draft"
     with pytest.raises(ValueError):
         devmanager.suggest(st, "token refresh", "my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
