@@ -374,3 +374,52 @@ def test_a_logging_reconfigure_keeps_the_privacy_hook(home):
         assert logs._on_privacy_on.count(hook) == 1
     finally:
         logs.off_privacy_on(hook)
+
+
+def _boom(row):
+    raise TypeError("a ledger body of an unexpected shape")
+
+
+def test_a_row_fix_crash_is_partial_and_the_switch_still_saves(ctx, home, monkeypatch):
+    _seed(home)
+    monkeypatch.setattr(privacy, "_ledger_fix", _boom)        # #1625 R1: not only sqlite3/OS errors
+    seen = []
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append((a[1], k)))
+    got = privacy.set_privacy(ctx, True)
+    assert got["saved_in_config"] and got["scrub"]["partial"] == ["continuity.db"] and got["scrub"]["plan_steps"]
+    assert "privacy = true" in (home / "config.toml").read_text(encoding="utf-8")
+    assert seen == [("PRIVACY_SCRUB_PARTIAL", {"target": "continuity.db", "error_type": "TypeError"})]
+
+
+async def test_core_start_completes_when_a_row_fix_crashes(home, cfg, monkeypatch):
+    _seed(home)
+    monkeypatch.setattr(privacy, "_ledger_fix", _boom)
+    cfg.log.privacy = True
+    c = new_core(cfg, home)
+    await c.start()                                           # #1625 R1: the start is not aborted
+    try:
+        assert "Dana" not in _dump(home, ledger=False)       # memory.db is still scrubbed
+    finally:
+        await c.stop()
+
+
+def test_a_null_evidence_step_with_a_kept_code_is_not_rewritten_again():
+    # #1625 R2: the schema says NOT NULL, but a NULL (hand-edited or older file) is no text: no rewrite at each start
+    assert privacy._step_fix((1, None, "TOOL_TIMEOUT")) is None
+    assert privacy._step_fix((1, None, "TOOL_TIMEOUT: Dana")) == (
+        "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", ("TOOL_TIMEOUT", 1))
+
+
+def test_join_background_waits_for_every_running_scrub(home, monkeypatch):
+    import threading
+    first, second = threading.Event(), threading.Event()
+    monkeypatch.setattr(privacy, "scrub_at_rest", lambda h: first.wait(10))
+    t1 = privacy.scrub_in_background(home)
+    monkeypatch.setattr(privacy, "scrub_at_rest", lambda h: second.wait(10))
+    t2 = privacy.scrub_in_background(home)
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: None)
+    second.set()                                              # #1625 R5: the later one ends first
+    t2.join(5)
+    assert privacy.join_background(0.05) is False and t1.is_alive()
+    first.set()
+    assert privacy.join_background(5) is True and not t1.is_alive()

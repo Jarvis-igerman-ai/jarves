@@ -11,13 +11,14 @@ async function post(path, body) { return api(path, { method: "POST", body: JSON.
 // ---------------------------------------------------------------- privacy (top bar + Home tile)
 let privacyState = null;
 let privacyScrubNote = null;   // #1557: {he, en}, kept across the top bar re-render (and a language change)
+function noteScrub(ans) { privacyScrubNote = ans && ans.scrub_note_en ? { he: ans.scrub_note_he, en: ans.scrub_note_en } : null; }
 async function togglePrivacy(msg) {
   const to = !privacyState.privacy;
   try {
     privacyState = await post("/api/privacy", { privacy: to });
     if (msg) msg.textContent = privacyState.saved_in_config ? tx("נשמר", "Saved")
       : tx("שונה עכשיו; config.toml לא נשמר: ", "Changed now; config.toml not saved: ") + privacyState.config_error;
-    privacyScrubNote = privacyState.scrub_note_en ? { he: privacyState.scrub_note_he, en: privacyState.scrub_note_en } : null;
+    noteScrub(privacyState);
   } catch (e) { if (msg) msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   await renderTopbar();
   refreshOverview();
@@ -62,7 +63,7 @@ function privacyCard(p) {
       el("button", { type: "button", id: "fullTextBtn", onclick: async () => {
         const to = !p.full_text_active;
         if (to && !confirm(tx("לשמור טקסט מלא ל-24 שעות בלבד? אחר כך הפרטיות חוזרת לבד.", "Keep full text for 24 hours only? Privacy then turns on again by itself."))) return;
-        try { await post("/api/privacy/full-text", { full_text: to }); await renderTopbar(); route(true); }
+        try { noteScrub(await post("/api/privacy/full-text", { full_text: to })); await renderTopbar(); route(true); }
         catch (e) { msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
       } }, p.full_text_active ? tx("סיום טקסט מלא עכשיו", "End full text now") : tx("טקסט מלא לפי בקשה (24 שעות)", "Full text on request (24 hours)")),
       oneWay(tx("הסתרת ההיסטוריה", "Mask existing history"), "/api/privacy/mask-history",

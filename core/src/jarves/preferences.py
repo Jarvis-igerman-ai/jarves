@@ -52,9 +52,11 @@ _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
 _DIGIT_GROUP = re.compile(r"[2-7]+")
 # Whole tokens only, so "footprint" or "יסוד" is no seed word. Hebrew allows up to three stacked prefix letters,
 # each may carry niqqud ("המאמת", "שהאוטנטיקטור", "וּבמאמת"; #1559 R4). A niqqud mark before it means mid-word (R6).
+_NQ = "[\u0591-\u05c7]*"                            # niqqud may sit between root letters too ("סוֹד"; #1625 R6)
+_HE_ROOTS = "|".join(_NQ.join(w) for w in ("מאמת", "אימות", "זרע", "סוד", "אוטנטיקטור"))
 _SEED_WORD = re.compile(r"(?<![A-Za-z0-9])(?:totp|otp|otpauth|seed|2fa|mfa|authenticator)s?(?![A-Za-z0-9])"
-                        r"|(?<![\u05d0-\u05ea\u0591-\u05c7])(?:[הובלמשכ][\u0591-\u05c7]*){0,3}(?:מאמת|אימות|זרע|סוד|אוטנטיקטור)"
-                        r"(?![\u05d0-\u05ea])", re.I)
+                        r"|(?<![\u05d0-\u05ea\u0591-\u05c7])(?:[הובלמשכ]" + _NQ + "){0,3}(?:" + _HE_ROOTS + ")"
+                        + _NQ + r"(?![\u05d0-\u05ea])", re.I)
 _SEED_NEAR = 20
 
 

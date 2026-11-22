@@ -149,13 +149,13 @@ def _step_fix(row):
     error = error if isinstance(error, str) else ""
     head = error.split(":", 1)[0].strip()
     code = head if head in _KEPT_CODES else ""     # only a known code like TOOL_TIMEOUT stays, never free text
-    if evidence == "" and code == error:
+    if (evidence or "") == "" and code == error:  # R2: a NULL evidence is no text, so not rewritten every start
         return None
     return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)
 
 
 _SCRUB_LOCK = threading.Lock()                     # one scrub at a time in this process
-_last_scrub: threading.Thread | None = None
+_scrubs: set[threading.Thread] = set()            # live background scrubs (R5: stop waits for all of them)
 SCRUB_PARTIAL_NOTE = "Some older text could not be cleared yet; it is tried again next time privacy turns on."
 SCRUB_PARTIAL_NOTE_HE = "חלק מהטקסט הישן עוד לא נמחק; ננסה שוב בפעם הבאה שהפרטיות תופעל."
 
@@ -169,21 +169,23 @@ def _scrub_answer(scrub: dict) -> dict:
 
 def scrub_in_background(home: Path) -> threading.Thread:
     """#1557 R2: the privacy-on hook may run on the Core's event loop (flag file poll); scrub on a thread instead."""
-    global _last_scrub
     t = threading.Thread(target=scrub_at_rest, args=(Path(home),), name="privacy-scrub", daemon=True)
+    _scrubs.difference_update([x for x in list(_scrubs) if not x.is_alive()])   # finished ones are not kept
+    _scrubs.add(t)
     t.start()
-    _last_scrub = t
     return t
 
 
 def join_background(timeout: float = SCRUB_TIMEOUT_S * 2) -> bool:
-    """#1557 R3: Core stop waits briefly for a running background scrub. False (logged) if it is still running."""
-    t = _last_scrub
-    if t is None:
-        return True
-    t.join(timeout)
-    if t.is_alive():
-        logs.warn("privacy", "PRIVACY_SCRUB_STILL_RUNNING", "a privacy scrub was still running at stop")
+    """#1557 R3: Core stop waits briefly (shared deadline) for every background scrub. False (logged) if one runs."""
+    end = time.monotonic() + timeout
+    for t in list(_scrubs):
+        t.join(max(0.0, end - time.monotonic()))
+        if not t.is_alive():
+            _scrubs.discard(t)
+    if _scrubs:
+        logs.warn("privacy", "PRIVACY_SCRUB_STILL_RUNNING", "a privacy scrub was still running at stop",
+                  count=len(_scrubs))
         return False
     return True
 
@@ -216,8 +218,8 @@ def _scrub_all(home: Path) -> dict:
                 out["partial"].append(name)
                 logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",
                           target=name, error_type=type(e).__name__)
-        except (sqlite3.Error, OSError) as e:      # R1: e.g. an unreadable folder; the switch still saves
-            out["partial"].append(name)
+        except Exception as e:                     # R1: a folder error or a row of an unexpected shape: the switch
+            out["partial"].append(name)            # still saves and a start still completes (retried next time)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",
                       target=name, error_type=type(e).__name__)
     if out["ledger"] or out["plan_steps"]:

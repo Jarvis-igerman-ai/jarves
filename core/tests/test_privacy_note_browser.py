@@ -76,3 +76,32 @@ def test_the_note_follows_a_later_language_change(browser, dash):  # noqa: F811
 
 def test_a_full_scrub_shows_no_note(browser, dash):  # noqa: F811
     assert _switch(browser, dash, False, "en") == ""
+
+
+def test_ending_full_text_shows_the_partial_note(browser, dash):  # noqa: F811
+    ctx = browser.new_context(viewport={"width": 1200, "height": 900})
+    p = ctx.new_page()
+    state = {"privacy": False, "full_text_active": True, "full_text_note_en": "full text", "full_text_note_he": ""}
+
+    def api(route):
+        if route.request.method == "POST":                    # #1625 R4: the full-text switch's answer has the note
+            state.update(privacy=True, full_text_active=False)
+            body = {**state, **privacy._scrub_answer({"ledger": 0, "plan_steps": 0, "partial": ["memory.db"]})}
+        else:
+            body = state
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+    def home_api(route):                                      # the Home privacy card reads /api/home
+        d = route.fetch().json()
+        d["privacy"] = {**d.get("privacy", {}), **state}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
+    p.route(re.compile(r"/api/privacy(/full-text)?$"), api)
+    p.route(re.compile(r"/api/home(\?.*)?$"), home_api)
+    p.add_init_script("try{localStorage.setItem('jarves-lang','en')}catch(e){}")
+    p.goto(dash.url + "#/home")
+    p.click("details.home-more summary", timeout=30000)
+    p.click("#fullTextBtn", timeout=30000)
+    p.wait_for_selector('#privacyBtn[aria-pressed="true"]', timeout=30000)
+    note = p.locator("#privacyScrubNote")
+    text = note.inner_text() if note.count() else ""
+    ctx.close()
+    assert text == privacy.SCRUB_PARTIAL_NOTE

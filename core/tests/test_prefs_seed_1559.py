@@ -14,6 +14,8 @@ LEAKY = [
     "שהאוטנטיקטור נתן JBSW Y3DP EHPK 3PXP",       # R4: stacked prefix letters
     "ובמאמת שמרתי JBSWYDPEHPKAPXPQ",               # R4: two stacked prefixes, digit-free seed
     "וּבמאמת שמרתי JBSWYDPEHPKAPXPQ",              # R4: stacked prefixes with niqqud
+    "הסוֹד שלי JBSW Y3DP EHPK 3PXP",                # #1625 R6: niqqud inside the root word
+    "המְאַמֵּת נתן JBSWYDPEHPKAPXPQ",
 ]
 SAFE = [
     "OTP SETUP: INTERNATIONALIZATION",            # a long real word
