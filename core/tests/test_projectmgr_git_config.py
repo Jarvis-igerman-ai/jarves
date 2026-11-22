@@ -171,7 +171,7 @@ def test_every_git_call_fixes_editors_pagers_and_ext_remotes(monkeypatch, tmp_pa
         return real(argv, **kw)
     monkeypatch.setattr(gitops.subprocess, "run", run)
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
-    argv, env = seen[-1]
+    argv, env = [c for c in seen if "--show-scope" not in c[0]][-1]
     assert argv[1] == "--no-pager" and "protocol.ext.allow=never" in argv
     assert env["GIT_EDITOR"] == ":" and env["GIT_SEQUENCE_EDITOR"] == ":"
     _shared_config(repo, '[protocol "ext"]\n\tallow = always\n')
@@ -179,14 +179,17 @@ def test_every_git_call_fixes_editors_pagers_and_ext_remotes(monkeypatch, tmp_pa
     assert gitops.git(repo, "push", "evil", "main", check=False).returncode != 0 and not marker.exists()
 
 
-def test_an_unreadable_config_stops_the_command(tmp_path):
-    """Fail closed: when the config cannot be read, the overrides are unknown, so the command never runs."""
-    repo = _repo(tmp_path)
-    with open(repo / ".git" / "config", "a", encoding="utf-8") as f:
-        f.write("[broken\n")
-    with pytest.raises(gitops.GitError):
+def test_an_unreadable_config_stops_the_command(monkeypatch, tmp_path):
+    """Fail closed: when the config cannot be read, the overrides are unknown, so the command is never spawned
+    (R5: `status` itself would succeed here, only the read fails)."""
+    repo, spawned = _repo(tmp_path), []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: spawned.append(argv) or real(argv, **kw))
+    monkeypatch.setattr(gitops, "_config_entries",
+                        lambda cwd, timeout: subprocess.CompletedProcess(["git"], 1, "", "cannot read config"))
+    with pytest.raises(gitops.GitError, match="cannot read config"):
         gitops.git(repo, "status")
-    assert gitops.git(repo, "status", check=False).returncode != 0
+    assert gitops.git(repo, "status", check=False).returncode == 1 and spawned == []
 
 
 @pytest.mark.parametrize("cond", ["onbranch:jarves/p1/t*", "gitdir:**/worktrees/**"])
@@ -256,3 +259,65 @@ def test_a_url_credential_reset_puts_owner_helpers_back_only_under_its_own_key()
                                      ("local", "credential.helper", "!evil")])
     assert pairs == [("credential.helper", ""), ("credential.helper", "manager"),
                      ("credential.https://o.example.helper", "o")]
+
+
+def test_a_key_that_is_not_utf8_stops_the_command(tmp_path):
+    """R1 (round 2): a reset can only name a key that decoded losslessly; a `\\xff` subsection would be reset under
+    other bytes and git would still run the agent's filter, so such a key fails closed."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _diverged(repo, "*.txt filter=ev\n")
+    (repo / ".gitattributes").write_bytes(b"*.txt filter=\xff\n")
+    (repo / ".git" / "agent.cfg").write_bytes(b'[filter "\xff"]\n\tsmudge = "' + _runs(marker).encode() + b'"\n')
+    subprocess.run(["git", "config", "--add", "include.path", "agent.cfg"], cwd=repo, check=True)
+    (repo / "a.txt").unlink()
+    _plain(repo, "checkout", "--", "a.txt")
+    assert marker.exists()
+    marker.unlink()
+    (repo / "a.txt").unlink()
+    with pytest.raises(gitops.GitError, match="not valid UTF-8"):
+        gitops.git(repo, "checkout", "--", "a.txt")
+    assert not marker.exists()
+
+
+def test_a_push_never_reaches_a_local_repository(tmp_path):
+    """R2 (round 2): a local remote runs receive-pack and the target's own hooks in a git that gets none of the
+    overrides; the shared config can aim `origin` there, so the file transport is off for JARVES's calls."""
+    repo, target, marker = _repo(tmp_path), tmp_path / "t.git", tmp_path / "ran.txt"
+    subprocess.run(["git", "init", "-q", "--bare", str(target)], check=True)
+    hook = target / "hooks" / "pre-receive"
+    hook.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\n", encoding="utf-8")
+    hook.chmod(0o755)
+    subprocess.run(["git", "remote", "add", "origin", str(target)], cwd=repo, check=True)
+    _plain(repo, "push", "-q", "origin", "main:p")
+    if not marker.exists():
+        pytest.skip("this platform runs no shell hook")
+    marker.unlink()
+    assert gitops.git(repo, "push", "origin", "main:q", check=False).returncode != 0 and not marker.exists()
+
+
+def test_every_git_call_turns_off_submodule_fetch_and_push_recursion(monkeypatch, tmp_path):
+    """R2 (round 2): `fetch.recurseSubmodules` / `push.recurseSubmodules` win over `submodule.recurse` and would run
+    a fetch or push in `.git/modules/<n>` with that repository's unread config."""
+    seen: list = []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    _repo(tmp_path)
+    argv = [a for a in seen if "init" in a][-1]
+    for flag in ("fetch.recurseSubmodules=false", "push.recurseSubmodules=no", "protocol.file.allow=never"):
+        assert flag in argv
+
+
+def test_a_command_key_added_during_the_call_is_reported(monkeypatch, tmp_path):
+    """R3 (round 2): the config is read again after the command; a command key or conditional include that appeared
+    in between fails the call with its name instead of passing silently."""
+    repo = _repo(tmp_path)
+    real, reads = gitops._config_entries, []
+
+    def read(cwd, timeout):
+        out = real(cwd, timeout)
+        reads.append(1)
+        return out + ([("local", "filter.ev.smudge", "evil")] if len(reads) % 2 == 0 else [])
+    monkeypatch.setattr(gitops, "_config_entries", read)
+    with pytest.raises(gitops.GitError, match="changed while.*filter.ev.smudge"):
+        gitops.git(repo, "status")
+    assert gitops.git(repo, "status", check=False).returncode != 0

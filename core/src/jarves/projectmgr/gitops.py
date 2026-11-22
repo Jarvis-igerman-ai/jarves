@@ -84,6 +84,23 @@ TRUSTED_SCOPES = ("system", "global")       # the owner's own files; `local`/`wo
 # an include whose condition depends on the branch or the git dir can match in a child git (worktree add checks out
 # inside the new worktree, on the task branch) but not in the read in `cwd`, so its keys would never be undone (R1)
 _COND_INCLUDE = re.compile(r"includeif\.(?:onbranch|gitdir|gitdir/i):.*\.path", re.S)
+
+
+def _refusal(entries: list[tuple[str, str, str]]) -> str:
+    """Why the overrides cannot be trusted for this config, naming the keys; '' when they can (fail closed)."""
+    cond = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _COND_INCLUDE.fullmatch(k)})
+    if cond:
+        return f"the shared repository config has a conditional include ({', '.join(cond)[:200]})"
+    # a reset can only name a key that decoded losslessly: a key with a non-UTF-8 byte would be reset under other
+    # bytes and git would still run it (R1, round 2)
+    bad = sorted({k for _, k, _ in entries if "\ufffd" in k})
+    return f"a git config key is not valid UTF-8 ({', '.join(bad)[:200]})" if bad else ""
+
+
+def _reset_keys(entries: list[tuple[str, str, str]]) -> set[str]:
+    return {k for k, v in config_overrides(entries) if v == ""} | {f"refusal:{_refusal(entries)}"} - {"refusal:"}
+
+
 FIXED_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"}   # ":" = no editor at all
 
 
@@ -147,21 +164,23 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
     config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, config hooks,
     `ext::` remotes, editors and pagers. Submodules never recurse (their config in `.git/modules` is never read)
-    and a branch- or gitdir-conditional include in the shared config stops the command (fail closed). Limit: the config is read just before the command, so a key an agent adds in
-    the milliseconds between the two reads is not undone."""
+    and a branch- or gitdir-conditional include or a key that is not UTF-8 stops the command (fail closed). No
+    fetch/push recurses into submodules and no local (file) remote is reached: its receive-pack and hooks would run
+    without these overrides. Limit: the config is read just before the command, so a key an agent adds in the
+    milliseconds between the reads is not undone; it is read again after the command, and a command key or
+    conditional include that appeared fails the call with its name (detected, not prevented)."""
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"]
+           "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
+           "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]
     entries = _config_entries(cwd, timeout)
     if isinstance(entries, subprocess.CompletedProcess):     # unreadable config: fail closed, the command never runs
         if check:
             raise GitError((entries.stderr or "git config could not be read").strip()[:300])
         return entries
-    cond = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _COND_INCLUDE.fullmatch(k)})
-    if cond:                                # a child git could read keys this read never saw: fail closed
-        why = f"refusing to run git: the shared repository config has a conditional include ({', '.join(cond)[:200]})"
+    if why := _refusal(entries):        # a child git could read keys this read never saw: fail closed
         if check:
-            raise GitError(why)
-        return subprocess.CompletedProcess(["git", *args], 1, "", why)
+            raise GitError(f"refusing to run git: {why}")
+        return subprocess.CompletedProcess(["git", *args], 1, "", f"refusing to run git: {why}")
     env = child_env({**FIXED_ENV, **_override_env(config_overrides(entries))})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
@@ -169,6 +188,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
+    after = _config_entries(cwd, timeout)       # R3: detect a command key added while the command ran
+    new = (sorted(_reset_keys(after) - _reset_keys(entries)) if isinstance(after, list)
+           else ["(config could not be read again)"])
+    if new:
+        p = subprocess.CompletedProcess(p.args, p.returncode or 1, p.stdout,
+                                        f"the shared git config changed while git ran: {', '.join(new)[:240]}")
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
