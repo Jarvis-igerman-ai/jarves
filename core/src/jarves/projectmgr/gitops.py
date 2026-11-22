@@ -141,9 +141,9 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     return wt, br
 
 
-def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
-    """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
-    wt = project_root(home, pid) / "release" / sha[:12]
+def detached_worktree(home: Path, repo: str, pid: int, sha: str, sub: str = "release") -> Path:
+    """A throw-away worktree at one exact commit (a release or a task check runs there, never in your folder)."""
+    wt = project_root(home, pid) / sub / sha[:12]
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)

@@ -12,8 +12,6 @@ text for the next card), repro {files, cmd}, kept (branch of work done without a
 """
 from __future__ import annotations
 
-import hashlib
-import os
 import threading
 from pathlib import Path
 
@@ -62,9 +60,9 @@ class StageEngine:
         except OSError:                                 # the worktree is gone: fail closed
             return "", f"the task worktree is missing ({what})"
         moved = "", (f"the task branch moved after JARVES checked it: {sha[:12]} is not the checked commit "
-                     f"{vetted[:12]}; retry it to run its work stage again ({what})")
+                     f"{vetted[:12]} ({what})")
         if not vetted:
-            return "", f"no checked commit is recorded for this task: retry it to run its work stage again ({what})"
+            return "", f"no checked commit is recorded for this task ({what})"
         if not sha:
             return moved
         if sha == vetted:
@@ -97,46 +95,15 @@ class StageEngine:
                     i += 1
         if not files:
             return ""
-        return (f"files changed after JARVES checked the task and were not committed: {', '.join(files[:5])}. "
-                f"Run its work stage again ({what})")
+        return (f"files changed after JARVES checked the task and were not committed: {', '.join(files[:5])} "
+                f"({what})")
 
-    @staticmethod
-    def _untracked(wt: Path) -> dict[str, str]:
-        """Untracked, not ignored files -> a hash of their content ('' when unreadable: never tolerated)."""
-        out = gitops.git(wt, "ls-files", "--others", "--exclude-standard", "-z").stdout
-        res = {}
-        for rel in (x for x in out.split("\0") if x):
-            f = wt / rel
-            try:
-                data = os.readlink(f).encode() if f.is_symlink() else f.read_bytes()
-                res[rel] = hashlib.sha256(data).hexdigest()[:16]
-            except OSError:
-                res[rel] = ""
-        return res
-
-    def _unvetted(self, t: dict, wt: Path, what: str) -> str:
-        """'' when every untracked, not ignored file is one a JARVES check left with the same content, else why not.
-        The check runs in the shared worktree but only the commit merges, so a planted `conftest.py` or
-        `sitecustomize.py` could make it pass on content that never merges (#1610 R1). A file written while a check
-        runs is recorded as that check's own; ignored files (`.venv/`) are not covered here."""
-        try:
-            cur = self._untracked(wt)
-        except (OSError, gitops.GitError):
-            return f"the task worktree cannot be read ({what})"
-        left = self._job(self.db.task(t["id"]) or t).get("check_left") or {}
-        bad = [r for r, h in cur.items() if not h or left.get(r) != h]
-        if not bad:
-            return ""
-        return (f"files that are not in the task commit could change the check: {', '.join(bad[:5])}. Remove them "
-                f"or add them to .gitignore, then retry ({what})")
-
-    def _record_left(self, t: dict, wt: Path) -> None:
-        """What the check just left behind (tolerated by the next check only while unchanged); too many: none."""
-        try:
-            cur = self._untracked(wt)
-        except (OSError, gitops.GitError):
-            cur = {}
-        self._set_job(t, check_left=cur if len(cur) <= 2000 else {})
+    def _checkout(self, p: dict, sha: str) -> Path:
+        """A throw-away checkout of exactly `sha` for a check (#1461, #1610 R1/R2). The task worktree is shared with
+        sibling agents: an untracked or ignored file there (a planted `conftest.py`, one hidden by the shared
+        `info/exclude`, a `.pth` in an ignored `.venv/`, or one written while the check runs) never merges, so the
+        check must not see it either. Only committed content is in this checkout; the caller removes it."""
+        return gitops.detached_worktree(self.home, p["path"], p["id"], sha, sub="check")
 
     @staticmethod
     def _git_older(wt: Path, want: tuple[int, int]) -> bool:
@@ -232,10 +199,15 @@ class StageEngine:
             if what == "fail":
                 return self._on_fail(p, t, st, i, stages, reason=out[1])
             if what == "stop":
-                back = pl.find(stages, pl.CODE_KINDS, before=i) if out[3:] == (REWORK,) else None
-                if back is not None:            # a retry runs the work stage again on what the branch holds now
-                    self.db.update_task(t["id"], stage=back)
-                return self._fail(t, out[1], out[2], p)
+                reason = out[2]
+                if out[3:] == (REWORK,):
+                    back = pl.find(stages, pl.CODE_KINDS, before=i)
+                    if back is not None:        # a retry runs the work stage again on what the branch holds now
+                        self.db.update_task(t["id"], stage=back)
+                        reason += ". Retry it to run its work stage again"
+                    else:                       # #1610 R3: a retry alone would block the same way again
+                        reason += ". This flow has no work stage before this step: add one, then retry"
+                return self._fail(t, out[1], reason, p)
         self._finish(p, self.db.task(t["id"]))
 
     def _finish(self, p: dict, t: dict) -> None:
@@ -406,7 +378,7 @@ class StageEngine:
         reproduction test untouched by the fix, record the handoff."""
         base = gitops.integration_branch(p["id"])
         h = cards.parse_handoff(text)
-        self._set_job(t, tested_head=None)              # set again below only when every scope rule passed
+        self._set_job(t, tested_head=None, fold_block=None)     # set again below only when every scope rule passed
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
             seen = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
@@ -674,25 +646,30 @@ class StageEngine:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
                 if conflicts:
                     return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
-                moved = self._unvetted(t, wt, "not checked")
-                if moved:
-                    return ("stop", "blocked", moved)
                 # the commit this check runs on; recorded before the check (a later move is caught at the merge)
                 self._set_job(t, tested_head=sha)
+                try:
+                    run_wt = self._checkout(p, sha)
+                except (gitops.GitError, OSError) as e:
+                    return ("stop", "failed", f"the check checkout failed: {clean(e, 200)}")
+            else:
+                run_wt = wt
             outs = []
             ok = True
-            if kind == "verify" and repro.get("cmd"):
-                ok, out = gitops.run_check(wt, repro["cmd"], timeout=min(900, self.cfg.task_timeout_s))
-                outs.append(out)
-                if not ok:
-                    outs.insert(0, "the reproduction still fails:")
-            if ok:
-                ok, out = gitops.run_check(wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
-                outs.append(out)
-            if has_wt:
-                self._record_left(t, wt)
+            try:
+                if kind == "verify" and repro.get("cmd"):
+                    ok, out = gitops.run_check(run_wt, repro["cmd"], timeout=min(900, self.cfg.task_timeout_s))
+                    outs.append(out)
+                    if not ok:
+                        outs.insert(0, "the reproduction still fails:")
+                if ok:
+                    ok, out = gitops.run_check(run_wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
+                    outs.append(out)
+            finally:
+                if has_wt:
+                    gitops.remove_worktree(p["path"], run_wt)
             if ok and kind == "verify" and repro.get("files") and repro.get("commit") and has_wt:
-                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
+                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], sha, "--", *repro["files"],
                                      check=False).stdout.split()
                 if touched:
                     ok = False
@@ -717,8 +694,10 @@ class StageEngine:
             if self._stopped(t, cancel):
                 return ("end",)
             try:
-                sha, moved = self._bind(wt, self._job(self.db.task(t["id"]) or t).get("tested_head") or "",
-                                        "not merged")
+                j = self._job(self.db.task(t["id"]) or t)
+                if j.get("fold_block"):                     # #1610 R6: say why, not "moved after JARVES checked it"
+                    return ("stop", "blocked", j["fold_block"], REWORK)
+                sha, moved = self._bind(wt, j.get("tested_head") or "", "not merged")
                 moved = moved or self._dirty(wt, "not merged")      # never fold files in after the check
                 if moved:
                     return ("stop", "blocked", moved, REWORK)
@@ -729,12 +708,15 @@ class StageEngine:
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     sha, moved = self._bind(wt, sha, "not merged", merged=True, base_sha=base_sha)
-                    moved = moved or (self._unvetted(t, wt, "not merged") if has_check else "")
                     if moved:
                         return ("stop", "blocked", moved, REWORK)
                     if has_check:
-                        ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
-                        self._record_left(t, wt)
+                        run_wt = self._checkout(p, sha)
+                        try:
+                            ok, out = gitops.run_check(run_wt, p["check_cmd"],
+                                                       timeout=min(900, self.cfg.task_timeout_s))
+                        finally:
+                            gitops.remove_worktree(p["path"], run_wt)
                         if not ok:
                             self.db.event(t["id"], "manager", "check_failed", clean(out, cards.FAIL_MAX))
                             test_i = pl.find(stages, ("test", "verify"), before=len(stages))
@@ -888,9 +870,10 @@ class StageEngine:
                             if new[1:] == [pre] and not bad:
                                 self._set_job(t, tested_head=new[0], tested_base=None)
                             elif bad:
-                                self.db.event(t["id"], "manager", "warning", "the edit at the merge approval changed "
-                                              "protected files or files outside the scope, so it is not merged: "
-                                              + ", ".join(bad[:5]))
+                                why = ("the edit at the merge approval changed protected files or files outside the "
+                                       "scope, so it is not merged: " + ", ".join(bad[:5]) + " (not merged)")
+                                self._set_job(t, tested_head=None, fold_block=why)
+                                self.db.event(t["id"], "manager", "warning", why)
                     except gitops.GitError:
                         pass
                     t = self.db.task(t["id"])

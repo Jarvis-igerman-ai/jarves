@@ -56,17 +56,22 @@ def test_branch_moved_before_the_check_is_not_checked(env):
     assert _integration_a(home) == ""
 
 
-def test_branch_moved_during_the_check_is_not_merged(env):
+def test_branch_moved_during_the_check_is_not_merged(env, monkeypatch):
     m, repo, home = env
-    move = ("import subprocess as s; open('a.txt','w').write('during\\n'); "
-            "g=['git','-c','user.name=s','-c','user.email=s@s']; s.run(g+['add','-A'],check=True); "
-            "s.run(g+['commit','-q','-m','x'],check=True)")
-    open_project(m, repo, check=[sys.executable, "-c", move])
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    orig, done = gitops.run_check, []
+
+    def sibling(wt, argv, *a, **k):
+        if not done:
+            done.append(1)
+            _sibling_commit(Path(m.db.by_seq(1, 1)["worktree"]), "during\n")
+        return orig(wt, argv, *a, **k)
+    monkeypatch.setattr(gitops, "run_check", sibling)
     m.call("resume", project="demo")
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "not merged" in t["reason"], t["reason"]
+    assert done and t["status"] == "blocked" and "not merged" in t["reason"], t["reason"]
     assert _integration_a(home) == ""
 
 
@@ -148,17 +153,62 @@ def test_untracked_file_before_the_merge_is_never_merged(env):
     assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == "1\n"
 
 
-def test_untracked_file_that_changes_the_check_is_not_checked(env):
-    """#1610 R1: the check must not pass on a file that never merges."""
-    m, repo, home = env
-    open_project(m, repo, check=[sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists('extra.txt') else 1)"])
+NEEDS_EXTRA = [sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists('extra.txt') else 1)"]
+
+
+def _check_never_sees(m, repo, home, plant):
+    """The check runs in a checkout of the bound commit only, so a file that never merges cannot make it pass."""
+    open_project(m, repo, check=NEEDS_EXTRA)
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
-    _wrap(m, "_st_check", lambda t: _write(Path(t["worktree"]), "extra.txt"))
+    plant()
     m.call("resume", project="demo")
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "extra.txt" in t["reason"] and "not checked" in t["reason"], t["reason"]
+    assert t["status"] != "done" and any(e["kind"] == "check_failed" for e in m.db.events(t["id"])), t["reason"]
     assert not _integration_has(home, "extra.txt") and _integration_a(home) == ""
+
+
+def test_untracked_file_that_changes_the_check_is_not_checked(env):
+    """#1610 R1: the check must not pass on a file that never merges."""
+    m, repo, home = env
+    _check_never_sees(m, repo, home, lambda: _wrap(m, "_st_check", lambda t: _write(Path(t["worktree"]), "extra.txt")))
+
+
+def test_file_hidden_by_the_shared_info_exclude_is_not_checked(env):
+    """#1610 R1 (review 3): a sibling hides the planted file through the shared `info/exclude`."""
+    m, repo, home = env
+
+    def hide(t):
+        wt = Path(t["worktree"])
+        ex = Path(sh(wt, "git", "rev-parse", "--path-format=absolute", "--git-common-dir").strip()) / "info" / "exclude"
+        ex.parent.mkdir(parents=True, exist_ok=True)
+        ex.write_text(ex.read_text() + "\nextra.txt\n" if ex.exists() else "extra.txt\n")
+        _write(wt, "extra.txt")
+    _check_never_sees(m, repo, home, lambda: _wrap(m, "_st_check", hide))
+
+
+def test_file_planted_while_the_check_runs_is_not_checked(env, monkeypatch):
+    """#1610 R2 (review 3): a file written during the check is neither seen by it nor allow-listed later."""
+    m, repo, home = env
+    orig = gitops.run_check
+
+    def plant(wt, argv, *a, **k):
+        for t in m.db.tasks(1):
+            if t["worktree"] and Path(t["worktree"]).exists():
+                _write(Path(t["worktree"]), "extra.txt")
+        return orig(wt, argv, *a, **k)
+    _check_never_sees(m, repo, home, lambda: monkeypatch.setattr(gitops, "run_check", plant))
+
+
+def test_check_checkout_is_removed(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    left = gitops.project_root(home, 1) / "check"
+    assert not left.exists() or not any(left.iterdir())
 
 
 def test_tracked_edit_before_the_merge_blocks(env):
@@ -201,7 +251,7 @@ def test_protected_file_folded_at_owner_approval_is_not_merged(env):
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
+    assert t["status"] == "blocked" and "edit at the merge approval" in t["reason"], t["reason"]
     assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == ""
 
 
@@ -212,7 +262,7 @@ def test_out_of_scope_file_folded_at_owner_approval_is_not_merged(env):
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
+    assert t["status"] == "blocked" and "edit at the merge approval" in t["reason"], t["reason"]
     assert not _integration_has(home, "other.txt") and _integration_a(home) == ""
 
 
@@ -460,3 +510,43 @@ def test_dirty_reason_keeps_the_full_names_of_a_rename(env, tmp_path):
     sh(wt, *GIT, "mv", "original.txt", "renamed.txt")
     why = m._dirty(wt, "x")
     assert "renamed.txt" in why and "ginal.txt" not in why, why
+
+
+def test_flow_without_a_work_stage_says_how_to_fix_the_block(env):
+    """#1610 R3: with no work stage before the check, "retry it" would block the same way for ever."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="x", acceptance="x", flow="test merge")
+    t = m.db.by_seq(1, 1)
+    m._ensure_worktree(m.db.project(1), t)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "no work stage before this step" in t["reason"], t["reason"]
+    assert "Retry it to run its work stage" not in t["reason"]
+
+
+def test_reproduction_untouched_check_reads_the_bound_commit(env, monkeypatch):
+    """#1610 R4: a sibling commit to the repro test during the check is a move, judged on the bound commit."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("bug", project="demo", title="b", spec="FAKE write src/fixed.txt=ok", flow="reproduce work verify merge",
+           repro_cmd=[sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists('src/fixed.txt') else 1)"])
+    orig, done = gitops.run_check, []
+
+    def sibling(wt, argv, *a, **k):
+        ok = orig(wt, argv, *a, **k)
+        task_wt = Path(m.db.by_seq(1, 1)["worktree"])
+        if not done and "check" in Path(wt).parts and m.db.by_seq(1, 1)["stage"] == 2:
+            done.append(1)
+            (task_wt / "tests").mkdir(exist_ok=True)
+            (task_wt / "tests" / "test_bug.py").write_text("def test_bug(): pass\n")
+            sh(task_wt, *GIT, "add", "-A")
+            sh(task_wt, *GIT, "commit", "-q", "-m", "sibling")
+        return ok
+    monkeypatch.setattr(gitops, "run_check", sibling)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert done and t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
+    assert not any("reproduction test was changed" in (e.get("text") or "") for e in m.db.events(t["id"], 80))

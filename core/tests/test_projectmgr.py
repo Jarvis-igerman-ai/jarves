@@ -975,8 +975,9 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
 def test_owner_scope_warning_covers_only_the_owners_own_edit(env):
     """#1500 (#1407 item 2): the owner-code stage's scope warning covered every out-of-scope file on the task branch,
     so a file the check command left in the task folder rode in on the owner's "done" as only a warning."""
-    m, repo, _ = env
-    gen = [sys.executable, "-c", "open('generated.txt', 'w').write('from the check')"]
+    m, repo, home = env
+    out = gitops.project_root(home, 1) / "wt" / "t1-a1" / "generated.txt"     # the check runs in its own checkout
+    gen = [sys.executable, "-c", f"open({str(out)!r}, 'w').write('from the check')"]
     open_project(m, repo, check=gen)
     m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
            flow="work:owner test work:owner merge:owner")
