@@ -269,6 +269,7 @@ def owner_home(monkeypatch, tmp_path):
         monkeypatch.setenv(k, str(home))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    assert gitops.child_env().get("GIT_CONFIG_NOSYSTEM") == "1"          # PR #1520 review R4: reaches every git
     return home
 
 
@@ -355,12 +356,39 @@ def test_every_command_key_set_in_the_shared_config_gets_a_safe_value():
     """#1390: the owner's value wins, then a safe default, else ""; owner-only keys are left alone."""
     listing = "\0".join(["global", "filter.lfs.clean\ngit-lfs clean -- %f", "global", "core.editor\nvim",
                          "global", "credential.helper\nmanager", "global", "credential.https://o.helper\nx",
-                         "local", "filter.lfs.clean\nevil", "worktree", "merge.m.driver\nevil", "local", "core.editor\ne",
+                         "local", "filter.lfs.clean\nevil", "worktree", "merge.m.driver\nevil",
+                         "local", "core.editor\ne",
                          "local", "hook.h.command\nevil", "local",
                          "core.sshcommand\nevil", "local", "credential.helper\nevil", "command", "diff.d.textconv\nok",
-                         "local", "diff.d.textconv\nevil", "local", "gpg.program\nevil",
+                         "local", "diff.d.textconv\nevil", "local", "gpg.program\nevil", "local", "gpg.x509.program\ne",
+                         "local", "gpg.ssh.program\ne",
                          "local", "user.name\nAgent", ""])
     assert gitops.config_overrides(listing) == [
         ("filter.lfs.clean", "git-lfs clean -- %f"), ("merge.m.driver", ""), ("core.editor", "vim"),
-        ("hook.h.command", ""), ("core.sshcommand", "ssh"), ("diff.d.textconv", ""), ("gpg.program", ""),
+        ("hook.h.command", ""), ("core.sshcommand", "ssh"), ("diff.d.textconv", ""), ("gpg.program", "gpg"),
+        ("gpg.x509.program", "gpgsm"), ("gpg.ssh.program", "ssh-keygen"),
         ("credential.helper", ""), ("credential.helper", "manager"), ("credential.https://o.helper", "x")]
+
+
+
+@pytest.mark.parametrize("args", [("-C", "x", "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status"), ()])
+def test_global_options_before_the_subcommand_are_refused(tmp_path, args):
+    """PR #1520 review R2: the config read runs in cwd, so `-C`/`--git-dir`/`--work-tree` could make git act on
+    another repository than the one whose config was checked."""
+    with pytest.raises(gitops.GitError, match="global options are refused"):
+        gitops.git(tmp_path, *args)
+
+
+def test_a_shared_config_hook_never_runs(owner_home, tmp_path):
+    """PR #1520 review R3: on a git with config-defined hooks (`hook.<x>.command`), the blanked command runs nothing.
+    On a git without them (2.43) the probe writes no marker and the test only shows nothing runs; the repo has a
+    no-skips rule, so it is not skipped. `live` records which case ran."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _cfg(repo, "hook.h.event", "post-commit", "hook.h.command", _cmd(tmp_path, marker))
+    subprocess.run(["git", "hook", "run", "--ignore-missing", "post-commit"], cwd=repo, capture_output=True)
+    live = marker.exists()                                                     # this git runs config hooks
+    marker.unlink(missing_ok=True)
+    (repo / "a.py").write_text("1\n", encoding="utf-8")
+    gitops.commit_all(repo, "a")
+    gitops.git(repo, "hook", "run", "--ignore-missing", "post-commit", check=False)
+    assert not marker.exists(), f"config hook ran (config hooks live: {live})"

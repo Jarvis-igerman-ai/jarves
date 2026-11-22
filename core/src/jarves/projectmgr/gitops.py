@@ -79,7 +79,8 @@ _CMD_KEY = re.compile(r"filter\..+\.(clean|smudge|process)|merge\..+\.driver|dif
                       r"|remote\..+\.(uploadpack|receivepack)")
 _FIRST_WINS = re.compile(r"remote\..+\.(uploadpack|receivepack)")   # git uses the FIRST value: no override can win
 _CRED_KEY = re.compile(r"credential\.(.+\.)?helper")         # a list: an empty value clears it
-_SAFE = {"sshcommand": "ssh"}
+_SAFE = {"core.sshcommand": "ssh", "gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+         "gpg.ssh.program": "ssh-keygen"}                 # git's own defaults: owner signing keeps working
 _OWNER_SCOPES = ("system", "global")
 
 
@@ -107,7 +108,7 @@ def config_overrides(listing: str) -> list[tuple[str, str]]:
     out = []
     for key in dict.fromkeys(k for k in shared if _CMD_KEY.fullmatch(k)):
         mine = [v for k, v in owner if k == key]
-        out.append((key, mine[-1] if mine else _SAFE.get(key.rsplit(".", 1)[1], "")))
+        out.append((key, mine[-1] if mine else _SAFE.get(key, "")))
     if any(_CRED_KEY.fullmatch(k) for k in shared):               # clear the list, then replay the owner's helpers
         out += [("credential.helper", "")] + [(k, v) for k, v in owner if _CRED_KEY.fullmatch(k)]
     return out
@@ -121,13 +122,18 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch.
-    Other commands the repository's config names (#1390, `_CMD_KEY`: filters, merge/diff drivers, ssh, editors,
-    gpg, credential helpers) are replaced through GIT_CONFIG_COUNT (no `key=value` parsing,
-    so any subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`, and
-    `protocol.ext.allow=never` refuses `ext::<command>` remote URLs whatever the shared `protocol.*` keys say. A config git cannot
-    read, or a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value), fails the call. KNOWN RESIDUAL (#1390 review R1): the config is read once before the call and git reads it
-    again, so an agent that writes a new command key between the two reads can still get it run. Closing that needs
-    agents that cannot write the config JARVES reads (separate clones), a separate design."""
+    Other commands the repository's config names (#1390, `_CMD_KEY`: filters, merge/diff drivers, ssh,
+    editors, gpg, credential helpers) are replaced through GIT_CONFIG_COUNT (no `key=value` parsing, so any
+    subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`, and
+    `protocol.ext.allow=never` refuses `ext::<command>` remote URLs whatever the shared `protocol.*` keys say.
+    A config git cannot read, or a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value),
+    fails the call. A global option before the subcommand (`-C`, `--git-dir`, `--work-tree`) is refused: the
+    config read runs in `cwd`, so it must be the repository git acts on.
+    KNOWN RESIDUAL (#1390 review R1, #1599): the config is read once before the call and git reads it again, so
+    an agent that writes a new command key between the two reads can still get it run. Closing that needs agents
+    that cannot write the config JARVES reads (separate clones), a separate design."""
+    if not args or args[0].startswith("-"):
+        raise GitError("git(): the first argument must be the subcommand (global options are refused)")
     pre = ["-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_PROXY_COMMAND": ""})
     rd = _run(cwd, [*pre, "config", "--list", "-z", "--show-scope"], timeout, env)
