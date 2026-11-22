@@ -385,6 +385,7 @@ def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_p
     outside = tmp_path / "outside.txt"
     outside.write_text("secret", encoding="utf-8")
     os.chmod(outside, 0o644)
+    mode = os.stat(outside).st_mode               # Windows reports 0o666 for any writable file: compare, not 0o644
     (wt / "d").mkdir()
     _symlink(outside, wt / "d" / "l")
     real_unlink = os.unlink
@@ -396,7 +397,7 @@ def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_p
     monkeypatch.setattr(os, "unlink", unlink)
     monkeypatch.setattr(gitops, "_WIN", win)              # True: the Windows branch (lstat, never through a link)
     gitops.remove_worktree(str(repo), wt, br)
-    assert os.stat(outside).st_mode & 0o777 == 0o644 and outside.read_text(encoding="utf-8") == "secret"
+    assert os.stat(outside).st_mode == mode and outside.read_text(encoding="utf-8") == "secret"
     assert "could not remove" in caplog.text and (wt / "d" / "l").is_symlink()
 
 
@@ -472,3 +473,63 @@ def test_a_lost_branch_race_puts_the_folder_back(monkeypatch, tmp_path):
     assert out and "another value" in out[0] and not (wt / "n.txt").exists()
     monkeypatch.setattr(gitops, "git", real)
     assert gitops.folder_state(wt)[1] is False
+
+
+def test_a_shared_worktree_from_an_older_install_is_refused(tmp_path):
+    """#1599 review R1: a task folder made by `git worktree add` (an older install) shares the owner's config and
+    info/attributes; while one exists JARVES runs no task-folder or ship git in that repository, so a filter it
+    planted never runs. Removing it (a stopped task) lets the separate clones work again."""
+    repo, home, integ, wt, br = _task(tmp_path)
+    old = gitops.project_root(home, 1) / "wt" / "t2-a1"
+    gitops.git(repo, "worktree", "add", "-q", "-b", gitops.task_branch(1, 2, 1), str(old), gitops.integration_branch(1))
+    assert not gitops.is_clone(old) and gitops.is_clone(wt)
+    marker = tmp_path / "ran.txt"
+    _hook(tmp_path / "evil-bin", "run", marker)
+    cmd = (tmp_path / "evil-bin" / "run").as_posix()
+    subprocess.run(["git", "config", "filter.x.clean", cmd], cwd=old, check=True)        # the agent writes it
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("* filter=x\n", encoding="utf-8")
+    (old / "a.txt").write_text("a\n", encoding="utf-8")
+    (wt / "b.txt").write_text("b\n", encoding="utf-8")
+    for folder in (old, wt):
+        with pytest.raises(gitops.GitError, match="older install"):
+            gitops.commit_all(folder, "x")
+        assert gitops.merge_in(folder, gitops.integration_branch(1))[0].startswith("(not merged: a task folder")
+        with pytest.raises(gitops.GitError, match="older install"):
+            gitops.folder_state(folder)
+    with pytest.raises(gitops.GitError, match="older install"):
+        gitops.fast_forward(integ, br)
+    assert not marker.exists()
+    gitops.remove_worktree(str(repo), old, gitops.task_branch(1, 2, 1))
+    (repo / ".git" / "info" / "attributes").unlink()
+    subprocess.run(["git", "config", "--unset", "filter.x.clean"], cwd=repo, check=True)
+    assert gitops.commit_all(wt, "task 1") and not marker.exists()
+
+
+def test_a_failed_view_update_keeps_the_commit(monkeypatch, tmp_path, caplog):
+    """#1599 review R2: the task branch moved, so an OSError writing the clone's own ref (Windows: the agent's git
+    holds the file) is logged, not raised as a non-GitError that would crash the stage."""
+    repo, _home, _integ, wt, br = _task(tmp_path)
+    (wt / "a.txt").write_text("a\n", encoding="utf-8")
+
+    def replace(*_a, **_kw):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(gitops.os, "replace", replace)
+    assert gitops.commit_all(wt, "task 1")
+    assert "not updated" in caplog.text and "Permission denied" in caplog.text
+    assert gitops.git(repo, "show", f"{br}:a.txt").stdout == "a\n"
+    assert [x.name for x in (wt / ".git" / "refs" / "heads").rglob(".jarves-*")] == []
+
+
+def test_the_private_index_is_kept_outside_the_folder_and_removed_with_it(tmp_path):
+    """#1599 review R4: one private index per task (its stat cache spares a rehash of every file each call), outside
+    the task folder, removed with the folder."""
+    repo, home, _integ, wt, br = _task(tmp_path)
+    idx = gitops.project_root(home, 1) / "idx" / "t1-a1"
+    (wt / "a.txt").write_text("a\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "task 1") and idx.is_file()
+    assert gitops.folder_state(wt)[1] is False
+    (wt / "a.txt").write_text("changed\n", encoding="utf-8")
+    assert gitops.folder_state(wt)[1] is True
+    gitops.remove_worktree(str(repo), wt, br)
+    assert not idx.exists()

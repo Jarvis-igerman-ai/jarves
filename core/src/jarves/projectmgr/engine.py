@@ -219,7 +219,10 @@ class StageEngine:
 
     def _ensure_worktree(self, p, t):
         if t["worktree"] and Path(t["worktree"]).exists():
-            return Path(t["worktree"]), t["branch"]
+            if gitops.is_clone(t["worktree"]):
+                return Path(t["worktree"]), t["branch"]
+            # #1599 review R1: a shared worktree from an older install; replaced by a separate clone (a new attempt)
+            gitops.remove_worktree(p["path"], Path(t["worktree"]), t["branch"])
         att = max(1, t["attempts"])
         wt, br = gitops.new_task_worktree(self.home, p["path"], p["id"], t["seq"], att)
         self.db.update_task(t["id"], worktree=str(wt), branch=br)
@@ -652,7 +655,7 @@ class StageEngine:
                 return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event())
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
-                head = gitops.folder_branch(wt) or br
+                head = gitops.folder_branch(wt)                     # "" (detached, older worktree): not on it
                 if head != br:
                     return ("park", f"the folder {wt} is not on the task branch {br} any more: switch back, then say done")
                 base = gitops.integration_branch(p["id"])

@@ -8,7 +8,9 @@ a `git clone --shared` with its OWN `.git` (config, hooks, info/attributes), so 
 the config, hooks or attributes of the owner's repository. JARVES never runs git with a task folder's `.git`: it
 reads the folder's files with the owner's git folder and a private index (`commit_all`, `folder_state`), merges with
 `merge-tree` in the owner's repository (`merge_in`) and answers every diff from the task branch there (`where`).
-No config read can race an agent's config write: JARVES's git only reads a config the agent never writes."""
+No config read can race an agent's config write: JARVES's git only reads a config the agent never writes.
+A task folder from an older install (a `git worktree`, whose `.git` is a file into the owner's) breaks that, so while
+one is registered JARVES refuses task-folder and ship git in that repository (`refuse_shared_worktrees`)."""
 from __future__ import annotations
 
 import fnmatch
@@ -215,16 +217,19 @@ class _FolderIndex:
             raise GitError("not a JARVES task folder")
         _need_task_git()
         self.wt, (self.cwd, self.branch) = Path(wt), ref
+        refuse_shared_worktrees(self.cwd, self.wt)
         self.gitdir = git(self.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
-        self.index = ""
+        # one private index per task, kept outside the folder (review R4): its stat cache spares a rehash of every file
+        self.index = _index_path(self.wt)
+        self._lock = _repo_lock(self.index)
 
     def __enter__(self) -> "_FolderIndex":
-        tmp = tempfile.mkdtemp(prefix="idx-", dir=str(self.cwd.parent))
-        self.index = os.path.join(tmp, "index")
+        self._lock.acquire()
+        os.makedirs(os.path.dirname(self.index), exist_ok=True)
         return self
 
     def __exit__(self, *_exc) -> None:
-        shutil.rmtree(os.path.dirname(self.index), ignore_errors=True)
+        self._lock.release()
 
     def run(self, *args: str, check: bool = True, index: str = "") -> subprocess.CompletedProcess:
         return git(self.cwd, f"--git-dir={self.gitdir}", f"--work-tree={self.wt}", *args, check=check,
@@ -241,14 +246,17 @@ class _FolderIndex:
         if folder_branch(self.wt) != self.branch or any(x.is_symlink() for x in chain) or not ref.parent.is_dir():
             _LOG.warning("task folder %s: its own git view was not updated (a link or another branch)", self.wt)
             return
-        fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=str(ref.parent))
         try:
-            with os.fdopen(fd, "w", encoding="ascii") as fh:
-                fh.write(sha + "\n")
-            os.replace(tmp, ref)
-        except OSError:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+            fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=str(ref.parent))
+            try:
+                with os.fdopen(fd, "w", encoding="ascii") as fh:
+                    fh.write(sha + "\n")
+                os.replace(tmp, ref)
+            finally:
+                Path(tmp).unlink(missing_ok=True)
+        except OSError as e:          # review R2: the task branch (the record) already moved; only this view is stale
+            _LOG.warning("task folder %s: its own git view was not updated: %s", self.wt, e)
+            return
         if self.run("read-tree", sha, check=False, index=str(g / "index")).returncode == 0:
             self.run("update-index", "-q", "--refresh", check=False, index=str(g / "index"))
 
@@ -260,9 +268,38 @@ class _FolderIndex:
 
     def tree(self, head: str) -> str:
         """The tree of the folder's files now (a tracked file that matches .gitignore stays, as with `add -A`)."""
-        self.run("read-tree", head)
+        if self.run("read-tree", "-m", head, check=False).returncode != 0:     # -m keeps the stat cache (R4)
+            self.run("read-tree", head)
         self.run("add", "-A")
         return self.run("write-tree").stdout.strip()
+
+
+def _index_path(wt: Path) -> str:
+    """The private index of a task folder: `<home>/projects/<pid>/idx/<folder name>`, never inside the folder."""
+    return str(wt.parent.parent / "idx" / wt.name)
+
+
+def is_clone(wt: str | Path) -> bool:
+    """True when a task folder has its own `.git` folder (#1599); False for a `git worktree` from an older install,
+    whose `.git` is a file pointing into the owner's `.git` (config, hooks, info/attributes are shared)."""
+    g = Path(wt) / ".git"
+    return g.is_dir() and not g.is_symlink()
+
+
+def shared_worktrees(cwd: str | Path) -> list[str]:
+    """Task folders registered as worktrees of the owner's repository (an older install, #1599). An agent there can
+    still write the owner's shared config, so every JARVES git command in that repository could read what it wrote."""
+    out = git(cwd, "worktree", "list", "--porcelain", "-z", check=False).stdout.split("\0")
+    return [x[len("worktree "):] for x in out if x.startswith("worktree ") and task_ref(x[len("worktree "):])]
+
+
+def refuse_shared_worktrees(cwd: str | Path, wt: str | Path | None = None) -> None:
+    """GitError while a task folder of an older install shares the owner's git folder (review R1): no JARVES git
+    command runs in that repository until it is removed (stop the task; a new attempt makes a separate clone)."""
+    old = ([str(wt)] if wt is not None and not is_clone(wt) else []) + shared_worktrees(cwd)
+    if old:
+        raise GitError(f"a task folder from an older install shares the repository's git config (#1599): {old[0]}; "
+                       "stop that task so its folder is removed, then start it again (it gets its own clone)")
 
 
 def folder_branch(wt: str | Path) -> str:
@@ -332,6 +369,8 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
         git(repo, "worktree", "remove", "--force", str(wt), check=False)     # a worktree from an older install
         if Path(wt).exists():
             _rmtree(Path(wt))
+        if task_ref(wt):
+            Path(_index_path(Path(wt))).unlink(missing_ok=True)
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
@@ -477,6 +516,7 @@ def _merge_task(wt: Path, branch: str) -> list[str]:
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
+    refuse_shared_worktrees(integration_wt)
     git(integration_wt, "merge", "--ff-only", branch)
 
 

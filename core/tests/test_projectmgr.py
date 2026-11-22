@@ -972,6 +972,38 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     assert (gitops.project_root(home, 1) / "integration" / "mine.txt").read_text() == "changed after the approval\n"
 
 
+def test_owner_work_on_a_detached_clone_is_parked(env):
+    """#1599 review R3: a detached HEAD in the task clone is "not on the task branch", never taken as on it."""
+    m, repo, _home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    sha = gitops.git(repo, "rev-parse", t["branch"]).stdout.strip()
+    (wt / ".git" / "HEAD").write_text(sha + "\n", encoding="ascii")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    assert "not on the task branch" in m.db.by_seq(1, 1)["waiting"]
+
+
+def test_a_shared_worktree_from_an_older_install_is_replaced_by_a_clone(env):
+    """#1599 review R1: a task folder from an older install (`git worktree add`) is removed and made again as a
+    separate clone before an agent runs there."""
+    m, repo, home = env
+    open_project(m, repo)
+    p = m.db.projects()[0]
+    gitops.ensure_integration(home, str(repo), p["id"])
+    old = gitops.project_root(home, p["id"]) / "wt" / "t1-a1"
+    br = gitops.task_branch(p["id"], 1, 1)
+    sh(repo, "git", "worktree", "add", "-q", "-b", br, str(old), gitops.integration_branch(p["id"]))
+    t = {"worktree": str(old), "branch": br, "attempts": 1, "seq": 1, "id": 0}
+    m.db.update_task = lambda *a, **k: None
+    wt, _br = m._ensure_worktree(p, t)
+    assert gitops.is_clone(wt) and gitops.shared_worktrees(gitops.project_root(home, p["id"]) / "integration") == []
+
+
 def test_owner_scope_warning_covers_only_the_owners_own_edit(env):
     """#1500 (#1407 item 2): the owner-code stage's scope warning covered every out-of-scope file on the task branch,
     so a file the check command left in the task folder rode in on the owner's "done" as only a warning."""
