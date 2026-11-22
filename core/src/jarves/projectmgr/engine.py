@@ -50,13 +50,28 @@ class StageEngine:
         """'' when the task branch is still at the commit JARVES vetted, else why not (#1461). All worktrees share
         refs, so a sibling can point the task branch elsewhere after the scope check or the check."""
         vetted = self._job(self.db.task(t["id"]) or t).get("tested_head") or ""
-        head = gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
+        try:
+            head = gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
+        except OSError:                                 # the worktree is gone: fail closed
+            return f"the task worktree is missing for task #{t['seq']} ({what})"
         if not vetted:
             return f"no checked commit is recorded for task #{t['seq']}: run its work stage again ({what})"
         if head != vetted:
             return (f"the task branch moved after JARVES checked it: {head[:12]} is not the checked commit "
                     f"{vetted[:12]} ({what})")
         return ""
+
+    @staticmethod
+    def _bind(wt: Path, vetted: str, what: str, *, committed: bool = False, merged: bool = False
+              ) -> tuple[str, str]:
+        """Read HEAD once: (sha, '') when it is `vetted`, our own commit_all right on it (`committed`) or our merge
+        whose first parent is it (`merged`); else ('', why). Later steps use that exact sha, not the branch (#1461)."""
+        sha, *parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split() or [""]
+        if sha and vetted and (sha == vetted or (committed and parents == [vetted])
+                               or (merged and len(parents) == 2 and parents[0] == vetted)):
+            return sha, ""
+        return "", (f"the task branch moved after JARVES checked it: {sha[:12]} is not the checked commit "
+                    f"{vetted[:12]} ({what})")
 
     def _feedback(self, t: dict, text: str) -> None:
         j = self._job(self.db.task(t["id"]) or t)
@@ -296,6 +311,7 @@ class StageEngine:
         reproduction test untouched by the fix, record the handoff."""
         base = gitops.integration_branch(p["id"])
         h = cards.parse_handoff(text)
+        self._set_job(t, tested_head=None)              # set again below only when every scope rule passed
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
             seen = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
@@ -305,7 +321,6 @@ class StageEngine:
                 return ("stop", "blocked", f"the task branch moved during the scope check (not merged; on {br})")
         except gitops.GitError as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
-        self._set_job(t, tested_head=None)              # set again below only when every scope rule passed
         scope = t["scope"]
         if kind == "reproduce" and not scope:
             scope = ["test", "tests", "spec", "*test*", "*/test*", "*spec*"]
@@ -552,14 +567,22 @@ class StageEngine:
                 if moved:
                     return ("stop", "blocked", moved)
                 try:
-                    gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                    vetted = self._job(self.db.task(t["id"]) or t).get("tested_head") or ""
+                    committed = gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                    sha, moved = self._bind(wt, vetted, "not checked", committed=committed)
+                    if moved:
+                        return ("stop", "blocked", moved)
                     conflicts = gitops.merge_in(wt, base)
+                    if not conflicts:
+                        sha, moved = self._bind(wt, sha, "not checked", merged=True)
+                        if moved:
+                            return ("stop", "blocked", moved)
                 except gitops.GitError as e:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
                 if conflicts:
                     return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                 # the commit this check runs on; recorded before the check (a later move is caught at the merge)
-                self._set_job(t, tested_head=gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip())
+                self._set_job(t, tested_head=sha)
             outs = []
             ok = True
             if kind == "verify" and repro.get("cmd"):
@@ -599,12 +622,20 @@ class StageEngine:
             if moved:
                 return ("stop", "blocked", moved)
             try:
-                gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                # #1503 R5 (open): this commit_all still folds files left uncommitted after the check
+                committed = gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                sha, moved = self._bind(wt, self._job(self.db.task(t["id"]) or t).get("tested_head") or "",
+                                        "not merged", committed=committed)
+                if moved:
+                    return ("stop", "blocked", moved)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
+                    sha, moved = self._bind(wt, sha, "not merged", merged=True)
+                    if moved:
+                        return ("stop", "blocked", moved)
                     if has_check:
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
                         if not ok:
@@ -614,7 +645,10 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                gitops.fast_forward(self._integration(p), br)
+                        sha, moved = self._bind(wt, sha, "not merged")      # the check ran on this exact commit
+                        if moved:
+                            return ("stop", "blocked", moved)
+                gitops.fast_forward(self._integration(p), sha)      # the exact vetted sha, never the moving ref
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat = t["result"]
@@ -744,7 +778,8 @@ class StageEngine:
                     wt = Path(t["worktree"])
                     try:
                         pre = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
-                        if gitops.commit_all(wt, f"task {t['seq']}: owner edit before merge"[:120]) and                                 pre == self._job(t).get("tested_head"):
+                        committed = gitops.commit_all(wt, f"task {t['seq']}: owner edit before merge"[:120])
+                        if committed and pre == self._job(t).get("tested_head"):
                             new = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
                             if new[1:] == [pre]:            # your edit sits directly on the checked commit (#1461)
                                 self._set_job(t, tested_head=new[0])
