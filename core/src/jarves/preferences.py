@@ -75,7 +75,8 @@ def _base32(text: str) -> bool:
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 # 6+ characters with a digit or a non-hyphen symbol ("well-known" is a word), dots inside allowed but not a final
-# one; a URL, a path, an env-var reference ($NAME, ${NAME}) or an encoding/hash name (base64-encoded, SHA256) is no value
+# one. Known limit (#1630 R3): an all-letter value ("my api key is hunterhunterx") is allowed, so state words such
+# as "valid" or "expired" are not refused; a URL, a path, an env-var reference ($NAME, ${NAME}) or an encoding/hash name (base64-encoded, SHA256) is no value
 _END = r"(?=[\s,;!?]|\.?$|\.\s)"
 _NOT_VALUE = (r"(?![a-z][a-z0-9+.-]*://|/|\$\{?(?-i:[A-Z_][A-Z0-9_]*)\}?" + _END +
               r"|(?:base(?:32|58|64)|sha-?\d+|md5|utf-?(?:8|16)|aes-?\d*|rsa-?\d*)(?:-[a-z]+)?" + _END + ")")
@@ -89,9 +90,14 @@ _KEY_VALUE = re.compile(
 _KEY_RUN = re.compile(r"[A-Za-z0-9+/=_-]{20,}")
 # camelCase: a first word, then each further word starts with a capital, so "ab12cd34ef56" is no name (#1630 R3)
 _PIECE = re.compile(r"[a-z]+\d{0,4}|[A-Z]+\d{0,3}|\d+|[A-Z]{0,4}[a-z]{2,}(?![a-z])(?:[A-Z]{1,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))*")
-# only a git SHA (40/64 hex) or a canonical UUID is exempt; a bare 32-hex key is a key (#1630 R2)
+# a git SHA (40/64 hex) or canonical UUID is exempt only in a URL path or after an id word ("commit 9fce...",
+# "ticket <uuid>"); a bare one may be a legacy GitHub PAT, an HMAC secret or a UUID-shaped API key (#1630 R2)
 _HEX_ID = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})"
                      r"(?![0-9a-fA-F])")
+_ID_BEFORE = re.compile(r"(?:/|\b(?:commit|sha-?\d*|revert|rev|hash|checksum|digest|uuid|id|ticket|fix(?:e[sd]|up)?|"
+                        r"merge[ds]?|pick|reset|checkout|rebase|bisect|blame|show|diff)\W{1,3})$", re.I)
+# letter+digit groups of one shape ("abcd1234-efgh5678-...") are a split key, not a name (#1630 R1)
+_GROUP = re.compile(r"([A-Za-z]{2,})(\d{2,})")
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
@@ -100,11 +106,14 @@ def _entropy(s: str) -> float:
 
 
 def _keylike(text: str) -> bool:
-    for run in _KEY_RUN.findall(text):
-        pieces = [p for p in re.split(r"[/_-]+", _HEX_ID.sub("", run)) if p]
+    for m in _KEY_RUN.finditer(text):
+        run = _HEX_ID.sub(lambda h: "" if _ID_BEFORE.search(text[:m.start() + h.start()]) else h.group(), m.group())
+        pieces = [p for p in re.split(r"[/_-]+", run) if p]
         joined = "".join(pieces)
+        shapes = [(len(g[1]), len(g[2])) for g in map(_GROUP.fullmatch, pieces) if g]
+        grouped = any(shapes.count(sh) >= 3 for sh in shapes)
         if (len(joined) >= 20 and re.search(r"[A-Za-z]", joined) and re.search(r"\d", joined)
-                and not all(_PIECE.fullmatch(p) for p in pieces)
+                and (grouped or not all(_PIECE.fullmatch(p) for p in pieces))
                 and _entropy(joined) >= KEY_ENTROPY_BITS):
             return True
     return False

@@ -33,6 +33,12 @@ KEYS = [
     "remember 3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e",
     "remember ab12cd34ef56gh78ij90kl",
     "token: $abc123XYZ",                                              # "$" plus a random value is no env name
+    # #1630 review 3 R1: repeated letter+digit groups are one key; R2: a bare SHA-shaped or UUID-shaped secret
+    "remember abcd1234-efgh5678-ijkl9012-mnop3456",
+    "use ABC12-DEF34-GHI56-JKL78 tomorrow",
+    "remember 9fceb02d0ae598e95dc970b74767f19372d61af8",               # legacy 40-hex GitHub PAT
+    "keep 9f86d0a1b8c4c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f0a0e",   # 64-hex HMAC secret
+    "heroku 3f2a9c1e-7b4d-4e8a-9c2f-1a5b7d9e3c6f",                     # UUID-shaped API key
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -82,6 +88,9 @@ PLAIN = [
     "sha256 9f86d0a1b8c4c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f0a0e",
     "call getUserPrefsFromCache42Fast here",
     "see github.com/x/jarves/commit/9fceb02d0ae598e95dc970b74767f19372d61af8",
+    # #1630 review 3: unlike groups and repeated low-entropy groups stay allowed
+    "use sha256_aes128_rsa2048_md5 here",
+    "rename item01-item02-item03-item04",
 ]
 
 
