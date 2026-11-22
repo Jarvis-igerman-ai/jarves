@@ -647,6 +647,7 @@ async def test_1526_privacy_on_scrubs_plan_text_written_before_it(env, monkeypat
     assert env.store.scrub_if_private() == 0                              # nothing left: a pass changes no row
 
     env.db.x("UPDATE goal_plan_steps SET evidence='again' WHERE plan_id=?", (ok["id"],))   # stored after the scrub
+    env.clock.t += gp.SCRUB_MIN_S
     assert env.store.scrub_if_private() == 1 and env.store.get(ok["id"])["steps"][0]["evidence"] == ""
 
 
@@ -667,6 +668,7 @@ async def test_1526_run_loop_scrubs_every_pass_even_with_feature_off(env, monkey
 
     async def sleep(_s):
         passes.append(env.store.get(p["id"])["steps"][0]["evidence"])
+        env.clock.t += gp.SCRUB_MIN_S
         if len(passes) == 1:                                              # a late step result lands after pass 1
             env.db.x("UPDATE goal_plan_steps SET evidence='late secret' WHERE plan_id=?", (p["id"],))
         else:
@@ -676,22 +678,51 @@ async def test_1526_run_loop_scrubs_every_pass_even_with_feature_off(env, monkey
     assert passes == ["", ""] and env.store.get(p["id"])["result"] == "1/1 steps done."
 
 
-def test_1526_own_reasons_are_shared_constants():
-    """#1526 R4: every fixed reason the runner writes is a shared WHY_* constant the scrub keeps (no copied string)."""
-    import ast
-    import inspect
-    tree = ast.parse(inspect.getsource(gp))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("_block", "_fail", "_stop_plan"):
-            assert not isinstance(node.args[2], ast.Constant), ast.unparse(node)
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("_cas", "_set_if"):
-            for kw in node.keywords:
-                if kw.arg == "note":
-                    assert not (isinstance(kw.value, ast.Constant) and kw.value.value), ast.unparse(node)
+def test_1526_own_reasons_are_kept_and_tool_text_after_them_is_not():
+    """#1526: the scrub keeps Jarvis's fixed reasons, only in their full form, and the bare 'failed' of a code-less error."""
     for why in gp._OWN:
         assert gp._private_text(why) == why and gp._private_note(f"step 2: {why}") == f"step 2: {why}"
-    assert gp._private_text(gp.WHY_TIME_CAP + "5 min reached") == gp.WHY_TIME_CAP + "5 min reached"
-    assert gp._private_text("X" * 41 + ": text") == ""                    # R5: an over-long "code" is not kept
+    for cap in ("time cap of 5 min reached", "cost cap of 20 AI requests reached"):
+        assert gp._private_text(cap) == cap and gp._private_text(cap + ": secret") == ""   # review R2: full form only
+    assert gp._private_text(gp.WHY_TIME_CAP + "secret") == ""
+    assert gp._private_text("failed: secret words") == "failed"                          # review R3
+    assert gp._private_note("step 3: failed: secret words") == "step 3: failed"
+    assert gp._private_text("X" * 41 + ": text") == ""                    # an over-long "code" is not kept
+
+
+def test_1526_scrub_never_adopts_an_open_transaction(env, monkeypatch):
+    """#1526 review R4: with a caller's transaction open the scrub neither commits nor rolls it back; it retries later."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", True)
+    c = env.db._db
+    c.execute("BEGIN")
+    c.execute("CREATE TEMP TABLE caller_pending (x)")
+    warned = []
+    monkeypatch.setattr(logs, "warn", lambda comp, code, msg, **f: warned.append(code))
+    assert env.store.scrub_if_private() == 0 and c.in_transaction and warned == ["PLAN_SCRUB_SKIPPED"]
+    c.rollback()
+    assert env.store._seen is None                                        # not marked scanned: the next pass retries
+
+
+async def test_1526_failed_scrub_does_not_stop_plan_execution(env, monkeypatch):
+    """#1526 review R1: a scrub error (e.g. 'database is locked') is logged and the same pass still runs the plans."""
+    from jarves import logs
+    import sqlite3
+    monkeypatch.setattr(logs, "_privacy", False)
+
+    def locked():
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(env.store, "scrub_if_private", locked)
+    errors = []
+    monkeypatch.setattr(logs, "error", lambda comp, code, msg, **f: errors.append(code))
+    p = env.store.propose("ok", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+
+    async def sleep(_s):
+        runner.stop()
+    runner = gp.PlanRunner(env.store, env.reg, clock=env.clock, sleep=sleep)
+    await runner.run()
+    assert errors == ["PLAN_SCRUB_FAILED"] and env.store.get(p["id"])["state"] == "done"
 
 
 async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatch, tmp_path):
@@ -731,11 +762,14 @@ async def test_1526_scrub_is_one_transaction_and_idle_passes_skip_it(env, monkey
     env.store.scrub_if_private()
     assert len(scans) == 1                                                       # nothing written: no scan
     env.db.x("UPDATE goal_plan_steps SET evidence='late' WHERE plan_id=?", (p["id"],))
+    assert env.store.scrub_if_private() == 0 and len(scans) == 1                 # review R6: rate-limited rescan
+    env.clock.t += gp.SCRUB_MIN_S
     assert env.store.scrub_if_private() == 1 and len(scans) == 2
     other = sqlite3.connect(env.db.path)
     other.execute("UPDATE goal_plan_steps SET evidence='other process' WHERE plan_id=?", (p["id"],))
     other.commit()
     other.close()
+    env.clock.t += gp.SCRUB_MIN_S
     assert env.store.scrub_if_private() == 1 and len(scans) == 3
     monkeypatch.setattr(logs, "_privacy", False)
     env.store.scrub_if_private()

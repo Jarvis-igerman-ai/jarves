@@ -87,14 +87,18 @@ WHY_NO_CODE = "failed"                                         # a failed tool r
 WHY_TIME_CAP, WHY_COST_CAP = "time cap of ", "cost cap of "      # prefixes: the number follows
 _OWN = (WHY_DENIED, WHY_TAINTED, WHY_NO_TOOL, WHY_NO_ANSWER, WHY_TOO_LONG, WHY_TIMEOUT, WHY_TIMEOUT_MAYBE, WHY_CRASH,
         WHY_RESTART, WHY_PAUSED, WHY_CANCELLED, WHY_RESTART_PAUSED, WHY_BUDGET, WHY_NO_CODE)
-_OWN_PREFIX = (WHY_TIME_CAP, WHY_COST_CAP)
+# the two capped reasons only in their full fixed form: nothing after the number survives (#1526 review R2)
+_OWN_CAP = re.compile(rf"^(?:{WHY_TIME_CAP}\d+ min reached|{WHY_COST_CAP}\d+ AI requests reached)$")
+SCRUB_MIN_S = 10.0       # a rescan after a db write runs at most this often; the privacy off->on edge scans at once
 
 
 def _private_text(text: str) -> str:
     """#1526: an error / note at rest in privacy mode: a fixed reason stays, a tool code stays, other text goes."""
     t = text or ""
-    if t in _OWN or t.startswith(_OWN_PREFIX):
+    if t in _OWN or _OWN_CAP.match(t):
         return t
+    if t.startswith(WHY_NO_CODE + ":"):                  # "failed: <tool text>": keep the reason, drop the text (R3)
+        return WHY_NO_CODE
     m = _CODE.match(t)
     return m.group(1) if m else ""
 
@@ -129,6 +133,7 @@ class PlanStore:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
         self._seen: tuple | None = None       # #1526: db change counters at the last scrub (None: scan on the next pass)
+        self._scanned = 0.0                   # #1526: clock() of the last scrub (rate limit for write-triggered scans)
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -347,11 +352,13 @@ class PlanStore:
         n = 0
         with self.db._lock:
             c = self.db._db
+            if c.in_transaction:          # never commit or roll back a caller's pending writes with ours (review R4)
+                logs.warn("goals", "PLAN_SCRUB_SKIPPED", "privacy scrub skipped: a transaction is open; retried next pass")
+                return 0
             secure = c.execute("PRAGMA secure_delete").fetchone()[0]
             c.execute("PRAGMA secure_delete=ON")
             try:
-                if not c.in_transaction:
-                    c.execute("BEGIN")
+                c.execute("BEGIN")
                 for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "
                                    "WHERE evidence != '' OR error != ''").fetchall():
                     er = _private_text(r[2])
@@ -371,7 +378,7 @@ class PlanStore:
                 c.execute(f"PRAGMA secure_delete={int(secure)}")
             if n:
                 c.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # busy readers: frames stay until the next checkpoint
-            self._seen = self._version()
+            self._seen, self._scanned = self._version(), self.clock()
         if n:
             logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy mode: older plan text removed", count=n)
         return n
@@ -385,11 +392,12 @@ class PlanStore:
     def scrub_if_private(self) -> int:
         """Privacy on: scrub() when memory.db changed since the last scrub, and always on the privacy off->on edge.
         Called on EVERY runner pass, so text a step stores while privacy is on (a step that was mid-run when the switch
-        flipped) is gone within one pass, while an idle pass costs two counter reads instead of a table scan."""
+        flipped) is gone within SCRUB_MIN_S, while an idle pass costs two counter reads instead of a table scan. The
+        counters see writes to any memory.db table, so write-triggered rescans are rate-limited (review R6)."""
         if not logs.privacy():
             self._seen = None
             return 0
-        if self._seen is not None and self._version() == self._seen:
+        if self._seen is not None and (self._version() == self._seen or self.clock() - self._scanned < SCRUB_MIN_S):
             return 0
         return self.scrub()
 
@@ -507,6 +515,11 @@ class PlanRunner:
                 # #1526: every pass, even with the goal_plans feature off (Operations.start always starts run());
                 # off the event loop, as the scrub is synchronous SQLite work under the db lock
                 await asyncio.to_thread(self.store.scrub_if_private)
+            except asyncio.CancelledError:
+                raise
+            except Exception:                            # a failed scrub (e.g. db locked) never stops plan execution (R1)
+                logs.error("goals", "PLAN_SCRUB_FAILED", "privacy scrub failed; retried next pass", exc=True)
+            try:
                 await self.tick()
             except asyncio.CancelledError:
                 raise
