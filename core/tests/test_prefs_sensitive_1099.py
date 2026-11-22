@@ -9,17 +9,21 @@ KEYS = [
     "use ghp_abcdefghijklmnopqrstuvwxyz0123456789 for github",           # GitHub token
     "aws AKIAABCDEFGHIJKLMNOP please",                             # AWS key id
     "remember Zx9fQ2LmB7vT4kRw8YpN3sHd",                           # unprefixed high-entropy string
-    "my api key is hunter-two-x",                                  # keyword + value: api key
+    "my api key is hunter2-x",                                     # keyword + value: api key
     "the client secret: abc",                                      # keyword + value: client secret
     "store this access token = qwerty",                            # keyword + value: access token
-    "my secret key is open-sesame",                                # keyword + value: secret key
+    "my secret key is open_sesame",                                # keyword + value: secret key
     "private key: begin here",                                     # keyword + value: private key
-    "access key was hello-world",                                  # keyword + value: access key
+    "access key was hello-w0rld",                                  # keyword + value: access key
     "my github token for work is abc12345",                             # up to two words between keyword and value
     "הטוקן שלי הוא abc12345",                                           # Hebrew: token
     "מפתח API הוא abc12345",                                            # Hebrew: API key
     "מפתח הגישה שלי: abc",                                         # Hebrew: access key
     "מפתח סוד זה abc12345",                                             # Hebrew: secret key
+    # #1099 review 3: up to five words between keyword and a spoken value; a bare "key" with a value counts
+    "the token for my work github account is abc12345",
+    "my openai key is abc12345",
+    "Remember aB3xY7qL9mN2pR5tV8wZ1kC4",                                # random mixed case, not camelCase words
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -43,6 +47,12 @@ PLAIN = [
     "the token is expired after an hour",
     "the access key was rotated.",
     "the api key is valid.",
+    # #1099 review 3: a hyphenated state word after is/was is not a value; camelCase names are not keys
+    "the token is well-known",
+    "the api key is re-issued",
+    "rename handleOAuth2CallbackResponse in the auth module",
+    "call getUserPreferences2Async on start",
+    "the key is under the mat",
 ]
 
 
@@ -58,6 +68,7 @@ def test_ordinary_preferences_are_not_sensitive(text):
 
 def test_non_string_input_does_not_crash():
     assert prefs_mod.looks_sensitive(None) is False
+    assert prefs_mod.looks_sensitive("my openai key is abc12345") is True   # a bool, not a match object
     assert prefs_mod.looks_sensitive(12345678) is True                  # a long number stays sensitive
 
 
