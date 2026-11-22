@@ -1,0 +1,1 @@
+- Added: a JAR-651 report on why the Windows installer job never ran on four update and release PRs: they were tested before the JAR-584 rule reached main, and the Tier R label holds them, not a broken build (docs/reports/2026-11-21-jar-651-windows-installer-ci.md).
