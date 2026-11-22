@@ -310,3 +310,15 @@ def test_an_agent_run_that_writes_the_shared_git_config_is_rejected_and_undone(t
     r = Planter().run("x", str(repo))
     assert not r.ok and "shared git config" in r.error
     assert cfg.read_bytes() == before
+
+
+def test_a_check_that_times_out_still_reports_the_timeout(monkeypatch, tmp_path):
+    repo = _repo(tmp_path)
+    real = subprocess.run
+
+    def run(argv, **kw):
+        if argv[0] == "git":
+            return real(argv, **kw)
+        raise subprocess.TimeoutExpired(argv, 1)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    assert gitops.run_check(repo, ["slow"]) == (False, "check timed out") and not gitops._GUARDS
