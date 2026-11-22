@@ -48,6 +48,15 @@ def state(ctx) -> dict:
             "banner_en": "" if on else logs.PRIVACY_OFF_NOTE, "banner_he": "" if on else logs.PRIVACY_OFF_NOTE_HE}
 
 
+def flag_on(home: Path) -> bool:
+    """#1557: the runtime switch file says privacy is on (read directly; False when missing or unreadable)."""
+    try:
+        d = json.loads((Path(home) / "logs" / logs.PRIVACY_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(d, dict) and d.get("privacy") is True
+
+
 def _window_until(home: Path) -> float:
     """The end of a running full-text window from the flag file (read directly, so any process sees it), else 0."""
     try:
@@ -76,7 +85,7 @@ def set_full_text(ctx, on: bool) -> dict:
 
 
 _NOT_KEPT = {"not_kept": True, "code": "NOT_KEPT"}
-_CODE = re.compile(r"[A-Z][A-Z0-9_]*")
+_CODE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")   # TOOL_ERROR; a bare word like DANA is not a code
 SCRUB_TIMEOUT_S = 2.0                               # a Core holding the lock: logged as partial, not a stuck request
 
 
@@ -119,7 +128,7 @@ def _step_fix(row):
     rid, evidence, error = row
     error = error if isinstance(error, str) else ""
     head = error.split(":", 1)[0].strip()
-    code = head if _CODE.fullmatch(head) else ""   # only an upper-case code like TOOL_ERROR stays, never free text
+    code = head if _CODE.fullmatch(head) else ""   # only a code like TOOL_ERROR stays, never free text
     if evidence == "" and code == error:
         return None
     return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)

@@ -29,3 +29,17 @@ def test_seed_near_a_seed_word_is_sensitive(text):
 @pytest.mark.parametrize("text", SAFE)
 def test_ordinary_text_is_not_sensitive(text):
     assert not looks_sensitive(text)
+
+
+def _random_seeds(n=2000, size=16):
+    import random
+    r = random.Random(1559)                       # fixed seed: the same sample on every run
+    return ["".join(r.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ") for _ in range(size)) for _ in range(n)]
+
+
+def test_most_digit_free_seeds_are_refused_unbroken_and_spaced():
+    seeds = _random_seeds()
+    unbroken = sum(looks_sensitive(f"my totp seed: {s}") for s in seeds) / len(seeds)
+    spaced = sum(looks_sensitive("my totp seed: " + " ".join(s[i:i + 4] for i in range(0, 16, 4)))
+                 for s in seeds) / len(seeds)
+    assert unbroken >= 0.8 and spaced >= 0.8, (unbroken, spaced)

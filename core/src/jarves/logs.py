@@ -274,9 +274,24 @@ def field_class(key: object, default: str = CONTENT) -> str:
 _privacy = True
 
 
+_on_privacy_on: list = []          # #1557: called (no arguments) when privacy turns on in this process
+
+
+def on_privacy_on(fn) -> None:
+    """Run fn() each time privacy turns on in this process (dashboard switch, another process's flag, the end of a
+    full-text window). setup() clears the list. A failing fn is logged and never breaks logging."""
+    _on_privacy_on.append(fn)
+
+
 def set_privacy(on: bool) -> None:
     global _privacy
-    _privacy = bool(on)
+    was, _privacy = _privacy, bool(on)
+    if _privacy and not was:
+        for fn in list(_on_privacy_on):
+            try:
+                fn()
+            except Exception as e:                  # a hook must not break the caller's log line or switch
+                warn("logs", "PRIVACY_HOOK_FAILED", "a privacy-on hook failed", error_type=type(e).__name__)
 
 
 def privacy() -> bool:
@@ -764,6 +779,7 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
           console: bool = True, console_level: str | None = None, only=(), hide=(), privacy: bool = True) -> Path:
     """File gets `level` (JSON); the terminal gets `console_level` (default = level) filtered by module."""
     global _base_level, _console, _console_base
+    _on_privacy_on.clear()                          # hooks belong to the process that set them up again
     set_privacy(privacy)
     log_dir.mkdir(parents=True, exist_ok=True)
     watch_privacy(log_dir)

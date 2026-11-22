@@ -282,9 +282,10 @@ class Core:
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
         self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
-        if c.log.privacy:                               # #1557: privacy set in config.toml: older text scrubbed too
-            from . import privacy
+        from . import privacy                           # #1557: older text is scrubbed when privacy is on at start
+        if c.log.privacy or privacy.flag_on(self.home):  # (config.toml, or a switch config.toml could not save)
             privacy.scrub_at_rest(self.home)
+        logs.on_privacy_on(lambda: privacy.scrub_at_rest(self.home))   # and each time it turns on while running
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         from .runtime import shutdown as _shutdown

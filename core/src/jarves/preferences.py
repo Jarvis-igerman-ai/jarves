@@ -55,10 +55,17 @@ _SEED_NEAR = 20                   # characters between the seed word and the run
 
 
 def _seed_like(run: str) -> bool:
-    """A digit 2-7, or (no digit) few vowels: random base32 has ~20% vowels, English words ~40%
-    (so INTERNATIONALIZATION or "with this must work" pass)."""
-    s = run.replace(" ", "").replace("-", "").upper()
-    return any(c in "234567" for c in s) or sum(c in "AEIOUY" for c in s) <= len(s) // 5
+    """A digit 2-7, or (no digit) fewer vowels than English: random base32 letters are ~23% vowels, English ~40%.
+    Unbroken: at most a third vowels (INTERNATIONALIZATION passes). Spaced groups: a 4-character group with no vowel,
+    or at most a fifth vowels ("with this must work" passes). Catches ~85% of digit-free 16-character seeds."""
+    groups = re.split(r"[ -]", run.upper())
+    s = "".join(groups)
+    vowels = sum(c in "AEIOUY" for c in s)
+    if any(c in "234567" for c in s):
+        return True
+    if len(groups) == 1:
+        return vowels <= len(s) // 3
+    return any(not set(g) & set("AEIOUY") for g in groups) or vowels <= len(s) // 5
 
 
 def _seed_near_word(text: str) -> bool:
