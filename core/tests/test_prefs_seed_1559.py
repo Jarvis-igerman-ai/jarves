@@ -21,6 +21,7 @@ SAFE = [
     "I prefer short answers in the morning",
     "JBSW Y3DP EHPK 3PXP",                        # no seed word near it
     "authenticator app is fine, call me at noon",
+    "יְסוד JBSW Y3DP EHPK 3PXP",                   # R6: "סוד" after a niqqud mark is inside a longer word
 ]
 
 

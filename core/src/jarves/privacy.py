@@ -15,7 +15,6 @@ Two one-way actions (each needs {"confirm": true}):
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 import threading
 import time
@@ -86,7 +85,11 @@ def set_full_text(ctx, on: bool) -> dict:
 
 
 _NOT_KEPT = {"not_kept": True, "code": "NOT_KEPT"}
-_CODE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")   # TOOL_ERROR; a bare word like DANA is not a code
+# #1557 R5: only the generic tool-runner and plan codes stay (skills/__init__.py, goal_plans.py); any other
+# code-shaped text such as CALL_DANA could carry personal words, so it is cleared.
+_KEPT_CODES = frozenset({"TOOL_FORBIDDEN", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED", "TOOL_UNKNOWN", "SKILL_DISABLED",
+                         "FEATURE_OFF", "TOOL_BAD_ARGS", "TOOL_TIMEOUT", "TOOL_CRASH", "PLAN_BAD", "PLAN_NOT_FOUND",
+                         "NOT_APPROVED"})
 SCRUB_TIMEOUT_S = 2.0                               # a Core holding the lock: logged as partial, not a stuck request
 
 
@@ -119,23 +122,32 @@ def _scrub_db(path: Path, sql: str, fix) -> int:
 
 
 def _ledger_fix(row):
-    rid, status, body = row
+    """R4: chat and goal rows get the same body #206 F13 stores in privacy mode, so a resend sees a known shape."""
+    from . import mobile                           # late: mobile imports much of the Core
+    rid, kind, status, body = row
     try:
         old = json.loads(body)
     except (TypeError, ValueError):                 # NULL or malformed body: replaced too
         old = None
-    if isinstance(old, dict) and old.get("not_kept") is True:
-        return None
     ok = old.get("ok") if isinstance(old, dict) and isinstance(old.get("ok"), bool) else \
         isinstance(status, int) and status < 400
-    return "UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps({**_NOT_KEPT, "ok": ok}), rid)
+    if kind == "goal":
+        new = mobile.goal_at_rest(old if isinstance(old, dict) else {"error": ""})
+        new.setdefault("ok", ok)
+    elif kind == "chat":
+        new = mobile.chat_at_rest({"ok": ok})
+    else:
+        new = {**_NOT_KEPT, "ok": ok}
+    if new == old:
+        return None
+    return "UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps(new), rid)
 
 
 def _step_fix(row):
     rid, evidence, error = row
     error = error if isinstance(error, str) else ""
     head = error.split(":", 1)[0].strip()
-    code = head if _CODE.fullmatch(head) else ""   # only a code like TOOL_ERROR stays, never free text
+    code = head if head in _KEPT_CODES else ""     # only a known code like TOOL_TIMEOUT stays, never free text
     if evidence == "" and code == error:
         return None
     return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)
@@ -189,7 +201,7 @@ def scrub_at_rest(home: Path) -> dict:
 def _scrub_all(home: Path) -> dict:
     out: dict = {"ledger": 0, "plan_steps": 0, "partial": []}
     for key, name, sql, fix in (
-            ("ledger", "continuity.db", "SELECT rowid, status, body FROM ledger", _ledger_fix),
+            ("ledger", "continuity.db", "SELECT rowid, kind, status, body FROM ledger", _ledger_fix),
             ("plan_steps", "memory.db", "SELECT rowid, evidence, error FROM goal_plan_steps "
                                         "WHERE evidence != '' OR error != ''", _step_fix)):
         try:

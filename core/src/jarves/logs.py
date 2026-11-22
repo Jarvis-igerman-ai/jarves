@@ -279,8 +279,10 @@ _on_privacy_on: list = []          # #1557: called (no arguments) when privacy t
 
 def on_privacy_on(fn) -> None:
     """Run fn() each time privacy turns on in this process (dashboard switch, another process's flag, the end of a
-    full-text window). setup() clears the list. A failing fn is logged and never breaks logging."""
-    _on_privacy_on.append(fn)
+    full-text window). setup() keeps the list (R3: a reconfigure must not drop a running Core's hook); the Core
+    removes its hook at stop. A failing fn is logged and never breaks logging."""
+    if fn not in _on_privacy_on:
+        _on_privacy_on.append(fn)
 
 
 def off_privacy_on(fn) -> None:
@@ -785,7 +787,6 @@ def setup(log_dir: Path, level: str = "INFO", max_bytes: int = 1_000_000, backup
           console: bool = True, console_level: str | None = None, only=(), hide=(), privacy: bool = True) -> Path:
     """File gets `level` (JSON); the terminal gets `console_level` (default = level) filtered by module."""
     global _base_level, _console, _console_base
-    _on_privacy_on.clear()                          # hooks belong to the process that set them up again
     set_privacy(privacy)
     log_dir.mkdir(parents=True, exist_ok=True)
     watch_privacy(log_dir)

@@ -478,8 +478,7 @@ class MobileAccess:
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
         if logs.privacy():           # #206 F13: the ledger is on disk, so in privacy mode it keeps a fixed note, not the words
-            en, he = _MSG["NOT_KEPT"]                             # one text per language, like _err's error/error_he
-            reply = {"reply": en, "reply_he": he, "ok": bool(reply.get("ok")), "not_kept": True, "code": "NOT_KEPT"}
+            reply = chat_at_rest(reply)
         try:
             self.cont.store(device, mid, "chat", 200, reply)
         except Exception:
@@ -1218,6 +1217,17 @@ def _chat_routes(h, mob, dev, path, method, done, need, need_page) -> None:
         st, obj = chat_engine.handle_send(mob.chat, {**d, "text": text}, client=dev["id"], device=True)
         return done(st, obj, chars=len(text))
     return h._json(404, _err("NOT_FOUND"))
+
+
+def chat_at_rest(reply: dict) -> dict:
+    """#206 F13: the stored copy of a chat answer in privacy mode (also what the #1557 scrub writes): a fixed note."""
+    en, he = _MSG["NOT_KEPT"]                                     # one text per language, like _err's error/error_he
+    return {"reply": en, "reply_he": he, "ok": bool(reply.get("ok")), "not_kept": True, "code": "NOT_KEPT"}
+
+
+def goal_at_rest(body: dict) -> dict:
+    """The stored copy of a goal answer in privacy mode (public name for the #1557 scrub)."""
+    return _goal_at_rest(body)
 
 
 def _goal_brief(g: dict) -> dict:

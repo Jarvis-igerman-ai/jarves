@@ -2,12 +2,11 @@
 evidence and error text), not only new writes. Status, codes and the resend ledger rows themselves stay."""
 import json
 import sqlite3
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from jarves import logs, privacy
+from jarves import logs, mobile, privacy
 from jarves.app import Core
 from jarves.config import Config
 from jarves.continuity import Continuity
@@ -41,8 +40,9 @@ def _seed(home):
     db = UserDB(home / "memory.db")
     db.x("INSERT INTO goal_plans (title, state, created, updated) VALUES ('t', 'failed', 0, 0)")
     db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence, error) VALUES "
-         "(1, 0, 'web_search', 'failed', ?, ?)", (SECRET, "TOOL_ERROR: " + SECRET))
-    for err in ("Dana's phone: unreachable", "no colon, Dana did not answer", "DANA: unreachable"):  # not codes
+         "(1, 0, 'web_search', 'failed', ?, ?)", (SECRET, "TOOL_TIMEOUT: " + SECRET))
+    for err in ("Dana's phone: unreachable", "no colon, Dana did not answer", "DANA: unreachable",
+                "CALL_DANA: no answer"):                      # not known codes (R5: CALL_DANA is code-shaped)
         db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, error) VALUES (1, 1, 'call', 'failed', ?)",
              (err,))
     return db
@@ -73,22 +73,33 @@ def test_switching_privacy_on_scrubs_older_text(ctx, home):
     db = _seed(home)                                          # kept open, like the running Core: the -wal file stays
     assert "Dana" in _dump(home)
     got = privacy.set_privacy(ctx, True)
-    assert got["scrub"] == {"ledger": 1, "plan_steps": 4, "partial": []} and got["saved_in_config"]
+    assert got["scrub"] == {"ledger": 1, "plan_steps": 5, "partial": []} and got["saved_in_config"]
     dump = _dump(home)
     assert "Dana" not in dump
-    assert "TOOL_ERROR" in dump and "failed" in dump          # the code and status stay
+    assert "TOOL_TIMEOUT" in dump and "failed" in dump        # the known code and status stay
     assert "DANA" not in dump                                 # an upper-case name is not kept as a code
     assert "Dana" not in (home / "memory.db-wal").read_bytes().decode("utf-8", "replace")   # no old page copy
     assert _wal_clean(home)
     assert db.row("SELECT error FROM goal_plan_steps WHERE tool='call' AND error != ''") is None
     seen = Continuity(home).seen("phone1", "c1")              # a resend is still answered, not run again
-    assert seen and seen.get("not_kept") is True and seen.get("ok") is True
+    assert seen == mobile.chat_at_rest({"ok": True})          # R4: the body #206 F13 stores in privacy mode
+    assert seen["reply"] and seen["reply_he"]                 # a resend client still gets a reply text
+
+
+def test_a_scrubbed_goal_row_has_the_privacy_mode_goal_shape(ctx, home):
+    body = {"ok": True, "goal": {"id": 3, "title": SECRET, "status": "active", "percent": 50,
+                                 "steps": [{"id": 1, "text": SECRET, "done": True}]}}
+    Continuity(home).store("phone1", "g1", "goal", 200, body)
+    privacy.set_privacy(ctx, True)
+    seen = Continuity(home).seen("phone1", "g1")
+    assert seen == mobile.goal_at_rest(body) and "Dana" not in json.dumps(seen)   # R4: same shape as #206 F13
+    assert privacy.scrub_at_rest(home)["ledger"] == 0         # already at rest: not rewritten again
 
 
 def test_ending_full_text_scrubs_too(ctx, home):
     db = _seed(home)
     got = privacy.set_full_text(ctx, False)
-    assert got["scrub"] == {"ledger": 1, "plan_steps": 4, "partial": []}
+    assert got["scrub"] == {"ledger": 1, "plan_steps": 5, "partial": []}
     assert "Dana" not in _dump(home) and _wal_clean(home)
     db.close()
 
@@ -110,7 +121,7 @@ def test_unreadable_database_is_logged_and_the_other_is_still_scrubbed(home, mon
     seen = []
     monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append((a[1], k)))
     out = privacy.scrub_at_rest(home)
-    assert out == {"ledger": 0, "plan_steps": 4, "partial": ["continuity.db"]}
+    assert out == {"ledger": 0, "plan_steps": 5, "partial": ["continuity.db"]}
     assert "Dana" not in _dump(home, ledger=False)
     assert seen == [("PRIVACY_SCRUB_PARTIAL", {"target": "continuity.db", "error_type": "DatabaseError"})]
     assert privacy.scrub_at_rest(home)["plan_steps"] == 0          # already scrubbed: nothing rewritten again
@@ -127,7 +138,7 @@ def test_malformed_ledger_rows_are_replaced_and_the_switch_still_saves(ctx, home
     cx = sqlite3.connect(home / "continuity.db")
     assert "Dana" not in json.dumps(cx.execute("SELECT body FROM ledger").fetchall())
     cx.close()
-    assert Continuity(home).seen("p", "c2", max_age=1e12) == {"not_kept": True, "code": "NOT_KEPT", "ok": False}
+    assert Continuity(home).seen("p", "c2", max_age=1e12) == mobile.chat_at_rest({"ok": False})
 
 
 def test_a_locked_database_is_reported_partial_to_the_owner(ctx, home, monkeypatch):
@@ -150,9 +161,20 @@ def test_a_full_scrub_has_no_partial_note(ctx, home):
     assert got["scrub"]["partial"] == [] and "scrub_note_en" not in got
 
 
-def test_the_privacy_switch_shows_the_partial_note():
-    js = (Path(privacy.__file__).parent / "dashboard_static" / "home.js").read_text(encoding="utf-8")
-    assert "tx(privacyState.scrub_note_he, privacyState.scrub_note_en)" in js   # R2: EN/HE note in the panel
+def test_the_dashboard_switch_scrubs_on_a_request_thread_not_the_caller(ctx, home, monkeypatch):
+    """R2: the dashboard is a ThreadingHTTPServer, so the scrub runs on the request's own thread, never a Core loop."""
+    import threading
+    from jarves import dashboard
+    from test_dashboard import req
+    ran = []
+    monkeypatch.setattr(privacy, "scrub_at_rest", lambda h: ran.append(threading.current_thread()) or
+                        {"ledger": 0, "plan_steps": 0, "partial": []})
+    d = dashboard.Dashboard(home, ctx.cfg, config_path=ctx.config_path).start()
+    try:
+        r, _ = req(d, "POST", "/api/privacy", headers={"X-Jarves": "1"}, body={"privacy": True})
+    finally:
+        d.stop()
+    assert r.status == 200 and len(ran) == 1 and ran[0] is not threading.main_thread()
 
 
 def test_an_os_error_in_the_scrub_is_partial_and_the_switch_still_saves(ctx, home, monkeypatch):
@@ -276,5 +298,17 @@ def test_a_failing_privacy_hook_is_logged_and_privacy_still_turns_on(home, monke
     logs.on_privacy_on(lambda: 1 / 0)
     logs.set_privacy(True)
     assert logs.privacy() and seen == [("PRIVACY_HOOK_FAILED", {"error_type": "ZeroDivisionError"})]
+    logs.off_privacy_on(logs._on_privacy_on[-1])
     logs.setup(home / "logs", "INFO", console=False, privacy=True)
-    assert logs._on_privacy_on == []                          # setup() clears the hooks
+
+
+def test_a_logging_reconfigure_keeps_the_privacy_hook(home):
+    """R3: a later logs.setup() in a running process must not drop the Core's scrub hook."""
+    hook = lambda: None                                       # noqa: E731
+    logs.on_privacy_on(hook)
+    logs.on_privacy_on(hook)                                  # added once only
+    try:
+        logs.setup(home / "logs", "INFO", console=False, privacy=True)
+        assert logs._on_privacy_on.count(hook) == 1
+    finally:
+        logs.off_privacy_on(hook)
