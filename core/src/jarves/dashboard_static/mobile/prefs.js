@@ -8,16 +8,16 @@
       confirm: "Confirm", decline: "Decline", forget: "Forget", edit: "Correct", save: "Save", cancel: "Cancel", again: "Still true",
       stale: "Not re-confirmed for a long time: not used until you say it is still true.", conflict: "Looks like another confirmed preference",
       said: "You said", off: "Using preferences in conversations is switched off on the computer.", 
-      saved: "Saved.", recheck: "Saved. Confirm it again to use it.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget" },
+      saved: "Saved.", recheck: "Saved. Confirm it to use it.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget" },
     he: { intro: "מה ש-JARVES למד עליכם. רק מה שאישרתם משמש בשיחות.", empty: "עוד לא נלמד כלום.",
       confirmed: "מאושר", proposed: "ממתין לתשובה שלכם", declined: "נדחה (נשמר כדי שלא ישאלו שוב)",
       confirm: "אישור", decline: "דחייה", forget: "שכחו", edit: "תיקון", save: "שמירה", cancel: "ביטול", again: "עדיין נכון",
       stale: "לא אושר מחדש זמן רב: לא בשימוש עד שתאמרו שזה עדיין נכון.", conflict: "דומה להעדפה מאושרת אחרת",
       said: "אמרתם", off: "השימוש בהעדפות בשיחות כבוי במחשב.", 
-      saved: "נשמר.", recheck: "נשמר. אשרו שוב כדי שישמש.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
+      saved: "נשמר.", recheck: "נשמר. אשרו כדי שישמש.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
   };
-  // #206 H2: only a confirmed item that the server sent back to "proposed" needs a new confirm; others just saved
-  const editNote = (kind, r) => (kind === "confirmed" && r && r.state === "proposed" ? "recheck" : "saved");
+  // #206 H2: the server's state after the edit decides (not the list the item was shown in): proposed needs a confirm
+  const editNote = (r) => (r && r.state === "proposed" ? "recheck" : "saved");
   const newId = () => "pref-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   let root = null, cx = null, busy = false, editing = 0, asking = 0, note = "";
   const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
@@ -44,7 +44,7 @@
     if (editing === p.id) {
       const lab = el("label"); const sp = el("span", "", t("label")); const inp = el("input"); inp.maxLength = 200; inp.value = p.text; inp.setAttribute("aria-label", t("label"));
       lab.append(sp, inp); li.appendChild(lab);
-      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, (r) => editNote(kind, r)), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
+      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, editNote), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
     } else if (asking === p.id) {
       box.appendChild(el("div", "", t("ask")));
       acts.append(btn(t("yes"), () => op({ op: "remove", pref: p.id }, "gone"), true), btn(t("cancel"), () => { asking = 0; paint(d); }));

@@ -25,6 +25,7 @@ def test_f13_privacy_mode_chat_ledger_keeps_no_reply_text(home, monkeypatch):
     again = mobile.MobileAccess(home).replay("dev1", "mid-1")     # a PC restart: only the ledger copy is left
     assert again["ok"] is True and again["not_kept"] is True and "4321" not in again["reply"] and again["reply"]
     assert again["code"] == "NOT_KEPT"            # review R2: a code a client can translate; the text is only a fallback
+    assert (again["reply"], again["reply_he"]) == mobile._MSG["NOT_KEPT"]   # review R3: one text per language, not mixed
 
 
 def test_f13_privacy_off_chat_ledger_still_replays_the_answer(home, monkeypatch):
@@ -50,7 +51,6 @@ def test_h2_reproposing_edit_of_a_removed_pref_writes_nothing_and_raises_keyerro
     assert p.get(pid) is None
 
 
-@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
 def test_h2_pref_removed_right_after_the_guarded_write_is_keyerror_not_a_crash(home, monkeypatch):
     """Review R1: edit() re-reads the row it just wrote; a remove landing between the write and that read is KeyError."""
     p = Preferences(open_db(home))
@@ -67,14 +67,15 @@ def test_h2_pref_removed_right_after_the_guarded_write_is_keyerror_not_a_crash(h
         p.edit(pid, "I like long answers", by="phone", repropose=True)
 
 
-def test_h2_phone_note_asks_for_a_new_confirm_only_when_a_confirmed_item_went_back():
+@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+def test_h2_phone_note_asks_for_a_confirm_whenever_the_server_says_proposed():
+    """Review R2: a listed-as-proposed item that a racing confirm made confirmed, then this edit re-proposed, still asks."""
     js = Path(__file__).resolve().parents[1] / "src/jarves/dashboard_static/mobile/prefs.js"
     probe = ("global.window = {}; require(process.argv[1]); const f = window.JarvesPrefs.editNote;"
-             "console.log(JSON.stringify([f('confirmed', {state: 'proposed'}), f('declined', {state: 'declined'}),"
-             "f('proposed', {state: 'proposed'}), f('confirmed', {})]))")
+             "console.log(JSON.stringify([f({state: 'proposed'}), f({state: 'declined'}), f({state: 'confirmed'}), f({}), f(null)]))")
     out = subprocess.run(["node", "-e", probe, str(js)], capture_output=True, text=True, timeout=30, check=False)
     assert out.returncode == 0, out.stderr
-    assert json.loads(out.stdout) == ["recheck", "saved", "saved", "saved"]
+    assert json.loads(out.stdout) == ["recheck", "saved", "saved", "saved", "saved"]
 
 
 def test_h2_reproposing_edit_cannot_leave_a_confirm_that_raced_it(home, monkeypatch):
