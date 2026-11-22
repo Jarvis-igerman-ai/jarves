@@ -496,6 +496,7 @@ class StageEngine:
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", f"{base}...{head}", check=False).stdout
         if not diff.strip():
+            self._set_job(t, tested_head=head)                      # an empty review saw this commit too (R2)
             return ("next",)
         if self._day_cap():
             return ("requeue", self._day_cap())
@@ -602,19 +603,26 @@ class StageEngine:
             if self._stopped(t, cancel):
                 return ("end",)
             try:
+                before = self._head(wt)
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 new = self._head(wt)                                # #1461: only this exact commit is merged
+                if new != before and self._job(self.db.task(t["id"]) or t).get("tested_head"):
+                    return ("stop", "blocked", f"uncommitted files appeared in the task folder after the check/review "
+                                               f"(not merged; on {br})")
                 if self._moved(t, new, approved):
                     return ("stop", "blocked", self._moved(t, new, approved))
                 job = self._job(self.db.task(t["id"]) or t)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
-                if head != job.get("tested_base") or new != job.get("tested_head", new):   # base moved / you edited
+                if head != job.get("tested_base") or new != (job.get("tested_head") or new):   # base moved / you edited
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     cur = self._head(wt)
-                    par = gitops.git(wt, "rev-parse", f"{cur}^1", f"{cur}^2", check=False).stdout.split()
-                    if cur != new and par != [new, head]:           # only the checked commit + the integration commit
+                    par = [gitops.git(wt, "rev-parse", "--verify", "-q", f"{cur}^{n}", check=False).stdout.strip()
+                           for n in (1, 2)]
+                    ffwd = cur == head and gitops.git(wt, "merge-base", "--is-ancestor", new, head,
+                                                      check=False).returncode == 0      # task already in integration
+                    if cur != new and not ffwd and par != [new, head]:  # only the checked + the integration commit
                         return ("stop", "blocked", f"the task branch {br} moved during the merge: not merged")
                     new = cur
                     if has_check:
@@ -682,7 +690,9 @@ class StageEngine:
             self._set_job(t, approved=None)
             if kind == "merge":
                 head, dirty = self._tree(t)
-                if dirty or not head or appr.get("tree") != head:         # fail closed on a missing tree
+                if t["worktree"] and Path(t["worktree"]).exists() and (dirty or not head or appr.get("tree") != head):
+                    if self._moved(t, head, appr.get("tree") or ""):  # fail closed; never re-ask an unchecked commit
+                        return ("stop", "blocked", self._moved(t, head, appr.get("tree") or ""))
                     self._set_job(t, shown=head or None)
                     return ("park", f"the code changed after your approval: approve merging task #{t['seq']} "
                                     f"(commit {head[:12]}) again")

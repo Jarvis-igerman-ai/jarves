@@ -1063,7 +1063,8 @@ def _rev(wt, ref="HEAD"):
 
 def _sibling_commit(wt, text="sneaked\n"):          # all worktrees share refs: any agent can move a task branch
     (Path(wt) / "a").write_text(text)
-    sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qam", "sibling")
+    sh(wt, "git", "add", "a")
+    sh(wt, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "sibling")
 
 
 @pytest.mark.parametrize("flow", ["work test gate merge", "work review gate merge", "work test gate merge:owner"])
@@ -1096,8 +1097,7 @@ def test_task_branch_moved_during_the_check_is_not_merged_1461(env):
     assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
 
 
-@pytest.mark.parametrize("sneak_in_merge", [False, True])
-def test_owner_merge_approval_covers_only_the_commit_the_prompt_named_1461(env, monkeypatch, sneak_in_merge):
+def test_owner_merge_approval_covers_only_the_commit_the_prompt_named_1461(env):
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test merge:owner")
@@ -1109,20 +1109,100 @@ def test_owner_merge_approval_covers_only_the_commit_the_prompt_named_1461(env, 
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
-    moved = _rev(t["worktree"])
-    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], (t["status"], t["reason"])
-    assert moved[:12] in t["waiting"] and not (gitops.project_root(home, 1) / "integration" / "a").exists()
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]      # you approve the commit now shown
-    if sneak_in_merge:                                  # the branch moves again inside the merge stage's re-merge
+    assert t["status"] == "blocked" and "moved after the check/review" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+
+
+@pytest.mark.parametrize("sneak_in_merge", [False, True])
+def test_owner_edit_at_the_merge_approval_is_rechecked_then_merged_1461(env, monkeypatch, sneak_in_merge):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    (Path(t["worktree"]) / "a").write_text("mine\n")              # your own edit on top of the shown commit
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    if sneak_in_merge:                                  # the branch moves inside the merge stage's re-merge
         real = gitops.merge_in
         monkeypatch.setattr(gitops, "merge_in", lambda wt, *a, **k: (_sibling_commit(wt, "again\n"), real(wt, *a, **k))[1])
+    edited = _rev(t["worktree"])
     finish(m)
     t = m.db.by_seq(1, 1)
     if sneak_in_merge:
         assert t["status"] == "blocked" and "moved during the merge" in t["reason"], (t["status"], t["reason"])
+        assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
         return
     assert t["status"] == "done", (t["status"], t["reason"])
-    assert any(e["kind"] == "merged" and moved[:12] in e["text"] for e in m.db.events(t["id"], 40))
+    assert (gitops.project_root(home, 1) / "integration" / "a").read_text() == "mine\n"
+    assert any(e["kind"] == "merged" and edited[:12] in e["text"] for e in m.db.events(t["id"], 40))
+
+
+@pytest.mark.parametrize("clear", ["shown", "tree"])
+def test_owner_merge_approval_without_a_recorded_commit_asks_again_1461(env, clear):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    if clear == "shown":                                # e.g. a task parked before this version
+        m._set_job(t, shown=None)
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    else:
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+        m._set_job(t, approved={"stage": m.db.by_seq(1, 1)["job"]["approved"]["stage"], "tree": ""})
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
+def test_sibling_commit_after_an_empty_review_is_not_merged_1461(env):
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="nothing to write", scope=["a"], flow="work review gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["job"].get("tested_head"), (t["status"], t["reason"], t["job"])
+    _sibling_commit(t["worktree"])
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after the check/review" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+
+
+def test_files_left_after_the_check_are_named_as_such_1461(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "open('generated.txt', 'w').write('x')"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "uncommitted files appeared" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+
+
+def test_task_already_in_the_integration_branch_merges_as_a_no_op_1461(env):
+    m, repo, home = env
+    integ = gitops.project_root(home, 1) / "integration"
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="nothing to write", scope=["a"], flow="work test gate merge")
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "waiting"
+    (integ / "c").write_text("newer work\n")                     # stands in for another task merged meanwhile
+    sh(integ, "git", "-c", "user.name=s", "-c", "user.email=s@s", "add", "c")
+    sh(integ, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "newer")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
 
 
 def test_task_branch_moved_during_the_review_is_not_merged_1461(env, monkeypatch):
@@ -1441,6 +1521,7 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     assert not (gitops.project_root(home, 1) / "reviews_default").exists()            # no reviewer was asked
     wt = Path(t["worktree"])                                   # review R1: a committed change does not hide extra edits
     gitops.commit_all(wt, "committed in-scope change")
+    m._set_job(t, tested_head=None)                            # as a work stage's _after_code does (#1461)
     assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean: reviewed and approved
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
