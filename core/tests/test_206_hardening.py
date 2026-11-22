@@ -65,25 +65,40 @@ async def test_f13_privacy_mode_untrusted_text_is_not_kept_by_the_blocked_plan(e
     assert "ignore previous" not in json.dumps(d)          # the mail text: not in evidence, error, note or result
 
 
-async def test_f13_privacy_mode_failure_without_a_code_stores_a_fixed_word(env, monkeypatch):
+@pytest.mark.parametrize("code,permission,raises,state,status", [
+    (None, "read", False, "failed", "failed"),                         # no code: stored as the word "failed", never "None"
+    ("X_SECRET", "read", False, "failed", "failed"),                   # generic failure branch
+    ("TOOL_UNTRUSTED_TURN", "read", False, "blocked", "blocked"),
+    ("NOT_APPROVED", "read", False, "blocked", "blocked"),
+    ("TOOL_APPROVAL_TIMEOUT", "read", False, "blocked", "blocked"),
+    ("TOOL_TIMEOUT", "action", False, "failed", "unknown"),            # consequential timeout: PC-only 'unknown'
+    (None, "read", True, "failed", "failed"),                          # the tool raised
+])
+async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, monkeypatch, code, permission, raises,
+                                                                         state, status):
+    """Review R2: every branch that ends a step after the tool answered keeps no tool text (error, evidence, note, result)."""
     from jarves.skills import NoArgs, Skill, Tool, ToolResult
 
-    async def nocode(_a: NoArgs):
-        return ToolResult(False, "secret detail", code=None)
+    async def answer(_a: NoArgs):
+        if raises:
+            raise RuntimeError("secret detail")
+        return ToolResult(False, "secret detail", code=code)
 
-    class NoCode(Skill):
-        name = "nocode"
-        description = "no code"
+    class Answer(Skill):
+        name = "answer"
+        description = "answers with secret text"
 
         def tools(self):
-            return [Tool("fake_nocode", "n", nocode, NoArgs, permission="read")]
-    env.reg.register(NoCode())
+            return [Tool("fake_answer", "a", answer, NoArgs, permission=permission)]
+    env.reg.register(Answer())
+    env.reg.allowed_actions |= {"fake_answer"}
     monkeypatch.setattr(logs, "privacy", lambda: True)
-    p = env.store.propose("p", steps(("fake_nocode", {})))
+    p = env.store.propose("p", steps(("fake_answer", {})))
     env.store.approve(p["id"])
     await env.runner.tick()
     d = env.store.get(p["id"])
-    assert d["steps"][0]["error"] == "failed" and "None" not in json.dumps(d) and "secret" not in json.dumps(d)
+    assert d["state"] == state and d["steps"][0]["status"] == status
+    assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
 
 
 # ---------------------------------------------------------------- H2: a phone edit needs a fresh confirm
@@ -162,8 +177,9 @@ def test_f13_goal_ledger_copy_is_an_allow_list_not_the_whole_answer():
     body = {"goal": {"id": 1, "title": "Run 5k", "status": "paused", "percent": 0,
                      "steps": [{"id": 3, "text": "week 1", "done": False}, "junk"]}, "note": "secret note"}
     assert mobile._goal_at_rest(body) == {"goal": {"id": 1, "status": "paused", "percent": 0, "steps": [{"id": 3, "done": False}]}}
-    stored = mobile._goal_at_rest({"error": "bad status 'Run 5k'", "note": "secret note"})
-    assert stored == {"error": mobile.GOAL_ERROR_NOT_KEPT} and "Run 5k" not in json.dumps(stored)
+    stored = mobile._goal_at_rest({"error": "bad status 'Run 5k'", "note": "secret note", "ok": False, "code": "BAD_STATUS"})
+    assert stored == {"error": mobile.GOAL_ERROR_NOT_KEPT, "ok": False, "code": "BAD_STATUS"}    # review R1: non-text keys stay
+    assert "code" not in mobile._goal_at_rest({"error": "x", "code": "Run 5k please"})            # free text in `code` does not
 
 
 # ---------------------------------------------------------------- H3 / H4: stated in the guides
@@ -178,3 +194,19 @@ def test_h4_project_guide_says_the_check_is_not_sandboxed():
     g = guides.find("project_manager")
     assert "sandbox" in g.privacy_en.lower() and "ארגז חול" in g.privacy_he
     assert "sandbox" in guides.help_text(g).lower()
+
+
+def test_h4_guide_claim_check_runs_with_an_allow_listed_env_and_a_time_limit(tmp_path, monkeypatch):
+    """Review R3: the H4 guide sentence says 'only allow-listed environment variables and a time limit'; pin both."""
+    import subprocess
+    from jarves.projectmgr import gitops
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw)
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
+    monkeypatch.setattr(gitops.subprocess, "run", fake_run)
+    assert gitops.run_check(tmp_path, ["check"], timeout=7) == (False, "check timed out")
+    assert seen["timeout"] == 7 and "OPENAI_API_KEY" not in seen["env"] and seen.get("shell") is not True
+    assert seen["env"] and all(k.upper() in gitops.ENV_KEEP for k in seen["env"])     # only allow-listed names

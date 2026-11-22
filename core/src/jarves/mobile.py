@@ -1232,6 +1232,10 @@ GOAL_ERROR_NOT_KEPT = "the goal change was refused (details not kept in privacy 
 def _goal_at_rest(body: dict) -> dict:
     """#206 F13: the stored copy of a goal answer keeps ids and state, not the title or step text (the page re-syncs)."""
     out: dict = {"error": GOAL_ERROR_NOT_KEPT} if "error" in body else {}   # allow-list: no other key reaches disk
+    if isinstance(body.get("ok"), bool):
+        out["ok"] = body["ok"]
+    if isinstance(body.get("code"), str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", body["code"]):
+        out["code"] = body["code"]                                       # an identifier, never free text
     g = body.get("goal")
     if isinstance(g, dict):
         out["goal"] = {"id": g.get("id"), "status": g.get("status"), "percent": g.get("percent"),
