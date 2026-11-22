@@ -74,16 +74,24 @@ def _base32(text: str) -> bool:
 # "the token is expired", "token at https://...") is still allowed. Known token shapes come from logs.has_secret.
 _KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
-# 6+ characters with a digit or a non-hyphen symbol ("well-known" is a word); a URL or path is not a value
-_CRED = r"(?![a-z][a-z0-9+.-]*://|/)(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}"
+# 6+ characters with a digit or a non-hyphen symbol ("well-known" is a word), dots inside allowed but not a final
+# one; a URL, a path, an env-var reference ($NAME, ${NAME}) or an encoding/hash name (base64-encoded, SHA256) is no value
+_END = r"(?=[\s,;!?]|\.?$|\.\s)"
+_NOT_VALUE = (r"(?![a-z][a-z0-9+.-]*://|/|\$\{?(?-i:[A-Z_][A-Z0-9_]*)\}?" + _END +
+              r"|(?:base(?:32|58|64)|sha-?\d+|md5|utf-?(?:8|16)|aes-?\d*|rsa-?\d*)(?:-[a-z]+)?" + _END + ")")
+_CRED = _NOT_VALUE + r"(?=[^\s,;!?]*[\d_+/=@#$%*&])[^\s,;!?]{6,}(?<!\.)"
 _KEY_VALUE = re.compile(
     rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*{_CRED}|"           # "keyword: value", two words between
     rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}", re.I)
 # An unprefixed key is one long run of letters, digits and + / = _ - with high character entropy. A run whose
-# pieces (split at / _ -) are all words, numbers or camelCase names is an identifier or path, and pure hex (git
-# SHA, UUID) is no key either; a random piece such as "Zx9fQ2LmB7" makes the whole run a key (review R2).
+# pieces (split at / _ -) are all words, numbers or camelCase names is an identifier or path, and a git SHA or
+# UUID is no key either; a random piece such as "Zx9fQ2LmB7" makes the whole run a key (review R2).
 _KEY_RUN = re.compile(r"[A-Za-z0-9+/=_-]{20,}")
-_PIECE = re.compile(r"[a-z]+\d{0,4}|[A-Z]+\d{0,3}|\d+|(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")
+# camelCase: a first word, then each further word starts with a capital, so "ab12cd34ef56" is no name (#1630 R3)
+_PIECE = re.compile(r"[a-z]+\d{0,4}|[A-Z]+\d{0,3}|\d+|[A-Z]{0,4}[a-z]{2,}(?![a-z])(?:[A-Z]{1,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))*")
+# only a git SHA (40/64 hex) or a canonical UUID is exempt; a bare 32-hex key is a key (#1630 R2)
+_HEX_ID = re.compile(r"(?<![0-9a-fA-F])(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{40}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})"
+                     r"(?![0-9a-fA-F])")
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
@@ -93,10 +101,10 @@ def _entropy(s: str) -> float:
 
 def _keylike(text: str) -> bool:
     for run in _KEY_RUN.findall(text):
-        pieces = [p for p in re.split(r"[/_-]+", run) if p]
+        pieces = [p for p in re.split(r"[/_-]+", _HEX_ID.sub("", run)) if p]
         joined = "".join(pieces)
         if (len(joined) >= 20 and re.search(r"[A-Za-z]", joined) and re.search(r"\d", joined)
-                and not re.fullmatch(r"[0-9a-fA-F]+", joined) and not all(_PIECE.fullmatch(p) for p in pieces)
+                and not all(_PIECE.fullmatch(p) for p in pieces)
                 and _entropy(joined) >= KEY_ENTROPY_BITS):
             return True
     return False

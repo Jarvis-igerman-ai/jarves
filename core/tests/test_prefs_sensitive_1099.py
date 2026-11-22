@@ -27,6 +27,12 @@ KEYS = [
     # #1099 review 4 R2: a base64url/slash key split into short pieces is still one key
     "Zx9fQ2LmB7-vT4kRw8YpN_3sHdQ2LmB7vT",
     "keep aB3xY7qL9m/N2pR5tV8wZ/1kC4dE6fG",
+    # #1630 review: a dotted value (R1), a bare 32-hex key (R2), an alternating lowercase key (R3)
+    "my api key is ab.cd1234ef",
+    "my api key is ab.cd1234ef.",
+    "remember 3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e",
+    "remember ab12cd34ef56gh78ij90kl",
+    "token: $abc123XYZ",                                              # "$" plus a random value is no env name
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -65,6 +71,17 @@ PLAIN = [
     "edit changelog.d/2026-11-22-intake-1099.md",
     "open github.com/Jarvis-igerman-ai/jarves/pull/1586",
     "run SOME_CONSTANT_NAME_V2 and my-feature-branch-2026",
+    # #1630 review R4: env-var references and encoding/hash names are not values
+    "the api key is base64-encoded",
+    "the token is SHA256",
+    "set token: $GITHUB_TOKEN in CI",
+    "set token: ${GITHUB_TOKEN} in CI",
+    "the access key is utf-8.",
+    # #1630 review R2/R3: canonical UUIDs, 64-hex SHAs and camelCase names stay allowed
+    "id 3F2A9C1E-7B4D-4E8A-9C2F-1A5B7D9E3C6F",
+    "sha256 9f86d0a1b8c4c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f0a0e",
+    "call getUserPrefsFromCache42Fast here",
+    "see github.com/x/jarves/commit/9fceb02d0ae598e95dc970b74767f19372d61af8",
 ]
 
 
