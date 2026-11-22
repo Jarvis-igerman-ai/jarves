@@ -14,6 +14,8 @@ from jarves import dashboard, mobile
 from jarves.config import Config
 from jarves.mobile import Bridge, MobileAccess
 
+from agents_helpers import wait_for  # noqa: E402
+
 HOST = "192.168.50.7"
 
 
@@ -799,7 +801,8 @@ def test_phone_voice_busy_rate_and_lockout_errors_are_in_en_and_he(home):
         assert st == 415 and _he(body, "BAD_AUDIO")
         st, body, _ = voice()
         assert st == 502 and _he(body, "VOICE_FAILED")
-        assert d.mobile.begin(dev)                                   # a turn is still running on this phone
+        # the server clears the busy flag in `finally` after the reply is written: wait for it (Windows race, #1569)
+        wait_for(lambda: d.mobile.begin(dev), timeout=10, what="previous voice turn released")   # a turn is running
         st, body, _ = voice()
         assert st == 409 and body["code"] == "BUSY" and _he(body, "BUSY")
         d.mobile.end(dev)
