@@ -159,12 +159,15 @@ def kill_tree(p: subprocess.Popen) -> None:
 def abs_rule_path(path: str | Path) -> str:
     """An absolute path in Claude Code permission-rule form: `//` + POSIX path; a Windows drive `C:\\x` becomes `//c/x`
     (Claude Code matches Windows paths in that form; UNVERIFIED against a live Windows run). A UNC or other
-    non-absolute path has no known rule form and is refused (ValueError), never turned into a rule that matches nothing."""
+    non-absolute path has no known rule form and is refused (ValueError), never turned into a rule that matches nothing;
+    so is a path with glob characters or parentheses (`[1]` is a character class, `)` would end the `Edit(...)` rule)."""
     p = str(path).replace("\\", "/")
     if re.match(r"^[A-Za-z]:/", p):
         p = "/" + p[0].lower() + p[2:]
     if not p.startswith("/") or p.startswith("//"):
         raise ValueError(f"no permission-rule form for the path {path!r} (network or relative path)")
+    if re.search(r"[][*?(){}]", p):
+        raise ValueError(f"no permission-rule form for the path {path!r} (glob characters or parentheses)")
     return "/" + p.rstrip("/")
 
 
@@ -198,7 +201,9 @@ def _shared_git_deny(cwd: str) -> list[str]:
         return []
     common = gitops.common_dir(cwd)
     if common is None:
-        raise ValueError("cannot find the shared git folder of this worktree (git 2.31 or newer is needed)")
+        found = ", ".join(str(t / ".git") for t in tops)
+        raise ValueError(f"cannot find the shared git folder of this worktree from {found} "
+                         "(a broken or stray .git, or git older than 2.31)")
     try:
         roots = [abs_rule_path(f) for p in (*(t / ".git" for t in tops), common) for f in (p, p.resolve())]
     except (OSError, RuntimeError) as e:                     # a symlink loop: RuntimeError before Python 3.13

@@ -385,9 +385,11 @@ def test_the_rules_cover_both_the_given_and_the_resolved_path(monkeypatch, tmp_p
     assert f"Write({runners.abs_rule_path(elsewhere / '.git')}/**)" in denied
 
 
-@pytest.mark.parametrize("path", [r"\\srv\share\r\.git", "relative/.git"])
+@pytest.mark.parametrize("path", [r"\\srv\share\r\.git", "relative/.git", r"C:\a[1]\.git", "/h/a*b/.git",
+                                  "/h/a?/.git", "/h/p(1)/.git", "/h/{a,b}/.git"])
 def test_a_path_without_a_known_rule_form_is_refused(path):
-    # review R3: a UNC path became `///srv/share/...`, a rule that matches nothing; refuse it instead
+    # review R3: a UNC path became `///srv/share/...`, a rule that matches nothing; refuse it instead.
+    # council R1: glob characters (`[1]` is a character class) or parentheses inside `Edit(...)` would do the same
     from jarves.projectmgr import runners
     with pytest.raises(ValueError, match="no permission-rule form"):
         runners.abs_rule_path(path)
@@ -429,3 +431,15 @@ def test_a_cwd_symlink_outside_the_repo_into_a_subfolder_still_gets_the_rules(mo
     monkeypatch.setattr(gitops, "common_dir", lambda p: real_resolve(repo / ".git"))   # git sees the physical cwd
     denied = runners._shared_git_deny(str(link))
     assert expected and set(expected) <= set(denied)
+
+
+def test_a_folder_below_a_stray_git_entry_names_that_entry_when_refused(monkeypatch, tmp_path):
+    # council R3: a non-repo project under a parent with a broken `.git` (a home kept in git) is refused with a
+    # message that names the `.git` found, not only "git 2.31 or newer is needed"
+    from jarves.projectmgr import runners
+    (tmp_path / ".git").write_text("gitdir: /nowhere", encoding="utf-8")
+    (tmp_path / "proj").mkdir()
+    monkeypatch.setattr(gitops, "common_dir", lambda p: None)
+    with pytest.raises(ValueError, match="shared git folder") as e:
+        runners._shared_git_deny(str(tmp_path / "proj"))
+    assert str(tmp_path / ".git") in str(e.value)
