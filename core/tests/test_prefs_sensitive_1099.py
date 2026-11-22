@@ -9,10 +9,17 @@ KEYS = [
     "use ghp_abcdefghijklmnopqrstuvwxyz0123 for github",           # GitHub token
     "aws AKIAABCDEFGHIJKLMNOP please",                             # AWS key id
     "remember Zx9fQ2LmB7vT4kRw8YpN3sHd",                           # unprefixed high-entropy string
-    "remember my api key",                                         # keyword: api key
-    "the client secret for the app",                               # keyword: client secret
-    "store this access token for me",                              # keyword: access token
-    "תזכור את הטוקן שלי",                                          # Hebrew keyword: token
+    "my api key is hunter-two-x",                                  # keyword + value: api key
+    "the client secret: abc",                                      # keyword + value: client secret
+    "store this access token = qwerty",                            # keyword + value: access token
+    "my secret key is open-sesame",                                # keyword + value: secret key
+    "private key: begin here",                                     # keyword + value: private key
+    "access key was hello-world",                                  # keyword + value: access key
+    "my github token for work is abc",                             # up to two words between keyword and value
+    "הטוקן שלי הוא abc",                                           # Hebrew: token
+    "מפתח API הוא abc",                                            # Hebrew: API key
+    "מפתח הגישה שלי: abc",                                         # Hebrew: access key
+    "מפתח סוד זה abc",                                             # Hebrew: secret key
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -21,6 +28,15 @@ PLAIN = [
     "call me by my first name",
     "supercalifragilisticexpialidocious songs",                    # long word, no digits: not a key
     "meeting reminders 15 minutes before",
+    # #1099 review: naming a key/token without a value is not a secret (dev tasks and goals use these words)
+    "fix token refresh expiry",
+    "move the API key loader to settings",
+    "rotate the client secret next week",
+    "לתקן את רענון הטוקן",
+    # #1099 review: identifiers, not keys (the new rules allow them; the older 6-digit rule still applies)
+    "revert commit 9fceb02d0ae598e95dc970b74767f19372d61af8",     # 40-char git SHA (pure hex)
+    "ticket 3f2a9c1e-7b4d-4e8a-9c2f-1a5b7d9e3c6f",                 # UUID
+    "rename test_prefs_sensitive_1099 to test_keys_42",            # snake_case identifier with digits
 ]
 
 
@@ -44,3 +60,15 @@ def test_suggest_refuses_a_key_and_stores_nothing(home):
     with pytest.raises(ValueError):
         p.suggest("my token is Zx9fQ2LmB7vT4kRw8YpN3sHd", "I said Zx9fQ2LmB7vT4kRw8YpN3sHd")
     assert p.items("proposed") == []
+
+
+def test_dev_task_naming_a_token_is_kept_but_one_carrying_a_key_is_refused(home):
+    """#1099 review R1: the same gate guards dev drafts; naming a token is fine, pasting one is not."""
+    from test_v5_followups import make_store
+    from jarves import devmanager
+    st = make_store(home)
+    assert devmanager.suggest(st, "fix token refresh expiry", "move the API key loader to settings")["status"] == "draft"
+    with pytest.raises(ValueError):
+        devmanager.suggest(st, "token refresh", "my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
+    assert len(devmanager.listing(st)) == 1
+    st.close()

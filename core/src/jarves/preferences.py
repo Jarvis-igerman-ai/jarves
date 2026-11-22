@@ -43,11 +43,17 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
-    r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
-# #1099: an unprefixed key/token is a long run of mixed letters and digits with high character entropy
-_KEYLIKE = re.compile(r"[A-Za-z0-9+/_\-=]{20,}")
+# #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
+# "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
+_KEY_VALUE = re.compile(
+    r"(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
+    r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד)"
+    r"(?:\s+[^\s:=]+){0,2}?\s*(?:[:=]|\bis\b|\bwas\b|הוא|היא|זה)\s*\S", re.I)
+# An unprefixed key/token is one long segment of mixed letters and digits with high character entropy. Segments are
+# split at _ - . / so identifiers (test_prefs_1099) and UUIDs are not keys; pure hex (git SHAs) is not a key either.
+_KEY_SEGMENT = re.compile(r"[A-Za-z0-9+=]{20,}")
+_HEX = re.compile(r"[0-9a-fA-F]+")
 KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
 
 
@@ -56,14 +62,14 @@ def _entropy(s: str) -> float:
 
 
 def _keylike(text: str) -> bool:
-    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and _entropy(m) >= KEY_ENTROPY_BITS
-               for m in _KEYLIKE.findall(text))
+    return any(re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m)
+               and _entropy(m) >= KEY_ENTROPY_BITS for m in _KEY_SEGMENT.findall(text))
 
 
 def looks_sensitive(text: object) -> bool:
     """Credentials, card/ID numbers, key/token-shaped strings, health or money details: never learned."""
     s = "" if text is None else str(text)
-    return bool(_SENSITIVE.search(s)) or logs.has_secret(s) or _keylike(s)
+    return bool(_SENSITIVE.search(s) or _KEY_VALUE.search(s)) or logs.has_secret(s) or _keylike(s)
 
 
 def normalize(text: str) -> str:
