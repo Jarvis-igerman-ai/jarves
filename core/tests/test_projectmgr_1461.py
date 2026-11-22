@@ -188,3 +188,38 @@ def test_task_checked_before_this_fix_is_checked_again_at_the_merge(env):
     finish(m)
     assert any(e["kind"] == "check_failed" for e in m.db.events(m.db.by_seq(1, 1)["id"], 60))
     assert (_integ(home) / "a.txt").read_text() == "1\n"              # the retry's checked content, never "evil"
+
+
+def test_code_stage_after_the_check_is_checked_again_and_merges(env):
+    """Review R1 (round 3): a code stage between the check and the merge is new code, not a move."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner test work:owner merge:owner")
+    m.call("resume", project="demo")
+    for text in ("one\n", "two\n"):
+        finish(m)
+        wt = Path(m.db.by_seq(1, 1)["worktree"])
+        (wt / "mine.txt").write_text(text)
+        assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    assert (_integ(home) / "mine.txt").read_text() == "two\n"
+
+
+def test_integration_moving_during_the_check_is_merged_in_and_checked(env):
+    """Review R2 (round 3): tested_base is the integration commit from before the check, not one it never saw."""
+    m, repo, home = env
+    integ, flag = _integ(home), home.parent / "landed"
+    land = (f"import os, subprocess as s\nif not os.path.exists(r'{flag}'):\n    open(r'{flag}', 'w').close()\n"
+            f"    open(r'{integ / 'other.txt'}', 'w').write('o')\n"
+            f"    s.run({list(GIT)!r} + ['-C', r'{integ}', 'add', '-A'], check=True)\n"
+            f"    s.run({list(GIT)!r} + ['-C', r'{integ}', 'commit', '-qm', 'other', '--no-verify'], check=True)\n")
+    _start(m, repo, [sys.executable, "-c", land])
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    assert (integ / "a.txt").read_text() == "1\n" and (integ / "other.txt").exists()

@@ -7,7 +7,8 @@ per-project lock (re-checked when the branch moved since the test), a failed age
 while `max_attempts` allows.
 
 Per-task run state lives in the `job` JSON column: tested_base, tested_head (#1461: the task commit the check
-saw; the merge takes only that commit), approved {stage, tree}, feedback (untrusted agent
+saw; the merge takes only that commit; a later code stage clears it), owner_fold (the sha of the commit answer()
+folded at a merge:owner approval), approved {stage, tree}, feedback (untrusted agent
 text for the next card), repro {files, cmd}, kept (branch of work done without a merge), stage_runs.
 """
 from __future__ import annotations
@@ -290,6 +291,7 @@ class StageEngine:
             links = gitops.link_files(wt, base)
         except gitops.GitError as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
+        self._set_job(t, tested_head=None)              # #1461: new code after a check: the merge checks it again
         scope = t["scope"]
         if kind == "reproduce" and not scope:
             scope = ["test", "tests", "spec", "*test*", "*/test*", "*spec*"]
@@ -539,6 +541,7 @@ class StageEngine:
                 if conflicts:
                     return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
             vetted = self._head(wt) if has_wt else ""
+            tested = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()   # before it runs
             outs = []
             ok = True
             if kind == "verify" and repro.get("cmd"):
@@ -555,7 +558,6 @@ class StageEngine:
                 if touched:
                     ok = False
                     outs = [f"the reproduction test was changed: {', '.join(touched[:3])}"]
-            tested = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
             if has_wt and self._head(wt) != vetted:                 # #1461: a sibling moved the branch mid-check
                 return self._moved(p, t, "moved while JARVES checked it")
         if self._stopped(t, cancel):
