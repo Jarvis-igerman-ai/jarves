@@ -286,10 +286,41 @@ def test_the_real_phone_api_copies_the_error_code_for_the_changed_note(tmp_path)
     assert out == {"code": "PREF_CHANGED", "status": 409, "msg": "השתנתה"}   # review (sonnet): prefs.js reads e.code
 
 
-def test_production_confirms_accept_meta_so_the_voice_confirm_can_show_the_wording(home):
-    from jarves.app import Core                           # review (opus): approval_meta runs only for these confirms
+def test_only_confirms_that_show_the_details_count_as_showing_the_wording(home):
+    from jarves.app import Core                           # review: approval_meta runs only when the owner sees its details
     from jarves.approvals import audited
+    from jarves.skills import shows_details
 
     async def plain(prompt):
         return False
-    assert getattr(Core.ask_confirm, "accepts_meta", False) and audited(home, plain).accepts_meta
+
+    async def meta_aware(prompt, **meta):
+        return False
+    meta_aware.accepts_meta = True
+    assert shows_details(Core.ask_confirm)                # production: the approvals popup shows the details
+    assert not shows_details(plain) and shows_details(meta_aware)
+    # audited() still takes meta for its audit record, but its terminal confirm gets the prompt only
+    assert audited(home, plain).accepts_meta and not shows_details(audited(home, plain))
+    assert not shows_details(audited(home, meta_aware))
+
+
+def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, home):
+    p, pid, _ = prefs                                     # review R1: the #1542 blocker one wrapper deeper
+    from jarves.approvals import audited
+    from jarves.skills import SkillRegistry
+
+    async def plain_yes(prompt):                          # a terminal yes/no: the wording is not on screen
+        return True
+    reg = SkillRegistry()
+    reg.confirm = audited(home, plain_yes)
+    reg.register(prefs_mod.make_skill(p))
+    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
+    r = asyncio.run(reg.call("pref_confirm", {"id": pid}, origin="user"))
+    assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
+
+
+def test_every_learned_prefs_update_moves_the_version_forward():
+    import re                                             # review R3: no UPDATE may set `updated` from the clock alone
+    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")
+    updates = re.findall(r'"UPDATE learned_prefs SET[^"]*"(?:\s*\+\s*_BUMP)?', src)
+    assert updates and all("_BUMP" in u for u in updates) and "updated=?" not in src.replace("AND updated=?", "")

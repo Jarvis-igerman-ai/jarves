@@ -292,6 +292,13 @@ def tool_schema(tool: "Tool") -> dict:
     return _fresh(cached)
 
 
+def shows_details(confirm) -> bool:
+    """#1514: does this confirm put the approval's details (approval_meta) in front of the owner? `shows_details` when
+    set (audited() takes meta for its audit only: False), else `accepts_meta` (the approvals popup shows them)."""
+    v = getattr(confirm, "shows_details", None)
+    return bool(getattr(confirm, "accepts_meta", False) if v is None else v)
+
+
 class SkillRegistry:
     def __init__(self, disabled: set[str] | None = None,
                  allowed_actions: set[str] | frozenset[str] | None = None) -> None:
@@ -515,9 +522,9 @@ class SkillRegistry:
                 who = None
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
-        # #1514: approval_meta only runs when the confirm can show its details (a plain confirm(prompt) drops them),
-        # so a tool may treat it having run as proof the owner saw those details
-        if tool.approval_meta is not None and prompt and getattr(self.confirm, "accepts_meta", False):
+        # #1514: approval_meta only runs when the confirm shows its details to the owner (a plain confirm(prompt)
+        # drops them, audited() only logs them), so a tool may treat it having run as proof the owner saw them
+        if tool.approval_meta is not None and prompt and shows_details(self.confirm):
             try:
                 extra = tool.approval_meta(args) or {}
             except Exception:
