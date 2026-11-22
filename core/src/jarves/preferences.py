@@ -97,6 +97,9 @@ def looks_sensitive(text: str) -> bool:
     Not caught (known gaps, out of scope for #1482): all-lowercase or all-uppercase letter+digit tokens
     outside hex/base32, base32 with fewer than two digits 2-7, lowercase base32, and base64url (``-``/``_``)
     values, unless ``logs.has_secret`` or another rule here matches them.
+
+    Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
+    the long-number rule unless a credential word sits just before it, so "my id is 12345678ab" is allowed.
     """
     t = text or ""
     # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)

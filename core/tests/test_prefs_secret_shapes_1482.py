@@ -75,6 +75,22 @@ def test_digit_heavy_hex_next_to_a_credential_word_is_refused(text):
     assert looks_sensitive(text), text
 
 
+def _mixed_case(h: str) -> str:
+    return "".join(c.upper() if i % 2 else c for i, c in enumerate(h))
+
+
+@pytest.mark.parametrize("text", [_hex("h41", 41), _hex("h48", 48), _hex("h63", 63),
+                                  _mixed_case(_hex("mc32", 32))])
+def test_hex_of_41_to_63_chars_and_mixed_case_hex_are_refused(text):
+    # review R3 (round 3): pin hex lengths between a SHA-1 and a SHA-256, and mixed-case 32-char hex
+    assert looks_sensitive(text), text
+
+
+def test_sha_like_token_without_a_credential_word_is_allowed():
+    # review R2 (round 3): the documented tradeoff, pinned so a change to it is deliberate
+    assert not looks_sensitive("my id is 12345678ab")
+
+
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
     store = Store(home / "store.db")
     assert devmanager.suggest(store, "regression since " + SHA_WITH_DIGIT_RUN, "bisected to " + SHA40)
