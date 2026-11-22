@@ -45,8 +45,34 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
+# #1559: an authenticator (TOTP) seed next to a strong seed word: base32 (A-Z, 2-7), one case, unbroken (16+) or in
+# spaced/dashed 4-character groups as authenticator apps show it. Hebrew words may carry a prefix letter only.
+_SEED_WORD = re.compile(r"\b(?:totp|otp|otpauth|2fa|mfa|authenticator)\b|"
+                        r"(?<![א-ת])[ובלכמהש]?(?:מאמת|אוטנטיקטור)(?![א-ת])", re.I)
+_SEED_RUN = (re.compile(r"(?<![A-Za-z0-9])(?:[A-Z2-7]{16,}|[A-Z2-7]{4}(?:[ -][A-Z2-7]{4}){3,})(?![A-Za-z0-9])"),
+             re.compile(r"(?<![A-Za-z0-9])(?:[a-z2-7]{16,}|[a-z2-7]{4}(?:[ -][a-z2-7]{4}){3,})(?![A-Za-z0-9])"))
+_SEED_NEAR = 20                   # characters between the seed word and the run
+
+
+def _seed_like(run: str) -> bool:
+    """A digit 2-7, or (no digit) few vowels: random base32 has ~20% vowels, English words ~40%
+    (so INTERNATIONALIZATION or "with this must work" pass)."""
+    s = run.replace(" ", "").replace("-", "").upper()
+    return any(c in "234567" for c in s) or sum(c in "AEIOUY" for c in s) <= len(s) // 5
+
+
+def _seed_near_word(text: str) -> bool:
+    for rx in _SEED_RUN:
+        for m in rx.finditer(text):
+            near = text[max(0, m.start() - _SEED_NEAR):m.end() + _SEED_NEAR]
+            if _seed_like(m.group()) and _SEED_WORD.search(near):
+                return True
+    return False
+
+
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    text = text or ""
+    return bool(_SENSITIVE.search(text)) or _seed_near_word(text)
 
 
 def normalize(text: str) -> str:

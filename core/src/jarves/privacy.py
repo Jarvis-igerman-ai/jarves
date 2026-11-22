@@ -68,14 +68,78 @@ def set_full_text(ctx, on: bool) -> dict:
     else:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
+        scrub_at_rest(ctx.home)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
     return state(ctx)
+
+
+_NOT_KEPT = {"not_kept": True, "code": "NOT_KEPT"}
+
+
+def _scrub_db(path: Path, sql: str, fix) -> int:
+    """Rewrite the rows `sql` selects (rowid first) with fix(row) -> (update sql, args) or None. 0 if no file."""
+    if not path.is_file():
+        return 0
+    cx = sqlite3.connect(path, timeout=10)
+    try:
+        with cx:                                    # one transaction: all rows or none
+            cx.execute("PRAGMA secure_delete=ON")
+            n = 0
+            for row in cx.execute(sql).fetchall():
+                upd = fix(row)
+                if upd:
+                    n += cx.execute(*upd).rowcount
+        return n
+    finally:
+        cx.close()
+
+
+def _ledger_fix(row):
+    rid, status, body = row
+    try:
+        old = json.loads(body)
+    except ValueError:
+        old = None
+    if isinstance(old, dict) and old.get("not_kept") is True:
+        return None
+    ok = old.get("ok") if isinstance(old, dict) and isinstance(old.get("ok"), bool) else int(status) < 400
+    return "UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps({**_NOT_KEPT, "ok": ok}), rid)
+
+
+def _step_fix(row):
+    rid, evidence, error = row
+    code = error.split(":", 1)[0] if error else ""     # "CODE: tool text" keeps the code only
+    if evidence == "" and code == error:
+        return None
+    return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)
+
+
+def scrub_at_rest(home: Path) -> dict:
+    """#1557: when privacy turns on, text stored before it was on is scrubbed too (#206 F13 covered new writes only):
+    continuity.db ledger answers become a fixed NOT_KEPT note (a resend is still answered, not run again) and
+    memory.db goal plan steps keep status and error code, not tool text. Best effort: a busy database is logged."""
+    out = {"ledger": 0, "plan_steps": 0}
+    for key, name, sql, fix in (
+            ("ledger", "continuity.db", "SELECT rowid, status, body FROM ledger", _ledger_fix),
+            ("plan_steps", "memory.db", "SELECT rowid, evidence, error FROM goal_plan_steps "
+                                        "WHERE evidence != '' OR instr(error, ':') > 0", _step_fix)):
+        try:
+            out[key] = _scrub_db(Path(home) / name, sql, fix)
+        except sqlite3.Error as e:
+            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed (database busy)",
+                      target=name, error_type=type(e).__name__)
+    if any(out.values()):
+        logs.info("privacy", "PRIVACY_SCRUBBED", "text stored before privacy mode was scrubbed",
+                  count=sum(out.values()), kind=",".join(k for k, v in out.items() if v))
+    return out
 
 
 def set_privacy(ctx, on: bool) -> dict:
     """Flip it now (this process + the Core via the flag file) and in config.toml for the next start."""
     logs.write_privacy(ctx.home / "logs", on)
     ctx.cfg.log.privacy = bool(on)                  # this dashboard's reads (logs view, tasks, notes) follow at once
+    if on:
+        scrub_at_rest(ctx.home)
     saved, err = True, ""
     try:
         config_edit.apply(ctx.config_path, {"log.privacy": bool(on)})
