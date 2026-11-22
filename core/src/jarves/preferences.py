@@ -52,7 +52,10 @@ _HEX = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-f]{32,}|[0-9A-F]{32,})(?![0-9A-Za-z
 _BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
 _BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
 _BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
-_CRED_NEAR = re.compile(r"\b(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook|auth|api)\b\W*(?:\w+\W+){0,2}$", re.I)
+# credential words; '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
+_CRED_WORD = r"(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
+_CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[A-Za-z0-9]+[\W_]+){0,4}$", re.I)
+_CRED_AFTER = re.compile(r"^[\W_]*(?:[A-Za-z0-9]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
 
 
@@ -103,10 +106,15 @@ def _path_word(seg: str) -> bool:
     return not seg or seg.islower() or _wordy(seg) or not _mixed(seg) and len(seg) < 8
 
 
+def _cred_near(t: str, m: re.Match) -> bool:
+    """A credential word up to four words before the value or three words after it."""
+    return bool(_CRED_BEFORE.search(t[max(0, m.start() - 60):m.start()]) or _CRED_AFTER.search(t[m.end():m.end() + 40]))
+
+
 def _secret_shaped(t: str) -> bool:
     for m in _HEX.finditer(t):
         before = t[max(0, m.start() - 40):m.start()]
-        if _CRED_NEAR.search(before):
+        if _cred_near(t, m):
             return True
         n = len(m.group(0))
         if n != 40 and not (n in _HASH_LENS and _HASH_NEAR.search(before)):
@@ -135,8 +143,8 @@ def _secret_shaped(t: str) -> bool:
 
 
 def _drop_sha(m: re.Match) -> str:
-    """Hide a commit-SHA candidate from the long-number rule, unless a credential word sits right before it."""
-    return m.group(0) if _CRED_NEAR.search(m.string[max(0, m.start() - 40):m.start()]) else " "
+    """Hide a commit-SHA candidate from the long-number rule, unless a credential word sits near it."""
+    return m.group(0) if _cred_near(m.string, m) else " "
 
 
 def looks_sensitive(text: str) -> bool:
@@ -150,12 +158,16 @@ def looks_sensitive(text: str) -> bool:
     of 32-char tokens and about 0.05% of base64-encoded 32-byte keys. The test pins these rates.
 
     Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
-    the long-number rule unless a credential word sits just before it, so "my id is 12345678ab" is allowed.
+    the long-number rule unless a credential word (key, token, secret, password, ...; ``_`` separates words, so
+    ``GITHUB_TOKEN=`` counts) sits up to four words before or three words after it, so "my id is 12345678ab" is
+    allowed. A 40-char hex value with such a word near it is refused; "fixed in <sha>, key rotation bug" is
+    therefore refused too (safe side).
     A hex value of a digest length (32, 40, 64 or 128 chars) is allowed when a hash word (commit, sha256, md5,
     checksum, digest, hash, rev...) sits within two words before it and no credential word does, so
     "commit <32 hex>" passes; other 32+ char hex lengths are refused even after a hash word.
     Identifiers whose words average under three letters (``UserByIdV4Test``) can still be refused as random
-    tokens; that error is on the safe side.
+    tokens, and uppercase constants of 16+ chars with two or more digits 2-7 (``AES256GCMENCRYPTION``) can be
+    refused as base32 seeds; both errors are on the safe side.
     """
     t = text or ""
     # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)

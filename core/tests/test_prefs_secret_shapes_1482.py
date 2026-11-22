@@ -130,3 +130,24 @@ def test_base64_encoded_32_byte_keys_are_all_refused():
     assert sum(k.count("/") >= 2 for k in keys) >= 20      # the sample really holds multi-'/' keys
     leaked = [k for k in keys if not looks_sensitive("the key is " + k)]
     assert not leaked, leaked[:3]
+
+
+@pytest.mark.parametrize("text", ["GITHUB_TOKEN=" + _hex("x", 40), "api_key: " + _hex("x", 40),
+                                  "auth_token=" + _hex("z", 40), "api_key=12345678ab",
+                                  "the webhook secret for prod is " + _hex("w", 40),     # 3 words in between
+                                  "use " + _hex("u", 40) + " as the token"])             # credential word after
+def test_snake_case_credential_names_and_a_wider_window_refuse_a_sha_shape(text):
+    # review round 5 R1/R2: '_' separates credential words, and the window spans 4 words before and 3 after
+    assert looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["api regression since " + _hex("s", 40), "auth bug in " + _hex("b", 40)])
+def test_bare_api_and_auth_do_not_make_a_sha_a_secret(text):
+    # review round 5 R3: "api"/"auth" alone are not credential words
+    assert not looks_sensitive(text), text
+
+
+def test_base64_key_with_plus_and_no_slash_is_refused():
+    # review round 5 R5: the '+'-only base64 branch; both parts are under 20 chars, so _BASE62 cannot catch them
+    key = _b62("p1", 14) + "+" + _b62("p2", 17) + "="
+    assert looks_sensitive("use " + key), key
