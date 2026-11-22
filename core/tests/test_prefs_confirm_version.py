@@ -59,9 +59,9 @@ def test_phone_confirm_needs_the_shown_version(prefs, home):
 def test_dashboard_confirm_needs_the_shown_version(prefs):
     p, pid, shown = prefs
     ctx = SimpleNamespace(_prefs=p)
-    for bad in ("x", None, float("inf")):                # review R2: malformed = an old page, coded, in Hebrew
-        st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": bad})
-        assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"]
+    for bad in ({}, {"updated": "x"}, {"updated": float("inf")}):   # missing (an old page) or malformed: coded, in Hebrew
+        st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, **bad})
+        assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and p.get(pid)["state"] == "proposed"
     _edit_to_b(p, pid)
     st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": shown})
     assert st == 409 and body["code"] == "PREF_CHANGED" and body["error_he"] and p.get(pid)["state"] == "proposed"
@@ -215,12 +215,6 @@ def test_the_model_cannot_supply_the_shown_version(prefs):
     assert p.get(pid)["state"] == "proposed"
 
 
-def test_dashboard_confirm_from_an_old_page_is_told_to_reload(prefs):
-    p, pid, _ = prefs
-    st, body = prefs_mod.api_pref_op(SimpleNamespace(_prefs=p), None, {"op": "confirm", "id": pid})
-    assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and p.get(pid)["state"] == "proposed"
-
-
 @pytest.mark.parametrize("shown", [None, "current"])
 def test_confirm_of_an_item_removed_after_the_read_is_not_found_not_changed(prefs, shown):
     p, pid, ver = prefs
@@ -260,7 +254,6 @@ def test_the_real_phone_api_copies_the_error_code_for_the_changed_note(tmp_path)
 
 def test_only_confirms_that_show_the_details_count_as_showing_the_wording(home):
     from jarves.app import Core                           # review: approval_meta runs only when the owner sees its details
-    from jarves.approvals import audited
     from jarves.skills import shows_details
 
     async def plain(prompt):
@@ -271,23 +264,22 @@ def test_only_confirms_that_show_the_details_count_as_showing_the_wording(home):
     meta_aware.accepts_meta = True
     assert shows_details(Core.ask_confirm)                # production: the approvals popup shows the details
     assert not shows_details(plain) and shows_details(meta_aware)
-    # audited() still takes meta for its audit record, but its terminal confirm gets the prompt only
-    assert audited(home, plain).accepts_meta and not shows_details(audited(home, plain))
-    assert not shows_details(audited(home, meta_aware))
 
 
-def test_audited_shows_details_exactly_when_it_forwards_them(home):
+@pytest.mark.parametrize("forward", [False, True])
+@pytest.mark.parametrize("inner_shows", [False, True])
+def test_audited_shows_details_exactly_when_it_forwards_them(home, forward, inner_shows):
     from jarves.approvals import audited                  # review R3: the flag follows what wrapped() really forwards
     from jarves.skills import shows_details
     got = []
 
-    async def meta_aware(prompt, **meta):
+    async def inner(prompt, **meta):
         got.append(meta)
         return True
-    meta_aware.accepts_meta = True
-    w = audited(home, meta_aware)
-    assert asyncio.run(w("Remember?", details={"preference": A}))
-    assert shows_details(w) == bool(got[0].get("details"))
+    inner.accepts_meta = inner_shows
+    w = audited(home, inner, forward_meta=forward)
+    assert w.accepts_meta and asyncio.run(w("Remember?", details={"preference": A}))   # meta still reaches the audit
+    assert bool(got[0].get("details")) == forward and shows_details(w) == (forward and inner_shows)
 
 
 def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, home):
@@ -342,6 +334,16 @@ def test_the_live_core_registry_confirm_shows_the_details(cfg, home):
         finally:
             await core.stop()
     asyncio.run(run())
+
+
+def test_a_removed_and_re_suggested_item_never_reuses_a_stale_id_and_version(prefs):
+    p, pid, ver = prefs                                   # review R2: INSERT is the only writer without _BUMP
+    p.remove(pid, by="dashboard")
+    new = p.suggest(A, "I love jazz when I cook", "music")["item"]     # same tick, same words
+    assert new["id"] != pid and new["updated"] == ver     # AUTOINCREMENT: the stale page's (id, version) is gone
+    with pytest.raises(KeyError):
+        p.confirm(pid, by="phone", shown=ver)
+    assert p.get(new["id"])["state"] == "proposed"
 
 
 def test_confirm_of_an_item_removed_right_after_the_write_is_not_found(prefs):
