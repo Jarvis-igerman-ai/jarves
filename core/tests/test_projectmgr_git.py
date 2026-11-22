@@ -362,17 +362,25 @@ def test_an_old_git_that_echoes_the_unknown_option_is_not_taken_for_a_path(monke
     assert gitops.common_dir(tmp_path) is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink")
-def test_the_rules_cover_both_the_given_and_the_resolved_path(tmp_path):
-    # review R3: the agent may write through a symlinked folder (macOS /tmp); both spellings are denied
+def test_the_rules_cover_both_the_given_and_the_resolved_path(monkeypatch, tmp_path):
+    # review R3: the agent may write through a symlinked folder (macOS /tmp); both spellings are denied.
+    # The symlink is simulated through `resolve` so the test runs on Windows too (CI forbids skips).
     from jarves.projectmgr import runners
-    (tmp_path / "real").mkdir()
-    repo = _repo(tmp_path / "real")
-    link = tmp_path / "link"
-    link.symlink_to(repo)
-    denied = runners._shared_git_deny(str(link))
-    assert f"Write({runners.abs_rule_path(link / '.git')}/**)" in denied
-    assert f"Write({runners.abs_rule_path((repo / '.git').resolve())}/**)" in denied
+    (tmp_path / "given").mkdir()
+    repo = _repo(tmp_path / "given")
+    elsewhere = tmp_path / "resolved"
+    real_resolve = runners.Path.resolve
+
+    def resolve(self, *a, **k):
+        r = real_resolve(self, *a, **k)
+        try:
+            return elsewhere / r.relative_to(real_resolve(repo))
+        except ValueError:
+            return r
+    monkeypatch.setattr(runners.Path, "resolve", resolve)
+    denied = runners._shared_git_deny(str(repo))
+    assert f"Write({runners.abs_rule_path(repo / '.git')}/**)" in denied
+    assert f"Write({runners.abs_rule_path(elsewhere / '.git')}/**)" in denied
 
 
 @pytest.mark.parametrize("path", [r"\\srv\share\r\.git", "relative/.git"])
