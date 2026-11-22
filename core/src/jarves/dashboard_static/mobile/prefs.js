@@ -8,14 +8,16 @@
       confirm: "Confirm", decline: "Decline", forget: "Forget", edit: "Correct", save: "Save", cancel: "Cancel", again: "Still true",
       stale: "Not re-confirmed for a long time: not used until you say it is still true.", conflict: "Looks like another confirmed preference",
       said: "You said", off: "Using preferences in conversations is switched off on the computer.", 
-      saved: "Saved.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget" },
+      saved: "Saved.", recheck: "Saved. Confirm it to use it.", gone: "Forgotten.", failed: "Could not do that", loading: "Loading…", label: "Corrected text", ask: "Forget this preference?", yes: "Yes, forget" },
     he: { intro: "מה ש-JARVES למד עליכם. רק מה שאישרתם משמש בשיחות.", empty: "עוד לא נלמד כלום.",
       confirmed: "מאושר", proposed: "ממתין לתשובה שלכם", declined: "נדחה (נשמר כדי שלא ישאלו שוב)",
       confirm: "אישור", decline: "דחייה", forget: "שכחו", edit: "תיקון", save: "שמירה", cancel: "ביטול", again: "עדיין נכון",
       stale: "לא אושר מחדש זמן רב: לא בשימוש עד שתאמרו שזה עדיין נכון.", conflict: "דומה להעדפה מאושרת אחרת",
       said: "אמרתם", off: "השימוש בהעדפות בשיחות כבוי במחשב.", 
-      saved: "נשמר.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
+      saved: "נשמר.", recheck: "נשמר. אשרו כדי שישמש.", gone: "נשכח.", failed: "לא ניתן לבצע", loading: "טוען…", label: "הטקסט המתוקן", ask: "לשכוח את ההעדפה הזאת?", yes: "כן, לשכוח" },
   };
+  // #206 H2: the server's state after the edit decides (not the list the item was shown in): proposed needs a confirm
+  const editNote = (r) => (r && r.state === "proposed" ? "recheck" : "saved");
   const newId = () => "pref-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   let root = null, cx = null, busy = false, editing = 0, asking = 0, note = "";
   const t = (k) => ((T[cx.lang()] || T.en)[k]) || T.en[k] || k;
@@ -27,7 +29,7 @@
   }
   async function op(body, ok) {
     if (busy) return; busy = true;
-    try { await cx.post("/api/m/prefs/op", { ...body, id: newId() }); note = t(ok); editing = asking = 0; }
+    try { const r = await cx.post("/api/m/prefs/op", { ...body, id: newId() }); note = t(typeof ok === "function" ? ok(r) : ok); editing = asking = 0; }
     catch (e) { note = t("failed") + ": " + e.message; }
     busy = false; load();
   }
@@ -42,12 +44,12 @@
     if (editing === p.id) {
       const lab = el("label"); const sp = el("span", "", t("label")); const inp = el("input"); inp.maxLength = 200; inp.value = p.text; inp.setAttribute("aria-label", t("label"));
       lab.append(sp, inp); li.appendChild(lab);
-      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, "saved"), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
+      acts.append(btn(t("save"), () => op({ op: "edit", pref: p.id, text: inp.value }, editNote), true), btn(t("cancel"), () => { editing = 0; paint(d); }));
     } else if (asking === p.id) {
       box.appendChild(el("div", "", t("ask")));
       acts.append(btn(t("yes"), () => op({ op: "remove", pref: p.id }, "gone"), true), btn(t("cancel"), () => { asking = 0; paint(d); }));
     } else {
-      if (kind !== "confirmed") acts.appendChild(btn(t("confirm"), () => op({ op: "confirm", pref: p.id }, "saved"), true));
+      if (kind !== "confirmed") acts.appendChild(btn(t("confirm"), () => op({ op: "confirm", pref: p.id, text: p.text }, "saved"), true));
       if (kind === "proposed") acts.appendChild(btn(t("decline"), () => op({ op: "decline", pref: p.id }, "saved")));
       if (kind === "confirmed" && p.stale) acts.appendChild(btn(t("again"), () => op({ op: "reaffirm", pref: p.id }, "saved"), true));
       if (kind !== "declined") acts.appendChild(btn(t("edit"), () => { editing = p.id; paint(d); }));
@@ -75,5 +77,6 @@
     refresh() { if (root && !editing && !asking && !busy) load(); },
     unmount() { root = null; },
     catalogs: T,
+    editNote,
   };
 })();
