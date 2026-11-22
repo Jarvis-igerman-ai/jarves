@@ -467,20 +467,10 @@ def test_a_tracked_edit_right_before_the_folder_removal_is_kept(tmp_path, monkey
             (wt / "f.txt").write_text("owner edit", encoding="utf-8")
         return real(cwd, *args, **kw)
     monkeypatch.setattr(gitops, "git", racing)
-    assert gitops.retire_worktree(str(repo), wt, "t1", tip) == "dirty"
+    assert gitops.retire_worktree(str(repo), wt, "t1", tip) == "cleanup_failed"     # git refused: kept
     monkeypatch.setattr(gitops, "git", real)
     assert (wt / "f.txt").read_text(encoding="utf-8") == "owner edit"
     assert gitops.commit_of(repo, "refs/heads/t1") == tip
-
-
-def test_retire_worktree_still_removes_untracked_output(tmp_path):
-    repo = _repo(tmp_path)
-    wt = tmp_path / "projects" / "1" / "t1"
-    gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
-    (wt / "out.log").write_text("build", encoding="utf-8")
-    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD"), {"out.log"}) == ""
-    assert not wt.exists() and gitops.git(repo, "rev-parse", "-q", "--verify", "refs/heads/t1",
-                                          check=False).returncode != 0
 
 
 def test_an_uninitialised_submodule_keeps_its_pointer_in_a_task_worktree(tmp_path):
@@ -499,18 +489,35 @@ def test_an_uninitialised_submodule_keeps_its_pointer_in_a_task_worktree(tmp_pat
 
 
 
-def test_an_untracked_file_made_during_the_merge_is_never_cleaned(tmp_path):
-    """JAR-678 (#1601 council): a new untracked source file (owner or agent work after commit_all) was deleted by an
-    unconditional `git clean -fd`; only the listed check artifacts are removed, anything else keeps the folder."""
+def test_no_untracked_file_is_ever_deleted_by_the_cleanup(tmp_path):
+    """JAR-678 (#1601 council, gpt blocker): untracked files were cleaned when they appeared during the check, which
+    can be owner or agent source. No untracked file is deleted: the folder and branch are kept ("kept")."""
     repo = _repo(tmp_path)
     wt = tmp_path / "projects" / "1" / "t1"
     gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
     (wt / "out.log").write_text("build", encoding="utf-8")
     (wt / "new.py").write_text("work", encoding="utf-8")
     tip = gitops.commit_of(wt, "HEAD")
-    assert gitops.retire_worktree(str(repo), wt, "t1", tip, {"out.log"}) == "dirty"
-    assert (wt / "new.py").read_text(encoding="utf-8") == "work" and not (wt / "out.log").exists()
+    assert gitops.retire_worktree(str(repo), wt, "t1", tip) == "kept"
+    assert (wt / "new.py").read_text(encoding="utf-8") == "work" and (wt / "out.log").exists()
     assert gitops.commit_of(repo, "refs/heads/t1") == tip
+
+
+def test_a_removal_that_stops_partway_is_a_cleanup_failure(tmp_path, monkeypatch):
+    """JAR-678 (#1601 council, opus): a Windows lock stops `worktree remove` after deleting some tracked files; that
+    read as "dirty", so the owner path committed the deletions. A failed removal is always "cleanup_failed"."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "1" / "t1"
+    gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
+    real = gitops.git
+
+    def partial(cwd, *a, **kw):
+        if a[:2] == ("worktree", "remove"):
+            (wt / "f.txt").unlink()
+            return subprocess.CompletedProcess(a, 1, "", "Permission denied")
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", partial)
+    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD")) == "cleanup_failed"
 
 
 def test_a_refused_removal_without_changes_is_a_cleanup_failure(tmp_path, monkeypatch):

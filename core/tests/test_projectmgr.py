@@ -1575,13 +1575,15 @@ def test_an_untracked_check_artifact_after_a_re_merge_does_not_block_the_merge(e
     """JAR-678 (#1561 review): a check that writes an untracked file after merging newer work used to read as a
     moved task: merged but not done, then an "edit after the approval" commit of the build output."""
     m, repo, home = env
-    gen = [sys.executable, "-c", "import os; os.path.exists('other.txt') and open('out.log', 'w').write('x')"]
+    gen = [sys.executable, "-c", "import os; os.path.exists('other.txt') and [open(f, 'w').write('x') "
+           "for f in ('out.log', 'src.py')]"]     # #1601 council: a source file made during the check is kept
     open_project(m, repo, check=gen)
     m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
            flow="work test merge:owner")
     m.call("resume", project="demo")
     finish(m)
     assert "approve merging" in m.db.by_seq(1, 1)["waiting"]
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
     integ = gitops.project_root(home, 1) / "integration"
     (integ / "other.txt").write_text("other\n")
     gitops.commit_all(integ, "other")                       # the re-merge runs the check, which leaves out.log
@@ -1591,6 +1593,7 @@ def test_an_untracked_check_artifact_after_a_re_merge_does_not_block_the_merge(e
     assert t["status"] == "done" and not t["worktree"], (t["status"], t["waiting"], t["reason"])
     log = sh(integ, "git", "log", "--format=%s")
     assert "edit after the approval" not in log and (integ / "a.txt").exists() and not (integ / "out.log").exists()
+    assert (wt / "src.py").exists() and (wt / "out.log").exists()                 # nothing untracked is deleted
 
 
 def test_owner_merge_approval_stores_the_commit_it_checked(env, monkeypatch):
@@ -1797,7 +1800,7 @@ def test_a_folder_git_cannot_remove_after_the_merge_ends_done_not_moved(env, mon
 
 def test_a_new_untracked_file_after_the_check_is_kept(env, monkeypatch):
     """JAR-678 (#1601 council): a new untracked file written in the task folder during the merge (after the check)
-    was deleted by the cleanup; now the folder is kept and the task stops naming it."""
+    was deleted by the cleanup; now the merge ends done and the folder is kept, naming the file."""
     m, repo, home = env
     open_project(m, repo)
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
@@ -1812,5 +1815,28 @@ def test_a_new_untracked_file_after_the_check_is_kept(env, monkeypatch):
     monkeypatch.setattr(gitops, "fast_forward", late)
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert seen and (seen[0] / "new.py").read_text() == "work\n"
-    assert t["status"] != "done" and "changed during the merge" in (t["reason"] or ""), t
+    assert seen and (seen[0] / "new.py").read_text() == "work\n"                # never deleted
+    assert t["status"] == "done" and any(e["kind"] == "folder_kept" and "new.py" in e["text"]
+                                         for e in m.db.events(t["id"], 40)), t
+
+
+def test_an_owner_merge_whose_folder_removal_stops_partway_never_commits_the_deletions(env, monkeypatch):
+    """JAR-678 (#1601 council, opus): a removal stopped by a lock after deleting task files read as "dirty"; the owner
+    path then committed the deletions as "edit after the approval". The merge landed: the task ends done."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.git
+
+    def partial(cwd, *a, **kw):
+        if a[:2] == ("worktree", "remove"):
+            (wt / "a.txt").unlink()
+            return subprocess.CompletedProcess(a, 1, "", "Permission denied")
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", partial)
+    finish(m)
+    monkeypatch.setattr(gitops, "git", real)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert t["status"] == "done", (t["status"], t["waiting"], t["reason"])
+    assert (integ / "a.txt").exists() and "edit after the approval" not in sh(integ, "git", "log", "--format=%s")
