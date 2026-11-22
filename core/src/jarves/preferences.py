@@ -80,6 +80,29 @@ def _mixed(run: str) -> bool:
     return switches >= len(letters) // 4
 
 
+def _random_long(run: str) -> bool:
+    """A 32+ char run with upper and lower case, not words, and many distinct characters (a random key).
+
+    Catches the long random tokens whose case happens not to switch often enough for ``_mixed``.
+    """
+    s = re.sub(r"[+/=]", "", run)
+    return (len(s) >= 32 and any(c.isupper() for c in s) and any(c.islower() for c in s)
+            and not _wordy(s) and len(set(s)) / len(s) >= 0.5)
+
+
+def _wordy(s: str) -> bool:
+    """CamelCase made of real words. Random letters split into camel tokens too, but a long run of them has few
+    vowels; short words (``HttpClientV2``) may have few vowels, so the vowel test applies from 20 chars."""
+    letters = [c for c in s if c.isalpha()]
+    return _camel(s) and (len(s) < 20 or sum(c in "aeiouAEIOU" for c in letters) >= 0.25 * len(letters))
+
+
+def _path_word(seg: str) -> bool:
+    """A path segment made of words (``src``, ``ConfigLoaderV3x``), not random characters."""
+    seg = seg.replace("+", "")
+    return not seg or seg.islower() or _wordy(seg) or not _mixed(seg) and len(seg) < 8
+
+
 def _secret_shaped(t: str) -> bool:
     for m in _HEX.finditer(t):
         before = t[max(0, m.start() - 40):m.start()]
@@ -92,14 +115,21 @@ def _secret_shaped(t: str) -> bool:
         run = m.group(0).rstrip("=")
         if sum(c in "234567" for c in run) >= 2 and sum(c.isalpha() for c in run) >= len(run) // 2:
             return True              # TOTP seeds and other base32 secrets
-    if any(_mixed(m.group(0)) for m in _BASE62.finditer(t)):
+    if any(_mixed(m.group(0)) or _random_long(m.group(0)) for m in _BASE62.finditer(t)):
         return True
     # base64 with '+' or '/' inside. A path (absolute or relative) has '/' too, so a '/' run is judged per segment:
     # random segments are mixed case, path segments are words. Segments of 20+ chars are also checked by _BASE62.
+    # A random key can split at '/' into short segments that are each too short to judge, so the joined run is
+    # refused when it looks random and not every segment is a path word (#1482 review R2).
     for r in (m.group(0).rstrip("=") for m in _BASE64.finditer(t)):
-        if "/" in r and _mixed(re.sub(r"[+/]", "", r)) and any(_mixed(seg.replace("+", "")) for seg in r.split("/")):
-            return True
-        if "/" not in r and "+" in r and _mixed(r.replace("+", "")):
+        joined = re.sub(r"[+/]", "", r)
+        if "/" in r:
+            segs = r.split("/")
+            if _mixed(joined) and any(_mixed(seg.replace("+", "")) for seg in segs):
+                return True
+            if (_mixed(joined) or _random_long(joined)) and not all(_path_word(seg) for seg in segs):
+                return True
+        elif "+" in r and (_mixed(joined) or _random_long(joined)):
             return True
     return False
 
@@ -115,6 +145,9 @@ def looks_sensitive(text: str) -> bool:
     Not caught (known gaps, out of scope for #1482): all-lowercase or all-uppercase letter+digit tokens
     outside hex/base32, base32 with fewer than two digits 2-7, lowercase base32, and base64url (``-``/``_``)
     values, unless ``logs.has_secret`` or another rule here matches them.
+    Random mixed-case tokens are judged by a heuristic (case switches, distinct characters, vowels), so some slip
+    through: measured on seeded samples, about 7-9% of 20-char and about 4-5% of 24-char base62 tokens, under 0.5%
+    of 32-char tokens and about 0.05% of base64-encoded 32-byte keys. The test pins these rates.
 
     Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
     the long-number rule unless a credential word sits just before it, so "my id is 12345678ab" is allowed.

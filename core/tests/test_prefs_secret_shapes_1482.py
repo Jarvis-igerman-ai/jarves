@@ -111,3 +111,22 @@ def test_random_slash_segments_and_hex_of_no_digest_length_are_refused(text):
     # review round 4 R3/R5: a relative-path exemption must not let random base64 segments through, and a hash
     # word only excuses hex of a digest length (32/40/64/128)
     assert looks_sensitive(text), text
+
+
+def _b64_key(i: int) -> str:
+    return base64.b64encode(hashlib.sha256(f"key-{i}".encode()).digest()).decode()
+
+
+def test_random_base62_tokens_are_refused_at_a_pinned_rate():
+    # review R1: the case-switch heuristic misses some random tokens; pin the rate so it cannot silently get worse
+    for n, floor in ((20, 0.88), (24, 0.92), (32, 0.99)):
+        refused = sum(looks_sensitive("use " + _b62(f"rate-{n}-{i}", n)) for i in range(1000))
+        assert refused >= floor * 1000, (n, refused)
+
+
+def test_base64_encoded_32_byte_keys_are_all_refused():
+    # review R2: a key split by two or more '/' into short segments must still be refused
+    keys = [_b64_key(i) for i in range(500)]
+    assert sum(k.count("/") >= 2 for k in keys) >= 20      # the sample really holds multi-'/' keys
+    leaked = [k for k in keys if not looks_sensitive("the key is " + k)]
+    assert not leaked, leaked[:3]
