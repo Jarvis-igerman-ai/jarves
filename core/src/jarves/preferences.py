@@ -49,8 +49,32 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
+# #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
+# digit groups, or one digit group with a seed word within ~20 chars. A single digit group on its own is allowed so
+# development words such as "base64urlencoded" or "sha256checksumfile" in drafts and plans are not refused.
+_BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
+_DIGIT_GROUP = re.compile(r"[2-7]+")
+# Whole tokens only, so "footprint" or "יסוד" is no seed word; Hebrew allows one prefix letter (e.g. "המאמת").
+_SEED_WORD = re.compile(r"(?<![A-Za-z0-9])(?:totp|otp|seed|2fa|mfa|authenticator)s?(?![A-Za-z0-9])"
+                        r"|(?<![\u05d0-\u05ea])[הובלמשכ]?(?:מאמת|אימות|זרע|סוד)(?![\u05d0-\u05ea])", re.I)
+_SEED_NEAR = 20
+
+
+def _base32(text: str) -> bool:
+    for m in _BASE32_RUN.finditer(text):
+        groups = len(_DIGIT_GROUP.findall(m.group()))
+        if groups >= 2:
+            return True
+        # Only the text beside the run counts, so a word inside the run (e.g. "getOtpSecret4Value") is no seed word.
+        near = text[max(0, m.start() - _SEED_NEAR):m.start()] + " " + text[m.end():m.end() + _SEED_NEAR]
+        if groups == 1 and _SEED_WORD.search(near):
+            return True
+    return False
+
+
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    text = text or ""
+    return bool(_SENSITIVE.search(text)) or _base32(text)
 
 
 def normalize(text: str) -> str:
