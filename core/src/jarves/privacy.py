@@ -15,6 +15,7 @@ Two one-way actions (each needs {"confirm": true}):
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -68,19 +69,22 @@ def set_full_text(ctx, on: bool) -> dict:
     else:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
-        scrub_at_rest(ctx.home)
+        scrub = scrub_at_rest(ctx.home)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
+        return {**state(ctx), "scrub": scrub}
     return state(ctx)
 
 
 _NOT_KEPT = {"not_kept": True, "code": "NOT_KEPT"}
+_CODE = re.compile(r"[A-Z][A-Z0-9_]*")
+SCRUB_TIMEOUT_S = 2.0                               # a Core holding the lock: logged as partial, not a stuck request
 
 
 def _scrub_db(path: Path, sql: str, fix) -> int:
     """Rewrite the rows `sql` selects (rowid first) with fix(row) -> (update sql, args) or None. 0 if no file."""
     if not path.is_file():
         return 0
-    cx = sqlite3.connect(path, timeout=10)
+    cx = sqlite3.connect(path, timeout=SCRUB_TIMEOUT_S)
     try:
         with cx:                                    # one transaction: all rows or none
             cx.execute("PRAGMA secure_delete=ON")
@@ -89,6 +93,10 @@ def _scrub_db(path: Path, sql: str, fix) -> int:
                 upd = fix(row)
                 if upd:
                     n += cx.execute(*upd).rowcount
+        try:                                        # old page copies in a -wal file: best effort (a reader may hold it)
+            cx.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error:
+            pass
         return n
     finally:
         cx.close()
@@ -98,17 +106,20 @@ def _ledger_fix(row):
     rid, status, body = row
     try:
         old = json.loads(body)
-    except ValueError:
+    except (TypeError, ValueError):                 # NULL or malformed body: replaced too
         old = None
     if isinstance(old, dict) and old.get("not_kept") is True:
         return None
-    ok = old.get("ok") if isinstance(old, dict) and isinstance(old.get("ok"), bool) else int(status) < 400
+    ok = old.get("ok") if isinstance(old, dict) and isinstance(old.get("ok"), bool) else \
+        isinstance(status, int) and status < 400
     return "UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps({**_NOT_KEPT, "ok": ok}), rid)
 
 
 def _step_fix(row):
     rid, evidence, error = row
-    code = error.split(":", 1)[0] if error else ""     # "CODE: tool text" keeps the code only
+    error = error if isinstance(error, str) else ""
+    head = error.split(":", 1)[0].strip()
+    code = head if _CODE.fullmatch(head) else ""   # only an upper-case code like TOOL_ERROR stays, never free text
     if evidence == "" and code == error:
         return None
     return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)
@@ -117,20 +128,23 @@ def _step_fix(row):
 def scrub_at_rest(home: Path) -> dict:
     """#1557: when privacy turns on, text stored before it was on is scrubbed too (#206 F13 covered new writes only):
     continuity.db ledger answers become a fixed NOT_KEPT note (a resend is still answered, not run again) and
-    memory.db goal plan steps keep status and error code, not tool text. Best effort: a busy database is logged."""
-    out = {"ledger": 0, "plan_steps": 0}
+    memory.db goal plan steps keep status and an upper-case error code only. Best effort: a database that cannot be
+    scrubbed is logged and named in "partial", so the owner is told older text is still stored."""
+    out: dict = {"ledger": 0, "plan_steps": 0, "partial": []}
     for key, name, sql, fix in (
             ("ledger", "continuity.db", "SELECT rowid, status, body FROM ledger", _ledger_fix),
             ("plan_steps", "memory.db", "SELECT rowid, evidence, error FROM goal_plan_steps "
-                                        "WHERE evidence != '' OR instr(error, ':') > 0", _step_fix)):
+                                        "WHERE evidence != '' OR error != ''", _step_fix)):
         try:
             out[key] = _scrub_db(Path(home) / name, sql, fix)
         except sqlite3.Error as e:
-            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed (database busy)",
+            out["partial"].append(name)
+            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",
                       target=name, error_type=type(e).__name__)
-    if any(out.values()):
+    if out["ledger"] or out["plan_steps"]:
         logs.info("privacy", "PRIVACY_SCRUBBED", "text stored before privacy mode was scrubbed",
-                  count=sum(out.values()), kind=",".join(k for k, v in out.items() if v))
+                  count=out["ledger"] + out["plan_steps"],
+                  kind=",".join(k for k in ("ledger", "plan_steps") if out[k]))
     return out
 
 
@@ -138,15 +152,14 @@ def set_privacy(ctx, on: bool) -> dict:
     """Flip it now (this process + the Core via the flag file) and in config.toml for the next start."""
     logs.write_privacy(ctx.home / "logs", on)
     ctx.cfg.log.privacy = bool(on)                  # this dashboard's reads (logs view, tasks, notes) follow at once
-    if on:
-        scrub_at_rest(ctx.home)
+    scrub = scrub_at_rest(ctx.home) if on else None
     saved, err = True, ""
     try:
         config_edit.apply(ctx.config_path, {"log.privacy": bool(on)})
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
-    return {**state(ctx), "saved_in_config": saved, "config_error": err}
+    return {**state(ctx), "saved_in_config": saved, "config_error": err, **({"scrub": scrub} if scrub else {})}
 
 
 # ---------------------------------------------------------------------- one-way actions
