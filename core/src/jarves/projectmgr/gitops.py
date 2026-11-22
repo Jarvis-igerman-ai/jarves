@@ -165,9 +165,9 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
             git(repo, "branch", "-D", branch, check=False)
 
 
-def dirty_files(wt: Path) -> list[str]:
-    """Uncommitted paths in a worktree (changed, deleted or untracked, not ignored), as plain text."""
-    out = git(wt, "diff", "--name-only", "-z", "--no-renames", "HEAD").stdout.split("\0")
+def dirty_files(wt: Path, ref: str = "HEAD") -> list[str]:
+    """Paths in a worktree that differ from `ref` (changed, deleted or untracked, not ignored), as plain text."""
+    out = git(wt, "diff", "--name-only", "-z", "--no-renames", ref).stdout.split("\0")
     out += git(wt, "ls-files", "-o", "--exclude-standard", "-z").stdout.split("\0")
     return sorted({x.replace("\\", "/") for x in out if x})
 

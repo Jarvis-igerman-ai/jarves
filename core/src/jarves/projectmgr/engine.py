@@ -237,6 +237,12 @@ class StageEngine:
                     f"{checked[:12]})")
         return ""
 
+    def _leftover(self, wt: Path) -> str:
+        """R1/R2: uncommitted files never passed the work stage's scope check, so a check or merge never commits them."""
+        dirty = gitops.dirty_files(wt)
+        return ("uncommitted files in the task folder were never scope-checked: " + ", ".join(dirty[:5]) +
+                " (not merged): add them to .gitignore (e.g. check output) or remove them, then retry") if dirty else ""
+
     def _at(self, p, ref: str) -> tuple[str, str]:
         """(short commit `ref` points at now, `ref at commit X`) for owner/agent text (#1469: a branch name can move
         after the text was shown). ("", ref) when git cannot tell."""
@@ -561,9 +567,9 @@ class StageEngine:
                 try:
                     pre = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
                     why = self._unchecked(t, pre) if self._job(self.db.task(t["id"]) or t).get("tested_head") else ""
-                    if why:                                         # e.g. moved after a review: never rebind
-                        return ("stop", "blocked", why + ": not checked")
-                    gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                    why = f"{why}: not checked" if why else self._leftover(wt)  # moved after a review / unscoped files
+                    if why:
+                        return ("stop", "blocked", why)
                     conflicts = gitops.merge_in(wt, base)
                 except gitops.GitError as e:
                     return ("stop", "failed", f"merge failed: {clean(e, 200)}")
@@ -608,7 +614,9 @@ class StageEngine:
             if self._stopped(t, cancel):
                 return ("end",)
             try:
-                gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                why = self._leftover(wt)                            # e.g. files the check wrote: named, not folded in
+                if why:
+                    return ("stop", "blocked", why)
                 tip = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
                 why = "" if approved and tip == approved else self._unchecked(t, tip)   # #1461; approved: your call
                 if why:
@@ -697,6 +705,22 @@ class StageEngine:
         return f" (commit {head[:12]}" + (f"; uncommitted: {', '.join(dirty[:5])}" + (" ..." if len(dirty) > 5 else "")
                                           if dirty else "") + ")"
 
+    def _unchecked_note(self, t) -> str:
+        """R3: a merge yes on content other than the checked commit is your call; say what no check or scope check saw."""
+        checked = self._job(t).get("tested_head") or ""
+        if not checked or not t["worktree"] or not Path(t["worktree"]).exists():
+            return ""
+        try:
+            changed = gitops.dirty_files(Path(t["worktree"]), checked)
+        except gitops.GitError:
+            return f"; could not compare with the checked commit {checked[:12]}"
+        if not changed:
+            return ""
+        prot, outside = gitops.violations(changed, t["scope"])
+        return (f"; NOT the checked commit {checked[:12]}, changed since: {', '.join(changed[:5])}" +
+                (f"; outside the task scope: {', '.join(outside[:5])}" if outside else "") +
+                (f"; protected: {', '.join(prot[:5])}" if prot else ""))
+
     def _bind_answer(self, p, t, st, i, stages) -> tuple[str, str]:
         """The owner said yes to a review/test/verify/merge question. Review/test/verify cover the checked commit only:
         the folder must be exactly that commit, the one the question showed, else the task blocks (BLOCKED, why).
@@ -741,7 +765,7 @@ class StageEngine:
                 head, dirty = self._tree(t)
                 if dirty or (appr.get("tree") and appr["tree"] != head):
                     return ("park", f"the code changed after your approval: approve merging task #{t['seq']}"
-                                    f"{self._shown(t)} again")
+                                    f"{self._shown(t)} again{self._unchecked_note(t)}")
                 return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event(),
                                       approved=appr.get("tree") or "")
             if kind == "work":
@@ -781,7 +805,7 @@ class StageEngine:
                       "fail",
             "review": f"review task #{t['seq']}{shown}: git -C \"{where}\" diff {sha or base}...{head or 'HEAD'} "
                       f"({at}), then approve or reject with what to change",
-            "merge": f"approve merging task #{t['seq']}{shown} into {at}",
+            "merge": f"approve merging task #{t['seq']}{shown} into {at}{self._unchecked_note(t)}",
             "release": f"release {p['name']} yourself, then say done",
             "gate": st.get("question") or f"approve to continue task #{t['seq']}",
             "debate": "decide this question yourself and answer with your decision",
@@ -815,7 +839,7 @@ class StageEngine:
             code, again = self._bind_answer(p, t, st, i, stages)
             if code == "BLOCKED":
                 self._fail(t, "blocked", again, p)
-                return self._res(False, "CHANGED", f"task #{t['seq']} blocked: {again}")
+                return self._res(False, "BLOCKED", f"task #{t['seq']} blocked: {again}")
             if again:
                 self.db.update_task(t["id"], waiting=clean(again, 400))
                 return self._res(False, "CHANGED", f"task #{t['seq']} changed since the question, so your answer does "

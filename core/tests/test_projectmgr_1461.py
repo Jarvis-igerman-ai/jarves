@@ -60,7 +60,7 @@ def test_a_review_answer_does_not_cover_a_commit_made_after_the_question(env):
     before = _rev(_integration(home))
     _sibling_moves(home, repo, t)
     r = m.call("answer", project="demo", task=1, answer="approve")
-    assert not r["ok"] and r["code"] == "CHANGED", r
+    assert not r["ok"] and r["code"] == "BLOCKED", r                   # not the re-ask code CHANGED (round 4 R4)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "blocked" and "changed after the check" in t["reason"], t
     finish(m)
@@ -223,3 +223,40 @@ def test_owner_merge_question_names_the_commits(env):
     t = _start(m, repo, "work merge:owner", check=None)
     assert f"approve merging task #1 (commit {_rev(Path(t['worktree']))[:12]})" in t["waiting"], t
     assert f"at commit {_rev(_integration(home))[:12]}" in t["waiting"]
+
+
+def test_files_written_after_the_scope_check_are_never_checked_or_merged(env, monkeypatch):
+    """Round 4 R1: the check stage must not commit (and so bind) files no scope check saw, e.g. a protected path."""
+    m, repo, home = env
+    real = m._st_check
+
+    def write_first(p, t, *a, **k):
+        (Path(t["worktree"]) / ".github").mkdir(exist_ok=True)
+        (Path(t["worktree"]) / ".github" / "x.yml").write_text("on: push\n")
+        return real(p, t, *a, **k)
+    monkeypatch.setattr(m, "_st_check", write_first)
+    t = _run(m, repo, "work test merge")
+    assert t["status"] == "blocked" and "never scope-checked" in t["reason"] and ".github/x.yml" in t["reason"], t
+    assert not (_integration(home) / ".github" / "x.yml").exists() and not (_integration(home) / "a.txt").exists()
+
+
+def test_files_the_check_leaves_are_named_at_the_merge(env):
+    """Round 4 R2: check output that is not gitignored blocks the merge by name, with the remedy."""
+    m, repo, home = env
+    t = _run(m, repo, "work test merge", check=[sys.executable, "-c", "open('coverage.out', 'w').write('x')"])
+    assert t["status"] == "blocked" and "coverage.out" in t["reason"] and ".gitignore" in t["reason"], t
+    assert not (_integration(home) / "a.txt").exists()
+
+
+def test_a_merge_question_on_unchecked_content_says_so(env):
+    """Round 4 R3: your merge yes on other content than the checked commit is your call: the question names it."""
+    m, repo, home = env
+    t = _start(m, repo, "work test merge:owner")
+    checked = m.db.by_seq(1, 1)["job"]["tested_head"]
+    assert "NOT the checked commit" not in t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    (Path(t["worktree"]) / "b.txt").write_text("out of scope\n")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and f"NOT the checked commit {checked[:12]}" in t["waiting"], t
+    assert "outside the task scope: b.txt" in t["waiting"]
