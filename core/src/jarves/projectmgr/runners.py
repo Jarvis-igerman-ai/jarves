@@ -103,10 +103,10 @@ class Runner:
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
-        with gitops.config_guard(cwd) as guard:        # #1592: agent-run code may not change the shared git config
+        with gitops.config_guard(cwd) as guard:        # #1592: agent-run code may not change git config
             r = self._spawn(spec, cwd, timeout, on_start, cancel)
         if guard["changed"]:
-            return Result(error="the agent changed the shared git config and the run was rejected (#1592)"
+            return Result(error="the agent changed a git config file and the run was rejected (#1592)"
                           + gitops.guard_note(guard))
         return r
 

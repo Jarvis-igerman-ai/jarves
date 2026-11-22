@@ -268,7 +268,7 @@ def test_a_check_command_that_writes_the_shared_git_config_is_rejected_and_undon
     before = cfg.read_bytes()
     argv = [sys.executable, "-c", f"open({str(cfg)!r}, 'a').write({PLANT!r})"]
     ok, out = gitops.run_check(repo, argv)
-    assert not ok and "shared git config" in out
+    assert not ok and "git config file" in out
     assert cfg.read_bytes() == before
     kept = out.split("kept in ", 1)[1].split()[0]                 # R2: the replaced content is kept and named
     assert Path(kept).read_bytes() == before + PLANT.encode()
@@ -310,7 +310,7 @@ def test_an_agent_run_that_writes_the_shared_git_config_is_rejected_and_undone(t
             return runners.Result(ok=rc == 0, text="done")
 
     r = Planter().run("x", str(repo))
-    assert not r.ok and "shared git config" in r.error
+    assert not r.ok and "git config file" in r.error
     assert cfg.read_bytes() == before
 
 
@@ -357,3 +357,43 @@ def test_a_config_that_cannot_be_restored_stops_git_and_leaves_no_temp_file(tmp_
             gitops.git(repo, "status")
     assert guard["unrestored"] and "could NOT be restored" in gitops.guard_note(guard) and not gitops._GUARDS
     assert not list((repo / ".git").glob("config.jarves-*.tmp"))
+
+
+def test_a_planted_global_git_config_is_removed_and_the_check_fails(tmp_path, monkeypatch):
+    """#1592 review R1: the check runs as the owner's user and can write ~/.gitconfig (a global filter runs on the
+    next git call); the guard covers the global and XDG config files too."""
+    import sys
+    repo = _repo(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    glob = home / ".gitconfig"
+    argv = [sys.executable, "-c", f"open({str(glob)!r}, 'w').write({PLANT!r})"]
+    ok, out = gitops.run_check(repo, argv)
+    assert not ok and "git config file" in out and not glob.exists()
+    assert (Path(out.split("kept in ", 1)[1].split()[0])).read_text() == PLANT
+
+
+def test_a_rewritten_worktree_pointer_is_restored(tmp_path):
+    """#1592 review R1: rewriting the worktree's `.git` file would point later git calls at an unguarded config."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "b1", str(wt), "main")
+    gitfile = wt / ".git"
+    before = gitfile.read_bytes()
+    with gitops.config_guard(wt) as guard:
+        gitfile.write_text(f"gitdir: {tmp_path / 'elsewhere'}\n")
+    assert guard["changed"] and gitfile.read_bytes() == before
+
+
+def test_jarves_worktree_and_branch_calls_write_no_config_during_a_run(tmp_path):
+    """#1592 review R3: JARVES's own git calls during another task's run do not change the config, even with
+    branch.autoSetupMerge=always, so no run is falsely rejected."""
+    repo = _repo(tmp_path)
+    gitops.git(repo, "config", "branch.autoSetupMerge", "always")
+    with gitops.config_guard(repo) as guard:
+        wt = tmp_path / "projects" / "wt2"
+        gitops.git(repo, "worktree", "add", "-b", "b2", str(wt), "main")
+        gitops.remove_worktree(str(repo), wt, "b2")
+    assert not guard["changed"]

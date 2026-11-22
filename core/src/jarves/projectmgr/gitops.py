@@ -1,7 +1,8 @@
 """Git for the project manager. Every JARVES worktree lives under `<home>/projects/<id>/` (never inside the owner's
 repository, so tests/linters at the repo root never see them and agents do not inherit the owner's CLAUDE.md of a parent
 folder). The owner's checkout is never touched: the integration branch `jarves/p<ID>/integration` has its own worktree,
-merges are fast-forward only after the check ran on the merged result. JARVES never pushes."""
+merges are fast-forward only after the check ran on the merged result. Nothing here pushes on its own; the only push is
+`forge.push_branch` (GitHub write mode), which runs through `git()`."""
 from __future__ import annotations
 
 import contextlib
@@ -71,27 +72,31 @@ def _no_hooks_path() -> str:
 
 
 NO_HOOKS = _no_hooks_path()
+# #1592 review R3: JARVES's own git calls must not write config while a guarded run is active (it would be reverted and
+# every active run rejected): no upstream tracking on `worktree add -b` (branch.<n>.* entries) and no relative-worktree
+# format bump (extensions.relativeWorktrees, newer git). Unknown keys are ignored by older git.
+CONFIG_PINS = ["-c", "branch.autoSetupMerge=false", "-c", "worktree.useRelativePaths=false"]
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    config-defined hooks (`hook.<name>.command`, newer git) are not covered here. env: extra variables (forge's push)."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *CONFIG_PINS]
     if _GUARDS and not check_guards():    # #1592: never read an entry a running agent or check planted
-        p = subprocess.CompletedProcess(["git", *args], 1, "", "the shared git config was changed and could not be "
+        p = subprocess.CompletedProcess(["git", *args], 1, "", "a git config file was changed and could not be "
                                         "restored: git not run")
         if check:
             raise GitError(p.stderr)
         return p
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **(env or {})}), encoding="utf-8",
                            errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
@@ -101,43 +106,63 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     return p
 
 
-# #1592: agent-written code (the agent, its tests, the check command) runs as the owner's user and can write the
-# repository's shared `.git/config` (a `filter.<n>.clean` entry runs a command on the next JARVES or owner git call).
-# While such code runs, the config is guarded: a copy taken when the run starts; every JARVES git call and the end of the
-# run compare and restore it, and the run is rejected. Every run active on that repository is rejected, because the
-# writer cannot be told apart. Limits: not an OS sandbox (a process the run leaves behind can still write after it ends;
-# the owner's own git can read a planted entry during a run). ANY change during a run is reverted, the owner's own
-# `git config`/`git remote set-url` included: the replaced content is kept next to the config in
-# `config.jarves-rejected-*/config`, named in the rejection and in a PROJECT_GIT_CONFIG_RESTORED log line.
-_GUARDS: dict[str, dict] = {}            # config path -> {"data": trusted bytes, "runs": [state dicts]}
+# #1592: agent-written code (the agent, its tests, the check command) runs as the owner's user and can write git config
+# that git reads: the repository's shared `.git/config`, the owner's global `~/.gitconfig` and XDG `git/config` (a
+# `filter.<n>.clean` entry runs a command on the next JARVES or owner git call), and the worktree's `.git` pointer and
+# `commondir`/`gitdir` files (they would point later git calls at another, unguarded config). While such code runs these
+# files are guarded: a copy (or "absent") taken when the run starts; every JARVES git call and the end of the run
+# compare and restore them, and the run is rejected. Every run active on that file is rejected, because the writer
+# cannot be told apart. Limits: not an OS sandbox (a process the run leaves behind can still write after it ends; the
+# owner's own git can read a planted entry during a run; the system config and an owner-set GIT_CONFIG_GLOBAL are not
+# guarded). ANY change during a run is reverted, the owner's own `git config`/`git remote set-url` included: the
+# replaced content is kept next to the file in `<name>.jarves-rejected-*/<name>`, named in the rejection and in a
+# PROJECT_GIT_CONFIG_RESTORED log line. JARVES's own git calls write no config (CONFIG_PINS).
+_GUARDS: dict[str, dict] = {}            # file path -> {"data": trusted bytes or None (absent), "runs": [state dicts]}
 _GUARDS_LOCK = threading.RLock()
 
 
-def _shared_config(wt: str | Path) -> Path | None:
-    p = git(wt, "rev-parse", "--git-common-dir", check=False)
-    common = p.stdout.strip()
-    return (Path(wt) / common).resolve() / "config" if p.returncode == 0 and common else None
+def _global_configs() -> list[Path]:
+    """The global config files git reads for JARVES's children (child_env keeps HOME/XDG_CONFIG_HOME, drops
+    GIT_CONFIG_GLOBAL)."""
+    home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    return [home / ".gitconfig", xdg / "git" / "config"]
 
 
-def _keep_rejected(path: Path) -> str:
-    """Move or copy what replaced the trusted config into a fresh `config.jarves-rejected-*` folder (R2: nothing is
-    lost). A folder in place of the file is moved aside so the config can be written again. '' when nothing was there."""
-    side = Path(tempfile.mkdtemp(prefix="config.jarves-rejected-", dir=path.parent))
-    if path.is_dir() and not path.is_symlink():
-        os.replace(path, side / "config")
-    elif os.path.lexists(path):
+def _guarded_files(wt: str | Path) -> list[Path]:
+    """Every file `config_guard` watches for the repository at `wt`; [] when `wt` is not a git repository."""
+    p = git(wt, "rev-parse", "--git-common-dir", "--git-dir", check=False)
+    lines = p.stdout.split("\n")
+    if p.returncode != 0 or len(lines) < 2 or not lines[0].strip():
+        return []
+    common, gdir = ((Path(wt) / x.strip()).resolve() for x in lines[:2])
+    files = [common / "config", *_global_configs()]
+    if gdir != common:                     # a linked worktree: its pointer files
+        files += [Path(wt) / ".git", gdir / "commondir", gdir / "gitdir"]
+    return files
+
+
+def _keep_rejected(path: Path, move: bool = False) -> str:
+    """Move (a folder, or move=True) or copy what replaced the trusted file into a fresh `<name>.jarves-rejected-*`
+    folder (nothing is lost). '' when nothing was there."""
+    if not os.path.lexists(path):
+        return ""
+    side = Path(tempfile.mkdtemp(prefix=f"{path.name}.jarves-rejected-", dir=path.parent))
+    if move or (path.is_dir() and not path.is_symlink()):
+        os.replace(path, side / path.name)
+    else:
         try:
-            shutil.copyfile(path, side / "config")
+            shutil.copyfile(path, side / path.name)
         except OSError:                   # a dangling or unreadable link: the link itself is replaced below
             pass
     if not any(side.iterdir()):
         side.rmdir()
         return ""
-    return str(side / "config")
+    return str(side / path.name)
 
 
 def _restore(path: Path, data: bytes) -> None:
-    fd, tmp = tempfile.mkstemp(prefix="config.jarves-", suffix=".tmp", dir=path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=f"{path.name}.jarves-", suffix=".tmp", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -146,6 +171,13 @@ def _restore(path: Path, data: bytes) -> None:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+
+
+def _read(path: Path) -> bytes | None:
+    """The file's bytes, None when absent; raises OSError when it exists but cannot be read as a file."""
+    if not os.path.lexists(path):
+        return None
+    return path.read_bytes()
 
 
 def check_guards() -> bool:
@@ -157,18 +189,19 @@ def check_guards() -> bool:
         for key, g in _GUARDS.items():
             path = Path(key)
             try:
-                if path.read_bytes() == g["data"]:
+                if _read(path) == g["data"]:
                     continue
-            except OSError:               # missing, a folder, locked on Windows: changed
+            except OSError:               # a folder, locked on Windows: changed
                 pass
             kept, err = "", ""
             try:
-                kept = _keep_rejected(path)
-                _restore(path, g["data"])
+                kept = _keep_rejected(path, move=g["data"] is None)
+                if g["data"] is not None:
+                    _restore(path, g["data"])
             except OSError as e:
                 err = str(e)[:200]
                 safe = False
-            logs.warn("projects", "PROJECT_GIT_CONFIG_RESTORED", "shared git config changed during an agent run",
+            logs.warn("projects", "PROJECT_GIT_CONFIG_RESTORED", "git config changed during an agent run",
                       path=key, backup=kept, ok=not err, error=err)
             for st in g["runs"]:
                 st["changed"] = True
@@ -186,25 +219,27 @@ def guard_note(state: dict) -> str:
 
 @contextlib.contextmanager
 def config_guard(wt: str | Path):
-    """Guard the shared git config of the repository at `wt` while agent-written code runs. Yields a dict whose
+    """Guard the git config files of the repository at `wt` (`_guarded_files`) while agent-written code runs. Yields a dict whose
     "changed" is True after the block when the config was changed (it is already restored). Not a repository: no-op."""
     state = {"changed": False}
     try:
-        path = _shared_config(wt)
+        files = _guarded_files(wt)
     except (OSError, subprocess.SubprocessError):
-        path = None
-    try:
-        data = path.read_bytes() if path is not None and path.is_file() else None
-    except OSError:
-        data = None
-    if data is None:
+        files = []
+    snap: dict[str, bytes | None] = {}
+    for f in files:
+        try:
+            snap[str(f)] = _read(f)
+        except OSError:                   # unreadable now (a folder): nothing trusted to restore
+            continue
+    if not files:
         yield state
         return
-    key = str(path)
     with _GUARDS_LOCK:
         check_guards()
-        g = _GUARDS.setdefault(key, {"data": data, "runs": []})
-        g["runs"].append(state)
+        held = [_GUARDS.setdefault(k, {"data": d, "runs": []}) for k, d in snap.items()]
+        for g in held:
+            g["runs"].append(state)
     try:
         yield state
     finally:
@@ -212,9 +247,10 @@ def config_guard(wt: str | Path):
             try:
                 check_guards()
             finally:
-                g["runs"].remove(state)
-                if not g["runs"]:
-                    del _GUARDS[key]
+                for k, g in zip(snap, held):
+                    g["runs"].remove(state)
+                    if not g["runs"]:
+                        del _GUARDS[k]
 
 
 def is_repo(path: str) -> bool:
@@ -391,7 +427,7 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         except OSError as e:
             return False, f"check could not start: {e}"
     if guard["changed"]:
-        return False, "the check changed the shared git config and failed (#1592)" + \
+        return False, "the check changed a git config file and failed (#1592)" + \
             guard_note(guard)
     if p is None:
         return False, "check timed out"

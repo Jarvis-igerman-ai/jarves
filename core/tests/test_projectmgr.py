@@ -1361,16 +1361,25 @@ def test_push_ignores_url_rewrites_in_the_shared_git_config(tmp_path, monkeypatc
     for key in ("insteadOf", "pushInsteadOf"):
         sh(repo, "git", "config", f"url.{evil.as_uri()}.{key}", base + "o/r.git")
     sh(repo, "git", "config", "http.sslVerify", "false")
+    home = tmp_path / "home"                                   # review R1: a planted GLOBAL rewrite as well
+    (home / ".config" / "git").mkdir(parents=True)
+    for f in (home / ".gitconfig", home / ".config" / "git" / "config"):
+        f.write_text(f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {base}\n\tinsteadOf = {base}\n')
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
     seen: list = []
     real_git = forge.gitops.git
 
     def spy(cwd, *args, **kw):
-        if args[:1] == ("push",):                               # what the pushing repository can see
-            seen.append(real_git(cwd, "config", "--list", "--show-scope", check=False).stdout)
+        if "push" in args:                                      # what the pushing git can see, same options/env
+            pre = args[:args.index("push")]
+            seen.append(real_git(cwd, *pre, "config", "--list", "--show-scope", check=False, env=kw.get("env")).stdout)
         return real_git(cwd, *args, **kw)
     monkeypatch.setattr(forge.gitops, "git", spy)
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
-    assert seen and not any(k in seen[0].lower() for k in ("sslverify", "insteadof", "remote.origin"))
+    assert seen and not any(k in seen[0].lower() for k in ("insteadof", "remote.origin", "sslverify=false"))
+    assert "credential.helper=!'gh' auth git-credential" in seen[0] and "sslverify=true" in seen[0].lower()
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
     assert not sh(evil, "git", "branch", "--list").strip()
     with pytest.raises(forge.ForgeError):
