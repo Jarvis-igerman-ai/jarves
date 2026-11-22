@@ -9,7 +9,7 @@ import pytest
 
 from jarves import dashboard, logs, mobile
 from jarves.config import Config
-from jarves.preferences import Preferences
+from jarves.preferences import PrefConflict, Preferences
 from jarves.userdata import open_db
 
 HOST = "192.168.50.7"
@@ -91,8 +91,11 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     st, v = call(srv, "GET", "/api/m/prefs", tok)
     assert st == 200 and [x["id"] for x in v["items"]] == [a] and [x["id"] for x in v["proposed"]] == [b]
     assert v["in_prompt"] is True and "music" in v["topics"]
-    assert op(srv, tok, op="confirm", pref=b)[1]["state"] == "confirmed"
-    assert op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")[0] == 200
+    assert op(srv, tok, op="confirm", pref=b, text="Play jazz while cooking")[1]["state"] == "confirmed"
+    st, out = op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")
+    assert st == 200 and out["state"] == "proposed"                                    # #206 H2: new words need a new confirm
+    assert p.get(a)["state"] == "proposed" and op(srv, tok, op="confirm", pref=a,
+                                                  text="I like very short answers in the morning")[1]["state"] == "confirmed"
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
     assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True
@@ -100,6 +103,18 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     _, v = call(srv, "GET", "/api/m/prefs", tok)
     assert v["items"] == [] and [x["id"] for x in v["declined"]] == [b]
     assert p.get(a) is None
+
+
+def test_206_h2_edit_of_a_missing_or_vanishing_pref_is_404_not_500(srv, prefs, monkeypatch):
+    p, a, _b = prefs
+    tok, _ = pair(srv)
+    assert op(srv, tok, op="edit", pref=9999, text="anything at all")[0] == 404
+    monkeypatch.setattr(Preferences, "edit", lambda self, *x, **k: (_ for _ in ()).throw(KeyError(a)))  # removed meanwhile
+    st, out = op(srv, tok, op="edit", pref=a, text="I like long answers")
+    assert st == 404 and out["error"] == "no such preference"
+    monkeypatch.setattr(Preferences, "edit", lambda self, *x, **k: (_ for _ in ()).throw(PrefConflict(a)))  # kept changing
+    st, out = op(srv, tok, op="edit", pref=a, text="I like long answers")
+    assert st == 409 and out["code"] == "PREF_CONFLICT"
 
 
 def test_the_same_rules_as_the_desktop(srv, prefs):
@@ -136,7 +151,7 @@ def test_privacy_mode_keeps_no_text_in_the_audit_the_ledger_or_the_logs(srv, pre
     assert v["privacy"] is True
     assert [x["text"] for x in v["items"]] == ["I like short answers in the morning"]     # the owner's phone sees it
     op(srv, tok, op="edit", pref=a, text="Brief answers please, every morning")
-    op(srv, tok, op="confirm", pref=b)
+    op(srv, tok, op="confirm", pref=b, text="Play jazz while cooking")
     audit = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
     assert "Brief answers" not in audit and "jazz" not in audit and '"pref"' in audit
     ledger = srv.mobile.cont._rows("SELECT body FROM ledger")

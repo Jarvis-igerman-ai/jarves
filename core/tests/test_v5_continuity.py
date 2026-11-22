@@ -365,6 +365,20 @@ def test_goal_actions_need_the_tasks_scope_and_run_once(srv, fake):
     assert call(srv, "POST", "/api/m/goals/op", tok, {"op": "status", "goal": 9, "status": "paused", "id": "goal-00000003"})[0] == 404
 
 
+def test_206_f13_privacy_mode_goal_ledger_keeps_ids_not_the_title_or_step_text(srv, fake, monkeypatch):
+    from jarves import logs
+    tok, _ = pair(srv, scopes=["chat", "status", "tasks"])
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    body = {"op": "status", "goal": 1, "status": "paused", "id": "goal-00000f13"}
+    st, live = call(srv, "POST", "/api/m/goals/op", tok, body)
+    assert st == 200 and live["goal"]["title"] == "Run 5k"                    # the live answer is whole
+    rows = srv.mobile.cont._rows("SELECT body FROM ledger WHERE kind='goal'")
+    assert rows and not any("Run 5k" in r["body"] or "week 1" in r["body"] for r in rows)
+    st, again = call(srv, "POST", "/api/m/goals/op", tok, body)
+    assert st == 200 and again["replay"] is True and again["goal"]["id"] == 1 and again["goal"]["steps"] == [{"id": 3, "done": False}]
+    assert fake.goals.calls == [("status", 1, "paused", "phone")]
+
+
 def test_sync_shows_the_desktop_turn_the_note_and_ack_clears_it(srv, fake):
     tok, dev = pair(srv, scopes=["chat", "status", "tasks"])
     c = srv.mobile.cont
