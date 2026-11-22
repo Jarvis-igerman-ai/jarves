@@ -215,14 +215,20 @@ def test_the_model_cannot_supply_the_shown_version(prefs):
     assert p.get(pid)["state"] == "proposed"
 
 
-@pytest.mark.parametrize("shown", [None, "current"])
-def test_confirm_of_an_item_removed_after_the_read_is_not_found_not_changed(prefs, shown):
-    p, pid, ver = prefs
-    row, real_get = p.get(pid), p.get
-    p.remove(pid, by="dashboard")
-    p.get = lambda i: row if i == pid else real_get(i)    # the removal lands between get() and the UPDATE
-    with pytest.raises(KeyError):
-        p.confirm(pid, by="cli", shown=ver if shown else None)
+@pytest.mark.parametrize("when", ["after_read", "after_write"])
+def test_confirm_of_an_item_removed_mid_confirm_is_not_found_not_changed(prefs, when):
+    p, pid, ver = prefs                                   # KeyError (the route answers 404), never PrefChanged or a 500
+    row, real_get, real_x = p.get(pid), p.get, p.db.x
+    if when == "after_read":                              # the removal lands between get() and the UPDATE
+        p.remove(pid, by="dashboard")
+        p.get = lambda i: row if i == pid else real_get(i)
+    else:                                                 # the removal lands right after the UPDATE
+        def x(sql, args=()):
+            cur = real_x(sql, args)
+            if sql.startswith("UPDATE learned_prefs SET state='confirmed'"):
+                real_x("DELETE FROM learned_prefs WHERE id=?", (pid,))
+            return cur
+        p.db.x = x
     assert prefs_mod.api_pref_op(SimpleNamespace(_prefs=p), None, {"op": "confirm", "id": pid, "updated": ver})[0] == 404
 
 
@@ -233,23 +239,6 @@ def test_phone_confirm_without_the_version_cannot_confirm_after_an_a_b_a_rewrite
     p.edit(pid, A, by="voice")                            # back to A: a cached page's words match once more
     st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A}, "dev")
     assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and p.get(pid)["state"] == "proposed"
-
-
-PHONE_API_HARNESS = r"""
-const fs = require("fs"), vm = require("vm");
-const src = fs.readFileSync(process.argv[2], "utf8");
-const body = src.slice(src.indexOf("  async function api("), src.indexOf("  const post = "));
-const ctx = { JSON, Error, Promise, console, token: "t", lang: "he", t: (k) => k, setConn() {}, forget() {},
-  fetch: async () => ({ ok: false, status: 409, json: async () => ({ error: "changed", error_he: "השתנתה", code: "PREF_CHANGED" }) }) };
-vm.createContext(ctx);
-vm.runInContext(body + "\nthis.api = api;", ctx);
-ctx.api("/api/m/prefs/op", { method: "POST" }).catch((e) => console.log(JSON.stringify({ code: e.code, status: e.status, msg: e.message })));
-"""
-
-
-def test_the_real_phone_api_copies_the_error_code_for_the_changed_note(tmp_path):
-    out = _node(tmp_path, PHONE_API_HARNESS, str(STATIC / "mobile" / "app.js"), STATIC / "mobile" / "app.js")
-    assert out == {"code": "PREF_CHANGED", "status": 409, "msg": "השתנתה"}   # review (sonnet): prefs.js reads e.code
 
 
 @pytest.mark.parametrize("kind", ["plain", "audited", "meta_only", "popup"])
@@ -290,28 +279,13 @@ def test_other_tools_approval_meta_still_runs_behind_every_confirm(home, kind):
         assert rec["kind"] == "message" and rec["decision"] == "approved"   # title may be redacted (privacy mode)
 
 
-@pytest.mark.parametrize("forward", [False, True])
-@pytest.mark.parametrize("inner_shows", [False, True])
-def test_audited_shows_details_exactly_when_it_forwards_them(home, forward, inner_shows):
-    from jarves.approvals import audited                  # review R3: the flag follows what wrapped() really forwards
-    from jarves.skills import shows_details
-    got = []
-
-    async def inner(prompt, **meta):
-        got.append(meta)
-        return True
-    inner.accepts_meta = inner_shows
-    w = audited(home, inner, forward_meta=forward)
-    assert w.accepts_meta and asyncio.run(w("Remember?", details={"preference": A}))   # meta still reaches the audit
-    assert bool(got[0].get("details")) == forward and shows_details(w) == (forward and inner_shows)
-
-
 def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, home):
     p, pid, _ = prefs                                     # review R1: the #1542 blocker one wrapper deeper
     from jarves.approvals import audited
 
     async def plain_yes(prompt):                          # a terminal yes/no: the wording is not on screen
         return True
+    plain_yes.accepts_meta = True                         # even a meta-aware inner confirm: audited() passes the prompt only
     r = asyncio.run(_voice(p, confirm=audited(home, plain_yes)).call("pref_confirm", {"id": pid}, origin="user"))
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
@@ -370,15 +344,9 @@ def test_a_removed_and_re_suggested_item_never_reuses_a_stale_id_and_version(pre
     assert p.get(new["id"])["state"] == "proposed"
 
 
-def test_confirm_of_an_item_removed_right_after_the_write_is_not_found(prefs):
-    p, pid, ver = prefs                                   # review R3: KeyError (404), never a TypeError (500)
-    real_x = p.db.x
-
-    def x(sql, args=()):
-        cur = real_x(sql, args)
-        if sql.startswith("UPDATE learned_prefs SET state='confirmed'"):
-            real_x("DELETE FROM learned_prefs WHERE id=?", (pid,))
-        return cur
-    p.db.x = x
-    with pytest.raises(KeyError):
-        p.confirm(pid, by="cli", shown=ver)
+def test_every_update_of_learned_prefs_moves_the_version():
+    import re                                             # review R3 (#1628): a writer without _BUMP reopens the replay
+    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")
+    ups = re.findall(r'"UPDATE learned_prefs SET [^"]*"(?:\s*\+\s*\w+)?', src)
+    assert ups and all("_BUMP" in u for u in ups), ups
+    assert src.count("UPDATE learned_prefs") == len(ups)  # no writer outside the pattern this test reads

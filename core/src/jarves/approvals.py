@@ -773,16 +773,12 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
     return True, ""
 
 
-def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: str = "terminal",
-            forward_meta: bool = False):
-    """Wrap a terminal-only confirm (jarvis execute, `jarvis calendar/mail`) so its decisions reach the same audit.
-    `forward_meta` (#1514): also pass meta to `confirm`; off by default, so a terminal confirm gets the prompt only.
-    No caller enables it yet (the CLI confirm path is #1550); it keeps `shows_details` derived from what is forwarded."""
-
+def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: str = "terminal"):
+    """Wrap a terminal-only confirm (jarvis execute, `jarvis calendar/mail`) so its decisions reach the same audit."""
     async def wrapped(prompt: str, **meta) -> bool:
         t0 = time.time()
         try:
-            ok = bool(await (confirm(prompt, **meta) if forward_meta else confirm(prompt)))
+            ok = bool(await confirm(prompt))
         except Exception:
             ok = False
         title = meta.get("title") or (prompt.splitlines()[0] if prompt else "")
@@ -795,9 +791,7 @@ def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: s
         append_audit(Path(home) / "approvals" / "audit.jsonl", rec)
         return ok
     wrapped.accepts_meta = True                 # meta reaches the audit record above
-    # #1514: derived from what wrapped() forwards: details reach the owner only when meta reaches a confirm that shows it
-    from .skills import shows_details           # lazy: skills imports approvals lazily too
-    wrapped.shows_details = forward_meta and shows_details(confirm)
+    wrapped.shows_details = False               # #1514: `confirm` gets the prompt only, never the details
     return wrapped
 
 
