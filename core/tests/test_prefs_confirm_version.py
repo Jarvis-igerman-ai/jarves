@@ -319,8 +319,42 @@ def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, h
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
 
-def test_every_learned_prefs_update_moves_the_version_forward():
-    import re                                             # review R3: no UPDATE may set `updated` from the clock alone
-    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")
-    updates = re.findall(r'"UPDATE learned_prefs SET[^"]*"(?:\s*\+\s*_BUMP)?', src)
-    assert updates and all("_BUMP" in u for u in updates) and "updated=?" not in src.replace("AND updated=?", "")
+@pytest.mark.parametrize("op", ["confirm", "decline", "reaffirm", "edit", "edit_repropose"])
+def test_each_write_alone_moves_the_version_forward_within_one_clock_tick(prefs, op):
+    p, pid, v0 = prefs                                    # review R2: behavioural, one write op at a time, frozen clock
+    p.confirm(pid, by="phone", shown=v0)                  # confirmed, so reaffirm and repropose have something to do
+    v1 = p.get(pid)["updated"]
+    assert v1 > v0
+    {"confirm": lambda: p.confirm(pid, by="phone"), "decline": lambda: p.decline(pid, by="phone"),
+     "reaffirm": lambda: p.reaffirm(pid, by="phone"), "edit": lambda: p.edit(pid, B, by="dashboard"),
+     "edit_repropose": lambda: _edit_to_b(p, pid)}[op]()
+    assert p.get(pid)["updated"] > v1
+    with pytest.raises(PrefChanged):
+        p.confirm(pid, by="phone", shown=v1)
+
+
+def test_voice_confirm_of_an_item_removed_during_the_popup_is_not_found(prefs):
+    p, pid, _ = prefs                                     # review R3: KeyError from confirm() becomes PREF_NOT_FOUND
+    row, real_get = p.get(pid), p.get
+    p.get = lambda i: row if i == pid else real_get(i)    # handler and popup still see the row...
+    r = asyncio.run(_voice(p, lambda: p.remove(pid, by="dashboard")).call("pref_confirm", {"id": pid}, origin="user"))
+    assert not r.ok and r.code == "PREF_NOT_FOUND" and real_get(pid) is None   # ...the removal lands before the UPDATE
+
+
+def test_the_live_core_registry_confirm_shows_the_details(cfg, home):
+    from conftest import FakeSTT, FakeTTS                 # review R1: the production wiring, not just the class method
+    from jarves.app import Core
+    from jarves.skills import shows_details
+    from jarves.skills.music import FakePlayer
+    from jarves.voice.audio import SimAudio
+
+    async def run():
+        core = Core(cfg, home, audio=SimAudio(), stt=FakeSTT(), tts=FakeTTS(), player=FakePlayer(),
+                    console_logs=False, use_real_audio=False)
+        await core.start()
+        try:
+            assert "pref_confirm" in core.registry._tools       # the voice tool lives in this very registry
+            assert core.registry.confirm == core.ask_confirm and shows_details(core.registry.confirm)
+        finally:
+            await core.stop()
+    asyncio.run(run())

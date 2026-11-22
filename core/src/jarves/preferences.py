@@ -344,6 +344,8 @@ def make_skill(prefs: Preferences):
                     r = prefs.confirm(a.id, by="voice", shown=a._shown)
                 except PrefChanged as e:
                     return ToolResult(False, str(e), code=PrefChanged.code)
+                except KeyError:              # removed between get() and the guarded UPDATE
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
                 msg = "remembered"
                 if r["conflicts"]:
                     msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])
