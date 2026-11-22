@@ -25,8 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
+from contextlib import closing
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +59,8 @@ OPEN = ("draft", "ready", "running", "paused", "blocked")
 TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
 _RECURSION = ("goal_plan_",)        # a plan never plans
+CODE_MAX = 64
+_CODE = re.compile(r"([A-Z]+(?:_[A-Z]+)+)(?::|$)")
 
 
 def _clean(text: object, n: int) -> str:
@@ -65,6 +70,12 @@ def _clean(text: object, n: int) -> str:
 def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     s = " ".join(str(text or "").split())
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _code_only(text: object) -> str:
+    """#1526: all that privacy mode keeps of an error text: its leading code (A-Z and '_', no digits), else ''."""
+    m = _CODE.match(str(text or ""))
+    return m.group(1) if m and len(m.group(1)) <= CODE_MAX else ""
 
 
 class PlanStore:
@@ -281,6 +292,41 @@ class PlanStore:
         logs.info("goals", "PLAN_DELETED", "plan deleted", id=pid, by=by)
         return True
 
+    # ------------------------------------------------------------------ privacy (#1526)
+    def scrub_private(self) -> tuple[int, int]:
+        """Blank plan text written before privacy mode was on: step evidence, plan result and note; a step error keeps
+        only its code. States are not touched. ONE transaction, freed bytes overwritten (secure_delete). Returns
+        (steps, plans) changed; a sqlite3.Error is raised after the rollback."""
+        with self.db._lock:
+            c = self.db._db
+            c.execute("PRAGMA secure_delete=ON")
+            c.execute("BEGIN IMMEDIATE")
+            try:
+                rows = c.execute("SELECT id, evidence, error FROM goal_plan_steps WHERE evidence<>'' OR error<>'' "
+                                 "ORDER BY id").fetchall()
+                n = 0
+                for r in rows:
+                    code = _code_only(r["error"])
+                    if r["evidence"] or r["error"] != code:
+                        c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (code, r["id"]))
+                        n += 1
+                plans = c.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+        return n, plans
+
+    def truncate_wal(self) -> bool:
+        """Empty memory.db-wal, which still holds the old pages. Own connection without waiting: False when busy."""
+        if self.db.path == ":memory:":
+            return True
+        try:
+            with closing(sqlite3.connect(self.db.path, timeout=0)) as w:
+                return w.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
+        except sqlite3.Error:
+            return False
+
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:
         """After a Core start: a plan that was running is paused (the checkpoint is the step table). A read-only step
@@ -374,12 +420,15 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._private: bool | str = False    # #1526: False -> scrub; "wal"/"busy" -> only the checkpoint; True -> clean
+        self._scrub_failed = False
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        self._privacy_scrub()
         if not self._on():
             return 0
         n = 0
@@ -388,6 +437,31 @@ class PlanRunner:
                 await self.run_plan(r["id"])
                 n += 1
         return n
+
+    def _privacy_scrub(self) -> None:
+        """#1526: at Core start with privacy on, or when privacy is switched on, scrub the older plan text once."""
+        if not logs.privacy():
+            self._private = False
+            return
+        if self._private is True:
+            return
+        if not self._private:
+            try:
+                steps, plans = self.store.scrub_private()
+            except sqlite3.Error as e:          # rolled back; tried again next tick, logged once until it works
+                if not self._scrub_failed:
+                    logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text: retrying",
+                              error_type=type(e).__name__)
+                self._scrub_failed = True
+                return
+            self._scrub_failed, self._private = False, "wal"
+            if steps or plans:
+                logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text removed", count=steps, changed=plans)
+        if self.store.truncate_wal():
+            self._private = True
+        elif self._private == "wal":
+            logs.warn("goals", "PLAN_PRIVACY_WAL_BUSY", "memory.db-wal still holds old plan text: retrying")
+            self._private = "busy"
 
     async def run(self, poll_s: float = 2.0) -> None:
         while not self._stop:
