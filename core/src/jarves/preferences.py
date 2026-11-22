@@ -45,8 +45,28 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
+# #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
+# digit groups, or one digit group with a seed word within ~20 chars. A single digit group on its own is allowed so
+# development words such as "base64urlencoded" or "sha256checksumfile" in drafts and plans are not refused.
+_BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
+_DIGIT_GROUP = re.compile(r"[2-7]+")
+_SEED_WORD = re.compile(r"totp|otp|seed|2fa|mfa|authenticator|מאמת|אימות|זרע|סוד", re.I)
+_SEED_NEAR = 20
+
+
+def _base32(text: str) -> bool:
+    for m in _BASE32_RUN.finditer(text):
+        groups = len(_DIGIT_GROUP.findall(m.group()))
+        if groups >= 2:
+            return True
+        if groups == 1 and _SEED_WORD.search(text[max(0, m.start() - _SEED_NEAR):m.end() + _SEED_NEAR]):
+            return True
+    return False
+
+
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    text = text or ""
+    return bool(_SENSITIVE.search(text)) or _base32(text)
 
 
 def normalize(text: str) -> str:
