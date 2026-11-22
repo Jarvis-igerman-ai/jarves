@@ -57,18 +57,15 @@ def _window_until(home: Path) -> float:
     return float(u) if isinstance(u, (int, float)) and not isinstance(u, bool) and u > time.time() else 0.0
 
 
-def scrub_plans(home: Path) -> int:
-    """Privacy just turned on: erase stored plan output text in memory.db (#1526). Best effort, never raises:
-    a locked or missing database leaves the switch working and is retried at the next Core start."""
+def scrub_plans(ctx) -> int:
+    """Privacy just turned on: erase stored plan output text in memory.db (#1526) on this dashboard's own
+    memory.db connection (userdata.ctx_db: no second connection waiting on the first one's lock). Best effort,
+    never raises: a locked database leaves the switch working; the Core's next plan tick erases the text."""
     from . import goal_plans
-    from .userdata import open_db
+    from .userdata import ctx_db
     try:
-        db = open_db(home)
-        try:
-            return goal_plans.scrub_private_text(db)
-        finally:
-            db.close()
-    except Exception as e:
+        return goal_plans.scrub_private_text(ctx_db(ctx))
+    except (sqlite3.Error, OSError) as e:
         logs.warn("privacy", "PRIVACY_PLAN_SCRUB_FAILED", "could not erase stored plan text", error=type(e).__name__)
         return 0
 
@@ -86,7 +83,7 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         if not was_private:
-            scrub_plans(ctx.home)
+            scrub_plans(ctx)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
     return state(ctx)
 
@@ -102,7 +99,7 @@ def set_privacy(ctx, on: bool) -> dict:
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     if on and not was_private:                     # #1526: only a real off -> on switch erases plan text
-        scrub_plans(ctx.home)
+        scrub_plans(ctx)
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
 
@@ -226,7 +223,7 @@ def mask_history(ctx, *, prune_backups: bool = False) -> dict:
         context_trace.mask_all(st._db)
     _secure_purge(st)
     lines = mask_logs(ctx.home)
-    scrub_plans(ctx.home)
+    scrub_plans(ctx)
     backups = _backup_residue(ctx.home, prune_backups)
     logs.info("privacy", "PRIVACY_MASKED_HISTORY", "existing history masked", turns=turns, tool_args=args,
               events=ev, log_lines=lines, index_rows=purged)

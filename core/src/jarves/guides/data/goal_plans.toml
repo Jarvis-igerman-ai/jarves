@@ -13,8 +13,8 @@ expect_he = "התוכנית נשמרת כטיוטה ולא רצה. רק אחרי
 expect_en = "The plan is saved as a draft and does not run. It starts only after you approve it on the screen. Every step that changes something asks again; read-only steps run without asking. You can pause, cancel, retry, skip and resume, also after JARVES restarts. At the end there is a short result with the evidence for each step."
 cost_he = "הצעדים עצמם חינם. יש תקרה לכל תוכנית: 30 דקות ו-20 בקשות AI כברירת מחדל, ותקרת התקציב היומי תקפה גם כן."
 cost_en = "The steps themselves are free. Each plan has caps: 30 minutes and 20 AI requests by default, and the daily budget limit still applies."
-privacy_he = "התוכניות נשמרות רק במחשב ונכללות בגיבוי. טקסט שנכתב על ידי אחרים (דואר, יומן) לא יכול להפעיל צעד: אחרי קריאה כזו כל צעד שמשנה משהו נחסם עד שתמשיך בעצמך."
-privacy_en = "Plans stay on this computer and are included in the backup. Text written by others (mail, calendar) can never trigger a step: after reading it, any step that changes something is blocked until you resume the plan yourself."
+privacy_he = "התוכניות נשמרות רק במחשב ונכללות בגיבוי. טקסט שנכתב על ידי אחרים (דואר, יומן) לא יכול להפעיל צעד: אחרי קריאה כזו כל צעד שמשנה משהו נחסם עד שתמשיך בעצמך. כשמצב הפרטיות דולק, צעדים לא שומרים את פלט הכלי (רק מצב וקוד שגיאה), וטקסט שנשמר קודם נמחק."
+privacy_en = "Plans stay on this computer and are included in the backup. Text written by others (mail, calendar) can never trigger a step: after reading it, any step that changes something is blocked until you resume the plan yourself. With privacy on, steps keep no tool output (only their status and error code), and text saved earlier is erased."
 
 [[steps]]
 he = "אמרו \"תתכנן איך להכין את הפגישה של מחר\". JARVES מציע צעדים ושומר אותם כטיוטה."

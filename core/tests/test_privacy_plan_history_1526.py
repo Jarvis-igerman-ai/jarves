@@ -2,7 +2,6 @@
 import re
 import sqlite3
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -53,7 +52,9 @@ def test_privacy_switch_scrubs_existing_plan_text_and_keeps_codes(home):
     db = open_db(home)
     try:
         pid = _seed(db)
-        assert privacy.set_privacy(_ctx(home, False), True)["privacy"] is True
+        ctx = _ctx(home, False)
+        ctx._userdata = db                                      # the dashboard's own memory.db connection
+        assert privacy.set_privacy(ctx, True)["privacy"] is True
         assert _texts(db, pid) == SCRUBBED
         assert goal_plans.scrub_private_text(db) == 0          # idempotent: the kept codes survive a second scrub
         assert _texts(db, pid) == SCRUBBED
@@ -64,7 +65,7 @@ def test_privacy_switch_scrubs_existing_plan_text_and_keeps_codes(home):
 def test_set_privacy_on_when_already_on_does_not_scrub(home, monkeypatch):
     logs.setup(home / "logs", "INFO", console=False, privacy=True)
     calls = []
-    monkeypatch.setattr(privacy, "scrub_plans", lambda h: calls.append(h) or 0)
+    monkeypatch.setattr(privacy, "scrub_plans", lambda c: calls.append(c.home) or 0)
     ctx = _ctx(home, True)
     privacy.set_privacy(ctx, True)
     privacy.set_full_text(ctx, False)
@@ -158,14 +159,60 @@ def test_scrub_keeps_codes_with_digits_and_the_runners_fixed_reasons(home, error
 _CODE_RE = re.compile(r"[A-Z][A-Z0-9_]*[A-Z0-9]")
 
 
-def test_every_fixed_reason_in_goal_plans_is_kept_by_the_scrub():
-    src = Path(goal_plans.__file__).read_text(encoding="utf-8")
-    found = re.findall(r'(?:_block\(pid, step, |_fail\(pid, step, |_stop_plan\(pid, "blocked", |note=)"([^"{]+)"', src)
-    found += re.findall(r'_stop_plan\(pid, "blocked", f"((?!step )[^"]+)"', src)
-    assert len(found) >= 12
-    for text in found:
-        text = re.sub(r"\{[^}]+\}", "5", text)
-        assert goal_plans._FIXED.fullmatch(text), text
+@pytest.mark.parametrize("reason", goal_plans.FIXED_REASONS)
+def test_every_fixed_reason_is_kept_by_the_scrub_as_error_and_note(reason):
+    text = reason.format(5)
+    assert goal_plans._code_only(text) == text
+    assert goal_plans._note_code(text) == text and goal_plans._note_code("step 2: " + text) == "step 2: " + text
+    assert goal_plans._code_only(text + " and private words") == ""
+
+
+def test_a_step_interrupted_by_a_restart_keeps_its_reason_through_the_scrub(home):
+    db = open_db(home)
+    try:
+        st = goal_plans.PlanStore(db, clock=lambda: 1_800_000_000.0)
+        pid = st.propose("p", [{"tool": "clock", "args": {}, "why": "t"}])["id"]
+        db.x("UPDATE goal_plans SET state='running' WHERE id=?", (pid,))
+        db.x("UPDATE goal_plan_steps SET status='running', consequential=1 WHERE plan_id=?", (pid,))
+        st.recover()
+        want = ([("unknown", "", goal_plans.R_STEP_RESTARTED)], ("paused", "", goal_plans.R_RESTARTED))
+        assert _texts(db, pid) == want
+        goal_plans.scrub_private_text(db)
+        assert _texts(db, pid) == want
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("why,kept", [("private words from a tool", goal_plans.R_FAILED),
+                                      ("X_BROKE: private detail", "X_BROKE"),
+                                      (goal_plans.R_REFUSED, goal_plans.R_REFUSED)])
+def test_privacy_on_block_and_fail_store_only_a_code_or_fixed_reason_whoever_calls(tmp_path, monkeypatch, why, kept):
+    from test_v5_goal_plans import Env, steps
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    env = Env(tmp_path)
+    try:
+        for stop in (lambda pid, step: env.runner._block(pid, step, why),
+                     lambda pid, step: env.runner._fail(pid, step, why, env.clock(), evidence="private evidence")):
+            pid = env.store.propose("p", steps(("fake_read", {"text": "a"})))["id"]
+            env.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (pid,))
+            stop(pid, env.store.steps(pid)[0])
+            p = env.store.get(pid)
+            assert (p["steps"][0]["error"], p["steps"][0]["evidence"], p["note"]) == (kept, "", "step 1: " + kept)
+    finally:
+        env.db.close()
+
+
+def test_scrub_plans_uses_the_dashboards_own_connection(home, monkeypatch):
+    import jarves.userdata as ud
+    db = open_db(home)
+    try:
+        pid = _seed(db)
+        monkeypatch.setattr(ud, "open_db", lambda h: pytest.fail("a second memory.db connection was opened"))
+        ctx = _ctx(home, True)
+        ctx._userdata = db
+        assert privacy.scrub_plans(ctx) == 3 and _texts(db, pid) == SCRUBBED
+    finally:
+        db.close()
 
 
 def test_a_failing_scrub_rolls_back_every_row(home, monkeypatch):

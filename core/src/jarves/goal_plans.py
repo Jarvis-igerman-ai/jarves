@@ -77,17 +77,26 @@ def _kept(text: object, n: int = EVIDENCE_CHARS) -> str:
 _CODE = re.compile(r"([A-Z][A-Z0-9_]{0,62}[A-Z0-9])(?::|$)")    # a tool code: X_BROKE, TOOL_TIMEOUT, HTTP_404, E2BIG
 _NOTE = re.compile(r"(step \d+: )(.*)", re.S)
 # The runner's and the store's own reasons: fixed text, never tool output, so privacy keeps them (#1526 review).
-# test_privacy_plan_history_1526 checks that every literal reason in this module matches.
-_FIXED = re.compile("|".join((
-    r"tool not available \(switched off or removed\)",
-    r"text written by others was read earlier in this plan: resume to continue",
-    r"the arguments are too long to show in full for your approval; shorten the step",
-    r"the owner did not approve this step",
-    r"no approval was given for this step \(no answer in time or nowhere to ask\)",
-    r"the step timed out(?:: it may already have happened)?",
-    r"the step failed(?: unexpectedly)?",
-    r"time cap of \d+ min reached", r"cost cap of \d+ AI requests reached", r"the daily AI budget is used up",
-    r"paused by the owner", r"cancelled by the owner", r"interrupted by a restart: resume when ready")))
+# Every call site writes one of these; `{}` is a whole number filled in with .format().
+R_UNAVAILABLE = "tool not available (switched off or removed)"
+R_TAINTED = "text written by others was read earlier in this plan: resume to continue"
+R_TOO_LONG = "the arguments are too long to show in full for your approval; shorten the step"
+R_REFUSED = "the owner did not approve this step"
+R_NO_ANSWER = "no approval was given for this step (no answer in time or nowhere to ask)"
+R_TIMEOUT = "the step timed out"
+R_TIMEOUT_MAYBE = "the step timed out: it may already have happened"
+R_FAILED = "the step failed"
+R_CRASHED = "the step failed unexpectedly"
+R_TIME_CAP = "time cap of {} min reached"
+R_COST_CAP = "cost cap of {} AI requests reached"
+R_BUDGET = "the daily AI budget is used up"
+R_PAUSED = "paused by the owner"
+R_CANCELLED = "cancelled by the owner"
+R_RESTARTED = "interrupted by a restart: resume when ready"
+R_STEP_RESTARTED = "interrupted by a restart"
+FIXED_REASONS = (R_UNAVAILABLE, R_TAINTED, R_TOO_LONG, R_REFUSED, R_NO_ANSWER, R_TIMEOUT, R_TIMEOUT_MAYBE, R_FAILED,
+                 R_CRASHED, R_TIME_CAP, R_COST_CAP, R_BUDGET, R_PAUSED, R_CANCELLED, R_RESTARTED, R_STEP_RESTARTED)
+_FIXED = re.compile("|".join(re.escape(r).replace(r"\{\}", r"\d+") for r in FIXED_REASONS))
 
 
 def _code_only(text: object) -> str:
@@ -98,6 +107,11 @@ def _code_only(text: object) -> str:
         return s
     m = _CODE.match(s)
     return m.group(1) if m else ""
+
+
+def _private_why(why: str) -> str:
+    """A step error as written: with privacy on only its code or a fixed reason (else R_FAILED) reaches the store."""
+    return (_code_only(why) or R_FAILED) if logs.privacy() else why
 
 
 def _note_code(text: object) -> str:
@@ -272,7 +286,7 @@ class PlanStore:
         p = self._plan(pid)
         if p["state"] not in ("ready", "running"):
             raise ValueError("only a ready or running plan can be paused")
-        self._cas(pid, ("ready", "running"), "paused", note="paused by the owner")
+        self._cas(pid, ("ready", "running"), "paused", note=R_PAUSED)
         logs.info("goals", "PLAN_PAUSED", "plan paused", id=pid, by=by)
         return self.get(pid)
 
@@ -295,7 +309,7 @@ class PlanStore:
             raise ValueError("this plan is already finished")
         self._cas(pid, (*OPEN, "failed"), "cancelled",           # #813: any cancellable state, never a done/cancelled one
                   (("UPDATE goal_plan_steps SET status='skipped' WHERE plan_id=? AND status IN ('pending','blocked','unknown')",
-                    (int(pid),)),), note="cancelled by the owner", finished=self.clock())
+                    (int(pid),)),), note=R_CANCELLED, finished=self.clock())
         logs.info("goals", "PLAN_CANCELLED", "plan cancelled", id=pid, by=by)
         return self.get(pid)
 
@@ -361,10 +375,10 @@ class PlanStore:
         n = 0
         for p in self.db.rows("SELECT id FROM goal_plans WHERE state='running'"):
             sql = tuple(("UPDATE goal_plan_steps SET status=?, error=? WHERE id=? AND status='running'",
-                         ("unknown", "interrupted by a restart", s["id"]) if s["consequential"] else ("pending", "", s["id"]))
+                         ("unknown", R_STEP_RESTARTED, s["id"]) if s["consequential"] else ("pending", "", s["id"]))
                         for s in self.db.rows("SELECT * FROM goal_plan_steps WHERE plan_id=? AND status='running'", (p["id"],)))
             try:                                         # #813: a cancel that landed after the read wins
-                self._cas(p["id"], ("running",), "paused", sql, note="interrupted by a restart: resume when ready")
+                self._cas(p["id"], ("running",), "paused", sql, note=R_RESTARTED)
             except ValueError:
                 continue
             n += 1
@@ -502,6 +516,8 @@ class PlanRunner:
         self._stop = True
 
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
+        if logs.privacy():                          # #1526: only a code or a fixed reason, whoever the caller is
+            note = _note_code(note)
         if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
             return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
@@ -545,26 +561,26 @@ class PlanRunner:
             if step is None:
                 return self._finish(pid)
             if p["spent_s"] >= p["timeout_s"]:
-                self._stop_plan(pid, "blocked", f"time cap of {int(p['timeout_s'] // 60)} min reached")
+                self._stop_plan(pid, "blocked", R_TIME_CAP.format(int(p["timeout_s"] // 60)))
                 return st.get(pid)
             if self.budget is not None:
                 if 0 < self._spent_ai(p) >= p["max_ai"]:
-                    self._stop_plan(pid, "blocked", f"cost cap of {p['max_ai']} AI requests reached")
+                    self._stop_plan(pid, "blocked", R_COST_CAP.format(int(p["max_ai"])))
                     return st.get(pid)
                 if self.budget.remaining("ai_requests") < 1:
-                    self._stop_plan(pid, "blocked", "the daily AI budget is used up")
+                    self._stop_plan(pid, "blocked", R_BUDGET)
                     return st.get(pid)
             tool = self.registry.get(step["tool"])
             if tool is None:
-                self._block(pid, step, "tool not available (switched off or removed)")
+                self._block(pid, step, R_UNAVAILABLE)
                 return st.get(pid)
             consequential = tool.permission != "read"
             if consequential and p["tainted"]:
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, R_TAINTED)
                 return st.get(pid)
             if consequential and not tool.confirm and tool.permission != "destructive":
                 if _shown_len(step["args"]) > STEP_SHOW_CHARS:         # checked on the ESCAPED text: it can be 6x longer
-                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                    self._block(pid, step, R_TOO_LONG)
                     return st.get(pid)
                 ok = await self.registry.ask(
                     f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
@@ -573,7 +589,7 @@ class PlanRunner:
                     why=(_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
                     + (" It was tried before and may already have happened: check first." if step["attempts"] else ""))
                 if not ok:
-                    self._block(pid, step, "the owner did not approve this step")
+                    self._block(pid, step, R_REFUSED)
                     return st.get(pid)
                 p = st._plan(pid)
                 if p["state"] != "running":                   # cancelled / paused while the popup was open
@@ -589,14 +605,14 @@ class PlanRunner:
                 res = await asyncio.wait_for(self.registry.call(step["tool"], step["args"], origin="model"),
                                              min(remaining, tool.timeout_s + STEP_GRACE_S))
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(pid, step, "the step timed out" + (": it may already have happened" if consequential else ""), t0,
+                self._fail(pid, step, R_TIMEOUT_MAYBE if consequential else R_TIMEOUT, t0,
                            status="unknown" if consequential else "failed")
                 return st.get(pid)
             except asyncio.CancelledError:
                 raise                                          # shutdown: the step stays 'running' for recover()
             except Exception:
                 logs.error("goals", "PLAN_STEP_CRASH", "plan step raised", tool=step["tool"], exc=True)
-                self._fail(pid, step, "the step failed unexpectedly", t0)
+                self._fail(pid, step, R_CRASHED, t0)
                 return st.get(pid)
             ran = self.clock() - t0
             st.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=?", (max(0.0, ran), pid))
@@ -610,27 +626,29 @@ class PlanRunner:
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
                 st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, R_TAINTED)
                 return st.get(pid)
             if res.code in ("NOT_APPROVED", "APPROVAL_REFUSED", "TOOL_NOT_CONFIRMED", "TOOL_DECLINED"):
-                self._block(pid, step, "the owner did not approve this step")
+                self._block(pid, step, R_REFUSED)
                 return st.get(pid)
             if res.code in ("TOOL_APPROVAL_TIMEOUT", "TOOL_APPROVAL_UNAVAILABLE"):     # V5 sec F8: nothing ran; retry after resume
-                self._block(pid, step, "no approval was given for this step (no answer in time or nowhere to ask)")
+                self._block(pid, step, R_NO_ANSWER)
                 return st.get(pid)
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
-                self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
+                self._fail(pid, step, R_TIMEOUT_MAYBE, t0, evidence=res.message, status="unknown")
                 return st.get(pid)
-            why = (_code_only(res.code) or "the step failed") if logs.privacy() else f"{res.code}: {_short(res.message, 120)}"
-            self._fail(pid, step, why, t0, evidence=res.message)
+            self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
+        self._rearm()
+        why = _private_why(why)
         self.store.db.x("UPDATE goal_plan_steps SET status='blocked', error=? WHERE id=?", (_short(why, 200), step["id"]))
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
         self._rearm()
+        why = _private_why(why)
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
