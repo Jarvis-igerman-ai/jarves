@@ -148,11 +148,11 @@ class Preferences:
                              "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
                     logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
                               id=pid, by=by)
-                    return self._view(self.get(pid))
+                    return self._written(pid)
                 if self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=? AND state<>'confirmed'",
                              (t, norm, self.clock(), pid)).rowcount:
                     logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
-                    return self._view(self.get(pid))
+                    return self._written(pid)
             if not self.get(pid):
                 raise KeyError(pid)            # removed meanwhile: nothing written
             logs.warn("prefs", "PREF_EDIT_CONFLICT", "the preference kept changing during the edit: nothing written",
@@ -161,6 +161,13 @@ class Preferences:
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
+
+    def _written(self, pid: int) -> dict:
+        """The view of a row just written; removed right after the write: KeyError (the route answers 404), never a 500."""
+        row = self.get(pid)
+        if not row:
+            raise KeyError(pid)
+        return self._view(row)
 
     def remove(self, pid: int, *, by: str = "user") -> bool:
         n = self.db.x("DELETE FROM learned_prefs WHERE id=?", (pid,)).rowcount

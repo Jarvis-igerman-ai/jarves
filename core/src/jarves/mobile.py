@@ -481,7 +481,7 @@ class MobileAccess:
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
         if logs.privacy():           # #206 F13: the ledger is on disk, so in privacy mode it keeps a fixed note, not the words
-            reply = {"reply": NOT_KEPT_REPLY, "ok": bool(reply.get("ok")), "not_kept": True}
+            reply = {"reply": NOT_KEPT_REPLY, "ok": bool(reply.get("ok")), "not_kept": True, "code": "NOT_KEPT"}
         try:
             self.cont.store(device, mid, "chat", 200, reply)
         except Exception:

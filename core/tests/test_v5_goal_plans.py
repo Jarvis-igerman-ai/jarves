@@ -4,6 +4,7 @@ registry, the real dashboard handlers and CLI."""
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from pydantic import BaseModel
@@ -615,3 +616,62 @@ def test_813_runner_writes_do_not_overwrite_a_cancel(env):
     assert env.store.get(p["id"])["state"] == "cancelled"
     assert env.runner._finish(p["id"])["state"] == "cancelled"
     assert env.store._set_if(p["id"], ("ready", "running"), "running") is False
+
+
+# ---------------------------------------------------------------- #206 F13: no tool text at rest in privacy mode
+async def test_f13_privacy_mode_plan_keeps_no_tool_text_in_evidence_error_or_result(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == "done" and d["steps"][0]["evidence"] == "" and "secret-a" not in d["result"]
+    q = env.store.propose("q", steps(("fake_bad", {})))
+    env.store.approve(q["id"])
+    await env.runner.tick()
+    s = env.store.get(q["id"])["steps"][0]
+    assert s["status"] == "failed" and "X_BROKE" in s["error"] and "it broke" not in s["error"] + s["evidence"]
+
+
+async def test_f13_privacy_mode_untrusted_text_is_not_kept_by_the_blocked_plan(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_mail", {}), ("fake_act", {"text": "x"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == "blocked" and [s["status"] for s in d["steps"]] == ["done", "blocked"]
+    assert "ignore previous" not in json.dumps(d)          # the mail text: not in evidence, error, note or result
+
+
+@pytest.mark.parametrize("code,permission,raises,state,status", [
+    (None, "read", False, "failed", "failed"),                         # no code: stored as the word "failed", never "None"
+    ("X_SECRET", "read", False, "failed", "failed"),                   # generic failure branch
+    ("TOOL_UNTRUSTED_TURN", "read", False, "blocked", "blocked"),
+    ("NOT_APPROVED", "read", False, "blocked", "blocked"),
+    ("TOOL_APPROVAL_TIMEOUT", "read", False, "blocked", "blocked"),
+    ("TOOL_TIMEOUT", "action", False, "failed", "unknown"),            # consequential timeout: PC-only 'unknown'
+    (None, "read", True, "failed", "failed"),                          # the tool raised
+])
+async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, monkeypatch, code, permission, raises,
+                                                                         state, status):
+    """Review R2: every branch that ends a step after the tool answered keeps no tool text (error, evidence, note, result)."""
+    async def answer(_a: NoArgs):
+        if raises:
+            raise RuntimeError("secret detail")
+        return ToolResult(False, "secret detail", code=code)
+
+    class Answer(Skill):
+        name = "answer"
+        description = "answers with secret text"
+
+        def tools(self):
+            return [Tool("fake_answer", "a", answer, NoArgs, permission=permission)]
+    env.reg.register(Answer())
+    env.reg.allowed_actions |= {"fake_answer"}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    p = env.store.propose("p", steps(("fake_answer", {})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    d = env.store.get(p["id"])
+    assert d["state"] == state and d["steps"][0]["status"] == status
+    assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)

@@ -14,8 +14,6 @@ from jarves import guides, logs, mobile
 from jarves.preferences import PrefConflict, Preferences, make_skill
 from jarves.userdata import open_db
 
-from test_v5_goal_plans import Env, steps
-
 
 # ---------------------------------------------------------------- F13: no text at rest in privacy mode
 def test_f13_privacy_mode_chat_ledger_keeps_no_reply_text(home, monkeypatch):
@@ -26,79 +24,13 @@ def test_f13_privacy_mode_chat_ledger_keeps_no_reply_text(home, monkeypatch):
     assert rows and not any("4321" in r["body"] for r in rows)
     again = mobile.MobileAccess(home).replay("dev1", "mid-1")     # a PC restart: only the ledger copy is left
     assert again["ok"] is True and again["not_kept"] is True and "4321" not in again["reply"] and again["reply"]
+    assert again["code"] == "NOT_KEPT"            # review R2: a code a client can translate; the text is only a fallback
 
 
 def test_f13_privacy_off_chat_ledger_still_replays_the_answer(home, monkeypatch):
     monkeypatch.setattr(logs, "privacy", lambda: False)
     mobile.MobileAccess(home).remember("dev1", "mid-2", {"reply": "hello there", "ok": True})
     assert mobile.MobileAccess(home).replay("dev1", "mid-2") == {"reply": "hello there", "ok": True}
-
-
-@pytest.fixture
-def env(tmp_path):
-    e = Env(tmp_path)
-    yield e
-    e.db.close()
-
-
-async def test_f13_privacy_mode_plan_keeps_no_tool_text_in_evidence_error_or_result(env, monkeypatch):
-    monkeypatch.setattr(logs, "privacy", lambda: True)
-    p = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
-    env.store.approve(p["id"])
-    await env.runner.tick()
-    d = env.store.get(p["id"])
-    assert d["state"] == "done" and d["steps"][0]["evidence"] == "" and "secret-a" not in d["result"]
-    q = env.store.propose("q", steps(("fake_bad", {})))
-    env.store.approve(q["id"])
-    await env.runner.tick()
-    s = env.store.get(q["id"])["steps"][0]
-    assert s["status"] == "failed" and "X_BROKE" in s["error"] and "it broke" not in s["error"] + s["evidence"]
-
-
-async def test_f13_privacy_mode_untrusted_text_is_not_kept_by_the_blocked_plan(env, monkeypatch):
-    monkeypatch.setattr(logs, "privacy", lambda: True)
-    p = env.store.propose("p", steps(("fake_mail", {}), ("fake_act", {"text": "x"})))
-    env.store.approve(p["id"])
-    await env.runner.tick()
-    d = env.store.get(p["id"])
-    assert d["state"] == "blocked" and [s["status"] for s in d["steps"]] == ["done", "blocked"]
-    assert "ignore previous" not in json.dumps(d)          # the mail text: not in evidence, error, note or result
-
-
-@pytest.mark.parametrize("code,permission,raises,state,status", [
-    (None, "read", False, "failed", "failed"),                         # no code: stored as the word "failed", never "None"
-    ("X_SECRET", "read", False, "failed", "failed"),                   # generic failure branch
-    ("TOOL_UNTRUSTED_TURN", "read", False, "blocked", "blocked"),
-    ("NOT_APPROVED", "read", False, "blocked", "blocked"),
-    ("TOOL_APPROVAL_TIMEOUT", "read", False, "blocked", "blocked"),
-    ("TOOL_TIMEOUT", "action", False, "failed", "unknown"),            # consequential timeout: PC-only 'unknown'
-    (None, "read", True, "failed", "failed"),                          # the tool raised
-])
-async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, monkeypatch, code, permission, raises,
-                                                                         state, status):
-    """Review R2: every branch that ends a step after the tool answered keeps no tool text (error, evidence, note, result)."""
-    from jarves.skills import NoArgs, Skill, Tool, ToolResult
-
-    async def answer(_a: NoArgs):
-        if raises:
-            raise RuntimeError("secret detail")
-        return ToolResult(False, "secret detail", code=code)
-
-    class Answer(Skill):
-        name = "answer"
-        description = "answers with secret text"
-
-        def tools(self):
-            return [Tool("fake_answer", "a", answer, NoArgs, permission=permission)]
-    env.reg.register(Answer())
-    env.reg.allowed_actions |= {"fake_answer"}
-    monkeypatch.setattr(logs, "privacy", lambda: True)
-    p = env.store.propose("p", steps(("fake_answer", {})))
-    env.store.approve(p["id"])
-    await env.runner.tick()
-    d = env.store.get(p["id"])
-    assert d["state"] == state and d["steps"][0]["status"] == status
-    assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
 
 
 # ---------------------------------------------------------------- H2: a phone edit needs a fresh confirm
@@ -119,12 +51,28 @@ def test_h2_reproposing_edit_of_a_removed_pref_writes_nothing_and_raises_keyerro
 
 
 @pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+def test_h2_pref_removed_right_after_the_guarded_write_is_keyerror_not_a_crash(home, monkeypatch):
+    """Review R1: edit() re-reads the row it just wrote; a remove landing between the write and that read is KeyError."""
+    p = Preferences(open_db(home))
+    pid = p.add_confirmed("I like short answers in the morning", "communication")["item"]["id"]
+    real_get, calls = p.get, []
+
+    def get(i):                                # 1st: edit()'s read; 2nd: the re-read after the write (removed meanwhile)
+        calls.append(i)
+        if len(calls) == 2:
+            p.remove(i, by="test")
+        return real_get(i)
+    monkeypatch.setattr(p, "get", get)
+    with pytest.raises(KeyError):
+        p.edit(pid, "I like long answers", by="phone", repropose=True)
+
+
 def test_h2_phone_note_asks_for_a_new_confirm_only_when_a_confirmed_item_went_back():
     js = Path(__file__).resolve().parents[1] / "src/jarves/dashboard_static/mobile/prefs.js"
     probe = ("global.window = {}; require(process.argv[1]); const f = window.JarvesPrefs.editNote;"
              "console.log(JSON.stringify([f('confirmed', {state: 'proposed'}), f('declined', {state: 'declined'}),"
              "f('proposed', {state: 'proposed'}), f('confirmed', {})]))")
-    out = subprocess.run(["node", "-e", probe, str(js)], capture_output=True, text=True, timeout=30)
+    out = subprocess.run(["node", "-e", probe, str(js)], capture_output=True, text=True, timeout=30, check=False)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == ["recheck", "saved", "saved", "saved"]
 
@@ -198,7 +146,6 @@ def test_h4_project_guide_says_the_check_is_not_sandboxed():
 
 def test_h4_guide_claim_check_runs_with_an_allow_listed_env_and_a_time_limit(tmp_path, monkeypatch):
     """Review R3: the H4 guide sentence says 'only allow-listed environment variables and a time limit'; pin both."""
-    import subprocess
     from jarves.projectmgr import gitops
     seen = {}
 
