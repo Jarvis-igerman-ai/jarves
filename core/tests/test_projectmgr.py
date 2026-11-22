@@ -1423,3 +1423,28 @@ def test_an_owner_edit_never_carries_an_unseen_agent_commit_into_the_merge(env):
     head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
     assert f"(now commit {head})" in t["waiting"], t["waiting"]
     assert not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()          # nothing merged yet
+
+
+def test_a_commit_after_the_approval_check_is_never_merged(env, monkeypatch):
+    """Review round 2 R2: a commit that lands after the approval check is caught under the merge lock, and the
+    fast-forward names the checked commit, never the branch."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    real = gitops.commit_all
+
+    def late(path, message):
+        if message.startswith("task 1: T"):                              # the merge stage's own commit
+            (Path(path) / "t.txt").write_text("unseen\n")
+            real(path, "agent, after the check")
+        return real(path, message)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    monkeypatch.setattr(gitops, "commit_all", late)
+    finish(m)
+    monkeypatch.setattr(gitops, "commit_all", real)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting", (t["status"], t["reason"])
+    assert "(now commit " in t["waiting"] and not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()

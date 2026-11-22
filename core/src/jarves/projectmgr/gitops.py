@@ -85,12 +85,13 @@ def _norm_key(key: str) -> str:
     return f"{head.lower()}.{sub}{dot}{name.lower()}" if sub else f"{head.lower()}.{name.lower()}"
 
 
-def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
-    """`-c` pairs that neutralise the config-named commands (filter/merge/diff drivers, textconv, diff.external, config
+def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str]]:
+    """(key, value) pairs that neutralise the config-named commands (filter/merge/diff drivers, textconv, diff.external, config
     hooks, gpg programs and gpg.ssh.defaultKeyCommand) set
     in the agent-writable local/worktree config (#1407); the owner's global/system value is kept. ident=False (a merge
     into your branch): untrusted signing settings turn signing off, so your key never signs on an agent's say-so.
-    Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533."""
+    Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533. `git` passes them as
+    GIT_CONFIG_KEY_n/VALUE_n, never `-c k=v`: git splits `-c` at the first `=`, and a subsection may hold one."""
     try:
         p = subprocess.run(["git", "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
                            timeout=30, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
@@ -100,7 +101,7 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
         raise GitError("could not read the git config: " + p.stderr.decode("utf-8", "replace").strip()[:200])
     items = p.stdout.decode("utf-8", "replace").split("\0")
     trusted: dict[str, str] = {}
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     signing = False
     for scope, kv in zip(items[0::2], items[1::2]):
         key, _, val = kv.partition("\n")
@@ -113,17 +114,17 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
         if not m:
             continue
         if m.group(2):
-            out += ["-c", f"{key}=", "-c", f"filter.{m.group(2)}.required=false"]
+            out += [(key, ""), (f"filter.{m.group(2)}.required", "false")]
         elif m.group(4):
-            out += ["-c", f"{key}=exit 1"]                  # a conflict, never the agent's program
+            out.append((key, "exit 1"))                     # a conflict, never the agent's program
         elif m.group(5):
-            out += ["-c", f"{key}=exit 0"]
+            out.append((key, "exit 0"))
         elif m.group(7):
-            out += ["-c", f"{key}={trusted.get(key, 'exit 1')}"]      # fails closed, never the agent's program
+            out.append((key, trusted.get(key, "exit 1")))   # fails closed, never the agent's program
         else:
-            out += ["-c", f"{key}={trusted.get(key, _GPG_DEFAULT.get(key, 'gpg'))}"]
+            out.append((key, trusted.get(key, _GPG_DEFAULT.get(key, "gpg"))))
     if signing and not ident:
-        out += ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+        out += [("commit.gpgsign", "false"), ("tag.gpgsign", "false")]
     return out
 
 
@@ -136,19 +137,24 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Other config-named commands: `config_overrides` (#1407)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    env = child_env({"GIT_TERMINAL_PROMPT": "0"})
     if not args or args[0] not in _NO_CONFIG_CMDS:
         try:
-            pre += config_overrides(cwd, ident)
+            pairs = config_overrides(cwd, ident)
         except GitError as e:                               # the command never runs; check=False still never raises
             if check:
                 raise
             return subprocess.CompletedProcess(["git", *args], 128, "", str(e))
-    if args and args[0] == "diff":                          # #1407: no external diff or textconv on any JARVES diff
+        env["GIT_CONFIG_COUNT"] = str(len(pairs))
+        for n, (k, v) in enumerate(pairs):
+            env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
+    # #1407: no external diff or textconv on any JARVES diff. `log -p`/`show` would also honour textconv (an untrusted
+    # one is `exit 1` there, so they would fail, not run it); JARVES uses neither (only `log --oneline`).
+    if args and args[0] == "diff":
         args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))

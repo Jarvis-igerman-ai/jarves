@@ -274,7 +274,7 @@ def _spy(tmp_path: Path, name: str) -> tuple[str, Path]:
     return f'echo ran > "{marker.as_posix()}"; cat', marker
 
 
-@pytest.mark.parametrize("name", ["evil", "Evil"])          # a subsection is case-sensitive (review R1)
+@pytest.mark.parametrize("name", ["evil", "Evil", "x=y"])   # case-sensitive; `=` inside (reviews R1, R1 round 2)
 def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name):
     repo = _repo(tmp_path)
     cmd, marker = _spy(tmp_path, "filter")
@@ -285,7 +285,7 @@ def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_confi
     assert gitops.commit_all(repo, "with attributes") and not marker.exists()
 
 
-@pytest.mark.parametrize("name", ["evil", "Evil"])
+@pytest.mark.parametrize("name", ["evil", "Evil", "x=y"])
 def test_a_merge_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name):
     repo = _repo(tmp_path)
     cmd, marker = _spy(tmp_path, "merge")
@@ -325,9 +325,9 @@ def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_pat
     gitops.git(repo, "config", "hook.evil.command", "rm -rf /")      # newer git runs these; 2.43 does not
     gitops.git(repo, "config", "gpg.ssh.program", "evil")
     pre = gitops.config_overrides(repo)
-    assert "hook.evil.command=exit 0" in pre and "gpg.ssh.program=ssh-keygen" in pre
-    assert not any("evil" in x and "=" in x and x.endswith("evil") for x in pre)
-    assert "commit.gpgsign=false" in gitops.config_overrides(repo, ident=False)
+    assert ("hook.evil.command", "exit 0") in pre and ("gpg.ssh.program", "ssh-keygen") in pre
+    assert not any(v == "evil" for _, v in pre)
+    assert ("commit.gpgsign", "false") in gitops.config_overrides(repo, ident=False)
 
 
 @pytest.mark.parametrize("key,attr", [("diff.external", ""), ("diff.Evil.command", "diff=Evil"),
@@ -345,7 +345,8 @@ def test_a_diff_program_from_the_repo_config_never_runs(tmp_path, no_user_config
     gitops.git(repo, "diff", "HEAD~1...HEAD", check=False)
     gitops.diffstat(repo, "HEAD~1")
     assert not marker.exists()
-    assert f"{key}=" in " ".join(gitops.config_overrides(repo)) and cmd not in gitops.config_overrides(repo)
+    pairs = dict(gitops.config_overrides(repo))
+    assert pairs[key] == "exit 1" and cmd not in pairs.values()
 
 
 def test_an_ssh_default_key_command_from_the_repo_config_never_runs(tmp_path, no_user_config):
@@ -362,7 +363,7 @@ def test_an_ssh_default_key_command_from_the_repo_config_never_runs(tmp_path, no
     gitops.git(repo, "add", "-A")
     gitops.git(repo, "commit", "-qm", "owner", ident=False)
     assert not marker.exists()
-    assert "gpg.ssh.defaultkeycommand=exit 1" in gitops.config_overrides(repo)
+    assert ("gpg.ssh.defaultkeycommand", "exit 1") in gitops.config_overrides(repo)
 
 
 def test_an_unreadable_repo_config_fails_closed_and_check_false_never_raises(tmp_path, no_user_config):

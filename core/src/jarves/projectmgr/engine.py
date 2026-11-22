@@ -563,7 +563,13 @@ class StageEngine:
         self._set_job(t, tested_base=tested)
         return ("next",)
 
-    def _st_merge(self, p, t, stages, cancel):
+    def _reapprove(self, t, head: str) -> tuple:
+        self._set_job(t, shown=head or None)                # the new commit is the one you approve next
+        return ("park", f"the code changed after your approval: approve merging task #{t['seq']} "
+                        f"(now commit {head[:12]}) again")
+
+    def _st_merge(self, p, t, stages, cancel, expect: str = ""):
+        """expect: the commit you approved; checked under the merge lock, and only the checked commit is merged."""
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing to merge
         wt, br = Path(t["worktree"]), t["branch"]
@@ -575,11 +581,18 @@ class StageEngine:
                 return ("end",)
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
+                mine = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
+                if expect and mine != expect:                       # checked under the merge lock (#1407)
+                    return self._reapprove(t, mine)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
+                tip = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()     # the commit checked and merged (#1407)
+                if expect and tip != mine and gitops.git(wt, "rev-parse", f"{tip}^").stdout.strip() != mine:
+                    return self._reapprove(t, tip)                  # a commit landed during the re-merge
+                if head != self._job(t).get("tested_base"):
                     if has_check:
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
                         if not ok:
@@ -589,7 +602,7 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                gitops.fast_forward(self._integration(p), br)
+                gitops.fast_forward(self._integration(p), tip)      # never the branch name: it can move
                 at = gitops.git(self._integration(p), "rev-parse", "HEAD").stdout.strip()
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
@@ -644,11 +657,9 @@ class StageEngine:
             self._set_job(t, approved=None)
             if kind == "merge":
                 head, dirty = self._tree(t)
-                if dirty or (appr.get("tree") and appr["tree"] != head):
-                    self._set_job(t, shown=head or None)        # the new commit is the one you approve next
-                    return ("park", f"the code changed after your approval: approve merging task #{t['seq']} "
-                                    f"(now commit {head[:12]}) again")
-                return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event())
+                if not appr.get("tree") and (dirty or head):
+                    return self._reapprove(t, head)                 # no commit was bound: nothing is merged unseen
+                return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event(), expect=appr.get("tree", ""))
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
                 head = gitops.git(wt, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
@@ -677,7 +688,8 @@ class StageEngine:
         at = gitops.git(where, "rev-parse", "--verify", "--quiet", f"refs/heads/{base}^{{commit}}",
                         check=False).stdout.strip()[:12] or base    # the commit, not a name that can move (#1407)
         shown = self._tree(t)[0]
-        self._set_job(t, shown=shown or None)
+        if kind == "merge":                                 # only a merge approval binds a commit (review R3)
+            self._set_job(t, shown=shown or None)
         tip = shown[:12]
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
