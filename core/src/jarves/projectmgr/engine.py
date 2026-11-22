@@ -82,36 +82,47 @@ class StageEngine:
         if sha == base_sha:                             # fast-forward: only when the vetted work is already in it
             ok = gitops.git(wt, "merge-base", "--is-ancestor", vetted, base_sha, check=False).returncode == 0
             return (sha, "") if ok else moved
-        if parents == [vetted, base_sha] and StageEngine._clean_merge(wt, sha, vetted, base_sha):
-            return sha, ""
+        if parents == [vetted, base_sha]:
+            why = StageEngine._clean_merge(wt, sha, vetted, base_sha)
+            return (sha, "") if not why else ("", f"{why} ({what})")
         return moved
 
     @staticmethod
     def _dirty(wt: Path, what: str) -> str:
-        """'' when the worktree has no uncommitted or untracked (not ignored) files, else why not. After the scope
-        check nothing is folded in: such files never saw the scope and protected-path rules (#1461 review R1)."""
+        """'' when no tracked file has uncommitted changes, else why not. Nothing is folded in after the scope check
+        and the merge fast-forwards to the exact checked sha, so untracked files (a check's `__pycache__/`, `.coverage`)
+        never reach the integration branch and do not block; a tracked edit would silently be left out (#1461)."""
         try:
-            out = gitops.git(wt, "status", "--porcelain", "-z", "--untracked-files=all").stdout
+            out = gitops.git(wt, "status", "--porcelain", "-z", "--untracked-files=no").stdout.split("\0")
         except (OSError, gitops.GitError):
             return f"the task worktree cannot be read ({what})"
-        files = [x[3:].replace("\\", "/") for x in out.split("\0") if len(x) > 3]
+        files, i = [], 0
+        while i < len(out):
+            x, i = out[i], i + 1
+            if len(x) > 3:
+                files.append(x[3:].replace("\\", "/"))
+                if x[0] in "RC" or x[1] in "RC":        # a rename or copy: the next entry is its source path
+                    i += 1
         if not files:
             return ""
         return (f"files changed after JARVES checked the task and were not committed: {', '.join(files[:5])}. "
                 f"Run its work stage again ({what})")
 
     @staticmethod
-    def _clean_merge(wt: Path, sha: str, a: str, b: str) -> bool:
-        """True only when `sha` holds exactly the tree git's own merge of a and b gives: a merge commit's content is not
-        fixed by its parents, so an amended merge with the right parents is refused (#1461 review 3 R1). Needs git
-        2.38+ (`merge-tree --write-tree`); on older git every real merge fails closed (blocked, never merged)."""
+    def _clean_merge(wt: Path, sha: str, a: str, b: str) -> str:
+        """'' only when `sha` holds exactly the tree git's own merge of a and b gives, else why not: a merge commit's
+        content is not fixed by its parents, so an amended merge with the right parents is refused (#1461 review 3 R1).
+        Needs git 2.38+ (`merge-tree --write-tree`); older git gets its own reason and fails closed (never merged)."""
+        moved = f"the task branch moved after JARVES checked it: {sha[:12]} is not a clean merge of the checked commit"
         try:
             want = gitops.git(wt, "merge-tree", "--write-tree", a, b, check=False)
             have = gitops.git(wt, "rev-parse", f"{sha}^{{tree}}", check=False).stdout.strip()
         except OSError:
-            return False
+            return moved
+        if want.returncode == 129:                      # git's usage error: this git has no merge-tree --write-tree
+            return "git 2.38 or newer is needed to check a merge with newer work: update git, then retry the task"
         tree = want.stdout.split("\n", 1)[0].strip() if want.returncode == 0 else ""
-        return bool(tree) and tree == have
+        return "" if tree and tree == have else moved
 
     def _feedback(self, t: dict, text: str) -> None:
         j = self._job(self.db.task(t["id"]) or t)
@@ -823,15 +834,18 @@ class StageEngine:
                         if committed and pre == self._job(t).get("tested_head"):
                             new = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
                             files = gitops.changed_files(wt, pre, new[0])
-                            prot, _ = gitops.violations(files, [])
+                            prot, outside = gitops.violations(files, t["scope"])
                             prot += gitops.link_files(wt, pre, new[0])
-                            # your edit sits directly on the checked commit and touches no protected path or link
-                            # (#1461); otherwise it stays unbound and the merge stage blocks it
-                            if new[1:] == [pre] and not prot:
-                                self._set_job(t, tested_head=new[0])
-                            elif prot:
+                            bad = prot + [f for f in outside if f not in prot]
+                            # the same scope and protected-path rules as the work stage: the fold commits the whole
+                            # shared worktree, not only your edit (#1461); otherwise it stays unbound and the merge
+                            # stage blocks it. tested_base=None: the merge stage runs the check on it again.
+                            if new[1:] == [pre] and not bad:
+                                self._set_job(t, tested_head=new[0], tested_base=None)
+                            elif bad:
                                 self.db.event(t["id"], "manager", "warning", "the edit at the merge approval changed "
-                                              "protected files, so it is not merged: " + ", ".join(prot[:5]))
+                                              "protected files or files outside the scope, so it is not merged: "
+                                              + ", ".join(bad[:5]))
                     except gitops.GitError:
                         pass
                     t = self.db.task(t["id"])

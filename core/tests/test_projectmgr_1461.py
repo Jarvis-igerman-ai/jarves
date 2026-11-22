@@ -137,28 +137,49 @@ def _integration_has(home: Path, rel: str) -> bool:
     return (gitops.project_root(home, 1) / "integration" / rel).exists()
 
 
-def test_uncommitted_file_before_the_merge_is_not_merged(env):
+def test_untracked_file_before_the_merge_is_never_merged(env):
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
     _wrap(m, "_st_merge", lambda t: _write(Path(t["worktree"]), ".github/x.yml"))
     m.call("resume", project="demo")
     finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "not committed" in t["reason"] and "not merged" in t["reason"], t["reason"]
-    assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == ""
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == "1\n"
 
 
-def test_uncommitted_file_before_the_check_is_not_checked(env):
+def test_untracked_file_before_the_check_is_never_merged(env):
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
     _wrap(m, "_st_check", lambda t: _write(Path(t["worktree"]), "extra.txt"))
     m.call("resume", project="demo")
     finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "blocked" and "extra.txt" in t["reason"] and "not checked" in t["reason"], t["reason"]
+    assert m.db.by_seq(1, 1)["status"] == "done"
     assert not _integration_has(home, "extra.txt")
+
+
+def test_tracked_edit_before_the_merge_blocks(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    _wrap(m, "_st_merge", lambda t: _write(Path(t["worktree"]), "a.txt", "not checked\n"))
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "not committed" in t["reason"] and "not merged" in t["reason"], t["reason"]
+    assert _integration_a(home) == ""
+
+
+def test_check_that_leaves_an_artefact_still_merges(env):
+    """#1610 R2: a check writing `.coverage` or `__pycache__/` must not block every merge."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "open('.coverage','w').write('x')"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)["reason"]
+    assert _integration_a(home) == "1\n" and not _integration_has(home, ".coverage")
 
 
 def _owner_merge_task(m, repo):
@@ -180,6 +201,34 @@ def test_protected_file_folded_at_owner_approval_is_not_merged(env):
     t = m.db.by_seq(1, 1)
     assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
     assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == ""
+
+
+def test_out_of_scope_file_folded_at_owner_approval_is_not_merged(env):
+    """#1610 R1: the approval fold commits the whole shared worktree, so the task scope applies to it."""
+    m, repo, home = env
+    _write(_owner_merge_task(m, repo), "other.txt")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
+    assert not _integration_has(home, "other.txt") and _integration_a(home) == ""
+
+
+def test_owner_edit_at_approval_is_checked_again(env):
+    """#1610 R3: the owner-edit commit runs the project check before it merges."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "import sys; sys.exit(open('a.txt').read() == 'bad\\n')"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    _write(Path(t["worktree"]), "a.txt", "bad\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert _integration_a(home) != "bad\n"
+    assert any(e["kind"] == "check_failed" for e in m.db.events(t["id"])), m.db.events(t["id"])
 
 
 def test_owner_edit_at_approval_still_merges(env):
@@ -356,4 +405,39 @@ def test_scope_check_reads_the_fixed_commit_not_the_moving_head(env, monkeypatch
     monkeypatch.setattr(gitops, "changed_files", run)
     m.call("resume", project="demo")
     finish(m)
-    assert seen and len(seen[0]) == 40 and seen[0] != "HEAD", seen
+    t = m.db.by_seq(1, 1)
+    assert seen and seen[0] == m._job(t).get("tested_head"), (seen, m._job(t))
+
+
+def test_old_git_without_merge_tree_write_tree_gets_its_own_reason(env, tmp_path, monkeypatch):
+    """#1610 R4: git older than 2.38 fails closed with a reason that says what to do."""
+    import subprocess
+    m, repo, home = env
+    wt, a, b = _repo_ab(tmp_path / "r")
+    sh(wt, "git", "checkout", "-q", "-b", "task", a)
+    (wt / "g").write_text("task")
+    sh(wt, *GIT, "add", "-A")
+    sh(wt, *GIT, "commit", "-q", "-m", "task")
+    vetted = sh(wt, "git", "rev-parse", "HEAD").strip()
+    sh(wt, *GIT, "merge", "-q", "--no-ff", "--no-edit", b)
+    orig = gitops.git
+
+    def old_git(cwd, *args, **k):
+        if args[:2] == ("merge-tree", "--write-tree"):
+            return subprocess.CompletedProcess(args, 129, "", "usage: git merge-tree")
+        return orig(cwd, *args, **k)
+    monkeypatch.setattr(gitops, "git", old_git)
+    sha, why = m._bind(wt, vetted, "not merged", merged=True, base_sha=b)
+    assert sha == "" and "git 2.38 or newer" in why and "not merged" in why, why
+
+
+def test_dirty_reason_keeps_the_full_names_of_a_rename(env, tmp_path):
+    """#1610 R5: with -z a rename's source path is a bare entry; it must not be cut or listed as a change."""
+    m, repo, home = env
+    wt, a, b = _repo_ab(tmp_path / "r")
+    (wt / "original.txt").write_text("o")
+    sh(wt, *GIT, "add", "-A")
+    sh(wt, *GIT, "commit", "-q", "-m", "o")
+    sh(wt, *GIT, "mv", "original.txt", "renamed.txt")
+    why = m._dirty(wt, "x")
+    assert "renamed.txt" in why and "ginal.txt" not in why, why

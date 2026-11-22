@@ -110,6 +110,12 @@ fix_he = "הסוכן שינה קבצים שלא הוגדרו למשימה (או 
 fix_en = "The agent changed files the task did not list (or agent settings files). Nothing was merged; the work stays on the task branch. Widen the scope: jarvis project update N --scope ... then jarvis project retry N."
 
 [[problems]]
+he = "משימה תקועה עם הודעה ש-git 2.38 או חדש יותר נדרש"
+en = "A task is blocked with a message that git 2.38 or newer is needed"
+fix_he = "כשענף האינטגרציה התקדם, ג'ארביס בודק שהמיזוג עם העבודה החדשה נקי בעזרת git merge-tree --write-tree, שקיים רק מ-git 2.38. שום דבר לא מוזג. עדכנו את git (git --version מראה את הגרסה) ואז jarvis project retry N."
+fix_en = "When the integration branch moved on, JARVES checks the merge with the newer work is clean with git merge-tree --write-tree, which exists only from git 2.38. Nothing was merged. Update git (git --version shows the version), then jarvis project retry N."
+
+[[problems]]
 he = "משימה נכשלה אחרי שתי ניסיונות"
 en = "A task failed after two attempts"
 fix_he = "ראו למה: jarvis project deep N (ציר זמן ופלט הבדיקה). פצלו למשימות קטנות יותר או תקנו את המפרט, ואז retry. סוכן שלא מותקן מופיע ב-jarvis project runners."
