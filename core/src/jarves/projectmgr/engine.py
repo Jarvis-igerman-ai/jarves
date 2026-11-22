@@ -226,6 +226,17 @@ class StageEngine:
         self.db.update_task(t["id"], worktree=str(wt), branch=br)
         return wt, br
 
+    def _unchecked(self, t: dict, head: str) -> str:
+        """#1461: '' when `head` is the commit the last check / scope check saw, else why not (fails closed when none
+        is recorded, e.g. a task already past its work stage when this version was installed)."""
+        checked = self._job(self.db.task(t["id"]) or t).get("tested_head") or ""
+        if not checked:
+            return f"no checked commit is recorded for task #{t['seq']}: retry the task"
+        if head != checked:
+            return (f"the task branch {t['branch']} changed after the check (now {head[:12] or '?'}, checked "
+                    f"{checked[:12]})")
+        return ""
+
     def _at(self, p, ref: str) -> tuple[str, str]:
         """(short commit `ref` points at now, `ref at commit X`) for owner/agent text (#1469: a branch name can move
         after the text was shown). ("", ref) when git cannot tell."""
@@ -486,11 +497,13 @@ class StageEngine:
         if dirty:                                                   # #1508: reviewers see only commits; merge's
             return ("stop", "blocked", "uncommitted edits in the task folder were never reviewed: commit them "
                                        "through a work stage or remove them")   # commit_all would fold these in
+        why = self._unchecked(t, head)                              # #1461: a review never rebinds to a moved commit
+        if why:
+            return ("stop", "blocked", why + ": not reviewed")
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", "--no-ext-diff", "--no-textconv", f"{base}...{head}",
                           check=False).stdout
         if not diff.strip():
-            self._set_job(t, tested_head=head)                      # nothing to review in exactly this commit
             return ("next",)
         if self._day_cap():
             return ("requeue", self._day_cap())
@@ -511,8 +524,7 @@ class StageEngine:
         req = st.get("require", "all")
         passed = (len(ok) == len(verdicts)) if req == "all" else (len(ok) >= 1) if req == "any" else \
             (len(ok) * 2 > len(verdicts))
-        if passed:
-            self._set_job(t, tested_head=head)                      # #1461: the reviewed commit, nothing later
+        if passed:                                                  # the merge stage re-checks the branch is at it
             return ("next",)
         for n, v in verdicts:
             if v["verdict"] == "changes":
@@ -547,6 +559,10 @@ class StageEngine:
                 return ("end",)
             if has_wt:
                 try:
+                    pre = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
+                    why = self._unchecked(t, pre) if self._job(self.db.task(t["id"]) or t).get("tested_head") else ""
+                    if why:                                         # e.g. moved after a review: never rebind
+                        return ("stop", "blocked", why + ": not checked")
                     gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                     conflicts = gitops.merge_in(wt, base)
                 except gitops.GitError as e:
@@ -594,15 +610,18 @@ class StageEngine:
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 tip = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
-                checked = self._job(t).get("tested_head")
-                if checked and tip not in (checked, approved):  # #1461: moved or edited after the check/review
-                    return ("stop", "blocked", f"the task branch {br} changed after the check (now {tip[:12]}, "
-                                               f"checked {checked[:12]}): not merged")
+                why = "" if approved and tip == approved else self._unchecked(t, tip)   # #1461; approved: your call
+                if why:
+                    return ("stop", "blocked", why + ": not merged")
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
+                    new = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()     # the merge commit merge_in made
+                    if new not in (head, tip) and gitops.git(wt, "rev-parse", f"{new}^1", f"{new}^2",
+                                                  check=False).stdout.split() != [tip, head]:
+                        return ("stop", "blocked", f"the task branch {br} moved during the merge: not merged")
                     if has_check:
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
                         if not ok:
@@ -612,10 +631,8 @@ class StageEngine:
                             self._on_fail(p, t, st, test_i if test_i is not None else 0, stages,
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
-                    new = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()     # the merge commit just checked
-                    if new not in (head, tip) and gitops.git(wt, "rev-parse", f"{new}^1", f"{new}^2",
-                                                  check=False).stdout.split() != [tip, head]:
-                        return ("stop", "blocked", f"the task branch {br} moved during the merge: not merged")
+                    if gitops.git(wt, "rev-parse", "HEAD").stdout.strip() != new:      # exactly what was checked
+                        return ("stop", "blocked", f"the task branch {br} changed during the check: not merged")
                     tip = new
                 gitops.fast_forward(self._integration(p), tip)      # that exact commit, never the movable branch name
             except gitops.GitError as e:
@@ -668,39 +685,52 @@ class StageEngine:
         """Record the task commit and uncommitted files an owner question shows; returns the text naming them
         (#1461/#1469: your answer covers exactly this)."""
         if not t["worktree"] or not Path(t["worktree"]).exists():
-            self._set_job(t, shown=None, shown_dirty=None)
+            self._set_job(t, shown=None, shown_dirty=None, shown_tree=None)
             return ""
         head = self._tree(t)[0]
         dirty = gitops.dirty_files(Path(t["worktree"]))
-        self._set_job(t, shown=head, shown_dirty=dirty)
+        try:
+            tree = gitops.worktree_tree(Path(t["worktree"]))        # contents, not only names (R2)
+        except gitops.GitError:
+            tree = ""                                               # no tree: no yes can bind (fails closed)
+        self._set_job(t, shown=head, shown_dirty=dirty, shown_tree=tree)
         return f" (commit {head[:12]}" + (f"; uncommitted: {', '.join(dirty[:5])}" + (" ..." if len(dirty) > 5 else "")
                                           if dirty else "") + ")"
 
-    def _bind_answer(self, p, t, st, i, stages) -> str:
-        """The owner said yes to a review/test/verify/merge question: commit the folder and keep the commit only if it
-        is what the question showed (its commit plus the uncommitted files it named). Returns "" when bound, else the
-        re-asked question (the task changed since; your yes does not cover it)."""
+    def _bind_answer(self, p, t, st, i, stages) -> tuple[str, str]:
+        """The owner said yes to a review/test/verify/merge question. Review/test/verify cover the checked commit only:
+        the folder must be exactly that commit, the one the question showed, else the task blocks (BLOCKED, why).
+        Merge: commit the folder and keep the commit only if its contents are what the question showed (that commit
+        plus its uncommitted files, contents included), else re-ask (CHANGED, question). ("", "") when bound."""
         job = self._job(t)
         wt = Path(t["worktree"])
+        shown = job.get("shown") or ""
+        if st["kind"] != "merge":                                   # a yes never rebinds the checked commit (R1)
+            head, dirty = self._tree(t)
+            why = self._unchecked(t, head) or (f"task #{t['seq']} has uncommitted edits that were never checked"
+                                               if dirty else "") or (f"the task branch {t['branch']} changed since "
+                                                                     "the question" if head != shown else "")
+            if why:
+                return "BLOCKED", why + f": your {st['kind']} answer does not cover it; not merged"
+            self._set_job(t, shown=None, shown_dirty=None, shown_tree=None)
+            return "", ""
         new: set[str] = set()
         try:
             gitops.commit_all(wt, f"task {t['seq']}: owner edit before {st['kind']}"[:120])
             head = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
-            shown = job.get("shown") or ""
-            ok = bool(shown) and head == shown
+            tree = gitops.git(wt, "rev-parse", f"{head}^{{tree}}").stdout.strip()
+            parents = gitops.git(wt, "rev-parse", f"{head}^@", check=False).stdout.split()
+            ok = bool(shown) and tree == job.get("shown_tree") and (head == shown or parents == [shown])
             if shown and not ok:
-                parents = gitops.git(wt, "rev-parse", f"{head}^@", check=False).stdout.split()
                 files = gitops.git(wt, "diff", "--name-only", "-z", "--no-renames", shown, head).stdout.split("\0")
                 new = {f for f in files if f}
-                ok = parents == [shown] and new <= set(job.get("shown_dirty") or [])
         except gitops.GitError:
             head, ok = "", False
         if ok:
-            bound = {"approved": {"stage": i, "tree": head}} if st["kind"] == "merge" else {"tested_head": head}
-            self._set_job(t, shown=None, shown_dirty=None, **bound)
-            return ""
+            self._set_job(t, shown=None, shown_dirty=None, shown_tree=None, approved={"stage": i, "tree": head})
+            return "", ""
         again = self._owner_stage(p, self.db.task(t["id"]), st, i, stages)[1]
-        return again + (f" (changed since the question: {', '.join(sorted(new)[:5])})" if new else "")
+        return "CHANGED", again + (f" (changed since the question: {', '.join(sorted(new)[:5])})" if new else "")
 
     def _owner_stage(self, p, t, st, i, stages):
         kind = st["kind"]
@@ -782,7 +812,10 @@ class StageEngine:
             self.db.update_task(t["id"], notes=(t["notes"] + [note])[-5:])      # the owner's own words
         if positive and st["by"] == "owner" and st["kind"] in BIND_KINDS and t["worktree"] and \
                 Path(t["worktree"]).exists():
-            again = self._bind_answer(p, t, st, i, stages)
+            code, again = self._bind_answer(p, t, st, i, stages)
+            if code == "BLOCKED":
+                self._fail(t, "blocked", again, p)
+                return self._res(False, "CHANGED", f"task #{t['seq']} blocked: {again}")
             if again:
                 self.db.update_task(t["id"], waiting=clean(again, 400))
                 return self._res(False, "CHANGED", f"task #{t['seq']} changed since the question, so your answer does "

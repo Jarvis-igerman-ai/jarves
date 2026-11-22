@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -69,8 +70,8 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
@@ -81,7 +82,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **(env or {})}), encoding="utf-8",
                            errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
@@ -169,6 +170,16 @@ def dirty_files(wt: Path) -> list[str]:
     out = git(wt, "diff", "--name-only", "-z", "--no-renames", "HEAD").stdout.split("\0")
     out += git(wt, "ls-files", "-o", "--exclude-standard", "-z").stdout.split("\0")
     return sorted({x.replace("\\", "/") for x in out if x})
+
+
+def worktree_tree(wt: Path) -> str:
+    """The tree id commit_all would commit now (HEAD plus every uncommitted, non-ignored file, contents included),
+    built in a throwaway index so the real index is untouched (#1461: an owner answer binds to contents, not names)."""
+    with tempfile.TemporaryDirectory() as d:
+        env = {"GIT_INDEX_FILE": os.path.join(d, "index")}
+        git(wt, "read-tree", "HEAD", env=env)
+        git(wt, "add", "-A", env=env)
+        return git(wt, "write-tree", env=env).stdout.strip()
 
 
 def commit_all(wt: Path, message: str) -> bool:

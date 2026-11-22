@@ -1328,13 +1328,16 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and t["worktree"]
     p = m.db.project(t["project_id"])
+    wt = Path(t["worktree"])
+    seen = lambda: m._set_job(t, tested_head=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())  # as a work stage does
+    seen()
     assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean and empty: nothing to review
     (Path(t["worktree"]) / "mine.txt").write_text("never reviewed\n")                  # in scope, never committed
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
     assert not (gitops.project_root(home, 1) / "reviews_default").exists()            # no reviewer was asked
-    wt = Path(t["worktree"])                                   # review R1: a committed change does not hide extra edits
-    gitops.commit_all(wt, "committed in-scope change")
+    gitops.commit_all(wt, "committed in-scope change")         # review R1: a committed change does not hide extra edits
+    seen()
     assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean: reviewed and approved
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
