@@ -32,3 +32,11 @@ PRs are held by the Tier R `no-automerge` label, not by a red installer job.** T
 2. The Tier R reviewer chooses which of #1344 or #1424 to keep and closes the other.
 3. `stall:check_broken` and `pr_not_merging` come from the factory, not this repo. They stay open until steps 1
    and 2 are done. UNVERIFIED.
+
+## Guard added (22 Nov 2026)
+GitHub can run a PR on a stale `refs/pull/N/merge`, so a CI rule fix on main did not reach #1424's run. The
+`changes` job now fetches the base tip and lists what main changed since the merge's base
+(`base-drift.txt`). If that list contains a CI rule file (`jarves-checks.yml`, `ci_plan/ci_flake/ci_reuse.py`,
+`conftest.py`), or the base tip cannot be read, `ci_plan.py classify --base-drift-from` gives the PR the full
+matrix, installer included. Test: `test_jar651_*` in `core/tests/test_ci_speed_tools.py`. This only helps runs
+whose merge ref already contains the guard; the four PRs above still need fresh heads.
