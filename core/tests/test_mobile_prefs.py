@@ -188,3 +188,16 @@ def test_prefs_js_is_served_csp_safe_and_translated():
     assert re.search(r"[֐-׿]", js)
     html = (MOBILE_DIR / "index.html").read_text(encoding="utf-8")
     assert '/m/prefs.js' in html and 'id="prefsRoot"' in html and 'id="tabbtn-prefs"' in html
+
+
+def test_206_h2_review_r3_a_max_length_pref_confirms_with_the_listed_text(srv, prefs):
+    p, _a, _b = prefs
+    from jarves.preferences import MAX_TEXT
+    long = ("Please keep every answer about cooking short and plain " * 5)[:MAX_TEXT].strip()
+    assert len(long) >= MAX_TEXT - 1
+    pid = p.suggest(long, "I said so", "food")["item"]["id"]
+    tok, _ = pair(srv)
+    _, v = call(srv, "GET", "/api/m/prefs", tok)
+    shown = next(x["text"] for x in v["proposed"] if x["id"] == pid)           # exactly what the phone page lists
+    st, out = op(srv, tok, op="confirm", pref=pid, text=shown)                  # what prefs.js sends back (p.text)
+    assert st == 200 and out["state"] == "confirmed" and p.get(pid)["state"] == "confirmed"
