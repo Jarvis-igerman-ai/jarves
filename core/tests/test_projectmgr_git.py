@@ -269,11 +269,15 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
     cfg.claude_command = ["claude"]
     argv = runners.ClaudeRunner(cfg).build("p", str(wt)).argv
     denied = argv[argv.index("--disallowedTools") + 1:]
-    root = "/" + (repo / ".git").resolve().as_posix()          # Claude Code's absolute-path rule form (POSIX here)
-    if os.name == "nt":
-        root = "//" + root[2].lower() + root[4:]
+    def rule(path: Path) -> str:                               # Claude Code's absolute-path rule form
+        root = "/" + path.resolve().as_posix()                 # POSIX "//x"; Windows "/C:/x" -> "//c/x"
+        return "//" + root[1].lower() + root[3:] if os.name == "nt" else root
+    root = rule(repo / ".git")
     assert f"Edit({root}/**)" in denied and f"Write({root}/**)" in denied
     assert gitops.common_dir(wt) == (repo / ".git").resolve()
+    # review R2: the worktree's own `.git` pointer file, repointed at a planted gitdir, would bypass the rule above
+    ptr = rule(wt / ".git")
+    assert all(f"{t}({ptr}{s})" in denied for t in ("Edit", "Write") for s in ("", "/**"))
     # a folder that is not a repository gets no extra rule and no error
     assert gitops.common_dir(tmp_path / "nowhere") is None
     assert runners.ClaudeRunner(cfg).build("p", str(tmp_path)).argv.count("--disallowedTools") == 1
@@ -283,3 +287,21 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
 def test_claude_absolute_rule_path_form(path, rule):
     from jarves.projectmgr import runners
     assert runners.abs_rule_path(path) == rule
+
+
+def test_a_worktree_whose_shared_git_dir_cannot_be_found_is_refused_not_run_open(monkeypatch, tmp_path):
+    # review R3: an old git (no --path-format) or unreadable repo must not silently drop the #1533 rules
+    from jarves.config import Config
+    from jarves.projectmgr import runners
+    (tmp_path / ".git").write_text("gitdir: /nowhere", encoding="utf-8")
+    calls: list = []
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(129, "error: unknown option `path-format'")], calls))
+    assert gitops.common_dir(tmp_path) is None
+    cfg = Config().projects
+    cfg.claude_command = ["claude"]
+    with pytest.raises(ValueError, match="shared git folder"):
+        runners.ClaudeRunner(cfg).build("p", str(tmp_path))
+    started: list = []
+    monkeypatch.setattr(runners.subprocess, "Popen", lambda *a, **k: started.append(a))
+    r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
+    assert not r.ok and "shared git folder" in r.error and started == []

@@ -102,7 +102,7 @@ def common_dir(path: str | Path) -> Path | None:
     """The repository's shared git dir (config, info/attributes, hooks, refs) for a worktree, absolute; None when the
     folder is not a git worktree. Agents get no write access to it (#1533)."""
     try:
-        p = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+        p = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return None
     out = p.stdout.strip()

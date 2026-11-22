@@ -167,12 +167,23 @@ def abs_rule_path(path: str | Path) -> str:
 
 def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
-    (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it."""
+    (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it.
+    The worktree's own `.git` pointer file is denied too: repointed at a planted gitdir, git would read that config.
+    A worktree whose shared git dir cannot be found (git older than 2.31, unreadable repo) is refused, not run open."""
+    try:
+        dot_git = Path(cwd).resolve() / ".git"
+        present = dot_git.exists()
+    except OSError:
+        return []
+    if not present:
+        return []
     common = gitops.common_dir(cwd)
     if common is None:
-        return []
-    root = abs_rule_path(common)
-    return [f"Edit({root}/**)", f"Write({root}/**)"]
+        raise ValueError("cannot find the shared git folder of this worktree (git 2.31 or newer is needed)")
+    rules = []
+    for root in (abs_rule_path(dot_git), abs_rule_path(common)):
+        rules += [f"Edit({root})", f"Write({root})", f"Edit({root}/**)", f"Write({root}/**)"]
+    return list(dict.fromkeys(rules))
 
 
 def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) -> list[str]:
