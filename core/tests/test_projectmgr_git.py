@@ -318,8 +318,12 @@ def test_a_worktree_whose_git_entry_cannot_be_inspected_is_refused(monkeypatch, 
     from jarves.config import Config
     from jarves.projectmgr import runners
 
-    def broken(self, *a, **k):
-        raise PermissionError("access denied")
+    real_lstat = os.lstat
+
+    def broken(path, *a, **k):                                   # an unreadable `.git` entry
+        if os.path.basename(os.fspath(path)) == ".git":
+            raise PermissionError("access denied")
+        return real_lstat(path, *a, **k)
     cfg = Config().projects
     cfg.claude_command = ["claude"]
     started: list = []
@@ -328,7 +332,9 @@ def test_a_worktree_whose_git_entry_cannot_be_inspected_is_refused(monkeypatch, 
         started.append(a)
         raise OSError("the agent must not start")
     monkeypatch.setattr(runners.subprocess, "Popen", popen)
-    monkeypatch.setattr(runners.Path, "exists", broken)            # the `.git` lookup in cwd and its parents
+    monkeypatch.setattr(runners.os, "lstat", broken)
+    # review R2 (restart): Python 3.14 `Path.exists` turns every OSError into False; it must not hide the error
+    monkeypatch.setattr(runners.Path, "exists", lambda self, *a, **k: False)
     r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
     assert not r.ok and "cannot inspect the git folder" in r.error and started == []
 
@@ -375,3 +381,13 @@ def test_a_path_without_a_known_rule_form_is_refused(path):
     from jarves.projectmgr import runners
     with pytest.raises(ValueError, match="no permission-rule form"):
         runners.abs_rule_path(path)
+
+
+def test_a_project_on_a_mapped_network_drive_is_refused(monkeypatch, tmp_path):
+    # review R3 (restart): Windows resolves a mapped drive `Z:\` to `\\srv\share\`; that spelling has no rule form,
+    # so the run is refused (documented in the changelog), never run with a deny rule that matches nothing
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(runners.Path, "resolve", lambda self, *a, **k: Path(r"\\srv\share\r\.git"))
+    with pytest.raises(ValueError, match="no permission-rule form"):
+        runners._shared_git_deny(str(repo))

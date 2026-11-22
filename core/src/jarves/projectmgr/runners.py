@@ -168,6 +168,16 @@ def abs_rule_path(path: str | Path) -> str:
     return "/" + p.rstrip("/")
 
 
+def _has_git_entry(d: Path) -> bool:
+    """`d/.git` exists (file, folder or symlink). Only "no such entry" is False; any other OSError (an unreadable
+    folder) propagates, so the caller refuses. Not `Path.exists`: Python 3.14 turns every OSError into False."""
+    try:
+        os.lstat(d / ".git")
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
+
+
 def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
     (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it.
@@ -177,7 +187,7 @@ def _shared_git_deny(cwd: str) -> list[str]:
     Each path is denied as given and resolved (a symlinked folder), and in lower case on Windows (case-insensitive)."""
     try:
         start = Path(os.path.abspath(cwd))
-        top = next((d for d in (start, *start.parents) if (d / ".git").exists()), None)
+        top = next((d for d in (start, *start.parents) if _has_git_entry(d)), None)
     except OSError as e:
         raise ValueError(f"cannot inspect the git folder of this worktree: {e}") from e
     if top is None:
