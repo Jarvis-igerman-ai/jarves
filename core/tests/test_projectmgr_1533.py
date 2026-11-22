@@ -57,6 +57,7 @@ def test_an_agent_that_writes_the_shared_git_config_fails_and_it_is_restored(tmp
     assert not res.ok and "shared git" in res.error and "config" in res.error
     assert (repo / ".git" / "config").read_bytes() == before
     assert not (repo / ".git" / "info" / "attributes").exists()
+    assert "evil" in (repo / ".git" / "config.jarves-rejected").read_text(encoding="utf-8")     # review R4: kept
     (wt / "a.py").write_text("1\n", encoding="utf-8")
     assert gitops.commit_all(wt, "a") and not (tmp_path / "ran.txt").exists()
 
@@ -80,7 +81,7 @@ def test_a_jarves_commit_never_runs_a_filter_planted_while_another_agent_runs(tm
         with pytest.raises(gitops.GitError, match="shared git"):
             gitops.commit_all(wt, "a")
         assert (repo / ".git" / "config").read_bytes() == before
-    assert changed == [] and not (tmp_path / "ran.txt").exists()
+    assert changed == ["config", "info/attributes"] and not (tmp_path / "ran.txt").exists()     # review R1
     assert gitops.git(wt, "log", "-1", "--format=%s").stdout.strip() != "a"
 
 
@@ -93,15 +94,43 @@ def test_claude_agents_may_not_edit_the_shared_git_folder(tmp_path):
     assert f"Edit(/{common}/**)" in deny and f"Write(/{common}/**)" in deny
 
 
-def test_an_edit_after_the_last_run_ended_is_kept_and_commit_all_works(tmp_path):
-    """Review R1: the baseline ends with the last guarded run; a later owner (or JARVES) config edit is kept."""
+def test_an_edit_after_the_last_run_ended_is_kept_but_stops_project_work(tmp_path):
+    """Review R1 (round 1) + R2 (round 2): a later edit is never reverted, but commits and new runs refuse it."""
     repo, wt = _task(tmp_path)
     assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
     with open(repo / ".git" / "config", "a", encoding="utf-8") as h:
         h.write("[x]\n\ty = 1\n")
     (wt / "a.py").write_text("1\n", encoding="utf-8")
-    assert gitops.commit_all(wt, "a") and "[x]" in (repo / ".git" / "config").read_text(encoding="utf-8")
-    assert gitops._GUARDS == {}
+    with pytest.raises(gitops.GitError, match="restart JARVES to accept"):
+        gitops.commit_all(wt, "a")
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", "pass"])
+    assert not ok and "(config) changed after the last agent run" in out
+    assert "[x]" in (repo / ".git" / "config").read_text(encoding="utf-8") and gitops._GUARDS == {}
+
+
+def test_a_filter_planted_after_the_check_ended_never_runs(tmp_path):
+    """Review R2 (round 2): a process the check left behind writes after it returned; commit_all runs no git."""
+    repo, wt = _task(tmp_path)
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
+    import subprocess
+    subprocess.run(_plant(repo, tmp_path), check=True)
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError, match="config, info/attributes"):
+        gitops.commit_all(wt, "a")
+    assert not (tmp_path / "ran.txt").exists() and "evil" in (repo / ".git" / "config").read_text(encoding="utf-8")
+    res = _Agent([sys.executable, "-c", "pass"]).run("work", str(wt))
+    assert not res.ok and "changed after the last agent run" in res.error
+
+
+def test_an_agent_run_whose_files_cannot_be_put_back_fails_with_a_result(monkeypatch, tmp_path):
+    """Review R3 (round 2): an OSError from the guard is a failed Result, not an exception out of Runner.run."""
+    repo, wt = _task(tmp_path)
+
+    def broken(f, data):
+        raise PermissionError("read-only")
+    monkeypatch.setattr(gitops, "_put_back", broken)
+    res = _Agent(_plant(repo, tmp_path)).run("work", str(wt))
+    assert not res.ok and res.error == "the shared git files could not be checked or put back: read-only"
 
 
 def test_a_check_that_times_out_still_reports_the_changed_files(monkeypatch, tmp_path):

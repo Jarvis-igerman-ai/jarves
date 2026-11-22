@@ -99,9 +99,14 @@ class Runner:
             cancel: threading.Event | None = None, team: bool = False) -> Result:
         """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533).
         Subclasses override build/parse, never run (the guard lives here)."""
-        with gitops.shared_config_guard(cwd) as changed:
-            r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
-                          timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+        try:
+            with gitops.shared_config_guard(cwd) as changed:
+                r = self._run(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
+                              timeout=timeout, on_start=on_start, cancel=cancel, team=team)
+        except gitops.GitError as e:            # they changed after the last run: no agent starts
+            return Result(error=str(e))
+        except OSError as e:                    # reading or putting back the shared git files (review R3)
+            return Result(error=f"the shared git files could not be checked or put back: {e}")
         return Result(error="the agent " + gitops.tamper_text(changed), session_id=r.session_id, cost_usd=r.cost_usd,
                       tokens=r.tokens) if changed else r
 
@@ -182,7 +187,8 @@ def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) ->
 
 def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the repository's common git folder lies outside the task worktree; no edit there, by absolute path
-    (Claude Code's `//path` form; a Windows drive `C:` becomes `/c`). Live enforcement is UNVERIFIED."""
+    (Claude Code's `//path` form; a Windows drive `C:` becomes `/c`). Defence in depth only: Bash writes are not
+    covered and live enforcement is UNVERIFIED; the real control is gitops.shared_config_guard around every run."""
     common = gitops.common_dir(cwd)
     if common is None:
         return []

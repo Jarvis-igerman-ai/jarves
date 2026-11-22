@@ -97,12 +97,16 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # or a check running its code that writes them could make git run a command (filter/merge driver, config-defined
 # hook) for JARVES or later for the owner; no git option skips them. (Hook FILES in `.git/hooks` and `core.hooksPath`
 # never run for JARVES git: see `git`, #1381.) While any agent or check runs in a repository, JARVES keeps ONE baseline
-# of them: a change is put back (unique temp file + os.replace) and fails that run, and commit_all refuses to run git
-# while they differ. The baseline ends with the last run, so later edits (yours, or JARVES's own) are kept. A process
-# can still write between JARVES's check and git's own read.
+# of them: a change is put back (unique temp file + os.replace; the rejected bytes are kept next to it as
+# `<name>.jarves-rejected`) and fails EVERY run active at that moment (the writer is one of them). After the last run
+# the files as it left them stay the reference: a later change (a process the run left behind, or your own edit) is
+# never reverted, but JARVES refuses project commits and new runs there until JARVES restarts. A process can still
+# write between JARVES's check and git's own read.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
-_GUARDS: dict[Path, list] = {}          # common dir -> [active runs, {file: bytes or None (absent)}]
-_GUARD_LOCK = threading.Lock()
+REJECTED = ".jarves-rejected"
+_GUARDS: dict[Path, list] = {}          # common dir -> [the `changed` lists of the active runs, {file: bytes or None}]
+_LAST: dict[Path, dict] = {}            # common dir -> the files as the last run left them (review R2)
+_GUARD_LOCK = threading.RLock()
 
 
 def common_dir(cwd: str | Path) -> Path | None:
@@ -125,10 +129,7 @@ def _read(f: Path) -> bytes | None:
         return None
 
 
-def _put_back(f: Path, data: bytes | None) -> None:
-    if data is None:
-        f.unlink(missing_ok=True)
-        return
+def _write(f: Path, data: bytes) -> None:
     f.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.name}.", suffix=".jarves")
     try:
@@ -140,41 +141,74 @@ def _put_back(f: Path, data: bytes | None) -> None:
         raise
 
 
+def _put_back(f: Path, data: bytes | None) -> None:
+    now = _read(f)
+    if now is not None:                         # nothing is lost: an edit of yours can be copied back (review R4)
+        _write(f.with_name(f.name + REJECTED), now)
+    if data is None:
+        f.unlink(missing_ok=True)
+    else:
+        _write(f, data)
+
+
+def _differ(common: Path, snap: dict) -> list[Path]:
+    return [f for f in sorted(set(snap) | _shared_files(common)) if _read(f) != snap.get(f)]
+
+
+def _name(common: Path, f: Path) -> str:
+    return f.relative_to(common).as_posix()
+
+
 def _restore(common: Path) -> list[str]:
-    """Put back every shared file that differs from the baseline; the names that differed."""
+    """Put back every shared file that differs from the baseline; the names go to every active run, and are returned."""
     with _GUARD_LOCK:
         g = _GUARDS.get(common)
-        if not g or g[0] <= 0:                  # no agent or check is running there: nothing to compare with
+        if not g:                               # no agent or check is running there
             return []
-        changed = []
-        for f in sorted(set(g[1]) | _shared_files(common)):
-            if _read(f) != g[1].get(f):
-                _put_back(f, g[1].get(f))
-                changed.append(f.relative_to(common).as_posix())
-        return changed
+        names = []
+        for f in _differ(common, g[1]):
+            _put_back(f, g[1].get(f))
+            names.append(_name(common, f))
+        for run in g[0]:                        # review R1: the run that wrote them fails too
+            run.extend(n for n in names if n not in run)
+        return names
+
+
+def _refuse_late_change(common: Path) -> None:
+    """No run is active: the files must still be as the last run left them (review R2). Never reverted."""
+    with _GUARD_LOCK:
+        snap = _LAST.get(common) if common not in _GUARDS else None
+        late = [_name(common, f) for f in _differ(common, snap)] if snap is not None else []
+    if late:
+        raise GitError(f"the shared git files ({', '.join(late[:5])}) changed after the last agent run or check "
+                       "ended; JARVES left them as they are and runs no project work there. If you made this change "
+                       "yourself, restart JARVES to accept it (#1533)")
 
 
 @contextlib.contextmanager
 def shared_config_guard(cwd: str | Path):
     """Around an agent run or a check in `cwd`. Yields a list that holds, on exit, the shared files changed meanwhile
-    (already put back). Not a repository: nothing to guard."""
+    (already put back). Not a repository: nothing to guard. A change since the last run raises GitError."""
     common, changed = common_dir(cwd), []
     if common is not None:
         with _GUARD_LOCK:
+            _refuse_late_change(common)         # never adopt a planted copy as the next baseline
             if common in _GUARDS:
-                _GUARDS[common][0] += 1
+                _GUARDS[common][0].append(changed)
             else:                               # the first run there takes the baseline every later run shares
-                _GUARDS[common] = [1, {f: _read(f) for f in _shared_files(common)}]
+                _GUARDS[common] = [[changed], {f: _read(f) for f in _shared_files(common)}]
     try:
         yield changed
     finally:
         if common is not None:
             try:
-                changed.extend(_restore(common))
+                _restore(common)
             finally:
                 with _GUARD_LOCK:
-                    _GUARDS[common][0] -= 1
-                    if _GUARDS[common][0] <= 0:     # the last run ended: the baseline goes with it (review R1)
+                    g = _GUARDS[common]
+                    g[0] = [r for r in g[0] if r is not changed]
+                    if not g[0]:                # the last run ended: its baseline is the reference from now on
+                        _LAST[common] = g[1]
                         del _GUARDS[common]
 
 
@@ -256,7 +290,9 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
 
 
 def commit_all(wt: Path, message: str) -> bool:
-    common = common_dir(wt) if _GUARDS else None
+    common = common_dir(wt) if _GUARDS or _LAST else None
+    if common is not None:
+        _refuse_late_change(common)
     changed = _restore(common) if common is not None else []
     if changed:                                     # #1533: git would read them, and may run what they name
         raise GitError("a running agent or check " + tamper_text(changed))
@@ -362,6 +398,8 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
                 why = "check timed out"
             except OSError as e:
                 why = f"check could not start: {e}"
+    except GitError as e:                       # they changed after the last run (#1533)
+        return False, str(e)
     except OSError as e:                        # reading or putting back the shared git files (#1533)
         return False, f"{why + '; ' if why else ''}the shared git files could not be checked or put back: {e}"
     if changed:
