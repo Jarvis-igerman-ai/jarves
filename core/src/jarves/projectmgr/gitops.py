@@ -70,14 +70,24 @@ NO_HOOKS = _no_hooks_path()
 TRUSTED_SCOPES = ("system", "global", "command")        # local/worktree config (and its includes) is agent-writable
 # commands git takes from config (#1407): an agent-writable value is replaced, so git never runs it
 _RUN_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process)|merge\.(.+)\.driver|hook\.(.+)\.command"
-                      r"|gpg(\.[^.]+)?\.program)$")
+                      r"|gpg(\.[^.]+)?\.program|(gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(command|textconv)))$")
 _SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag)\.gpgsign)$")
+_NO_CONFIG_CMDS = ("rev-parse", "merge-base", "rev-list")   # never run a config-named command: no config read
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                 "gpg.ssh.program": "ssh-keygen"}
 
 
+def _norm_key(key: str) -> str:
+    """git prints `section.Sub.Name` with the subsection as written (case-sensitive); only the section and the name are
+    case-insensitive, so `filter.Evil.clean` must be overridden as `filter.Evil.clean`, never `filter.evil.clean`."""
+    head, _, rest = key.partition(".")
+    sub, dot, name = rest.rpartition(".")
+    return f"{head.lower()}.{sub}{dot}{name.lower()}" if sub else f"{head.lower()}.{name.lower()}"
+
+
 def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
-    """`-c` pairs that neutralise every config-named command (filter/merge drivers, config hooks, gpg programs) set
+    """`-c` pairs that neutralise the config-named commands (filter/merge/diff drivers, textconv, diff.external, config
+    hooks, gpg programs and gpg.ssh.defaultKeyCommand) set
     in the agent-writable local/worktree config (#1407); the owner's global/system value is kept. ident=False (a merge
     into your branch): untrusted signing settings turn signing off, so your key never signs on an agent's say-so.
     Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533."""
@@ -94,7 +104,7 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     signing = False
     for scope, kv in zip(items[0::2], items[1::2]):
         key, _, val = kv.partition("\n")
-        key = key.lower()
+        key = _norm_key(key)
         if scope in TRUSTED_SCOPES:
             trusted[key] = val
             continue
@@ -108,6 +118,8 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
             out += ["-c", f"{key}=exit 1"]                  # a conflict, never the agent's program
         elif m.group(5):
             out += ["-c", f"{key}=exit 0"]
+        elif m.group(7):
+            out += ["-c", f"{key}={trusted.get(key, 'exit 1')}"]      # fails closed, never the agent's program
         else:
             out += ["-c", f"{key}={trusted.get(key, _GPG_DEFAULT.get(key, 'gpg'))}"]
     if signing and not ident:
@@ -123,8 +135,16 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Other config-named commands: `config_overrides` (#1407)."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           *config_overrides(cwd, ident)]
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    if not args or args[0] not in _NO_CONFIG_CMDS:
+        try:
+            pre += config_overrides(cwd, ident)
+        except GitError as e:                               # the command never runs; check=False still never raises
+            if check:
+                raise
+            return subprocess.CompletedProcess(["git", *args], 128, "", str(e))
+    if args and args[0] == "diff":                          # #1407: no external diff or textconv on any JARVES diff
+        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -274,14 +294,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

@@ -264,6 +264,8 @@ def no_user_config(monkeypatch, tmp_path):
     """Hermetic: the machine's global git config (a signing program, say) must not decide these tests."""
     for k in ("HOME", "XDG_CONFIG_HOME", "USERPROFILE"):
         monkeypatch.setenv(k, str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")                  # nor the system config (child_env drops it)
+    monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
 
 
 def _spy(tmp_path: Path, name: str) -> tuple[str, Path]:
@@ -272,21 +274,23 @@ def _spy(tmp_path: Path, name: str) -> tuple[str, Path]:
     return f'echo ran > "{marker.as_posix()}"; cat', marker
 
 
-def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config):
+@pytest.mark.parametrize("name", ["evil", "Evil"])          # a subsection is case-sensitive (review R1)
+def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name):
     repo = _repo(tmp_path)
     cmd, marker = _spy(tmp_path, "filter")
-    gitops.git(repo, "config", "filter.evil.clean", cmd)
-    gitops.git(repo, "config", "filter.evil.required", "true")
-    (repo / ".gitattributes").write_text("*.txt filter=evil\n", encoding="utf-8")
+    gitops.git(repo, "config", f"filter.{name}.clean", cmd)
+    gitops.git(repo, "config", f"filter.{name}.required", "true")
+    (repo / ".gitattributes").write_text(f"*.txt filter={name}\n", encoding="utf-8")
     (repo / "g.txt").write_text("y", encoding="utf-8")
     assert gitops.commit_all(repo, "with attributes") and not marker.exists()
 
 
-def test_a_merge_driver_from_the_repo_config_never_runs(tmp_path, no_user_config):
+@pytest.mark.parametrize("name", ["evil", "Evil"])
+def test_a_merge_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name):
     repo = _repo(tmp_path)
     cmd, marker = _spy(tmp_path, "merge")
-    gitops.git(repo, "config", "merge.evil.driver", cmd)
-    (repo / ".gitattributes").write_text("f.txt merge=evil\n", encoding="utf-8")
+    gitops.git(repo, "config", f"merge.{name}.driver", cmd)
+    (repo / ".gitattributes").write_text(f"f.txt merge={name}\n", encoding="utf-8")
     gitops.commit_all(repo, "attributes")
     gitops.git(repo, "checkout", "-q", "-b", "side")
     (repo / "f.txt").write_text("side", encoding="utf-8")
@@ -324,3 +328,47 @@ def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_pat
     assert "hook.evil.command=exit 0" in pre and "gpg.ssh.program=ssh-keygen" in pre
     assert not any("evil" in x and "=" in x and x.endswith("evil") for x in pre)
     assert "commit.gpgsign=false" in gitops.config_overrides(repo, ident=False)
+
+
+@pytest.mark.parametrize("key,attr", [("diff.external", ""), ("diff.Evil.command", "diff=Evil"),
+                                      ("diff.Evil.textconv", "diff=Evil")])
+def test_a_diff_program_from_the_repo_config_never_runs(tmp_path, no_user_config, key, attr):
+    """Review R2: porcelain `git diff` honours diff.external, diff.<drv>.command and textconv by default."""
+    repo = _repo(tmp_path)
+    cmd, marker = _spy(tmp_path, "diff")
+    if attr:
+        (repo / ".gitattributes").write_text(f"*.txt {attr}\n", encoding="utf-8")
+    gitops.commit_all(repo, "attributes")
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    gitops.commit_all(repo, "change")
+    gitops.git(repo, "config", key, cmd)
+    gitops.git(repo, "diff", "HEAD~1...HEAD", check=False)
+    gitops.diffstat(repo, "HEAD~1")
+    assert not marker.exists()
+    assert f"{key}=" in " ".join(gitops.config_overrides(repo)) and cmd not in gitops.config_overrides(repo)
+
+
+def test_an_ssh_default_key_command_from_the_repo_config_never_runs(tmp_path, no_user_config):
+    """Review R2: `gpg.ssh.defaultKeyCommand` runs when gpg.format=ssh signs without a key."""
+    repo = _repo(tmp_path)
+    marker = tmp_path / "ran-key"
+    spy = tmp_path / "key-spy.sh"
+    spy.write_text(f'#!/bin/sh\necho ran > "{marker.as_posix()}"\nexit 1\n', encoding="utf-8")
+    spy.chmod(0o755)
+    for k, v in (("gpg.format", "ssh"), ("gpg.ssh.defaultKeyCommand", spy.as_posix()), ("commit.gpgsign", "true"),
+                 ("user.name", "Owner"), ("user.email", "o@x")):
+        gitops.git(repo, "config", k, v)
+    (repo / "k.txt").write_text("k", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "owner", ident=False)
+    assert not marker.exists()
+    assert "gpg.ssh.defaultkeycommand=exit 1" in gitops.config_overrides(repo)
+
+
+def test_an_unreadable_repo_config_fails_closed_and_check_false_never_raises(tmp_path, no_user_config):
+    """Review R5: a malformed .git/config written by an agent: the command never runs, check=False returns 128."""
+    repo = _repo(tmp_path)
+    (repo / ".git" / "config").write_text("[broken\n", encoding="utf-8")
+    assert gitops.git(repo, "status", check=False).returncode == 128
+    with pytest.raises(gitops.GitError):
+        gitops.git(repo, "status")

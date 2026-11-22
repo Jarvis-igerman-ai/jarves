@@ -569,6 +569,7 @@ class StageEngine:
         wt, br = Path(t["worktree"]), t["branch"]
         base = gitops.integration_branch(p["id"])
         has_check = any(s["kind"] in ("test", "verify") and not s.get("skip") for s in stages) and p["check_cmd"]
+        at = ""
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
@@ -726,8 +727,9 @@ class StageEngine:
                         pass
                     t = self.db.task(t["id"])
                 tree, shown = self._tree(t)[0], self._job(t).get("shown") or ""
-                if st["kind"] == "merge" and shown and not edited:
-                    tree = shown                    # you approved the commit you were shown; a later one is not it
+                if st["kind"] == "merge" and shown and (not edited or gitops.git(
+                        t["worktree"], "rev-parse", "HEAD^", check=False).stdout.strip() != shown):
+                    tree = shown    # you approved the commit you were shown (plus your own edit on it), nothing later
                 self._set_job(t, approved={"stage": i, "tree": tree}, shown=None)
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:

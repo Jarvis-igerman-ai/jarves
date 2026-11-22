@@ -1363,8 +1363,12 @@ def test_ship_names_and_merges_the_approved_commit_not_the_branch(env):
         gitops.commit_all(integ, "late")
         return True
     m._ask = ask
+    (repo / "own.txt").write_text("yours\n")                            # your branch moved: a real merge commit
+    sh(repo, "git", "add", "own.txt")
+    sh(repo, "git", "-c", "user.name=o", "-c", "user.email=o@x", "commit", "-qm", "own", "--no-verify")
     assert m.call("ship_plan", project="demo", apply=True)["ok"]
     assert sha[:12] in seen[0] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    assert sh(repo, "git", "log", "-1", "--format=%s").strip() == f"Merge {br} at {sha[:12]}"     # review R6
 
 
 def test_owner_merge_prompt_names_the_commit_and_a_later_commit_voids_the_approval(env):
@@ -1397,3 +1401,25 @@ def test_owner_merge_prompt_names_the_commit_and_a_later_commit_voids_the_approv
     assert t["status"] == "done"
     merged = sh(gitops.project_root(home, 1) / "integration", "git", "rev-parse", "HEAD").strip()[:12]
     assert any(e["kind"] == "merged" and f"at {merged}:" in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_an_owner_edit_never_carries_an_unseen_agent_commit_into_the_merge(env):
+    """Review R3: an agent commit after the merge prompt, then your own edit on top: approving re-parks, naming it."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    wt = Path(t["worktree"])
+    (wt / "t.txt").write_text("unseen\n")
+    gitops.commit_all(wt, "agent, after the prompt")
+    (wt / "mine.txt").write_text("my edit\n")                          # yours: committed by the approval
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting", (t["status"], t["reason"])       # before the fix: merged, unseen commit too
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert f"(now commit {head})" in t["waiting"], t["waiting"]
+    assert not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()          # nothing merged yet
