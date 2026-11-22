@@ -286,14 +286,29 @@ class StageEngine:
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
             files = gitops.changed_files(wt, base)
+            links = gitops.link_files(wt, base)
         except gitops.GitError as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
         scope = t["scope"]
         if kind == "reproduce" and not scope:
             scope = ["test", "tests", "spec", "*test*", "*/test*", "*spec*"]
+        mark = ""
+        if owner:                     # only what changed since your turn began is yours (#1500); none recorded: none
+            mark = self._job(t).get("owner_from") or ""
+            self._set_job(t, owner_from=None)           # used once, on every path (a stale mark would widen it)
         prot, outside = gitops.violations(files, scope)
+        prot += [f for f in links if f not in prot]
         if prot:
             return ("stop", "blocked", "changed protected files: " + ", ".join(prot[:5]) + f" (not merged; on {br})")
+        mine: set[str] = set()
+        if owner:
+            try:
+                out = gitops.git(wt, "diff", "--name-only", "-z", "--no-renames", mark, "HEAD").stdout if mark else ""
+            except gitops.GitError as e:
+                return ("stop", "failed", f"git failed: {clean(e, 200)}")
+            mine = {x.replace("\\", "/") for x in out.split("\0") if x}
+            if [f for f in outside if f not in mine]:
+                owner, outside = False, [f for f in outside if f not in mine]
         if outside and not owner:
             self.db.update_task(t["id"], handoff=cards.auto_handoff(text, gitops.diffstat(wt, base)), handoff_kind="auto")
             return ("stop", "blocked", "changed files outside the scope: " + ", ".join(outside[:5]) +
@@ -389,6 +404,7 @@ class StageEngine:
                 gitops.commit_all(wt, f"task {t['seq']} ({name}): {t['title']}"[:120])
                 files = gitops.changed_files(wt, base)
                 prot, outside = gitops.violations(files, t["scope"])
+                prot += [f for f in gitops.link_files(wt, base) if f not in prot]
             except gitops.GitError as e:
                 notes.append(f"{name}: git failed {clean(e, 80)}")
                 continue
@@ -453,6 +469,10 @@ class StageEngine:
     def _st_review(self, p, t, st, acts):
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return ("next",)                                        # nothing changed yet: nothing to review
+        _head, dirty = self._tree(t)                                # dirty: `git status --porcelain` is not empty
+        if dirty:                                                   # #1508: reviewers see only commits; merge's
+            return ("stop", "blocked", "uncommitted edits in the task folder were never reviewed: commit them "
+                                       "through a work stage or remove them")   # commit_all would fold these in
         base = gitops.integration_branch(p["id"])
         diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
         if not diff.strip():
@@ -642,6 +662,15 @@ class StageEngine:
                 wt, br = self._ensure_worktree(p, t)
             except (gitops.GitError, OSError) as e:
                 return ("stop", "failed", f"worktree failed: {clean(e, 200)}")
+            if kind == "work":            # each park starts a new turn: commit what is in the folder, mark here
+                # Your "done" does not come back here: answer() stores approved={"stage": i}, and the approved branch
+                # at the top of this method calls _after_code, so the mark always predates your edit. commit_all is
+                # a no-op on a clean folder (no empty commits).
+                try:
+                    gitops.commit_all(wt, f"task {t['seq']}: before your edit"[:120])
+                    self._set_job(t, owner_from=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+                except gitops.GitError as e:
+                    return ("stop", "failed", f"git failed: {clean(e, 200)}")
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))

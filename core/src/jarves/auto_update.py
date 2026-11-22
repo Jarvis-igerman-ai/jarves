@@ -41,6 +41,7 @@ NOTICE_GRACE_S = 15 * 60                 # between the "before" notice and the e
 LATER_S = 24 * 3600                      # "later" = ask again after a day
 BACKOFF_S = (3600, 4 * 3600, 12 * 3600)  # wait after failure 1, 2, 3
 GIVE_UP_AFTER = 3                        # failures per version, then stop and tell the owner once
+PROBE_STUCK_S = 24 * 3600                # probe_error this long: tell the owner once (it may never clear by itself)
 TICK_S = 600                             # how often the Core looks (the update check itself is cached for a day)
 
 CHOICES = ("now", "later", "off")
@@ -333,29 +334,42 @@ class AutoUpdater:
             return "gave_up"
         if not st.get("announced_ts"):
             st["announced_ts"] = now
+            st.pop("probe_error_since", None)              # #1100 R2: no probe runs here, the timer restarts
             self._emit(st, "before", ver, disp, default=self._default_note() == "beta")
             _save(self.home, st)
             return "announced"
         forced = bool(st.get("now_requested"))
         if not forced:
-            if float(st.get("snooze_until") or 0) > now:
+            held = ("snoozed" if float(st.get("snooze_until") or 0) > now else
+                    "waiting_grace" if now - float(st["announced_ts"]) < NOTICE_GRACE_S else
+                    "backoff" if float(st.get("next_try") or 0) > now else "")
+            if held:                                       # no probe ran: the probe_stuck timer must not count this
+                st.pop("probe_error_since", None)
                 _save(self.home, st)
-                return "snoozed"
-            if now - float(st["announced_ts"]) < NOTICE_GRACE_S:
-                _save(self.home, st)
-                return "waiting_grace"
-            if float(st.get("next_try") or 0) > now:
-                _save(self.home, st)
-                return "backoff"
+                return held
             reasons = list(self.busy() or [])
             st["busy"] = reasons
+            self._watch_probe_error(st, "probe_error" in reasons, now, ver, disp)
             if reasons:
                 _save(self.home, st)
                 return "busy"
         elif float(st.get("next_try") or 0) > now:
+            st.pop("probe_error_since", None)              # no probe ran
+            _save(self.home, st)
             return "backoff"
         st["busy"] = []
+        st.pop("probe_error_since", None)                  # #1100 R4: the timer restarts; probe_stuck_noticed stays
         return self._install(st, chk, ver, disp)
+
+    def _watch_probe_error(self, st: dict, failing: bool, now: float, ver: str, disp: str) -> None:
+        """#1100 follow-up: a broken busy probe keeps the update waiting forever; say so once per version."""
+        if not failing:
+            st.pop("probe_error_since", None)
+            return
+        since = float(st.setdefault("probe_error_since", now))
+        if now - since >= PROBE_STUCK_S and st.get("probe_stuck_noticed") != ver:
+            st["probe_stuck_noticed"] = ver
+            self._emit(st, "probe_stuck", ver, disp)
 
     # ------------------------------------------------------------------ install (the existing signed path)
     def _install(self, st: dict, chk: updates.UpdateChecker, ver: str, disp: str) -> str:
@@ -473,6 +487,14 @@ def _notice_text(kind: str, display: str, **x) -> tuple[tuple[str, str], tuple[s
                  "alone (it would not start on that data). To go back: jarvis update --rollback (or the Roll back "
                  "button on the Updates page); it also restores the data backup made before the update, and only "
                  "after your OK."))
+    if kind == "probe_stuck":
+        return (("העדכון האוטומטי תקוע", f"גרסה {display} ממתינה כבר יותר מיום כי בדיקת 'האם ג'רביס בשימוש' נכשלת, "
+                 "ולכן אני לא מתקין (ליתר ביטחון). הגרסה הנוכחית עובדת. אפשר לעדכן ידנית בעמוד Updates או עם jarvis update install, אחרי שבדקת שאין אישור שממתין לך; אם זה חוזר, "
+                 "דווח עם jarvis report."),
+                ("Auto-update is stuck", f"Version {display} has waited over a day because the 'is JARVES in use' check "
+                 "keeps failing, so I do not install (to stay safe). The current version works. You can update by "
+                 "hand on the Updates page or with jarvis update install after checking that no approval is waiting for you; if it repeats, "
+                 "report it with jarvis report."))
     if kind in ("rolled_back", "rollback_failed"):
         prev = x.get("prev") or ""
         if kind == "rolled_back":
@@ -527,11 +549,12 @@ def status_lines(s: dict) -> list[str]:
     if kind in NEXT_TEXT and s.get("next_at"):
         he, en = NEXT_TEXT[kind]
         out.append(clilang.fmt(he.format(t=_local(s["next_at"])), en.format(t=_local(s["next_at"]))))
-    if "approval_probe_failed" in (s.get("busy") or []):
-        out.append(clilang.fmt("בדיקת האישורים הממתינים נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של JARVES "
-                               "בדרך כלל עוזרת). להתקין בכל זאת: jarvis update auto now",
-                               "The pending-approval check is failing, so the update waits until it works (restarting "
-                               "JARVES usually helps). To install anyway: jarvis update auto now"))
+    if "probe_error" in (s.get("busy") or []):     # JAR-316: say why it waits in plain words, not the raw key
+        out.append(clilang.fmt("בדיקת 'האם ג'רביס בשימוש' נכשלת, אז העדכון ממתין עד שהיא תעבוד (הפעלה מחדש של JARVES "
+                               "בדרך כלל עוזרת). להתקין בכל זאת, אחרי שבדקת שאין אישור שממתין לך: jarvis update auto now",
+                               "The 'is JARVES in use' check is failing, so the update waits until it works (restarting "
+                               "JARVES usually helps). To install anyway, after checking that no approval is waiting "
+                               "for you: jarvis update auto now"))
     r = s.get("last_result") or {}
     if r.get("version"):
         t = _local(float(r.get("ts") or 0))
@@ -559,44 +582,32 @@ def core_busy(core) -> list[str]:
         out.append("listening")
     if getattr(core, "stopping", False):
         out.append("stopping")
-    try:
-        if core.approvals.has_pending():
-            out.append("pending_approval")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals")
-    except Exception as e:                  # unknown is not "none pending": defer the restart (fail closed, JAR-316)
-        out.append("approval_probe_failed")
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "approvals"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="approvals")
-    try:
-        if getattr(core.chat, "turns", None):
-            out.append("chat_turn")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "chat"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="chat")
-    try:
+    failed = False
+
+    def probe(where: str, reason: str, check: Callable[[], bool]) -> None:
+        nonlocal failed
+        try:
+            if check():
+                out.append(reason)
+            _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", where)
+        except Exception as e:      # #1100: an unreadable probe fails CLOSED (busy), never "quiet"
+            failed = True
+            if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", where):
+                logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
+                          error_type=type(e).__name__, where=where)
+
+    def agents() -> bool:
         from .orchestrator.envelope import LIVE_STATES
         busy_states = {"RUNNING", "WAITING_INPUT", "WAITING_APPROVAL"} & set(LIVE_STATES)
-        o = getattr(core, "orchestrator", None)
-        db = getattr(o, "db", None)
-        if db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True)):
-            out.append("coding_agent")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "agents"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="agents")
-    try:
-        eng = core.ops.alerts
-        if eng.quiet_now() or eng.paused():
-            out.append("quiet_hours")
-        _ok("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet")
-    except Exception as e:
-        if _first_time("AUTO_UPDATE_BUSY_PROBE_FAILED", "quiet"):
-            logs.warn("updates", "AUTO_UPDATE_BUSY_PROBE_FAILED", "busy probe failed",
-                      error_type=type(e).__name__, where="quiet")
+        db = getattr(getattr(core, "orchestrator", None), "db", None)
+        return db is not None and any(s["state"] in busy_states for s in db.sessions(live_only=True))
+
+    probe("approvals", "pending_approval", lambda: core.approvals.has_pending())
+    probe("chat", "chat_turn", lambda: bool(getattr(core.chat, "turns", None)))
+    probe("agents", "coding_agent", agents)
+    probe("quiet", "quiet_hours", lambda: core.ops.alerts.quiet_now() or core.ops.alerts.paused())
+    if failed:
+        out.append("probe_error")
     return out
 
 

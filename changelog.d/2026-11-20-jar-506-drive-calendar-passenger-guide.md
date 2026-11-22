@@ -1,0 +1,1 @@
+- Added: the drive-mode guide (EN+HE) explains that calendar event titles are read aloud only when the saved passenger setting is "alone", and the regression test now also pins ask, unknown, wrong-case and unreadable settings as deferred, plus drive off, the phone screen and the saved-setting path (JAR-506, carries over closed PR #1204).

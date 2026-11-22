@@ -26,7 +26,12 @@ def test_record_fail_files_issue_and_alerts(tmp_path, monkeypatch):
 
 
 def test_stale_and_missing(tmp_path):
-    assert factory_sim_alerts(tmp_path) == []
+    missing = factory_sim_alerts(tmp_path)  # #897: an uninstalled schedule must be visible
+    assert [a["kind"] for a in missing] == ["factory_sim_missing"]
+    assert missing[0]["summary"].startswith("No nightly factory simulation result found")
+    assert "--schedule-command" in missing[0]["summary"]
+    # same shape as the failed/stale alerts: no task/agent, so the worker-stall handler skips it
+    assert missing[0]["task_id"] is None and missing[0]["agent_id"] is None
     (tmp_path / "factory_sim_last.json").write_text(json.dumps({"at": 100.0, "ok": True}))
     assert factory_sim_alerts(tmp_path, now=100.0 + 37 * 3600)[0]["kind"] == "factory_sim_stale"
     assert factory_sim_alerts(tmp_path, now=100.0 + 3600) == []
@@ -49,19 +54,59 @@ def test_file_issue_skips_when_duplicate_check_fails(monkeypatch):
     assert len(calls) == 1 and "list" in calls[0]
 
 
-def test_file_issue_body_has_no_raw_output(monkeypatch):
+def _fake_gh(calls, labels_out="[]", labels_rc=0, create_rc=0, create_err=""):
     import subprocess
-    calls = []
 
     def fake_run(cmd, **kw):
         calls.append(cmd)
+        if cmd[:3] == ["gh", "label", "list"]:
+            return subprocess.CompletedProcess(cmd, labels_rc, labels_out, "")
+        if "create" in cmd:
+            return subprocess.CompletedProcess(cmd, create_rc, "", create_err)
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
-    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    return fake_run
+
+
+def _create_labels(calls):
+    (create,) = [c for c in calls if "create" in c]
+    return [create[i + 1] for i, a in enumerate(create) if a == "--label"]
+
+
+def test_file_issue_body_has_no_raw_output(monkeypatch):
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, labels_out='[{"name": "testing"}]'))
     tail = "noise C:\\Users\\bob\\secret.py sk-abcdefghijkl123\nFAILED core/tests/t.py::x - boom\n=== 1 failed in 2s ==="
     factory_sim.file_issue(["x"], tail)
-    body = calls[1][calls[1].index("--body") + 1]
+    (create,) = [c for c in calls if "create" in c]
+    body = create[create.index("--body") + 1]
     assert "noise" not in body and "sk-abc" not in body and "C:\\Users" not in body
     assert "FAILED core/tests/t.py::x" in body
+    assert _create_labels(calls) == ["showstopper", "P1", "testing"]  # #897: the auto-issue carries an area label
+
+
+def test_issue_is_filed_without_area_label_when_repo_lacks_it(monkeypatch):
+    calls = []  # #897: decided from `gh label list`, not from gh's error wording; exactly one create call
+    monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, labels_out='[{"name": "testing-old"}]'))
+    factory_sim.file_issue(["x"], "tail")
+    assert _create_labels(calls) == ["showstopper", "P1"]
+
+
+def test_label_check_failure_or_malformed_output_files_without_area_label(monkeypatch, capsys):
+    for kw in ({"labels_rc": 1}, {"labels_out": "{not json"}, {"labels_out": '{"name": "testing"}'}):
+        calls = []
+        monkeypatch.setattr(factory_sim.subprocess, "run", _fake_gh(calls, **kw))
+        factory_sim.file_issue(["x"], "tail")
+        assert _create_labels(calls) == ["showstopper", "P1"]
+        assert "label check failed; filing without the 'testing' label" in capsys.readouterr().out
+
+
+def test_issue_create_failure_is_reported_once(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(factory_sim.subprocess, "run",
+                        _fake_gh(calls, labels_out='[{"name": "testing"}]', create_rc=1, create_err="HTTP 401: Bad credentials"))
+    factory_sim.file_issue(["x"], "tail")
+    assert len([c for c in calls if "create" in c]) == 1
+    assert "issue create failed: HTTP 401: Bad credentials" in capsys.readouterr().out
 
 
 def test_schedule_command_is_0300_daily_and_installs_nothing(capsys):
@@ -125,3 +170,33 @@ def test_nightly_nonzero_pytest_exit_is_failure_even_if_scenarios_passed(tmp_pat
     assert factory_sim.main(["--nightly", "--home", str(tmp_path)]) == 1
     data = json.loads((tmp_path / "factory_sim_last.json").read_text())
     assert data["ok"] is False and filed
+
+
+def test_label_check_timeout_or_oserror_still_files_issue(monkeypatch, capsys):
+    import subprocess  # #897 review R1: a hung or missing `gh label list` must not lose the failure report
+    for exc in (subprocess.TimeoutExpired(["gh"], 60), OSError("gh not found")):
+        calls = []
+        base = _fake_gh(calls)
+
+        def fake_run(cmd, _exc=exc, **kw):
+            if cmd[:3] == ["gh", "label", "list"]:
+                calls.append(cmd)
+                raise _exc
+            return base(cmd, **kw)
+        monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+        factory_sim.file_issue(["x"], "tail")
+        assert _create_labels(calls) == ["showstopper", "P1"]
+        assert "label check failed; filing without the 'testing' label" in capsys.readouterr().out
+
+
+def test_label_check_uses_short_timeout(monkeypatch):
+    calls = []  # #897 review R2: a hung `gh label list` must not delay the failure report by a full minute
+    base = _fake_gh(calls)
+    timeouts = {}
+
+    def fake_run(cmd, **kw):
+        timeouts[cmd[1]] = kw.get("timeout")
+        return base(cmd, **kw)
+    monkeypatch.setattr(factory_sim.subprocess, "run", fake_run)
+    factory_sim.file_issue(["x"], "tail")
+    assert timeouts["label"] is not None and 0 < timeouts["label"] < 60

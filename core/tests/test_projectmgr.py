@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -67,10 +68,18 @@ FAKE = textwrap.dedent('''
     sid = "sess-" + num
     for m in re.finditer(r"^FAKE (\\w+) ?(.*)$", prompt, re.M):
         op, arg = m.group(1), m.group(2)
+        if arg.startswith("@"):                     # "FAKE write @beta ...": only that model does it
+            who, _, arg = arg.partition(" ")
+            if who[1:] != model:
+                continue
         if op == "write":
             path, _, body = arg.partition("=")
             os.makedirs(os.path.dirname(os.path.join(os.getcwd(), path)) or ".", exist_ok=True)
             open(os.path.join(os.getcwd(), path), "w").write(body + "\\n")
+        elif op == "link":                  # a symlink in scope (#1381)
+            path, _, body = arg.partition("=")
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            os.symlink(body, path)
         elif op == "sleep":
             time.sleep(float(arg))
         elif op == "fail":
@@ -320,6 +329,33 @@ def test_out_of_scope_and_protected_files_block_without_merge(env):
     assert "outside the scope" in ts[0]["reason"] and "protected" in ts[1]["reason"]
     integ = gitops.project_root(home, 1) / "integration"
     assert not (integ / "other").exists() and not (integ / ".claude").exists()
+
+
+def _can_symlink(tmp: Path) -> bool:
+    """Probes in its own folder and removes the link again (#1381 review R4): nothing is left next to the fixture repo."""
+    probe = tmp / "symlink-probe"
+    probe.mkdir(exist_ok=True)
+    try:
+        os.symlink("target", probe / "link")
+    except (OSError, NotImplementedError):          # Windows without Developer Mode or admin rights
+        return False
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+    return True
+
+
+def test_a_symlink_in_scope_into_github_is_blocked_as_protected(env, tmp_path):
+    """#1381 item 2: the path `src/ci` is in scope and its text is harmless, but it is a symlink into .github/."""
+    if not _can_symlink(tmp_path):
+        pytest.skip("this system cannot create symlinks")
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "Link", "FAKE link src/ci=../.github/workflows", scope=["src/"])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "blocked" and "protected" in t["reason"] and "src/ci" in t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "src").exists()
 
 
 def test_agent_blocked_and_failed_runs(env):
@@ -919,10 +955,12 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     assert t["status"] == "waiting" and "your turn" in t["waiting"]
     wt = Path(t["worktree"])
     (wt / "mine.txt").write_text("by hand\n")
+    (wt / "notes.md").write_text("mine too\n")                         # your own out-of-scope edit: only a warning
     assert m.call("answer", project="demo", task=1, answer="done")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    assert any(e["kind"] == "warning" and "notes.md" in e["text"] for e in m.db.events(t["id"], 40))
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     (wt / "mine.txt").write_text("changed after the approval\n")                      # the approval no longer holds
     finish(m)
@@ -932,6 +970,91 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
     assert (gitops.project_root(home, 1) / "integration" / "mine.txt").read_text() == "changed after the approval\n"
+
+
+def test_owner_scope_warning_covers_only_the_owners_own_edit(env):
+    """#1500 (#1407 item 2): the owner-code stage's scope warning covered every out-of-scope file on the task branch,
+    so a file the check command left in the task folder rode in on the owner's "done" as only a warning."""
+    m, repo, _ = env
+    gen = [sys.executable, "-c", "open('generated.txt', 'w').write('from the check')"]
+    open_project(m, repo, check=gen)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner test work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    (wt / "mine.txt").write_text("one\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)                                   # the test stage leaves generated.txt; the second owner turn parks
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"], (t["status"], t["waiting"], t["reason"])
+    (wt / "mine.txt").write_text("two\n")
+    (wt / "notes.md").write_text("my own note\n")                     # the owner's own out-of-scope edit
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "generated.txt" in t["reason"], (t["status"], t["reason"])
+    assert "notes.md" not in t["reason"]
+
+
+def test_owner_turn_mark_is_cleared_when_protected_files_block(env):
+    """#1500 review: a block on protected files must not leave the turn's mark behind for a later turn to reuse."""
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["job"].get("owner_from")
+    log = gitops.git(t["worktree"], "log", "--oneline", "--grep", "before your edit").stdout
+    assert log == ""                                              # a clean folder at the park: no empty commit
+    (Path(t["worktree"]) / ".github").mkdir()
+    (Path(t["worktree"]) / ".github" / "x.yml").write_text("on: push\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "protected" in t["reason"]
+    assert "owner_from" not in t["job"]
+
+
+def test_owner_earlier_turn_out_of_scope_file_blocks_a_later_turn(env):
+    """#1500 review R1 (documented, safe direction): an out-of-scope file you wrote in an earlier turn was only a
+    warning then, but a later owner turn covers only its own window, so that file blocks the later turn."""
+    m, repo, _ = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="work:owner test work:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    (wt / "notes.md").write_text("turn one\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"], (t["status"], t["reason"])
+    (wt / "mine.txt").write_text("turn two\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "notes.md" in t["reason"], (t["status"], t["reason"])
+
+
+def test_owner_reproduce_turn_keeps_its_behaviour(env):
+    """#1500 review: the owner's reproduce turn never reaches the scope check; its out-of-scope test file is not
+    blocked (unchanged behaviour; only the owner's work turn is marked)."""
+    m, repo, _ = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"],
+           flow="reproduce:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "failing test" in t["waiting"] and not t["job"].get("owner_from")
+    (Path(t["worktree"]) / "test_mine.py").write_text("def test_x(): assert False\n")
+    assert m.call("answer", project="demo", task=1, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"], (t["status"], t["reason"])
 
 
 def test_gate_reject_stops_and_answer_needs_waiting(env):
@@ -988,6 +1111,24 @@ def test_best_of_two_agents_smallest_passing_change_wins(env):
     best = [e for e in m.db.events(t["id"], 60) if e["kind"] == "best_of"]
     assert best and "won among" in best[0]["text"]
     assert len(list((gitops.project_root(home, 1) / "wt").glob("t1-*"))) == 0          # losers removed
+
+
+def test_best_of_drops_a_candidate_that_commits_a_symlink_in_scope(env, tmp_path):
+    """#1381 review R4: alpha's symlink into .github/ ties beta's change in size and would win by order; it is dropped
+    and beta's change is merged."""
+    if not _can_symlink(tmp_path):
+        pytest.skip("this system cannot create symlinks")
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "import sys; sys.exit(0)"])
+    m.call("add_task", project="demo", title="A", spec="FAKE link @alpha src/ci=../.github/workflows\n"
+           "FAKE write @beta src/a.txt=1", scope=["src/"], flow="work:claude:alpha,claude:beta test merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    best = [e["text"] for e in m.db.events(t["id"], 60) if e["kind"] == "best_of"]
+    assert t["status"] == "done" and best and "changed files it may not" in best[0]
+    integ = gitops.project_root(home, 1) / "integration" / "src"
+    assert (integ / "a.txt").exists() and not os.path.lexists(integ / "ci")
 
 
 def test_debate_op_with_judge_and_with_owner(env):
@@ -1174,3 +1315,27 @@ def test_f6_read_only_git_still_works():
     for cmd in ("git status", "git diff", "git diff --stat", "git log --oneline -5"):
         assert any(_rule_matches(r, cmd) for r in allow if r.startswith("Bash(")), cmd
     assert not any(r.startswith(("Edit", "Write")) for r in allow)
+
+
+def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
+    """#1508: an empty `base...HEAD` diff skipped the review even with uncommitted edits in the task folder; the merge
+    stage then committed and merged them unreviewed. A dirty folder with nothing committed now blocks instead."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner review merge")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["worktree"]
+    p = m.db.project(t["project_id"])
+    assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean and empty: nothing to review
+    (Path(t["worktree"]) / "mine.txt").write_text("never reviewed\n")                  # in scope, never committed
+    r = m._st_review(p, t, {"kind": "review"}, ["claude"])
+    assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+    assert not (gitops.project_root(home, 1) / "reviews_default").exists()            # no reviewer was asked
+    wt = Path(t["worktree"])                                   # review R1: a committed change does not hide extra edits
+    gitops.commit_all(wt, "committed in-scope change")
+    assert m._st_review(p, t, {"kind": "review"}, ["claude"]) == ("next",)            # clean: reviewed and approved
+    (wt / "mine.txt").write_text("edited after the commit\n")
+    r = m._st_review(p, t, {"kind": "review"}, ["claude"])
+    assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]

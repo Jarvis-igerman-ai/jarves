@@ -49,7 +49,11 @@ RULES = {
 # smoke profiles, upgrade/rollback: 6 Windows jobs, ~3-4 min of wall time) runs only when packaging itself changes. The
 # merge-queue group (merge_group) keeps the full RULES["installer"] rule, so any group touching core/src, packaging/,
 # pyproject/uv.lock, godot/ or jarvis.cmd builds and smoke-tests the installer BEFORE it merges; main reuses that proof.
-PR_INSTALLER = r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_)"
+# JAR-584: plus the update/install write paths and the release/package workflows, which change what the installed product
+# does on Windows; before this their PRs (#1344 auto_update.py, #1336 release.yml) never started the installer job.
+PR_INSTALLER = (r"^(packaging/|core/(pyproject\.toml|uv\.lock)|godot/|jarvis\.cmd|scripts/build_"
+                r"|core/src/jarves/(auto_update|updates|update_progress|hotfix\w*|install_latest)\.py$"
+                r"|\.github/workflows/(release|package)\.yml$)")
 
 
 def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[str]:
