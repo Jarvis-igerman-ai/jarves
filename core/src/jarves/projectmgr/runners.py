@@ -181,6 +181,11 @@ def _has_git_entry(d: Path) -> bool:
     return True
 
 
+def _any_case(rule_path: str) -> str:
+    """Every ASCII letter as a gitignore character class (`a` -> `[aA]`), so the rule matches any case spelling."""
+    return re.sub(r"[A-Za-z]", lambda m: f"[{m[0].lower()}{m[0].upper()}]", rule_path)
+
+
 def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
     (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it.
@@ -188,7 +193,10 @@ def _shared_git_deny(cwd: str) -> list[str]:
     The worktree is found the nearest `<cwd or a parent>/.git` (cwd may be a subfolder), along the given parents and,
     like git (which works in the physical cwd), along the parents of the resolved cwd (a symlink into a repo subfolder).
     Only a cwd with no `.git` on either walk gets no rules; anything that cannot be inspected or resolved is refused.
-    Each path is denied as given and resolved (a symlinked folder), and in lower case on Windows (case-insensitive)."""
+    Each path is denied as given and resolved (a symlinked folder), literally and in an any-case form (`[gG][iI][tT]`
+    for every letter, the whole path) so `.GIT` or `REPO/.Git` on a case-insensitive filesystem is denied too.
+    Covered tools: Edit and Write (Claude Code applies Edit rules to its built-in file-editing tools; NotebookEdit is
+    never allowed). Read-only runs have no write tools and skip this (no git call, no refusal)."""
     try:
         given = Path(os.path.abspath(cwd))
         tops = [next((d for d in (s, *s.parents) if _has_git_entry(d)), None) for s in (given, given.resolve())]
@@ -210,7 +218,7 @@ def _shared_git_deny(cwd: str) -> list[str]:
         raise ValueError(f"cannot resolve the git folder of this worktree: {e}") from e
     rules = []
     for root in roots:
-        for r in (root, root.lower()) if os.name == "nt" else (root,):
+        for r in (root, _any_case(root)):
             rules += [f"Edit({r})", f"Write({r})", f"Edit({r}/**)", f"Write({r}/**)"]
     return list(dict.fromkeys(rules))
 
@@ -240,7 +248,7 @@ class ClaudeRunner(Runner):
         argv = [*self.command(), "-p", "--output-format", "json", "--permission-mode", "dontAsk",
                 "--permission-prompts", "none", "--setting-sources", "user", "--allowedTools",
                 *_tools(read_only, check_argv, team),
-                "--disallowedTools", *DENY, *_shared_git_deny(cwd)]
+                "--disallowedTools", *DENY, *([] if read_only else _shared_git_deny(cwd))]
         if model:
             argv += ["--model", model]
         if resume:

@@ -282,9 +282,11 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
     assert gitops.common_dir(empty) is None
-    other = tmp_path / "other-empty"                           # hermetic: never walks a real host root such as /w
-    other.mkdir()
-    assert runners.ClaudeRunner(cfg).build("p", str(empty)).argv == runners.ClaudeRunner(cfg).build("p", str(other)).argv
+    above = set(tmp_path.resolve().parents) | set(tmp_path.parents)  # hermetic: ignore a checkout holding tmp_path
+    real_has = runners._has_git_entry
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(runners, "_has_git_entry", lambda d: d not in above and real_has(d))
+        assert runners._shared_git_deny(str(empty)) == []
     # a plain checkout: `.git` is the shared dir itself, so its four rules appear exactly once
     plain = runners.ClaudeRunner(cfg).build("p", str(repo)).argv
     own = rule(repo / ".git")
@@ -443,3 +445,32 @@ def test_a_folder_below_a_stray_git_entry_names_that_entry_when_refused(monkeypa
     with pytest.raises(ValueError, match="shared git folder") as e:
         runners._shared_git_deny(str(tmp_path / "proj"))
     assert str(tmp_path / ".git") in str(e.value)
+
+
+def test_mixed_case_spellings_of_the_shared_git_dir_and_pointer_are_denied(tmp_path):
+    # council (gpt) blocker: on a case-insensitive filesystem `.GIT` or `REPO/.Git` name the same folder
+    import fnmatch
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    wt = tmp_path / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "t1", str(wt))
+    denied = runners._shared_git_deny(str(wt))
+    for d in (repo / ".git", wt / ".git"):
+        spelled = runners.abs_rule_path(d.resolve()).swapcase()     # e.g. //HOME/.../.GIT
+        for tool in ("Edit", "Write"):
+            pats = [r[len(tool) + 1:-1] for r in denied if r.startswith(tool + "(")]
+            assert any(fnmatch.fnmatchcase(spelled, p) for p in pats)
+            assert any(fnmatch.fnmatchcase(spelled + "/cOnFiG", p) for p in pats)
+
+
+def test_a_read_only_run_gets_no_git_check_and_is_never_refused(monkeypatch, tmp_path):
+    # council nit: read-only runs have no Edit/Write tools; a git check there only adds a refusal path
+    from jarves.config import Config
+    from jarves.projectmgr import runners
+    cfg = Config().projects
+    cfg.claude_command = ["claude"]
+    monkeypatch.setattr(runners, "_shared_git_deny", lambda cwd: (_ for _ in ()).throw(ValueError("refused")))
+    argv = runners.ClaudeRunner(cfg).build("p", str(tmp_path), read_only=True).argv
+    assert "Edit" not in argv[argv.index("--allowedTools") + 1:argv.index("--disallowedTools")]
+    with pytest.raises(ValueError, match="refused"):
+        runners.ClaudeRunner(cfg).build("p", str(tmp_path))
