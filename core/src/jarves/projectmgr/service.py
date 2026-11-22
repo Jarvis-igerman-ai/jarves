@@ -933,7 +933,9 @@ class Manager(StageEngine):
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
-            return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed." + note,
+            fix = (" Files of a turned-off smudge filter (LFS) hold pointer text: run `git lfs checkout` (or that"
+                   " filter's own checkout) to restore them." if any(n.endswith(".smudge") for n in off) else "")
+            return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed." + note + fix,
                         turned_off=off)
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         rev = sha or br

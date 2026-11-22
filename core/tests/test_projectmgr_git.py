@@ -523,3 +523,49 @@ def test_your_own_receive_pack_is_kept_on_push(tmp_path, no_user_config, monkeyp
     monkeypatch.setattr(gitops.subprocess, "run", lambda argv, *a, **kw: (seen.append(argv), real(argv, *a, **kw))[1])
     gitops.git(repo, "push", "origin", "main", check=False)
     assert "--receive-pack=my-pack" in seen[-1], seen[-1][-6:]
+
+
+def test_your_signing_key_never_signs_a_push_certificate_because_of_the_repo_config(tmp_path, no_user_config):
+    """Review R1 (round 3, #1635): local `push.gpgSign` + `user.signingkey` would make your own gpg sign a push."""
+    repo = _repo(tmp_path)
+    bare = tmp_path / "signed.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    subprocess.run(["git", "-C", str(bare), "config", "receive.certNonceSeed", "seed"], check=True)
+    prog, marker = _exe_spy(tmp_path, "push-gpg")
+    (tmp_path / "home").mkdir(exist_ok=True)
+    subprocess.run(["git", "config", "--global", "gpg.program", prog], check=True, env={**os.environ})
+    for k, v in (("push.gpgSign", "true"), ("user.signingkey", "OWNERKEY")):
+        gitops.git(repo, "config", k, v)
+    gitops.git(repo, "push", "-q", bare.as_posix(), "main", check=False)
+    assert not marker.exists() and ("push.gpgsign", "false") in gitops.config_overrides(repo)
+
+
+def test_a_push_or_fetch_never_recurses_into_submodules_or_runs_an_alternate_refs_command(tmp_path, no_user_config):
+    """Review R2 (round 3, #1635): an on-demand recursive push runs `git push` with the submodule's own (unread,
+    agent-writable) config; `core.alternateRefsCommand` runs on fetch when an alternates file exists."""
+    sub_src, bare_sub, bare = tmp_path / "sub-src", tmp_path / "sub.git", tmp_path / "super.git"
+    for b in (bare_sub, bare):
+        subprocess.run(["git", "init", "-q", "-b", "main", "--bare", str(b)], check=True)
+    repo = _repo(tmp_path)
+    plain = ["git", "-c", "protocol.file.allow=always", "-c", "user.name=t", "-c", "user.email=t@x"]
+    subprocess.run([*plain, "clone", "-q", bare_sub.as_posix(), str(sub_src)], check=True, capture_output=True)
+    subprocess.run([*plain, "-C", str(sub_src), "commit", "-q", "--allow-empty", "-m", "s"], check=True)
+    subprocess.run([*plain, "-C", str(sub_src), "push", "-q", "origin", "HEAD:main"], check=True, capture_output=True)
+    subprocess.run([*plain, "-C", str(repo), "submodule", "add", "-q", bare_sub.as_posix(), "sub"], check=True,
+                   capture_output=True)
+    subprocess.run([*plain, "-C", str(repo / "sub"), "commit", "-q", "--allow-empty", "-m", "unpushed"], check=True)
+    subprocess.run([*plain, "-C", str(repo), "commit", "-qam", "bump"], check=True)
+    marker = tmp_path / "ran-sub"
+    subprocess.run(["git", "-C", str(repo / "sub"), "config", "remote.origin.receivepack",
+                    f'echo ran > "{marker.as_posix()}"; exit 1'], check=True)
+    alt = tmp_path / "ran-alt"
+    (repo / ".git" / "objects" / "info" / "alternates").write_text(str(sub_src / ".git" / "objects") + "\n")
+    for k, v in (("push.recurseSubmodules", "on-demand"), ("fetch.recurseSubmodules", "on-demand"),
+                 ("core.alternateRefsCommand", f'echo ran > "{alt.as_posix()}"')):
+        gitops.git(repo, "config", k, v)
+    gitops.git(repo, "push", "-q", bare.as_posix(), "main", check=False)
+    gitops.git(repo, "fetch", "-q", bare_sub.as_posix(), "main", check=False)
+    assert not marker.exists() and not alt.exists()
+    pre = gitops.config_overrides(repo)
+    assert ("push.recursesubmodules", "no") in pre and ("fetch.recursesubmodules", "false") in pre
+    assert ("core.alternaterefscommand", "exit 1") in pre

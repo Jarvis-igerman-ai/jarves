@@ -1423,13 +1423,15 @@ def test_ship_says_what_it_turned_off_from_the_repo_config(env):
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
     m.call("resume", project="demo")
     finish(m)
-    for k, v in (("user.name", "o"), ("user.email", "o@x"), ("commit.gpgsign", "true"), ("diff.external", "x")):
+    for k, v in (("user.name", "o"), ("user.email", "o@x"), ("commit.gpgsign", "true"), ("diff.external", "x"),
+                 ("filter.lfs.smudge", "git-lfs smudge -- %f")):
         sh(repo, "git", "config", k, v)
     r = m.call("ship_plan", project="demo")
     assert "--no-ext-diff --no-textconv" in r["commands"][0]
     assert "commit.gpgsign" in r["turned_off"] and "diff.external" in r["text"] and "check those settings" in r["text"]
     r = m.call("ship_plan", project="demo", apply=True, yes=True)
     assert r["ok"] and "turned off" in r["text"] and "commit.gpgsign" in r["turned_off"], r
+    assert "git lfs checkout" in r["text"], r          # review R3 (round 3): the recovery step is said
 
 
 def test_the_ship_prompt_never_shows_an_agent_chosen_config_name(env):

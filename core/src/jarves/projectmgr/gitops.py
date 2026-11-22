@@ -73,14 +73,17 @@ TRUSTED_SCOPES = ("system", "global", "command")        # local/worktree config 
 # command fails instead (a merge conflict, no diff/trailer/key). `sub`: no recursive submodule checkout/update (review R4)
 _RUN_KEY = re.compile(r"^(?:(?P<filter>filter\.(?P<drv>.+)\.(?:clean|smudge|process))|(?P<hook>hook\..+\.command)"
                       r"|(?P<fail>merge\..+\.driver|gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(?:command|textconv)"
-                      r"|trailer\..+\.(?:command|cmd)|core\.editor|sequence\.editor)"
+                      r"|trailer\..+\.(?:command|cmd)|core\.editor|sequence\.editor|core\.alternaterefscommand)"
                       r"|(?P<sub>submodule\.recurse|submodule\..+\.update)|(?P<cred>credential\.(?:.+\.)?helper)"
                       r"|(?P<prog>gpg(?:\.[^.]+)?\.program|core\.sshcommand|core\.askpass)"
                       r"|(?P<proto>protocol\.allow|protocol\..+\.allow)|(?P<proxy>core\.gitproxy))$")
 # review R5 (#1635): `forge.push` runs ssh/askpass and credential helpers; `remote.*.receivepack` is first-wins in git
 # (an override after it is ignored), so `git` passes `--receive-pack` on every push. An editor is never opened
 # (merge --no-edit, commit -m), so an untrusted editor just fails
-_SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag)\.gpgsign)$")
+_SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag|push)\.gpgsign)$")   # push: a push certificate
+# review R2 (round 3): a recursive push/fetch runs git in each submodule with ITS config (agent-writable, never read
+# here), so recursion is off on every call, whatever any config says
+_NO_RECURSE = [("push.recursesubmodules", "no"), ("fetch.recursesubmodules", "false")]
 _NO_CONFIG_CMDS = ("rev-parse", "merge-base", "rev-list")   # never run a config-named command: no config read
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                 "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh", "core.askpass": ""}
@@ -187,15 +190,15 @@ def config_overrides(cwd: str | Path) -> list[tuple[str, str]]:
         else:
             out.append((key, trusted.get(key, _GPG_DEFAULT.get(key, "gpg"))))
     if signing:
-        out += [("commit.gpgsign", "false"), ("tag.gpgsign", "false")]
-    return [*out, ("protocol.ext.allow", trusted.get("protocol.ext.allow", "never"))]   # last: it wins
+        out += [("commit.gpgsign", "false"), ("tag.gpgsign", "false"), ("push.gpgsign", "false")]
+    return [*out, *_NO_RECURSE, ("protocol.ext.allow", trusted.get("protocol.ext.allow", "never"))]   # last: it wins
 
 
 def overridden_names(cwd: str | Path) -> list[str]:
     """What `config_overrides` turns off, safe to show the owner (review R2, #1635): a subsection is the agent's own
-    text, so it is shown as `*`; the forced `protocol.ext.allow` is left out. Sorted, unique, each at most 60 chars."""
+    text, so it is shown as `*`; the always-forced recursion and `protocol.ext.allow` pairs are left out. Sorted, unique, each at most 60 chars."""
     names = set()
-    for key, _ in config_overrides(cwd)[:-1]:
+    for key, _ in config_overrides(cwd)[:-1 - len(_NO_RECURSE)]:
         head, _, rest = key.partition(".")
         sub, dot, name = rest.rpartition(".")
         names.add((f"{head}.*.{name}" if sub else key)[:60])
