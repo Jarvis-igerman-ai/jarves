@@ -158,31 +158,41 @@ def kill_tree(p: subprocess.Popen) -> None:
 
 def abs_rule_path(path: str | Path) -> str:
     """An absolute path in Claude Code permission-rule form: `//` + POSIX path; a Windows drive `C:\\x` becomes `//c/x`
-    (Claude Code matches Windows paths in that form; UNVERIFIED against a live Windows run)."""
+    (Claude Code matches Windows paths in that form; UNVERIFIED against a live Windows run). A UNC or other
+    non-absolute path has no known rule form and is refused (ValueError), never turned into a rule that matches nothing."""
     p = str(path).replace("\\", "/")
     if re.match(r"^[A-Za-z]:/", p):
         p = "/" + p[0].lower() + p[2:]
+    if not p.startswith("/") or p.startswith("//"):
+        raise ValueError(f"no permission-rule form for the path {path!r} (network or relative path)")
     return "/" + p.rstrip("/")
 
 
 def _shared_git_deny(cwd: str) -> list[str]:
     """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
     (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it.
-    The worktree's own `.git` pointer file is denied too: repointed at a planted gitdir, git would read that config.
-    A worktree whose shared git dir cannot be found (git older than 2.31, unreadable repo) is refused, not run open."""
+    The worktree's own `.git` pointer is denied too: repointed at a planted gitdir, git would read that config.
+    The worktree is found like git finds it: the nearest `<cwd or a parent>/.git` (cwd may be a subfolder). Only a cwd
+    with no `.git` in any parent gets no rules; anything that cannot be inspected or resolved is refused, not run open.
+    Each path is denied as given and resolved (a symlinked folder), and in lower case on Windows (case-insensitive)."""
     try:
-        dot_git = Path(cwd).resolve() / ".git"
-        present = dot_git.exists()
+        start = Path(os.path.abspath(cwd))
+        top = next((d for d in (start, *start.parents) if (d / ".git").exists()), None)
     except OSError as e:
         raise ValueError(f"cannot inspect the git folder of this worktree: {e}") from e
-    if not present:
+    if top is None:
         return []
     common = gitops.common_dir(cwd)
     if common is None:
         raise ValueError("cannot find the shared git folder of this worktree (git 2.31 or newer is needed)")
+    try:
+        roots = [abs_rule_path(f) for p in (top / ".git", common) for f in (p, p.resolve())]
+    except (OSError, RuntimeError) as e:                     # a symlink loop: RuntimeError before Python 3.13
+        raise ValueError(f"cannot resolve the git folder of this worktree: {e}") from e
     rules = []
-    for root in (abs_rule_path(dot_git), abs_rule_path(common)):
-        rules += [f"Edit({root})", f"Write({root})", f"Edit({root}/**)", f"Write({root}/**)"]
+    for root in roots:
+        for r in (root, root.lower()) if os.name == "nt" else (root,):
+            rules += [f"Edit({r})", f"Write({r})", f"Edit({r}/**)", f"Write({r}/**)"]
     return list(dict.fromkeys(rules))
 
 

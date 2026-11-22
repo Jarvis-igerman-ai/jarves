@@ -99,14 +99,17 @@ def is_repo(path: str) -> bool:
 
 
 def common_dir(path: str | Path) -> Path | None:
-    """The repository's shared git dir (config, info/attributes, hooks, refs) for a worktree, absolute; None when the
-    folder is not a git worktree. Agents get no write access to it (#1533)."""
+    """The repository's shared git dir (config, info/attributes, hooks, refs) for a worktree or any folder inside one,
+    absolute as git prints it; None when git cannot give exactly one absolute path (not a repository, git older than
+    2.31 echoes the unknown `--path-format` option back, broken repo). Agents get no write access to it (#1533)."""
     try:
         p = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return None
-    out = p.stdout.strip()
-    return Path(out).resolve() if p.returncode == 0 and out else None
+    lines = p.stdout.splitlines()
+    if p.returncode != 0 or len(lines) != 1 or not Path(lines[0].strip()).is_absolute():
+        return None
+    return Path(lines[0].strip())
 
 
 def current_branch(path: str) -> str:

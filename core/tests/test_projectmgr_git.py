@@ -274,7 +274,7 @@ def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path)
         return "//" + root[1].lower() + root[3:] if os.name == "nt" else root
     root = rule(repo / ".git")
     assert f"Edit({root}/**)" in denied and f"Write({root}/**)" in denied
-    assert gitops.common_dir(wt) == (repo / ".git").resolve()
+    assert gitops.common_dir(wt).resolve() == (repo / ".git").resolve()
     # review R2: the worktree's own `.git` pointer file, repointed at a planted gitdir, would bypass the rule above
     ptr = rule(wt / ".git")
     assert all(f"{t}({ptr}{s})" in denied for t in ("Edit", "Write") for s in ("", "/**"))
@@ -301,8 +301,8 @@ def test_a_worktree_whose_shared_git_dir_cannot_be_found_is_refused_not_run_open
     from jarves.projectmgr import runners
     (tmp_path / ".git").write_text("gitdir: /nowhere", encoding="utf-8")
     calls: list = []
-    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(129, "error: unknown option `path-format'")], calls))
-    assert gitops.common_dir(tmp_path) is None
+    monkeypatch.setattr(gitops.subprocess, "run", _fake_run([(129, "error: unknown option `path-format'")] * 3, calls))
+    assert gitops.common_dir(tmp_path) is None and len(calls) == 1
     cfg = Config().projects
     cfg.claude_command = ["claude"]
     with pytest.raises(ValueError, match="shared git folder"):
@@ -310,7 +310,7 @@ def test_a_worktree_whose_shared_git_dir_cannot_be_found_is_refused_not_run_open
     started: list = []
     monkeypatch.setattr(runners.subprocess, "Popen", lambda *a, **k: started.append(a))
     r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
-    assert not r.ok and "shared git folder" in r.error and started == []
+    assert not r.ok and "shared git folder" in r.error and started == [] and len(calls) == 3   # one git call per build
 
 
 def test_a_worktree_whose_git_entry_cannot_be_inspected_is_refused(monkeypatch, tmp_path):
@@ -328,6 +328,50 @@ def test_a_worktree_whose_git_entry_cannot_be_inspected_is_refused(monkeypatch, 
         started.append(a)
         raise OSError("the agent must not start")
     monkeypatch.setattr(runners.subprocess, "Popen", popen)
-    monkeypatch.setattr(runners.Path, "exists", broken)
+    monkeypatch.setattr(runners.Path, "exists", broken)            # the `.git` lookup in cwd and its parents
     r = runners.ClaudeRunner(cfg).run("p", str(tmp_path))
     assert not r.ok and "cannot inspect the git folder" in r.error and started == []
+
+
+def test_a_subfolder_of_a_worktree_still_gets_the_shared_git_rules(tmp_path):
+    # review R1 (round 3): a cwd below the worktree top has no `.git` of its own; the rules must still be added
+    from jarves.config import Config
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    wt = tmp_path / "wt"
+    gitops.git(repo, "worktree", "add", "-b", "t1", str(wt))
+    sub = wt / "pkg" / "deep"
+    sub.mkdir(parents=True)
+    cfg = Config().projects
+    cfg.claude_command = ["claude"]
+    at_top = runners._shared_git_deny(str(wt))
+    assert at_top and runners._shared_git_deny(str(sub)) == at_top
+    assert runners.ClaudeRunner(cfg).build("p", str(sub)).argv[-len(at_top):] == at_top
+
+
+def test_an_old_git_that_echoes_the_unknown_option_is_not_taken_for_a_path(monkeypatch, tmp_path):
+    # git < 2.31 rev-parse prints `--path-format=absolute` back and a relative dir with exit code 0
+    out = "--path-format=absolute\n.git\n"
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, out, ""))
+    assert gitops.common_dir(tmp_path) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink")
+def test_the_rules_cover_both_the_given_and_the_resolved_path(tmp_path):
+    # review R3: the agent may write through a symlinked folder (macOS /tmp); both spellings are denied
+    from jarves.projectmgr import runners
+    (tmp_path / "real").mkdir()
+    repo = _repo(tmp_path / "real")
+    link = tmp_path / "link"
+    link.symlink_to(repo)
+    denied = runners._shared_git_deny(str(link))
+    assert f"Write({runners.abs_rule_path(link / '.git')}/**)" in denied
+    assert f"Write({runners.abs_rule_path((repo / '.git').resolve())}/**)" in denied
+
+
+@pytest.mark.parametrize("path", [r"\\srv\share\r\.git", "relative/.git"])
+def test_a_path_without_a_known_rule_form_is_refused(path):
+    # review R3: a UNC path became `///srv/share/...`, a rule that matches nothing; refuse it instead
+    from jarves.projectmgr import runners
+    with pytest.raises(ValueError, match="no permission-rule form"):
+        runners.abs_rule_path(path)
