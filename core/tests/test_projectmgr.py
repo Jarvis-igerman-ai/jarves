@@ -1413,3 +1413,20 @@ def test_ship_plan_without_the_integration_branch_still_answers_but_never_merges
     r = m.call("ship_plan", project="demo")
     assert r["ok"] and r["commit"] == "" and "not found" in r["text"]
     assert m.call("ship_plan", project="demo", apply=True, yes=True)["code"] == "NO_BRANCH"
+
+
+def test_ship_says_what_it_turned_off_from_the_repo_config(env):
+    """Review R2/R3 (#1635): per-repo signing (or LFS, a diff program) in your own .git/config is turned off for the
+    ship merge; the plan and the result say so, and the printed diff runs no external diff or textconv."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    for k, v in (("user.name", "o"), ("user.email", "o@x"), ("commit.gpgsign", "true"), ("diff.external", "x")):
+        sh(repo, "git", "config", k, v)
+    r = m.call("ship_plan", project="demo")
+    assert "--no-ext-diff --no-textconv" in r["commands"][0]
+    assert "commit.gpgsign" in r["turned_off"] and "diff.external" in r["text"] and "check those settings" in r["text"]
+    r = m.call("ship_plan", project="demo", apply=True, yes=True)
+    assert r["ok"] and "turned off" in r["text"] and "commit.gpgsign" in r["turned_off"], r

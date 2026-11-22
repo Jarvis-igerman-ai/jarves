@@ -73,13 +73,18 @@ TRUSTED_SCOPES = ("system", "global", "command")        # local/worktree config 
 # command fails instead (a merge conflict, no diff/trailer/key). `sub`: no recursive submodule checkout/update (review R4)
 _RUN_KEY = re.compile(r"^(?:(?P<filter>filter\.(?P<drv>.+)\.(?:clean|smudge|process))|(?P<hook>hook\..+\.command)"
                       r"|(?P<fail>merge\..+\.driver|gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(?:command|textconv)"
-                      r"|trailer\..+\.(?:command|cmd))|(?P<sub>submodule\.recurse|submodule\..+\.update)"
-                      r"|(?P<gpg>gpg(?:\.[^.]+)?\.program))$")
+                      r"|trailer\..+\.(?:command|cmd)|core\.editor|sequence\.editor)"
+                      r"|(?P<sub>submodule\.recurse|submodule\..+\.update)|(?P<cred>credential\.(?:.+\.)?helper)"
+                      r"|(?P<prog>gpg(?:\.[^.]+)?\.program|core\.sshcommand|core\.askpass))$")
+# review R5 (#1635): `forge.push` runs ssh/askpass and credential helpers; `remote.*.receivepack` is first-wins in git
+# (an override after it is ignored), so `git` passes `--receive-pack` on every push. An editor is never opened
+# (merge --no-edit, commit -m), so an untrusted editor just fails
 _SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag)\.gpgsign)$")
 _NO_CONFIG_CMDS = ("rev-parse", "merge-base", "rev-list")   # never run a config-named command: no config read
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-                "gpg.ssh.program": "ssh-keygen"}
+                "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh", "core.askpass": ""}
 _CFG_CACHE: dict[str, tuple[tuple, list]] = {}         # cwd -> (stamp of every file the config came from, rows)
+_CFG_FILES: dict[str, list[str]] = {}                   # cwd -> the files the last read came from (stamped before a read)
 
 
 def _norm_key(key: str) -> str:
@@ -107,13 +112,16 @@ _NO_CACHE = ("include.", "includeif.", "extensions.worktreeconfig")
 
 def _config_rows(cwd: str | Path) -> list[tuple[str, str, str]]:
     """(scope, key, value) of the effective config. Cached per folder until the content of a file it came from changes
-    (review R3: one read per call doubled the git processes). Never cached when an agent-writable file could appear or
+    (review R3: one read per call doubled the git processes); a read is cached only when the same files hashed the
+    same just before and just after it, so the first read of a folder is never cached. Never cached when an agent-writable file could appear or
     apply without a listed file changing: an include, `includeIf` (its branch condition), a worktree config, no
     local rows at all, or no `.git` in the folder."""
     key = os.path.realpath(str(cwd))
     hit = _CFG_CACHE.get(key)
     if hit and _stamp(key, [f for f, _ in hit[0][:-1]]) == hit[0]:
         return hit[1]
+    known = _CFG_FILES.get(key)
+    before = _stamp(key, known) if known is not None else None   # review R1 (#1635): stamped BEFORE the read too
     try:
         p = subprocess.run(["git", "config", "--list", "--show-scope", "--show-origin", "-z"], cwd=str(cwd),
                            capture_output=True, timeout=30, creationflags=_NOWIN,
@@ -129,9 +137,13 @@ def _config_rows(cwd: str | Path) -> list[tuple[str, str, str]]:
         if origin.startswith("file:") and origin[5:] not in files:
             files.append(origin[5:])
     _CFG_CACHE.pop(key, None)
-    if os.path.lexists(os.path.join(key, ".git")) and any(s == "local" for s, _, _ in rows) and \
-            not any(k.startswith(_NO_CACHE) for _, k, _ in rows):
-        _CFG_CACHE[key] = (_stamp(key, files), rows)
+    _CFG_FILES[key] = files
+    after = _stamp(key, files)
+    # cached only when nothing changed around the read: a write during or right after it (stamped after, read before)
+    # would otherwise store old rows under the new file's stamp, so the agent's command would run on every later call
+    if known == files and before == after and os.path.lexists(os.path.join(key, ".git")) and \
+            any(s == "local" for s, _, _ in rows) and not any(k.startswith(_NO_CACHE) for _, k, _ in rows):
+        _CFG_CACHE[key] = (after, rows)
     return rows
 
 
@@ -161,6 +173,9 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str
             out.append((key, trusted.get(key, "exit 1")))   # fails closed, never the agent's program
         elif m["sub"]:
             out.append((key, trusted.get(key, "false" if key == "submodule.recurse" else "none")))
+        elif m["cred"]:                                     # a list: "" clears it, then only your own helpers again
+            if (key, "") not in out:
+                out += [(key, ""), *[(k, v) for sc, k, v in rows if sc in TRUSTED_SCOPES and k == key]]
         else:
             out.append((key, trusted.get(key, _GPG_DEFAULT.get(key, "gpg"))))
     if signing:
@@ -190,6 +205,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
             env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
     # #1407: no external diff or textconv on any JARVES diff. `log -p`/`show` would also honour textconv (an untrusted
     # one is `exit 1` there, so they would fail, not run it); JARVES uses neither (only `log --oneline`).
+    if args and args[0] == "push":                      # never the repo config's receive-pack (review R5, #1635)
+        args = ("push", "--receive-pack=git-receive-pack", *args[1:])
     if args and args[0] == "diff":
         args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):

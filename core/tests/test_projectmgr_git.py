@@ -274,11 +274,12 @@ def _spy(tmp_path: Path, name: str) -> tuple[str, Path]:
     return f'echo ran > "{marker.as_posix()}"; cat', marker
 
 
+@pytest.mark.parametrize("kind", ["clean", "process"])   # `process`: the form LFS uses (review R4, #1635)
 @pytest.mark.parametrize("name", ["evil", "Evil", "x=y"])   # case-sensitive; `=` inside (reviews R1, R1 round 2)
-def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name):
+def test_a_filter_driver_from_the_repo_config_never_runs(tmp_path, no_user_config, name, kind):
     repo = _repo(tmp_path)
     cmd, marker = _spy(tmp_path, "filter")
-    gitops.git(repo, "config", f"filter.{name}.clean", cmd)
+    gitops.git(repo, "config", f"filter.{name}.{kind}", cmd)
     gitops.git(repo, "config", f"filter.{name}.required", "true")
     (repo / ".gitattributes").write_text(f"*.txt filter={name}\n", encoding="utf-8")
     (repo / "g.txt").write_text("y", encoding="utf-8")
@@ -439,9 +440,12 @@ def test_the_config_read_is_cached_until_a_config_file_changes(tmp_path, no_user
         return real(argv, *a, **kw)
     monkeypatch.setattr(gitops.subprocess, "run", run)
     monkeypatch.setattr(gitops, "_CFG_CACHE", {})
+    monkeypatch.setattr(gitops, "_CFG_FILES", {})
+    gitops.config_overrides(repo)                       # the first read of a folder is never cached
     gitops.config_overrides(repo)
     gitops.git(repo, "status")
-    assert len(reads) == 1
+    assert len(reads) == 2
+    reads[:] = [0]                                      # counted as one read from here
     cmd, marker = _spy(tmp_path, "filter")
     real(["git", "config", "filter.evil.clean", cmd], cwd=repo, check=True)   # an agent edits .git/config
     assert ("filter.evil.clean", "") in gitops.config_overrides(repo) and len(reads) == 2
@@ -450,3 +454,46 @@ def test_the_config_read_is_cached_until_a_config_file_changes(tmp_path, no_user
     gitops.config_overrides(repo)
     later.write_text(f"[merge \"x\"]\n\tdriver = {cmd}\n", encoding="utf-8")     # appears after the read
     assert ("merge.x.driver", "exit 1") in gitops.config_overrides(repo) and len(reads) == 4
+
+
+def test_a_config_write_during_the_read_never_poisons_the_cache(tmp_path, no_user_config, monkeypatch):
+    """Review R1 (#1635): an agent writes a driver right after `git config --list` returned, before the stamp. The
+    old rows must not be cached under the new file's stamp: the next call sees the driver and overrides it."""
+    repo = _repo(tmp_path)
+    cmd, _marker = _spy(tmp_path, "filter")
+    real, armed = subprocess.run, []
+
+    def run(argv, *a, **kw):
+        out = real(argv, *a, **kw)
+        if argv[:3] == ["git", "config", "--list"] and armed:
+            armed.clear()
+            real(["git", "config", "filter.evil.clean", cmd], cwd=repo, check=True)
+        return out
+    monkeypatch.setattr(gitops, "_CFG_CACHE", {})
+    monkeypatch.setattr(gitops, "_CFG_FILES", {})
+    gitops.config_overrides(repo)                       # known files: the next read may be cached
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    armed.append(1)
+    assert ("filter.evil.clean", "") not in gitops.config_overrides(repo)   # this read ran before the write (#1533)
+    assert ("filter.evil.clean", "") in gitops.config_overrides(repo)
+
+
+def test_push_never_runs_a_receive_pack_ssh_or_credential_helper_from_the_repo_config(tmp_path, no_user_config):
+    """Review R5 (#1635): `forge` pushes; the agent-writable config must not pick the programs a push runs."""
+    repo = _repo(tmp_path)
+    bare = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    marker = tmp_path / "ran-pack"
+    gitops.git(repo, "remote", "add", "origin", bare.as_posix())
+    gitops.git(repo, "config", "remote.origin.receivepack", f'echo ran > "{marker.as_posix()}"; exit 1')
+    gitops.git(repo, "push", "-q", "origin", "main")
+    assert not marker.exists() and (bare / "refs" / "heads" / "main").exists()
+    (tmp_path / "home").mkdir(exist_ok=True)
+    subprocess.run(["git", "config", "--global", "credential.helper", "store"], check=True, env={**os.environ})
+    for k, v in (("credential.helper", "!evil"), ("core.sshCommand", "evil"), ("core.askPass", "evil"),
+                 ("core.editor", "evil")):
+        gitops.git(repo, "config", k, v)
+    pre = gitops.config_overrides(repo)
+    assert pre[pre.index(("credential.helper", "")) + 1] == ("credential.helper", "store")
+    assert ("core.sshcommand", "ssh") in pre and ("core.askpass", "") in pre and ("core.editor", "exit 1") in pre
+    assert not any(v in ("evil", "!evil") for _, v in pre), pre

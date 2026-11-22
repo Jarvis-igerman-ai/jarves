@@ -911,6 +911,11 @@ class Manager(StageEngine):
                              check=False).stdout.strip()
         except (OSError, gitops.GitError):
             sha = ""
+        try:            # what JARVES turns off from the repo's own config (signing, LFS, drivers): said, never silent
+            off = sorted({k for k, _ in gitops.config_overrides(p["path"], ident=False)})
+        except (OSError, gitops.GitError):
+            off = []
+        note = (" From your repo's own .git/config JARVES turned off: " + ", ".join(off[:8]) + ".") if off else ""
         if apply:
             if not sha:                                     # nothing to merge (a plan still answers, as before)
                 return _res(False, "NO_BRANCH", f"the integration branch {br} was not found in {p['path']}")
@@ -919,7 +924,7 @@ class Manager(StageEngine):
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
-            if not yes and not self._approve(f"Merge {br} at {sha[:12]} into {st['branch']} in {p['path']}? (no push)",
+            if not yes and not self._approve(f"Merge {br} at {sha[:12]} into {st['branch']} in {p['path']}? (no push)" + note,
                                              "project_ship", {"project": p["name"], "branch": st["branch"],
                                                               "commit": sha[:12]}):
                 return _res(False, "NOT_APPROVED", "not merged")
@@ -928,17 +933,21 @@ class Manager(StageEngine):
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
-            return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed.")
+            return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed." + note,
+                        turned_off=off)
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         rev = sha or br
         try:
             stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{rev}", check=False).stdout.strip() or "no changes"
         except (OSError, gitops.GitError):
             stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{rev}", f"git -C \"{p['path']}\" merge --no-ff {rev}   # when you are happy",
+        cmds = [f"git -C \"{p['path']}\" diff --no-ext-diff --no-textconv HEAD...{rev}",     # review R2 (#1635)
+                f"git -C \"{p['path']}\" merge --no-ff {rev}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
-        return _res(True, "ok", f"{p['name']}: integration branch {br} (commit {sha[:12] or 'not found'}) has {stat}. JARVES does not merge or push; "
-                                "the commands are in the result.", branch=br, commit=sha, worktree=str(wt), commands=cmds)
+        warn = note + " Your own git commands still run them: check those settings before you merge." if off else ""
+        return _res(True, "ok", f"{p['name']}: integration branch {br} (commit {sha[:12] or 'not found'}) has {stat}. "
+                                "JARVES does not merge or push; the commands are in the result." + warn,
+                    branch=br, commit=sha, worktree=str(wt), commands=cmds, turned_off=off)
 
     # ================================================================== the agents working on a project
     def _orch_call(self, op: str, **kw) -> dict:
