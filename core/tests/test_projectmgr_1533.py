@@ -57,7 +57,8 @@ def test_an_agent_that_writes_the_shared_git_config_fails_and_it_is_restored(tmp
     assert not res.ok and "shared git" in res.error and "config" in res.error
     assert (repo / ".git" / "config").read_bytes() == before
     assert not (repo / ".git" / "info" / "attributes").exists()
-    assert "evil" in (repo / ".git" / "config.jarves-rejected").read_text(encoding="utf-8")     # review R4: kept
+    kept = list((repo / ".git").glob("config.jarves-rejected-*"))                               # review R4: kept
+    assert len(kept) == 1 and "evil" in kept[0].read_text(encoding="utf-8")
     (wt / "a.py").write_text("1\n", encoding="utf-8")
     assert gitops.commit_all(wt, "a") and not (tmp_path / "ran.txt").exists()
 
@@ -165,3 +166,61 @@ def test_runner_run_keeps_its_explicit_keywords():
     import inspect
     params = inspect.signature(runners.Runner.run).parameters
     assert "timeout" in params and all(p.kind != p.VAR_KEYWORD for p in params.values())
+
+
+def test_every_rejected_copy_is_kept(tmp_path):
+    """Review R4 (round 3): a second rejection no longer overwrites the first owner-visible copy."""
+    repo, wt = _task(tmp_path)
+    for n in ("one", "two"):
+        line = f"[{n}]\\n\\tx = 1\\n"
+        ok, _ = gitops.run_check(wt, [sys.executable, "-c", f"open({str(repo / '.git' / 'config')!r}, 'a').write('{line}')"])
+        assert not ok
+    kept = sorted(f.read_text(encoding="utf-8") for f in (repo / ".git").glob("config.jarves-rejected-*"))
+    assert len(kept) == 2 and "[one]" in kept[0] + kept[1] and "[two]" in kept[0] + kept[1]
+
+
+def _fake_common(repo: Path, tmp_path: Path) -> Path:
+    """A copy of the real git folder whose config and attributes run a filter (writes ran.txt)."""
+    import shutil
+    fake = tmp_path / "fake"
+    shutil.copytree(repo / ".git", fake)
+    code = _plant(repo, tmp_path)[2].replace(repr(str(repo / ".git")), repr(str(fake)))
+    import subprocess
+    subprocess.run([sys.executable, "-c", code], check=True)
+    return fake
+
+
+def test_a_check_that_rewrites_commondir_fails_and_it_is_restored(tmp_path):
+    """Review R1 (round 3): worktrees/<task>/commondir is a shared file too."""
+    repo, wt = _task(tmp_path)
+    fake = _fake_common(repo, tmp_path)
+    cd = repo / ".git" / "worktrees" / "t1-a1" / "commondir"
+    before = cd.read_bytes()
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", f"open({str(cd)!r}, 'w').write({str(fake)!r} + '\\n')"])
+    assert not ok and "worktrees/t1-a1/commondir" in out and cd.read_bytes() == before
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a") and not (tmp_path / "ran.txt").exists()
+
+
+def test_a_planted_worktree_pointer_to_a_fake_git_folder_is_never_followed(tmp_path):
+    """Review R1 (round 3): a process a check left behind points `wt/.git` at a fake folder with a filter."""
+    repo, wt = _task(tmp_path)
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
+    fake = _fake_common(repo, tmp_path)
+    (fake / "worktrees" / "t1-a1" / "commondir").write_text(str(fake) + "\n", encoding="utf-8")
+    (wt / ".git").write_text(f"gitdir: {fake / 'worktrees' / 't1-a1'}\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "a") and not (tmp_path / "ran.txt").exists()
+    assert gitops.git(repo, "log", "-1", "--format=%s", "jarves/p1/t1-a1").stdout.strip() == "a"
+
+
+def test_jarves_own_worktree_changes_after_a_run_do_not_stop_project_work(tmp_path):
+    """Review R3 (round 3): worktree add/remove by JARVES (even with branch.autoSetupMerge=always) joins the baseline."""
+    repo, wt = _task(tmp_path)
+    gitops.git(repo, "config", "branch.autoSetupMerge", "always")
+    assert gitops.run_check(wt, [sys.executable, "-c", "pass"]) == (True, "")
+    wt2, _ = gitops.new_task_worktree(tmp_path / "home", str(repo), 1, 2, 1)
+    gitops.remove_worktree(str(repo), wt)
+    (wt2 / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(wt2, "a")
+    assert gitops.run_check(wt2, [sys.executable, "-c", "pass"]) == (True, "")

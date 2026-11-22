@@ -81,10 +81,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
     config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    pin = _PIN.get(_key(cwd))                   # #1533: never the worktree's own `.git` / `commondir` pointers
+    env = child_env({"GIT_TERMINAL_PROMPT": "0", **({"GIT_DIR": pin[0], "GIT_COMMON_DIR": pin[1],
+                                                       "GIT_WORK_TREE": str(cwd)} if pin else {})})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
@@ -96,17 +98,44 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # #1533: files in the repository's common git folder that every worktree (and the owner's own checkout) reads. An agent
 # or a check running its code that writes them could make git run a command (filter/merge driver, config-defined
 # hook) for JARVES or later for the owner; no git option skips them. (Hook FILES in `.git/hooks` and `core.hooksPath`
-# never run for JARVES git: see `git`, #1381.) While any agent or check runs in a repository, JARVES keeps ONE baseline
+# never run for JARVES git: see `git`, #1381.) The pointers to that folder (the worktree's `.git` file and
+# `worktrees/<name>/commondir`) are read once, when JARVES creates the worktree, and every later JARVES git command
+# there uses them (GIT_DIR/GIT_COMMON_DIR), so a planted pointer to a fake folder is never followed. While any agent or check runs in a repository, JARVES keeps ONE baseline
 # of them: a change is put back (unique temp file + os.replace; the rejected bytes are kept next to it as
 # `<name>.jarves-rejected`) and fails EVERY run active at that moment (the writer is one of them). After the last run
 # the files as it left them stay the reference: a later change (a process the run left behind, or your own edit) is
 # never reverted, but JARVES refuses project commits and new runs there until JARVES restarts. A process can still
 # write between JARVES's check and git's own read.
 SHARED_GIT = ("config", "config.worktree", "info/attributes")
+SHARED_WT = ("config.worktree", "commondir", "gitdir")     # in every worktrees/<name>/
 REJECTED = ".jarves-rejected"
 _GUARDS: dict[Path, list] = {}          # common dir -> [the `changed` lists of the active runs, {file: bytes or None}]
 _LAST: dict[Path, dict] = {}            # common dir -> the files as the last run left them (review R2)
 _GUARD_LOCK = threading.RLock()
+_PIN: dict[str, tuple[str, str]] = {}   # worktree -> (its git dir, the common dir) as read when JARVES created it
+
+
+def _key(path: str | Path) -> str:
+    return os.path.normcase(os.path.realpath(str(path)))
+
+
+def _pin(wt: Path) -> None:
+    """Right after JARVES created (or first opened) the worktree `wt`: its git folders, used from now on."""
+    _PIN.pop(_key(wt), None)
+    gd, common = git(wt, "rev-parse", "--absolute-git-dir").stdout.strip(), common_dir(wt)
+    if gd and common is not None:
+        _PIN[_key(wt)] = (gd, str(common))
+
+
+def _adopt(repo: str | Path, keep) -> None:
+    """JARVES's own worktree add/remove changed some shared files (review R3, round 3): those join the baseline."""
+    common = common_dir(repo) if _GUARDS or _LAST else None
+    with _GUARD_LOCK:
+        snap = None if common is None else _GUARDS[common][1] if common in _GUARDS else _LAST.get(common)
+        for f in _differ(common, snap) if snap is not None else []:
+            if keep(f, f.relative_to(common).parts):
+                now = _read(f)
+                snap.pop(f, None) if now is None else snap.__setitem__(f, now)
 
 
 def common_dir(cwd: str | Path) -> Path | None:
@@ -119,7 +148,7 @@ def common_dir(cwd: str | Path) -> Path | None:
 
 
 def _shared_files(common: Path) -> set[Path]:
-    return {common / n for n in SHARED_GIT} | set(common.glob("worktrees/*/config.worktree"))
+    return {common / n for n in SHARED_GIT} | {f for n in SHARED_WT for f in common.glob(f"worktrees/*/{n}")}
 
 
 def _read(f: Path) -> bytes | None:
@@ -143,8 +172,8 @@ def _write(f: Path, data: bytes) -> None:
 
 def _put_back(f: Path, data: bytes | None) -> None:
     now = _read(f)
-    if now is not None:                         # nothing is lost: an edit of yours can be copied back (review R4)
-        _write(f.with_name(f.name + REJECTED), now)
+    if now is not None:                         # nothing is lost: every rejected copy has its own name (review R4)
+        _write(f.with_name(f"{f.name}{REJECTED}-{time.time_ns()}"), now)
     if data is None:
         f.unlink(missing_ok=True)
     else:
@@ -244,6 +273,8 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     wt = project_root(home, pid) / "integration"
     br = integration_branch(pid)
     if (wt / ".git").exists():
+        if _key(wt) not in _PIN:                # made before this JARVES started: pinned before any agent runs
+            _pin(wt)
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
     start = base or "HEAD"
@@ -251,8 +282,15 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
             git(repo, "worktree", "add", str(wt), br)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start)
+            git(repo, "worktree", "add", "--no-track", "-b", br, str(wt), start)
+        _added(repo, wt)
     return wt
+
+
+def _added(repo: str, wt: Path) -> None:
+    _pin(wt)
+    gd = Path(_PIN[_key(wt)][0]) if _key(wt) in _PIN else None
+    _adopt(repo, lambda f, _: gd is not None and f.parent == gd)
 
 
 def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -> tuple[Path, str]:
@@ -262,7 +300,8 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "worktree", "add", "--no-track", "-b", br, str(wt), integration_branch(pid))
+        _added(repo, wt)
     return wt, br
 
 
@@ -273,6 +312,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "--detach", str(wt), sha)
+        _added(repo, wt)
     return wt
 
 
@@ -281,12 +321,14 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
     with _repo_lock(repo):
+        _PIN.pop(_key(wt), None)
         git(repo, "worktree", "remove", "--force", str(wt), check=False)
         if Path(wt).exists():
             shutil.rmtree(wt, ignore_errors=True)
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
+        _adopt(repo, lambda f, rel: rel[0] == "worktrees" and _read(f) is None)    # a deletion runs nothing
 
 
 def commit_all(wt: Path, message: str) -> bool:
