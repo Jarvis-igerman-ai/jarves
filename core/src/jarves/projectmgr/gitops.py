@@ -98,6 +98,17 @@ def is_repo(path: str) -> bool:
         return False
 
 
+def common_dir(path: str | Path) -> Path | None:
+    """The repository's shared git dir (config, info/attributes, hooks, refs) for a worktree, absolute; None when the
+    folder is not a git worktree. Agents get no write access to it (#1533)."""
+    try:
+        p = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = p.stdout.strip()
+    return Path(out).resolve() if p.returncode == 0 and out else None
+
+
 def current_branch(path: str) -> str:
     return git(path, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
 

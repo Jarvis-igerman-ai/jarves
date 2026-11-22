@@ -255,3 +255,31 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def test_claude_agent_may_not_write_the_shared_git_dir_of_its_worktree(tmp_path):
+    # #1533: the shared `.git` (config, info/attributes, hooks) sits outside the task worktree; an agent that writes
+    # it can make git run a filter/merge driver command in JARVES's own next git call
+    from jarves.config import Config
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    wt = tmp_path / "home" / "projects" / "1" / "wt" / "t1-a1"
+    gitops.git(repo, "worktree", "add", "-b", "t1", str(wt))
+    cfg = Config().projects
+    cfg.claude_command = ["claude"]
+    argv = runners.ClaudeRunner(cfg).build("p", str(wt)).argv
+    denied = argv[argv.index("--disallowedTools") + 1:]
+    root = "/" + (repo / ".git").resolve().as_posix()          # Claude Code's absolute-path rule form (POSIX here)
+    if os.name == "nt":
+        root = "//" + root[2].lower() + root[4:]
+    assert f"Edit({root}/**)" in denied and f"Write({root}/**)" in denied
+    assert gitops.common_dir(wt) == (repo / ".git").resolve()
+    # a folder that is not a repository gets no extra rule and no error
+    assert gitops.common_dir(tmp_path / "nowhere") is None
+    assert runners.ClaudeRunner(cfg).build("p", str(tmp_path)).argv.count("--disallowedTools") == 1
+
+
+@pytest.mark.parametrize("path,rule", [("/home/u/r/.git", "//home/u/r/.git"), (r"C:\work\r\.git", "//c/work/r/.git")])
+def test_claude_absolute_rule_path_form(path, rule):
+    from jarves.projectmgr import runners
+    assert runners.abs_rule_path(path) == rule

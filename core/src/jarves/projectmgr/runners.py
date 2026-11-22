@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -155,6 +156,25 @@ def kill_tree(p: subprocess.Popen) -> None:
         pass
 
 
+def abs_rule_path(path: str | Path) -> str:
+    """An absolute path in Claude Code permission-rule form: `//` + POSIX path; a Windows drive `C:\\x` becomes `//c/x`
+    (Claude Code matches Windows paths in that form; UNVERIFIED against a live Windows run)."""
+    p = str(path).replace("\\", "/")
+    if re.match(r"^[A-Za-z]:/", p):
+        p = "/" + p[0].lower() + p[2:]
+    return "/" + p.rstrip("/")
+
+
+def _shared_git_deny(cwd: str) -> list[str]:
+    """#1533: the worktree's shared git dir lies outside the worktree; its config and info/attributes choose commands
+    (filter/merge drivers) that JARVES's own git calls would run. The agent may read it but never edit or write it."""
+    common = gitops.common_dir(cwd)
+    if common is None:
+        return []
+    root = abs_rule_path(common)
+    return [f"Edit({root}/**)", f"Write({root}/**)"]
+
+
 def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) -> list[str]:
     t = ["Read", "Glob", "Grep"]
     if read_only:
@@ -180,7 +200,7 @@ class ClaudeRunner(Runner):
         argv = [*self.command(), "-p", "--output-format", "json", "--permission-mode", "dontAsk",
                 "--permission-prompts", "none", "--setting-sources", "user", "--allowedTools",
                 *_tools(read_only, check_argv, team),
-                "--disallowedTools", *DENY]
+                "--disallowedTools", *DENY, *_shared_git_deny(cwd)]
         if model:
             argv += ["--model", model]
         if resume:
