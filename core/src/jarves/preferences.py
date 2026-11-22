@@ -52,10 +52,12 @@ _HEX = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-f]{32,}|[0-9A-F]{32,})(?![0-9A-Za-z
 _BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
 _BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
 _BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
-# credential words; '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
-_CRED_WORD = r"(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
-_CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[A-Za-z0-9]+[\W_]+){0,4}$", re.I)
-_CRED_AFTER = re.compile(r"^[\W_]*(?:[A-Za-z0-9]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
+# credential words (English and Hebrew); '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
+# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and suffixes, so they get no ASCII word boundary
+_CRED_WORD = (r"(?:(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
+              r"|(?<![א-ת])[והשבכלמ]{0,3}(?:סיסמ|טוקן|אסימון|מפתח|סוד))")
+_CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
+_CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
 
 
@@ -158,7 +160,7 @@ def looks_sensitive(text: str) -> bool:
     of 32-char tokens and about 0.05% of base64-encoded 32-byte keys. The test pins these rates.
 
     Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
-    the long-number rule unless a credential word (key, token, secret, password, ...; ``_`` separates words, so
+    the long-number rule unless a credential word (key, token, secret, password, סיסמה, מפתח, טוקן, סוד, ...; ``_`` separates words, so
     ``GITHUB_TOKEN=`` counts) sits up to four words before or three words after it, so "my id is 12345678ab" is
     allowed. A 40-char hex value with such a word near it is refused; "fixed in <sha>, key rotation bug" is
     therefore refused too (safe side).

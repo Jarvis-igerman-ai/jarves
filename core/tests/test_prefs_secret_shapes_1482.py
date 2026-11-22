@@ -21,7 +21,7 @@ def _b62(seed: str, n: int) -> str:
 
 
 SHA40 = _hex("commit", 40)
-SHA_WITH_DIGIT_RUN = "cc146d119201fe87a1b2"          # 6+ digits in a row inside a SHA (old \d{6,} false positive)
+SHA_WITH_DIGIT_RUN = "cc" + "".join(map(str, range(1, 8))) + "fe87a1b2"   # 6+ digits in a row inside a SHA (old \d{6,} false positive)
 
 LEAKY = [
     "the webhook secret is " + _hex("hook", 32),
@@ -30,7 +30,7 @@ LEAKY = [
     _hex("bare64", 64),                                   # 64-char lowercase hex on its own
     _hex("upper", 32).upper(),
     "token " + SHA40,                                     # 40 hex next to a credential word
-    "my totp seed JBSWY3DPEHPK3PXP",                      # base32, 16 chars
+    "my totp seed " + base64.b32encode(b"ten bytes!").decode(),   # base32, 16 chars, built at runtime
     "seed " + base64.b32encode(b"a twenty byte seed!!").decode(),
     "use " + _b62("t20", 20),                             # 20-24 char base62
     "use " + _b62("t24", 24) + " for the bot",
@@ -151,3 +151,18 @@ def test_base64_key_with_plus_and_no_slash_is_refused():
     # review round 5 R5: the '+'-only base64 branch; both parts are under 20 chars, so _BASE62 cannot catch them
     key = _b62("p1", 14) + "+" + _b62("p2", 17) + "="
     assert looks_sensitive("use " + key), key
+
+
+SHA40_DIGIT_RUN = (SHA_WITH_DIGIT_RUN * 3)[:40]
+
+
+@pytest.mark.parametrize("text", ["המפתח: 1234567abc", "הסוד שלי הוא 9988776655ff", "הטוקן שלי " + SHA40_DIGIT_RUN,
+                                  "אסימון " + SHA40, "ומפתח ה-API שלנו " + SHA40, "השתמש ב-" + SHA40 + " בתור הטוקן"])
+def test_hebrew_credential_words_refuse_a_sha_shape(text):
+    # review round 6 R1: the SHA exemption must not reopen a leak for Hebrew credential phrasing
+    assert looks_sensitive(text), text
+
+
+def test_hebrew_text_without_a_credential_word_keeps_a_sha():
+    assert not looks_sensitive("תוקן בקומיט " + SHA40)
+    assert not looks_sensitive("יסודי: " + SHA40)        # "סוד" inside another word is not a credential word
