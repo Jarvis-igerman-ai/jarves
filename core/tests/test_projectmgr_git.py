@@ -575,3 +575,28 @@ def test_the_push_pins_the_windows_tls_backend():
     """#1595 round-5 R4: GIT_CONFIG_NOSYSTEM drops Git for Windows' system http.sslBackend; the push pins schannel."""
     from jarves.projectmgr import forge
     assert forge._tls_pins("nt") == ["-c", "http.sslBackend=schannel"] and forge._tls_pins("posix") == []
+
+
+def test_rejected_copies_are_capped_per_file(tmp_path):
+    """#1592 round-6 R3: repeated rejections keep at most KEEP_REJECTED backup folders next to a file."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    for i in range(gitops.KEEP_REJECTED + 3):
+        with gitops.config_guard(repo):
+            cfg.write_bytes(cfg.read_bytes() + f"# {i}\n".encode())
+    kept = sorted((repo / ".git").glob("config.jarves-rejected-*"))
+    assert len(kept) == gitops.KEEP_REJECTED
+    assert any(b"# %d\n" % (gitops.KEEP_REJECTED + 2) in (k / "config").read_bytes() for k in kept)   # newest kept
+
+
+def test_one_file_reached_by_two_spellings_gets_one_guard(tmp_path, monkeypatch):
+    """#1592 round-6 R5: a home reached through a symlinked folder and the resolved common dir is one key."""
+    repo = _repo(tmp_path)
+    real = Path(os.environ["HOME"])
+    link = tmp_path / "home-link"
+    link.symlink_to(real, target_is_directory=True)
+    (real / ".gitconfig").write_bytes(b"[user]\n\tname = owner\n")
+    monkeypatch.setenv("HOME", str(link))
+    keys = gitops._guarded_files(repo)
+    assert len([k for k in keys if k.endswith(".gitconfig")]) == 1
+    assert os.path.normcase(os.path.join(os.path.realpath(real), ".gitconfig")) in keys

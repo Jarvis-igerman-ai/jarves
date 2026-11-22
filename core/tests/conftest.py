@@ -261,10 +261,10 @@ def _no_real_autostart(monkeypatch):
 def _git_config_home(tmp_path_factory, monkeypatch):
     """projectmgr's git config guard (#1592) snapshots, restores and backs up the global git config. Every test gets
     its own HOME, so no test that reaches `run_check` or `Runner.run` touches the developer's real ~/.gitconfig, and
-    a test's quarantined (unrestored) guard never stops a later test's git (round-5 R5)."""
+    a test's quarantined (unrestored) guard never stops a later test's git (round-5 R5). Only HOME: git (also Git for
+    Windows) reads HOME first, while a changed USERPROFILE breaks Chromium in the Windows browser tests."""
     home = tmp_path_factory.mktemp("githome")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     yield
     gitops = sys.modules.get("jarves.projectmgr.gitops")

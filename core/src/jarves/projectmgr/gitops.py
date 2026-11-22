@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
+import glob
 import os
 import re
 import shutil
@@ -118,17 +119,31 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # owner's own git can read a planted entry during a run; the system config, an owner-set GIT_CONFIG_GLOBAL, an include
 # inside an included file that does not apply to the guarded worktree and a conditional include that applies only in
 # another folder are not guarded). A file that could not be restored stays guarded after the run ends ("failed"):
-# every JARVES git call retries the restore and refuses to run until it succeeds. ANY change during a run is reverted, the owner's own `git config`/`git remote set-url` included: the
+# every JARVES git call retries the restore and refuses to run until it succeeds. That quarantine lives in memory
+# only: it does not survive a JARVES restart, after which the unrestored entry is read again (round-6 R1). At most
+# KEEP_REJECTED backup folders are kept per file. ANY change during a run is reverted, the owner's own `git config`/`git remote set-url` included: the
 # replaced content is kept next to the file in `<name>.jarves-rejected-*/<name>`, named in the rejection and in a
 # PROJECT_GIT_CONFIG_RESTORED log line. JARVES's own git calls write no config (CONFIG_PINS).
 _GUARDS: dict[str, dict] = {}            # file path -> {"data": trusted bytes or None (absent), "runs": [state dicts]}
 _GUARDS_LOCK = threading.RLock()
 
 
+def _home() -> Path:
+    """The home git uses for `~` and the global config: HOME first (also Git for Windows), then USERPROFILE."""
+    return Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+
+
+def _key(path: str | Path) -> str:
+    """One guard key per file (round-6 R5): the folder resolved (symlinks, 8.3 names, drive-letter case), the last part
+    kept, so a symlinked `~/.gitconfig` that is swapped for a file still counts as changed."""
+    p = os.path.abspath(path)
+    return os.path.normcase(os.path.join(os.path.realpath(os.path.dirname(p)), os.path.basename(p)))
+
+
 def _global_configs() -> list[Path]:
     """The global config files git reads for JARVES's children (child_env keeps HOME/XDG_CONFIG_HOME, drops
     GIT_CONFIG_GLOBAL)."""
-    home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    home = _home()
     xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
     return [home / ".gitconfig", xdg / "git" / "config"]
 
@@ -145,9 +160,9 @@ def _guarded_files(wt: str | Path) -> dict[str, str | None]:
     files = [common / "config", common / "config.worktree", *_global_configs()]
     if gdir != common:                     # a linked worktree: its pointer files
         files += [Path(wt) / ".git", gdir / "commondir", gdir / "gitdir", gdir / "config.worktree"]
-    out: dict[str, str | None] = {os.path.abspath(f): None for f in files + _config_files(wt)}
+    out: dict[str, str | None] = {_key(f): None for f in files + _config_files(wt)}
     if gdir != common:
-        out[os.path.abspath(Path(wt) / ".git")] = str(gdir)
+        out[_key(Path(wt) / ".git")] = str(gdir)
     return out
 
 
@@ -164,9 +179,18 @@ def _config_files(wt: str | Path) -> list[Path]:
         out.append(src)
         key = key.lower()
         if val and (key == "include.path" or (key.startswith("includeif.") and key.endswith(".path"))):
-            target = Path(os.path.expanduser(val))
+            target = _home() / val[2:] if val.startswith(("~/", "~\\")) else Path(val)
             out.append(target if target.is_absolute() else src.parent / target)
     return out
+
+
+KEEP_REJECTED = 5                        # backup folders kept per guarded file; older ones are removed (round-6 R3)
+
+
+def _prune_rejected(where: Path, name: str) -> None:
+    old = sorted(where.glob(f"{glob.escape(name)}.jarves-rejected-*"), key=lambda p: p.stat().st_mtime_ns)
+    for p in old[:-KEEP_REJECTED]:
+        shutil.rmtree(p, ignore_errors=True)
 
 
 def _keep_rejected(path: Path, move: bool = False, side_dir: str | None = None) -> str:
@@ -185,6 +209,7 @@ def _keep_rejected(path: Path, move: bool = False, side_dir: str | None = None) 
     if not any(side.iterdir()):
         side.rmdir()
         return ""
+    _prune_rejected(side.parent, path.name)
     return str(side / path.name)
 
 
