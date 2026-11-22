@@ -120,7 +120,8 @@ def steps(*pairs):
     return [{"tool": t, "args": a, "why": f"because {i}"} for i, (t, a) in enumerate(pairs)]
 
 
-async def test_draft_never_runs_then_approved_plan_runs_with_evidence(env):
+async def test_draft_never_runs_then_approved_plan_runs_with_evidence(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "_privacy", False)               # tool output is stored only with privacy off (#1526)
     p = env.store.propose("morning", steps(("fake_read", {"text": "a"}), ("fake_act", {"text": "b"})))
     assert p["state"] == "draft" and await env.runner.tick() == 0 and env.ran == []
     env.store.approve(p["id"])

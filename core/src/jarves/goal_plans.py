@@ -80,6 +80,17 @@ def _code_only(text: object) -> str:
     return m.group(1) if m and 2 <= len(m.group(1)) <= CODE_MAX else ""
 
 
+def _kept(text: str) -> str:
+    """#1526: tool output as stored now: '' while privacy mode is on (states and codes still say what happened).
+    The plan's own fixed reasons (caps, approvals, timeouts) are not user content and stay."""
+    return "" if logs.privacy() else text
+
+
+def _kept_error(text: str) -> str:
+    """#1526: a step error carrying tool output, as stored now: only its code while privacy mode is on."""
+    return _code_only(text) if logs.privacy() else text
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
@@ -318,7 +329,8 @@ class PlanStore:
         return n, plans
 
     def truncate_wal(self) -> bool:
-        """Empty memory.db-wal, which still holds the old pages. Own connection without waiting: False when busy."""
+        """Empty memory.db-wal, which still holds the old pages. Own connection without waiting: False when busy.
+        memory.db is always WAL (UserDB.__init__; test_1526 asserts it): no rollback journal keeps old pages."""
         if self.db.path == ":memory:":
             return True
         try:
@@ -590,7 +602,7 @@ class PlanRunner:
                     st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
                 self._rearm()
                 st.db.x("UPDATE goal_plan_steps SET status='done', finished=?, evidence=?, error='' WHERE id=?",
-                        (self.clock(), _short(res.message), step["id"]))
+                        (self.clock(), _kept(_short(res.message)), step["id"]))
                 logs.info("goals", "PLAN_STEP_DONE", "plan step done", id=pid, step=step["idx"], tool=step["tool"])
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
@@ -606,7 +618,8 @@ class PlanRunner:
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
                 self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
                 return st.get(pid)
-            self._fail(pid, step, f"{res.code}: {_short(res.message, 120)}", t0, evidence=res.message)
+            why = _kept_error(f"{res.code}: {_short(res.message, 120)}") or "the step failed"
+            self._fail(pid, step, why, t0, evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
@@ -618,7 +631,7 @@ class PlanRunner:
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
-                        (status, self.clock(), _short(why, 200), _short(evidence), step["id"]))
+                        (status, self.clock(), _short(why, 200), _kept(_short(evidence)), step["id"]))
         self._stop_plan(pid, "failed", f"step {step['idx'] + 1}: {why}", finished=self.clock())
 
     def _finish(self, pid: int) -> dict:

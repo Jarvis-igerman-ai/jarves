@@ -64,6 +64,7 @@ async def test_1526_privacy_switched_on_blanks_older_plan_text_and_keeps_states_
     assert ("PLAN_PRIVACY_SCRUBBED", {"count": 2, "changed": 2}) in seen
     assert not any(w in _disk(env) for w in WORDS)          # not in memory.db, its free pages or memory.db-wal
     assert env.db.row("PRAGMA secure_delete")["secure_delete"] == 0      # the shared connection's setting is restored
+    assert env.db.row("PRAGMA journal_mode")["journal_mode"] == "wal"    # no rollback journal holding old pages
     seen.clear()
     await env.runner.tick()                                  # once per switch-on: a second tick does nothing
     assert not [c for c, _ in seen if c.startswith("PLAN_PRIVACY")]
@@ -153,6 +154,20 @@ async def test_1526_text_written_while_privacy_was_off_during_a_step_is_scrubbed
     logs.set_privacy(True)                                   # on again before any tick start saw it off
     await env.runner.tick()
     assert env.store.get(p["id"])["steps"][0]["evidence"] == "" and env.store.get(p["id"])["result"] == ""
+
+
+async def test_1526_plan_text_written_while_privacy_is_on_is_never_stored(env, seen):
+    logs.set_privacy(True)
+    done = env.store.propose("a", steps(("fake_read", {"text": "secret"})))
+    bad = env.store.propose("b", steps(("fake_bad", {})))
+    env.store.approve(done["id"])
+    env.store.approve(bad["id"])
+    await env.runner.tick()
+    d, b = env.store.get(done["id"]), env.store.get(bad["id"])
+    assert (d["state"], d["steps"][0]["status"], d["steps"][0]["evidence"]) == ("done", "done", "")
+    assert d["result"] == "1/1 steps done. 1. fake_read: done"           # the plan's own counts and states stay
+    assert (b["state"], b["steps"][0]["error"], b["steps"][0]["evidence"], b["note"]) == ("failed", "X_BROKE", "", "step 1: X_BROKE")
+    assert not any(w in _disk(env) for w in (b"read secret", b"it broke"))
 
 
 @pytest.mark.parametrize("text,code", [("X_BROKE: it broke", "X_BROKE"), ("TOOL_TIMEOUT", "TOOL_TIMEOUT"),
