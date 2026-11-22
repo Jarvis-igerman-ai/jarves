@@ -911,9 +911,9 @@ class Manager(StageEngine):
                              check=False).stdout.strip()
         except (OSError, gitops.GitError):
             sha = ""
-        if not sha:
-            return _res(False, "NO_BRANCH", f"the integration branch {br} was not found in {p['path']}")
         if apply:
+            if not sha:                                     # nothing to merge (a plan still answers, as before)
+                return _res(False, "NO_BRANCH", f"the integration branch {br} was not found in {p['path']}")
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
@@ -923,19 +923,21 @@ class Manager(StageEngine):
                                              "project_ship", {"project": p["name"], "branch": st["branch"],
                                                               "commit": sha[:12]}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False, message=f"Merge {br} at {sha[:12]}")      # your own git identity / signing
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,             # your own git identity / signing
+                                        message=f"Merge {br} at {sha[:12]}")
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
             return _res(True, "ok", f"Merged {br} at {sha[:12]} into {st['branch']}. Nothing was pushed.")
         wt = gitops.project_root(self.home, p["id"]) / "integration"
+        rev = sha or br
         try:
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}", check=False).stdout.strip() or "no changes"
+            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{rev}", check=False).stdout.strip() or "no changes"
         except (OSError, gitops.GitError):
             stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{sha}", f"git -C \"{p['path']}\" merge --no-ff {sha}   # when you are happy",
+        cmds = [f"git -C \"{p['path']}\" diff HEAD...{rev}", f"git -C \"{p['path']}\" merge --no-ff {rev}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
-        return _res(True, "ok", f"{p['name']}: integration branch {br} (commit {sha[:12]}) has {stat}. JARVES does not merge or push; "
+        return _res(True, "ok", f"{p['name']}: integration branch {br} (commit {sha[:12] or 'not found'}) has {stat}. JARVES does not merge or push; "
                                 "the commands are in the result.", branch=br, commit=sha, worktree=str(wt), commands=cmds)
 
     # ================================================================== the agents working on a project

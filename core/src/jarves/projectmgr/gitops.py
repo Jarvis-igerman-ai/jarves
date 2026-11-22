@@ -5,6 +5,7 @@ merges are fast-forward only after the check ran on the merged result. JARVES ne
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import re
 import shutil
@@ -68,13 +69,17 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 TRUSTED_SCOPES = ("system", "global", "command")        # local/worktree config (and its includes) is agent-writable
-# commands git takes from config (#1407): an agent-writable value is replaced, so git never runs it
-_RUN_KEY = re.compile(r"^(filter\.(.+)\.(clean|smudge|process)|merge\.(.+)\.driver|hook\.(.+)\.command"
-                      r"|gpg(\.[^.]+)?\.program|(gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(command|textconv)))$")
+# commands git takes from config (#1407): an agent-writable value is replaced, so git never runs it. `fail`: the
+# command fails instead (a merge conflict, no diff/trailer/key). `sub`: no recursive submodule checkout/update (review R4)
+_RUN_KEY = re.compile(r"^(?:(?P<filter>filter\.(?P<drv>.+)\.(?:clean|smudge|process))|(?P<hook>hook\..+\.command)"
+                      r"|(?P<fail>merge\..+\.driver|gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(?:command|textconv)"
+                      r"|trailer\..+\.(?:command|cmd))|(?P<sub>submodule\.recurse|submodule\..+\.update)"
+                      r"|(?P<gpg>gpg(?:\.[^.]+)?\.program))$")
 _SIGN_KEY = re.compile(r"^(gpg\..+|user\.signingkey|(commit|tag)\.gpgsign)$")
 _NO_CONFIG_CMDS = ("rev-parse", "merge-base", "rev-list")   # never run a config-named command: no config read
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                 "gpg.ssh.program": "ssh-keygen"}
+_CFG_CACHE: dict[str, tuple[tuple, list]] = {}         # cwd -> (stamp of every file the config came from, rows)
 
 
 def _norm_key(key: str) -> str:
@@ -85,22 +90,58 @@ def _norm_key(key: str) -> str:
     return f"{head.lower()}.{sub}{dot}{name.lower()}" if sub else f"{head.lower()}.{name.lower()}"
 
 
-def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str]]:
-    """(key, value) pairs that neutralise the config-named commands (filter/merge/diff drivers, textconv, diff.external, config
-    hooks, gpg programs and gpg.ssh.defaultKeyCommand) set
-    in the agent-writable local/worktree config (#1407); the owner's global/system value is kept. ident=False (a merge
-    into your branch): untrusted signing settings turn signing off, so your key never signs on an agent's say-so.
-    Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533. `git` passes them as
-    GIT_CONFIG_KEY_n/VALUE_n, never `-c k=v`: git splits `-c` at the first `=`, and a subsection may hold one."""
+def _stamp(cwd: str, files: list[str]) -> tuple:
+    """The content of every file the config came from, plus `.git` (a worktree's `.git` file names its git folder)."""
+    out = []
+    for f in [*files, ".git"]:
+        path = os.path.join(cwd, f)
+        try:
+            out.append((f, "dir" if os.path.isdir(path) else hashlib.sha256(Path(path).read_bytes()).hexdigest()))
+        except OSError:
+            out.append((f, None))
+    return tuple(out)
+
+
+_NO_CACHE = ("include.", "includeif.", "extensions.worktreeconfig")
+
+
+def _config_rows(cwd: str | Path) -> list[tuple[str, str, str]]:
+    """(scope, key, value) of the effective config. Cached per folder until the content of a file it came from changes
+    (review R3: one read per call doubled the git processes). Never cached when an agent-writable file could appear or
+    apply without a listed file changing: an include, `includeIf` (its branch condition), a worktree config, no
+    local rows at all, or no `.git` in the folder."""
+    key = os.path.realpath(str(cwd))
+    hit = _CFG_CACHE.get(key)
+    if hit and _stamp(key, [f for f, _ in hit[0][:-1]]) == hit[0]:
+        return hit[1]
     try:
-        p = subprocess.run(["git", "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
-                           timeout=30, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
+        p = subprocess.run(["git", "config", "--list", "--show-scope", "--show-origin", "-z"], cwd=str(cwd),
+                           capture_output=True, timeout=30, creationflags=_NOWIN,
+                           env=child_env({"GIT_TERMINAL_PROMPT": "0"}))
     except subprocess.SubprocessError as e:                 # OSError (no such folder) propagates as before
         raise GitError(f"could not read the git config: {e}") from e
     if p.returncode != 0:
         raise GitError("could not read the git config: " + p.stderr.decode("utf-8", "replace").strip()[:200])
     items = p.stdout.decode("utf-8", "replace").split("\0")
-    rows = [(scope, _norm_key(kv.partition("\n")[0]), kv.partition("\n")[2]) for scope, kv in zip(items[0::2], items[1::2])]
+    rows, files = [], []
+    for scope, origin, kv in zip(items[0::3], items[1::3], items[2::3]):
+        rows.append((scope, _norm_key(kv.partition("\n")[0]), kv.partition("\n")[2]))
+        if origin.startswith("file:") and origin[5:] not in files:
+            files.append(origin[5:])
+    _CFG_CACHE.pop(key, None)
+    if os.path.lexists(os.path.join(key, ".git")) and any(s == "local" for s, _, _ in rows) and \
+            not any(k.startswith(_NO_CACHE) for _, k, _ in rows):
+        _CFG_CACHE[key] = (_stamp(key, files), rows)
+    return rows
+
+
+def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str]]:
+    """(key, value) pairs that neutralise the config-named commands (`_RUN_KEY`) set in the agent-writable
+    local/worktree config (#1407); the owner's global/system value is kept. Untrusted signing settings turn signing
+    off on every call (review R1), so your key never signs on an agent's say-so.
+    Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533. `git` passes them as
+    GIT_CONFIG_KEY_n/VALUE_n, never `-c k=v`: git splits `-c` at the first `=`, and a subsection may hold one."""
+    rows = _config_rows(cwd)
     trusted = {key: val for scope, key, val in rows if scope in TRUSTED_SCOPES}   # all of them first: `command` is last
     out: list[tuple[str, str]] = []
     signing = False
@@ -111,18 +152,18 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str
         m = _RUN_KEY.match(key)
         if not m:
             continue
-        if m.group(2):                                      # your own same-named value stays (review R4)
-            req = f"filter.{m.group(2)}.required"
+        if m["filter"]:                                     # your own same-named value stays (review R4)
+            req = f"filter.{m['drv']}.required"
             out += [(key, trusted.get(key, "")), (req, trusted.get(req, "false") if key in trusted else "false")]
-        elif m.group(4):
-            out.append((key, trusted.get(key, "exit 1")))   # a conflict, never the agent's program
-        elif m.group(5):
+        elif m["hook"]:
             out.append((key, trusted.get(key, "exit 0")))
-        elif m.group(7):
+        elif m["fail"]:
             out.append((key, trusted.get(key, "exit 1")))   # fails closed, never the agent's program
+        elif m["sub"]:
+            out.append((key, trusted.get(key, "false" if key == "submodule.recurse" else "none")))
         else:
             out.append((key, trusted.get(key, _GPG_DEFAULT.get(key, "gpg"))))
-    if signing and not ident:
+    if signing:
         out += [("commit.gpgsign", "false"), ("tag.gpgsign", "false")]
     return out
 

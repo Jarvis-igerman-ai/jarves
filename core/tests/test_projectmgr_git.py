@@ -322,7 +322,8 @@ def test_a_signing_program_from_the_repo_config_never_runs_on_the_owner_merge(tm
 
 def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_path, no_user_config):
     repo = _repo(tmp_path)
-    gitops.git(repo, "config", "hook.evil.command", "rm -rf /")      # newer git runs these; 2.43 does not
+    cmd, _marker = _spy(tmp_path, "hook")
+    gitops.git(repo, "config", "hook.evil.command", cmd)              # newer git runs these; 2.43 does not
     gitops.git(repo, "config", "gpg.ssh.program", "evil")
     pre = gitops.config_overrides(repo)
     assert ("hook.evil.command", "exit 0") in pre and ("gpg.ssh.program", "ssh-keygen") in pre
@@ -386,3 +387,66 @@ def test_an_unreadable_repo_config_fails_closed_and_check_false_never_raises(tmp
     assert gitops.git(repo, "status", check=False).returncode == 128
     with pytest.raises(gitops.GitError):
         gitops.git(repo, "status")
+
+
+def _exe_spy(tmp_path: Path, name: str) -> tuple[str, Path]:
+    """A program git runs directly (gpg.program): leaves a marker and fails."""
+    marker, spy = tmp_path / f"ran-{name}", tmp_path / f"{name}-spy.sh"
+    spy.write_text(f'#!/bin/sh\necho ran > "{marker.as_posix()}"\nexit 1\n', encoding="utf-8")
+    spy.chmod(0o755)
+    return spy.as_posix(), marker
+
+
+def test_your_signing_key_never_signs_on_an_ordinary_call_because_of_the_repo_config(tmp_path, no_user_config):
+    """Review R1: with ident=True an agent's local `tag.gpgsign`/`commit.gpgsign` + `user.signingkey` would make your
+    own (trusted) signing program sign; every call turns signing off once the repo config touches signing."""
+    repo = _repo(tmp_path)
+    prog, marker = _exe_spy(tmp_path, "owner-gpg")
+    (tmp_path / "home").mkdir(exist_ok=True)
+    subprocess.run(["git", "config", "--global", "gpg.program", prog], check=True, env={**os.environ})
+    for k, v in (("commit.gpgsign", "true"), ("tag.gpgsign", "true"), ("user.signingkey", "OWNERKEY")):
+        gitops.git(repo, "config", k, v)
+    (repo / "c.txt").write_text("c", encoding="utf-8")
+    assert gitops.commit_all(repo, "agent work")
+    gitops.git(repo, "tag", "-a", "v1", "-m", "agent tag")
+    assert not marker.exists()
+    assert ("tag.gpgsign", "false") in gitops.config_overrides(repo)
+
+
+def test_a_trailer_command_from_the_repo_config_never_runs(tmp_path, no_user_config):
+    """Review R4: `trailer.<t>.cmd` runs on `interpret-trailers` (and `commit --trailer`)."""
+    repo = _repo(tmp_path)
+    marker = tmp_path / "ran-trailer"
+    gitops.git(repo, "config", "trailer.sign.cmd", f'echo ran > "{marker.as_posix()}"')
+    (repo / "msg.txt").write_text("subject\n\nbody\n", encoding="utf-8")
+    gitops.git(repo, "interpret-trailers", "--in-place", "msg.txt", check=False)
+    assert not marker.exists()
+    gitops.git(repo, "config", "submodule.recurse", "true")
+    gitops.git(repo, "config", "submodule.x.update", "!evil")
+    pre = gitops.config_overrides(repo)
+    assert ("submodule.recurse", "false") in pre and ("submodule.x.update", "none") in pre
+
+
+def test_the_config_read_is_cached_until_a_config_file_changes(tmp_path, no_user_config, monkeypatch):
+    """Review R3: one `git config --list` per folder until the content of a file it came from changes; an include
+    (its target may appear later) is never cached."""
+    repo = _repo(tmp_path)
+    real, reads = subprocess.run, []
+
+    def run(argv, *a, **kw):
+        if argv[:3] == ["git", "config", "--list"]:
+            reads.append(argv)
+        return real(argv, *a, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    monkeypatch.setattr(gitops, "_CFG_CACHE", {})
+    gitops.config_overrides(repo)
+    gitops.git(repo, "status")
+    assert len(reads) == 1
+    cmd, marker = _spy(tmp_path, "filter")
+    real(["git", "config", "filter.evil.clean", cmd], cwd=repo, check=True)   # an agent edits .git/config
+    assert ("filter.evil.clean", "") in gitops.config_overrides(repo) and len(reads) == 2
+    later = tmp_path / "later.cfg"
+    real(["git", "config", "include.path", later.as_posix()], cwd=repo, check=True)
+    gitops.config_overrides(repo)
+    later.write_text(f"[merge \"x\"]\n\tdriver = {cmd}\n", encoding="utf-8")     # appears after the read
+    assert ("merge.x.driver", "exit 1") in gitops.config_overrides(repo) and len(reads) == 4

@@ -1370,3 +1370,46 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
     assert branch not in t["waiting"]
     sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
+
+
+def test_ship_names_and_merges_the_approved_commit_not_the_branch(env):
+    """#1407: the ship plan, approval and merge name the integration commit; a same-named tag cannot supply it and a
+    commit landing on the branch while you approve is not merged."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    br = gitops.integration_branch(1)
+    sha = sh(repo, "git", "rev-parse", f"refs/heads/{br}").strip()
+    sh(repo, "git", "tag", br, "main")                                   # a tag with the branch's name, elsewhere
+    r = m.call("ship_plan", project="demo")
+    assert r["commit"] == sha and all(sha in c for c in r["commands"][:2]) and sha[:12] in r["text"]
+    integ = gitops.project_root(home, 1) / "integration"
+    seen = []
+
+    def ask(prompt, **_):
+        seen.append(prompt)
+        (integ / "late.txt").write_text("not approved\n")
+        gitops.commit_all(integ, "late")
+        return True
+    m._ask = ask
+    sh(repo, "git", "config", "user.name", "o")         # the merge uses your identity: CI has none of its own
+    sh(repo, "git", "config", "user.email", "o@x")
+    (repo / "own.txt").write_text("yours\n")                            # your branch moved: a real merge commit
+    sh(repo, "git", "add", "own.txt")
+    sh(repo, "git", "commit", "-qm", "own", "--no-verify")
+    assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert sha[:12] in seen[0] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+    assert sh(repo, "git", "log", "-1", "--format=%s").strip() == f"Merge {br} at {sha[:12]}"     # review R6
+
+
+def test_ship_plan_without_the_integration_branch_still_answers_but_never_merges(env):
+    """Review R7: a plan with no integration branch keeps answering as before; only applying it refuses."""
+    m, repo, home = env
+    open_project(m, repo)
+    sh(repo, "git", "worktree", "remove", "--force", str(gitops.project_root(home, 1) / "integration"))
+    sh(repo, "git", "branch", "-D", gitops.integration_branch(1))
+    r = m.call("ship_plan", project="demo")
+    assert r["ok"] and r["commit"] == "" and "not found" in r["text"]
+    assert m.call("ship_plan", project="demo", apply=True, yes=True)["code"] == "NO_BRANCH"
