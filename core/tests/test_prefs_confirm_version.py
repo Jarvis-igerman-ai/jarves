@@ -43,10 +43,14 @@ def test_store_confirm_with_the_old_version_after_an_edit_stays_proposed(prefs):
 def test_phone_confirm_needs_the_shown_version(prefs, home):
     p, pid, shown = prefs
     mob = SimpleNamespace(bridge=None, _prefs=p, home=home)
-    assert mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A, "updated": "x"}, "dev")[0] == 400
+    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid}, "dev")   # no words: #206 H2's reload answer
+    assert st == 400 and body["code"] == "PREF_TEXT_REQUIRED" and "reload" in body["error"]
+    for bad in ("x", None, float("nan"), True):          # review R2: malformed = an old page, coded, in Hebrew
+        st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A, "updated": bad}, "dev")
+        assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"]
     p.edit(pid, A, by="voice")                            # an A -> A rewrite: same words, newer version (#206 H2 can't see it)
     st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A, "updated": shown}, "dev")
-    assert st == 409 and body["code"] == "PREF_CHANGED" and p.get(pid)["state"] == "proposed"
+    assert st == 409 and body["code"] == "PREF_CHANGED" and body["error_he"] and p.get(pid)["state"] == "proposed"
     _edit_to_b(p, pid)
     st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": B, "updated": p.get(pid)["updated"]}, "dev")
     assert st == 200 and body["state"] == "confirmed"
@@ -55,7 +59,9 @@ def test_phone_confirm_needs_the_shown_version(prefs, home):
 def test_dashboard_confirm_needs_the_shown_version(prefs):
     p, pid, shown = prefs
     ctx = SimpleNamespace(_prefs=p)
-    assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": "x"})[0] == 400
+    for bad in ("x", None, float("inf")):                # review R2: malformed = an old page, coded, in Hebrew
+        st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": bad})
+        assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"]
     _edit_to_b(p, pid)
     st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": shown})
     assert st == 409 and body["code"] == "PREF_CHANGED" and body["error_he"] and p.get(pid)["state"] == "proposed"
@@ -63,15 +69,16 @@ def test_dashboard_confirm_needs_the_shown_version(prefs):
     assert p.get(pid)["state"] == "confirmed"
 
 
-def _voice(p, during_popup):
+def _voice(p, during_popup=lambda: None, *, confirm=None, shows=True):
     from jarves.skills import SkillRegistry
     reg = SkillRegistry()
 
     async def popup(prompt, **meta):                       # the owner sees the wording, then taps yes
         during_popup()
         return True
-    popup.accepts_meta = True
-    reg.confirm = popup
+    if shows:
+        popup.accepts_meta = True
+    reg.confirm = confirm or popup
     reg.register(prefs_mod.make_skill(p))
     reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
     return reg
@@ -82,25 +89,8 @@ def test_voice_confirm_after_an_edit_during_the_popup_is_refused(prefs):
     reg = _voice(p, lambda: _edit_to_b(p, pid))             # wording A in the popup, B committed before the yes
     r = asyncio.run(reg.call("pref_confirm", {"id": pid}, origin="model"))
     assert not r.ok and r.code == "PREF_CHANGED" and p.get(pid)["state"] == "proposed" and not p.for_prompt()
-    r = asyncio.run(_voice(p, lambda: None).call("pref_confirm", {"id": pid}, origin="model"))
+    r = asyncio.run(_voice(p).call("pref_confirm", {"id": pid}, origin="model"))
     assert r.ok and p.get(pid)["state"] == "confirmed"      # a fresh popup shows B: that yes confirms B
-
-
-def test_voice_confirm_without_an_approval_popup_fails_closed(prefs):
-    p, pid, _ = prefs                                     # review R3: no approval_meta ran, so no wording was shown
-    confirm = {t.name: t for t in prefs_mod.make_skill(p).tools()}["pref_confirm"]
-    r = asyncio.run(confirm.handler(confirm.args(id=pid)))
-    assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
-
-
-def test_phone_errors_tell_an_old_page_to_reload_in_both_languages(prefs, home):
-    p, pid, shown = prefs                                 # review R4/R5; a page without the words: #206 H2's reload answer
-    mob = SimpleNamespace(bridge=None, _prefs=p, home=home)
-    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid}, "dev")
-    assert st == 400 and body["code"] == "PREF_TEXT_REQUIRED" and "reload" in body["error"]
-    _edit_to_b(p, pid)
-    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": B, "updated": shown}, "dev")
-    assert st == 409 and body["error_he"]
 
 
 DASH_HARNESS = r"""
@@ -205,17 +195,7 @@ def test_phone_page_sends_the_shown_version_and_reloads_when_it_changed(mode, tm
 @pytest.mark.parametrize("with_meta", [True, False])
 def test_voice_confirm_works_for_every_origin_and_popup_type(prefs, origin, with_meta):
     p, pid, _ = prefs                                     # review R3: approval_meta runs on every path pref_confirm takes
-    from jarves.skills import SkillRegistry
-    reg = SkillRegistry()
-
-    async def popup(prompt, **meta):
-        return True
-    if with_meta:
-        popup.accepts_meta = True
-    reg.confirm = popup
-    reg.register(prefs_mod.make_skill(p))
-    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
-    r = asyncio.run(reg.call("pref_confirm", {"id": pid}, origin=origin))
+    r = asyncio.run(_voice(p, shows=with_meta).call("pref_confirm", {"id": pid}, origin=origin))
     if with_meta:
         assert r.ok and p.get(pid)["state"] == "confirmed"
     else:                                                 # a plain yes/no prompt never showed the wording: fail closed
@@ -229,10 +209,9 @@ def test_the_model_cannot_supply_the_shown_version(prefs):
     assert args._shown is None
     r = asyncio.run(confirm.handler(args))
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
-    reg = _voice(p, lambda: None)
-    reg.confirm = lambda prompt, **meta: asyncio.sleep(0, result=False)          # the owner says no
-    reg.confirm.accepts_meta = True
-    assert not asyncio.run(reg.call("pref_confirm", {"id": pid, "_shown": v}, origin="model")).ok
+    no = lambda prompt, **meta: asyncio.sleep(0, result=False)                  # the owner says no
+    no.accepts_meta = True
+    assert not asyncio.run(_voice(p, confirm=no).call("pref_confirm", {"id": pid, "_shown": v}, origin="model")).ok
     assert p.get(pid)["state"] == "proposed"
 
 
@@ -297,18 +276,27 @@ def test_only_confirms_that_show_the_details_count_as_showing_the_wording(home):
     assert not shows_details(audited(home, meta_aware))
 
 
+def test_audited_shows_details_exactly_when_it_forwards_them(home):
+    from jarves.approvals import audited                  # review R3: the flag follows what wrapped() really forwards
+    from jarves.skills import shows_details
+    got = []
+
+    async def meta_aware(prompt, **meta):
+        got.append(meta)
+        return True
+    meta_aware.accepts_meta = True
+    w = audited(home, meta_aware)
+    assert asyncio.run(w("Remember?", details={"preference": A}))
+    assert shows_details(w) == bool(got[0].get("details"))
+
+
 def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, home):
     p, pid, _ = prefs                                     # review R1: the #1542 blocker one wrapper deeper
     from jarves.approvals import audited
-    from jarves.skills import SkillRegistry
 
     async def plain_yes(prompt):                          # a terminal yes/no: the wording is not on screen
         return True
-    reg = SkillRegistry()
-    reg.confirm = audited(home, plain_yes)
-    reg.register(prefs_mod.make_skill(p))
-    reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
-    r = asyncio.run(reg.call("pref_confirm", {"id": pid}, origin="user"))
+    r = asyncio.run(_voice(p, confirm=audited(home, plain_yes)).call("pref_confirm", {"id": pid}, origin="user"))
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
 

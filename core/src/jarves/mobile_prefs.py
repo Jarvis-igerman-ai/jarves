@@ -70,9 +70,11 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             seen = d.get("text")                              # #206 H2: confirm only the words the phone showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            if "updated" not in d:                            # #1514: words alone miss an A->B->A rewrite
+            try:                                              # #1514: words alone miss an A->B->A rewrite
+                shown = shown_version(d.get("updated"))
+            except ValueError:                                # missing or malformed: an old page, coded and in Hebrew
                 return 400, dict(OLD_PAGE)
-            r = p.confirm(pid, by=by, expect=seen[:400], shown=shown_version(d["updated"]))
+            r = p.confirm(pid, by=by, expect=seen[:400], shown=shown)
             return 200, {"ok": True, "pref": pid, "state": "confirmed", "conflicts": len(r["conflicts"])}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by=by), "pref": pid}

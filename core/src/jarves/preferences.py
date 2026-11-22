@@ -471,9 +471,11 @@ def api_pref_op(ctx, m, body):
         return 404, {"error": "no such preference"}
     try:
         if op == "confirm":
-            if "updated" not in b:
+            try:
+                shown = shown_version(b.get("updated"))
+            except ValueError:                                # missing or malformed: an old page, coded and in Hebrew
                 return 400, dict(OLD_PAGE)
-            return 200, p.confirm(pid, by="dashboard", shown=shown_version(b.get("updated")))
+            return 200, p.confirm(pid, by="dashboard", shown=shown)
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":

@@ -775,10 +775,12 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
 
 def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: str = "terminal"):
     """Wrap a terminal-only confirm (jarvis execute, `jarvis calendar/mail`) so its decisions reach the same audit."""
+    forwards_meta = False                       # the terminal confirm gets the prompt only; meta goes to the audit
+
     async def wrapped(prompt: str, **meta) -> bool:
         t0 = time.time()
         try:
-            ok = bool(await confirm(prompt))
+            ok = bool(await (confirm(prompt, **meta) if forwards_meta else confirm(prompt)))
         except Exception:
             ok = False
         title = meta.get("title") or (prompt.splitlines()[0] if prompt else "")
@@ -791,9 +793,9 @@ def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: s
         append_audit(Path(home) / "approvals" / "audit.jsonl", rec)
         return ok
     wrapped.accepts_meta = True                 # meta reaches the audit record above
-    # #1514: always False, whatever `confirm` is: wrapped() calls confirm(prompt) above without meta, so even a
-    # details-showing confirm never receives them. Forward meta there first before ever setting this from `confirm`.
-    wrapped.shows_details = False
+    # #1514: derived from what wrapped() forwards: details reach the owner only when meta reaches a confirm that shows it
+    from .skills import shows_details           # lazy: skills imports approvals lazily too
+    wrapped.shows_details = forwards_meta and shows_details(confirm)
     return wrapped
 
 
