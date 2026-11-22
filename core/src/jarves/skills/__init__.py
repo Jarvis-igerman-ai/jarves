@@ -74,6 +74,9 @@ IN_TOOL: contextvars.ContextVar[str] = contextvars.ContextVar("jarves_in_tool", 
 # Terminal text chat (chat_service.py): a callable (name, ok, code) told about every tool call of THIS turn, so the
 # terminal shows one short line per call. It never receives arguments or results (nothing to redact or leak).
 TOOL_SINK: contextvars.ContextVar = contextvars.ContextVar("jarves_tool_sink", default=None)
+# #1514: True only while approval_meta runs for a confirm that puts its details in front of the owner (shows_details).
+# approval_meta itself runs for every confirm, as before; a tool reads this before treating its run as "the owner saw it".
+DETAILS_SHOWN: contextvars.ContextVar[bool] = contextvars.ContextVar("jarves_details_shown", default=False)
 
 
 def _tool_seen(name: str, ok: bool, code: str, message: str = "") -> None:
@@ -522,13 +525,14 @@ class SkillRegistry:
                 who = None
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
-        # #1514: approval_meta only runs when the confirm shows its details to the owner (a plain confirm(prompt)
-        # drops them, audited() only logs them), so a tool may treat it having run as proof the owner saw them
-        if tool.approval_meta is not None and prompt and shows_details(self.confirm):
+        if tool.approval_meta is not None and prompt:
+            tok = DETAILS_SHOWN.set(shows_details(self.confirm))   # #1514: a plain confirm / audited() drops the details
             try:
                 extra = tool.approval_meta(args) or {}
             except Exception:
                 extra = {}
+            finally:
+                DETAILS_SHOWN.reset(tok)
             meta["details"] = {**meta.get("details", {}), **(extra.get("details") or {})}
             for k in ("typed", "voice", "why"):
                 if k in extra:

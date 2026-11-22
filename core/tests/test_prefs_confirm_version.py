@@ -252,18 +252,42 @@ def test_the_real_phone_api_copies_the_error_code_for_the_changed_note(tmp_path)
     assert out == {"code": "PREF_CHANGED", "status": 409, "msg": "השתנתה"}   # review (sonnet): prefs.js reads e.code
 
 
-def test_only_confirms_that_show_the_details_count_as_showing_the_wording(home):
-    from jarves.app import Core                           # review: approval_meta runs only when the owner sees its details
-    from jarves.skills import shows_details
+@pytest.mark.parametrize("kind", ["plain", "audited", "meta_only", "popup"])
+def test_other_tools_approval_meta_still_runs_behind_every_confirm(home, kind):
+    from jarves.approvals import audited                  # review R1 (#1628): only pref_confirm's _shown is gated
+    from jarves.skills import DETAILS_SHOWN, Skill, SkillRegistry, Tool, ToolResult, shows_details
+    ran, got = [], []
+
+    def meta(_a):
+        ran.append(DETAILS_SHOWN.get())
+        return {"details": {"to": "Dana"}, "why": "asked"}
+
+    class S(Skill):
+        name, description = "s", "s"
+
+        def tools(self):
+            return [Tool("demo_send", "d", lambda _a: asyncio.sleep(0, result=ToolResult(True, "sent")),
+                         prefs_mod.IdArgs, permission="action", confirm="Send?", approval_meta=meta)]
 
     async def plain(prompt):
-        return False
+        return True
 
-    async def meta_aware(prompt, **meta):
-        return False
-    meta_aware.accepts_meta = True
-    assert shows_details(Core.ask_confirm)                # production: the approvals popup shows the details
-    assert not shows_details(plain) and shows_details(meta_aware)
+    async def recorder(prompt, **m):                      # meta-aware; shows the details only as the popup
+        got.append(m)
+        return True
+    recorder.accepts_meta, recorder.shows_details = True, kind == "popup"
+    reg = SkillRegistry()
+    reg.confirm = {"plain": plain, "audited": audited(home, plain)}.get(kind, recorder)
+    reg.register(S())
+    reg.allowed_actions |= {"demo_send"}
+    assert asyncio.run(reg.call("demo_send", {"id": 1}, origin="user")).ok
+    assert ran == [kind == "popup"]                       # approval_meta ran in every case; flagged shown only for the popup
+    assert shows_details(reg.confirm) == (kind == "popup")
+    if got:                                               # its details and why still reach a meta-aware confirm
+        assert got[0]["details"] == {"to": "Dana"} and got[0]["why"] == "asked"
+    if kind == "audited":                                 # the decision still reaches the audit record
+        rec = json.loads((home / "approvals" / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert rec["kind"] == "message" and rec["decision"] == "approved"   # title may be redacted (privacy mode)
 
 
 @pytest.mark.parametrize("forward", [False, True])

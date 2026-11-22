@@ -776,7 +776,8 @@ def submit_answer(home: Path, aid: str, approved: bool, *, channel: str, typed: 
 def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: str = "terminal",
             forward_meta: bool = False):
     """Wrap a terminal-only confirm (jarvis execute, `jarvis calendar/mail`) so its decisions reach the same audit.
-    `forward_meta` (#1514): also pass meta to `confirm`; off by default, so a terminal confirm gets the prompt only."""
+    `forward_meta` (#1514): also pass meta to `confirm`; off by default, so a terminal confirm gets the prompt only.
+    No caller enables it yet (the CLI confirm path is #1550); it keeps `shows_details` derived from what is forwarded."""
 
     async def wrapped(prompt: str, **meta) -> bool:
         t0 = time.time()

@@ -342,7 +342,7 @@ class NoArgs(BaseModel):
 
 
 def make_skill(prefs: Preferences):
-    from .skills import Skill, Tool, ToolResult
+    from .skills import DETAILS_SHOWN, Skill, Tool, ToolResult
 
     class PrefSkill(Skill):
         name = "preferences"
@@ -408,7 +408,8 @@ def make_skill(prefs: Preferences):
                 r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
                 if not r:
                     return {}
-                a._shown = r["updated"]       # #1514: the confirm after this approval only lands on this exact wording
+                if DETAILS_SHOWN.get():       # #1514: only a popup that shows the wording pins the confirm to it
+                    a._shown = r["updated"]
                 return {"details": {"preference": str(r["text"])[:MAX_TEXT]}}
 
             return [
