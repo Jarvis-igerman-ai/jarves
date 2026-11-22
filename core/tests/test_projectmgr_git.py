@@ -306,6 +306,24 @@ def test_shared_config_filters_and_merge_drivers_never_run(owner_home, tmp_path)
     assert not marker.exists()
 
 
+@pytest.mark.parametrize("cond", ["onbranch:jarves/p1/t*", "gitdir:**/worktrees/t1-a1/"])
+def test_a_conditional_include_from_the_shared_config_is_refused(owner_home, tmp_path, cond):
+    """PR #1520 review R1: an `includeIf` file that matches only in a child git (`worktree add` checks out the new
+    branch in the new worktree) is never seen by the config read in `cwd`, so its smudge filter would get no
+    override. Any shared `includeIf` fails the call; the filter never runs."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
+    (repo / ".gitattributes").write_text("*.txt filter=x\n", encoding="utf-8")
+    (repo / "f.txt").write_text("1\n", encoding="utf-8")
+    assert gitops.commit_all(repo, "a")
+    gitops.ensure_integration(home, str(repo), 1)
+    (tmp_path / "evil.cfg").write_text(f"[filter \"x\"]\n\tsmudge = {_cmd(tmp_path, marker)}\n", encoding="utf-8")
+    _cfg(repo, f"includeIf.{cond}.path", str(tmp_path / "evil.cfg"))
+    with pytest.raises(gitops.GitError, match="includeif"):
+        gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    assert not marker.exists()
+    assert gitops.config_overrides("global\0includeif.onbranch:x.path\nmine.cfg\0") == []   # the owner's own: fine
+
+
 def test_a_required_shared_filter_fails_closed(owner_home, tmp_path):
     """#1390: with its command switched off, a `required` filter stops the call instead of skipping the filter."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"

@@ -78,6 +78,9 @@ _CMD_KEY = re.compile(r"filter\..+\.(clean|smudge|process)|merge\..+\.driver|dif
                       r"|gpg\.(.+\.)?program|gpg\.ssh\.defaultkeycommand|hook\..+\.command|trailer\..+\.(cmd|command)"
                       r"|remote\..+\.(uploadpack|receivepack)")
 _FIRST_WINS = re.compile(r"remote\..+\.(uploadpack|receivepack)")   # git uses the FIRST value: no override can win
+# an `includeIf` file may match only in a child git (`worktree add` checks out the new branch in the new worktree), so
+# the read in `cwd` cannot see its keys to override them (PR #1520 review R1): a shared one is refused outright
+_REFUSED = re.compile(rf"{_FIRST_WINS.pattern}|includeif\..+")
 _CRED_KEY = re.compile(r"credential\.(.+\.)?helper")         # a list: an empty value clears it
 _SAFE = {"core.sshcommand": "ssh", "gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
          "gpg.ssh.program": "ssh-keygen"}                 # git's own defaults: owner signing keeps working
@@ -92,7 +95,7 @@ def _run(cwd: str | Path, argv: list[str], timeout: float, env: dict[str, str],
 
 def config_overrides(listing: str) -> list[tuple[str, str]]:
     """(key, value) pairs that neutralise every command key the shared config sets, from the output of
-    `git config --list -z --show-scope`. Pure: no git call. ValueError: a key no override can beat (`_FIRST_WINS`)."""
+    `git config --list -z --show-scope`. Pure: no git call. ValueError: a key no override can beat (`_REFUSED`)."""
     items = listing.split("\0")
     owner: list[tuple[str, str]] = []
     shared: list[str] = []
@@ -100,9 +103,9 @@ def config_overrides(listing: str) -> list[tuple[str, str]]:
         key, _, value = entry.partition("\n")
         if scope in _OWNER_SCOPES:
             owner.append((key, value))
-        elif scope != "command" and (_CMD_KEY.fullmatch(key) or _CRED_KEY.fullmatch(key)):
+        elif scope != "command" and (_CMD_KEY.fullmatch(key) or _CRED_KEY.fullmatch(key) or _REFUSED.fullmatch(key)):
             shared.append(key)
-    refused = [k for k in shared if _FIRST_WINS.fullmatch(k)]
+    refused = [k for k in shared if _REFUSED.fullmatch(k)]
     if refused:
         raise ValueError(f"the repository's git config names a program JARVES will not run: {refused[0]}")
     out = []
@@ -126,8 +129,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     editors, gpg, credential helpers) are replaced through GIT_CONFIG_COUNT (no `key=value` parsing, so any
     subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`, and
     `protocol.ext.allow=never` refuses `ext::<command>` remote URLs whatever the shared `protocol.*` keys say.
-    A config git cannot read, or a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value),
-    fails the call. A global option before the subcommand (`-C`, `--git-dir`, `--work-tree`) is refused: the
+    A config git cannot read, a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value) or a
+    shared `includeIf` (it can match only in a child git, unseen by the read here), fails the call. A global option before the subcommand (`-C`, `--git-dir`, `--work-tree`) is refused: the
     config read runs in `cwd`, so it must be the repository git acts on.
     KNOWN RESIDUAL (#1390 review R1, #1599): the config is read once before the call and git reads it again, so
     an agent that writes a new command key between the two reads can still get it run. Closing that needs agents
