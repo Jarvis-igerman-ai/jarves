@@ -606,14 +606,16 @@ class StageEngine:
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
                 gitops.fast_forward(self._integration(p), tip)      # the exact commit, never the branch name
-                if self._tree(t) != (tip, False):                   # a later commit or edit: never delete it (R1)
-                    return self._repark_merge(t) if approved else \
-                        ("stop", "blocked", f"the task branch moved during the merge; merged commit {tip[:12]}, "
-                                            f"later work kept in {wt}")
+                # Cleanup only while the branch is exactly `tip` and no tracked file changed (atomic ref check);
+                # untracked check output is not "work". A later commit or edit is never deleted (#1561 review).
+                if not gitops.retire_worktree(p["path"], wt, br, tip):
+                    if approved and wt.exists():
+                        return self._repark_merge(t)
+                    return ("stop", "blocked", f"the task branch moved during the merge; merged commit {tip[:12]}, "
+                                               f"later work kept in {wt if wt.exists() else 'branch ' + br}")
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat, sha = t["result"], tip[:12]
-        gitops.remove_worktree(p["path"], wt, br)
         self.db.update_task(t["id"], branch="", worktree="", reason="")
         self._set_job(t, kept=None)
         self.db.event(t["id"], "manager", "merged", f"merged commit {sha} into {base}: {stat}")

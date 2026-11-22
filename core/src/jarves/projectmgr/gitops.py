@@ -262,6 +262,37 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
             git(repo, "branch", "-D", branch, check=False)
 
 
+def retire_worktree(repo: str, wt: Path, branch: str, tip: str) -> bool:
+    """Remove a merged task's worktree and branch only while the branch is still exactly `tip` and no tracked file
+    is edited (#1407 review). The branch ref is deleted with a compare-and-swap (`update-ref -d ref tip`), so a
+    commit landing after the last check makes the delete fail; a commit after the delete recreates the branch,
+    which the worktree removal keeps. Untracked files (a check's build output) are removed as before.
+    False = nothing lost: the folder and/or branch were kept. A tracked edit in the instant between the last
+    status read and the removal is not covered (the task's agent is not running in the merge stage)."""
+    if "projects" not in Path(wt).parts:
+        raise GitError("refusing to remove a folder outside the JARVES projects area")
+    ref = f"refs/heads/{branch}"
+    with _repo_lock(repo):
+        if tracked_dirty(wt, tip) or git(repo, "update-ref", "-d", ref, tip, check=False).returncode != 0:
+            return False                                # an edit, or the branch moved: keep both
+        if tracked_dirty(wt, tip):                           # an edit between the two reads: put the branch back
+            git(repo, "update-ref", ref, tip, "", check=False)      # create-only; a newer commit already made it
+            return False
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        if Path(wt).exists():
+            shutil.rmtree(wt, ignore_errors=True)
+        git(repo, "worktree", "prune", check=False)
+        return git(repo, "rev-parse", "--verify", "--quiet", ref, check=False).returncode != 0
+
+
+def tracked_dirty(wt: str | Path, base: str) -> bool:
+    """A staged or unstaged change to a tracked file against the commit `base` (also after the branch ref is
+    gone); untracked files (check output) do not count. A failed read counts as dirty (keep the work)."""
+    git(wt, "update-index", "-q", "--refresh", check=False)
+    return any(git(wt, "diff-index", "--quiet", "--ignore-submodules=dirty", *c, base, "--", check=False).returncode
+               for c in (["--cached"], []))
+
+
 def _add_all(wt: Path) -> None:
     """`git add -A` without the child `git status` it runs inside each submodule (review R1): that child reads the
     submodule's own config, whose filters the `-c` overrides cannot name. Submodule pointers are staged directly."""

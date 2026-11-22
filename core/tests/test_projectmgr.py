@@ -1544,6 +1544,55 @@ def test_a_commit_after_the_fast_forward_is_never_deleted_with_the_task_branch(e
         assert t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
 
 
+@pytest.mark.parametrize("when", [("update-ref", "-d"), ("worktree", "remove")])
+def test_a_commit_during_the_cleanup_keeps_the_task_branch(env, monkeypatch, when):
+    """JAR-678 (#1561 review): a commit after the final tip check (before the branch delete, or between the delete
+    and the folder removal) is never lost: the branch delete is a compare-and-swap on the merged commit."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    real, fired = gitops.git, []
+
+    def racing(cwd, *args, **kw):
+        wt = Path(m.db.by_seq(1, 1)["worktree"] or home / "none")      # never the test's own cwd
+        if args[:2] == when and not fired and wt.is_relative_to(home) and wt.exists():
+            fired.append(1)
+            (wt / "late.txt").write_text("late\n")
+            gitops.commit_all(wt, "late")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", racing)
+    finish(m)
+    monkeypatch.setattr(gitops, "git", real)
+    t = m.db.by_seq(1, 1)
+    assert fired and t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
+    assert "late.txt" in sh(repo, "git", "ls-tree", "--name-only", t["branch"])      # the late work has a ref
+    assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+
+
+def test_an_untracked_check_artifact_after_a_re_merge_does_not_block_the_merge(env):
+    """JAR-678 (#1561 review): a check that writes an untracked file after merging newer work used to read as a
+    moved task: merged but not done, then an "edit after the approval" commit of the build output."""
+    m, repo, home = env
+    gen = [sys.executable, "-c", "import os; os.path.exists('other.txt') and open('out.log', 'w').write('x')"]
+    open_project(m, repo, check=gen)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    assert "approve merging" in m.db.by_seq(1, 1)["waiting"]
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")                       # the re-merge runs the check, which leaves out.log
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done" and not t["worktree"], (t["status"], t["waiting"], t["reason"])
+    log = sh(integ, "git", "log", "--format=%s")
+    assert "edit after the approval" not in log and (integ / "a.txt").exists() and not (integ / "out.log").exists()
+
+
 def test_owner_merge_approval_stores_the_commit_it_checked(env, monkeypatch):
     """#1407 review round 2 R1: a commit landing between the approval check and storing it is never approved."""
     m, repo, home = env
