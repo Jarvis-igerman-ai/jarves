@@ -53,9 +53,10 @@ _BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
 _BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
 _BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
 # credential words (English and Hebrew); '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
-# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and suffixes, so they get no ASCII word boundary
+# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and only known inflections, so מפתחים/סודה are not credential words
 _CRED_WORD = (r"(?:(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
-              r"|(?<![א-ת])[והשבכלמ]{0,3}(?:סיסמ|טוקן|אסימון|מפתח|סוד))")
+              r"|(?<![א-ת])[והשבכלמ]{0,3}(?:סיסמ(?:ה|א|ת|אות|ות|תי|תך|תו)?|טוק(?:ן|נים|ני|נו)|אסימו(?:ן|נים|ני|נו)"
+              r"|מפתח(?:ות|ה|ו|י|ך)?|סוד(?:ות|י|ו)?)(?![א-ת]))")
 _CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
 _CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
@@ -115,11 +116,10 @@ def _cred_near(t: str, m: re.Match) -> bool:
 
 def _secret_shaped(t: str) -> bool:
     for m in _HEX.finditer(t):
-        before = t[max(0, m.start() - 40):m.start()]
         if _cred_near(t, m):
             return True
         n = len(m.group(0))
-        if n != 40 and not (n in _HASH_LENS and _HASH_NEAR.search(before)):
+        if n != 40 and not (n in _HASH_LENS and _HASH_NEAR.search(t[max(0, m.start() - 40):m.start()])):
             return True              # 32+ char hex alone, or of no digest length: a key or webhook secret
     for m in _BASE32.finditer(t):
         run = m.group(0).rstrip("=")

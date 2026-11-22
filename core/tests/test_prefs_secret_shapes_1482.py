@@ -35,6 +35,8 @@ LEAKY = [
     "use " + _b62("t20", 20),                             # 20-24 char base62
     "use " + _b62("t24", 24) + " for the bot",
     "key " + base64.b64encode(hashlib.sha256(b"k").digest()).decode(),   # base64 with + / =
+    "commit key " + _hex("ck", 32),                       # a credential word overrides a hash word (review R3)
+    "sha256 secret " + _hex("ss", 64),
 ]
 
 SAFE = [
@@ -166,3 +168,14 @@ def test_hebrew_credential_words_refuse_a_sha_shape(text):
 def test_hebrew_text_without_a_credential_word_keeps_a_sha():
     assert not looks_sensitive("תוקן בקומיט " + SHA40)
     assert not looks_sensitive("יסודי: " + SHA40)        # "סוד" inside another word is not a credential word
+
+
+@pytest.mark.parametrize("text", ["המפתחים תיקנו ב-" + SHA40, "סודר בקומיט " + SHA40, "שתיתי סודה, תוקן ב-" + SHA40])
+def test_hebrew_words_that_only_start_like_a_credential_word_keep_a_sha(text):
+    # review round 7 R1: "developers"/"arranged"/"soda" are not credential words
+    assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["המפתחות: " + SHA40, "הסיסמאות שלנו " + SHA40, "הטוקנים " + SHA40])
+def test_inflected_hebrew_credential_words_still_refuse_a_sha(text):
+    assert looks_sensitive(text), text
