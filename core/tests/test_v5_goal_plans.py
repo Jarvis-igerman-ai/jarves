@@ -769,6 +769,47 @@ async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatc
     assert files and not any(b"QZSECRETQZ" in f.read_bytes() for f in files)
 
 
+async def test_1526_busy_wal_is_retried_and_restart_does_not_vacuum_again(env, monkeypatch, tmp_path):
+    """JAR-701 review R2: a reader on another connection makes the WAL truncate busy: it is retried each pass (warned
+    once) until the text is gone from every db file. R3: a restart with privacy on does not VACUUM again; a real
+    privacy off->on edge does."""
+    import sqlite3
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    env.db.x("UPDATE goal_plan_steps SET evidence=? WHERE plan_id=?", ("QZSECRETQZ " * 40, p["id"]))
+    reader = sqlite3.connect(env.db.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM goal_plan_steps").fetchall()          # holds a snapshot: the truncate is busy
+    warned = []
+    monkeypatch.setattr(logs, "warn", lambda comp, code, msg, **f: warned.append(code))
+    monkeypatch.setattr(logs, "_privacy", True)
+    assert env.store.scrub_if_private() > 0 and env.store._ckpt is True
+    env.store.scrub_if_private()
+    assert warned == ["PLAN_SCRUB_CHECKPOINT_BUSY"] and env.store._ckpt is True
+    assert env.db.row("SELECT 1 AS x FROM agent_settings WHERE key=?", (gp._VACUUMED,)) is None
+    reader.rollback()
+    reader.close()
+    env.store.scrub_if_private()
+    assert env.store._ckpt is None
+    files = [f for f in tmp_path.rglob("*") if f.is_file() and ".db" in f.name]
+    assert files and not any(b"QZSECRETQZ" in f.read_bytes() for f in files)
+
+    vacuums = []
+    for _ in range(2):
+        st = gp.PlanStore(env.db, clock=env.clock, mono=env.clock)    # a Core restart with privacy still on
+        monkeypatch.setattr(st, "scrub", lambda vacuum=False: vacuums.append(vacuum) or 0)
+        st.scrub_if_private()
+    assert vacuums == [False, False]
+    monkeypatch.setattr(logs, "_privacy", False)
+    st.scrub_if_private()                                              # privacy off: the marker goes
+    monkeypatch.setattr(logs, "_privacy", True)
+    st.scrub_if_private()
+    assert vacuums == [False, False, True]
+
+
 async def test_1526_scrub_is_one_transaction_and_idle_passes_skip_it(env, monkeypatch):
     """#1526 council R1/R3: a failing scrub changes no row; a pass with no new write since the last scrub skips the scan,
     a write (this or another connection) or a privacy off->on edge runs it again."""
@@ -894,6 +935,28 @@ async def test_1526_every_stop_reason_survives_the_scrub(env, monkeypatch):
     st.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (pid,))
     st.db.x("UPDATE goal_plan_steps SET status='running', consequential=1 WHERE plan_id=?", (pid,))
     st.recover()
+    real_call, real_get = env.reg.call, env.reg.get              # the writers no fake tool reaches (review R1)
+
+    async def call(name, args, **kw):
+        mode = (args or {}).get("text", "")
+        if mode == "crash":
+            raise RuntimeError("tool text QZ")
+        if mode.startswith("tmo"):
+            raise asyncio.TimeoutError
+        if mode in ("noans", "tooltmo"):
+            return ToolResult(False, "tool text QZ", code="TOOL_APPROVAL_TIMEOUT" if mode == "noans" else "TOOL_TIMEOUT")
+        return await real_call(name, args, **kw)
+    plan("crash", ("fake_read", {"text": "crash"}))
+    plan("tmo", ("fake_read", {"text": "tmo"}))
+    plan("tmo_act", ("fake_act", {"text": "tmo_act"}))
+    plan("noans", ("fake_read", {"text": "noans"}))
+    plan("tooltmo", ("fake_act", {"text": "tooltmo"}))
+    plan("notool", ("fake_bad", {}))
+    pid = plan("long", ("fake_act", {"text": "x"}))
+    st.db.x("UPDATE goal_plan_steps SET args=? WHERE plan_id=?", (json.dumps({"text": "<" * gp.STEP_SHOW_CHARS}), pid))
+    monkeypatch.setattr(env.reg, "call", call)
+    monkeypatch.setattr(env.reg, "get", lambda n: None if n == "fake_bad" else real_get(n))
+    await env.runner.tick()
     env.budget.limit = env.budget.ai
     plan("budget", ("fake_read", {"text": "b"}))
     await env.runner.tick()
@@ -902,12 +965,15 @@ async def test_1526_every_stop_reason_survives_the_scrub(env, monkeypatch):
         return {i: (st.get(i)["note"], tuple(x["error"] for x in st.get(i)["steps"])) for i in ids}
     before = stored()
     want = {gp.WHY_DENIED, gp.WHY_TAINTED, gp.WHY_PAUSED, gp.WHY_CANCELLED, gp.WHY_RESTART_PAUSED, gp.WHY_RESTART,
-            gp.WHY_BUDGET, "time cap of 0 min reached", "cost cap of 2 AI requests reached"}
+            gp.WHY_BUDGET, gp.WHY_CRASH, gp.WHY_TIMEOUT, gp.WHY_TIMEOUT_MAYBE, gp.WHY_NO_ANSWER, gp.WHY_NO_TOOL,
+            gp.WHY_TOO_LONG, "time cap of 0 min reached", "cost cap of 2 AI requests reached"}
     seen = {gp._STEP.sub(r"\2", t) for n, errs in before.values() for t in (n, *errs) if t}
     assert want <= seen, want - seen                                     # each stop path really ran
     monkeypatch.setattr(logs, "_privacy", True)
     st.scrub()
     assert stored() == before
+    whys = {v for k, v in vars(gp).items() if k.startswith("WHY_") and k not in ("WHY_TIME_CAP", "WHY_COST_CAP")}
+    assert whys == set(gp._OWN)                                      # every WHY_* constant is one the scrub keeps
 
 
 def test_1526_rate_limit_uses_a_monotonic_clock(tmp_path, monkeypatch):

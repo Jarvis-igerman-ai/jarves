@@ -70,8 +70,8 @@ _CODE = re.compile(r"^([A-Z][A-Z0-9_]{2,39})(?::|$)")
 _DONE = re.compile(r"^\d+/\d+ steps done\.")
 _STEP = re.compile(r"^(step \d+): (.*)$", re.S)
 # Our own fixed reasons (never tool text). The writers below use these constants and the privacy scrub keeps exactly
-# them, so the owner still sees why a plan stopped (#1526: one source; test_1526_writers_use_only_shared_reasons
-# fails if a writer passes its own literal reason, which the scrub would erase).
+# them, so the owner still sees why a plan stopped (#1526: one source; test_1526_every_stop_reason_survives_the_scrub
+# drives every writer of these reasons and fails if a stored reason is not one the scrub keeps).
 WHY_DENIED = "the owner did not approve this step"
 WHY_TAINTED = "text written by others was read earlier in this plan: resume to continue"
 WHY_NO_TOOL = "tool not available (switched off or removed)"
@@ -91,6 +91,7 @@ _OWN = (WHY_DENIED, WHY_TAINTED, WHY_NO_TOOL, WHY_NO_ANSWER, WHY_TOO_LONG, WHY_T
         WHY_RESTART, WHY_PAUSED, WHY_CANCELLED, WHY_RESTART_PAUSED, WHY_BUDGET, WHY_NO_CODE)
 # the two capped reasons only in their full fixed form: nothing after the number survives (#1526 review R2)
 _OWN_CAP = re.compile(rf"^(?:{WHY_TIME_CAP}\d+ min reached|{WHY_COST_CAP}\d+ AI requests reached)$")
+_VACUUMED = "goals.privacy_vacuumed"   # agent_settings row (not in DEFAULTS: internal): VACUUM done since privacy on
 SCRUB_MIN_S = 10.0       # a rescan after a db write runs at most this often; the privacy off->on edge scans at once
 
 
@@ -137,6 +138,9 @@ class PlanStore:
         self._seen: tuple | None = None       # #1526: db change counters at the last scrub (None: scan on the next pass)
         self._scanned = 0.0                   # #1526: mono() of the last scrub (rate limit for write-triggered scans)
         self._skip_warned = False             # #1526: PLAN_SCRUB_SKIPPED is logged once per open-transaction incident
+        self._ckpt: bool | None = None        # #1526: a WAL truncate is still owed (True: after a VACUUM); None: none
+        self._ckpt_warned = False             # PLAN_SCRUB_CHECKPOINT_BUSY once per incident
+        self._marked: bool | None = None      # cached: is the _VACUUMED row present (None: unknown)
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -352,7 +356,8 @@ class PlanStore:
         sqlite3 default, deferred transactions). UserDB has no transaction API; this follows `_cas` (db lock + rollback).
         Status, error codes, step numbers and the done count stay. secure_delete is on for the writes and a changed scrub
         truncates the WAL. `vacuum` (the privacy off->on edge) also rebuilds memory.db with VACUUM, so text freed BEFORE
-        privacy was on (a deleted plan, an overwritten value) is not left in free pages either. Returns rows changed.
+        privacy was on (a deleted plan, an overwritten value) is not left in free pages either; it runs once per real
+        off->on edge (the _VACUUMED marker survives restarts), ~0.6 s for a 100 MB db here. Returns rows changed.
         Cost bound (measured 22 Nov 2026, Linux CI container): ~0.11 s for 10k plans / 120k steps; the Python check
         runs only on non-empty error / note / result values, and a write-triggered rescan runs at most every SCRUB_MIN_S."""
         n = 0
@@ -393,11 +398,36 @@ class PlanStore:
             if vacuum:                    # outside the transaction, under the db lock; a failure retries the edge
                 c.execute("VACUUM")
             if n or vacuum:
-                c.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # busy readers: frames stay until the next checkpoint
+                self._ckpt = bool(vacuum or self._ckpt)
+                self._checkpoint()
             self._seen, self._scanned = self._version(), self.mono()
         if n:
             logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy mode: older plan text removed", count=n)
         return n
+
+    def _checkpoint(self) -> bool:
+        """Truncate the WAL that holds the pre-scrub pages. A reader on another connection makes it return busy=1
+        without raising: then it stays owed and is retried every pass (review R2). The _VACUUMED marker is written
+        only once the WAL after a VACUUM is truncated, so a restart with privacy on does not VACUUM again (review R3)."""
+        with self.db._lock:
+            c = self.db._db
+            wait = c.execute("PRAGMA busy_timeout").fetchone()[0]
+            c.execute("PRAGMA busy_timeout=0")      # never wait under the db lock (UserDB waits 5 s): retry next pass
+            try:
+                busy = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                c.execute(f"PRAGMA busy_timeout={int(wait)}")
+            if busy:
+                if not self._ckpt_warned:
+                    self._ckpt_warned = True
+                    logs.warn("goals", "PLAN_SCRUB_CHECKPOINT_BUSY", "privacy scrub: WAL still in use; retried next pass")
+                return False
+            if self._ckpt:
+                c.execute("INSERT OR REPLACE INTO agent_settings (key, value) VALUES (?, '1')", (_VACUUMED,))
+                c.commit()
+                self._marked = True
+            self._ckpt, self._ckpt_warned = None, False
+            return True
 
     def _version(self) -> tuple:
         """Changes this connection made (total_changes) + commits by other connections (data_version) since open."""
@@ -412,10 +442,17 @@ class PlanStore:
         counters see writes to any memory.db table, so write-triggered rescans are rate-limited (review R6)."""
         if not logs.privacy():
             self._seen = None
+            if self._marked is not False:            # privacy off: the next off->on edge must VACUUM again
+                self.db.x("DELETE FROM agent_settings WHERE key=?", (_VACUUMED,))
+                self._marked = False
             return 0
+        if self._ckpt is not None:
+            self._checkpoint()
         if self._seen is not None and (self._version() == self._seen or 0 <= self.mono() - self._scanned < SCRUB_MIN_S):
             return 0
-        return self.scrub(vacuum=self._seen is None)
+        if self._seen is None and self._marked is None:
+            self._marked = self.db.row("SELECT 1 FROM agent_settings WHERE key=?", (_VACUUMED,)) is not None
+        return self.scrub(vacuum=self._seen is None and not self._marked)
 
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:
