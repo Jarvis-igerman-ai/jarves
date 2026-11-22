@@ -1,0 +1,1 @@
+- Fixed: the project manager no longer merges a task commit that nobody checked. It records the commit it scope-checked and checked, and it blocks the check or the merge when another agent moved the task branch in between (#1461).
