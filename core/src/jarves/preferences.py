@@ -39,7 +39,7 @@ CONFLICT_RATIO = 0.55
 TOPICS = ("voice", "schedule", "food", "music", "communication", "other")
 # #1514: every write moves `updated` (the version a confirm is checked against) strictly forward, in the same statement,
 # even within one clock tick, so a version a stale page still holds can never come back
-_BUMP = "updated=MAX(?, COALESCE(updated, 0) + 0.001)"
+_BUMP = "updated=MAX(?, updated + 0.001)"          # `updated` is NOT NULL (userdata schema)
 _PUNCT = re.compile(r"[^\w\s]+")
 _NIQQUD = re.compile(r"[֑-ׇ]")
 # Text that must never be learned: credentials, card/ID/phone-like numbers, and health or money details.
@@ -72,6 +72,7 @@ def _clean(text: str, n: int) -> str:
 # #1514: a page cached from before the version guard confirms without `updated`; it is told to reload, never confirmed
 OLD_PAGE = {"error": "this page is out of date: reload it, then confirm again", "code": "PREF_PAGE_OLD",
             "error_he": "העמוד הזה ישן: רעננו אותו ואשרו שוב"}
+CHANGED_HE = "ההעדפה השתנתה מאז שהוצגה: רעננו כדי לראות את הנוסח החדש"
 
 
 class PrefChanged(ValueError):
@@ -426,7 +427,7 @@ def api_pref_op(ctx, m, body):
         if op == "remove":
             return 200, {"ok": p.remove(pid, by="dashboard")}
     except PrefChanged as e:
-        return 409, {"error": str(e), "code": PrefChanged.code}
+        return 409, {"error": str(e), "error_he": CHANGED_HE, "code": PrefChanged.code}
     except ValueError as e:
         return 400, {"error": str(e)}
     except KeyError:                                          # removed while the request was in flight

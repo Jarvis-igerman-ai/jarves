@@ -54,7 +54,7 @@ def test_dashboard_confirm_needs_the_shown_version(prefs):
     assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": "x"})[0] == 400
     _edit_to_b(p, pid)
     st, body = prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": shown})
-    assert st == 409 and body["code"] == "PREF_CHANGED" and p.get(pid)["state"] == "proposed"
+    assert st == 409 and body["code"] == "PREF_CHANGED" and body["error_he"] and p.get(pid)["state"] == "proposed"
     assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "updated": p.get(pid)["updated"]})[0] == 200
     assert p.get(pid)["state"] == "confirmed"
 
@@ -219,7 +219,10 @@ def test_voice_confirm_works_for_every_origin_and_popup_type(prefs, origin, with
     reg.register(prefs_mod.make_skill(p))
     reg.allowed_actions |= prefs_mod.ALLOWED_ACTIONS
     r = asyncio.run(reg.call("pref_confirm", {"id": pid}, origin=origin))
-    assert r.ok and p.get(pid)["state"] == "confirmed"
+    if with_meta:
+        assert r.ok and p.get(pid)["state"] == "confirmed"
+    else:                                                 # a plain yes/no prompt never showed the wording: fail closed
+        assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
 
 def test_the_model_cannot_supply_the_shown_version(prefs):

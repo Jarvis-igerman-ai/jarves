@@ -18,7 +18,6 @@ from . import logs
 
 SCOPE = "prefs"
 PHONE_OPS = ("confirm", "decline", "reaffirm", "edit", "remove")      # no add and no clear-all from a phone
-CHANGED_HE = "ההעדפה השתנתה מאז שהוצגה: רעננו כדי לראות את הנוסח החדש"
 
 
 def store(mob):
@@ -60,7 +59,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
-    from .preferences import OLD_PAGE, PrefChanged, shown_version
+    from .preferences import CHANGED_HE, OLD_PAGE, PrefChanged, shown_version
     p = store(mob)
     if not p.get(pid):
         return 404, {"error": "no such preference"}

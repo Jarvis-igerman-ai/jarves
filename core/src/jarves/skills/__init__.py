@@ -515,7 +515,9 @@ class SkillRegistry:
                 who = None
             if who:
                 meta["details"] = {"recipient": str(who)}       # spoken_kind() speaks its first name only
-        if tool.approval_meta is not None and prompt:
+        # #1514: approval_meta only runs when the confirm can show its details (a plain confirm(prompt) drops them),
+        # so a tool may treat it having run as proof the owner saw those details
+        if tool.approval_meta is not None and prompt and getattr(self.confirm, "accepts_meta", False):
             try:
                 extra = tool.approval_meta(args) or {}
             except Exception:
