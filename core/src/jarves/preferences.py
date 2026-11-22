@@ -59,7 +59,9 @@ def _base32(text: str) -> bool:
         groups = len(_DIGIT_GROUP.findall(m.group()))
         if groups >= 2:
             return True
-        if groups == 1 and _SEED_WORD.search(text[max(0, m.start() - _SEED_NEAR):m.end() + _SEED_NEAR]):
+        # Only the text beside the run counts, so a word inside the run (e.g. "getOtpSecret4Value") is no seed word.
+        near = text[max(0, m.start() - _SEED_NEAR):m.start()] + " " + text[m.end():m.end() + _SEED_NEAR]
+        if groups == 1 and _SEED_WORD.search(near):
             return True
     return False
 

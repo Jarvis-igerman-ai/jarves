@@ -24,6 +24,7 @@ SAFE = [
     "fix a3f9c2e1b7d4f6a8c0e2b4d6f8a1c3e5b7d9f0a2",  # 40-char git SHA
     "I prefer short answers in the morning",
     "internationalization",                           # long word, no digits
+    "call getOtpSecret4Value in the handler",        # seed word only inside the run itself (review R1)
 ]
 
 
