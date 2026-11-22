@@ -166,9 +166,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     `ext::` remotes, editors and pagers. Submodules never recurse (their config in `.git/modules` is never read)
     and a branch- or gitdir-conditional include or a key that is not UTF-8 stops the command (fail closed). No
     fetch/push recurses into submodules and no local (file) remote is reached: its receive-pack and hooks would run
-    without these overrides. Limit: the config is read just before the command, so a key an agent adds in the
-    milliseconds between the reads is not undone; it is read again after the command, and a command key or
-    conditional include that appeared fails the call with its name (detected, not prevented)."""
+    without these overrides. Limit (not prevention): the config is read just before the command, so a key an agent
+    adds between that read and the command is not undone and may run. It is read again after the command, and the
+    call fails with the key's name only when that key is still present then; a writer that adds the key and removes
+    it again between the two reads is not caught (#1390 residual). When this after-read fails the call, the
+    command has already run, so its effects stay (e.g. a registered worktree); callers never run git with a `cwd`
+    the command deletes (remove_worktree runs in the repo, not in the worktree)."""
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
            "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]

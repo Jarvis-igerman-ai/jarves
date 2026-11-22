@@ -321,3 +321,25 @@ def test_a_command_key_added_during_the_call_is_reported(monkeypatch, tmp_path):
     with pytest.raises(gitops.GitError, match="changed while.*filter.ev.smudge"):
         gitops.git(repo, "status")
     assert gitops.git(repo, "status", check=False).returncode != 0
+
+
+def test_a_key_toggled_between_the_two_reads_is_a_known_residual(monkeypatch, tmp_path):
+    """R5 (round 3): documents the limit stated in git(): a key added after the first read and removed before the
+    second read runs and is not reported. Detection, not prevention; if this test starts failing, the residual is
+    closed and the docstring and changelog should say so."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    real, cfg = subprocess.run, repo / ".git" / "config"
+
+    def run(argv, **kw):
+        if "diff" in argv and "config" not in argv:            # the command itself, between the two reads
+            clean = cfg.read_text(encoding="utf-8")
+            cfg.write_text(clean + f'[diff]\n\texternal = "{_runs(marker, "true")}"\n', encoding="utf-8")
+            try:
+                return real(argv, **kw)
+            finally:
+                cfg.write_text(clean, encoding="utf-8")
+        return real(argv, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    assert gitops.git(repo, "diff", check=False).returncode == 0
+    assert marker.exists()
