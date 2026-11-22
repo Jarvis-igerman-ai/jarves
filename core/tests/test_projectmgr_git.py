@@ -368,3 +368,34 @@ def test_a_task_merge_fast_forwards_a_task_with_no_work(tmp_path):
     assert gitops.merge_in(wt, gitops.integration_branch(1)) == []
     assert (wt / "n.txt").exists()
     assert gitops.git(repo, "rev-parse", br).stdout.strip() == gitops.git(integ, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_path, caplog):
+    """#1599 review R1: a link in the task folder that cannot be removed (its folder is read-only) must not make
+    cleanup chmod the link's target, an owner file outside the folder. The leftover is logged, not hidden."""
+    repo, _home, _integ, wt, br = _task(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    os.chmod(outside, 0o644)
+    (wt / "d").mkdir()
+    os.symlink(outside, wt / "d" / "l")
+    real_unlink = os.unlink
+
+    def unlink(p, *a, **kw):                       # the read-only parent: as root a real chmod 555 would not stop it
+        if os.fspath(p) in ("l", str(wt / "d" / "l")):
+            raise PermissionError(13, "Permission denied", os.fspath(p))
+        return real_unlink(p, *a, **kw)
+    monkeypatch.setattr(os, "unlink", unlink)
+    gitops.remove_worktree(str(repo), wt, br)
+    assert os.stat(outside).st_mode & 0o777 == 0o644 and outside.read_text(encoding="utf-8") == "secret"
+    assert "could not remove" in caplog.text and (wt / "d" / "l").is_symlink()
+
+
+def test_an_old_git_is_named_instead_of_an_unknown_option(monkeypatch, tmp_path):
+    """#1599 review R6: task folders need git 2.38 (merge-tree --write-tree); an older git gets a clear message."""
+    _repo_, _home, _integ, wt, _br = _task(tmp_path)
+    monkeypatch.setattr(gitops, "_GIT_VERSION", [(2, 30)])
+    with pytest.raises(gitops.GitError, match="git 2.38 or later"):
+        gitops.commit_all(wt, "x")
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == [
+        "(not merged: git 2.38 or later is needed for task folders; this git is 2.30)"]

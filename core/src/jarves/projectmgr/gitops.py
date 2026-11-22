@@ -12,6 +12,7 @@ No config read can race an agent's config write: JARVES's git only reads a confi
 from __future__ import annotations
 
 import fnmatch
+import logging
 import os
 import re
 import shutil
@@ -183,6 +184,20 @@ def _rev(cwd: Path, rev: str) -> str:
     return git(cwd, "rev-parse", "--verify", "--quiet", rev, check=False).stdout.strip()
 
 
+_GIT_VERSION: list[tuple[int, ...]] = []
+
+
+def git_version() -> tuple[int, ...]:
+    """git's version as numbers, (0,) when unknown; read once."""
+    if not _GIT_VERSION:
+        m = re.search(r"(\d+)\.(\d+)", git(Path.cwd(), "--version", check=False).stdout)
+        _GIT_VERSION.append(tuple(int(x) for x in m.groups()) if m else (0,))
+    return _GIT_VERSION[0]
+
+
+TASK_GIT = (2, 38)        # merge-tree --write-tree (2.38), rev-parse --path-format=absolute (2.31)
+
+
 class _FolderIndex:
     """git on a task folder's FILES with the owner's git folder and a private index outside the task folder, so the
     folder's `.git` (config, hooks, info/attributes, index) is never read. git never adds a `.git` entry itself."""
@@ -191,6 +206,9 @@ class _FolderIndex:
         ref = task_ref(wt)
         if ref is None:
             raise GitError("not a JARVES task folder")
+        if git_version() < TASK_GIT:
+            raise GitError(f"git {'.'.join(map(str, TASK_GIT))} or later is needed for task folders; "
+                           f"this git is {'.'.join(map(str, git_version()))}")
         self.wt, (self.cwd, self.branch) = Path(wt), ref
         self.gitdir = git(self.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
         self.index = ""
@@ -204,7 +222,7 @@ class _FolderIndex:
         shutil.rmtree(os.path.dirname(self.index), ignore_errors=True)
 
     def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return git(self.wt, f"--git-dir={self.gitdir}", f"--work-tree={self.wt}", *args, check=check,
+        return git(self.cwd, f"--git-dir={self.gitdir}", f"--work-tree={self.wt}", *args, check=check,
                    env={"GIT_INDEX_FILE": self.index})
 
     def head(self) -> str:
@@ -251,14 +269,31 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
 
 
 def _rmtree(path: Path) -> None:
-    """Remove a folder, git's read-only object files included (Windows refuses to delete a read-only file)."""
-    def again(func, p, _exc):
-        try:
-            os.chmod(p, stat.S_IWRITE)
-            func(p)
-        except OSError:
-            pass
+    """Remove a folder, git's read-only object files included (Windows refuses to delete a read-only file). Only a
+    plain file is made writable, never through a link: an agent fills the folder and may plant a link to an owner
+    file outside it (#1599). On POSIX a mode change cannot help (removal depends on the parent folder), so nothing
+    is changed there. What still cannot be removed is left in place and logged (cleanup is not a task failure)."""
+    left: list[str] = []
+
+    def again(func, p, exc):
+        if os.name == "nt":
+            try:
+                st = os.lstat(p)
+                if stat.S_ISREG(st.st_mode) and not getattr(st, "st_file_attributes", 0) & _REPARSE:
+                    os.chmod(p, st.st_mode | stat.S_IWRITE, **_NOFOLLOW)
+                    func(p)
+                    return
+            except OSError as e:
+                exc = e
+        left.append(f"{p}: {exc}")
     shutil.rmtree(path, onexc=again)
+    if left:
+        _LOG.warning("could not remove %d item(s) under %s, first: %s", len(left), path, left[0][:300])
+
+
+_LOG = logging.getLogger(__name__)
+_REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)              # a symlink or a junction on Windows
+_NOFOLLOW = {"follow_symlinks": False} if os.chmod in os.supports_follow_symlinks else {}
 
 
 def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
@@ -376,7 +411,10 @@ def _merge_task(wt: Path, branch: str) -> list[str]:
     """merge_in for a task folder: `merge-tree` of the task branch and `branch` in the owner's repository (its config
     only), a merge commit there, then the folder's files move from the old tree to the new one through the private
     index. The folder's own `.git` is never used; its index and HEAD stay behind (a scratch copy)."""
-    f = _FolderIndex(wt)
+    try:
+        f = _FolderIndex(wt)
+    except GitError as e:
+        return [f"(not merged: {e})"]
     root = Path(f.gitdir)
     with _repo_lock(root.parent if root.name == ".git" else root), f:
         old, other = f.head(), _rev(f.cwd, f"{branch}^{{commit}}")
