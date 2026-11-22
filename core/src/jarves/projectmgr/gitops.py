@@ -191,8 +191,8 @@ def link_files(wt: Path, base: str, head: str = "HEAD") -> list[str]:
             if out[i].startswith(":") and out[i].split()[1:2] and out[i].split()[1] in LINK_MODES]
 
 
-def diffstat(wt: Path, base: str) -> str:
-    out = git(wt, "diff", "--shortstat", f"{base}...HEAD", check=False).stdout.strip()
+def diffstat(wt: Path, base: str, head: str = "HEAD") -> str:
+    out = git(wt, "diff", "--shortstat", f"{base}...{head}", check=False).stdout.strip()
     return out or "no changes"
 
 

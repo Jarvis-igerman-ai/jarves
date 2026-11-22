@@ -127,21 +127,68 @@ def test_branch_moved_inside_the_check_merge_window_is_not_recorded(env, monkeyp
     assert _integration_a(home) == ""
 
 
-def test_branch_moved_after_the_merge_stage_commit_is_not_merged(env, monkeypatch):
+def _write(wt: Path, rel: str, body: str = "never scope-checked\n") -> None:
+    """What a sibling can do without committing: leave a file in the shared worktree (#1461 review R1)."""
+    (wt / rel).parent.mkdir(parents=True, exist_ok=True)
+    (wt / rel).write_text(body)
+
+
+def _integration_has(home: Path, rel: str) -> bool:
+    return (gitops.project_root(home, 1) / "integration" / rel).exists()
+
+
+def test_uncommitted_file_before_the_merge_is_not_merged(env):
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
-    in_merge = []
-    _wrap(m, "_st_merge", lambda t: in_merge.append(1))
-    orig, run = _wrap_git("commit_all", lambda wt: in_merge and len(in_merge) == 1 and (
-        in_merge.append(2), _sibling_commit(wt, "moved after commit_all\n")))
-    monkeypatch.setattr(gitops, "commit_all", run)
+    _wrap(m, "_st_merge", lambda t: _write(Path(t["worktree"]), ".github/x.yml"))
     m.call("resume", project="demo")
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert in_merge == [1, 2]
-    assert t["status"] == "blocked" and "not merged" in t["reason"], t["reason"]
-    assert _integration_a(home) == ""
+    assert t["status"] == "blocked" and "not committed" in t["reason"] and "not merged" in t["reason"], t["reason"]
+    assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == ""
+
+
+def test_uncommitted_file_before_the_check_is_not_checked(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    _wrap(m, "_st_check", lambda t: _write(Path(t["worktree"]), "extra.txt"))
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "extra.txt" in t["reason"] and "not checked" in t["reason"], t["reason"]
+    assert not _integration_has(home, "extra.txt")
+
+
+def _owner_merge_task(m, repo):
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    return Path(t["worktree"])
+
+
+def test_protected_file_folded_at_owner_approval_is_not_merged(env):
+    m, repo, home = env
+    _write(_owner_merge_task(m, repo), ".github/x.yml")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], t["reason"]
+    assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == ""
+
+
+def test_owner_edit_at_approval_still_merges(env):
+    m, repo, home = env
+    _write(_owner_merge_task(m, repo), "a.txt", "owner\n")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+    assert _integration_a(home) == "owner\n"
 
 
 def test_move_during_scope_check_clears_an_old_checked_commit(env, monkeypatch):
@@ -214,6 +261,8 @@ def test_bind_accepts_a_fast_forward_to_the_base(env, tmp_path):
     wt, a, b = _repo_ab(tmp_path / "r")
     assert m._bind(wt, a, "x", merged=True, base_sha=b) == (b, "")
     assert m._bind(wt, a, "x", merged=True, base_sha=a)[0] == ""          # b is not the base: blocked
+    sh(wt, "git", "checkout", "-q", a)                                     # a sibling reset the branch to the base
+    assert m._bind(wt, b, "x", merged=True, base_sha=a)[0] == ""          # review R2: vetted work dropped: blocked
 
 
 def test_bind_on_a_missing_worktree_fails_closed(env, tmp_path):
