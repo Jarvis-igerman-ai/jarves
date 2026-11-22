@@ -145,6 +145,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     """A fresh task folder on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it).
     The branch lives in the owner's repository. The folder is a separate clone of it with its own `.git` (#1599):
     `--shared` borrows the owner's objects read-only (cheap), and the remote is removed, so nothing points back."""
+    _need_task_git()
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
     with _repo_lock(repo):
@@ -198,6 +199,12 @@ def git_version() -> tuple[int, ...]:
 TASK_GIT = (2, 38)        # merge-tree --write-tree (2.38), rev-parse --path-format=absolute (2.31)
 
 
+def _need_task_git() -> None:
+    if git_version() < TASK_GIT:
+        raise GitError(f"git {'.'.join(map(str, TASK_GIT))} or later is needed for task folders; "
+                       f"this git is {'.'.join(map(str, git_version()))}")
+
+
 class _FolderIndex:
     """git on a task folder's FILES with the owner's git folder and a private index outside the task folder, so the
     folder's `.git` (config, hooks, info/attributes, index) is never read. git never adds a `.git` entry itself."""
@@ -206,9 +213,7 @@ class _FolderIndex:
         ref = task_ref(wt)
         if ref is None:
             raise GitError("not a JARVES task folder")
-        if git_version() < TASK_GIT:
-            raise GitError(f"git {'.'.join(map(str, TASK_GIT))} or later is needed for task folders; "
-                           f"this git is {'.'.join(map(str, git_version()))}")
+        _need_task_git()
         self.wt, (self.cwd, self.branch) = Path(wt), ref
         self.gitdir = git(self.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
         self.index = ""
@@ -221,9 +226,31 @@ class _FolderIndex:
     def __exit__(self, *_exc) -> None:
         shutil.rmtree(os.path.dirname(self.index), ignore_errors=True)
 
-    def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    def run(self, *args: str, check: bool = True, index: str = "") -> subprocess.CompletedProcess:
         return git(self.cwd, f"--git-dir={self.gitdir}", f"--work-tree={self.wt}", *args, check=check,
-                   env={"GIT_INDEX_FILE": self.index})
+                   env={"GIT_INDEX_FILE": index or self.index})
+
+    def sync_clone(self, sha: str) -> None:
+        """Move the clone's own branch and index to `sha` (review R1), so the agent's `git status` matches the task
+        branch: the ref is written as text and the index by the owner's git (objects come through `--shared`), never
+        by git with the folder's `.git`. Skipped and logged when the clone is on another branch or any path is a link."""
+        g = self.wt / ".git"
+        ref = g.joinpath("refs", "heads", *self.branch.split("/"))
+        chain = [g, *[g.joinpath("refs", "heads", *self.branch.split("/")[:i]) for i in range(len(self.branch.split("/")))],
+                 g / "refs", ref, g / "index"]
+        if folder_branch(self.wt) != self.branch or any(x.is_symlink() for x in chain) or not ref.parent.is_dir():
+            _LOG.warning("task folder %s: its own git view was not updated (a link or another branch)", self.wt)
+            return
+        fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=str(ref.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="ascii") as fh:
+                fh.write(sha + "\n")
+            os.replace(tmp, ref)
+        except OSError:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+        if self.run("read-tree", sha, check=False, index=str(g / "index")).returncode == 0:
+            self.run("update-index", "-q", "--refresh", check=False, index=str(g / "index"))
 
     def head(self) -> str:
         sha = _rev(self.cwd, f"{self.branch}^{{commit}}")
@@ -276,7 +303,7 @@ def _rmtree(path: Path) -> None:
     left: list[str] = []
 
     def again(func, p, exc):
-        if os.name == "nt":
+        if _WIN:
             try:
                 st = os.lstat(p)
                 if stat.S_ISREG(st.st_mode) and not getattr(st, "st_file_attributes", 0) & _REPARSE:
@@ -292,6 +319,7 @@ def _rmtree(path: Path) -> None:
 
 
 _LOG = logging.getLogger(__name__)
+_WIN = os.name == "nt"
 _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)              # a symlink or a junction on Windows
 _NOFOLLOW = {"follow_symlinks": False} if os.chmod in os.supports_follow_symlinks else {}
 
@@ -311,8 +339,8 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
 
 def commit_all(wt: Path, message: str) -> bool:
     """Commit what is in a task folder onto its task branch, in the owner's repository (#1599): the files go through
-    a private index (`_FolderIndex`), then commit-tree and a compare-and-swap ref update. The folder's own `.git`
-    history is a scratch copy for the agent; the task branch is the record. False: nothing changed."""
+    a private index (`_FolderIndex`), then commit-tree and a compare-and-swap ref update; the clone's own branch and
+    index follow (`sync_clone`). The task branch is the record. False: nothing changed."""
     with _FolderIndex(wt) as f:
         old = f.head()
         tree = f.tree(old)
@@ -320,6 +348,7 @@ def commit_all(wt: Path, message: str) -> bool:
             return False
         new = git(f.cwd, "commit-tree", tree, "-p", old, "-m", message[:200]).stdout.strip()
         git(f.cwd, "update-ref", f"refs/heads/{f.branch}", new, old)
+        f.sync_clone(new)
     return True
 
 
@@ -410,7 +439,7 @@ def _not_merged(p: subprocess.CompletedProcess) -> list[str]:
 def _merge_task(wt: Path, branch: str) -> list[str]:
     """merge_in for a task folder: `merge-tree` of the task branch and `branch` in the owner's repository (its config
     only), a merge commit there, then the folder's files move from the old tree to the new one through the private
-    index. The folder's own `.git` is never used; its index and HEAD stay behind (a scratch copy)."""
+    index. git never runs with the folder's own `.git`; its branch and index follow as text (`sync_clone`)."""
     try:
         f = _FolderIndex(wt)
     except GitError as e:
@@ -438,7 +467,12 @@ def _merge_task(wt: Path, branch: str) -> list[str]:
         p = f.run("read-tree", "-m", "-u", old, new, check=False)          # the folder's files: old tree -> new tree
         if p.returncode != 0:
             return _not_merged(p)
-        git(f.cwd, "update-ref", f"refs/heads/{f.branch}", new, old)
+        try:
+            git(f.cwd, "update-ref", f"refs/heads/{f.branch}", new, old)
+        except GitError as e:                                              # the branch moved: files back to `old`
+            f.run("read-tree", "-m", "-u", new, old, check=False)
+            return [f"(not merged: {e})"]
+        f.sync_clone(new)
     return []
 
 

@@ -370,7 +370,15 @@ def test_a_task_merge_fast_forwards_a_task_with_no_work(tmp_path):
     assert gitops.git(repo, "rev-parse", br).stdout.strip() == gitops.git(integ, "rev-parse", "HEAD").stdout.strip()
 
 
-def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_path, caplog):
+def _symlink(target: Path, link: Path) -> None:
+    try:
+        os.symlink(target, link)
+    except (OSError, NotImplementedError) as e:          # Windows without symlink rights: skipped, named
+        pytest.skip(f"cannot create a symlink here: {e}")
+
+
+@pytest.mark.parametrize("win", [False, True])
+def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_path, caplog, win):
     """#1599 review R1: a link in the task folder that cannot be removed (its folder is read-only) must not make
     cleanup chmod the link's target, an owner file outside the folder. The leftover is logged, not hidden."""
     repo, _home, _integ, wt, br = _task(tmp_path)
@@ -378,7 +386,7 @@ def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_p
     outside.write_text("secret", encoding="utf-8")
     os.chmod(outside, 0o644)
     (wt / "d").mkdir()
-    os.symlink(outside, wt / "d" / "l")
+    _symlink(outside, wt / "d" / "l")
     real_unlink = os.unlink
 
     def unlink(p, *a, **kw):                       # the read-only parent: as root a real chmod 555 would not stop it
@@ -386,6 +394,7 @@ def test_cleanup_never_changes_a_file_outside_the_task_folder(monkeypatch, tmp_p
             raise PermissionError(13, "Permission denied", os.fspath(p))
         return real_unlink(p, *a, **kw)
     monkeypatch.setattr(os, "unlink", unlink)
+    monkeypatch.setattr(gitops, "_WIN", win)              # True: the Windows branch (lstat, never through a link)
     gitops.remove_worktree(str(repo), wt, br)
     assert os.stat(outside).st_mode & 0o777 == 0o644 and outside.read_text(encoding="utf-8") == "secret"
     assert "could not remove" in caplog.text and (wt / "d" / "l").is_symlink()
@@ -399,3 +408,67 @@ def test_an_old_git_is_named_instead_of_an_unknown_option(monkeypatch, tmp_path)
         gitops.commit_all(wt, "x")
     assert gitops.merge_in(wt, gitops.integration_branch(1)) == [
         "(not merged: git 2.38 or later is needed for task folders; this git is 2.30)"]
+
+
+def _agent_status(wt: Path) -> str:
+    return subprocess.run(["git", "status", "--porcelain"], cwd=wt, capture_output=True, text=True,
+                          check=True).stdout
+
+
+def test_the_agents_own_git_view_follows_jarves_commits_and_merges(tmp_path):
+    """#1599 review R1: after commit_all and merge_in the folder's own `git status` is clean, so an agent that
+    "discards unrelated changes" cannot revert earlier tasks' work into the task branch."""
+    repo, _home, integ, wt, br = _task(tmp_path)
+    (wt / "a.txt").write_text("a\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "task 1")
+    assert _agent_status(wt) == ""
+    (integ / "n.txt").write_text("n\n", encoding="utf-8")
+    gitops.git(integ, "add", "-A")
+    gitops.git(integ, "commit", "-qm", "earlier", "--no-verify")
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == []
+    assert _agent_status(wt) == ""
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=wt, capture_output=True, text=True).stdout.strip()
+    assert head == gitops.git(repo, "rev-parse", br).stdout.strip()
+
+
+def test_a_linked_ref_in_the_agents_git_folder_is_never_written_through(tmp_path, caplog):
+    """#1599 review R1: the clone's branch ref is written as text only when nothing on its path is a link."""
+    _repo_, _home, _integ, wt, br = _task(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("keep", encoding="utf-8")
+    ref = wt / ".git" / "refs" / "heads" / br
+    ref.unlink()
+    _symlink(outside, ref)
+    (wt / "a.txt").write_text("a\n", encoding="utf-8")
+    assert gitops.commit_all(wt, "task 1")
+    assert outside.read_text(encoding="utf-8") == "keep" and "not updated" in caplog.text
+
+
+def test_an_old_git_makes_no_task_folder(monkeypatch, tmp_path):
+    """#1599 review R4: the git 2.38 prerequisite is checked before a task folder is made, with the clear message."""
+    repo, home = _repo(tmp_path), tmp_path / "home"
+    gitops.ensure_integration(home, str(repo), 1)
+    monkeypatch.setattr(gitops, "_GIT_VERSION", [(2, 30)])
+    with pytest.raises(gitops.GitError, match="git 2.38 or later"):
+        gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    assert not (gitops.project_root(home, 1) / "wt" / "t1-a1").exists()
+
+
+def test_a_lost_branch_race_puts_the_folder_back(monkeypatch, tmp_path):
+    """#1599 review R5: when the task branch moved during a merge, the folder's files go back to the branch's tree
+    and the merge says why, instead of a GitError that leaves unexplained edits."""
+    _repo_, _home, integ, wt, _br = _task(tmp_path)
+    (integ / "n.txt").write_text("n\n", encoding="utf-8")
+    gitops.git(integ, "add", "-A")
+    gitops.git(integ, "commit", "-qm", "earlier", "--no-verify")
+    real = gitops.git
+
+    def git(cwd, *args, **kw):
+        if "update-ref" in args:
+            raise gitops.GitError("cannot lock ref: is at another value")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    out = gitops.merge_in(wt, gitops.integration_branch(1))
+    assert out and "another value" in out[0] and not (wt / "n.txt").exists()
+    monkeypatch.setattr(gitops, "git", real)
+    assert gitops.folder_state(wt)[1] is False
