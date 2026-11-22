@@ -30,6 +30,16 @@ def _fake_run(outcomes, calls):
     return run
 
 
+@pytest.fixture(autouse=True)
+def _own_home(tmp_path, monkeypatch):
+    """Review R5: the config guard snapshots and may restore the global git config; never the real ~/.gitconfig."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+
 LOCK = "fatal: Unable to create 'C:/r/.git/index.lock': File exists."
 
 
@@ -365,9 +375,6 @@ def test_a_planted_global_git_config_is_removed_and_the_check_fails(tmp_path, mo
     import sys
     repo = _repo(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     glob = home / ".gitconfig"
     argv = [sys.executable, "-c", f"open({str(glob)!r}, 'w').write({PLANT!r})"]
     ok, out = gitops.run_check(repo, argv)
@@ -397,3 +404,60 @@ def test_jarves_worktree_and_branch_calls_write_no_config_during_a_run(tmp_path)
         gitops.git(repo, "worktree", "add", "-b", "b2", str(wt), "main")
         gitops.remove_worktree(str(repo), wt, "b2")
     assert not guard["changed"]
+
+
+def test_a_run_ending_while_another_starts_never_makes_its_planted_entry_trusted(tmp_path, monkeypatch):
+    """#1592 review R1: run A planted an entry and ends while run B takes its snapshot. B's trusted copy must be
+    the clean file, so JARVES never writes the planted entry back."""
+    import contextlib
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    a = contextlib.ExitStack()
+    a_state = a.enter_context(gitops.config_guard(repo))
+    cfg.write_bytes(clean + PLANT.encode())
+    real = gitops._read
+
+    def read(path):
+        if Path(path) != cfg or gitops._GUARDS_LOCK._is_owned():
+            return real(path)
+        cfg.write_bytes(clean + PLANT.encode())     # a snapshot outside the lock: A plants again just before it
+        data = real(path)
+        a.close()                                   # and A ends right after it
+        return data
+    monkeypatch.setattr(gitops, "_read", read)
+    with gitops.config_guard(repo) as b_state:
+        a.close()                                                        # A ends after B started
+        assert gitops._GUARDS[str(cfg.resolve())]["data"] == clean
+        assert gitops.git(repo, "status", check=False).returncode == 0 and cfg.read_bytes() == clean
+    assert a_state["changed"] and not b_state["changed"] and cfg.read_bytes() == clean and not gitops._GUARDS
+
+
+def test_equal_run_states_are_tracked_by_identity(tmp_path):
+    """Review R1 follow-on: two runs' fresh states compare equal; the one that ends first must not unregister the
+    other, which would miss a later change."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    clean = cfg.read_bytes()
+    with gitops.config_guard(repo) as first:
+        with gitops.config_guard(repo) as second:
+            pass
+        assert not second["changed"]
+        cfg.write_bytes(clean + PLANT.encode())
+    assert first["changed"] and cfg.read_bytes() == clean
+
+
+def test_a_restore_that_keeps_failing_keeps_one_backup_and_logs_once(tmp_path, monkeypatch):
+    """#1592 review R2: every git call during the run refuses, but the same unrestorable content is kept and
+    logged only once (bounded logs, no pile of backup folders)."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    logged: list = []
+    monkeypatch.setattr(gitops.logs, "warn", lambda *a, **f: logged.append(a[1]))
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+        monkeypatch.setattr(gitops, "_restore", lambda p, d: (_ for _ in ()).throw(PermissionError("held")))
+        for _ in range(3):
+            assert gitops.git(repo, "status", check=False).returncode == 1
+    assert guard["unrestored"] and logged == ["PROJECT_GIT_CONFIG_RESTORED"]
+    assert len(list((repo / ".git").glob("config.jarves-rejected-*"))) == 1

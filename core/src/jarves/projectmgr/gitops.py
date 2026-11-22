@@ -173,6 +173,9 @@ def _restore(path: Path, data: bytes) -> None:
         raise
 
 
+_UNREADABLE = object()                   # a guarded path that exists but cannot be read as a file
+
+
 def _read(path: Path) -> bytes | None:
     """The file's bytes, None when absent; raises OSError when it exists but cannot be read as a file."""
     if not os.path.lexists(path):
@@ -183,16 +186,22 @@ def _read(path: Path) -> bytes | None:
 def check_guards() -> bool:
     """Restore every guarded shared config that changed; marks that repository's active runs ("changed", "kept",
     "unrestored"). Never raises: an unreadable config counts as changed. False when a config could NOT be restored
-    (it is still untrusted, so no git command may run)."""
+    (it is still untrusted, so no git command may run). A restore that keeps failing on the same content keeps one
+    backup and logs once (review R2): later calls only refuse."""
     safe = True
     with _GUARDS_LOCK:
         for key, g in _GUARDS.items():
             path = Path(key)
             try:
-                if _read(path) == g["data"]:
-                    continue
+                cur: object = _read(path)
             except OSError:               # a folder, locked on Windows: changed
-                pass
+                cur = _UNREADABLE
+            if cur == g["data"]:
+                g.pop("failed", None)
+                continue
+            if "failed" in g and g["failed"] == cur:
+                safe = False              # the same unrestorable content: already kept, logged and flagged
+                continue
             kept, err = "", ""
             try:
                 kept = _keep_rejected(path, move=g["data"] is None)
@@ -201,6 +210,7 @@ def check_guards() -> bool:
             except OSError as e:
                 err = str(e)[:200]
                 safe = False
+                g["failed"] = cur
             logs.warn("projects", "PROJECT_GIT_CONFIG_RESTORED", "git config changed during an agent run",
                       path=key, backup=kept, ok=not err, error=err)
             for st in g["runs"]:
@@ -226,20 +236,20 @@ def config_guard(wt: str | Path):
         files = _guarded_files(wt)
     except (OSError, subprocess.SubprocessError):
         files = []
-    snap: dict[str, bytes | None] = {}
-    for f in files:
-        try:
-            snap[str(f)] = _read(f)
-        except OSError:                   # unreadable now (a folder): nothing trusted to restore
-            continue
     if not files:
         yield state
         return
-    with _GUARDS_LOCK:
-        check_guards()
-        held = [_GUARDS.setdefault(k, {"data": d, "runs": []}) for k, d in snap.items()]
-        for g in held:
-            g["runs"].append(state)
+    keys, held = list(dict.fromkeys(str(f) for f in files)), []
+    with _GUARDS_LOCK:                    # review R1: snapshot under the lock, after restoring, only for new keys:
+        check_guards()                    # a run ending meanwhile can never hand us its planted bytes as trusted
+        for k in keys:
+            if k not in _GUARDS:
+                try:
+                    _GUARDS[k] = {"data": _read(Path(k)), "runs": []}
+                except OSError:           # unreadable now (a folder): nothing trusted to restore
+                    continue
+            _GUARDS[k]["runs"].append(state)
+            held.append(k)
     try:
         yield state
     finally:
@@ -247,8 +257,9 @@ def config_guard(wt: str | Path):
             try:
                 check_guards()
             finally:
-                for k, g in zip(snap, held):
-                    g["runs"].remove(state)
+                for k in held:
+                    g = _GUARDS[k]
+                    g["runs"] = [st for st in g["runs"] if st is not state]   # by identity: states can be equal
                     if not g["runs"]:
                         del _GUARDS[k]
 
