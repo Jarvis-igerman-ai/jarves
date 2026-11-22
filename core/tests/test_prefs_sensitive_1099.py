@@ -120,3 +120,23 @@ def test_dev_task_naming_a_token_is_kept_but_one_carrying_a_key_is_refused(home)
         devmanager.suggest(st, "token refresh", "my token is Zx9fQ2LmB7vT4kRw8YpN3sHd")
     assert len(devmanager.listing(st)) == 1
     st.close()
+
+
+def test_goal_and_goal_plan_refuse_a_key_but_keep_naming_a_token(home):
+    """#1630 review round 2 R2: the same gate guards goals, goal steps and goal plans end to end."""
+    from jarves import goals as goals_mod
+    from jarves.goal_plans import PlanStore
+    db = open_db(home)
+    g = goals_mod.Goals(db)
+    assert g.add("fix token refresh expiry", "rotate the client secret next week")["title"]
+    for kwargs in ({"title": "my api key is ab.cd1234ef"}, {"title": "rotate keys", "details": "token: qwerty12"},
+                   {"title": "rotate keys", "steps": ["remember 3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e"]}):
+        with pytest.raises(ValueError, match="sensitive"):
+            g.add(**kwargs)
+    assert len(db.rows("SELECT id FROM goals")) == 1
+    plans = PlanStore(db)
+    with pytest.raises(ValueError, match="sensitive"):
+        plans.propose("my token is Zx9fQ2LmB7vT4kRw8YpN3sHd", [{"tool": "get_time", "args": {}, "why": "x"}])
+    with pytest.raises(ValueError, match="sensitive"):
+        plans.propose("check the time", [{"tool": "get_time", "args": {}, "why": "api key is hunter2-x"}])
+    assert db.rows("SELECT id FROM goal_plans") == []
