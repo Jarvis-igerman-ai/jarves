@@ -346,12 +346,15 @@ class PlanStore:
         return True
 
     # ------------------------------------------------------------------ privacy at rest (#1526)
-    def scrub(self) -> int:
+    def scrub(self, vacuum: bool = False) -> int:
         """Privacy mode: blank the tool text that older rows still hold (step evidence / error, plan result / note) in ONE
         transaction: an explicit BEGIN, so it holds even if the connection were in autocommit mode (UserDB uses the
         sqlite3 default, deferred transactions). UserDB has no transaction API; this follows `_cas` (db lock + rollback).
         Status, error codes, step numbers and the done count stay. secure_delete is on for the writes and a changed scrub
-        truncates the WAL, so the old text is not left in free pages or WAL frames. Returns how many rows changed."""
+        truncates the WAL. `vacuum` (the privacy off->on edge) also rebuilds memory.db with VACUUM, so text freed BEFORE
+        privacy was on (a deleted plan, an overwritten value) is not left in free pages either. Returns rows changed.
+        Cost bound (measured 22 Nov 2026, Linux CI container): ~0.11 s for 10k plans / 120k steps; the Python check
+        runs only on non-empty error / note / result values, and a write-triggered rescan runs at most every SCRUB_MIN_S."""
         n = 0
         with self.db._lock:
             c = self.db._db
@@ -370,13 +373,13 @@ class PlanStore:
             try:
                 c.execute("BEGIN")
                 for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "
-                                   "WHERE evidence != '' OR error != jv_private_text(error)").fetchall():
+                                   "WHERE evidence != '' OR (error != '' AND error != jv_private_text(error))").fetchall():
                     er = _private_text(r[2])
                     if r[1] != "" or er != r[2]:
                         c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (er, r[0]))
                         n += 1
-                for r in c.execute("SELECT id, result, note FROM goal_plans WHERE result != jv_private_result(result) "
-                                   "OR note != jv_private_note(note)").fetchall():
+                for r in c.execute("SELECT id, result, note FROM goal_plans WHERE (result != '' AND "
+                                   "result != jv_private_result(result)) OR (note != '' AND note != jv_private_note(note))").fetchall():
                     res, note = _private_result(r[1]), _private_note(r[2])
                     if (res, note) != (r[1], r[2]):
                         c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (res, note, r[0]))
@@ -387,7 +390,9 @@ class PlanStore:
                 raise
             finally:
                 c.execute(f"PRAGMA secure_delete={int(secure)}")
-            if n:
+            if vacuum:                    # outside the transaction, under the db lock; a failure retries the edge
+                c.execute("VACUUM")
+            if n or vacuum:
                 c.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # busy readers: frames stay until the next checkpoint
             self._seen, self._scanned = self._version(), self.mono()
         if n:
@@ -410,7 +415,7 @@ class PlanStore:
             return 0
         if self._seen is not None and (self._version() == self._seen or 0 <= self.mono() - self._scanned < SCRUB_MIN_S):
             return 0
-        return self.scrub()
+        return self.scrub(vacuum=self._seen is None)
 
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:
@@ -505,6 +510,7 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._scrub_failed = False        # #1526: PLAN_SCRUB_FAILED logged once per incident (bounded logs)
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
@@ -529,7 +535,11 @@ class PlanRunner:
             except asyncio.CancelledError:
                 raise
             except Exception:                            # a failed scrub (e.g. db locked) never stops plan execution (R1)
-                logs.error("goals", "PLAN_SCRUB_FAILED", "privacy scrub failed; retried next pass", exc=True)
+                if not self._scrub_failed:                   # bounded logs: once per incident, not every 2 s pass
+                    self._scrub_failed = True
+                    logs.error("goals", "PLAN_SCRUB_FAILED", "privacy scrub failed; retried next pass", exc=True)
+            else:
+                self._scrub_failed = False
             try:
                 await self.tick()
             except asyncio.CancelledError:

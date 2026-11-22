@@ -733,6 +733,22 @@ async def test_1526_failed_scrub_does_not_stop_plan_execution(env, monkeypatch):
     await runner.run()
     assert errors == ["PLAN_SCRUB_FAILED"] and env.store.get(p["id"])["state"] == "done"
 
+    passes = []                                                        # JAR-701 review R2: once per incident
+
+    async def sleep3(_s):
+        passes.append(1)
+        if len(passes) == 2:
+            monkeypatch.setattr(env.store, "scrub_if_private", lambda: 0)     # the incident ends
+        elif len(passes) == 3:
+            monkeypatch.setattr(env.store, "scrub_if_private", locked)         # a new one starts
+        elif len(passes) == 4:
+            runner.stop()
+    errors.clear()
+    monkeypatch.setattr(env.store, "scrub_if_private", locked)
+    runner = gp.PlanRunner(env.store, env.reg, clock=env.clock, sleep=sleep3)
+    await runner.run()
+    assert errors == ["PLAN_SCRUB_FAILED", "PLAN_SCRUB_FAILED"]           # passes 1-2 one log, pass 4 one more
+
 
 async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatch, tmp_path):
     """#1526 council R2: the old text is not left behind in SQLite free pages or the WAL after a scrub."""
@@ -742,6 +758,11 @@ async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatc
     env.store.approve(p["id"])
     await env.runner.tick()
     env.db.x("UPDATE goal_plan_steps SET evidence=? WHERE plan_id=?", ("QZSECRETQZ " * 40, p["id"]))   # tool text
+    env.db.x("UPDATE goal_plan_steps SET evidence=? WHERE plan_id=?", ("QZSECRETQZ2 " * 40, p["id"]))  # overwritten
+    gone = env.store.propose("gone", steps(("fake_read", {"text": "QZSECRETQZ3 " * 40})))
+    env.store.approve(gone["id"])
+    await env.runner.tick()
+    env.store.delete(gone["id"], by="test")                    # review R1: text freed while privacy was still off
     monkeypatch.setattr(logs, "_privacy", True)
     assert env.store.scrub_if_private() > 0
     files = [f for f in tmp_path.rglob("*") if f.is_file() and ".db" in f.name]
@@ -766,7 +787,7 @@ async def test_1526_scrub_is_one_transaction_and_idle_passes_skip_it(env, monkey
     monkeypatch.setattr(gp, "_private_note", real)
 
     scans = []
-    monkeypatch.setattr(env.store, "scrub", lambda real=env.store.scrub: scans.append(1) or real())
+    monkeypatch.setattr(env.store, "scrub", lambda real=env.store.scrub, **k: scans.append(1) or real(**k))
     env.store.scrub_if_private()
     env.store.scrub_if_private()
     assert len(scans) == 1                                                       # nothing written: no scan
@@ -846,37 +867,47 @@ async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, mon
     assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
 
 
-def test_1526_writers_use_only_shared_reasons():
-    """JAR-701 R1: every reason a writer stores is a WHY_* constant (kept by the scrub), never its own literal, which the
-    privacy scrub would silently erase. Walks goal_plans.py: _block/_fail/_stop_plan reasons and note= keywords."""
-    import ast
-    import inspect
-    tree = ast.parse(inspect.getsource(gp))
-    wrappers = {"_block", "_fail", "_stop_plan"}                    # their bodies only prefix "step N: " to a reason
-    allowed = {"", " min reached", " AI requests reached", ": "}    # the cap tails (_OWN_CAP) and the code separator
-    bad = []
+async def test_1526_every_stop_reason_survives_the_scrub(env, monkeypatch):
+    """JAR-701 review R4: drive each stop path with privacy off, then scrub: every note / step error the runner and the
+    owner controls wrote is one of Jarvis's own reasons (or a code) and is unchanged; only tool text goes."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    st, ids = env.store, []
 
-    def literals(node):                                            # stored text, not dict keys such as p['max_ai']
-        keys = {id(k) for n in ast.walk(node) if isinstance(n, ast.Subscript) for k in ast.walk(n.slice)}
-        return [n.value for n in ast.walk(node)
-                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in keys]
+    def plan(title, *pairs, **kw):
+        p = st.propose(title, steps(*pairs), **kw)
+        st.approve(p["id"])
+        ids.append(p["id"])
+        return p["id"]
+    env.answer = False
+    plan("deny", ("fake_act", {"text": "x"}))
+    await env.runner.tick()
+    env.answer = True
+    plan("taint", ("fake_mail", {}), ("fake_act", {"text": "x"}))
+    plan("time", *[("fake_act", {"text": str(i)}) for i in range(4)], timeout_s=30)
+    plan("cost", ("fake_ai", {"text": "a"}), ("fake_ai", {"text": "b"}), max_ai=2)
+    pid = plan("pause", ("fake_pause", {"text": "0"}), ("fake_read", {"text": "y"}))
+    st.db.x("UPDATE goal_plan_steps SET args=? WHERE plan_id=? AND idx=0", (json.dumps({"text": str(pid)}), pid))
+    await env.runner.tick()
+    st.cancel(plan("cancel", ("fake_read", {"text": "c"})), by="test")
+    pid = plan("restart", ("fake_act", {"text": "r"}))
+    st.db.x("UPDATE goal_plans SET state='running' WHERE id=?", (pid,))
+    st.db.x("UPDATE goal_plan_steps SET status='running', consequential=1 WHERE plan_id=?", (pid,))
+    st.recover()
+    env.budget.limit = env.budget.ai
+    plan("budget", ("fake_read", {"text": "b"}))
+    await env.runner.tick()
 
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name in wrappers:
-            continue
-        for call in ast.walk(fn):
-            if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
-                continue
-            args = []
-            if call.func.attr in wrappers and len(call.args) >= 3:
-                args.append(call.args[2])
-            args += [k.value for k in call.keywords if k.arg == "note"]
-            bad += [(fn.name, call.lineno, v) for a in args for v in literals(a) if v not in allowed]
-    assert bad == []
-    whys = {v for k, v in vars(gp).items() if k.startswith("WHY_") and k not in ("WHY_TIME_CAP", "WHY_COST_CAP")}
-    assert whys == set(gp._OWN)                                      # every constant is kept by the scrub
-    for cap in (f"{gp.WHY_TIME_CAP}5 min reached", f"{gp.WHY_COST_CAP}20 AI requests reached"):
-        assert gp._OWN_CAP.match(cap)
+    def stored():
+        return {i: (st.get(i)["note"], tuple(x["error"] for x in st.get(i)["steps"])) for i in ids}
+    before = stored()
+    want = {gp.WHY_DENIED, gp.WHY_TAINTED, gp.WHY_PAUSED, gp.WHY_CANCELLED, gp.WHY_RESTART_PAUSED, gp.WHY_RESTART,
+            gp.WHY_BUDGET, "time cap of 0 min reached", "cost cap of 2 AI requests reached"}
+    seen = {gp._STEP.sub(r"\2", t) for n, errs in before.values() for t in (n, *errs) if t}
+    assert want <= seen, want - seen                                     # each stop path really ran
+    monkeypatch.setattr(logs, "_privacy", True)
+    st.scrub()
+    assert stored() == before
 
 
 def test_1526_rate_limit_uses_a_monotonic_clock(tmp_path, monkeypatch):
@@ -891,7 +922,7 @@ def test_1526_rate_limit_uses_a_monotonic_clock(tmp_path, monkeypatch):
     st.db.x("INSERT INTO other_write VALUES (1)")                       # any memory.db write
     mono.t += gp.SCRUB_MIN_S
     scans = []
-    monkeypatch.setattr(st, "scrub", lambda: scans.append(1) or 0)
+    monkeypatch.setattr(st, "scrub", lambda **k: scans.append(1) or 0)
     st.scrub_if_private()
     assert scans == [1]
     assert inspect_default(gp.PlanStore.__init__, "mono") is __import__("time").monotonic
