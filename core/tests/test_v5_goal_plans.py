@@ -642,10 +642,51 @@ async def test_1526_privacy_on_scrubs_plan_text_written_before_it(env, monkeypat
     rows = env.db.rows("SELECT evidence, error FROM goal_plan_steps") + env.db.rows("SELECT result, note FROM goal_plans")
     assert not any("secret" in str(v) or "broke" in str(v) for r in rows for v in r.values())
     assert env.store.scrub() == 0                                         # idempotent: codes and own words survive a rerun
-    assert env.store.scrub_if_private() == 0                              # once per privacy-on period
+    assert env.store.scrub_if_private() == 0                              # nothing left: a pass changes no row
 
-    monkeypatch.setattr(logs, "_privacy", False)
-    assert env.store.scrub_if_private() == 0
-    env.db.x("UPDATE goal_plan_steps SET evidence='again' WHERE plan_id=?", (ok["id"],))
-    monkeypatch.setattr(logs, "_privacy", True)                           # the switch turns on again: scrubbed again
+    env.db.x("UPDATE goal_plan_steps SET evidence='again' WHERE plan_id=?", (ok["id"],))   # stored after the scrub
     assert env.store.scrub_if_private() == 1 and env.store.get(ok["id"])["steps"][0]["evidence"] == ""
+
+
+async def test_1526_run_loop_scrubs_every_pass_even_with_feature_off(env, monkeypatch):
+    """#1526 R1/R2: PlanRunner.run() (started by Operations.start whatever the feature switch) scrubs on each pass,
+    including text a step stores after the previous pass."""
+    from jarves import logs
+
+    class Off:
+        def active(self, name):
+            return False
+    monkeypatch.setattr(logs, "_privacy", False)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    monkeypatch.setattr(logs, "_privacy", True)
+    passes = []
+
+    async def sleep(_s):
+        passes.append(env.store.get(p["id"])["steps"][0]["evidence"])
+        if len(passes) == 1:                                              # a late step result lands after pass 1
+            env.db.x("UPDATE goal_plan_steps SET evidence='late secret' WHERE plan_id=?", (p["id"],))
+        else:
+            runner.stop()
+    runner = gp.PlanRunner(env.store, env.reg, clock=env.clock, features=Off(), sleep=sleep)
+    await runner.run()
+    assert passes == ["", ""] and env.store.get(p["id"])["result"] == "1/1 steps done."
+
+
+def test_1526_own_reasons_are_shared_constants():
+    """#1526 R4: every fixed reason the runner writes is a shared WHY_* constant the scrub keeps (no copied string)."""
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(gp))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("_block", "_fail", "_stop_plan"):
+            assert not isinstance(node.args[2], ast.Constant), ast.unparse(node)
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") in ("_cas", "_set_if"):
+            for kw in node.keywords:
+                if kw.arg == "note":
+                    assert not (isinstance(kw.value, ast.Constant) and kw.value.value), ast.unparse(node)
+    for why in gp._OWN:
+        assert gp._private_text(why) == why and gp._private_note(f"step 2: {why}") == f"step 2: {why}"
+    assert gp._private_text(gp.WHY_TIME_CAP + "5 min reached") == gp.WHY_TIME_CAP + "5 min reached"
+    assert gp._private_text("X" * 41 + ": text") == ""                    # R5: an over-long "code" is not kept
