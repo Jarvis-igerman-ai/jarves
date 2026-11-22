@@ -190,3 +190,69 @@ def test_inflected_hebrew_credential_words_still_refuse_a_sha(text):
 def test_repo_links_with_a_sha_are_allowed(text):
     # a URL with mixed-case org/repo names and a SHA goes through the '/' base64 branch
     assert not looks_sensitive(text), text
+
+
+def _one_case(seed: str, n: int, abc: str) -> str:
+    d = hashlib.sha256(seed.encode()).digest() + hashlib.sha256(seed.encode() + b"2").digest()
+    return "".join(abc[b % len(abc)] for b in d)[:n]
+
+
+@pytest.mark.parametrize("abc", ["abcdefghijklmnopqrstuvwxyz0123456789", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"])
+def test_random_one_case_alnum_tokens_are_refused_at_a_pinned_rate(abc):
+    # R1: one letter case plus digits, outside the hex/base32 alphabets. Before the fix about 1% (lower) and
+    # 3-9% (upper) were refused; measured after on these seeds: 90-93% of 20-char, 92-95% of 24-char, 97-99% of
+    # 32-char tokens. The floors pin it; the remaining gap is tracked in #1604.
+    for n, floor in ((20, 0.88), (24, 0.90), (32, 0.96)):
+        refused = sum(looks_sensitive("use " + _one_case(f"{abc[0]}-{n}-{i}", n, abc)) for i in range(1000))
+        assert refused >= floor * 1000, (n, refused)
+
+
+@pytest.mark.parametrize("text", ["python3112venv", "release2024q3hotfix1patch", "RELEASE2024Q3HOTFIX1PATCH",
+                                  "node20alpine3buildstage", "v1beta2apiv3client"])
+def test_one_case_identifiers_with_words_are_allowed(text):
+    assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["הסודנו: " + SHA40, "סודם " + SHA40, "סודכם " + SHA40, "סודך " + SHA40])
+def test_possessive_hebrew_secret_words_refuse_a_sha(text):
+    # R3: possessive forms of סוד are credential words (סודה stays out: it is also "soda")
+    assert looks_sensitive(text), text
+
+
+KEY32 = _hex("caller", 32)        # a bare 32-char lowercase hex key: allowed by every caller before #1482
+
+
+def test_goals_refuse_a_hex_key(home):
+    from jarves.goals import Goals
+    from jarves.userdata import open_db
+    g = Goals(open_db(home))
+    for call in (lambda: g.add("rotate " + KEY32), lambda: g.add("rotate keys", steps=["use " + KEY32])):
+        with pytest.raises(ValueError, match="sensitive"):
+            call()
+    gid = g.add("rotate keys")["id"]
+    with pytest.raises(ValueError, match="sensitive"):
+        g.update(gid, details="new one " + KEY32)
+    with pytest.raises(ValueError, match="sensitive"):
+        g.add_step(gid, "paste " + KEY32)
+
+
+def test_goal_plans_refuse_a_hex_key(home):
+    from jarves.goal_plans import PlanStore
+    from jarves.userdata import open_db
+    store = PlanStore(open_db(home))
+    with pytest.raises(ValueError, match="sensitive"):
+        store.propose("rotate " + KEY32, [{"tool": "noop", "args": {}, "why": "x"}])
+    with pytest.raises(ValueError, match="sensitive"):
+        store.propose("rotate keys", [{"tool": "noop", "args": {}, "why": "use " + KEY32}])
+
+
+def test_preferences_refuse_a_hex_key(home):
+    from jarves.preferences import Preferences
+    from jarves.userdata import open_db
+    p = Preferences(open_db(home))
+    for call in (lambda: p.suggest("use " + KEY32, "I said so"), lambda: p.suggest("likes tea", "key " + KEY32)):
+        with pytest.raises(ValueError, match="sensitive"):
+            call()
+    pid = p.suggest("likes tea", "I like tea")["item"]["id"]
+    with pytest.raises(ValueError, match="sensitive"):
+        p.edit(pid, "use " + KEY32)

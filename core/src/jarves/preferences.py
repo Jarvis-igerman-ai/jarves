@@ -53,10 +53,11 @@ _BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
 _BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
 _BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
 # credential words (English and Hebrew); '_' and '=' separate them, so GITHUB_TOKEN= and api_key: count (bare "api"/"auth" do not)
-# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and only known inflections, so מפתחים/סודה are not credential words
+# Hebrew words take attached prefixes (ה/ו/ש/ב/כ/ל/מ) and only known inflections, so מפתחים is not a credential word;
+# סודה ("her secret") is left out on purpose: it is spelled like "soda", and סודן like "Sudan"
 _CRED_WORD = (r"(?:(?<![A-Za-z0-9])(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook)(?![A-Za-z0-9])"
               r"|(?<![א-ת])[והשבכלמ]{0,3}(?:סיסמ(?:ה|א|ת|אות|ות|תי|תך|תו)?|טוק(?:ן|נים|ני|נו)|אסימו(?:ן|נים|ני|נו)"
-              r"|מפתח(?:ות|ה|ו|י|ך)?|סוד(?:ות|י|ו)?)(?![א-ת]))")
+              r"|מפתח(?:ות|ה|ו|י|ך)?|סוד(?:ות|י|ו|ך|נו|ם|כם)?)(?![א-ת]))")
 _CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
 _CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
@@ -96,6 +97,25 @@ def _random_long(run: str) -> bool:
             and not _wordy(s) and len(set(s)) / len(s) >= 0.5)
 
 
+def _single_case(run: str) -> bool:
+    """A random one-case ``[a-z0-9]`` or ``[A-Z0-9]`` token (#1482 R1): letters and digits alternate often.
+
+    Identifiers (``python3112venv``, ``build20241122release``) switch between letters and digits a few times only.
+    Pure hex runs are left to the hex/SHA rules, so a commit SHA is not refused here.
+    """
+    if len(run) < 20 or not (run.islower() or run.isupper()) or re.fullmatch(r"[0-9a-fA-F]+", run):
+        return False
+    digits = sum(c.isdigit() for c in run)
+    if digits < 3 or len(run) - digits < 8:
+        return False
+    letters = [c for c in run.lower() if c.isalpha()]
+    switches = sum(a.isdigit() != b.isdigit() for a, b in zip(run, run[1:]))
+    if len(set(run)) / len(run) < 0.4 or switches < max(4, len(run) // 6):
+        return False
+    # words have vowels (``release2024q3hotfix1patch``); random letters mostly do not, and switch more often
+    return switches >= len(run) // 3 or sum(c in "aeiou" for c in letters) < 0.3 * len(letters)
+
+
 def _wordy(s: str) -> bool:
     """CamelCase made of real words. Random letters split into camel tokens too, but a long run of them has few
     vowels; short words (``HttpClientV2``) may have few vowels, so the vowel test applies from 20 chars."""
@@ -125,7 +145,7 @@ def _secret_shaped(t: str) -> bool:
         run = m.group(0).rstrip("=")
         if sum(c in "234567" for c in run) >= 2 and sum(c.isalpha() for c in run) >= len(run) // 2:
             return True              # TOTP seeds and other base32 secrets
-    if any(_mixed(m.group(0)) or _random_long(m.group(0)) for m in _BASE62.finditer(t)):
+    if any(_mixed(m.group(0)) or _random_long(m.group(0)) or _single_case(m.group(0)) for m in _BASE62.finditer(t)):
         return True
     # base64 with '+' or '/' inside. A path (absolute or relative) has '/' too, so a '/' run is judged per segment:
     # random segments are mixed case, path segments are words. Segments of 20+ chars are also checked by _BASE62.
