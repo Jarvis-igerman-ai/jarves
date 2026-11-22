@@ -68,9 +68,67 @@ def _base32(text: str) -> bool:
     return False
 
 
+# #1482: secret shapes without a vendor prefix. A git commit SHA (7-40 hex, 2+ letters a-f, one letter case) is allowed.
+_B = r"(?<![0-9A-Za-z])"
+_SHA = re.compile(_B + r"(?=(?:\d*[a-f]){2})[0-9a-f]{7,40}(?![0-9A-Za-z])|"
+                  + _B + r"(?=(?:\d*[A-F]){2})[0-9A-F]{7,40}(?![0-9A-Za-z])")
+_HEX = re.compile(_B + r"[0-9a-fA-F]{32,}(?![0-9A-Za-z])")
+_ALNUM = re.compile(_B + r"[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
+# Credential words: glued or separated qualifier (apikey, GITHUB_TOKEN, client secret) and plurals. Bare api/auth do not
+# count. Hebrew takes attached prefix letters and known inflections only (so מפתחים "developers" is out). מפתח is also
+# "developer"; the two cannot be told apart, so "המפתח תיקן ב-<SHA>" is refused: the safe side, only a draft is refused.
+_CRED_WORD = (r"(?:(?<![A-Za-z])(?:(?:api|auth|access|private|client|secret|bearer)[-_ ]?)?"
+              r"(?:keys?|tokens?|secrets?|passwords?|passwd|credentials?|bearer|webhooks?)(?![A-Za-z])"
+              r"|(?<![א-ת])[והשבכלמ]{0,3}(?:טוק(?:ן|נים|ני|נו)|אסימו(?:ן|נים|ני|נו)|מפתח(?:ות|ה|ו|י|ך)?"
+              r"|סוד(?:ות|י|ו|ך|נו|ם|כם)?)(?![א-ת]))")
+_CRED_BEFORE = re.compile(_CRED_WORD + r"[\W_]*(?:[^\W_]+[\W_]+){0,4}$", re.I)
+_CRED_AFTER = re.compile(r"^[\W_]*(?:[^\W_]+[\W_]+){0,3}?" + _CRED_WORD, re.I)
+_HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$",
+                        re.I)
+_WORD_TOK = re.compile(r"[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]+|[A-Z](?![A-Za-z])|[0-9]+")
+
+
+def _cred_near(t: str, m: re.Match) -> bool:
+    """A credential word up to four words before the value or three words after it."""
+    return bool(_CRED_BEFORE.search(t[max(0, m.start() - 60):m.start()]) or _CRED_AFTER.search(t[m.end():m.end() + 40]))
+
+
+def _hash_named(t: str, m: re.Match) -> bool:
+    return bool(_HASH_NEAR.search(t[max(0, m.start() - 40):m.start()]))
+
+
+def _random_mixed(run: str) -> bool:
+    """Random base62: digits, both letter cases and frequent case switches; CamelCase words split into tokens instead."""
+    toks = _WORD_TOK.findall(run)
+    if toks and "".join(toks) == run and len(run) / len(toks) >= 3:
+        return False
+    letters = [c for c in run if c.isalpha()]
+    if not any(c.isdigit() for c in run) or len(letters) < 8 or not 0.25 <= sum(map(str.isupper, letters)) / len(letters) <= 0.75:
+        return False
+    return sum(a.isupper() != b.isupper() for a, b in zip(letters, letters[1:])) >= len(letters) // 4
+
+
+def _secret_shaped(t: str) -> bool:
+    for m in _HEX.finditer(t):
+        run = m.group(0)
+        one_case = run.islower() or run.isupper()
+        allowed = one_case and (len(run) == 40 or len(run) in (32, 64, 128) and _hash_named(t, m))
+        if _cred_near(t, m) or not allowed:   # a bare 40-hex is taken as a git SHA (old 40-hex tokens: safe-side gap)
+            return True
+    return any(_random_mixed(m.group(0)) for m in _ALNUM.finditer(t))
+
+
+def _drop_sha(m: re.Match) -> str:
+    """Hide a commit SHA from the long-number rule when it is 40 chars or named by a hash word and no credential word
+    is near; other digit-heavy hex ids ("my id is 12345678ab") stay refused."""
+    t = m.string
+    keep = _cred_near(t, m) or not (len(m.group(0)) == 40 or _hash_named(t, m))
+    return m.group(0) if keep else " "
+
+
 def looks_sensitive(text: str) -> bool:
     text = text or ""
-    return bool(_SENSITIVE.search(text)) or _base32(text)
+    return bool(_SENSITIVE.search(_SHA.sub(_drop_sha, text))) or _base32(text) or _secret_shaped(text)
 
 
 def normalize(text: str) -> str:
