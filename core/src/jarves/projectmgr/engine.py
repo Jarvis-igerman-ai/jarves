@@ -586,12 +586,13 @@ class StageEngine:
                     return self._reapprove(t, mine)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
-                    conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
+                    conflicts = gitops.merge_in(wt, head or base)    # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                 tip = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()     # the commit checked and merged (#1407)
-                if expect and tip != mine and gitops.git(wt, "rev-parse", f"{tip}^").stdout.strip() != mine:
-                    return self._reapprove(t, tip)                  # a commit landed during the re-merge
+                if expect and tip not in (mine, head) and [gitops.git(wt, "rev-parse", "--verify", "--quiet", f"{tip}^{n}",
+                                                                     check=False).stdout.strip() for n in (1, 2)] != [mine, head]:
+                    return self._reapprove(t, tip)  # only mine + the integration head read (or a fast-forward to it)
                 if head != self._job(t).get("tested_base"):
                     if has_check:
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
@@ -731,17 +732,15 @@ class StageEngine:
                 self.db.add_decision(p["id"], st.get("question") or t["title"], [], "owner", note, "", [],
                                      task_id=t["id"])
             if st["by"] == "owner" and st["kind"] in ("merge", "work"):
-                edited = False
                 if st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists():
-                    try:
-                        edited = gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
+                    try:        # an edit (yours or an agent's) becomes a commit; the merge stage then asks about it by SHA
+                        gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: edit before merge"[:120])
                     except gitops.GitError:
                         pass
                     t = self.db.task(t["id"])
                 tree, shown = self._tree(t)[0], self._job(t).get("shown") or ""
-                if st["kind"] == "merge" and shown and (not edited or gitops.git(
-                        t["worktree"], "rev-parse", "HEAD^", check=False).stdout.strip() != shown):
-                    tree = shown    # you approved the commit you were shown (plus your own edit on it), nothing later
+                if st["kind"] == "merge" and shown:
+                    tree = shown    # you approved only the commit you were shown (#1407 review R1)
                 self._set_job(t, approved={"stage": i, "tree": tree}, shown=None)
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:

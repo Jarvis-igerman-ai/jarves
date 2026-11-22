@@ -1448,3 +1448,81 @@ def test_a_commit_after_the_approval_check_is_never_merged(env, monkeypatch):
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting", (t["status"], t["reason"])
     assert "(now commit " in t["waiting"] and not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()
+
+
+def test_uncommitted_files_at_approval_are_never_merged_unseen(env):
+    """Review round 3 R1: files left uncommitted after the merge prompt become a commit you approve by its SHA."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    (wt / "t.txt").write_text("unseen\n")                              # never committed by the agent
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    integ = gitops.project_root(home, 1) / "integration"
+    assert t["status"] == "waiting", (t["status"], t["reason"])       # before the fix: merged as an "owner edit"
+    assert f"(now commit {sh(wt, 'git', 'rev-parse', 'HEAD').strip()[:12]})" in t["waiting"], t["waiting"]
+    assert not (integ / "t.txt").exists()
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done" and (integ / "t.txt").read_text() == "unseen\n"
+
+
+def _moved(m, home, n):
+    integ = gitops.project_root(home, 1) / "integration"
+    for k in range(n):                                                   # another task merged meanwhile
+        (integ / f"o{k}.txt").write_text("other\n")
+        gitops.commit_all(integ, f"other {k}")
+    return integ
+
+
+def test_a_replaced_merge_commit_is_never_merged(env, monkeypatch):
+    """Review round 3 R2: the re-merge must have exactly your commit and the integration head read as parents."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    wt = Path(m.db.by_seq(1, 1)["worktree"])
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    integ = _moved(m, home, 1)
+    real = gitops.merge_in
+
+    def swap(w, *a, **k):
+        out = real(w, *a, **k)
+        mine, head = (gitops.git(w, "rev-parse", f"HEAD^{n}").stdout.strip() for n in (1, 2))
+        gitops.git(w, "checkout", "-q", "--detach", head)                # a commit on top of the integration head
+        (Path(w) / "evil.txt").write_text("unseen\n")
+        gitops.commit_all(Path(w), "more")
+        y = gitops.git(w, "rev-parse", "HEAD").stdout.strip()
+        gitops.git(w, "checkout", "-q", "-B", m.db.by_seq(1, 1)["branch"], mine)
+        gitops.git(w, "merge", "-q", "--no-edit", y)                     # first parent yours, second parent not read
+        return out
+    monkeypatch.setattr(gitops, "merge_in", swap)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "(now commit " in t["waiting"], (t["status"], t["reason"])
+    assert not (integ / "evil.txt").exists()
+
+
+def test_a_fast_forward_re_merge_does_not_ask_again(env):
+    """Review round 3 R3: a task branch with no commits of its own fast-forwards on the re-merge: no new approval."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    integ = gitops.project_root(home, 1) / "integration"
+    base = sh(integ, "git", "rev-parse", "HEAD").strip()
+    sh(wt, "git", "reset", "-q", "--hard", base)                         # nothing of its own beyond the base
+    m._set_job(t, shown=base)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    _moved(m, home, 2)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["waiting"], t["reason"])     # before the fix: a spurious re-park

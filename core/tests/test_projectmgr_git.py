@@ -330,6 +330,19 @@ def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_pat
     assert ("commit.gpgsign", "false") in gitops.config_overrides(repo, ident=False)
 
 
+def test_your_own_same_named_driver_is_kept_over_the_repo_config(tmp_path, no_user_config):
+    """Review R4: a local value shadowing your global filter/merge driver or config hook keeps your value, not a no-op."""
+    repo = _repo(tmp_path)
+    glob = {"filter.lfs.clean": "git-lfs clean -- %f", "filter.lfs.required": "true",
+            "merge.mine.driver": "my-merge %O %A %B", "hook.mine.command": "my-hook"}
+    (tmp_path / "home").mkdir(exist_ok=True)
+    for k, v in glob.items():
+        subprocess.run(["git", "config", "--global", k, v], check=True, env={**os.environ})
+        gitops.git(repo, "config", k, "evil")
+    pre = gitops.config_overrides(repo)
+    assert all((k, v) in pre for k, v in glob.items()) and not any(v == "evil" for _, v in pre), pre
+
+
 @pytest.mark.parametrize("key,attr", [("diff.external", ""), ("diff.Evil.command", "diff=Evil"),
                                       ("diff.Evil.textconv", "diff=Evil")])
 def test_a_diff_program_from_the_repo_config_never_runs(tmp_path, no_user_config, key, attr):

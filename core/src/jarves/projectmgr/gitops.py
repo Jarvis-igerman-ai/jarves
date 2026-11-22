@@ -100,25 +100,24 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str
     if p.returncode != 0:
         raise GitError("could not read the git config: " + p.stderr.decode("utf-8", "replace").strip()[:200])
     items = p.stdout.decode("utf-8", "replace").split("\0")
-    trusted: dict[str, str] = {}
+    rows = [(scope, _norm_key(kv.partition("\n")[0]), kv.partition("\n")[2]) for scope, kv in zip(items[0::2], items[1::2])]
+    trusted = {key: val for scope, key, val in rows if scope in TRUSTED_SCOPES}   # all of them first: `command` is last
     out: list[tuple[str, str]] = []
     signing = False
-    for scope, kv in zip(items[0::2], items[1::2]):
-        key, _, val = kv.partition("\n")
-        key = _norm_key(key)
+    for scope, key, _val in rows:
         if scope in TRUSTED_SCOPES:
-            trusted[key] = val
             continue
         signing = signing or bool(_SIGN_KEY.match(key))
         m = _RUN_KEY.match(key)
         if not m:
             continue
-        if m.group(2):
-            out += [(key, ""), (f"filter.{m.group(2)}.required", "false")]
+        if m.group(2):                                      # your own same-named value stays (review R4)
+            req = f"filter.{m.group(2)}.required"
+            out += [(key, trusted.get(key, "")), (req, trusted.get(req, "false") if key in trusted else "false")]
         elif m.group(4):
-            out.append((key, "exit 1"))                     # a conflict, never the agent's program
+            out.append((key, trusted.get(key, "exit 1")))   # a conflict, never the agent's program
         elif m.group(5):
-            out.append((key, "exit 0"))
+            out.append((key, trusted.get(key, "exit 0")))
         elif m.group(7):
             out.append((key, trusted.get(key, "exit 1")))   # fails closed, never the agent's program
         else:
