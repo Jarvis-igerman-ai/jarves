@@ -107,10 +107,7 @@ def test_branch_moved_while_the_merge_commits_is_not_merged(env, monkeypatch):
     _blocked(m, home, "moved while JARVES merged it")
 
 
-def test_owner_edit_folded_at_the_merge_approval_is_checked_again(env):
-    m, repo, home = env
-    check = [sys.executable, "-c", "import os,sys; sys.exit(os.path.exists('mine.txt') and "
-                                   "'bad' in open('mine.txt').read())"]
+def _owner_task(m, repo, check):
     open_project(m, repo, check=check)
     m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], flow="work:owner test merge:owner")
     m.call("resume", project="demo")
@@ -120,8 +117,74 @@ def test_owner_edit_folded_at_the_merge_approval_is_checked_again(env):
     assert m.call("answer", project="demo", task=1, answer="done")["ok"]
     finish(m)
     assert "approve merging" in m.db.by_seq(1, 1)["waiting"]
+    return wt
+
+
+def test_owner_edit_folded_at_the_merge_approval_is_checked_again(env):
+    m, repo, home = env
+    wt = _owner_task(m, repo, [sys.executable, "-c", "import os,sys; sys.exit(os.path.exists('mine.txt') and "
+                                                     "'bad' in open('mine.txt').read())"])
     (wt / "mine.txt").write_text("bad\n")                             # the owner's own edit, folded at the approval
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     assert not (_integ(home) / "mine.txt").exists()                   # the re-check failed: nothing merged
     assert any(e["kind"] == "check_failed" for e in m.db.events(m.db.by_seq(1, 1)["id"], 40))
+
+
+def test_sibling_commit_before_the_owner_approves_is_not_an_owner_edit(env):
+    """Review R1: one commit on the checked commit that answer() did not make is not the owner's own edit."""
+    m, repo, home = env
+    wt = _owner_task(m, repo, [sys.executable, "-c", "pass"])
+    (wt / "mine.txt").write_text("evil\n")
+    sh(wt, *GIT, "commit", "-qam", "sibling", "--no-verify")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after JARVES checked it" in t["reason"], (t["status"], t["reason"])
+    assert not (_integ(home) / "mine.txt").exists()
+
+
+def test_task_commit_already_in_the_integration_branch_still_merges(env):
+    """Review R2: a merge-in that fast-forwards the task branch to the integration head is up to date, not a move."""
+    m, repo, home = env
+
+    def lands_with_more_on_top(t):
+        sh(_integ(home), "git", "merge", "-q", "--ff-only", t["branch"])
+        for n in ("o1", "o2"):                                         # two commits: merged^1 is not the task sha
+            (_integ(home) / f"{n}.txt").write_text(n)
+            sh(_integ(home), *GIT, "add", "-A")
+            sh(_integ(home), *GIT, "commit", "-qm", n, "--no-verify")
+    _after_check(m, lands_with_more_on_top)
+    _start(m, repo, [sys.executable, "-c", "pass"])
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    assert (_integ(home) / "a.txt").read_text() == "1\n"
+
+
+def test_file_left_after_the_check_is_checked_before_the_merge(env):
+    """Review R3: what commit_all folds in after the check (here a file the check wrote) is checked again."""
+    m, repo, home = env
+    check = [sys.executable, "-c", "import os,sys; e=os.path.exists('left.txt'); open('left.txt','w').write('x'); "
+                                   "sys.exit(1 if e else 0)"]
+    _start(m, repo, check)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert any(e["kind"] == "check_failed" for e in m.db.events(t["id"], 60))
+    assert not (_integ(home) / "left.txt").exists() and t["status"] != "done", (t["status"], t["reason"])
+
+
+def test_task_checked_before_this_fix_is_checked_again_at_the_merge(env):
+    """Review R4: a task whose job has no tested_head (checked by an older JARVES) gets the merge-stage re-check."""
+    m, repo, home = env
+    moves = []
+
+    def legacy_then_moved(t):
+        if not moves:
+            m._set_job(t, tested_head=None)
+            moves.append(_sibling_commit(t["worktree"]))
+    _after_check(m, legacy_then_moved)
+    _start(m, repo, [sys.executable, "-c", "import sys; sys.exit('evil' in open('a.txt').read())"])
+    finish(m)
+    assert any(e["kind"] == "check_failed" for e in m.db.events(m.db.by_seq(1, 1)["id"], 60))
+    assert (_integ(home) / "a.txt").read_text() == "1\n"              # the retry's checked content, never "evil"

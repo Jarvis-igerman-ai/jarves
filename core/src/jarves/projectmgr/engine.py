@@ -579,9 +579,12 @@ class StageEngine:
             try:
                 # #1461: all worktrees share refs, so a sibling can move the task branch after check/review. Merge only
                 # the commit the check saw (plus what commit_all folds on top of it), and fast-forward to that sha.
-                # owner_head: the tree the owner approved; answer() folds the owner's own edit into one commit on top.
-                cur, want = self._head(wt), self._job(t).get("tested_head")
-                owner_fold = bool(want) and cur != want and cur == owner_head and self._head(wt, f"{cur}^") == want
+                # owner_head: the tree the owner approved; answer() folds the owner's own edit into one commit on top
+                # and records that commit's sha as job.owner_fold (a sibling commit of the same shape is not it).
+                job = self._job(t)
+                cur, want = self._head(wt), job.get("tested_head")
+                owner_fold = bool(want) and cur != want and cur == owner_head == job.get("owner_fold") and \
+                    self._head(wt, f"{cur}^") == want
                 if want and cur != want and not owner_fold:
                     return self._moved(p, t, "moved after JARVES checked it")
                 folded = gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
@@ -589,12 +592,15 @@ class StageEngine:
                 if (self._head(wt, f"{sha}^") if folded else sha) != cur:
                     return self._moved(p, t, "moved while JARVES merged it")
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
-                if owner_fold or head != self._job(t).get("tested_base"):    # the owner's edit is checked again
+                # checked again: the owner's edit, files folded after the check, or a task checked before #1461
+                if owner_fold or folded or not want or head != job.get("tested_base"):
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
-                    merged = self._head(wt)                         # a merge commit on sha, or sha (up to date)
-                    if merged != sha and self._head(wt, f"{merged}^1") != sha:
+                    merged = self._head(wt)                         # a merge commit on sha, sha (up to date), or
+                    ff = merged == head and gitops.git(wt, "merge-base", "--is-ancestor", sha, merged,   # a fast-
+                                                       check=False).returncode == 0                    # forward
+                    if merged != sha and not ff and self._head(wt, f"{merged}^1") != sha:
                         return self._moved(p, t, "moved while JARVES merged it")
                     sha = merged
                     if has_check:
@@ -614,7 +620,7 @@ class StageEngine:
         stat = t["result"]
         gitops.remove_worktree(p["path"], wt, br)
         self.db.update_task(t["id"], branch="", worktree="", reason="")
-        self._set_job(t, kept=None)
+        self._set_job(t, kept=None, owner_fold=None)
         self.db.event(t["id"], "manager", "merged", f"merged into {base}: {stat}")
         return ("next",)
 
@@ -628,7 +634,7 @@ class StageEngine:
         back = pl.find(stages, pl.CODE_KINDS, before=t["stage"])
         back = pl.find(stages, pl.CHECK_KINDS, before=t["stage"]) if back is None else back
         self.db.update_task(t["id"], stage=t["stage"] if back is None else back)
-        self._set_job(t, tested_base=None, tested_head=None, approved=None)
+        self._set_job(t, tested_base=None, tested_head=None, approved=None, owner_fold=None)
         self.db.event(t["id"], "manager", "warning", f"task branch {what}")
         return ("stop", "blocked", f"the task branch {what}; nothing was merged: retry to run its work and check again")
 
@@ -748,13 +754,15 @@ class StageEngine:
                 self.db.add_decision(p["id"], st.get("question") or t["title"], [], "owner", note, "", [],
                                      task_id=t["id"])
             if st["by"] == "owner" and st["kind"] in ("merge", "work"):
+                made = False
                 if st["kind"] == "merge" and t["worktree"] and Path(t["worktree"]).exists():
                     try:
-                        gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
+                        made = gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: owner edit before merge"[:120])
                     except gitops.GitError:
                         pass
                     t = self.db.task(t["id"])
-                self._set_job(t, approved={"stage": i, "tree": self._tree(t)[0]})
+                tree = self._tree(t)[0]
+                self._set_job(t, approved={"stage": i, "tree": tree}, owner_fold=tree if made else None)   # #1461
                 self.db.update_task(t["id"], status="todo", waiting="")
             else:
                 self.db.update_task(t["id"], stage=pl.next_index(stages, i), status="todo", waiting="",
