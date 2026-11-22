@@ -285,7 +285,8 @@ class Core:
         from . import privacy                           # #1557: older text is scrubbed when privacy is on at start
         if c.log.privacy or privacy.flag_on(self.home):  # (config.toml, or a switch config.toml could not save)
             privacy.scrub_at_rest(self.home)
-        logs.on_privacy_on(lambda: privacy.scrub_at_rest(self.home))   # and each time it turns on while running
+        self._privacy_hook = lambda: privacy.scrub_in_background(self.home)   # and each time it turns on while
+        logs.on_privacy_on(self._privacy_hook)          # running (on a thread: the flag poll runs on the event loop)
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)
         logs.new_cid()
         from .runtime import shutdown as _shutdown
@@ -580,6 +581,8 @@ class Core:
                            step=label, error_type=type(e).__name__, exc=True)
 
         sync("limits_sink", lambda: limits_mod.set_sink(None))
+        if getattr(self, "_privacy_hook", None) is not None:
+            sync("privacy_hook", lambda: logs.off_privacy_on(self._privacy_hook))   # #1557: a stopped Core stays quiet
         sync("speaker", self.dev.speaker_stop)
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping", reason=self.stop_reason or "unspecified")

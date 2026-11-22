@@ -169,8 +169,11 @@ async def test_core_start_scrubs_when_only_the_flag_file_says_privacy_on(home, c
         await c.stop()
 
 
-async def test_running_core_scrubs_when_another_process_turns_privacy_on(home, cfg):
+async def test_running_core_scrubs_when_another_process_turns_privacy_on(home, cfg, monkeypatch):
+    import threading
     from test_m3_core import new_core
+    started, real = [], privacy.scrub_in_background
+    monkeypatch.setattr(privacy, "scrub_in_background", lambda h: started.append(real(h)) or started[-1])
     cfg.log.privacy = False
     c = new_core(cfg, home)
     await c.start()
@@ -179,10 +182,33 @@ async def test_running_core_scrubs_when_another_process_turns_privacy_on(home, c
         assert "Dana" in _dump(home)
         (home / "logs" / logs.PRIVACY_FILE).write_text(json.dumps({"privacy": True, "at": 1}), encoding="utf-8")
         logs._poll_privacy(force=True)                        # the Core reads the dashboard's flag file
+        assert len(started) == 1 and started[0] is not threading.current_thread()   # off the event loop (R2)
+        started[0].join(10)
         assert logs.privacy() and "Dana" not in _dump(home)
     finally:
         await c.stop()
+        assert c._privacy_hook not in logs._on_privacy_on     # a stopped Core's hook no longer fires (R6)
         logs.setup(home / "logs", "INFO", console=False, privacy=True)
+
+
+def test_a_reader_blocking_the_checkpoint_is_reported_partial(home, monkeypatch):
+    db = _seed(home)
+    reader = sqlite3.connect(home / "memory.db", isolation_level=None)
+    assert reader.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM goal_plan_steps").fetchall()   # holds a read snapshot: the checkpoint stops
+    seen = []
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append((a[1], k)))
+    try:
+        got = privacy.scrub_at_rest(home)
+    finally:
+        reader.execute("ROLLBACK")
+        reader.close()
+        db.close()
+    assert got["partial"] == ["memory.db"]
+    assert ("PRIVACY_SCRUB_PARTIAL", {"target": "memory.db", "reason": "wal_pending"}) in seen
+    assert privacy.scrub_at_rest(home)["partial"] == []       # reader gone: the next scrub completes the checkpoint
+    assert "Dana" not in (home / "memory.db").read_bytes().decode("utf-8", "replace")
 
 
 def test_a_failing_privacy_hook_is_logged_and_privacy_still_turns_on(home, monkeypatch):

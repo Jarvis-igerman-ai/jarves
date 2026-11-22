@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -89,8 +90,13 @@ _CODE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")   # TOOL_ERROR; a bare word
 SCRUB_TIMEOUT_S = 2.0                               # a Core holding the lock: logged as partial, not a stuck request
 
 
+class WalPending(sqlite3.Error):
+    """The rows were rewritten, but a reader kept the checkpoint from copying them into the main file."""
+
+
 def _scrub_db(path: Path, sql: str, fix) -> int:
-    """Rewrite the rows `sql` selects (rowid first) with fix(row) -> (update sql, args) or None. 0 if no file."""
+    """Rewrite the rows `sql` selects (rowid first) with fix(row) -> (update sql, args) or None. 0 if no file.
+    Raises WalPending when the old page copies may still be in the main file (checkpoint busy or incomplete)."""
     if not path.is_file():
         return 0
     cx = sqlite3.connect(path, timeout=SCRUB_TIMEOUT_S)
@@ -102,10 +108,11 @@ def _scrub_db(path: Path, sql: str, fix) -> int:
                 upd = fix(row)
                 if upd:
                     n += cx.execute(*upd).rowcount
-        try:                                        # old page copies in a -wal file: best effort (a reader may hold it)
-            cx.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        except sqlite3.Error:
-            pass
+        # WAL: the old plaintext page stays in the main file until a checkpoint copies the new one over it. A busy
+        # checkpoint is a result row (busy, log, checkpointed), not an exception, so the row is read (#1557 R1).
+        row = cx.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if row and (row[0] != 0 or (row[1] >= 0 and row[2] < row[1])):
+            raise WalPending(f"checkpoint busy={row[0]} log={row[1]} checkpointed={row[2]}")
         return n
     finally:
         cx.close()
@@ -134,18 +141,39 @@ def _step_fix(row):
     return "UPDATE goal_plan_steps SET evidence = '', error = ? WHERE rowid = ?", (code, rid)
 
 
+_SCRUB_LOCK = threading.Lock()                     # one scrub at a time in this process
+
+
+def scrub_in_background(home: Path) -> threading.Thread:
+    """#1557 R2: the privacy-on hook may run on the Core's event loop (flag file poll); scrub on a thread instead."""
+    t = threading.Thread(target=scrub_at_rest, args=(Path(home),), name="privacy-scrub", daemon=True)
+    t.start()
+    return t
+
+
 def scrub_at_rest(home: Path) -> dict:
     """#1557: when privacy turns on, text stored before it was on is scrubbed too (#206 F13 covered new writes only):
     continuity.db ledger answers become a fixed NOT_KEPT note (a resend is still answered, not run again) and
     memory.db goal plan steps keep status and an upper-case error code only. Best effort: a database that cannot be
-    scrubbed is logged and named in "partial", so the owner is told older text is still stored."""
+    scrubbed, or whose checkpoint a reader blocked, is logged and named in "partial" of the returned dict (the
+    dashboard switch's JSON answer). Out of scope: the owner's own plan text (title, args, why, kept in privacy mode
+    by #206 too) and backups made before privacy was on."""
+    with _SCRUB_LOCK:
+        return _scrub_all(Path(home))
+
+
+def _scrub_all(home: Path) -> dict:
     out: dict = {"ledger": 0, "plan_steps": 0, "partial": []}
     for key, name, sql, fix in (
             ("ledger", "continuity.db", "SELECT rowid, status, body FROM ledger", _ledger_fix),
             ("plan_steps", "memory.db", "SELECT rowid, evidence, error FROM goal_plan_steps "
                                         "WHERE evidence != '' OR error != ''", _step_fix)):
         try:
-            out[key] = _scrub_db(Path(home) / name, sql, fix)
+            out[key] = _scrub_db(home / name, sql, fix)
+        except WalPending:
+            out["partial"].append(name)
+            logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text may still be in the database file",
+                      target=name, reason="wal_pending")
         except sqlite3.Error as e:
             out["partial"].append(name)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",

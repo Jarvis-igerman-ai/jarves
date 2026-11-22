@@ -283,6 +283,12 @@ def on_privacy_on(fn) -> None:
     _on_privacy_on.append(fn)
 
 
+def off_privacy_on(fn) -> None:
+    """Remove a hook added with on_privacy_on (a stopped Core's hook must not fire). Missing: nothing happens."""
+    if fn in _on_privacy_on:
+        _on_privacy_on.remove(fn)
+
+
 def set_privacy(on: bool) -> None:
     global _privacy
     was, _privacy = _privacy, bool(on)
