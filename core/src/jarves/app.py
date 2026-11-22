@@ -279,12 +279,12 @@ class Core:
         # SW-V4 B crash output: an exception nobody awaited is logged as CRASH (frames; its text is content)
         asyncio.get_running_loop().set_exception_handler(logs.asyncio_handler)
         self._start_early_voice_import()                # #159 perf2: `import openai` (8-12 s) overlaps the whole start
+        from . import privacy                           # #1557: older text is scrubbed when privacy is on at start
+        if c.log.privacy or privacy.flag_on(self.home):  # (config.toml, or a switch config.toml could not save),
+            privacy.scrub_at_rest(self.home)            # BEFORE the checkpoint, so a new backup holds no old text
         from . import backup, usage                     # SW-V2 M5: checkpoint BEFORE the stores open/migrate
         backup.startup_checkpoint(self.home)
         self._update_guard()                            # SW-V4 L: data migrations (backup first) + failed-update watch
-        from . import privacy                           # #1557: older text is scrubbed when privacy is on at start
-        if c.log.privacy or privacy.flag_on(self.home):  # (config.toml, or a switch config.toml could not save)
-            privacy.scrub_at_rest(self.home)
         self._privacy_hook = lambda: privacy.scrub_in_background(self.home)   # and each time it turns on while
         logs.on_privacy_on(self._privacy_hook)          # running (on a thread: the flag poll runs on the event loop)
         self.history = store.attach(self.home, c)       # conversation history + self-diagnosis (log sink)

@@ -10,14 +10,14 @@ async function post(path, body) { return api(path, { method: "POST", body: JSON.
 
 // ---------------------------------------------------------------- privacy (top bar + Home tile)
 let privacyState = null;
-let privacyScrubNote = "";   // #1557: kept across the top bar re-render that follows the switch
+let privacyScrubNote = null;   // #1557: {he, en}, kept across the top bar re-render (and a language change)
 async function togglePrivacy(msg) {
   const to = !privacyState.privacy;
   try {
     privacyState = await post("/api/privacy", { privacy: to });
     if (msg) msg.textContent = privacyState.saved_in_config ? tx("נשמר", "Saved")
       : tx("שונה עכשיו; config.toml לא נשמר: ", "Changed now; config.toml not saved: ") + privacyState.config_error;
-    privacyScrubNote = privacyState.scrub_note_en ? tx(privacyState.scrub_note_he, privacyState.scrub_note_en) : "";
+    privacyScrubNote = privacyState.scrub_note_en ? { he: privacyState.scrub_note_he, en: privacyState.scrub_note_en } : null;
   } catch (e) { if (msg) msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   await renderTopbar();
   refreshOverview();
@@ -40,7 +40,7 @@ async function renderTopbar() {
   const banner = privacyState.privacy ? null : el("span", { class: "priv-banner small", role: "status", id: "privacyBanner" },
     tx(privacyState.full_text_active ? privacyState.full_text_note_he : privacyState.banner_he,
       privacyState.full_text_active ? privacyState.full_text_note_en : privacyState.banner_en));
-  const note = privacyScrubNote ? el("span", { class: "small", role: "status", id: "privacyScrubNote" }, privacyScrubNote) : null;
+  const note = privacyScrubNote ? el("span", { class: "small", role: "status", id: "privacyScrubNote" }, tx(privacyScrubNote.he, privacyScrubNote.en)) : null;
   bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), ...(banner ? [banner] : []), ...(note ? [note] : []), msg);
 }
 function privacyCard(p) {

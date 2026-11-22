@@ -85,11 +85,12 @@ def set_full_text(ctx, on: bool) -> dict:
 
 
 _NOT_KEPT = {"not_kept": True, "code": "NOT_KEPT"}
-# #1557 R5: only the generic tool-runner and plan codes stay (skills/__init__.py, goal_plans.py); any other
-# code-shaped text such as CALL_DANA could carry personal words, so it is cleared.
+# #1557 R5: only the generic tool-runner and plan codes stay: every ToolResult code literal in skills/__init__.py
+# and goal_plans.py (test_kept_codes_match_their_owners fails when one is added there). Any other code-shaped text
+# such as CALL_DANA could carry personal words, so it is cleared.
 _KEPT_CODES = frozenset({"TOOL_FORBIDDEN", "TOOL_UNTRUSTED_TURN", "TOOL_DECLINED", "TOOL_UNKNOWN", "SKILL_DISABLED",
-                         "FEATURE_OFF", "TOOL_BAD_ARGS", "TOOL_TIMEOUT", "TOOL_CRASH", "PLAN_BAD", "PLAN_NOT_FOUND",
-                         "NOT_APPROVED"})
+                         "FEATURE_OFF", "TOOL_BAD_ARGS", "TOOL_TIMEOUT", "TOOL_CRASH", "DRIVE_ERROR", "PLAN_BAD",
+                         "PLAN_NOT_FOUND", "NOT_APPROVED"})
 SCRUB_TIMEOUT_S = 2.0                               # a Core holding the lock: logged as partial, not a stuck request
 
 
@@ -210,6 +211,11 @@ def _scrub_all(home: Path) -> dict:
             out["partial"].append(name)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text may still be in the database file",
                       target=name, reason="wal_pending")
+        except sqlite3.OperationalError as e:
+            if "no such table" not in str(e):      # a database made before that table existed holds none of it
+                out["partial"].append(name)
+                logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",
+                          target=name, error_type=type(e).__name__)
         except (sqlite3.Error, OSError) as e:      # R1: e.g. an unreadable folder; the switch still saves
             out["partial"].append(name)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",

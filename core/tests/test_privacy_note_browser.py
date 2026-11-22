@@ -28,7 +28,7 @@ def browser():
             b.close()
 
 
-def _switch(browser, dash, partial, lang):  # noqa: F811
+def _switch(browser, dash, partial, lang, then=None):  # noqa: F811
     ctx = browser.new_context(viewport={"width": 1200, "height": 900})
     p = ctx.new_page()
     errs: list[str] = []
@@ -51,6 +51,15 @@ def _switch(browser, dash, partial, lang):  # noqa: F811
     p.wait_for_selector('#privacyBtn[aria-pressed="true"]', timeout=30000)   # the top bar was drawn again
     note = p.locator("#privacyScrubNote")
     text = note.inner_text() if note.count() else ""
+    if then:                                                  # the owner picks another language afterwards
+        p.select_option("#langSlot select", then)
+        p.wait_for_selector(f'html[lang="{then}"]', timeout=30000)
+        try:                                                  # the top bar is drawn again with Hebrew text
+            p.wait_for_selector('#privacyScrubNote:text-matches("[\u05d0-\u05ea]")', timeout=10000)
+        except Exception:                                     # playwright TimeoutError: report what is shown
+            pass
+        note = p.locator("#privacyScrubNote")
+        text = note.inner_text() if note.count() else ""
     ctx.close()
     assert errs == []
     return text
@@ -59,6 +68,10 @@ def _switch(browser, dash, partial, lang):  # noqa: F811
 def test_a_partial_scrub_shows_the_note_in_english_and_hebrew(browser, dash):  # noqa: F811
     assert _switch(browser, dash, True, "en") == privacy.SCRUB_PARTIAL_NOTE
     assert _switch(browser, dash, True, "he") == privacy.SCRUB_PARTIAL_NOTE_HE
+
+
+def test_the_note_follows_a_later_language_change(browser, dash):  # noqa: F811
+    assert _switch(browser, dash, True, "en", then="he") == privacy.SCRUB_PARTIAL_NOTE_HE   # #1625 R6
 
 
 def test_a_full_scrub_shows_no_note(browser, dash):  # noqa: F811

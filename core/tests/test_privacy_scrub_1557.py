@@ -2,6 +2,7 @@
 evidence and error text), not only new writes. Status, codes and the resend ledger rows themselves stay."""
 import json
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -295,11 +296,72 @@ def test_a_failing_privacy_hook_is_logged_and_privacy_still_turns_on(home, monke
     logs.setup(home / "logs", "INFO", console=False, privacy=False)
     seen = []
     monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append((a[1], k)))
-    logs.on_privacy_on(lambda: 1 / 0)
-    logs.set_privacy(True)
-    assert logs.privacy() and seen == [("PRIVACY_HOOK_FAILED", {"error_type": "ZeroDivisionError"})]
-    logs.off_privacy_on(logs._on_privacy_on[-1])
-    logs.setup(home / "logs", "INFO", console=False, privacy=True)
+    def broken():
+        return 1 / 0
+    logs.on_privacy_on(broken)
+    try:
+        logs.set_privacy(True)
+        assert logs.privacy() and seen == [("PRIVACY_HOOK_FAILED", {"error_type": "ZeroDivisionError"})]
+    finally:
+        logs.off_privacy_on(broken)                          # never left in the process-wide list (#1625 R3)
+        logs.setup(home / "logs", "INFO", console=False, privacy=True)
+
+
+def test_an_expired_full_text_window_runs_the_privacy_hook(ctx, home, monkeypatch):
+    """#1625 R2: the 24 h window ending by itself (not the owner) turns privacy on through set_privacy: hooks run."""
+    t0 = logs._clock()
+    logs.write_privacy(home / "logs", False, until=t0 + 100)
+    ran = []
+
+    def hook():
+        ran.append(logs.privacy())
+    logs.on_privacy_on(hook)
+    try:
+        monkeypatch.setattr(logs, "_clock", lambda: t0 + 200)  # the window is over
+        logs._poll_privacy(force=True)
+        assert ran == [True] and privacy.flag_on(home)
+    finally:
+        logs.off_privacy_on(hook)
+
+
+def test_a_memory_db_without_the_plan_table_is_not_partial(home):
+    """#1625 R5: a database made before goal_plan_steps existed has none of that text: 0 rows, no partial note."""
+    cx = sqlite3.connect(home / "memory.db")
+    cx.execute("CREATE TABLE other (x)")
+    cx.commit()
+    cx.close()
+    assert privacy.scrub_at_rest(home) == {"ledger": 0, "plan_steps": 0, "partial": []}
+
+
+def test_kept_codes_match_their_owners():
+    """#1625 R4: _KEPT_CODES is every ToolResult code literal of the tool runner and goal plans (no silent drift)."""
+    import ast
+    import jarves.goal_plans
+    import jarves.skills
+    found = set()
+    for mod in (jarves.skills, jarves.goal_plans):
+        tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", None)) == "ToolResult":
+                found |= {k.value.value for k in n.keywords
+                          if k.arg == "code" and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str)}
+    assert found == privacy._KEPT_CODES
+
+
+async def test_a_privacy_on_start_backup_has_no_older_text(home, cfg):
+    """#1625 R1: a start with privacy on scrubs BEFORE the version checkpoint, so the new backup holds no old text."""
+    import zipfile
+    from jarves import backup
+    _seed(home)
+    backup._save_state(home, {"version": "0.0.1"})           # a version change: the start writes a checkpoint
+    cfg.log.privacy = True
+    c = new_core(cfg, home)
+    await c.start()
+    await c.stop()
+    zips = sorted(backup.backup_dir(home).glob("jarves-backup-*.zip"))
+    assert zips, "no checkpoint was written"
+    with zipfile.ZipFile(zips[-1]) as z:
+        assert not [n for n in z.namelist() if b"Dana" in z.read(n)]
 
 
 def test_a_logging_reconfigure_keeps_the_privacy_hook(home):
