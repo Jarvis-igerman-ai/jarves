@@ -20,6 +20,10 @@ on those PRs. It was **skipped**, and that cause is already fixed on main by JAR
   --files-from -` prints `installer=true`. `core/tests/test_ci_speed_tools.py` (row for PR #1344) already pins this.
 - The JAR-584 PR run [44663079329](https://github.com/Jarvis-igerman-ai/jarves/actions/runs/44663079329) changed
   `ci_plan.py`, so every job ran, including the installer job. It passed on main's tree at that time.
+- Rechecked 2026-11-22: `ci_plan.classify(files, event="pull_request")` on each branch's **full** file list
+  (`git diff --name-only origin/main...<branch>`) gives `installer=true` for all four. On the #1417 merge-queue run
+  [44675453407](https://github.com/Jarvis-igerman-ai/jarves/actions/runs/44675453407) the installer build and all five
+  smoke and upgrade jobs are `success`.
 - #1419: the cancelled run 44661738860 was replaced by run 44661745303 three seconds later on the **same SHA**, and that
   run passed. Re-running the cancelled run would be a blind rerun of a superseded run, so it was not re-run.
 
