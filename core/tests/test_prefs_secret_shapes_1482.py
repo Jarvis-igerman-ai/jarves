@@ -35,7 +35,7 @@ LEAKY = [
     "use " + _b62("t20", 20),                             # 20-24 char base62
     "use " + _b62("t24", 24) + " for the bot",
     "key " + base64.b64encode(hashlib.sha256(b"k").digest()).decode(),   # base64 with + / =
-    "commit key " + _hex("ck", 32),                       # a credential word overrides a hash word (review R3)
+    "commit key " + _hex("ck", 32),                       # a credential word overrides a hash word
     "sha256 secret " + _hex("ss", 64),
 ]
 
@@ -43,7 +43,7 @@ SAFE = [
     "fixed in commit " + SHA40,
     "fixed in " + SHA40,                                  # a 40-char SHA on its own
     "see 3f9c2ab for the change",                         # 7-char SHA
-    "regression since " + SHA_WITH_DIGIT_RUN,
+    "regression since commit " + SHA_WITH_DIGIT_RUN,     # a short digit-heavy SHA named by a hash word
     "sha256 " + _hex("file", 64) + " of the installer",   # a checksum named as one
     "md5 checksum " + _hex("md5", 32),
     "/Users/Owner/Documents/Project2024/v3/file1",
@@ -73,7 +73,7 @@ def test_long_numbers_are_still_refused():
 
 @pytest.mark.parametrize("text", ["token 12345678ab", "api key 1234567abc", "my secret is 9988776655ff"])
 def test_digit_heavy_hex_next_to_a_credential_word_is_refused(text):
-    # review R1: a short SHA-like token next to a credential word is not exempt from the long-number rule
+    # a short SHA-like token next to a credential word is not exempt from the long-number rule
     assert looks_sensitive(text), text
 
 
@@ -84,18 +84,20 @@ def _mixed_case(h: str) -> str:
 @pytest.mark.parametrize("text", [_hex("h41", 41), _hex("h48", 48), _hex("h63", 63),
                                   _mixed_case(_hex("mc32", 32))])
 def test_hex_of_41_to_63_chars_and_mixed_case_hex_are_refused(text):
-    # review R3 (round 3): pin hex lengths between a SHA-1 and a SHA-256, and mixed-case 32-char hex
+    # hex lengths between a SHA-1 and a SHA-256, and mixed-case 32-char hex, are not digests
     assert looks_sensitive(text), text
 
 
-def test_sha_like_token_without_a_credential_word_is_allowed():
-    # review R2 (round 3): the documented tradeoff, pinned so a change to it is deliberate
-    assert not looks_sensitive("my id is 12345678ab")
+@pytest.mark.parametrize("text", ["my id is 12345678ab", "account 1234567890ab", "customer 98765432EF",
+                                  "regression since " + SHA_WITH_DIGIT_RUN])
+def test_digit_heavy_hex_id_without_a_hash_word_is_still_refused(text):
+    # the SHA exemption does not relax the long-number rule: only 40-char SHAs or ones after a hash word are exempt
+    assert looks_sensitive(text), text
 
 
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
     store = Store(home / "store.db")
-    assert devmanager.suggest(store, "regression since " + SHA_WITH_DIGIT_RUN, "bisected to " + SHA40)
+    assert devmanager.suggest(store, "regression since commit " + SHA_WITH_DIGIT_RUN, "bisected to " + SHA40)
     with pytest.raises(ValueError):
         devmanager.suggest(store, "add webhook", "the secret is " + _hex("d", 32))
 
@@ -103,15 +105,14 @@ def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
 @pytest.mark.parametrize("text", ["rename getUserByIdAndName2024 to findUser", "call parseJSONv2ResponseBody here",
                                   "open MyApp2/ConfigLoaderV3x/HttpClientV2 next"])
 def test_short_word_camelcase_and_relative_paths_are_allowed(text):
-    # review round 4 R2/R3: CamelCase with short words and digits, and relative paths, are not random tokens
+    # CamelCase with short words and digits, and relative paths, are not random tokens
     assert not looks_sensitive(text), text
 
 
 @pytest.mark.parametrize("text", ["key " + _b62("s1", 16) + "/" + _b62("s2", 18),       # random '/' segments
                                   "commit " + _hex("c48", 48)])
 def test_random_slash_segments_and_hex_of_no_digest_length_are_refused(text):
-    # review round 4 R3/R5: a relative-path exemption must not let random base64 segments through, and a hash
-    # word only excuses hex of a digest length (32/40/64/128)
+    # random base64 segments are not path words; a hash word only excuses hex of a digest length (32/40/64/128)
     assert looks_sensitive(text), text
 
 
@@ -120,14 +121,16 @@ def _b64_key(i: int) -> str:
 
 
 def test_random_base62_tokens_are_refused_at_a_pinned_rate():
-    # review R1: the case-switch heuristic misses some random tokens; pin the rate so it cannot silently get worse
+    # The case-switch heuristic misses some random tokens. Measured on these seeds: about 7-9% of 20-char and
+    # 4-5% of 24-char tokens, under 0.5% of 32-char tokens. The floors pin it so it cannot silently get worse;
+    # tightening the 20-24 char range is tracked in #1604.
     for n, floor in ((20, 0.88), (24, 0.92), (32, 0.99)):
         refused = sum(looks_sensitive("use " + _b62(f"rate-{n}-{i}", n)) for i in range(1000))
         assert refused >= floor * 1000, (n, refused)
 
 
 def test_base64_encoded_32_byte_keys_are_all_refused():
-    # review R2: a key split by two or more '/' into short segments must still be refused
+    # a key split by two or more '/' into short segments must still be refused
     keys = [_b64_key(i) for i in range(500)]
     assert sum(k.count("/") >= 2 for k in keys) >= 20      # the sample really holds multi-'/' keys
     leaked = [k for k in keys if not looks_sensitive("the key is " + k)]
@@ -139,18 +142,18 @@ def test_base64_encoded_32_byte_keys_are_all_refused():
                                   "the webhook secret for prod is " + _hex("w", 40),     # 3 words in between
                                   "use " + _hex("u", 40) + " as the token"])             # credential word after
 def test_snake_case_credential_names_and_a_wider_window_refuse_a_sha_shape(text):
-    # review round 5 R1/R2: '_' separates credential words, and the window spans 4 words before and 3 after
+    # '_' separates credential words, and the window spans 4 words before and 3 after
     assert looks_sensitive(text), text
 
 
 @pytest.mark.parametrize("text", ["api regression since " + _hex("s", 40), "auth bug in " + _hex("b", 40)])
 def test_bare_api_and_auth_do_not_make_a_sha_a_secret(text):
-    # review round 5 R3: "api"/"auth" alone are not credential words
+    # "api"/"auth" alone are not credential words
     assert not looks_sensitive(text), text
 
 
 def test_base64_key_with_plus_and_no_slash_is_refused():
-    # review round 5 R5: the '+'-only base64 branch; both parts are under 20 chars, so _BASE62 cannot catch them
+    # the '+'-only base64 branch; both parts are under 20 chars, so _BASE62 cannot catch them
     key = _b62("p1", 14) + "+" + _b62("p2", 17) + "="
     assert looks_sensitive("use " + key), key
 
@@ -161,7 +164,7 @@ SHA40_DIGIT_RUN = (SHA_WITH_DIGIT_RUN * 3)[:40]
 @pytest.mark.parametrize("text", ["המפתח: 1234567abc", "הסוד שלי הוא 9988776655ff", "הטוקן שלי " + SHA40_DIGIT_RUN,
                                   "אסימון " + SHA40, "ומפתח ה-API שלנו " + SHA40, "השתמש ב-" + SHA40 + " בתור הטוקן"])
 def test_hebrew_credential_words_refuse_a_sha_shape(text):
-    # review round 6 R1: the SHA exemption must not reopen a leak for Hebrew credential phrasing
+    # the SHA exemption must not reopen a leak for Hebrew credential phrasing
     assert looks_sensitive(text), text
 
 
@@ -172,7 +175,7 @@ def test_hebrew_text_without_a_credential_word_keeps_a_sha():
 
 @pytest.mark.parametrize("text", ["המפתחים תיקנו ב-" + SHA40, "סודר בקומיט " + SHA40, "שתיתי סודה, תוקן ב-" + SHA40])
 def test_hebrew_words_that_only_start_like_a_credential_word_keep_a_sha(text):
-    # review round 7 R1: "developers"/"arranged"/"soda" are not credential words
+    # "developers"/"arranged"/"soda" are not credential words
     assert not looks_sensitive(text), text
 
 
@@ -185,5 +188,5 @@ def test_inflected_hebrew_credential_words_still_refuse_a_sha(text):
                                   "see https://github.com/OpenAI/OpenAI-Python/blob/" + SHA40 + "/src/Client2.py",
                                   "https://gitlab.com/MyTeam2024/WebApp3/-/commit/" + SHA40[:12]])
 def test_repo_links_with_a_sha_are_allowed(text):
-    # review of #1581 R1: a URL with mixed-case org/repo names and a SHA goes through the '/' base64 branch
+    # a URL with mixed-case org/repo names and a SHA goes through the '/' base64 branch
     assert not looks_sensitive(text), text

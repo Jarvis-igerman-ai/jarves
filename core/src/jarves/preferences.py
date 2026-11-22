@@ -145,31 +145,24 @@ def _secret_shaped(t: str) -> bool:
 
 
 def _drop_sha(m: re.Match) -> str:
-    """Hide a commit-SHA candidate from the long-number rule, unless a credential word sits near it."""
-    return m.group(0) if _cred_near(m.string, m) else " "
+    """Hide a commit SHA from the long-number rule: only a full 40-char SHA or one named by a hash word, never
+    one with a credential word near it. Other digit-heavy hex ids stay refused by the long-number rule."""
+    t = m.string
+    if _cred_near(t, m):
+        return m.group(0)
+    if len(m.group(0)) == 40 or _HASH_NEAR.search(t[max(0, m.start() - 40):m.start()]):
+        return " "
+    return m.group(0)
 
 
 def looks_sensitive(text: str) -> bool:
     """Refuse credentials, long numbers, health/money words and secret-shaped values (#1482).
 
-    Not caught (known gaps, out of scope for #1482): all-lowercase or all-uppercase letter+digit tokens
-    outside hex/base32, base32 with fewer than two digits 2-7, lowercase base32, and base64url (``-``/``_``)
-    values, unless ``logs.has_secret`` or another rule here matches them (follow-up #1604).
-    Random mixed-case tokens are judged by a heuristic (case switches, distinct characters, vowels), so some slip
-    through: measured on seeded samples, about 7-9% of 20-char and about 4-5% of 24-char base62 tokens, under 0.5%
-    of 32-char tokens and about 0.05% of base64-encoded 32-byte keys. The test pins these rates.
-
-    Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
-    the long-number rule unless a credential word (key, token, secret, password, סיסמה, מפתח, טוקן, סוד, ...; ``_`` separates words, so
-    ``GITHUB_TOKEN=`` counts) sits up to four words before or three words after it, so "my id is 12345678ab" is
-    allowed. A 40-char hex value with such a word near it is refused; "fixed in <sha>, key rotation bug" is
-    therefore refused too (safe side).
-    A hex value of a digest length (32, 40, 64 or 128 chars) is allowed when a hash word (commit, sha256, md5,
-    checksum, digest, hash, rev...) sits within two words before it and no credential word does, so
-    "commit <32 hex>" passes; other 32+ char hex lengths are refused even after a hash word.
-    Identifiers whose words average under three letters (``UserByIdV4Test``) can still be refused as random
-    tokens, and uppercase constants of 16+ chars with two or more digits 2-7 (``AES256GCMENCRYPTION``) can be
-    refused as base32 seeds; both errors are on the safe side.
+    Contract: a git commit SHA (7-40 hex, two or more letters a-f) is allowed when it is exactly 40 chars or a
+    hash word (commit, sha, rev, ...) sits just before it, and no credential word (English or Hebrew) is near it.
+    Any other hex id with a 6+ digit run stays refused by the long-number rule ("my id is 12345678ab").
+    Tradeoff: random mixed-case tokens are judged by a heuristic, so some short ones slip through (rates pinned
+    in test_prefs_secret_shapes_1482.py; gaps tracked in #1604). Errors on identifiers are on the safe side.
     """
     t = text or ""
     # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)
