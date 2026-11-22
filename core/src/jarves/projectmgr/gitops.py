@@ -123,7 +123,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch.
     Other commands the repository's config names (#1390, `_CMD_KEY`: filters, merge/diff drivers, ssh, editors,
     gpg, credential helpers) are replaced through GIT_CONFIG_COUNT (no `key=value` parsing,
-    so any subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`. A config git cannot
+    so any subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`, and
+    `protocol.ext.allow=never` refuses `ext::<command>` remote URLs whatever the shared `protocol.*` keys say. A config git cannot
     read, or a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value), fails the call. KNOWN RESIDUAL (#1390 review R1): the config is read once before the call and git reads it
     again, so an agent that writes a new command key between the two reads can still get it run. Closing that needs
     agents that cannot write the config JARVES reads (separate clones), a separate design."""
@@ -135,7 +136,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
             raise GitError((rd.stderr or "git config could not be read").strip()[:300])
         return rd
     try:
-        over = config_overrides(rd.stdout)
+        over = [("protocol.ext.allow", "never"), *config_overrides(rd.stdout)]      # `ext::<command>` URLs
     except ValueError as e:
         if check:
             raise GitError(str(e)) from None

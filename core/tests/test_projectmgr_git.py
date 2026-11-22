@@ -317,7 +317,8 @@ def test_a_required_shared_filter_fails_closed(owner_home, tmp_path):
 
 
 def test_shared_config_transport_programs_never_run(owner_home, tmp_path):
-    """#1390 (and review R3: any subcommand): `core.sshCommand` and `core.gitProxy` from the shared config never run;
+    """#1390 (and review R3: any subcommand): `core.sshCommand`, `core.gitProxy` and an `ext::` URL with
+    `protocol.ext.allow=always` from the shared config never run;
     a shared `remote.<x>.receivepack`/`uploadpack` (git uses the first value, so no override wins) stops the call."""
     repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
     bare = tmp_path / "origin.git"
@@ -328,6 +329,9 @@ def test_shared_config_transport_programs_never_run(owner_home, tmp_path):
     assert gitops.git(bare, "rev-parse", "main").stdout.strip() == gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
     for url in ("ssh://127.0.0.1:1/x", "git://127.0.0.1:1/x"):                 # nothing listens on port 1
         assert gitops.git(repo, "ls-remote", url, check=False, timeout=30).returncode != 0
+    _cfg(repo, "remote.x.url", f"ext::{evil} %S", "protocol.ext.allow", "always", "protocol.allow", "always")
+    p = gitops.git(repo, "push", "--no-verify", "x", "main:main", check=False, ident=False)   # PR #1520 review R2
+    assert p.returncode != 0 and "ext" in p.stderr
     for key, argv in (("remote.origin.receivepack", ("push", "origin", "main:x")), ("remote.origin.uploadpack",
                                                                                    ("remote", "update"))):
         _cfg(repo, key, evil)
