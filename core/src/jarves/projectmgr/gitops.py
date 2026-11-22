@@ -283,7 +283,10 @@ def retire_worktree(repo: str, wt: Path, branch: str, tip: str) -> str:
             return "moved"
         if tracked_dirty(wt, tip):
             return "dirty"
-        if untracked(wt):
+        try:
+            if untracked(wt):
+                return "kept"
+        except GitError:                                # a failed read keeps the folder, like tracked_dirty (#1601 R3)
             return "kept"
         if git(repo, "worktree", "remove", str(wt), check=False).returncode != 0:    # never --force: git refuses
             return "cleanup_failed"

@@ -1794,7 +1794,7 @@ def test_a_folder_git_cannot_remove_after_the_merge_ends_done_not_moved(env, mon
     monkeypatch.setattr(gitops, "git", real)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "done", (t["status"], t["reason"], t["waiting"])
-    assert any(e["kind"] == "cleanup_failed" for e in m.db.events(t["id"], 40))
+    assert any(e["kind"] == "cleanup_failed" and "submodule" in e["text"] for e in m.db.events(t["id"], 40))
     assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
 
 
@@ -1840,3 +1840,45 @@ def test_an_owner_merge_whose_folder_removal_stops_partway_never_commits_the_del
     integ = gitops.project_root(home, 1) / "integration"
     assert t["status"] == "done", (t["status"], t["waiting"], t["reason"])
     assert (integ / "a.txt").exists() and "edit after the approval" not in sh(integ, "git", "log", "--format=%s")
+
+
+def test_an_owner_merge_edited_after_landing_names_the_merged_commit(env, monkeypatch):
+    """JAR-678 (#1601 review R1): a tracked edit after the fast-forward re-asked as if nothing had landed. The
+    merged commit is recorded and the new question names it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real, seen = gitops.fast_forward, []
+
+    def late(integ, sha):
+        r = real(integ, sha)
+        (wt / "a.txt").write_text("later\n")
+        seen.append(sha)
+        return r
+    monkeypatch.setattr(gitops, "fast_forward", late)
+    finish(m)
+    monkeypatch.setattr(gitops, "fast_forward", real)
+    t = m.db.by_seq(1, 1)
+    assert seen and f"commit {seen[0][:12]} of task #1 is already merged" in t["waiting"], t["waiting"]
+    assert any(e["kind"] == "merged" and seen[0][:12] in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_a_failed_untracked_read_after_the_merge_keeps_the_folder_and_ends_done(env, monkeypatch):
+    """JAR-678 (#1601 review R3): `ls-files --others` failing after the fast-forward raised GitError, so a merge
+    that landed read as "merge failed". It ends done and the folder is kept."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    real = gitops.git
+
+    def broken(cwd, *a, **kw):
+        if a[:2] == ("ls-files", "--others"):
+            raise gitops.GitError("boom")                       # what git(check=True) raises on a failed read
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", broken)
+    finish(m)
+    monkeypatch.setattr(gitops, "git", real)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"])
+    assert any(e["kind"] == "folder_kept" and "could not list" in e["text"] for e in m.db.events(t["id"], 40))

@@ -576,6 +576,7 @@ class StageEngine:
         wt, br = Path(t["worktree"]), t["branch"]
         base = gitops.integration_branch(p["id"])
         has_check = any(s["kind"] in ("test", "verify") and not s.get("skip") for s in stages) and p["check_cmd"]
+        tip = ""
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
@@ -610,14 +611,19 @@ class StageEngine:
                 # ever deleted by force. A later commit, edit or new file is kept (#1601 review).
                 why = gitops.retire_worktree(p["path"], wt, br, tip)
                 if why in ("kept", "cleanup_failed"):       # merged; the folder stays: never re-ask or commit it
-                    files = sorted(gitops.untracked(wt))[:5] if why == "kept" else []
+                    try:
+                        files = sorted(gitops.untracked(wt))[:5] if why == "kept" else []
+                    except gitops.GitError:                 # the list failed after the merge landed (#1601 R3)
+                        files = ["(git could not list them)"]
                     self.db.event(t["id"], "manager", "folder_kept" if files else "cleanup_failed",
                                   f"merged commit {tip[:12]}; the task folder {wt} (branch {br}) was kept" +
                                   (f": it has files that were not merged ({', '.join(files)})" if files else
-                                   ": git could not remove it") + "; remove it yourself when done")
+                                   ": git could not remove it (a locked file or an initialised submodule)") +
+                                  "; remove it yourself when done")
                 elif why:
-                    if approved and wt.exists():
-                        return self._repark_merge(t)
+                    if approved and wt.exists():            # `tip` already landed: say so before asking (#1601 R1)
+                        self.db.event(t["id"], "manager", "merged", f"merged commit {tip[:12]} into {base}")
+                        return self._repark_merge(t, merged=tip)
                     what = "branch moved" if why == "moved" else "folder changed"
                     return ("stop", "blocked", f"the task {what} during the merge; merged commit {tip[:12]}, "
                                                f"later work kept in {wt if wt.exists() else 'branch ' + br}")
@@ -681,14 +687,18 @@ class StageEngine:
         tree = gitops.git(wt, "rev-parse", "--verify", f"{merged}^{{tree}}", check=False).stdout.strip()
         return want.returncode == 0 and bool(tree) and want.stdout.split()[:1] == [tree]
 
-    def _repark_merge(self, t):
-        """The task changed after your approval (#1407): commit any edits, then ask again naming that exact commit."""
+    def _repark_merge(self, t, merged: str = ""):
+        """The task changed after your approval (#1407): commit any edits, then ask again naming that exact commit.
+        merged: a commit of this task that already landed; the question names it so a reject is not misread."""
         try:
             gitops.commit_all(Path(t["worktree"]), f"task {t['seq']}: edit after the approval"[:120])
             head = gitops.commit_of(t["worktree"], "HEAD")
         except (gitops.GitError, OSError) as e:
             return ("stop", "failed", f"git failed: {clean(e, 200)}")
         self._set_job(t, shown=head)
+        if merged:
+            return ("park", f"commit {merged[:12]} of task #{t['seq']} is already merged; the code changed after "
+                            f"your approval: approve merging the later edit (now commit {head[:12]})")
         return ("park", f"the code changed after your approval: approve merging task #{t['seq']} (now commit "
                         f"{head[:12]}) again")
 

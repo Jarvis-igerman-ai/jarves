@@ -540,3 +540,19 @@ def test_a_submodule_replaced_by_a_file_is_committed(tmp_path):
     (repo / "lib").write_text("plain", encoding="utf-8")
     assert gitops.commit_all(repo, "file")
     assert gitops.git(repo, "ls-tree", "HEAD", "lib").stdout.split()[:2] == ["100644", "blob"]
+
+
+def test_a_failed_untracked_read_keeps_the_folder(tmp_path, monkeypatch):
+    """JAR-678 (#1601 review R3): a failing `ls-files --others` raised after the merge landed; it now fails closed."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "1" / "t1"
+    gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
+    real = gitops.git
+
+    def broken(cwd, *a, **kw):
+        if a[:2] == ("ls-files", "--others"):
+            raise gitops.GitError("boom")                       # what git(check=True) raises on a failed read
+        return real(cwd, *a, **kw)
+    monkeypatch.setattr(gitops, "git", broken)
+    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD")) == "kept"
+    assert wt.exists()
