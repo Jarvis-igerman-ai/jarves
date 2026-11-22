@@ -23,8 +23,11 @@ def prefs(home):
     return p, item["id"], item["updated"]
 
 
+A, B = "Play jazz while cooking", "Play loud metal while cooking"
+
+
 def _edit_to_b(p, pid):
-    p.edit(pid, "Play loud metal while cooking", by="voice", repropose=True)
+    p.edit(pid, B, by="voice", repropose=True)
 
 
 def test_store_confirm_with_the_old_version_after_an_edit_stays_proposed(prefs):
@@ -40,11 +43,12 @@ def test_store_confirm_with_the_old_version_after_an_edit_stays_proposed(prefs):
 def test_phone_confirm_needs_the_shown_version(prefs, home):
     p, pid, shown = prefs
     mob = SimpleNamespace(bridge=None, _prefs=p, home=home)
-    assert mobile_prefs.action(mob, {"op": "confirm", "pref": pid}, "dev")[0] == 400        # no version: refused
-    _edit_to_b(p, pid)
-    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "updated": shown}, "dev")
+    assert mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A, "updated": "x"}, "dev")[0] == 400
+    p.edit(pid, A, by="voice")                            # an A -> A rewrite: same words, newer version (#206 H2 can't see it)
+    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A, "updated": shown}, "dev")
     assert st == 409 and body["code"] == "PREF_CHANGED" and p.get(pid)["state"] == "proposed"
-    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "updated": p.get(pid)["updated"]}, "dev")
+    _edit_to_b(p, pid)
+    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": B, "updated": p.get(pid)["updated"]}, "dev")
     assert st == 200 and body["state"] == "confirmed"
 
 
@@ -102,12 +106,12 @@ def test_voice_confirm_without_an_approval_popup_fails_closed(prefs):
 
 
 def test_phone_errors_tell_an_old_page_to_reload_in_both_languages(prefs, home):
-    p, pid, shown = prefs                                 # review R4/R5
+    p, pid, shown = prefs                                 # review R4/R5; a page without the words: #206 H2's reload answer
     mob = SimpleNamespace(bridge=None, _prefs=p, home=home)
     st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid}, "dev")
-    assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and "reload" in body["error"]
+    assert st == 400 and body["code"] == "PREF_TEXT_REQUIRED" and "reload" in body["error"]
     _edit_to_b(p, pid)
-    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "updated": shown}, "dev")
+    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": B, "updated": shown}, "dev")
     assert st == 409 and body["error_he"]
 
 

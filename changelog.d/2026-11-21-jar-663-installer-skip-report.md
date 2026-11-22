@@ -1,0 +1,1 @@
+- Added: report on why the Windows installer job was skipped on PRs #1424, #1387, #1344 and #1336 (their CI test merge used a main from before the JAR-584 installer rule), with what each PR still needs (JAR-624, JAR-663).

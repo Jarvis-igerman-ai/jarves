@@ -69,13 +69,17 @@ def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+class PrefConflict(RuntimeError):
+    """#206 H2: the item changed while it was being edited or confirmed; nothing was written, the caller may retry."""
+
+
 # #1514: a page cached from before the version guard confirms without `updated`; it is told to reload, never confirmed
 OLD_PAGE = {"error": "this page is out of date: reload it, then confirm again", "code": "PREF_PAGE_OLD",
             "error_he": "העמוד הזה ישן: רעננו אותו ואשרו שוב"}
 CHANGED_HE = "ההעדפה השתנתה מאז שהוצגה: רעננו כדי לראות את הנוסח החדש"
 
 
-class PrefChanged(ValueError):
+class PrefChanged(PrefConflict):
     """The item changed after the owner was shown it (#1514): the confirm is refused, the page reloads."""
     code = "PREF_CHANGED"
 
@@ -127,9 +131,10 @@ class Preferences:
             r["status"] = "confirmed"
         return r
 
-    def confirm(self, pid: int, *, by: str = "user", shown: float | None = None) -> dict:
-        """`shown` (#1514): the `updated` version of the wording the owner was shown. When given, the UPDATE only lands
-        if the item is still that version; an edit in between raises PrefChanged and nothing is confirmed."""
+    def confirm(self, pid: int, *, by: str = "user", shown: float | None = None, expect: str | None = None) -> dict:
+        """`expect` (#206 H2): the words the owner saw; `shown` (#1514): the `updated` version of that wording. Each guard
+        given is part of the same UPDATE, so a confirm read before an edit but landing after it leaves the new words
+        proposed: PrefChanged for a stale version, PrefConflict for stale words."""
         r = self.get(pid)
         if not r:
             raise KeyError(pid)
@@ -137,11 +142,17 @@ class Preferences:
         sql, args = "UPDATE learned_prefs SET state='confirmed', confirmed_at=?, " + _BUMP + " WHERE id=?", [now, now, pid]
         if shown is not None:
             sql, args = sql + " AND updated=?", args + [float(shown)]
+        if expect is not None:
+            sql, args = sql + " AND norm=?", args + [normalize(_clean(expect, MAX_TEXT))]
         if not self.db.x(sql, tuple(args)).rowcount:
             if not self.db.row("SELECT id FROM learned_prefs WHERE id=?", (pid,)):
                 raise KeyError(pid)                           # removed after get(): gone, not "changed"
-            logs.info("prefs", "PREF_CHANGED", "confirm refused: the preference changed after it was shown", id=pid, by=by)
-            raise PrefChanged("this preference changed after it was shown: reload to see the new wording")
+            if shown is not None:
+                logs.info("prefs", "PREF_CHANGED", "confirm refused: the preference changed after it was shown", id=pid, by=by)
+                raise PrefChanged("this preference changed after it was shown: reload to see the new wording")
+            logs.warn("prefs", "PREF_CONFIRM_STALE", "confirm for words that were changed meanwhile: not applied",
+                      id=pid, by=by)
+            raise PrefConflict(pid)
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
@@ -170,15 +181,32 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        now = self.clock()
-        if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, " + _BUMP + " WHERE id=?",
-                      (t, norm, now, pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
-            return self._view(self.get(pid))
-        self.db.x("UPDATE learned_prefs SET text=?, norm=?, " + _BUMP + " WHERE id=?", (t, norm, now, pid))
+        if repropose:          # #206 H2: guarded writes, so a confirm racing this edit cannot keep the new words confirmed
+            for _ in range(3):
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, " + _BUMP + " "
+                             "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
+                              id=pid, by=by)
+                    return self._written(pid)
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, " + _BUMP + " WHERE id=? AND state<>'confirmed'",
+                             (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+                    return self._written(pid)
+            if not self.get(pid):
+                raise KeyError(pid)            # removed meanwhile: nothing written
+            logs.warn("prefs", "PREF_EDIT_CONFLICT", "the preference kept changing during the edit: nothing written",
+                      id=pid, by=by)
+            raise PrefConflict(pid)
+        self.db.x("UPDATE learned_prefs SET text=?, norm=?, " + _BUMP + " WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
+
+    def _written(self, pid: int) -> dict:
+        """The view of a row just written; removed right after the write: KeyError (the route answers 404), never a 500."""
+        row = self.get(pid)
+        if not row:
+            raise KeyError(pid)
+        return self._view(row)
 
     def remove(self, pid: int, *, by: str = "user") -> bool:
         n = self.db.x("DELETE FROM learned_prefs WHERE id=?", (pid,)).rowcount
@@ -338,6 +366,8 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "updated; it needs the owner's confirmation again before it is remembered", {"item": prefs.edit(a.id, a.text, by="voice", repropose=True)})
                 except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except PrefConflict:
+                    return ToolResult(False, "it changed meanwhile: try again", code="PREF_CONFLICT")
                 except ValueError as e:
                     return ToolResult(False, str(e), code="PREF_REFUSED")
 

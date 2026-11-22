@@ -59,25 +59,27 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         pid = int(d.get("pref", 0))
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
-    from .preferences import CHANGED_HE, OLD_PAGE, PrefChanged, shown_version
     p = store(mob)
+    from .preferences import CHANGED_HE, PrefChanged, PrefConflict, shown_version   # lazy, like store()
     if not p.get(pid):
         return 404, {"error": "no such preference"}
     by = "phone"
     try:
         # answers hold ids and counts only: the command ledger stores them, and text must not rest there (privacy)
         if op == "confirm":
-            if "updated" not in d:
-                return 400, dict(OLD_PAGE)
-            r = p.confirm(pid, by=by, shown=shown_version(d.get("updated")))
+            seen = d.get("text")                              # #206 H2: confirm only the words the phone showed
+            if not isinstance(seen, str) or not seen.strip():
+                return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
+            shown = shown_version(d["updated"]) if "updated" in d else None   # #1514: also the version, when the page sends it
+            r = p.confirm(pid, by=by, expect=seen[:400], shown=shown)
             return 200, {"ok": True, "pref": pid, "state": "confirmed", "conflicts": len(r["conflicts"])}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by=by), "pref": pid}
         if op == "reaffirm":
             return 200, {"ok": p.reaffirm(pid, by=by), "pref": pid}
         if op == "edit":
-            p.edit(pid, str(d.get("text", ""))[:400], by=by)
-            return 200, {"ok": True, "pref": pid}
+            r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: new words need a new confirm
+            return 200, {"ok": True, "pref": pid, "state": r["state"]}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
     except PrefChanged as e:                                  # #1514: edited after the phone showed it
         return 409, {"error": str(e), "error_he": CHANGED_HE, "code": PrefChanged.code}
@@ -85,3 +87,5 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         return 400, {"error": str(e)}
     except KeyError:
         return 404, {"error": "no such preference"}
+    except PrefConflict:                                      # #206 H2: it changed meanwhile (edit or stale confirm); nothing written
+        return 409, {"error": "the preference changed meanwhile: try again", "code": "PREF_CONFLICT"}
