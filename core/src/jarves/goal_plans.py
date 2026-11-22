@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
 
@@ -72,16 +74,42 @@ def _kept(text: object, n: int = EVIDENCE_CHARS) -> str:
     return "" if logs.privacy() else _short(text, n)
 
 
+_CODE = re.compile(r"([A-Z][A-Z_]{0,62}[A-Z])(?::|$)")     # a tool code: X_BROKE, TOOL_TIMEOUT, BUSY
+_NOTE = re.compile(r"(step \d+: )(.*)", re.S)
+
+
+def _code_only(text: object) -> str:
+    """What privacy keeps of a step error: its leading code (`X_BROKE: it broke` -> `X_BROKE`), else ''."""
+    m = _CODE.match(str(text or ""))
+    return m.group(1) if m else ""
+
+
+def _note_code(text: object) -> str:
+    """What privacy keeps of a plan note: `step N: CODE` (as a privacy-on failure writes it), else ''."""
+    m = _NOTE.match(str(text or ""))
+    code = _code_only(m.group(2)) if m else ""
+    return m.group(1) + code if code else ""
+
+
 def scrub_private_text(db) -> int:
-    """Privacy on: blank the tool output text stored earlier (step evidence/error, plan result/note) in ONE
-    transaction; states, statuses and codes stay. Returns the number of rows changed (#1526)."""
+    """Privacy on: blank the tool output text stored earlier in ONE transaction. Step evidence and plan result become
+    '', a step error keeps only its code and a plan note only `step N: CODE`; states and statuses are not touched.
+    Idempotent: a row privacy already wrote is left as it is. Returns the number of rows changed (#1526)."""
     with db._lock:
         cx = db._db
         try:
-            n = cx.execute("UPDATE goal_plan_steps SET evidence='', error='' "
-                           "WHERE COALESCE(evidence,'')<>'' OR COALESCE(error,'')<>''").rowcount
-            n += cx.execute("UPDATE goal_plans SET result='', note='' "
-                            "WHERE COALESCE(result,'')<>'' OR COALESCE(note,'')<>''").rowcount
+            n = 0
+            for r in cx.execute("SELECT id, evidence, error FROM goal_plan_steps "
+                                "WHERE COALESCE(evidence,'')<>'' OR COALESCE(error,'')<>''").fetchall():
+                code = _code_only(r["error"])
+                if r["evidence"] or (r["error"] or "") != code:
+                    n += cx.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?",
+                                    (code, r["id"])).rowcount
+            for r in cx.execute("SELECT id, result, note FROM goal_plans "
+                                "WHERE COALESCE(result,'')<>'' OR COALESCE(note,'')<>''").fetchall():
+                note = _note_code(r["note"])
+                if r["result"] or (r["note"] or "") != note:
+                    n += cx.execute("UPDATE goal_plans SET result='', note=? WHERE id=?", (note, r["id"])).rowcount
             cx.commit()
         except Exception:
             cx.rollback()
@@ -398,12 +426,15 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._private: bool | None = None      # #1526: privacy as last scrubbed (None = not yet: Core start)
+        self._scrub_failed = False
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        self._scrub_on_privacy()
         if not self._on():
             return 0
         n = 0
@@ -412,6 +443,29 @@ class PlanRunner:
                 await self.run_plan(r["id"])
                 n += 1
         return n
+
+    def _scrub_on_privacy(self) -> None:
+        """#1526: the first tick (Core start) and the first tick after privacy turned on (dashboard switch, the
+        full-text window ending by itself, another process) erase older plan text once; off -> nothing."""
+        if not logs.privacy():
+            self._private = False
+            return
+        if self._private:
+            return
+        try:
+            scrub_private_text(self.store.db)
+        except sqlite3.Error as e:                 # rolled back; tried again at the next tick, logged once
+            if not self._scrub_failed:
+                logs.warn("goals", "PLAN_TEXT_SCRUB_FAILED", "could not erase stored plan text: retrying",
+                          error_type=type(e).__name__)
+            self._scrub_failed = True
+            return
+        self._private, self._scrub_failed = True, False
+
+    def _rearm(self) -> None:
+        """Text about to be written with privacy off is erased at the next tick that sees privacy on (#1526)."""
+        if not logs.privacy():
+            self._private = False
 
     async def run(self, poll_s: float = 2.0) -> None:
         while not self._stop:
@@ -528,6 +582,7 @@ class PlanRunner:
             if res.ok:
                 if tool.untrusted_output:
                     st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
+                self._rearm()
                 st.db.x("UPDATE goal_plan_steps SET status='done', finished=?, evidence=?, error='' WHERE id=?",
                         (self.clock(), _kept(res.message), step["id"]))
                 logs.info("goals", "PLAN_STEP_DONE", "plan step done", id=pid, step=step["idx"], tool=step["tool"])
@@ -545,8 +600,8 @@ class PlanRunner:
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
                 self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
                 return st.get(pid)
-            self._fail(pid, step, res.code if logs.privacy() else f"{res.code}: {_short(res.message, 120)}", t0,
-                       evidence=res.message)
+            why = (_code_only(res.code) or "the step failed") if logs.privacy() else f"{res.code}: {_short(res.message, 120)}"
+            self._fail(pid, step, why, t0, evidence=res.message)
             return st.get(pid)
 
     def _block(self, pid: int, step: dict, why: str) -> None:
@@ -554,6 +609,7 @@ class PlanRunner:
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
+        self._rearm()
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",

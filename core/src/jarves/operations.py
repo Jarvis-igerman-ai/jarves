@@ -211,11 +211,7 @@ class Operations:
         self.goals = goals_mod.Goals(self.db)
         self.plans = plans_mod.PlanStore(self.db, known=core.registry.get)
         self.plans.recover()                 # a plan that was running when the Core stopped is paused, never repeated
-        if logs.privacy():                   # #1526: plan text written before privacy was switched on is erased
-            try:
-                plans_mod.scrub_private_text(self.db)
-            except Exception:
-                logs.error("goals", "PLAN_TEXT_SCRUB_FAILED", "could not erase stored plan text", exc=True)
+        # its first tick erases older plan text when privacy is on, and again whenever privacy turns on (#1526)
         self.plan_runner = plans_mod.PlanRunner(self.plans, core.registry, budget=getattr(core, "budget", None),
                                                 features=core.features)
         self._plan_task: asyncio.Task | None = None

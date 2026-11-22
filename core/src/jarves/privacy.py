@@ -82,15 +82,18 @@ def set_full_text(ctx, on: bool) -> dict:
         ctx.cfg.log.privacy = False
         logs.info("privacy", "PRIVACY_FULL_TEXT_ON", "full text switched on for a limited time", hours=logs.FULL_TEXT_HOURS)
     else:
+        was_private = logs.privacy()
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
-        scrub_plans(ctx.home)
+        if not was_private:
+            scrub_plans(ctx.home)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
     return state(ctx)
 
 
 def set_privacy(ctx, on: bool) -> dict:
     """Flip it now (this process + the Core via the flag file) and in config.toml for the next start."""
+    was_private = logs.privacy()
     logs.write_privacy(ctx.home / "logs", on)
     ctx.cfg.log.privacy = bool(on)                  # this dashboard's reads (logs view, tasks, notes) follow at once
     saved, err = True, ""
@@ -98,7 +101,7 @@ def set_privacy(ctx, on: bool) -> dict:
         config_edit.apply(ctx.config_path, {"log.privacy": bool(on)})
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
-    if on:
+    if on and not was_private:                     # #1526: only a real off -> on switch erases plan text
         scrub_plans(ctx.home)
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
