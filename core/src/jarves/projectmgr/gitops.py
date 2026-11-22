@@ -68,6 +68,92 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
+# Config keys whose value git runs as a command (#1390). Keys as `git config --list` prints them: section and name in
+# lower case, a subsection (`filter.<x>.smudge`) as written. Editors are fixed by GIT_EDITOR below, pagers by --no-pager.
+_RUNS = re.compile(r"(?:filter\..+\.(?:clean|smudge|process)|merge\..+\.driver|diff\..+\.(?:command|textconv)"
+                   r"|diff\.external|core\.(?:sshcommand|askpass|gitproxy|pager|alternaterefscommand)"
+                   r"|gpg\.(?:program|.+\.program|ssh\.defaultkeycommand)|credential\.(?:.+\.)?helper"
+                   r"|remote\..+\.(?:receivepack|uploadpack|vcs)|trailer\..+\.(?:cmd|command))", re.S)
+_HOOK = re.compile(r"hook\.(.+)\.(?:command|event)", re.S)
+# what git uses when nothing is set; an empty value would make these fail instead (only when the shared config set
+# them and the owner's own config does not)
+_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+             "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh"}
+_PACK_DEFAULT = {"receivepack": "git-receive-pack", "uploadpack": "git-upload-pack"}
+TRUSTED_SCOPES = ("system", "global")       # the owner's own files; `local`/`worktree` live in the shared .git
+# an include whose condition depends on the branch or the git dir can match in a child git (worktree add checks out
+# inside the new worktree, on the task branch) but not in the read in `cwd`, so its keys would never be undone (R1)
+_COND_INCLUDE = re.compile(r"includeif\.(?:onbranch|gitdir|gitdir/i):.*\.path", re.S)
+
+
+def _refusal(entries: list[tuple[str, str, str]]) -> str:
+    """Why the overrides cannot be trusted for this config, naming the keys; '' when they can (fail closed)."""
+    cond = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _COND_INCLUDE.fullmatch(k)})
+    if cond:
+        return f"the shared repository config has a conditional include ({', '.join(cond)[:200]})"
+    # a reset can only name a key that decoded losslessly: a key with a non-UTF-8 byte would be reset under other
+    # bytes and git would still run it (R1, round 2)
+    bad = sorted({k for _, k, _ in entries if "\ufffd" in k})
+    return f"a git config key is not valid UTF-8 ({', '.join(bad)[:200]})" if bad else ""
+
+
+def _reset_keys(entries: list[tuple[str, str, str]]) -> set[str]:
+    return {k for k, v in config_overrides(entries) if v == ""} | {f"refusal:{_refusal(entries)}"} - {"refusal:"}
+
+
+# subcommands that run no command a config names (no index refresh, filter, driver, helper or hook): they skip both
+# config reads, so most projectmgr calls (rev-parse) cost one git process instead of three (R3)
+_INERT = ("rev-parse", "rev-list", "merge-base")
+FIXED_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"}   # ":" = no editor at all
+
+
+def _config_entries(cwd: str | Path, timeout: float) -> list[tuple[str, str, str]] | subprocess.CompletedProcess:
+    """(scope, key, value) of the effective config, includes followed; the failed run when git cannot read it.
+    Reading config runs no command."""
+    p = subprocess.run(["git", "--no-pager", "config", "--show-scope", "-z", "--list"], cwd=str(cwd),
+                       capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
+                       env=child_env(FIXED_ENV), encoding="utf-8", errors="replace")
+    if p.returncode != 0:
+        return p
+    parts, out = (p.stdout or "").split("\0"), []
+    for i in range(0, len(parts) - 1, 2):
+        key, _, value = parts[i + 1].partition("\n")
+        out.append((parts[i], key, value))
+    return out
+
+
+def config_overrides(entries: list[tuple[str, str, str]]) -> list[tuple[str, str]]:
+    """Command-scope settings that undo every command the repository's shared config names (#1390). An agent can
+    write `.git/config` (and any file it includes), so a filter, merge driver, diff command, credential helper, ssh
+    command or gpg program set there must never run under JARVES. Each such key is reset to empty (no filter, no
+    driver, an empty helper list), then the owner's own system/global values for it come back in order, so LFS from
+    the global config, the owner's credential manager and signing keep working. Config-defined hooks
+    (`hook.<name>.command`, which `core.hooksPath` does not stop) lose all events in every scope, like file hooks."""
+    untrusted = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)})
+    trusted = [(k, v) for s, k, v in entries if s in TRUSTED_SCOPES and _RUNS.fullmatch(k)]
+    out: list[tuple[str, str]] = []
+    for k in untrusted:
+        out.append((k, ""))
+        if k.startswith("credential."):
+            continue                    # helper lists: handled once below
+        own = [(k2, v) for k2, v in trusted if k2 == k]
+        default = _DEFAULTS.get(k) or (_PACK_DEFAULT.get(k.rsplit(".", 1)[-1]) if k.startswith("remote.") else None)
+        out += own or ([(k, default)] if default else [])
+    if any(k.startswith("credential.") for k in untrusted):
+        # helpers are a list per request URL: the generic empty value clears it for every URL, then every owner helper
+        # comes back under its own key in order, so each one that matches runs once, whatever URL key it uses (R2)
+        out += [("credential.helper", "")] + [(k, v) for k, v in trusted if k.startswith("credential.")]
+    hooks = sorted({m.group(1) for _, k, _ in entries if (m := _HOOK.fullmatch(k))})
+    return out + [(f"hook.{name}.event", "") for name in hooks]
+
+
+def _override_env(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    """GIT_CONFIG_COUNT/KEY_n/VALUE_n instead of `-c`: a subsection name may hold `=`, which `-c` would split."""
+    env = {"GIT_CONFIG_COUNT": str(len(pairs))}
+    for i, (k, v) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    return env
+
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
@@ -76,16 +162,44 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
+    config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, trailer commands,
+    config hooks, `ext::` remotes, editors and pagers. rev-parse/rev-list/merge-base (_INERT) run none of these and
+    skip both config reads. Submodules never recurse (their config in `.git/modules` is never read)
+    and a branch- or gitdir-conditional include or a key that is not UTF-8 stops the command (fail closed). No
+    fetch/push recurses into submodules and no local (file) remote is reached: its receive-pack and hooks would run
+    without these overrides, so a push to an `origin` that is a folder fails (no JARVES flow uses one). Limit (not prevention): the config is read just before the command, so a key an agent
+    adds between that read and the command is not undone and may run. It is read again after the command, and the
+    call fails with the key's name only when that key is still present then; a writer that adds the key and removes
+    it again between the two reads is not caught (#1390 residual). When this after-read fails the call, the
+    command has already run, so its effects stay (e.g. a registered worktree); callers never run git with a `cwd`
+    the command deletes (remove_worktree runs in the repo, not in the worktree)."""
+    pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
+           "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]
+    inert = bool(args) and args[0] in _INERT
+    entries = [] if inert else _config_entries(cwd, timeout)
+    if isinstance(entries, subprocess.CompletedProcess):     # unreadable config: fail closed, the command never runs
+        if check:
+            raise GitError((entries.stderr or "git config could not be read").strip()[:300])
+        return entries
+    if why := _refusal(entries):        # a child git could read keys this read never saw: fail closed
+        if check:
+            raise GitError(f"refusing to run git: {why}")
+        return subprocess.CompletedProcess(["git", *args], 1, "", f"refusing to run git: {why}")
+    env = child_env({**FIXED_ENV, **_override_env(config_overrides(entries))})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
+    after = entries if inert else _config_entries(cwd, timeout)     # detect a command key added while it ran
+    new = (sorted(_reset_keys(after) - _reset_keys(entries)) if isinstance(after, list)
+           else ["(config could not be read again)"])
+    if new:
+        p = subprocess.CompletedProcess(p.args, p.returncode or 1, p.stdout,
+                                        f"the shared git config changed while git ran: {', '.join(new)[:240]}")
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -114,6 +228,13 @@ def task_branch(pid: int, seq: int, attempt: int) -> str:
     return f"jarves/p{pid}/t{seq}-a{attempt}"
 
 
+def _add_worktree(repo: str, wt: Path, *args: str) -> None:
+    """`worktree add` would check out in a child git whose config JARVES never read (R1, #1390): add it empty, then
+    check it out with a separate call from inside the new worktree, whose own config is read first."""
+    git(repo, "worktree", "add", "--no-checkout", *args)
+    git(wt, "reset", "-q", "--hard")
+
+
 def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     """The integration worktree, created from `base` (default: the repo's current HEAD) once."""
     wt = project_root(home, pid) / "integration"
@@ -124,9 +245,9 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     start = base or "HEAD"
     with _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
-            git(repo, "worktree", "add", str(wt), br)
+            _add_worktree(repo, wt, str(wt), br)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start)
+            _add_worktree(repo, wt, "-b", br, str(wt), start)
     return wt
 
 
@@ -137,7 +258,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        _add_worktree(repo, wt, "-b", br, str(wt), integration_branch(pid))
     return wt, br
 
 
@@ -147,7 +268,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "--detach", str(wt), sha)
+        _add_worktree(repo, wt, "--detach", str(wt), sha)
     return wt
 
 

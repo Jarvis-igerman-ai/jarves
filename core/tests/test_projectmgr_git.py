@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if argv[1:4] == ["--no-pager", "config", "--show-scope"]:    # the config read before every command (#1390)
+            return subprocess.CompletedProcess(argv, 0, "", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
