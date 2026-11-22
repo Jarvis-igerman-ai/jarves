@@ -94,9 +94,16 @@ class Runner:
     def parse(self, stdout: str, rc: int) -> Result:
         raise NotImplementedError
 
-    def run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
-            check_argv: list[str] | None = None, timeout: float = 1800, on_start=None, cancel: threading.Event | None = None,
-            team: bool = False) -> Result:
+    def run(self, prompt: str, cwd: str, **kw) -> Result:
+        """One agent run. An agent that changed the repository's shared git files fails; they are put back (#1533)."""
+        with gitops.shared_config_guard(cwd) as changed:
+            r = self._run(prompt, cwd, **kw)
+        return Result(error="the agent " + gitops.tamper_text(changed), session_id=r.session_id, cost_usd=r.cost_usd,
+                      tokens=r.tokens) if changed else r
+
+    def _run(self, prompt: str, cwd: str, *, model: str = "", resume: str = "", read_only: bool = False,
+             check_argv: list[str] | None = None, timeout: float = 1800, on_start=None,
+             cancel: threading.Event | None = None, team: bool = False) -> Result:
         try:
             spec = self.build(prompt, cwd, model=model, resume=resume, read_only=read_only, check_argv=check_argv,
                               team=team)
@@ -169,6 +176,17 @@ def _tools(read_only: bool, check_argv: list[str] | None, team: bool = False) ->
     return t
 
 
+def _shared_git_deny(cwd: str) -> list[str]:
+    """#1533: the repository's common git folder lies outside the task worktree; no edit there, by absolute path
+    (Claude Code's `//path` form; a Windows drive `C:` becomes `/c`). Live enforcement is UNVERIFIED."""
+    common = gitops.common_dir(cwd)
+    if common is None:
+        return []
+    p = common.as_posix()
+    p = "/" + p[0].lower() + p[2:] if p[1:2] == ":" else p
+    return [f"Edit(/{p}/**)", f"Write(/{p}/**)"]
+
+
 class ClaudeRunner(Runner):
     name = "claude"
     install_hint = "install Claude Code and sign in (claude)"
@@ -180,7 +198,7 @@ class ClaudeRunner(Runner):
         argv = [*self.command(), "-p", "--output-format", "json", "--permission-mode", "dontAsk",
                 "--permission-prompts", "none", "--setting-sources", "user", "--allowedTools",
                 *_tools(read_only, check_argv, team),
-                "--disallowedTools", *DENY]
+                "--disallowedTools", *DENY, *_shared_git_deny(cwd)]
         if model:
             argv += ["--model", model]
         if resume:

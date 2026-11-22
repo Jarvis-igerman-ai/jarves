@@ -4,11 +4,13 @@ folder). The owner's checkout is never touched: the integration branch `jarves/p
 merges are fast-forward only after the check ran on the merged result. JARVES never pushes."""
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -91,6 +93,91 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     return p
 
 
+# #1533: files in the repository's common git folder that every worktree (and the owner's own checkout) reads. An agent
+# or a check running its code that writes them could make git run a command (filter/merge driver, fsmonitor, hook) for
+# JARVES or later for the owner; no git option skips them. While any agent or check runs in a repository, JARVES keeps
+# ONE baseline of them: a change is put back (unique temp file + os.replace) and fails that run, and commit_all
+# refuses to run git while they differ. A process can still write between JARVES's check and git's own read.
+SHARED_GIT = ("config", "config.worktree", "info/attributes")
+_GUARDS: dict[Path, list] = {}          # common dir -> [active runs, {file: bytes or None (absent)}]
+_GUARD_LOCK = threading.Lock()
+
+
+def common_dir(cwd: str | Path) -> Path | None:
+    """The repository's common git folder; None outside a repository or for a folder that does not exist."""
+    try:
+        p = git(cwd, "rev-parse", "--git-common-dir", check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return (Path(cwd) / p.stdout.strip()).resolve() if p.returncode == 0 and p.stdout.strip() else None
+
+
+def _shared_files(common: Path) -> set[Path]:
+    return {common / n for n in SHARED_GIT} | set(common.glob("worktrees/*/config.worktree"))
+
+
+def _read(f: Path) -> bytes | None:
+    try:
+        return f.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _put_back(f: Path, data: bytes | None) -> None:
+    if data is None:
+        f.unlink(missing_ok=True)
+        return
+    f.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=f".{f.name}.", suffix=".jarves")
+    try:
+        with os.fdopen(fd, "wb") as h:
+            h.write(data)
+        os.replace(tmp, f)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _restore(common: Path) -> list[str]:
+    """Put back every shared file that differs from the baseline; the names that differed."""
+    with _GUARD_LOCK:
+        g = _GUARDS.get(common)
+        if not g:
+            return []
+        changed = []
+        for f in sorted(set(g[1]) | _shared_files(common)):
+            if _read(f) != g[1].get(f):
+                _put_back(f, g[1].get(f))
+                changed.append(f.relative_to(common).as_posix())
+        return changed
+
+
+@contextlib.contextmanager
+def shared_config_guard(cwd: str | Path):
+    """Around an agent run or a check in `cwd`. Yields a list that holds, on exit, the shared files changed meanwhile
+    (already put back). Not a repository: nothing to guard."""
+    common, changed = common_dir(cwd), []
+    if common is not None:
+        with _GUARD_LOCK:
+            g = _GUARDS.setdefault(common, [0, {}])
+            if not g[0]:
+                g[1] = {f: _read(f) for f in _shared_files(common)}
+            g[0] += 1
+    try:
+        yield changed
+    finally:
+        if common is not None:
+            try:
+                changed.extend(_restore(common))
+            finally:
+                with _GUARD_LOCK:
+                    _GUARDS[common][0] -= 1
+
+
+def tamper_text(changed: list[str]) -> str:
+    return f"changed the shared git files ({', '.join(changed[:5])}); JARVES put them back (#1533)"
+
+
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
@@ -165,6 +252,10 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
 
 
 def commit_all(wt: Path, message: str) -> bool:
+    common = common_dir(wt) if _GUARDS else None
+    changed = _restore(common) if common is not None else []
+    if changed:                                     # #1533: git would read them, and may run what they name
+        raise GitError("a running agent or check " + tamper_text(changed))
     git(wt, "add", "-A")
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
@@ -257,12 +348,16 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
-        p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+        with shared_config_guard(wt) as changed:
+            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
+                               creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
+                               stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False, "check timed out"
     except OSError as e:
         return False, f"check could not start: {e}"
+    if changed:
+        return False, "the check " + tamper_text(changed)
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
 
