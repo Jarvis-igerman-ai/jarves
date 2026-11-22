@@ -69,20 +69,83 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+# config keys whose value git runs as a program (#1390), as `git config --list` prints them (section and name in lower
+# case). Set in the repository's own config (which agents can write through the shared `.git`), each one is replaced
+# for the call by the owner's system/global value, a safe default, or "" (git then runs nothing, or fails closed: a
+# `required` filter with no command stops the call). `include.path`/`includeIf` files count as the including scope.
+_CMD_KEY = re.compile(r"filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
+                      r"|diff\.external|core\.(sshcommand|editor|askpass|alternaterefscommand)|sequence\.editor"
+                      r"|gpg\.(.+\.)?program|gpg\.ssh\.defaultkeycommand|hook\..+\.command|trailer\..+\.(cmd|command)"
+                      r"|remote\..+\.(uploadpack|receivepack)")
+_FIRST_WINS = re.compile(r"remote\..+\.(uploadpack|receivepack)")   # git uses the FIRST value: no override can win
+_CRED_KEY = re.compile(r"credential\.(.+\.)?helper")         # a list: an empty value clears it
+_SAFE = {"sshcommand": "ssh"}
+_OWNER_SCOPES = ("system", "global")
+
+
+def _run(cwd: str | Path, argv: list[str], timeout: float, env: dict[str, str],
+         stdin: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                          creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace", input=stdin)
+
+
+def config_overrides(listing: str) -> list[tuple[str, str]]:
+    """(key, value) pairs that neutralise every command key the shared config sets, from the output of
+    `git config --list -z --show-scope`. Pure: no git call. ValueError: a key no override can beat (`_FIRST_WINS`)."""
+    items = listing.split("\0")
+    owner: list[tuple[str, str]] = []
+    shared: list[str] = []
+    for scope, entry in zip(items[0::2], items[1::2]):
+        key, _, value = entry.partition("\n")
+        if scope in _OWNER_SCOPES:
+            owner.append((key, value))
+        elif scope != "command" and (_CMD_KEY.fullmatch(key) or _CRED_KEY.fullmatch(key)):
+            shared.append(key)
+    refused = [k for k in shared if _FIRST_WINS.fullmatch(k)]
+    if refused:
+        raise ValueError(f"the repository's git config names a program JARVES will not run: {refused[0]}")
+    out = []
+    for key in dict.fromkeys(k for k in shared if _CMD_KEY.fullmatch(k)):
+        mine = [v for k, v in owner if k == key]
+        out.append((key, mine[-1] if mine else _SAFE.get(key.rsplit(".", 1)[1], "")))
+    if any(_CRED_KEY.fullmatch(k) for k in shared):               # clear the list, then replay the owner's helpers
+        out += [("credential.helper", "")] + [(k, v) for k, v in owner if _CRED_KEY.fullmatch(k)]
+    return out
+
+
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        stdin: str | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch.
+    Other commands the repository's config names (#1390, `_CMD_KEY`: filters, merge/diff drivers, ssh, editors,
+    gpg, credential helpers) are replaced through GIT_CONFIG_COUNT (no `key=value` parsing,
+    so any subsection name works); GIT_PROXY_COMMAND="" makes git ignore every `core.gitProxy`. A config git cannot
+    read, or a shared `remote.<x>.uploadpack`/`receivepack` (git takes the first value), fails the call. KNOWN RESIDUAL (#1390 review R1): the config is read once before the call and git reads it
+    again, so an agent that writes a new command key between the two reads can still get it run. Closing that needs
+    agents that cannot write the config JARVES reads (separate clones), a separate design."""
+    pre = ["-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    env = child_env({"GIT_TERMINAL_PROMPT": "0", "GIT_PROXY_COMMAND": ""})
+    rd = _run(cwd, [*pre, "config", "--list", "-z", "--show-scope"], timeout, env)
+    if rd.returncode != 0:
+        if check:
+            raise GitError((rd.stderr or "git config could not be read").strip()[:300])
+        return rd
+    try:
+        over = config_overrides(rd.stdout)
+    except ValueError as e:
+        if check:
+            raise GitError(str(e)) from None
+        return subprocess.CompletedProcess(rd.args, 1, "", str(e))
+    env["GIT_CONFIG_COUNT"] = str(len(over))
+    for i, (k, v) in enumerate(over):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    argv = [*(IDENT if ident else []), *pre, *args]
     for attempt in range(LOCK_RETRIES + 1):
-        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+        p = _run(cwd, argv, timeout, env, stdin)
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))

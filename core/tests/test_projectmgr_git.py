@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if "--show-scope" in argv:                     # git()'s config read (#1390): not one of the counted calls
+            return subprocess.CompletedProcess(argv, 0, "", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,105 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+
+@pytest.fixture
+def owner_home(monkeypatch, tmp_path):
+    """#1390 tests: an empty owner HOME (global config) and no system config, so only the test's own config counts."""
+    home = tmp_path / "owner-home"
+    home.mkdir()
+    for k in ("HOME", "XDG_CONFIG_HOME", "USERPROFILE"):
+        monkeypatch.setenv(k, str(home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setattr(gitops, "ENV_KEEP", (*gitops.ENV_KEEP, "GIT_CONFIG_NOSYSTEM"))
+    return home
+
+
+def _cfg(repo: Path, *kv: str) -> None:
+    """What an agent writes into the shared `.git/config` (plain git, not JARVES's helper)."""
+    for i in range(0, len(kv), 2):
+        subprocess.run(["git", "config", "--add", kv[i], kv[i + 1]], cwd=repo, check=True)
+
+
+def _cmd(tmp_path: Path, marker: Path, name: str = "evil") -> str:
+    _hook(tmp_path / "evil-bin", name, marker)
+    return (tmp_path / "evil-bin" / name).as_posix()
+
+
+def test_shared_config_filters_and_merge_drivers_never_run(owner_home, tmp_path):
+    """#1390: a filter (clean on add, smudge on worktree checkout) and a merge driver named in the shared config, also
+    through an `include.path` file and under a subsection name with `=`, never run on JARVES's own git calls."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
+    evil = _cmd(tmp_path, marker)
+    (tmp_path / "inc.cfg").write_text(f"[merge \"m\"]\n\tdriver = {evil}\n", encoding="utf-8")
+    _cfg(repo, "filter.a=b.clean", evil, "filter.a=b.smudge", evil, "include.path", str(tmp_path / "inc.cfg"))
+    (repo / ".gitattributes").write_text("*.txt filter=a=b merge=m\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitattributes"], cwd=repo, check=True)
+    assert marker.exists()                                                     # the setup itself runs the filter
+    marker.unlink()
+    for br, text in (("side", "s\n"), ("main", "m\n")):
+        gitops.git(repo, "checkout", "-q", *(["-b", br] if br == "side" else [br]))
+        (repo / "f.txt").write_text(text, encoding="utf-8")
+        assert gitops.commit_all(repo, br)
+    assert gitops.merge_in(repo, "side") == ["f.txt"]                           # no driver: an ordinary conflict
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    assert (wt / "f.txt").read_text(encoding="utf-8") == "m\n"
+    assert not marker.exists()
+
+
+def test_a_required_shared_filter_fails_closed(owner_home, tmp_path):
+    """#1390: with its command switched off, a `required` filter stops the call instead of skipping the filter."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _cfg(repo, "filter.x.clean", _cmd(tmp_path, marker), "filter.x.required", "true")
+    (repo / ".gitattributes").write_text("*.py filter=x\n", encoding="utf-8")
+    (repo / "a.py").write_text("1\n", encoding="utf-8")
+    with pytest.raises(gitops.GitError):
+        gitops.commit_all(repo, "a")
+    assert not marker.exists()
+
+
+def test_shared_config_transport_programs_never_run(owner_home, tmp_path):
+    """#1390 (and review R3: any subcommand): `core.sshCommand` and `core.gitProxy` from the shared config never run;
+    a shared `remote.<x>.receivepack`/`uploadpack` (git uses the first value, so no override wins) stops the call."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    evil = _cmd(tmp_path, marker)
+    _cfg(repo, "remote.origin.url", str(bare), "core.sshCommand", evil, "core.gitProxy", evil)
+    gitops.git(repo, "push", "--no-verify", "origin", "main:main", ident=False)
+    assert gitops.git(bare, "rev-parse", "main").stdout.strip() == gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    for url in ("ssh://127.0.0.1:1/x", "git://127.0.0.1:1/x"):                 # nothing listens on port 1
+        assert gitops.git(repo, "ls-remote", url, check=False, timeout=30).returncode != 0
+    for key, argv in (("remote.origin.receivepack", ("push", "origin", "main:x")), ("remote.origin.uploadpack",
+                                                                                   ("remote", "update"))):
+        _cfg(repo, key, evil)
+        with pytest.raises(gitops.GitError, match=key):
+            gitops.git(repo, *argv)
+        assert gitops.git(repo, *argv, check=False).returncode == 1
+        subprocess.run(["git", "config", "--unset", key], cwd=repo, check=True)
+    assert not marker.exists()
+
+
+def test_a_shared_credential_helper_never_runs_beside_the_owners(owner_home, tmp_path):
+    """#1390: a repository credential helper (plain or per-URL) is cleared; the owner's global helpers still run."""
+    repo, marker, mine = _repo(tmp_path), tmp_path / "ran.txt", tmp_path / "owner-ran.txt"
+    _cfg(repo, "credential.helper", _cmd(tmp_path, marker), "credential.https://h.helper", _cmd(tmp_path, marker, "e2"))
+    subprocess.run(["git", "config", "--global", "credential.helper", "!" + _cmd(tmp_path, mine, "owner")], check=True)
+    gitops.git(repo, "credential", "fill", stdin="protocol=https\nhost=h\n\n", check=False)    # no prompt: fails
+    assert mine.exists() and not marker.exists()
+
+
+def test_every_command_key_set_in_the_shared_config_gets_a_safe_value():
+    """#1390: the owner's value wins, then a safe default, else ""; owner-only keys are left alone."""
+    listing = "\0".join(["global", "filter.lfs.clean\ngit-lfs clean -- %f", "global", "core.editor\nvim",
+                         "global", "credential.helper\nmanager", "global", "credential.https://o.helper\nx",
+                         "local", "filter.lfs.clean\nevil", "worktree", "merge.m.driver\nevil", "local", "core.editor\ne",
+                         "local", "hook.h.command\nevil", "local",
+                         "core.sshcommand\nevil", "local", "credential.helper\nevil", "command", "diff.d.textconv\nok",
+                         "local", "user.name\nAgent", ""])
+    assert gitops.config_overrides(listing) == [
+        ("filter.lfs.clean", "git-lfs clean -- %f"), ("merge.m.driver", ""), ("core.editor", "vim"),
+        ("hook.h.command", ""), ("core.sshcommand", "ssh"),
+        ("credential.helper", ""), ("credential.helper", "manager"), ("credential.https://o.helper", "x")]
