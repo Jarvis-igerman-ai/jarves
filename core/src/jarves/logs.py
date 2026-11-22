@@ -272,11 +272,19 @@ def field_class(key: object, default: str = CONTENT) -> str:
 # Privacy mode (log.privacy): True = mask user content (what was said/heard/answered); False = full content for
 # development. Credentials (keys, tokens, passwords, cookies) are masked in BOTH modes. Library default: True.
 _privacy = True
+_off_count = 0                        # times privacy was switched off in this process (#1526: no off->on edge is missed)
 
 
 def set_privacy(on: bool) -> None:
-    global _privacy
+    global _privacy, _off_count
+    if not on:
+        _off_count += 1
     _privacy = bool(on)
+
+
+def privacy_off_count() -> int:
+    """How often privacy was set off in this process: an off->on pair between two privacy() reads still counts."""
+    return _off_count
 
 
 def privacy() -> bool:

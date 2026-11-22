@@ -141,6 +141,7 @@ class PlanStore:
         self._ckpt: bool | None = None        # #1526: a WAL truncate is still owed (True: after a VACUUM); None: none
         self._ckpt_warned = False             # PLAN_SCRUB_CHECKPOINT_BUSY once per incident
         self._marked: bool | None = None      # cached: is the _VACUUMED row present (None: unknown)
+        self._offs = logs.privacy_off_count()  # #1526 R3: a privacy-off switch since the last pass is an edge too
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -411,6 +412,8 @@ class PlanStore:
         only once the WAL after a VACUUM is truncated, so a restart with privacy on does not VACUUM again (review R3)."""
         with self.db._lock:
             c = self.db._db
+            if c.in_transaction:          # never commit a caller's pending writes with the marker (review R2): stays owed
+                return False
             wait = c.execute("PRAGMA busy_timeout").fetchone()[0]
             c.execute("PRAGMA busy_timeout=0")      # never wait under the db lock (UserDB waits 5 s): retry next pass
             try:
@@ -440,12 +443,15 @@ class PlanStore:
         Called on EVERY runner pass, so text a step stores while privacy is on (a step that was mid-run when the switch
         flipped) is gone within SCRUB_MIN_S, while an idle pass costs two counter reads instead of a table scan. The
         counters see writes to any memory.db table, so write-triggered rescans are rate-limited (review R6)."""
-        if not logs.privacy():
-            self._seen = None
-            if self._marked is not False:            # privacy off: the next off->on edge must VACUUM again
+        on, offs = logs.privacy(), logs.privacy_off_count()
+        if not on or offs != self._offs:            # privacy off now, or off and back on since the last pass (R3)
+            self._offs, self._seen = offs, None
+            self._ckpt, self._ckpt_warned = None, False   # R1: a truncate owed for an OLDER edge must not mark this one
+            if self._marked is not False:            # the next privacy-on pass must VACUUM again
                 self.db.x("DELETE FROM agent_settings WHERE key=?", (_VACUUMED,))
                 self._marked = False
-            return 0
+            if not on:
+                return 0
         if self._ckpt is not None:
             self._checkpoint()
         if self._seen is not None and (self._version() == self._seen or 0 <= self.mono() - self._scanned < SCRUB_MIN_S):

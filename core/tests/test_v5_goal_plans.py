@@ -750,6 +750,14 @@ async def test_1526_failed_scrub_does_not_stop_plan_execution(env, monkeypatch):
     assert errors == ["PLAN_SCRUB_FAILED", "PLAN_SCRUB_FAILED"]           # passes 1-2 one log, pass 4 one more
 
 
+def _db_holds(env, needle: bytes) -> bool:
+    """review R5: read memory.db and its -wal / -shm by name, so the check cannot pass on the wrong files."""
+    from pathlib import Path
+    main = Path(env.db.path)
+    assert main.is_file() and main.stat().st_size > 0
+    return any(needle in f.read_bytes() for f in (main, Path(f"{main}-wal"), Path(f"{main}-shm")) if f.is_file())
+
+
 async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatch, tmp_path):
     """#1526 council R2: the old text is not left behind in SQLite free pages or the WAL after a scrub."""
     from jarves import logs
@@ -765,8 +773,7 @@ async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatc
     env.store.delete(gone["id"], by="test")                    # review R1: text freed while privacy was still off
     monkeypatch.setattr(logs, "_privacy", True)
     assert env.store.scrub_if_private() > 0
-    files = [f for f in tmp_path.rglob("*") if f.is_file() and ".db" in f.name]
-    assert files and not any(b"QZSECRETQZ" in f.read_bytes() for f in files)
+    assert not _db_holds(env, b"QZSECRETQZ")
 
 
 async def test_1526_busy_wal_is_retried_and_restart_does_not_vacuum_again(env, monkeypatch, tmp_path):
@@ -794,8 +801,7 @@ async def test_1526_busy_wal_is_retried_and_restart_does_not_vacuum_again(env, m
     reader.close()
     env.store.scrub_if_private()
     assert env.store._ckpt is None
-    files = [f for f in tmp_path.rglob("*") if f.is_file() and ".db" in f.name]
-    assert files and not any(b"QZSECRETQZ" in f.read_bytes() for f in files)
+    assert not _db_holds(env, b"QZSECRETQZ")
 
     vacuums = []
     for _ in range(2):
@@ -1028,3 +1034,62 @@ async def test_1526_rescan_reads_only_rows_that_still_hold_text(env, monkeypatch
         c.set_trace_callback(None)
     assert any(q.startswith("SELECT id, evidence") and "error != jv_private_text(error)" in q for q in sql)   # scrub filters in SQL
     assert any(q.startswith("SELECT id, result") and "note != jv_private_note(note)" in q for q in sql)
+
+
+async def test_1526_busy_truncate_from_an_older_edge_does_not_skip_the_next_vacuum(env, monkeypatch):
+    """JAR-701 review R1: a truncate still owed when privacy goes off must not mark the NEXT privacy-on edge as vacuumed:
+    text freed while privacy was off is removed by a VACUUM on that edge."""
+    import sqlite3
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    env.db.x("UPDATE goal_plan_steps SET evidence=? WHERE plan_id=?", ("QZSECRETQZ " * 40, p["id"]))
+    reader = sqlite3.connect(env.db.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT * FROM goal_plan_steps").fetchall()          # the truncate stays busy
+    monkeypatch.setattr(logs, "_privacy", True)
+    assert env.store.scrub_if_private() > 0 and env.store._ckpt is True
+    reader.rollback()
+    reader.close()
+    monkeypatch.setattr(logs, "_privacy", False)
+    env.store.scrub_if_private()
+    gone = env.store.propose("gone", steps(("fake_read", {"text": "QZFREEDQZ " * 40})))
+    env.store.approve(gone["id"])
+    await env.runner.tick()
+    env.store.delete(gone["id"], by="test")                          # freed while privacy is off
+    vacuums = []
+    real = env.store.scrub
+    monkeypatch.setattr(env.store, "scrub", lambda vacuum=False: vacuums.append(vacuum) or real(vacuum=vacuum))
+    monkeypatch.setattr(logs, "_privacy", True)
+    env.store.scrub_if_private()
+    assert vacuums == [True] and env.store._ckpt is None
+    assert not _db_holds(env, b"QZFREEDQZ") and not _db_holds(env, b"QZSECRETQZ")
+
+
+def test_1526_checkpoint_never_commits_a_callers_transaction(env):
+    """JAR-701 review R2: an owed truncate retried while a caller's transaction is open neither writes the marker nor
+    commits the caller's writes; it stays owed."""
+    env.store._ckpt = True
+    env.db._db.execute("INSERT OR REPLACE INTO agent_settings (key, value) VALUES ('t.pending', 'x')")
+    assert env.db._db.in_transaction
+    assert env.store._checkpoint() is False and env.store._ckpt is True and env.db._db.in_transaction
+    env.db._db.rollback()
+    assert env.db.row("SELECT 1 AS x FROM agent_settings WHERE key IN ('t.pending', ?)", (gp._VACUUMED,)) is None
+
+
+def test_1526_privacy_off_and_on_between_two_passes_still_vacuums(env, monkeypatch):
+    """JAR-701 review R3: privacy switched off and back on before the next pass is still an off->on edge."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", True)
+    vacuums = []
+    monkeypatch.setattr(env.store, "scrub", lambda vacuum=False: vacuums.append(vacuum) or 0)
+    env.db.x("INSERT OR REPLACE INTO agent_settings (key, value) VALUES (?, '1')", (gp._VACUUMED,))
+    env.store.scrub_if_private()
+    assert vacuums == [False]
+    logs.set_privacy(False)
+    logs.set_privacy(True)                                             # within one poll: never seen as off
+    env.store.scrub_if_private()
+    assert vacuums == [False, True]
+    assert env.db.row("SELECT 1 AS x FROM agent_settings WHERE key=?", (gp._VACUUMED,)) is None
