@@ -74,29 +74,50 @@ def _kept(text: object, n: int = EVIDENCE_CHARS) -> str:
     return "" if logs.privacy() else _short(text, n)
 
 
-_CODE = re.compile(r"([A-Z][A-Z_]{0,62}[A-Z])(?::|$)")     # a tool code: X_BROKE, TOOL_TIMEOUT, BUSY
+_CODE = re.compile(r"([A-Z][A-Z0-9_]{0,62}[A-Z0-9])(?::|$)")    # a tool code: X_BROKE, TOOL_TIMEOUT, HTTP_404, E2BIG
 _NOTE = re.compile(r"(step \d+: )(.*)", re.S)
+# The runner's and the store's own reasons: fixed text, never tool output, so privacy keeps them (#1526 review).
+# test_privacy_plan_history_1526 checks that every literal reason in this module matches.
+_FIXED = re.compile("|".join((
+    r"tool not available \(switched off or removed\)",
+    r"text written by others was read earlier in this plan: resume to continue",
+    r"the arguments are too long to show in full for your approval; shorten the step",
+    r"the owner did not approve this step",
+    r"no approval was given for this step \(no answer in time or nowhere to ask\)",
+    r"the step timed out(?:: it may already have happened)?",
+    r"the step failed(?: unexpectedly)?",
+    r"time cap of \d+ min reached", r"cost cap of \d+ AI requests reached", r"the daily AI budget is used up",
+    r"paused by the owner", r"cancelled by the owner", r"interrupted by a restart: resume when ready")))
 
 
 def _code_only(text: object) -> str:
-    """What privacy keeps of a step error: its leading code (`X_BROKE: it broke` -> `X_BROKE`), else ''."""
-    m = _CODE.match(str(text or ""))
+    """What privacy keeps of a step error: a fixed reason as it is, else its leading code
+    (`X_BROKE: it broke` -> `X_BROKE`), else ''."""
+    s = str(text or "")
+    if _FIXED.fullmatch(s):
+        return s
+    m = _CODE.match(s)
     return m.group(1) if m else ""
 
 
 def _note_code(text: object) -> str:
-    """What privacy keeps of a plan note: `step N: CODE` (as a privacy-on failure writes it), else ''."""
-    m = _NOTE.match(str(text or ""))
-    code = _code_only(m.group(2)) if m else ""
-    return m.group(1) + code if code else ""
+    """What privacy keeps of a plan note: `step N: ` plus what _code_only keeps, or a fixed plan reason, else ''."""
+    s = str(text or "")
+    m = _NOTE.match(s)
+    if not m:
+        return s if _FIXED.fullmatch(s) else ""
+    kept = _code_only(m.group(2))
+    return m.group(1) + kept if kept else ""
 
 
 def scrub_private_text(db) -> int:
-    """Privacy on: blank the tool output text stored earlier in ONE transaction. Step evidence and plan result become
-    '', a step error keeps only its code and a plan note only `step N: CODE`; states and statuses are not touched.
-    Idempotent: a row privacy already wrote is left as it is. Returns the number of rows changed (#1526)."""
+    """Privacy on: blank the tool output text stored earlier in ONE explicit transaction (BEGIN IMMEDIATE, rolled
+    back on any error). Step evidence and plan result become ''; a step error and a plan note keep only their code or
+    the runner's fixed reason (_code_only / _note_code); states and statuses are not touched. Errors and notes that
+    privacy wrote are left as they are. Returns the number of rows changed (#1526)."""
     with db._lock:
         cx = db._db
+        cx.execute("BEGIN IMMEDIATE")
         try:
             n = 0
             for r in cx.execute("SELECT id, evidence, error FROM goal_plan_steps "

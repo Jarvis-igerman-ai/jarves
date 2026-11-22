@@ -1,5 +1,8 @@
 """Issue #1526: enabling privacy must erase previously stored plan output; codes and states stay."""
+import re
+import sqlite3
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -82,10 +85,9 @@ async def test_privacy_on_new_steps_keep_status_and_codes_only_and_survive_a_scr
         env.store.approve(bad["id"])
         while await env.runner.tick():
             pass
-        for _ in range(2):                                       # as run, then after a Core-start scrub
+        for result in ("1/1 steps done. 1. fake_read: done", ""):     # as run, then after a Core-start scrub
             done, failed = env.store.get(ok["id"]), env.store.get(bad["id"])
-            assert (done["state"], done["steps"][0]["evidence"]) == ("done", "")
-            assert done["result"] in ("1/1 steps done. 1. fake_read: done", "")
+            assert (done["state"], done["steps"][0]["evidence"], done["result"]) == ("done", "", result)
             step = failed["steps"][0]
             assert (failed["state"], step["status"], step["evidence"], step["error"]) == ("failed", "failed", "", "X_BROKE")
             assert failed["note"] == "step 1: X_BROKE"
@@ -94,11 +96,13 @@ async def test_privacy_on_new_steps_keep_status_and_codes_only_and_survive_a_scr
         env.db.close()
 
 
-async def test_end_of_full_text_window_by_itself_scrubs_plan_text_at_the_next_tick(home):
+async def test_end_of_full_text_window_by_itself_scrubs_plan_text_at_the_next_tick(home, monkeypatch):
     from test_v5_goal_plans import Env, steps
     logs.setup(home / "logs", "INFO", console=False, privacy=True)
-    now = [time.time()]
+    now = [1_800_000_000.0]                                      # fixed: logs and privacy both read this clock
     logs._clock = lambda: now[0]
+    monkeypatch.setattr(privacy, "time", SimpleNamespace(time=lambda: now[0], strftime=time.strftime,
+                                                         localtime=time.localtime))
     env = Env(home)
     try:
         privacy.set_full_text(_ctx(home, True), True)
@@ -128,3 +132,57 @@ async def test_core_start_with_privacy_on_scrubs_at_the_first_tick_even_with_pla
         assert _texts(env.db, pid) == SCRUBBED
     finally:
         env.db.close()
+
+
+@pytest.mark.parametrize("error,note", [
+    ("HTTP_404", "step 1: HTTP_404"), ("E2BIG", "step 1: E2BIG"),
+    ("the step failed", "step 1: the step failed"),
+    ("the step timed out: it may already have happened", "step 1: the step timed out: it may already have happened"),
+    ("the owner did not approve this step", "step 1: the owner did not approve this step"),
+    ("", "time cap of 5 min reached"), ("", "cancelled by the owner")])
+def test_scrub_keeps_codes_with_digits_and_the_runners_fixed_reasons(home, error, note):
+    db = open_db(home)
+    try:
+        pid = goal_plans.PlanStore(db).propose("p", [{"tool": "clock", "args": {}, "why": "t"}])["id"]
+        db.x("UPDATE goal_plan_steps SET status='unknown', error=? WHERE plan_id=?", (error, pid))
+        db.x("UPDATE goal_plans SET state='blocked', note=? WHERE id=?", (note, pid))
+        assert goal_plans.scrub_private_text(db) == 0                # what privacy writes is never changed
+        assert _texts(db, pid) == ([("unknown", "", error)], ("blocked", "", note))
+        db.x("UPDATE goal_plan_steps SET error=? WHERE plan_id=?", ((error or "X") + ": private detail", pid))
+        goal_plans.scrub_private_text(db)
+        assert _texts(db, pid)[0] == [("unknown", "", error if _CODE_RE.fullmatch(error or "-") else "")]
+    finally:
+        db.close()
+
+
+_CODE_RE = re.compile(r"[A-Z][A-Z0-9_]*[A-Z0-9]")
+
+
+def test_every_fixed_reason_in_goal_plans_is_kept_by_the_scrub():
+    src = Path(goal_plans.__file__).read_text(encoding="utf-8")
+    found = re.findall(r'(?:_block\(pid, step, |_fail\(pid, step, |_stop_plan\(pid, "blocked", |note=)"([^"{]+)"', src)
+    found += re.findall(r'_stop_plan\(pid, "blocked", f"((?!step )[^"]+)"', src)
+    assert len(found) >= 12
+    for text in found:
+        text = re.sub(r"\{[^}]+\}", "5", text)
+        assert goal_plans._FIXED.fullmatch(text), text
+
+
+def test_a_failing_scrub_rolls_back_every_row(home, monkeypatch):
+    db = open_db(home)
+    try:
+        pid = _seed(db)
+        before = _texts(db, pid)
+        calls = []
+
+        def boom(text):
+            calls.append(text)
+            if len(calls) == 2:                                      # after the first row was already updated
+                raise sqlite3.OperationalError("database is locked")
+            return ""
+        monkeypatch.setattr(goal_plans, "_code_only", boom)
+        with pytest.raises(sqlite3.OperationalError):
+            goal_plans.scrub_private_text(db)
+        assert len(calls) == 2 and _texts(db, pid) == before
+    finally:
+        db.close()
