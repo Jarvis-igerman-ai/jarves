@@ -1339,3 +1339,61 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+
+
+def test_ship_names_and_merges_the_approved_commit_not_the_branch(env):
+    """#1407: the ship plan, approval and merge name the integration commit; a same-named tag cannot supply it and a
+    commit landing on the branch while you approve is not merged."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    br = gitops.integration_branch(1)
+    sha = sh(repo, "git", "rev-parse", f"refs/heads/{br}").strip()
+    sh(repo, "git", "tag", br, "main")                                   # a tag with the branch's name, elsewhere
+    r = m.call("ship_plan", project="demo")
+    assert r["commit"] == sha and all(sha in c for c in r["commands"][:2]) and sha[:12] in r["text"]
+    integ = gitops.project_root(home, 1) / "integration"
+    seen = []
+
+    def ask(prompt, **_):
+        seen.append(prompt)
+        (integ / "late.txt").write_text("not approved\n")
+        gitops.commit_all(integ, "late")
+        return True
+    m._ask = ask
+    assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert sha[:12] in seen[0] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
+def test_owner_merge_prompt_names_the_commit_and_a_later_commit_voids_the_approval(env):
+    """#1407: the review command and the merge prompt name commits, and approving binds the commit you were shown."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"],
+           flow="work review:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    at = sh(repo, "git", "rev-parse", f"refs/heads/{gitops.integration_branch(1)}").strip()[:12]
+    assert t["status"] == "waiting" and f"diff {at}...HEAD" in t["waiting"], t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    wt = Path(t["worktree"])
+    tip = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert f"(commit {tip})" in t["waiting"] and f"(now at {at})" in t["waiting"], t["waiting"]
+    (wt / "t.txt").write_text("unseen\n")
+    gitops.commit_all(wt, "after the prompt")                            # not the commit you were shown
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    later = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert t["status"] == "waiting" and f"(now commit {later})" in t["waiting"], t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done"
+    merged = sh(gitops.project_root(home, 1) / "integration", "git", "rev-parse", "HEAD").strip()[:12]
+    assert any(e["kind"] == "merged" and f"at {merged}:" in e["text"] for e in m.db.events(t["id"], 40))
