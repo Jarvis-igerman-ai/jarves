@@ -57,6 +57,10 @@ def _clean(text: str, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+class PrefConflict(RuntimeError):
+    """#206 H2: the item changed while it was being edited or confirmed; nothing was written, the caller may retry."""
+
+
 class Preferences:
     def __init__(self, db: UserDB, *, clock=time.time) -> None:
         self.db, self.clock = db, clock
@@ -104,11 +108,23 @@ class Preferences:
             r["status"] = "confirmed"
         return r
 
-    def confirm(self, pid: int, *, by: str = "user") -> dict:
+    def confirm(self, pid: int, *, by: str = "user", expect: str | None = None) -> dict:
+        """`expect` (#206 H2): the words the owner saw. The confirm applies only while the item still has those words,
+        in the same guarded UPDATE, so a confirm for old words that lands after an edit leaves the new words proposed."""
         r = self.get(pid)
         if not r:
             raise KeyError(pid)
         now = self.clock()
+        if expect is not None:
+            if not self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=? AND norm=?",
+                             (now, now, pid, normalize(_clean(expect, MAX_TEXT)))).rowcount:
+                if not self.get(pid):
+                    raise KeyError(pid)
+                logs.warn("prefs", "PREF_CONFIRM_STALE", "confirm for words that were changed meanwhile: not applied",
+                          id=pid, by=by)
+                raise PrefConflict(pid)
+            logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
+            return {"item": self._written(pid), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
         self.db.x("UPDATE learned_prefs SET state='confirmed', confirmed_at=?, updated=? WHERE id=?", (now, now, pid))
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
         return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
@@ -138,14 +154,32 @@ class Preferences:
         cur = self.get(pid)
         if not cur:
             raise KeyError(pid)
-        if repropose and cur["state"] == "confirmed":
-            self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? WHERE id=?",
-                      (t, norm, self.clock(), pid))
-            logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm", id=pid, by=by)
-            return self._view(self.get(pid))
+        if repropose:          # #206 H2: guarded writes, so a confirm racing this edit cannot keep the new words confirmed
+            for _ in range(3):
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, state='proposed', confirmed_at=0, updated=? "
+                             "WHERE id=? AND state='confirmed'", (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_REPROPOSED", "a confirmed preference was reworded: it needs a new confirm",
+                              id=pid, by=by)
+                    return self._written(pid)
+                if self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=? AND state<>'confirmed'",
+                             (t, norm, self.clock(), pid)).rowcount:
+                    logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
+                    return self._written(pid)
+            if not self.get(pid):
+                raise KeyError(pid)            # removed meanwhile: nothing written
+            logs.warn("prefs", "PREF_EDIT_CONFLICT", "the preference kept changing during the edit: nothing written",
+                      id=pid, by=by)
+            raise PrefConflict(pid)
         self.db.x("UPDATE learned_prefs SET text=?, norm=?, updated=? WHERE id=?", (t, norm, self.clock(), pid))
         logs.info("prefs", "PREF_EDITED", "preference edited", id=pid, by=by)
         return self._view(self.get(pid))
+
+    def _written(self, pid: int) -> dict:
+        """The view of a row just written; removed right after the write: KeyError (the route answers 404), never a 500."""
+        row = self.get(pid)
+        if not row:
+            raise KeyError(pid)
+        return self._view(row)
 
     def remove(self, pid: int, *, by: str = "user") -> bool:
         n = self.db.x("DELETE FROM learned_prefs WHERE id=?", (pid,)).rowcount
@@ -294,6 +328,8 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "updated; it needs the owner's confirmation again before it is remembered", {"item": prefs.edit(a.id, a.text, by="voice", repropose=True)})
                 except KeyError:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except PrefConflict:
+                    return ToolResult(False, "it changed meanwhile: try again", code="PREF_CONFLICT")
                 except ValueError as e:
                     return ToolResult(False, str(e), code="PREF_REFUSED")
 
