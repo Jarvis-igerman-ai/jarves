@@ -67,6 +67,7 @@ jobs:
       # a draft PR runs only the fast checks; marking it ready (ready_for_review) starts the full run (#89)
       DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
       MG_REF: ${{ github.event.merge_group.head_ref }}
+      BASE_REF: ${{ github.base_ref }}
     outputs:
       code: ${{ steps.c.outputs.code }}
       full: ${{ steps.c.outputs.full }}
@@ -139,6 +140,12 @@ jobs:
           args=(--event "$GITHUB_EVENT_NAME")
           [ "$reused" = "true" ] && args+=(--reused)
           [ "$reuse_tests_only" = "true" ] && args+=(--reuse-tests-only)
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # JAR-651: GitHub may run a PR on a stale refs/pull/N/merge (#1424 skipped the installer on 20 Nov). List
+            # what the base changed since this merge's base; changed CI rules there mean the full matrix (fail closed).
+            if git fetch --no-tags --depth=1 origin "$BASE_REF"; then git diff --name-only HEAD^1 FETCH_HEAD > base-drift.txt || rm -f base-drift.txt; fi
+            args+=(--base-drift-from base-drift.txt)
+          fi
           draft=false; [ "$DRAFT" = "true" ] && { draft=true; args+=(--draft); echo "draft PR: fast checks only (mark it ready for the full run)"; }
           python3 core/tools/ci_plan.py classify "${args[@]}" | tee classify.out
           if [ "$GITHUB_EVENT_NAME" != "pull_request" ] && [ "$reused" != "true" ]; then echo "full matrix ($GITHUB_EVENT_NAME $GITHUB_REF)"; fi

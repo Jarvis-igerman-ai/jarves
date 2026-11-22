@@ -90,9 +90,11 @@ def docs_read_by_tests(files: list[str], tests_dir: Path | None = None) -> set[s
 
 
 def classify(files: list[str], event: str = "pull_request", reused: bool = False, draft: bool = False,
-             reuse_tests_only: bool = False) -> dict[str, bool]:
+             reuse_tests_only: bool = False, base_drift: list[str] | None = None) -> dict[str, bool]:
     """Which jobs a change needs. Everything runs on main pushes, tags and manual runs, unless `reused`. A DRAFT pull
-    request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89)."""
+    request gets only the fast checks (classify + validation): the full run starts when it is marked ready (#89).
+    `base_drift` (JAR-651): files the base branch changed since the merge ref's base. GitHub can run a PR on a stale
+    refs/pull/N/merge; when the CI rules themselves changed since, its classification is outdated, so run everything."""
     if reused or draft:
         return {k: False for k in FLAGS}
     if reuse_tests_only:
@@ -112,7 +114,7 @@ def classify(files: list[str], event: str = "pull_request", reused: bool = False
     if event not in ("pull_request", "merge_group"):
         return {k: True for k in FLAGS}
     files = [f.strip() for f in files if f.strip()]
-    if any(SELF.match(f) for f in files):
+    if any(SELF.match(f) for f in files) or (event == "pull_request" and any(SELF.match(f.strip()) for f in base_drift or [])):
         return {k: True for k in FLAGS}
     rest = [f for f in files if not DOCS.match(f)]
     read = docs_read_by_tests([f for f in files if DOCS.match(f)])   # docs a Core test reads: Linux shards must run
@@ -259,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--reused", action="store_true", help="the tree was already proven on its PR: nothing to run")
     c.add_argument("--reuse-tests-only", action="store_true", help="exact green PR tests exist; main still builds installer")
     c.add_argument("--draft", action="store_true", help="a draft pull request: only the fast checks run")
+    c.add_argument("--base-drift-from", type=Path, help="files the base branch changed since the merge ref's base")
     s = sub.add_parser("shard-files")
     s.add_argument("--plan", type=Path, required=True)
     s.add_argument("--os", required=True)
@@ -277,7 +280,16 @@ def main(argv: list[str] | None = None) -> int:
             files = (sys.stdin.read() if a.files_from == "-" else Path(a.files_from).read_text(encoding="utf-8")).splitlines()
         else:
             files = _git_files() if a.event in ("pull_request", "merge_group") else []
-        for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only).items():
+        drift: list[str] = []
+        if a.base_drift_from:
+            try:
+                drift = a.base_drift_from.read_text(encoding="utf-8").splitlines()
+            except OSError as e:     # base tip unreadable: the merge ref may be stale, fail closed (JAR-651)
+                print(f"base drift unreadable ({e.__class__.__name__}): full matrix", file=sys.stderr)
+                drift = [".github/workflows/jarves-checks.yml"]
+            if any(SELF.match(f.strip()) for f in drift):
+                print("the base branch changed the CI rules since this merge ref: full matrix (JAR-651)", file=sys.stderr)
+        for k, v in classify(files, a.event, a.reused, a.draft, a.reuse_tests_only, drift).items():
             print(f"{k}={'true' if v else 'false'}")
         print("plan=" + json.dumps(plan(durations=load_durations(a.durations), linux_durations=load_durations(a.linux_durations)), separators=(",", ":")))
         return 0

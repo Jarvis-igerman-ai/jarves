@@ -1,0 +1,1 @@
+- Fixed: a pull request run on a stale merge ref no longer skips the Windows installer job when the CI rules changed on main since that merge ref's base; the classifier then runs the full matrix, and an unreadable base tip also means the full matrix (JAR-651).

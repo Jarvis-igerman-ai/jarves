@@ -75,6 +75,46 @@ def test_jar584_ordinary_core_and_workflow_prs_still_skip_the_installer():
         assert not ci_plan.classify([f], "pull_request")["installer"], f
 
 
+def test_jar651_stale_merge_ref_with_newer_ci_rules_on_base_runs_everything(tmp_path):
+    """JAR-651: #1424's run on 20 Nov 10:09 checked out a stale refs/pull/N/merge whose base predated the JAR-584 rule,
+    so the installer job was 'skipped' and never passed. When the CI rule files changed on the base branch since the
+    merge ref's base, the PR is classified with the full matrix (fail closed); unrelated base drift changes nothing."""
+    pr = ["core/src/jarves/auto_update.py"]
+    assert all(ci_plan.classify(pr, base_drift=["core/tools/ci_plan.py", "docs/x.md"]).values())
+    assert all(ci_plan.classify(pr, base_drift=[".github/workflows/jarves-checks.yml"]).values())
+    assert ci_plan.classify(pr, base_drift=["core/src/jarves/cli.py"]) == ci_plan.classify(pr)
+    assert not any(ci_plan.classify(["docs/HANDOFF.md"], base_drift=["core/src/x.py"]).values())
+    # the drift only widens a PR run: a draft, a proven tree and the merge queue keep their own rules
+    assert not any(ci_plan.classify(pr, draft=True, base_drift=["core/tools/ci_plan.py"]).values())
+    assert ci_plan.classify(pr, "merge_group", base_drift=["core/tools/ci_plan.py"]) == ci_plan.classify(pr, "merge_group")
+    # CLI: the workflow writes the base drift to a file; a missing file (base tip unreadable) fails closed
+    files = tmp_path / "files.txt"
+    files.write_text("core/src/jarves/cli.py\n", encoding="utf-8")
+    drift = tmp_path / "drift.txt"
+    drift.write_text("core/tools/ci_plan.py\n", encoding="utf-8")
+
+    def run(*extra):
+        r = subprocess.run([sys.executable, str(ROOT / "core" / "tools" / "ci_plan.py"), "classify", "--files-from",
+                            str(files), *extra], capture_output=True, text=True, check=True)
+        return dict(line.split("=", 1) for line in r.stdout.splitlines() if not line.startswith("plan=")), r.stderr
+
+    assert run()[0]["installer"] == "false"
+    out, err = run("--base-drift-from", str(drift))
+    assert out["installer"] == "true" and "base branch changed the CI rules" in err
+    out, err = run("--base-drift-from", str(tmp_path / "missing.txt"))
+    assert out["installer"] == "true" and "base drift unreadable" in err
+    drift.write_text("core/src/jarves/cli.py\n", encoding="utf-8")
+    assert run("--base-drift-from", str(drift))[0]["installer"] == "false"
+
+
+def test_jar651_changes_job_feeds_the_base_drift_to_the_classifier():
+    text = (WF / "jarves-checks.yml").read_text(encoding="utf-8")
+    step = yaml.safe_load(text)["jobs"]["changes"]["steps"][-1]["run"]
+    assert 'git fetch --no-tags --depth=1 origin "$BASE_REF"' in step
+    assert "git diff --name-only HEAD^1 FETCH_HEAD > base-drift.txt" in step
+    assert "--base-drift-from base-drift.txt" in step
+
+
 def test_main_push_and_workflow_changes_run_everything_and_a_proven_tree_runs_nothing():
     assert all(ci_plan.classify([], "push").values())
     assert all(ci_plan.classify([".github/workflows/jarves-checks.yml"]).values())
