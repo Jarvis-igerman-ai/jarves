@@ -63,13 +63,15 @@ def _clean(text: object, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
-# A tool result code ("TOOL_X: <tool text>" or a bare code). Codes come from ToolResult.code (developer constants),
-# never from tool output; a code that is not 3-40 capitals/digits/_ is dropped like other text (#1526 R5).
+# A tool result code ("TOOL_X: <tool text>" or a bare code). Codes come from ToolResult.code: in Core every one is a
+# string literal or an internal exception's .code (itself a literal); no MCP / plugin path builds a ToolResult from
+# outside data (checked 22 Nov 2026, JAR-701). A code that is not 3-40 capitals/digits/_ is dropped like other text.
 _CODE = re.compile(r"^([A-Z][A-Z0-9_]{2,39})(?::|$)")
 _DONE = re.compile(r"^\d+/\d+ steps done\.")
 _STEP = re.compile(r"^(step \d+): (.*)$", re.S)
 # Our own fixed reasons (never tool text). The writers below use these constants and the privacy scrub keeps exactly
-# them, so the owner still sees why a plan stopped (#1526 R4: one source, test_1526_own_reasons_are_shared).
+# them, so the owner still sees why a plan stopped (#1526: one source; test_1526_writers_use_only_shared_reasons
+# fails if a writer passes its own literal reason, which the scrub would erase).
 WHY_DENIED = "the owner did not approve this step"
 WHY_TAINTED = "text written by others was read earlier in this plan: resume to continue"
 WHY_NO_TOOL = "tool not available (switched off or removed)"
@@ -129,11 +131,12 @@ def _at_rest(text: str) -> str:
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
-    def __init__(self, db, *, clock=time.time, known=None) -> None:
-        self.db, self.clock = db, clock
+    def __init__(self, db, *, clock=time.time, known=None, mono=time.monotonic) -> None:
+        self.db, self.clock, self.mono = db, clock, mono      # mono: scrub rate limit, immune to wall-clock jumps
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
         self._seen: tuple | None = None       # #1526: db change counters at the last scrub (None: scan on the next pass)
-        self._scanned = 0.0                   # #1526: clock() of the last scrub (rate limit for write-triggered scans)
+        self._scanned = 0.0                   # #1526: mono() of the last scrub (rate limit for write-triggered scans)
+        self._skip_warned = False             # #1526: PLAN_SCRUB_SKIPPED is logged once per open-transaction incident
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -353,19 +356,27 @@ class PlanStore:
         with self.db._lock:
             c = self.db._db
             if c.in_transaction:          # never commit or roll back a caller's pending writes with ours (review R4)
-                logs.warn("goals", "PLAN_SCRUB_SKIPPED", "privacy scrub skipped: a transaction is open; retried next pass")
+                if not self._skip_warned:                     # once per incident, not every 2 s pass
+                    self._skip_warned = True
+                    logs.warn("goals", "PLAN_SCRUB_SKIPPED", "privacy scrub skipped: a transaction is open; retried next pass")
                 return 0
+            self._skip_warned = False
+            # only rows that still hold text are read: kept codes / reasons are skipped in SQL (they equal their scrub)
+            c.create_function("jv_private_text", 1, _private_text, deterministic=True)
+            c.create_function("jv_private_note", 1, _private_note, deterministic=True)
+            c.create_function("jv_private_result", 1, _private_result, deterministic=True)
             secure = c.execute("PRAGMA secure_delete").fetchone()[0]
             c.execute("PRAGMA secure_delete=ON")
             try:
                 c.execute("BEGIN")
                 for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "
-                                   "WHERE evidence != '' OR error != ''").fetchall():
+                                   "WHERE evidence != '' OR error != jv_private_text(error)").fetchall():
                     er = _private_text(r[2])
                     if r[1] != "" or er != r[2]:
                         c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (er, r[0]))
                         n += 1
-                for r in c.execute("SELECT id, result, note FROM goal_plans WHERE result != '' OR note != ''").fetchall():
+                for r in c.execute("SELECT id, result, note FROM goal_plans WHERE result != jv_private_result(result) "
+                                   "OR note != jv_private_note(note)").fetchall():
                     res, note = _private_result(r[1]), _private_note(r[2])
                     if (res, note) != (r[1], r[2]):
                         c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (res, note, r[0]))
@@ -378,7 +389,7 @@ class PlanStore:
                 c.execute(f"PRAGMA secure_delete={int(secure)}")
             if n:
                 c.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # busy readers: frames stay until the next checkpoint
-            self._seen, self._scanned = self._version(), self.clock()
+            self._seen, self._scanned = self._version(), self.mono()
         if n:
             logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy mode: older plan text removed", count=n)
         return n
@@ -397,7 +408,7 @@ class PlanStore:
         if not logs.privacy():
             self._seen = None
             return 0
-        if self._seen is not None and (self._version() == self._seen or self.clock() - self._scanned < SCRUB_MIN_S):
+        if self._seen is not None and (self._version() == self._seen or 0 <= self.mono() - self._scanned < SCRUB_MIN_S):
             return 0
         return self.scrub()
 

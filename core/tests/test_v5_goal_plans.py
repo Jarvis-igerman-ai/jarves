@@ -106,7 +106,7 @@ class Env:
                         Tool("fake_pause", "p", pause_self, Say, permission="read")]
         self.reg.register(Fake())
         self.reg.allowed_actions |= {"fake_act"}
-        self.store = gp.PlanStore(self.db, clock=self.clock, known=self.reg.get)
+        self.store = gp.PlanStore(self.db, clock=self.clock, known=self.reg.get, mono=self.clock)
         self.runner = gp.PlanRunner(self.store, self.reg, budget=self.budget, clock=self.clock)
 
 
@@ -700,8 +700,17 @@ def test_1526_scrub_never_adopts_an_open_transaction(env, monkeypatch):
     warned = []
     monkeypatch.setattr(logs, "warn", lambda comp, code, msg, **f: warned.append(code))
     assert env.store.scrub_if_private() == 0 and c.in_transaction and warned == ["PLAN_SCRUB_SKIPPED"]
+    for _ in range(5):                                                    # JAR-701 R3: warned once per incident
+        assert env.store.scrub_if_private() == 0
+    assert warned == ["PLAN_SCRUB_SKIPPED"]
     c.rollback()
     assert env.store._seen is None                                        # not marked scanned: the next pass retries
+    env.store.scrub_if_private()                                          # the incident ends with a real scan
+    env.store._seen = None
+    c.execute("BEGIN")
+    c.execute("CREATE TEMP TABLE caller_pending2 (x)")
+    assert env.store.scrub_if_private() == 0 and warned == ["PLAN_SCRUB_SKIPPED"] * 2   # a new incident warns again
+    c.rollback()
 
 
 async def test_1526_failed_scrub_does_not_stop_plan_execution(env, monkeypatch):
@@ -835,3 +844,90 @@ async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, mon
     d = env.store.get(p["id"])
     assert d["state"] == state and d["steps"][0]["status"] == status
     assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
+
+
+def test_1526_writers_use_only_shared_reasons():
+    """JAR-701 R1: every reason a writer stores is a WHY_* constant (kept by the scrub), never its own literal, which the
+    privacy scrub would silently erase. Walks goal_plans.py: _block/_fail/_stop_plan reasons and note= keywords."""
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(gp))
+    wrappers = {"_block", "_fail", "_stop_plan"}                    # their bodies only prefix "step N: " to a reason
+    allowed = {"", " min reached", " AI requests reached", ": "}    # the cap tails (_OWN_CAP) and the code separator
+    bad = []
+
+    def literals(node):                                            # stored text, not dict keys such as p['max_ai']
+        keys = {id(k) for n in ast.walk(node) if isinstance(n, ast.Subscript) for k in ast.walk(n.slice)}
+        return [n.value for n in ast.walk(node)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in keys]
+
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name in wrappers:
+            continue
+        for call in ast.walk(fn):
+            if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
+                continue
+            args = []
+            if call.func.attr in wrappers and len(call.args) >= 3:
+                args.append(call.args[2])
+            args += [k.value for k in call.keywords if k.arg == "note"]
+            bad += [(fn.name, call.lineno, v) for a in args for v in literals(a) if v not in allowed]
+    assert bad == []
+    whys = {v for k, v in vars(gp).items() if k.startswith("WHY_") and k not in ("WHY_TIME_CAP", "WHY_COST_CAP")}
+    assert whys == set(gp._OWN)                                      # every constant is kept by the scrub
+    for cap in (f"{gp.WHY_TIME_CAP}5 min reached", f"{gp.WHY_COST_CAP}20 AI requests reached"):
+        assert gp._OWN_CAP.match(cap)
+
+
+def test_1526_rate_limit_uses_a_monotonic_clock(tmp_path, monkeypatch):
+    """JAR-701 R2: a wall clock jumping back never stops write-triggered rescans; the rate limit runs on mono()."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", True)
+    wall, mono = Clock(), Clock()
+    st = gp.PlanStore(open_db(tmp_path / "m.db"), clock=wall, mono=mono)
+    st.scrub_if_private()
+    wall.t -= 86400                                                   # the wall clock jumps a day back
+    st.db.x("CREATE TABLE IF NOT EXISTS other_write (x)")
+    st.db.x("INSERT INTO other_write VALUES (1)")                       # any memory.db write
+    mono.t += gp.SCRUB_MIN_S
+    scans = []
+    monkeypatch.setattr(st, "scrub", lambda: scans.append(1) or 0)
+    st.scrub_if_private()
+    assert scans == [1]
+    assert inspect_default(gp.PlanStore.__init__, "mono") is __import__("time").monotonic
+
+
+def inspect_default(fn, name):
+    import inspect
+    return inspect.signature(fn).parameters[name].default
+
+
+async def test_1526_rescan_reads_only_rows_that_still_hold_text(env, monkeypatch):
+    """JAR-701 R4: after a scrub, kept codes / reasons are not read again; only a row with new text is."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    for name, tool in (("bad", "fake_bad"), ("deny", "fake_act")):
+        p = env.store.propose(name, steps((tool, {"text": "x"} if tool == "fake_act" else {})))
+        env.store.approve(p["id"])
+    env.answer = False
+    await env.runner.tick()
+    monkeypatch.setattr(logs, "_privacy", True)
+    assert env.store.scrub_if_private() > 0
+    c = env.db._db
+    seen = lambda: (c.execute("SELECT count(*) FROM goal_plan_steps WHERE evidence != '' "
+                              "OR error != jv_private_text(error)").fetchone()[0],
+                    c.execute("SELECT count(*) FROM goal_plans WHERE result != jv_private_result(result) "
+                              "OR note != jv_private_note(note)").fetchone()[0])
+    assert c.execute("SELECT count(*) FROM goal_plan_steps WHERE error != ''").fetchone()[0] >= 2   # codes kept
+    assert seen() == (0, 0)                                           # nothing to fetch on a rescan
+    env.db.x("UPDATE goal_plan_steps SET error='X_BROKE: new secret' WHERE id=(SELECT min(id) FROM goal_plan_steps)")
+    assert seen() == (1, 0)
+    env.clock.t += gp.SCRUB_MIN_S
+    sql = []
+    c.set_trace_callback(sql.append)
+    try:
+        assert env.store.scrub_if_private() == 1 and seen() == (0, 0)
+    finally:
+        c.set_trace_callback(None)
+    assert any(q.startswith("SELECT id, evidence") and "error != jv_private_text(error)" in q for q in sql)   # scrub filters in SQL
+    assert any(q.startswith("SELECT id, result") and "note != jv_private_note(note)" in q for q in sql)
