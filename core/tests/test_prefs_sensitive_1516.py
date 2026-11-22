@@ -20,8 +20,8 @@ LEAKY = [
     f"{SEED} is my google authenticator seed",
     f"הסיד של האימות הוא {SEED}",
     f"מאמת: {SEED}",
-    "key: OTP3JBSWYDPEHPKQ",
-    f"backup seed {SEED} for my 2fa app",            # weak word near the run, strong word elsewhere                         # `OTP` + digit inside the run counts as the seed word
+    "key: OTP3JBSWYDPEHPKQ",                        # `OTP` + digit inside the run counts as the seed word
+    f"backup seed {SEED} for my 2fa app",            # weak word near the run, strong word elsewhere
     "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example",  # review R1 (#1555)
     "otpauth://hotp/AcmeCorporation:a.long.user.name@example.com?counter=1&secret=JBSWY3DPEHPK3PXP",
 ]
