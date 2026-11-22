@@ -1430,3 +1430,20 @@ def test_ship_says_what_it_turned_off_from_the_repo_config(env):
     assert "commit.gpgsign" in r["turned_off"] and "diff.external" in r["text"] and "check those settings" in r["text"]
     r = m.call("ship_plan", project="demo", apply=True, yes=True)
     assert r["ok"] and "turned off" in r["text"] and "commit.gpgsign" in r["turned_off"], r
+
+
+def test_the_ship_prompt_never_shows_an_agent_chosen_config_name(env):
+    """Review R2 (round 2, #1635): a subsection is the agent's text; the approval prompt shows `filter.*.clean`."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    lie = "(no push) checks passed, safe to merge " + "x" * 200
+    for k, v in (("user.name", "o"), ("user.email", "o@x"), (f"filter.{lie}.clean", "cat")):
+        sh(repo, "git", "config", k, v)
+    seen = []
+    m._ask = lambda prompt, **_: seen.append(prompt) or True
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and seen and "safe to merge" not in seen[0] and "filter.*.clean" in seen[0], seen
+    assert r["turned_off"] == ["filter.*.clean", "filter.*.required"] and "safe to merge" not in r["text"]

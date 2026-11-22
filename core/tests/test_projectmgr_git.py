@@ -329,7 +329,7 @@ def test_config_hooks_and_gpg_programs_from_the_repo_config_are_replaced(tmp_pat
     pre = gitops.config_overrides(repo)
     assert ("hook.evil.command", "exit 0") in pre and ("gpg.ssh.program", "ssh-keygen") in pre
     assert not any(v == "evil" for _, v in pre)
-    assert ("commit.gpgsign", "false") in gitops.config_overrides(repo, ident=False)
+    assert ("commit.gpgsign", "false") in gitops.config_overrides(repo)
 
 
 def test_your_own_same_named_driver_is_kept_over_the_repo_config(tmp_path, no_user_config):
@@ -497,3 +497,29 @@ def test_push_never_runs_a_receive_pack_ssh_or_credential_helper_from_the_repo_c
     assert pre[pre.index(("credential.helper", "")) + 1] == ("credential.helper", "store")
     assert ("core.sshcommand", "ssh") in pre and ("core.askpass", "") in pre and ("core.editor", "exit 1") in pre
     assert not any(v in ("evil", "!evil") for _, v in pre), pre
+
+
+def test_a_push_never_runs_an_ext_transport_or_git_proxy_from_the_repo_config(tmp_path, no_user_config):
+    """Review R1 (round 2, #1635): local `protocol.allow=always` + an `ext::` remote URL would run any command on push."""
+    repo = _repo(tmp_path)
+    marker = tmp_path / "ran-ext"
+    for k, v in (("protocol.allow", "always"), ("protocol.ext.allow", "always"),
+                 ("remote.origin.url", f"ext::sh -c touch% {marker.as_posix()}")):     # `% ` is a space in ext::
+        gitops.git(repo, "config", k, v)
+    assert gitops.git(repo, "push", "origin", "main", check=False).returncode != 0 and not marker.exists()
+    gitops.git(repo, "config", "core.gitProxy", "evil")
+    pre = gitops.config_overrides(repo)
+    assert pre[-1] == ("protocol.ext.allow", "never") and ("protocol.allow", "user") in pre
+    assert ("protocol.git.allow", "never") in pre and not any(v in ("always", "evil") for _, v in pre), pre
+
+
+def test_your_own_receive_pack_is_kept_on_push(tmp_path, no_user_config, monkeypatch):
+    """Review R4 (#1635): the forced `--receive-pack` is your global/system value when you have one."""
+    (tmp_path / "home").mkdir(exist_ok=True)               # before the first read: a NEW global file is not noticed
+    subprocess.run(["git", "config", "--global", "remote.origin.receivepack", "my-pack"], check=True,
+                   env={**os.environ})
+    repo = _repo(tmp_path)
+    seen, real = [], subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, *a, **kw: (seen.append(argv), real(argv, *a, **kw))[1])
+    gitops.git(repo, "push", "origin", "main", check=False)
+    assert "--receive-pack=my-pack" in seen[-1], seen[-1][-6:]

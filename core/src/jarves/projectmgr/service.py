@@ -912,7 +912,7 @@ class Manager(StageEngine):
         except (OSError, gitops.GitError):
             sha = ""
         try:            # what JARVES turns off from the repo's own config (signing, LFS, drivers): said, never silent
-            off = sorted({k for k, _ in gitops.config_overrides(p["path"], ident=False)})
+            off = gitops.overridden_names(p["path"])     # never the agent's own subsection text (review R2)
         except (OSError, gitops.GitError):
             off = []
         note = (" From your repo's own .git/config JARVES turned off: " + ", ".join(off[:8]) + ".") if off else ""

@@ -75,7 +75,8 @@ _RUN_KEY = re.compile(r"^(?:(?P<filter>filter\.(?P<drv>.+)\.(?:clean|smudge|proc
                       r"|(?P<fail>merge\..+\.driver|gpg\.ssh\.defaultkeycommand|diff\.external|diff\..+\.(?:command|textconv)"
                       r"|trailer\..+\.(?:command|cmd)|core\.editor|sequence\.editor)"
                       r"|(?P<sub>submodule\.recurse|submodule\..+\.update)|(?P<cred>credential\.(?:.+\.)?helper)"
-                      r"|(?P<prog>gpg(?:\.[^.]+)?\.program|core\.sshcommand|core\.askpass))$")
+                      r"|(?P<prog>gpg(?:\.[^.]+)?\.program|core\.sshcommand|core\.askpass)"
+                      r"|(?P<proto>protocol\.allow|protocol\..+\.allow)|(?P<proxy>core\.gitproxy))$")
 # review R5 (#1635): `forge.push` runs ssh/askpass and credential helpers; `remote.*.receivepack` is first-wins in git
 # (an override after it is ignored), so `git` passes `--receive-pack` on every push. An editor is never opened
 # (merge --no-edit, commit -m), so an untrusted editor just fails
@@ -147,10 +148,13 @@ def _config_rows(cwd: str | Path) -> list[tuple[str, str, str]]:
     return rows
 
 
-def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str]]:
+def config_overrides(cwd: str | Path) -> list[tuple[str, str]]:
     """(key, value) pairs that neutralise the config-named commands (`_RUN_KEY`) set in the agent-writable
     local/worktree config (#1407); the owner's global/system value is kept. Untrusted signing settings turn signing
-    off on every call (review R1), so your key never signs on an agent's say-so.
+    off on every call, whoever's identity the call uses (reviews R1, R3), so your key never signs on an agent's say-so.
+    Transports (review R1, #1635): `ext::` (runs any command) is always `never` unless your own config allows it; an
+    untrusted `protocol[.<name>].allow` is replaced; an untrusted `core.gitProxy` (first match wins, so it cannot be
+    overridden) turns the `git://` protocol off.
     Unreadable config: `GitError` (fail closed). The read-then-run window is tracked in #1533. `git` passes them as
     GIT_CONFIG_KEY_n/VALUE_n, never `-c k=v`: git splits `-c` at the first `=`, and a subsection may hold one."""
     rows = _config_rows(cwd)
@@ -176,11 +180,26 @@ def config_overrides(cwd: str | Path, ident: bool = True) -> list[tuple[str, str
         elif m["cred"]:                                     # a list: "" clears it, then only your own helpers again
             if (key, "") not in out:
                 out += [(key, ""), *[(k, v) for sc, k, v in rows if sc in TRUSTED_SCOPES and k == key]]
+        elif m["proto"]:
+            out.append((key, trusted.get(key, "never" if key == "protocol.ext.allow" else "user")))
+        elif m["proxy"]:
+            out.append(("protocol.git.allow", "never"))
         else:
             out.append((key, trusted.get(key, _GPG_DEFAULT.get(key, "gpg"))))
     if signing:
         out += [("commit.gpgsign", "false"), ("tag.gpgsign", "false")]
-    return out
+    return [*out, ("protocol.ext.allow", trusted.get("protocol.ext.allow", "never"))]   # last: it wins
+
+
+def overridden_names(cwd: str | Path) -> list[str]:
+    """What `config_overrides` turns off, safe to show the owner (review R2, #1635): a subsection is the agent's own
+    text, so it is shown as `*`; the forced `protocol.ext.allow` is left out. Sorted, unique, each at most 60 chars."""
+    names = set()
+    for key, _ in config_overrides(cwd)[:-1]:
+        head, _, rest = key.partition(".")
+        sub, dot, name = rest.rpartition(".")
+        names.add((f"{head}.*.{name}" if sub else key)[:60])
+    return sorted(names)
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -195,7 +214,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     env = child_env({"GIT_TERMINAL_PROMPT": "0"})
     if not args or args[0] not in _NO_CONFIG_CMDS:
         try:
-            pairs = config_overrides(cwd, ident)
+            pairs = config_overrides(cwd)
         except GitError as e:                               # the command never runs; check=False still never raises
             if check:
                 raise
@@ -205,8 +224,16 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
             env[f"GIT_CONFIG_KEY_{n}"], env[f"GIT_CONFIG_VALUE_{n}"] = k, v
     # #1407: no external diff or textconv on any JARVES diff. `log -p`/`show` would also honour textconv (an untrusted
     # one is `exit 1` there, so they would fail, not run it); JARVES uses neither (only `log --oneline`).
-    if args and args[0] == "push":                      # never the repo config's receive-pack (review R5, #1635)
-        args = ("push", "--receive-pack=git-receive-pack", *args[1:])
+    if args and args[0] in ("push", "fetch"):           # never the repo config's receive/upload-pack (review R5,
+        # #1635): git takes the FIRST value, so an override cannot win; yours (global/system) is kept (review R4)
+        name = next((a for a in args[1:] if not a.startswith("-")), "origin")
+        kind = "receivepack" if args[0] == "push" else "uploadpack"
+        try:
+            mine = [v for sc, k, v in _config_rows(cwd) if sc in TRUSTED_SCOPES and k == f"remote.{name}.{kind}"]
+        except GitError:
+            mine = []
+        prog = mine[0] if mine else f"git-{kind[:-4]}-pack"
+        args = (args[0], f"--{kind[:-4]}-pack={prog}", *args[1:])
     if args and args[0] == "diff":
         args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
