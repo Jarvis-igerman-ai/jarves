@@ -10,9 +10,12 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
+
+from .. import logs
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
@@ -80,8 +83,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
     config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
-    if _GUARDS:
-        check_guards()                    # #1592: never read an entry a running agent or check planted
+    if _GUARDS and not check_guards():    # #1592: never read an entry a running agent or check planted
+        p = subprocess.CompletedProcess(["git", *args], 1, "", "the shared git config was changed and could not be "
+                                        "restored: git not run")
+        if check:
+            raise GitError(p.stderr)
+        return p
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -98,7 +105,10 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # repository's shared `.git/config` (a `filter.<n>.clean` entry runs a command on the next JARVES or owner git call).
 # While such code runs, the config is guarded: a copy taken when the run starts; every JARVES git call and the end of the
 # run compare and restore it, and the run is rejected. Every run active on that repository is rejected, because the
-# writer cannot be told apart. Not an OS sandbox: a process the run leaves behind can still write after it ends.
+# writer cannot be told apart. Limits: not an OS sandbox (a process the run leaves behind can still write after it ends;
+# the owner's own git can read a planted entry during a run). ANY change during a run is reverted, the owner's own
+# `git config`/`git remote set-url` included: the replaced content is kept next to the config in
+# `config.jarves-rejected-*/config`, named in the rejection and in a PROJECT_GIT_CONFIG_RESTORED log line.
 _GUARDS: dict[str, dict] = {}            # config path -> {"data": trusted bytes, "runs": [state dicts]}
 _GUARDS_LOCK = threading.RLock()
 
@@ -109,27 +119,69 @@ def _shared_config(wt: str | Path) -> Path | None:
     return (Path(wt) / common).resolve() / "config" if p.returncode == 0 and common else None
 
 
+def _keep_rejected(path: Path) -> str:
+    """Move or copy what replaced the trusted config into a fresh `config.jarves-rejected-*` folder (R2: nothing is
+    lost). A folder in place of the file is moved aside so the config can be written again. '' when nothing was there."""
+    side = Path(tempfile.mkdtemp(prefix="config.jarves-rejected-", dir=path.parent))
+    if path.is_dir() and not path.is_symlink():
+        os.replace(path, side / "config")
+    elif os.path.lexists(path):
+        try:
+            shutil.copyfile(path, side / "config")
+        except OSError:                   # a dangling or unreadable link: the link itself is replaced below
+            pass
+    if not any(side.iterdir()):
+        side.rmdir()
+        return ""
+    return str(side / "config")
+
+
 def _restore(path: Path, data: bytes) -> None:
-    tmp = path.with_name(f"config.jarves-{os.getpid()}-{threading.get_ident()}.tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(prefix="config.jarves-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 def check_guards() -> bool:
-    """Restore every guarded shared config that changed; True when one did (its active runs are marked)."""
-    hit = False
+    """Restore every guarded shared config that changed; marks that repository's active runs ("changed", "kept",
+    "unrestored"). Never raises: an unreadable config counts as changed. False when a config could NOT be restored
+    (it is still untrusted, so no git command may run)."""
+    safe = True
     with _GUARDS_LOCK:
         for key, g in _GUARDS.items():
+            path = Path(key)
             try:
-                same = Path(key).read_bytes() == g["data"]
-            except FileNotFoundError:
-                same = False
-            if not same:
-                _restore(Path(key), g["data"])
-                for st in g["runs"]:
-                    st["changed"] = True
-                hit = True
-    return hit
+                if path.read_bytes() == g["data"]:
+                    continue
+            except OSError:               # missing, a folder, locked on Windows: changed
+                pass
+            kept, err = "", ""
+            try:
+                kept = _keep_rejected(path)
+                _restore(path, g["data"])
+            except OSError as e:
+                err = str(e)[:200]
+                safe = False
+            logs.warn("projects", "PROJECT_GIT_CONFIG_RESTORED", "shared git config changed during an agent run",
+                      path=key, backup=kept, ok=not err, error=err)
+            for st in g["runs"]:
+                st["changed"] = True
+                st["kept"] = st.get("kept") or kept
+                st["unrestored"] = st.get("unrestored") or bool(err)
+    return safe
+
+
+def guard_note(state: dict) -> str:
+    """The rejection text's tail: where the replaced config was kept, or that it could not be restored."""
+    if state.get("unrestored"):
+        return "; it could NOT be restored: check it before running git there"
+    return "; it was restored" + (f", the replaced content is kept in {state['kept']}" if state.get("kept") else "")
 
 
 @contextlib.contextmanager
@@ -141,22 +193,28 @@ def config_guard(wt: str | Path):
         path = _shared_config(wt)
     except (OSError, subprocess.SubprocessError):
         path = None
-    if path is None or not path.is_file():
+    try:
+        data = path.read_bytes() if path is not None and path.is_file() else None
+    except OSError:
+        data = None
+    if data is None:
         yield state
         return
     key = str(path)
     with _GUARDS_LOCK:
         check_guards()
-        g = _GUARDS.setdefault(key, {"data": path.read_bytes(), "runs": []})
+        g = _GUARDS.setdefault(key, {"data": data, "runs": []})
         g["runs"].append(state)
     try:
         yield state
     finally:
         with _GUARDS_LOCK:
-            check_guards()
-            g["runs"].remove(state)
-            if not g["runs"]:
-                del _GUARDS[key]
+            try:
+                check_guards()
+            finally:
+                g["runs"].remove(state)
+                if not g["runs"]:
+                    del _GUARDS[key]
 
 
 def is_repo(path: str) -> bool:
@@ -333,7 +391,8 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
         except OSError as e:
             return False, f"check could not start: {e}"
     if guard["changed"]:
-        return False, "the check changed the shared git config: it was restored and the check failed (#1592)"
+        return False, "the check changed the shared git config and failed (#1592)" + \
+            guard_note(guard)
     if p is None:
         return False, "check timed out"
     out = ((p.stdout or "") + (p.stderr or "")).strip()

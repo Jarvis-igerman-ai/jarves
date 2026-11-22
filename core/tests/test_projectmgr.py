@@ -1361,7 +1361,16 @@ def test_push_ignores_url_rewrites_in_the_shared_git_config(tmp_path, monkeypatc
     for key in ("insteadOf", "pushInsteadOf"):
         sh(repo, "git", "config", f"url.{evil.as_uri()}.{key}", base + "o/r.git")
     sh(repo, "git", "config", "http.sslVerify", "false")
+    seen: list = []
+    real_git = forge.gitops.git
+
+    def spy(cwd, *args, **kw):
+        if args[:1] == ("push",):                               # what the pushing repository can see
+            seen.append(real_git(cwd, "config", "--list", "--show-scope", check=False).stdout)
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(forge.gitops, "git", spy)
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert seen and not any(k in seen[0].lower() for k in ("sslverify", "insteadof", "remote.origin"))
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
     assert not sh(evil, "git", "branch", "--list").strip()
     with pytest.raises(forge.ForgeError):

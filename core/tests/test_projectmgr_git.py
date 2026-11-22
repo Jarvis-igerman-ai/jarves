@@ -270,6 +270,8 @@ def test_a_check_command_that_writes_the_shared_git_config_is_rejected_and_undon
     ok, out = gitops.run_check(repo, argv)
     assert not ok and "shared git config" in out
     assert cfg.read_bytes() == before
+    kept = out.split("kept in ", 1)[1].split()[0]                 # R2: the replaced content is kept and named
+    assert Path(kept).read_bytes() == before + PLANT.encode()
 
 
 def test_git_calls_restore_the_shared_config_while_a_run_is_active(tmp_path):
@@ -322,3 +324,36 @@ def test_a_check_that_times_out_still_reports_the_timeout(monkeypatch, tmp_path)
         raise subprocess.TimeoutExpired(argv, 1)
     monkeypatch.setattr(gitops.subprocess, "run", run)
     assert gitops.run_check(repo, ["slow"]) == (False, "check timed out") and not gitops._GUARDS
+
+
+def test_a_config_replaced_by_a_folder_is_restored_and_the_guard_cleans_up(tmp_path, monkeypatch):
+    """#1592 review R1/R2: a folder in place of the config never leaves a stale guard that breaks later git calls."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    logged: list = []
+    monkeypatch.setattr(gitops.logs, "warn", lambda *a, **f: logged.append((a[1], f)))
+    with gitops.config_guard(repo) as guard:
+        cfg.unlink()
+        cfg.mkdir()
+        (cfg / "x").write_text("planted")
+        assert gitops.git(repo, "status", check=False).returncode == 0
+    assert cfg.read_bytes() == before and guard["changed"] and not gitops._GUARDS
+    assert (Path(guard["kept"]) / "x").read_text() == "planted"
+    assert logged[0][0] == "PROJECT_GIT_CONFIG_RESTORED" and logged[0][1]["backup"] == guard["kept"]
+    gitops.git(repo, "status")
+
+
+def test_a_config_that_cannot_be_restored_stops_git_and_leaves_no_temp_file(tmp_path, monkeypatch):
+    """#1592 review R1/R3: a failed restore (Windows: the file held open) runs no git command on the planted
+    config, raises nothing unexpected, removes its temp file and still cleans up the guard."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(cfg.read_bytes() + PLANT.encode())
+        monkeypatch.setattr(gitops.os, "replace", lambda a, b: (_ for _ in ()).throw(PermissionError("held")))
+        assert gitops.git(repo, "status", check=False).returncode == 1
+        with pytest.raises(gitops.GitError):
+            gitops.git(repo, "status")
+    assert guard["unrestored"] and "could NOT be restored" in gitops.guard_note(guard) and not gitops._GUARDS
+    assert not list((repo / ".git").glob("config.jarves-*.tmp"))

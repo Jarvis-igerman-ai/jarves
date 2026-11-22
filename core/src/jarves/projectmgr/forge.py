@@ -78,7 +78,8 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     The push runs from a private throw-away repository that borrows the project's objects (alternates), so no
     repository-scope key in the shared, agent-writable config is read: no `url.*.insteadOf`/`pushInsteadOf`,
     `http.proxy`, `http.sslVerify`, `http.<url>.*` or remote URL. The owner's global/system config (credential
-    helper) and environment still apply."""
+    helper) and environment still apply. The two `rev-parse` calls below still run in the project repository with its
+    shared config; rev-parse runs no filter, driver or transport, and `core.hooksPath`/`core.fsmonitor` are neutralised."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
     if not _SLUG_OK.match(slug or "") or ".." in slug:
