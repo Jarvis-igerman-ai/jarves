@@ -148,15 +148,17 @@ def test_untracked_file_before_the_merge_is_never_merged(env):
     assert not _integration_has(home, ".github/x.yml") and _integration_a(home) == "1\n"
 
 
-def test_untracked_file_before_the_check_is_never_merged(env):
+def test_untracked_file_that_changes_the_check_is_not_checked(env):
+    """#1610 R1: the check must not pass on a file that never merges."""
     m, repo, home = env
-    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    open_project(m, repo, check=[sys.executable, "-c", "import os,sys; sys.exit(0 if os.path.exists('extra.txt') else 1)"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
     _wrap(m, "_st_check", lambda t: _write(Path(t["worktree"]), "extra.txt"))
     m.call("resume", project="demo")
     finish(m)
-    assert m.db.by_seq(1, 1)["status"] == "done"
-    assert not _integration_has(home, "extra.txt")
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "extra.txt" in t["reason"] and "not checked" in t["reason"], t["reason"]
+    assert not _integration_has(home, "extra.txt") and _integration_a(home) == ""
 
 
 def test_tracked_edit_before_the_merge_blocks(env):
@@ -254,14 +256,22 @@ def test_move_during_scope_check_clears_an_old_checked_commit(env, monkeypatch):
     assert m._job(t).get("tested_head") is None
 
 
-def test_missing_worktree_fails_closed(env, tmp_path):
+def test_retry_after_a_move_block_runs_the_work_stage_again(env):
+    """#1610 R4: a retry after a "moved" block re-vets the branch instead of blocking at the merge for ever."""
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    once = []
+    _wrap(m, "_st_merge", lambda t: once or (once.append(1), _sibling_commit(Path(t["worktree"]), "sibling\n")))
+    m.call("resume", project="demo")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "blocked"
+    assert m.call("retry_task", project="demo", task=1)["ok"]
+    m.call("resume", project="demo")
+    finish(m)
     t = m.db.by_seq(1, 1)
-    m._set_job(t, tested_head="abc")
-    why = m._moved(t, tmp_path / "gone", "not merged")
-    assert "worktree" in why and "not merged" in why, why
+    assert t["status"] == "done", t["reason"]
+    assert _integration_a(home) == "1\n"              # the work stage ran again and its scope check vetted it
 
 
 def test_sibling_merge_that_makes_merge_in_a_noop_is_not_checked(env, monkeypatch):
@@ -396,17 +406,24 @@ def test_scope_check_reads_the_fixed_commit_not_the_moving_head(env, monkeypatch
     m, repo, home = env
     open_project(m, repo, check=[sys.executable, "-c", "pass"])
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
-    seen = []
     orig = gitops.changed_files
 
-    def run(wt, base, *a, **k):
-        seen.append(a[0] if a else k.get("head", "HEAD"))
-        return orig(wt, base, *a, **k)
-    monkeypatch.setattr(gitops, "changed_files", run)
+    def a_b_a(wt, *a, **k):
+        wt = Path(wt)
+        a_sha = sh(wt, "git", "rev-parse", "HEAD").strip()
+        _write(wt, "other.txt")                         # B adds a file outside the scope
+        sh(wt, *GIT, "add", "-A")
+        sh(wt, *GIT, "commit", "-q", "-m", "B")
+        try:
+            return orig(wt, *a, **k)
+        finally:
+            sh(wt, "git", "reset", "-q", "--hard", a_sha)   # and back to A before HEAD is compared
+    monkeypatch.setattr(gitops, "changed_files", a_b_a)
     m.call("resume", project="demo")
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert seen and seen[0] == m._job(t).get("tested_head"), (seen, m._job(t))
+    assert t["status"] == "done", t["reason"]           # the scope result is A's, not B's out-of-scope file
+    assert _integration_a(home) == "1\n" and not _integration_has(home, "other.txt")
 
 
 def test_old_git_without_merge_tree_write_tree_gets_its_own_reason(env, tmp_path, monkeypatch):
@@ -422,9 +439,11 @@ def test_old_git_without_merge_tree_write_tree_gets_its_own_reason(env, tmp_path
     sh(wt, *GIT, "merge", "-q", "--no-ff", "--no-edit", b)
     orig = gitops.git
 
-    def old_git(cwd, *args, **k):
+    def old_git(cwd, *args, **k):               # what git 2.37 does: `--write-tree` is read as a tree name
         if args[:2] == ("merge-tree", "--write-tree"):
-            return subprocess.CompletedProcess(args, 129, "", "usage: git merge-tree")
+            return subprocess.CompletedProcess(args, 128, "", "fatal: unknown rev --write-tree")
+        if args[:1] == ("version",):
+            return subprocess.CompletedProcess(args, 0, "git version 2.37.1\n", "")
         return orig(cwd, *args, **k)
     monkeypatch.setattr(gitops, "git", old_git)
     sha, why = m._bind(wt, vetted, "not merged", merged=True, base_sha=b)
