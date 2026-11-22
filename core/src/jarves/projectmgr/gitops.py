@@ -81,6 +81,9 @@ _DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.progr
              "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh"}
 _PACK_DEFAULT = {"receivepack": "git-receive-pack", "uploadpack": "git-upload-pack"}
 TRUSTED_SCOPES = ("system", "global")       # the owner's own files; `local`/`worktree` live in the shared .git
+# an include whose condition depends on the branch or the git dir can match in a child git (worktree add checks out
+# inside the new worktree, on the task branch) but not in the read in `cwd`, so its keys would never be undone (R1)
+_COND_INCLUDE = re.compile(r"includeif\.(?:onbranch|gitdir|gitdir/i):.*\.path", re.S)
 FIXED_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"}   # ":" = no editor at all
 
 
@@ -106,20 +109,24 @@ def config_overrides(entries: list[tuple[str, str, str]]) -> list[tuple[str, str
     driver, an empty helper list), then the owner's own system/global values for it come back in order, so LFS from
     the global config, the owner's credential manager and signing keep working. Config-defined hooks
     (`hook.<name>.command`, which `core.hooksPath` does not stop) lose all events in every scope, like file hooks."""
-    untrusted = {k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)}
-    family = {("credential" if k.startswith("credential.") else k) for k in untrusted}
-    resets = [(k, "") for k in sorted(untrusted)]
-    restored = [(k, v) for s, k, v in entries if s in TRUSTED_SCOPES and _RUNS.fullmatch(k)
-                and ("credential" if k.startswith("credential.") else k) in family]
-    for k in sorted(untrusted):
-        if any(r[0] == k for r in restored):
+    untrusted = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)})
+    trusted = [(k, v) for s, k, v in entries if s in TRUSTED_SCOPES and _RUNS.fullmatch(k)]
+    out: list[tuple[str, str]] = []
+    for k in untrusted:
+        out.append((k, ""))
+        if k.startswith("credential."):
+            # helpers are a list an empty value clears: the generic reset clears every owner helper, so all come back
+            # under their own keys; a URL reset clears them only when its URL matches, so they come back under that
+            # same key (a non-matching reset then changes nothing and no owner helper runs twice)
+            generic = k == "credential.helper"
+            out += [(k2 if generic else k, v) for k2, v in trusted
+                    if k2.startswith("credential.") and (generic or k2 in (k, "credential.helper"))]
             continue
-        last = k.rsplit(".", 1)[-1]
-        default = _DEFAULTS.get(k) or (_PACK_DEFAULT.get(last) if k.startswith("remote.") else None)
-        if default:
-            restored.append((k, default))
+        own = [(k2, v) for k2, v in trusted if k2 == k]
+        default = _DEFAULTS.get(k) or (_PACK_DEFAULT.get(k.rsplit(".", 1)[-1]) if k.startswith("remote.") else None)
+        out += own or ([(k, default)] if default else [])
     hooks = sorted({m.group(1) for _, k, _ in entries if (m := _HOOK.fullmatch(k))})
-    return resets + restored + [(f"hook.{name}.event", "") for name in hooks]
+    return out + [(f"hook.{name}.event", "") for name in hooks]
 
 
 def _override_env(pairs: list[tuple[str, str]]) -> dict[str, str]:
@@ -139,15 +146,22 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
     config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, config hooks,
-    `ext::` remotes, editors and pagers. Limit: the config is read just before the command, so a key an agent adds in
+    `ext::` remotes, editors and pagers. Submodules never recurse (their config in `.git/modules` is never read)
+    and a branch- or gitdir-conditional include in the shared config stops the command (fail closed). Limit: the config is read just before the command, so a key an agent adds in
     the milliseconds between the two reads is not undone."""
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           "-c", "protocol.ext.allow=never"]
+           "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false"]
     entries = _config_entries(cwd, timeout)
     if isinstance(entries, subprocess.CompletedProcess):     # unreadable config: fail closed, the command never runs
         if check:
             raise GitError((entries.stderr or "git config could not be read").strip()[:300])
         return entries
+    cond = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _COND_INCLUDE.fullmatch(k)})
+    if cond:                                # a child git could read keys this read never saw: fail closed
+        why = f"refusing to run git: the shared repository config has a conditional include ({', '.join(cond)[:200]})"
+        if check:
+            raise GitError(why)
+        return subprocess.CompletedProcess(["git", *args], 1, "", why)
     env = child_env({**FIXED_ENV, **_override_env(config_overrides(entries))})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
@@ -183,6 +197,13 @@ def task_branch(pid: int, seq: int, attempt: int) -> str:
     return f"jarves/p{pid}/t{seq}-a{attempt}"
 
 
+def _add_worktree(repo: str, wt: Path, *args: str) -> None:
+    """`worktree add` would check out in a child git whose config JARVES never read (R1, #1390): add it empty, then
+    check it out with a separate call from inside the new worktree, whose own config is read first."""
+    git(repo, "worktree", "add", "--no-checkout", *args)
+    git(wt, "reset", "-q", "--hard")
+
+
 def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     """The integration worktree, created from `base` (default: the repo's current HEAD) once."""
     wt = project_root(home, pid) / "integration"
@@ -193,9 +214,9 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
     start = base or "HEAD"
     with _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
-            git(repo, "worktree", "add", str(wt), br)
+            _add_worktree(repo, wt, str(wt), br)
         else:
-            git(repo, "worktree", "add", "-b", br, str(wt), start)
+            _add_worktree(repo, wt, "-b", br, str(wt), start)
     return wt
 
 
@@ -206,7 +227,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        _add_worktree(repo, wt, "-b", br, str(wt), integration_branch(pid))
     return wt, br
 
 
@@ -216,7 +237,7 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "--detach", str(wt), sha)
+        _add_worktree(repo, wt, "--detach", str(wt), sha)
     return wt
 
 

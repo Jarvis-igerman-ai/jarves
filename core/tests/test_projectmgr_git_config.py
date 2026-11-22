@@ -152,8 +152,9 @@ def test_owner_values_survive_and_shared_ones_are_undone():
             "credential.https://h.example.helper", "hook.ev.event", "hook.lint.event"} <= resets
     last = dict(pairs)
     assert last["filter.lfs.smudge"] == "git-lfs smudge -- %f" and last["filter.Ev.x=y.clean"] == ""
-    # the URL helper reset empties the whole helper list, so the owner's helper comes back after it
-    assert pairs.index(("credential.helper", "manager")) > pairs.index(("credential.https://h.example.helper", ""))
+    # the URL helper reset empties the helper list when it matches, so the owner's helper comes back under its key
+    url = "credential.https://h.example.helper"
+    assert pairs.index((url, "manager")) > pairs.index((url, "")) and ("credential.helper", "manager") not in pairs
     assert last["gpg.program"] == "gpg" and last["core.sshcommand"] == "ssh"
     assert last["remote.origin.receivepack"] == "git-receive-pack"
     assert not {"remote.origin.url", "user.name", "diff.tool"} & set(last)
@@ -186,3 +187,72 @@ def test_an_unreadable_config_stops_the_command(tmp_path):
     with pytest.raises(gitops.GitError):
         gitops.git(repo, "status")
     assert gitops.git(repo, "status", check=False).returncode != 0
+
+
+@pytest.mark.parametrize("cond", ["onbranch:jarves/p1/t*", "gitdir:**/worktrees/**"])
+def test_a_conditional_include_in_the_shared_config_stops_the_command(tmp_path, cond):
+    """R1 (#1390): an include that matches only in a child git (the task branch, the new worktree) is never seen by the
+    read in `cwd`, so its filter would run on `worktree add`. Such a condition in the shared config fails closed."""
+    repo, home, marker = _repo(tmp_path), tmp_path / "home", tmp_path / "ran.txt"
+    _diverged(repo, "*.txt filter=ev\n")
+    gitops.ensure_integration(home, str(repo), 1)
+    (repo / ".git" / "evil.cfg").write_text(f'[filter "ev"]\n\tsmudge = "{_runs(marker)}"\n', encoding="utf-8")
+    subprocess.run(["git", "config", f"includeIf.{cond}.path", "evil.cfg"], cwd=repo, check=True)
+    _plain(repo, "worktree", "add", "-b", "jarves/p1/t9-a1", str(tmp_path / "plain"), "main")
+    assert marker.exists()
+    marker.unlink()
+    with pytest.raises(gitops.GitError, match="conditional include"):
+        gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    assert gitops.git(repo, "status", check=False).returncode != 0 and not marker.exists()
+
+
+def test_submodules_never_recurse(tmp_path):
+    """R1 (#1390): `submodule.recurse=true` would make reset/checkout/merge run git in `.git/modules/<n>`, whose config
+    (writable by agents) is never read; its filter would run there."""
+    sub, marker = tmp_path / "sub", tmp_path / "ran.txt"
+    sub.mkdir()
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "1"]):
+        (sub / ".gitattributes").write_text("*.txt filter=ev\n", encoding="utf-8")
+        (sub / "a.txt").write_text("1\n", encoding="utf-8")
+        _plain(sub, *args)
+    repo = _repo(tmp_path)
+    _plain(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "s")
+    _plain(repo, "commit", "-qm", "sub")
+    with open(repo / ".git" / "modules" / "s" / "config", "a", encoding="utf-8") as f:
+        f.write(f'[filter "ev"]\n\tsmudge = "{_runs(marker)}"\n')
+    subprocess.run(["git", "config", "submodule.recurse", "true"], cwd=repo, check=True)
+    (repo / "s" / "a.txt").unlink()
+    _plain(repo, "reset", "-q", "--hard")
+    assert marker.exists()
+    marker.unlink()
+    (repo / "s" / "a.txt").unlink()
+    gitops.git(repo, "reset", "-q", "--hard")
+    assert not marker.exists()
+
+
+def test_worktrees_are_checked_out_by_a_git_that_reads_their_own_config(monkeypatch, tmp_path):
+    """R1 (#1390): `worktree add` checks out in a child git whose config was never read; JARVES adds the worktree
+    with --no-checkout and checks it out in a separate call from inside the new worktree."""
+    repo, home, seen = _repo(tmp_path), tmp_path / "home", []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append((argv, kw["cwd"])) or real(argv, **kw))
+    gitops.ensure_integration(home, str(repo), 1)
+    wt, _ = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    rel = gitops.detached_worktree(home, str(repo), 1, gitops.git(repo, "rev-parse", "HEAD").stdout.strip())
+    adds = [a for a, _ in seen if "worktree" in a and "add" in a]
+    assert len(adds) == 3 and all("--no-checkout" in a for a in adds)
+    for w in (home / "projects" / "1" / "integration", wt, rel):
+        assert any(c == str(w) and "reset" in a for a, c in seen) and (w / "f.txt").exists()
+
+
+def test_a_url_credential_reset_puts_owner_helpers_back_only_under_its_own_key():
+    """R3 (#1390): helpers are a list; a URL reset that does not match leaves the owner's list alone, so the owner's
+    helper must not also come back under the generic key (it would run twice)."""
+    pairs = gitops.config_overrides([("system", "credential.helper", "manager"),
+                                     ("local", "credential.https://h.example.helper", "!evil")])
+    assert pairs == [("credential.https://h.example.helper", ""), ("credential.https://h.example.helper", "manager")]
+    pairs = gitops.config_overrides([("system", "credential.helper", "manager"),
+                                     ("global", "credential.https://o.example.helper", "o"),
+                                     ("local", "credential.helper", "!evil")])
+    assert pairs == [("credential.helper", ""), ("credential.helper", "manager"),
+                     ("credential.https://o.example.helper", "o")]
