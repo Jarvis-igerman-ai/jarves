@@ -705,12 +705,12 @@ class StageEngine:
             try:
                 base_sha = gitops.commit_of(self._integration(p), "HEAD")[:12]
                 wt_ok = t["worktree"] and Path(t["worktree"]).exists()
-                head = gitops.commit_of(t["worktree"], "HEAD") if wt_ok else base_sha
+                head = gitops.commit_of(t["worktree"], "HEAD") if wt_ok else ""
             except (gitops.GitError, OSError) as e:
                 return ("stop", "failed", f"git failed: {clean(e, 200)}")
             if kind == "merge" and wt_ok:
                 self._set_job(t, shown=head)                        # the commit this prompt names (answer binds it)
-            head = head[:12]
+            head = head[:12] or ("HEAD" if kind == "review" else base_sha)    # no task folder: review `where`
         if kind in ("work", "reproduce"):
             try:
                 wt, br = self._ensure_worktree(p, t)

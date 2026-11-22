@@ -1403,6 +1403,37 @@ def test_ship_plan_reports_an_unresolvable_commit_as_git_error(env, monkeypatch)
     assert m.call("ship_plan", project="demo", apply=True)["code"] == "GIT_ERROR"
 
 
+def test_owner_review_without_a_task_folder_diffs_against_head(env):
+    """JAR-678 (#1540 review R2): with no task worktree the review command keeps HEAD, never an empty base...base."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "review", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    base = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()[:12]
+    assert t["status"] == "waiting" and f"diff {base}...HEAD" in t["waiting"], t["waiting"]
+
+
+def test_ship_plan_with_a_failing_stat_still_names_the_commit(env, monkeypatch):
+    """JAR-678 (#1540 review R4): only the diff stat falls back to "unknown"; the plan still names the commit."""
+    m, repo, _ = env
+    open_project(m, repo)
+    real = gitops.git
+
+    def fake(cwd, *args, **kw):
+        if "--shortstat" in args:                                    # e.g. an unborn HEAD in the owner checkout
+            if kw.get("check", True):
+                raise gitops.GitError("fatal: bad HEAD")
+            return subprocess.CompletedProcess(args, 128, "", "fatal: bad HEAD")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", fake)
+    r = m.call("ship_plan", project="demo")
+    sha = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()
+    assert r["ok"] and "unknown" in r["text"] and r["commit"] == sha, r
+
+
 def _owner_merge_waiting(m, repo):
     open_project(m, repo)
     m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
@@ -1503,7 +1534,7 @@ def test_owner_merge_of_a_task_already_on_the_moved_integration_branch_does_not_
     assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert "moved during the merge" not in (t["waiting"] or ""), t
+    assert "changed after your approval" not in (t["waiting"] or "") and t["status"] == "done", t
     assert any("merged commit" in e["text"] for e in m.db.events(t["id"], 40))
 
 

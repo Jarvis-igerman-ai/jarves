@@ -934,7 +934,8 @@ class Manager(StageEngine):
                 return _res(True, "ok", f"{p['name']}: nothing to ship yet (no integration branch {br}).", branch=br,
                             commit="", worktree=str(wt), commands=[])      # review R3: not created yet
             sha = gitops.commit_of(p["path"], br)
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}").stdout.strip() or "no changes"
+            r = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}", check=False)   # the stat may fail;
+            stat = (r.stdout.strip() or "no changes") if r.returncode == 0 else "unknown"   # the commit may not
         except (OSError, gitops.GitError) as e:
             return _res(False, "GIT_ERROR", f"git failed: {clean(e, 200)}")
         cmds = [f"git -C \"{p['path']}\" diff HEAD...{sha}",
