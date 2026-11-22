@@ -68,6 +68,67 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
+# Config keys whose value git runs as a command (#1390). Keys as `git config --list` prints them: section and name in
+# lower case, a subsection (`filter.<x>.smudge`) as written. Editors are fixed by GIT_EDITOR below, pagers by --no-pager.
+_RUNS = re.compile(r"(?:filter\..+\.(?:clean|smudge|process)|merge\..+\.driver|diff\..+\.(?:command|textconv)"
+                   r"|diff\.external|core\.(?:sshcommand|askpass|gitproxy|pager|alternaterefscommand)"
+                   r"|gpg\.(?:program|.+\.program|ssh\.defaultkeycommand)|credential\.(?:.+\.)?helper"
+                   r"|remote\..+\.(?:receivepack|uploadpack|vcs))", re.S)
+_HOOK = re.compile(r"hook\.(.+)\.(?:command|event)", re.S)
+# what git uses when nothing is set; an empty value would make these fail instead (only when the shared config set
+# them and the owner's own config does not)
+_DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+             "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh"}
+_PACK_DEFAULT = {"receivepack": "git-receive-pack", "uploadpack": "git-upload-pack"}
+TRUSTED_SCOPES = ("system", "global")       # the owner's own files; `local`/`worktree` live in the shared .git
+FIXED_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"}   # ":" = no editor at all
+
+
+def _config_entries(cwd: str | Path, timeout: float) -> list[tuple[str, str, str]] | subprocess.CompletedProcess:
+    """(scope, key, value) of the effective config, includes followed; the failed run when git cannot read it.
+    Reading config runs no command."""
+    p = subprocess.run(["git", "--no-pager", "config", "--show-scope", "-z", "--list"], cwd=str(cwd),
+                       capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
+                       env=child_env(FIXED_ENV), encoding="utf-8", errors="replace")
+    if p.returncode != 0:
+        return p
+    parts, out = (p.stdout or "").split("\0"), []
+    for i in range(0, len(parts) - 1, 2):
+        key, _, value = parts[i + 1].partition("\n")
+        out.append((parts[i], key, value))
+    return out
+
+
+def config_overrides(entries: list[tuple[str, str, str]]) -> list[tuple[str, str]]:
+    """Command-scope settings that undo every command the repository's shared config names (#1390). An agent can
+    write `.git/config` (and any file it includes), so a filter, merge driver, diff command, credential helper, ssh
+    command or gpg program set there must never run under JARVES. Each such key is reset to empty (no filter, no
+    driver, an empty helper list), then the owner's own system/global values for it come back in order, so LFS from
+    the global config, the owner's credential manager and signing keep working. Config-defined hooks
+    (`hook.<name>.command`, which `core.hooksPath` does not stop) lose all events in every scope, like file hooks."""
+    untrusted = {k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)}
+    family = {("credential" if k.startswith("credential.") else k) for k in untrusted}
+    resets = [(k, "") for k in sorted(untrusted)]
+    restored = [(k, v) for s, k, v in entries if s in TRUSTED_SCOPES and _RUNS.fullmatch(k)
+                and ("credential" if k.startswith("credential.") else k) in family]
+    for k in sorted(untrusted):
+        if any(r[0] == k for r in restored):
+            continue
+        last = k.rsplit(".", 1)[-1]
+        default = _DEFAULTS.get(k) or (_PACK_DEFAULT.get(last) if k.startswith("remote.") else None)
+        if default:
+            restored.append((k, default))
+    hooks = sorted({m.group(1) for _, k, _ in entries if (m := _HOOK.fullmatch(k))})
+    return resets + restored + [(f"hook.{name}.event", "") for name in hooks]
+
+
+def _override_env(pairs: list[tuple[str, str]]) -> dict[str, str]:
+    """GIT_CONFIG_COUNT/KEY_n/VALUE_n instead of `-c`: a subsection name may hold `=`, which `-c` would split."""
+    env = {"GIT_CONFIG_COUNT": str(len(pairs))}
+    for i, (k, v) in enumerate(pairs):
+        env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = k, v
+    return env
+
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
@@ -76,13 +137,21 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
+    config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, config hooks,
+    `ext::` remotes, editors and pagers. Limit: the config is read just before the command, so a key an agent adds in
+    the milliseconds between the two reads is not undone."""
+    pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "protocol.ext.allow=never"]
+    entries = _config_entries(cwd, timeout)
+    if isinstance(entries, subprocess.CompletedProcess):     # unreadable config: fail closed, the command never runs
+        if check:
+            raise GitError((entries.stderr or "git config could not be read").strip()[:300])
+        return entries
+    env = child_env({**FIXED_ENV, **_override_env(config_overrides(entries))})
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
