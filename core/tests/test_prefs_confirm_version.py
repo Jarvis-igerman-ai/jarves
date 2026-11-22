@@ -86,18 +86,6 @@ def test_voice_confirm_after_an_edit_during_the_popup_is_refused(prefs):
     assert r.ok and p.get(pid)["state"] == "confirmed"      # a fresh popup shows B: that yes confirms B
 
 
-def test_every_write_moves_the_version_forward_within_one_clock_tick(prefs):
-    p, pid, v0 = prefs                                    # review R1: frozen clock, edit -> confirm -> decline
-    _edit_to_b(p, pid)
-    v1 = p.get(pid)["updated"]
-    p.confirm(pid, by="phone", shown=v1)
-    p.decline(pid, by="phone")
-    for stale in (v0, v1):                                # no write may put an older version back
-        with pytest.raises(PrefChanged):
-            p.confirm(pid, by="phone", shown=stale)
-    assert p.get(pid)["state"] == "declined"
-
-
 def test_voice_confirm_without_an_approval_popup_fails_closed(prefs):
     p, pid, _ = prefs                                     # review R3: no approval_meta ran, so no wording was shown
     confirm = {t.name: t for t in prefs_mod.make_skill(p).tools()}["pref_confirm"]
@@ -324,15 +312,18 @@ def test_voice_confirm_behind_the_audited_terminal_confirm_is_not_shown(prefs, h
     assert not r.ok and r.code == "PREF_NOT_SHOWN" and p.get(pid)["state"] == "proposed"
 
 
-@pytest.mark.parametrize("op", ["confirm", "decline", "reaffirm", "edit", "edit_repropose"])
+@pytest.mark.parametrize("op", ["confirm", "decline", "reaffirm", "edit", "edit_repropose", "add_confirmed"])
 def test_each_write_alone_moves_the_version_forward_within_one_clock_tick(prefs, op):
     p, pid, v0 = prefs                                    # review R2: behavioural, one write op at a time, frozen clock
-    p.confirm(pid, by="phone", shown=v0)                  # confirmed, so reaffirm and repropose have something to do
+    if op == "add_confirmed":
+        p.decline(pid, by="phone")                        # declined, so add_confirmed of the same words confirms it
+    else:
+        p.confirm(pid, by="phone", shown=v0)              # confirmed, so reaffirm and repropose have something to do
     v1 = p.get(pid)["updated"]
     assert v1 > v0
     {"confirm": lambda: p.confirm(pid, by="phone"), "decline": lambda: p.decline(pid, by="phone"),
      "reaffirm": lambda: p.reaffirm(pid, by="phone"), "edit": lambda: p.edit(pid, B, by="dashboard"),
-     "edit_repropose": lambda: _edit_to_b(p, pid)}[op]()
+     "edit_repropose": lambda: _edit_to_b(p, pid), "add_confirmed": lambda: p.add_confirmed(A, "music", by="cli")}[op]()
     assert p.get(pid)["updated"] > v1
     with pytest.raises(PrefChanged):
         p.confirm(pid, by="phone", shown=v1)
@@ -363,24 +354,6 @@ def test_the_live_core_registry_confirm_shows_the_details(cfg, home):
         finally:
             await core.stop()
     asyncio.run(run())
-
-
-def test_every_write_moves_the_version_forward_within_one_tick(prefs):
-    p, pid, v = prefs                                     # review R1: every writer of an existing row, frozen clock
-    seen = [v]
-    for write in (lambda: p.edit(pid, "Play soft jazz while cooking", by="cli"),
-                  lambda: p.edit(pid, B, by="voice", repropose=True),
-                  lambda: p.confirm(pid, by="cli"),
-                  lambda: p.reaffirm(pid, by="cli"),
-                  lambda: p.edit(pid, A, by="voice", repropose=True),
-                  lambda: p.decline(pid, by="cli"),
-                  lambda: p.add_confirmed(A, "music", by="cli")):
-        write()
-        seen.append(p.get(pid)["updated"])
-    assert all(b > a for a, b in zip(seen, seen[1:])), seen
-    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")            # a future writer must use _BUMP too
-    for stmt in src.split("UPDATE learned_prefs SET")[1:]:
-        assert "_BUMP" in stmt.split("WHERE")[0], stmt[:80]
 
 
 def test_confirm_of_an_item_removed_right_after_the_write_is_not_found(prefs):

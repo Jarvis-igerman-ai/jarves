@@ -38,3 +38,9 @@ he = "ביקשתי שיזכור משהו והוא סירב"
 en = "I asked it to remember something and it refused"
 fix_he = "פרטים רגישים (סיסמה, מספרים ארוכים, בריאות, כסף) לא נשמרים בכוונה. נסחו העדפה כללית, למשל סגנון תשובה."
 fix_en = "Sensitive details (passwords, long numbers, health, money) are deliberately not stored. Word it as a general preference, such as answer style."
+
+[[problems]]
+he = "אישרתי העדפה וקיבלתי \"הניסוח השתנה\" או \"טענו מחדש את העמוד\""
+en = "I confirmed a preference and got \"the wording changed\" or \"reload the page\""
+fix_he = "ההעדפה נערכה אחרי שראיתם אותה, או שהעמוד ישן. שום דבר לא אושר: קראו את הניסוח המוצג עכשיו (טענו מחדש את העמוד אם התבקשתם) ואשרו שוב אם הוא נכון."
+fix_en = "The preference was edited after you saw it, or the page is old. Nothing was confirmed: read the wording shown now (reload the page if asked) and confirm again if it is right."

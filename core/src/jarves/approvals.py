@@ -791,7 +791,9 @@ def audited(home: Path, confirm: Callable[[str], Awaitable[bool]], *, channel: s
         append_audit(Path(home) / "approvals" / "audit.jsonl", rec)
         return ok
     wrapped.accepts_meta = True                 # meta reaches the audit record above
-    wrapped.shows_details = False               # #1514: the terminal confirm gets the prompt only, never the details
+    # #1514: always False, whatever `confirm` is: wrapped() calls confirm(prompt) above without meta, so even a
+    # details-showing confirm never receives them. Forward meta there first before ever setting this from `confirm`.
+    wrapped.shows_details = False
     return wrapped
 
 
