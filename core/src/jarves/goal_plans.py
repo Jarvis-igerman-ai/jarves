@@ -122,6 +122,7 @@ class PlanStore:
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+        self._seen: tuple | None = None       # #1526: db change counters at the last scrub (None: scan on the next pass)
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -333,11 +334,18 @@ class PlanStore:
     # ------------------------------------------------------------------ privacy at rest (#1526)
     def scrub(self) -> int:
         """Privacy mode: blank the tool text that older rows still hold (step evidence / error, plan result / note) in ONE
-        transaction. Status, error codes, step numbers and the done count stay. Returns how many rows changed."""
+        transaction: an explicit BEGIN, so it holds even if the connection were in autocommit mode (UserDB uses the
+        sqlite3 default, deferred transactions). UserDB has no transaction API; this follows `_cas` (db lock + rollback).
+        Status, error codes, step numbers and the done count stay. secure_delete is on for the writes and a changed scrub
+        truncates the WAL, so the old text is not left in free pages or WAL frames. Returns how many rows changed."""
         n = 0
         with self.db._lock:
             c = self.db._db
+            secure = c.execute("PRAGMA secure_delete").fetchone()[0]
+            c.execute("PRAGMA secure_delete=ON")
             try:
+                if not c.in_transaction:
+                    c.execute("BEGIN")
                 for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "
                                    "WHERE evidence != '' OR error != ''").fetchall():
                     er = _private_text(r[2])
@@ -353,14 +361,31 @@ class PlanStore:
             except BaseException:
                 c.rollback()
                 raise
+            finally:
+                c.execute(f"PRAGMA secure_delete={int(secure)}")
+            if n:
+                c.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # busy readers: frames stay until the next checkpoint
+            self._seen = self._version()
         if n:
             logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy mode: older plan text removed", count=n)
         return n
 
+    def _version(self) -> tuple:
+        """Changes this connection made (total_changes) + commits by other connections (data_version) since open."""
+        with self.db._lock:
+            c = self.db._db
+            return c.total_changes, c.execute("PRAGMA data_version").fetchone()[0]
+
     def scrub_if_private(self) -> int:
-        """Privacy on: scrub() now. Called on EVERY runner pass, so text a step stores while privacy is on (a step that
-        was mid-run when the switch flipped) is gone within one pass. Idempotent; the WHERE filter keeps it cheap."""
-        return self.scrub() if logs.privacy() else 0
+        """Privacy on: scrub() when memory.db changed since the last scrub, and always on the privacy off->on edge.
+        Called on EVERY runner pass, so text a step stores while privacy is on (a step that was mid-run when the switch
+        flipped) is gone within one pass, while an idle pass costs two counter reads instead of a table scan."""
+        if not logs.privacy():
+            self._seen = None
+            return 0
+        if self._seen is not None and self._version() == self._seen:
+            return 0
+        return self.scrub()
 
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:

@@ -690,3 +690,53 @@ def test_1526_own_reasons_are_shared_constants():
         assert gp._private_text(why) == why and gp._private_note(f"step 2: {why}") == f"step 2: {why}"
     assert gp._private_text(gp.WHY_TIME_CAP + "5 min reached") == gp.WHY_TIME_CAP + "5 min reached"
     assert gp._private_text("X" * 41 + ": text") == ""                    # R5: an over-long "code" is not kept
+
+
+async def test_1526_scrub_leaves_no_copy_at_rest_in_the_db_files(env, monkeypatch, tmp_path):
+    """#1526 council R2: the old text is not left behind in SQLite free pages or the WAL after a scrub."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    env.db.x("UPDATE goal_plan_steps SET evidence=? WHERE plan_id=?", ("QZSECRETQZ " * 40, p["id"]))   # tool text
+    monkeypatch.setattr(logs, "_privacy", True)
+    assert env.store.scrub_if_private() > 0
+    files = [f for f in tmp_path.rglob("*") if f.is_file() and ".db" in f.name]
+    assert files and not any(b"QZSECRETQZ" in f.read_bytes() for f in files)
+
+
+async def test_1526_scrub_is_one_transaction_and_idle_passes_skip_it(env, monkeypatch):
+    """#1526 council R1/R3: a failing scrub changes no row; a pass with no new write since the last scrub skips the scan,
+    a write (this or another connection) or a privacy off->on edge runs it again."""
+    import sqlite3
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    p = env.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    monkeypatch.setattr(logs, "_privacy", True)
+    real = gp._private_note
+    monkeypatch.setattr(gp, "_private_note", lambda t: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError):
+        env.store.scrub()
+    assert "secret" in env.store.get(p["id"])["steps"][0]["evidence"]          # rolled back with the plan rows
+    monkeypatch.setattr(gp, "_private_note", real)
+
+    scans = []
+    monkeypatch.setattr(env.store, "scrub", lambda real=env.store.scrub: scans.append(1) or real())
+    env.store.scrub_if_private()
+    env.store.scrub_if_private()
+    assert len(scans) == 1                                                       # nothing written: no scan
+    env.db.x("UPDATE goal_plan_steps SET evidence='late' WHERE plan_id=?", (p["id"],))
+    assert env.store.scrub_if_private() == 1 and len(scans) == 2
+    other = sqlite3.connect(env.db.path)
+    other.execute("UPDATE goal_plan_steps SET evidence='other process' WHERE plan_id=?", (p["id"],))
+    other.commit()
+    other.close()
+    assert env.store.scrub_if_private() == 1 and len(scans) == 3
+    monkeypatch.setattr(logs, "_privacy", False)
+    env.store.scrub_if_private()
+    monkeypatch.setattr(logs, "_privacy", True)
+    env.store.scrub_if_private()
+    assert len(scans) == 4                                                       # the off->on edge always scans
