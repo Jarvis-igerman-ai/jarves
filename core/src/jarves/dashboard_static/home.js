@@ -16,6 +16,7 @@ async function togglePrivacy(msg) {
     privacyState = await post("/api/privacy", { privacy: to });
     if (msg) msg.textContent = privacyState.saved_in_config ? tx("נשמר", "Saved")
       : tx("שונה עכשיו; config.toml לא נשמר: ", "Changed now; config.toml not saved: ") + privacyState.config_error;
+    if (msg && privacyState.scrub_note_en) msg.textContent += " " + tx(privacyState.scrub_note_he, privacyState.scrub_note_en);  // #1557 R2
   } catch (e) { if (msg) msg.textContent = tx("לא שונה: ", "Not changed: ") + e.message; }
   await renderTopbar();
   refreshOverview();

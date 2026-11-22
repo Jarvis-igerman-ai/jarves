@@ -583,6 +583,8 @@ class Core:
         sync("limits_sink", lambda: limits_mod.set_sink(None))
         if getattr(self, "_privacy_hook", None) is not None:
             sync("privacy_hook", lambda: logs.off_privacy_on(self._privacy_hook))   # #1557: a stopped Core stays quiet
+            from . import privacy
+            sync("privacy_scrub", privacy.join_background)                         # R3: no scrub left behind
         sync("speaker", self.dev.speaker_stop)
         self.health.mark("stopping")
         logs.info("core", "CORE_STOPPING", "Core stopping", reason=self.stop_reason or "unspecified")

@@ -81,7 +81,7 @@ def set_full_text(ctx, on: bool) -> dict:
         ctx.cfg.log.privacy = True
         scrub = scrub_at_rest(ctx.home)
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
-        return {**state(ctx), "scrub": scrub}
+        return {**state(ctx), **_scrub_answer(scrub)}
     return state(ctx)
 
 
@@ -142,13 +142,37 @@ def _step_fix(row):
 
 
 _SCRUB_LOCK = threading.Lock()                     # one scrub at a time in this process
+_last_scrub: threading.Thread | None = None
+SCRUB_PARTIAL_NOTE = "Some older text could not be cleared yet; it is tried again next time privacy turns on."
+SCRUB_PARTIAL_NOTE_HE = "חלק מהטקסט הישן עוד לא נמחק; ננסה שוב בפעם הבאה שהפרטיות תופעל."
+
+
+def _scrub_answer(scrub: dict) -> dict:
+    """The switch's JSON answer: the scrub result, plus a short EN/HE note when part of it failed (#1557 R2)."""
+    if not scrub["partial"]:
+        return {"scrub": scrub}
+    return {"scrub": scrub, "scrub_note_en": SCRUB_PARTIAL_NOTE, "scrub_note_he": SCRUB_PARTIAL_NOTE_HE}
 
 
 def scrub_in_background(home: Path) -> threading.Thread:
     """#1557 R2: the privacy-on hook may run on the Core's event loop (flag file poll); scrub on a thread instead."""
+    global _last_scrub
     t = threading.Thread(target=scrub_at_rest, args=(Path(home),), name="privacy-scrub", daemon=True)
     t.start()
+    _last_scrub = t
     return t
+
+
+def join_background(timeout: float = SCRUB_TIMEOUT_S * 2) -> bool:
+    """#1557 R3: Core stop waits briefly for a running background scrub. False (logged) if it is still running."""
+    t = _last_scrub
+    if t is None:
+        return True
+    t.join(timeout)
+    if t.is_alive():
+        logs.warn("privacy", "PRIVACY_SCRUB_STILL_RUNNING", "a privacy scrub was still running at stop")
+        return False
+    return True
 
 
 def scrub_at_rest(home: Path) -> dict:
@@ -174,7 +198,7 @@ def _scrub_all(home: Path) -> dict:
             out["partial"].append(name)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text may still be in the database file",
                       target=name, reason="wal_pending")
-        except sqlite3.Error as e:
+        except (sqlite3.Error, OSError) as e:      # R1: e.g. an unreadable folder; the switch still saves
             out["partial"].append(name)
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older text could not be scrubbed",
                       target=name, error_type=type(e).__name__)
@@ -196,7 +220,7 @@ def set_privacy(ctx, on: bool) -> dict:
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
-    return {**state(ctx), "saved_in_config": saved, "config_error": err, **({"scrub": scrub} if scrub else {})}
+    return {**state(ctx), "saved_in_config": saved, "config_error": err, **(_scrub_answer(scrub) if scrub else {})}
 
 
 # ---------------------------------------------------------------------- one-way actions

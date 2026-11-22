@@ -2,14 +2,20 @@
 evidence and error text), not only new writes. Status, codes and the resend ledger rows themselves stay."""
 import json
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from jarves import logs, privacy
+from jarves.app import Core
 from jarves.config import Config
 from jarves.continuity import Continuity
+from jarves.skills.music import FakePlayer
 from jarves.userdata import UserDB
+from jarves.voice.audio import SimAudio
+
+from conftest import FakeSTT, FakeTTS
 
 SECRET = "the answer mentions my sister Dana"
 
@@ -22,6 +28,12 @@ def ctx(home):
     logs.setup(home / "logs", "INFO", console=False, privacy=False)
     yield SimpleNamespace(home=home, cfg=cfg, config_path=home / "config.toml")
     logs.setup(home / "logs", "INFO", console=False, privacy=True)
+
+
+def new_core(cfg, home):
+    """A Core with virtual audio and fake speech (R5: no import from another test module)."""
+    return Core(cfg, home, audio=SimAudio(), player=FakePlayer(), stt=FakeSTT(), tts=FakeTTS(), console_logs=False,
+                use_real_audio=False)
 
 
 def _seed(home):
@@ -129,10 +141,59 @@ def test_a_locked_database_is_reported_partial_to_the_owner(ctx, home, monkeypat
         lock.execute("ROLLBACK")
         lock.close()
     assert got["scrub"]["partial"] == ["continuity.db"] and got["saved_in_config"]
+    assert got["scrub_note_en"] == privacy.SCRUB_PARTIAL_NOTE and got["scrub_note_he"] == privacy.SCRUB_PARTIAL_NOTE_HE
+
+
+def test_a_full_scrub_has_no_partial_note(ctx, home):
+    _seed(home)
+    got = privacy.set_privacy(ctx, True)
+    assert got["scrub"]["partial"] == [] and "scrub_note_en" not in got
+
+
+def test_the_privacy_switch_shows_the_partial_note():
+    js = (Path(privacy.__file__).parent / "dashboard_static" / "home.js").read_text(encoding="utf-8")
+    assert "tx(privacyState.scrub_note_he, privacyState.scrub_note_en)" in js   # R2: EN/HE note in the panel
+
+
+def test_an_os_error_in_the_scrub_is_partial_and_the_switch_still_saves(ctx, home, monkeypatch):
+    _seed(home)
+    real = privacy._scrub_db
+
+    def boom(path, sql, fix):
+        if path.name == "continuity.db":
+            raise PermissionError("denied")
+        return real(path, sql, fix)
+    seen = []
+    monkeypatch.setattr(privacy, "_scrub_db", boom)
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append((a[1], k)))
+    got = privacy.set_privacy(ctx, True)                       # R1: no exception after write_privacy
+    assert got["saved_in_config"] and got["scrub"]["partial"] == ["continuity.db"]
+    assert "privacy = true" in (home / "config.toml").read_text(encoding="utf-8")
+    assert seen == [("PRIVACY_SCRUB_PARTIAL", {"target": "continuity.db", "error_type": "PermissionError"})]
+
+
+def test_join_background_waits_for_a_running_scrub_and_logs_one_still_running(home, monkeypatch):
+    import threading
+    gate = threading.Event()
+    monkeypatch.setattr(privacy, "scrub_at_rest", lambda h: gate.wait(10))
+    seen = []
+    monkeypatch.setattr(logs, "warn", lambda *a, **k: seen.append(a[1]))
+    t = privacy.scrub_in_background(home)
+    assert privacy.join_background(0.05) is False and seen == ["PRIVACY_SCRUB_STILL_RUNNING"]
+    gate.set()
+    assert privacy.join_background(5) is True and not t.is_alive()
+
+
+async def test_core_stop_joins_the_background_scrub(home, cfg, monkeypatch):
+    calls = []
+    monkeypatch.setattr(privacy, "join_background", lambda: calls.append(1) or True)
+    c = new_core(cfg, home)
+    await c.start()
+    await c.stop()
+    assert calls == [1]                                       # R3: stop() waits for a running scrub
 
 
 async def test_core_start_with_privacy_on_scrubs_older_text(home, cfg):
-    from test_m3_core import new_core
     _seed(home)
     cfg.log.privacy = True                                    # set in config.toml, no dashboard switch
     c = new_core(cfg, home)
@@ -144,7 +205,6 @@ async def test_core_start_with_privacy_on_scrubs_older_text(home, cfg):
 
 
 async def test_core_start_with_privacy_off_keeps_text(home, cfg):
-    from test_m3_core import new_core
     _seed(home)
     cfg.log.privacy = False
     c = new_core(cfg, home)
@@ -156,7 +216,6 @@ async def test_core_start_with_privacy_off_keeps_text(home, cfg):
 
 
 async def test_core_start_scrubs_when_only_the_flag_file_says_privacy_on(home, cfg):
-    from test_m3_core import new_core
     _seed(home)
     (home / "logs").mkdir(exist_ok=True)
     (home / "logs" / logs.PRIVACY_FILE).write_text(json.dumps({"privacy": True, "at": 0}), encoding="utf-8")
@@ -171,7 +230,6 @@ async def test_core_start_scrubs_when_only_the_flag_file_says_privacy_on(home, c
 
 async def test_running_core_scrubs_when_another_process_turns_privacy_on(home, cfg, monkeypatch):
     import threading
-    from test_m3_core import new_core
     started, real = [], privacy.scrub_in_background
     monkeypatch.setattr(privacy, "scrub_in_background", lambda h: started.append(real(h)) or started[-1])
     cfg.log.privacy = False
