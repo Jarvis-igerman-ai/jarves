@@ -72,10 +72,24 @@ class StageEngine:
         except OSError:                                 # the worktree is gone: fail closed
             return "", f"the task worktree is missing ({what})"
         if sha and vetted and (sha == vetted or (committed and parents == [vetted])
-                               or (merged and base_sha and (parents == [vetted, base_sha] or sha == base_sha))):
+                               or (merged and base_sha and (sha == base_sha or (
+                                   parents == [vetted, base_sha] and StageEngine._clean_merge(wt, sha, vetted,
+                                                                                              base_sha))))):
             return sha, ""
         return "", (f"the task branch moved after JARVES checked it: {sha[:12]} is not the checked commit "
                     f"{vetted[:12]} ({what})")
+
+    @staticmethod
+    def _clean_merge(wt: Path, sha: str, a: str, b: str) -> bool:
+        """True only when `sha` holds exactly the tree git's own merge of a and b gives: a merge commit's content is not
+        fixed by its parents, so an amended merge with the right parents is refused (#1461 review 3 R1)."""
+        try:
+            want = gitops.git(wt, "merge-tree", "--write-tree", a, b, check=False)
+            have = gitops.git(wt, "rev-parse", f"{sha}^{{tree}}", check=False).stdout.strip()
+        except OSError:
+            return False
+        tree = want.stdout.split("\n", 1)[0].strip() if want.returncode == 0 else ""
+        return bool(tree) and tree == have
 
     def _feedback(self, t: dict, text: str) -> None:
         j = self._job(self.db.task(t["id"]) or t)
@@ -319,8 +333,8 @@ class StageEngine:
         try:
             gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
             seen = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
-            files = gitops.changed_files(wt, base)
-            links = gitops.link_files(wt, base)
+            files = gitops.changed_files(wt, base, seen)    # against the fixed sha, not the moving HEAD
+            links = gitops.link_files(wt, base, seen)
             if gitops.git(wt, "rev-parse", "HEAD").stdout.strip() != seen:
                 return ("stop", "blocked", f"the task branch moved during the scope check (not merged; on {br})")
         except gitops.GitError as e:
@@ -572,12 +586,13 @@ class StageEngine:
                     return ("stop", "blocked", moved)
                 try:
                     vetted = self._job(self.db.task(t["id"]) or t).get("tested_head") or ""
+                    # #1503 R5 (open): like the merge stage, this folds files left uncommitted after the scope check
                     committed = gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                     sha, moved = self._bind(wt, vetted, "not checked", committed=committed)
                     if moved:
                         return ("stop", "blocked", moved)
                     base_sha = gitops.git(wt, "rev-parse", base).stdout.strip()
-                    conflicts = gitops.merge_in(wt, base)
+                    conflicts = gitops.merge_in(wt, base_sha)    # the exact sha _bind checks, not the moving name
                     if not conflicts:
                         sha, moved = self._bind(wt, sha, "not checked", merged=True, base_sha=base_sha)
                         if moved:
@@ -636,7 +651,7 @@ class StageEngine:
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
                     base_sha = gitops.git(wt, "rev-parse", base).stdout.strip()
-                    conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
+                    conflicts = gitops.merge_in(wt, base_sha)        # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     sha, moved = self._bind(wt, sha, "not merged", merged=True, base_sha=base_sha)

@@ -220,3 +220,91 @@ def test_bind_on_a_missing_worktree_fails_closed(env, tmp_path):
     m, repo, home = env
     sha, why = m._bind(tmp_path / "gone", "abc", "not merged")
     assert sha == "" and "worktree is missing" in why and "not merged" in why, why
+
+
+def _evil_merge(wt: Path, base_sha: str) -> None:
+    """Review 3 R1: a merge with the exact parents [vetted, base_sha] amended with content nobody checked."""
+    sh(wt, *GIT, "merge", "-q", "--no-ff", "--no-edit", base_sha)
+    (wt / "extra.txt").write_text("never scope-checked\n")
+    sh(wt, *GIT, "add", "-A")
+    sh(wt, *GIT, "commit", "-q", "--amend", "--no-edit")
+
+
+def _evil_before_merge_in(monkeypatch, done: list) -> None:
+    orig = gitops.merge_in
+
+    def run(wt, ref, *a, **k):
+        if not done:
+            done.append(1)
+            _evil_merge(Path(wt), sh(Path(wt), "git", "rev-parse", ref).strip())
+        return orig(wt, ref, *a, **k)
+    monkeypatch.setattr(gitops, "merge_in", run)
+
+
+def _base_commit(home: Path) -> None:
+    """Newer work lands on the integration branch, so a later merge_in has something to merge."""
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "b.txt").write_text("newer\n")
+    sh(integ, *GIT, "add", "-A")
+    sh(integ, *GIT, "commit", "-q", "-m", "newer")
+
+
+def test_amended_merge_with_the_base_parents_is_not_checked(env, monkeypatch):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    done = []
+    _wrap(m, "_st_check", lambda t: _base_commit(home))
+    _evil_before_merge_in(monkeypatch, done)
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert done and t["status"] == "blocked" and "not checked" in t["reason"], t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "extra.txt").exists()
+
+
+def test_amended_merge_with_the_base_parents_is_not_merged(env, monkeypatch):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    done = []
+    _wrap(m, "_st_merge", lambda t: (_base_commit(home), _evil_before_merge_in(monkeypatch, done)))
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert done and t["status"] == "blocked" and "not merged" in t["reason"], t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "extra.txt").exists()
+
+
+def test_bind_accepts_a_clean_merge_and_refuses_an_amended_one(env, tmp_path):
+    m, repo, home = env
+    wt, a, b = _repo_ab(tmp_path / "r")
+    sh(wt, "git", "checkout", "-q", "-b", "task", a)
+    (wt / "g").write_text("task")
+    sh(wt, *GIT, "add", "-A")
+    sh(wt, *GIT, "commit", "-q", "-m", "task")
+    vetted = sh(wt, "git", "rev-parse", "HEAD").strip()
+    sh(wt, *GIT, "merge", "-q", "--no-ff", "--no-edit", b)
+    clean_sha = sh(wt, "git", "rev-parse", "HEAD").strip()
+    assert m._bind(wt, vetted, "x", merged=True, base_sha=b) == (clean_sha, "")
+    sh(wt, "git", "reset", "-q", "--hard", vetted)
+    _evil_merge(wt, b)
+    sha, why = m._bind(wt, vetted, "x", merged=True, base_sha=b)
+    assert sha == "" and "moved after JARVES checked it" in why, why
+
+
+def test_scope_check_reads_the_fixed_commit_not_the_moving_head(env, monkeypatch):
+    """Review 3 R3: a sibling moves the branch away and back (A->B->A) while the scope check reads it."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    seen = []
+    orig = gitops.changed_files
+
+    def run(wt, base, *a, **k):
+        seen.append(a[0] if a else k.get("head", "HEAD"))
+        return orig(wt, base, *a, **k)
+    monkeypatch.setattr(gitops, "changed_files", run)
+    m.call("resume", project="demo")
+    finish(m)
+    assert seen and len(seen[0]) == 40 and seen[0] != "HEAD", seen

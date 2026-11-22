@@ -172,21 +172,21 @@ def commit_all(wt: Path, message: str) -> bool:
     return True
 
 
-def changed_files(wt: Path, base: str) -> list[str]:
+def changed_files(wt: Path, base: str, head: str = "HEAD") -> list[str]:
     """Every path the task changed, as plain text. -z: git would otherwise print a non-ASCII name in quotes
     (octal escapes inside `"..."`), which no PROTECTED prefix matches. --no-renames: a rename lists both
     sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
-    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
+    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...{head}").stdout
     return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
 LINK_MODES = ("120000", "160000")       # a symlink and a gitlink (submodule entry)
 
 
-def link_files(wt: Path, base: str) -> list[str]:
+def link_files(wt: Path, base: str, head: str = "HEAD") -> list[str]:
     """Paths the task added or changed as a symlink or a gitlink (#1381). Their path text can look harmless while a
     symlink points into `.github/` or `.claude/` and a gitlink pulls in another repository, so they count as protected."""
-    out = git(wt, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...HEAD").stdout.split("\0")
+    out = git(wt, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...{head}").stdout.split("\0")
     return [out[i + 1].replace("\\", "/") for i in range(0, len(out) - 1, 2)
             if out[i].startswith(":") and out[i].split()[1:2] and out[i].split()[1] in LINK_MODES]
 
