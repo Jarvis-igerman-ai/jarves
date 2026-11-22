@@ -229,9 +229,12 @@ class StageEngine:
         deps = [d for d in (self.db.task(x) for x in t["deps"]) if d]
         merged = [d for d in deps if not self._job(d).get("kept")]
         kept = [f"task #{d['seq']}'s work is on branch {self._job(d)['kept']}" for d in deps if self._job(d).get("kept")]
-        base = gitops.integration_branch(p["id"])
         return cards.build_card(p, t, deps, cap=self.cfg.context_chars, failure=failure, notes=t["notes"],
-                                integration=base if merged else "", feedback=self._job(t).get("feedback"), kept=kept)
+                                integration=self._integration_sha(p)[:12] if merged else "", feedback=self._job(t).get("feedback"), kept=kept)
+
+    def _integration_sha(self, p) -> str:
+        """The integration branch's current commit: owner text names it, not the movable branch name (#1469)."""
+        return gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
 
     def _last_failure(self, t) -> str:
         last = [e for e in self.db.events(t["id"], 30) if e["kind"] == "check_failed"]
@@ -589,13 +592,14 @@ class StageEngine:
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
                 gitops.fast_forward(self._integration(p), br)
+                merged = self._integration_sha(p)
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat = t["result"]
         gitops.remove_worktree(p["path"], wt, br)
         self.db.update_task(t["id"], branch="", worktree="", reason="")
         self._set_job(t, kept=None)
-        self.db.event(t["id"], "manager", "merged", f"merged into {base}: {stat}")
+        self.db.event(t["id"], "manager", "merged", f"merged into {base} at commit {merged[:12]}: {stat}")
         return ("next",)
 
     def _st_release(self, p, t):
@@ -650,10 +654,6 @@ class StageEngine:
                 head = gitops.git(wt, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
                 if head != br:
                     return ("park", f"the folder {wt} is not on the task branch {br} any more: switch back, then say done")
-                base = gitops.integration_branch(p["id"])
-                if gitops.git(wt, "merge-base", "--is-ancestor", base, "HEAD", check=False).returncode != 0 and \
-                        gitops.git(wt, "merge-base", "--is-ancestor", f"{base}@{{1}}", "HEAD", check=False).returncode != 0:
-                    pass                                            # rebased by hand: the merge stage re-merges
                 return self._after_code(p, t, wt, br, "", "work", owner=True)
             return ("next",)
         base = gitops.integration_branch(p["id"])
@@ -674,11 +674,12 @@ class StageEngine:
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
+        at = self._integration_sha(p)[:12] or base                  # the commit, not the movable name (#1469)
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
-            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {base}...HEAD, then approve or reject with what "
+            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {at}...HEAD, then approve or reject with what "
                       "to change",
             "merge": f"approve merging task #{t['seq']} into {base}",
             "release": f"release {p['name']} yourself, then say done",
