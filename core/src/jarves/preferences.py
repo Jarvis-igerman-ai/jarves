@@ -130,7 +130,7 @@ def _secret_shaped(t: str) -> bool:
     # base64 with '+' or '/' inside. A path (absolute or relative) has '/' too, so a '/' run is judged per segment:
     # random segments are mixed case, path segments are words. Segments of 20+ chars are also checked by _BASE62.
     # A random key can split at '/' into short segments that are each too short to judge, so the joined run is
-    # refused when it looks random and not every segment is a path word (#1482 review R2).
+    # refused when it looks random and not every segment is a path word.
     for r in (m.group(0).rstrip("=") for m in _BASE64.finditer(t)):
         joined = re.sub(r"[+/]", "", r)
         if "/" in r:
