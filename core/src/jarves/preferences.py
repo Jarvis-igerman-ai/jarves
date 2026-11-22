@@ -11,6 +11,7 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
 
@@ -68,9 +69,43 @@ def _base32(text: str) -> bool:
     return False
 
 
-def looks_sensitive(text: str) -> bool:
-    text = text or ""
-    return bool(_SENSITIVE.search(text)) or _base32(text)
+# #1099: a key/token word refuses the text only when a credential-like value follows it ("my api key is ab12cd34",
+# "token: ab12cd34", "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("token refresh: fix it",
+# "the token is expired", "token at https://...") is still allowed. Known token shapes come from logs.has_secret.
+_KEY_WORD = (r"api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|\btokens?\b|"
+             r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
+# 6+ characters with a digit or a non-hyphen symbol ("well-known" is a word); a URL or path is not a value
+_CRED = r"(?![a-z][a-z0-9+.-]*://|/)(?=[^\s.,;!?]*[\d_+/=@#$%*&])[^\s.,;!?]{6,}"
+_KEY_VALUE = re.compile(
+    rf"(?:{_KEY_WORD})(?:\s+[^\s:=]+){{0,2}}?\s*[:=]\s*{_CRED}|"           # "keyword: value", two words between
+    rf"(?:{_KEY_WORD}|\bkeys?\b)(?:\s+[^\s:=]+){{0,5}}?\s+(?:is|was|הוא|היא|זה)\s+{_CRED}", re.I)
+# An unprefixed key is one long run of letters, digits and + / = _ - with high character entropy. A run whose
+# pieces (split at / _ -) are all words, numbers or camelCase names is an identifier or path, and pure hex (git
+# SHA, UUID) is no key either; a random piece such as "Zx9fQ2LmB7" makes the whole run a key (review R2).
+_KEY_RUN = re.compile(r"[A-Za-z0-9+/=_-]{20,}")
+_PIECE = re.compile(r"[a-z]+\d{0,4}|[A-Z]+\d{0,3}|\d+|(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")
+KEY_ENTROPY_BITS = 3.5            # bits per character; random base62/base64 keys of 20+ chars sit above 4
+
+
+def _entropy(s: str) -> float:
+    return -sum(c / len(s) * math.log2(c / len(s)) for c in (s.count(ch) for ch in set(s)))
+
+
+def _keylike(text: str) -> bool:
+    for run in _KEY_RUN.findall(text):
+        pieces = [p for p in re.split(r"[/_-]+", run) if p]
+        joined = "".join(pieces)
+        if (len(joined) >= 20 and re.search(r"[A-Za-z]", joined) and re.search(r"\d", joined)
+                and not re.fullmatch(r"[0-9a-fA-F]+", joined) and not all(_PIECE.fullmatch(p) for p in pieces)
+                and _entropy(joined) >= KEY_ENTROPY_BITS):
+            return True
+    return False
+
+
+def looks_sensitive(text: object) -> bool:
+    """Credentials, card/ID numbers, key/token-shaped strings, TOTP seeds, health or money details: never learned."""
+    s = "" if text is None else str(text)
+    return bool(_SENSITIVE.search(s) or _KEY_VALUE.search(s) or logs.has_secret(s) or _keylike(s) or _base32(s))
 
 
 def normalize(text: str) -> str:
