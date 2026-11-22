@@ -22,6 +22,13 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+@pytest.fixture(autouse=True)
+def _no_fast_path(monkeypatch):
+    """The fakes below count calls: the one-time `git --version` probe and the fast path must not depend on test order
+    or the machine's git (#1632 round 4), so every git() here takes the full path."""
+    monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [False])
+
+
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
         if argv[1:4] == ["--no-pager", "config", "--show-scope"]:    # the config read before every command (#1390)

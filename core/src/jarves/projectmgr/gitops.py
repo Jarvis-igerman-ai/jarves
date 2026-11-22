@@ -81,6 +81,13 @@ _HOOK = re.compile(r"hook\.(.+)\.(?:command|event)", re.S)
 _DEFAULTS = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
              "gpg.ssh.program": "ssh-keygen", "core.sshcommand": "ssh"}
 _PACK_DEFAULT = {"receivepack": "git-receive-pack", "uploadpack": "git-upload-pack"}
+# command keys with a fixed name: reset on EVERY call, whether or not the first read saw them, so a key an agent adds
+# after that read is undone too (#1632 round 4 blocker). Only subsection-named keys (filter/merge/diff drivers,
+# trailers, config hooks, remote.<x>.*) depend on the read; see git(). core.gitproxy (first value wins, so it cannot be
+# overridden) is stopped by protocol.git.allow=never, core.pager by --no-pager, diff.external (an empty value would
+# make every diff fail) by `diff --no-ext-diff`. Not here: core.alternateRefsCommand (empty breaks alternates).
+_ALWAYS = ("core.sshcommand", "core.askpass", "gpg.program", "gpg.openpgp.program", "gpg.x509.program", "gpg.ssh.program", "gpg.ssh.defaultkeycommand",
+           "credential.helper")
 TRUSTED_SCOPES = ("system", "global")       # the owner's own files; `local`/`worktree` live in the shared .git
 # an include whose condition depends on the branch or the git dir can match in a child git (worktree add checks out
 # inside the new worktree, on the task branch) but not in the read in `cwd`, so its keys would never be undone (R1)
@@ -158,20 +165,22 @@ def config_overrides(entries: list[tuple[str, str, str]]) -> list[tuple[str, str
     driver, an empty helper list), then the owner's own system/global values for it come back in order, so LFS from
     the global config, the owner's credential manager and signing keep working. Config-defined hooks
     (`hook.<name>.command`, which `core.hooksPath` does not stop) lose all events in every scope, like file hooks."""
-    untrusted = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)})
+    untrusted = sorted({k for s, k, _ in entries if s not in TRUSTED_SCOPES and _RUNS.fullmatch(k)} | set(_ALWAYS))
     trusted = [(k, v) for s, k, v in entries if s in TRUSTED_SCOPES and _RUNS.fullmatch(k)]
     out: list[tuple[str, str]] = []
     for k in untrusted:
+        if k == "credential.helper":
+            continue                    # helper lists: handled once below
         out.append((k, ""))
         if k.startswith("credential."):
-            continue                    # helper lists: handled once below
+            continue
         own = [(k2, v) for k2, v in trusted if k2 == k]
         default = _DEFAULTS.get(k) or (_PACK_DEFAULT.get(k.rsplit(".", 1)[-1]) if k.startswith("remote.") else None)
         out += own or ([(k, default)] if default else [])
-    if any(k.startswith("credential.") for k in untrusted):
-        # helpers are a list per request URL: the generic empty value clears it for every URL, then every owner helper
-        # comes back under its own key in order, so each one that matches runs once, whatever URL key it uses (R2)
-        out += [("credential.helper", "")] + [(k, v) for k, v in trusted if k.startswith("credential.")]
+    # helpers are a list per request URL: the generic empty value (last, command scope) clears it for every URL, even
+    # one added after the read, then every owner helper comes back under its own key in order, so each one that
+    # matches runs once, whatever URL key it uses (R2)
+    out += [("credential.helper", "")] + [(k, v) for k, v in trusted if k.startswith("credential.")]
     hooks = sorted({m.group(1) for _, k, _ in entries if (m := _HOOK.fullmatch(k))})
     # an empty event list, and a no-op command in case a git does not clear the list on an empty value
     return out + [pair for name in hooks for pair in ((f"hook.{name}.event", ""), (f"hook.{name}.command", ":"))]
@@ -192,7 +201,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
+    JARVES merges into the owner's branch. The other commands the shared config names are undone too (#1390, see
     config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, trailer commands,
     config hooks, `ext::` remotes, editors and pagers. rev-parse/rev-list/merge-base (_INERT) run none of these, so
     with GIT_NO_LAZY_FETCH=1 they skip both config reads; one that fails (a missing ref, or an object a partial clone
@@ -201,14 +210,17 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     fetch/push recurses into submodules and no local (file) remote is reached: its receive-pack and hooks would run
     without these overrides, so a push to an `origin` that is a folder fails (no JARVES flow uses one). A shared
     `core.sshCommand` becomes `ssh`; the owner's GIT_SSH/GIT_SSH_COMMAND never reach JARVES git (child_env), so
-    this changes no owner transport that worked before. Limit (not prevention): the config is read just before the
-    command, so a key an agent adds between that read and the command is not undone and may run. It is read again
-    after the command, and the call fails with the key's name only when that key is still present then; a
-    writer that adds the key and removes it again between the two reads is not caught (#1390 residual). When this
+    this changes no owner transport that worked before. Fixed-name keys (_ALWAYS: ssh/askpass/gpg programs,
+    credential helpers for every URL; `diff --no-ext-diff`) are undone on every call, so adding one mid-call changes
+    nothing.
+    Limit (not prevention, follow-up #1642): a subsection-named key (a filter/merge/diff driver the attributes select,
+    a trailer command, a config hook) an agent adds between the read just before the command and git's own read is
+    not undone and may run. The config is read again after the command, and the call fails with the key's name when
+    it is still present then; one added and removed again between the two reads is not caught. When this
     after-read fails the call, the command has already run, so its effects stay (e.g. a registered worktree);
     callers never run git with a `cwd` the command deletes (remove_worktree runs in the repo, not in the worktree)."""
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
+           "-c", "protocol.ext.allow=never", "-c", "protocol.git.allow=never", "-c", "submodule.recurse=false",
            "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]
     if (args and args[0] in _INERT and all(a in _INERT_FLAGS for a in args[1:] if a.startswith("-"))
             and _lazy_fetch_switch()):
@@ -227,6 +239,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
             raise GitError(f"refusing to run git: {why}")
         return subprocess.CompletedProcess(["git", *args], 1, "", f"refusing to run git: {why}")
     env = child_env({**FIXED_ENV, **_override_env(config_overrides(entries))})
+    if args[:1] == ("diff",):
+        args = ("diff", "--no-ext-diff", *args[1:])       # diff.external, even one added after the read
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=env, encoding="utf-8", errors="replace")
@@ -270,13 +284,16 @@ def task_branch(pid: int, seq: int, attempt: int) -> str:
 def _add_worktree(repo: str, wt: Path, *args: str) -> None:
     """`worktree add` would check out in a child git whose config JARVES never read (R1, #1390): add it empty, then
     check it out with a separate call from inside the new worktree, whose own config is read first."""
-    git(repo, "worktree", "add", "--no-checkout", *args)
+    existed = wt.exists()
     try:
+        # inside the try: git() can fail AFTER the add registered the worktree (the after-read saw a new key)
+        git(repo, "worktree", "add", "--no-checkout", *args)
         git(wt, "reset", "-q", "--hard")
     except (GitError, OSError, subprocess.SubprocessError):
         # a half worktree (empty index: "every file deleted") must not stay: ensure_integration would return it as-is
         git(repo, "worktree", "remove", "--force", str(wt), check=False)
-        shutil.rmtree(wt, ignore_errors=True)
+        if not existed:                 # never delete a folder this call did not create
+            shutil.rmtree(wt, ignore_errors=True)
         git(repo, "worktree", "prune", check=False)
         raise
 

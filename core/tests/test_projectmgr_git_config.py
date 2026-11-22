@@ -171,7 +171,10 @@ def test_owner_values_survive_and_shared_ones_are_undone():
     assert last["gpg.program"] == "gpg" and last["core.sshcommand"] == "ssh"
     assert last["remote.origin.receivepack"] == "git-receive-pack"
     assert not {"remote.origin.url", "user.name", "diff.tool"} & set(last)
-    assert gitops.config_overrides([("global", "filter.lfs.smudge", "git-lfs")]) == []     # owner-only: untouched
+    # owner-only filter: untouched; fixed-name keys are reset on every call and the owner's value comes back
+    owner = gitops.config_overrides([("global", "filter.lfs.smudge", "git-lfs"), ("global", "gpg.program", "g2")])
+    assert not any(k.startswith("filter.") for k, _ in owner) and dict(owner)["gpg.program"] == "g2"
+    assert {k for k, v in owner if v == ""} >= set(gitops._ALWAYS)
 
 
 def test_every_git_call_fixes_editors_pagers_and_ext_remotes(monkeypatch, tmp_path):
@@ -394,7 +397,8 @@ def test_every_git_call_turns_off_submodule_fetch_and_push_recursion(monkeypatch
     monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
     _repo(tmp_path)
     argv = [a for a in seen if "init" in a][-1]
-    for flag in ("fetch.recurseSubmodules=false", "push.recurseSubmodules=no", "protocol.file.allow=never"):
+    for flag in ("fetch.recurseSubmodules=false", "push.recurseSubmodules=no", "protocol.file.allow=never",
+                 "protocol.git.allow=never"):
         assert flag in argv
 
 
@@ -414,26 +418,42 @@ def test_a_command_key_added_during_the_call_is_reported(monkeypatch, tmp_path):
     assert gitops.git(repo, "status", check=False).returncode != 0
 
 
-def test_a_key_toggled_between_the_two_reads_is_a_known_residual(monkeypatch, tmp_path):
-    """R5 (round 3): documents the limit stated in git(): a key added after the first read and removed before the
-    second read runs and is not reported. Detection, not prevention; if this test starts failing, the residual is
-    closed and the docstring and changelog should say so."""
-    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
-    (repo / "f.txt").write_text("changed", encoding="utf-8")
+def _toggled_mid_call(monkeypatch, repo: Path, cmd: str, text: str) -> None:
+    """While the `cmd` git call itself runs (after JARVES read the config, before its read afterwards), the shared
+    config holds `text`; it is gone again before the second read."""
     real, cfg = subprocess.run, repo / ".git" / "config"
 
     def run(argv, **kw):
-        if "diff" in argv and "config" not in argv:            # the command itself, between the two reads
+        if cmd in argv and "config" not in argv:
             clean = cfg.read_text(encoding="utf-8")
-            cfg.write_text(clean + f'[diff]\n\texternal = "{_runs(marker, "true")}"\n', encoding="utf-8")
+            cfg.write_text(clean + text, encoding="utf-8")
             try:
                 return real(argv, **kw)
             finally:
                 cfg.write_text(clean, encoding="utf-8")
         return real(argv, **kw)
     monkeypatch.setattr(gitops.subprocess, "run", run)
+
+
+def test_a_fixed_name_key_added_mid_call_never_runs(monkeypatch, tmp_path):
+    """#1632 round 4 blocker: a fixed-name command key (diff.external, gpg.program) planted after the first config read ran
+    and went unreported; now _ALWAYS resets it on every call, so it never runs. Fails on b7b5bbc (marker written)."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    gpg = tmp_path / "gpg.sh"        # gpg.program is started directly, not through a shell
+    gpg.write_text(f"#!/bin/sh\n{_runs(marker, 'exit 1')}\n", encoding="utf-8")
+    gpg.chmod(0o755)
+    for args in (("-c", f"diff.external={_runs(marker, 'true')}", "diff"),
+                 ("-c", f"gpg.program={gpg.as_posix()}", "commit", "-qS", "-am", "x", "--no-verify")):
+        _plain(repo, *args)
+        assert marker.exists()      # plain git runs both
+        marker.unlink()
+    _toggled_mid_call(monkeypatch, repo, "diff", f'[diff]\n\texternal = "{_runs(marker, "true")}"\n')
     assert gitops.git(repo, "diff", check=False).returncode == 0
-    assert marker.exists()
+    assert not marker.exists()
+    _toggled_mid_call(monkeypatch, repo, "commit", f'[gpg]\n\tprogram = "{gpg.as_posix()}"\n')
+    gitops.git(repo, "commit", "-qS", "-am", "x", "--no-verify", check=False)
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize("fast_path", [False, True])
@@ -468,17 +488,22 @@ def test_a_worktree_whose_checkout_fails_is_removed_again(monkeypatch, tmp_path)
     repo, home = _repo(tmp_path), tmp_path / "home"
     real = gitops.git
 
-    def failing(cwd, *args, **kw):
-        if args[:1] == ("reset",):
-            raise gitops.GitError("the shared git config changed while git ran: filter.ev.smudge")
-        return real(cwd, *args, **kw)
-    monkeypatch.setattr(gitops, "git", failing)
-    for make in (lambda: gitops.ensure_integration(home, str(repo), 1),
-                 lambda: gitops.detached_worktree(home, str(repo), 1, real(repo, "rev-parse", "HEAD").stdout.strip())):
-        with pytest.raises(gitops.GitError, match="changed while"):
-            make()
-    listed = real(repo, "worktree", "list", "--porcelain").stdout
-    assert listed.count("worktree ") == 1 and not (home / "projects" / "1" / "integration").exists()
+    def failing(step):
+        def git(cwd, *args, **kw):
+            done = real(cwd, *args, **kw) if args[:1] != ("reset",) else None
+            if args[:len(step)] == step:     # round 4: the add itself succeeds, then its after-read fails the call
+                raise gitops.GitError("the shared git config changed while git ran: filter.ev.smudge")
+            return done
+        return git
+    sha = real(repo, "rev-parse", "HEAD").stdout.strip()
+    for step in (("reset",), ("worktree", "add")):
+        monkeypatch.setattr(gitops, "git", failing(step))
+        for make in (lambda: gitops.ensure_integration(home, str(repo), 1),
+                     lambda: gitops.detached_worktree(home, str(repo), 1, sha)):
+            with pytest.raises(gitops.GitError, match="changed while"):
+                make()
+        listed = real(repo, "worktree", "list", "--porcelain").stdout
+        assert listed.count("worktree ") == 1 and not (home / "projects" / "1" / "integration").exists()
     monkeypatch.setattr(gitops, "git", real)
     wt = gitops.ensure_integration(home, str(repo), 1)
     assert real(wt, "status", "--porcelain").stdout == "" and (wt / "f.txt").exists()
