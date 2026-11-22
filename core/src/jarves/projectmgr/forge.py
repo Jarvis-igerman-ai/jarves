@@ -3,6 +3,7 @@ owner's own login (JARVES stores no token). Never force-pushes, never merges on 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -14,7 +15,8 @@ from . import gitops
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
-_OWNER_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")     # fullmatch: no trailing newline
+_OWNER_REPO = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*")   # fullmatch: no trailing newline
+_log = logging.getLogger(__name__)
 
 
 class ForgeError(RuntimeError):
@@ -34,7 +36,7 @@ def repo_slug(path: str) -> str:
 
 
 def _checked_slug(repo: str) -> str:
-    if not isinstance(repo, str) or not _OWNER_REPO.fullmatch(repo) or ".." in repo or repo.startswith(("-", ".")):
+    if not isinstance(repo, str) or not _OWNER_REPO.fullmatch(repo) or ".." in repo:
         raise ForgeError("a GitHub call needs an explicit owner/repo")
     return repo
 
@@ -62,6 +64,8 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
                            creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
     finally:
         shutil.rmtree(cwd, ignore_errors=True)
+        if os.path.exists(cwd):
+            _log.debug("gh temp folder left behind (still in use): %s", cwd)
     if p.returncode != 0:
         raise ForgeError(" ".join((p.stderr or p.stdout or "gh failed").split())[:300])
     return p.stdout

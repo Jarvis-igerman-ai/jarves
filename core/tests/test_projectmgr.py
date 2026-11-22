@@ -3,6 +3,7 @@ git worktrees driven by a fake agent executable (a Python script that speaks Cla
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -1224,7 +1225,9 @@ FAKE_GH = textwrap.dedent('''
     import subprocess
     top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
-        f.write(json.dumps({"args": a, "cwd": os.getcwd(), "git_repo": top.returncode == 0}) + "\\n")
+        f.write(json.dumps({"args": a, "cwd": os.getcwd(), "git_repo": top.returncode == 0,
+                            "git_env": sorted(k for k in os.environ if k.startswith("GIT_") and k != "GIT_CEILING_DIRECTORIES")
+                            }) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1306,15 +1309,15 @@ def test_forge_gh_runs_outside_the_repo_with_explicit_repo_1622(fake_gh, tmp_pat
         assert not Path(c["cwd"]).exists()                            # the temp folder is removed after the call
     for c in calls[1:]:
         assert c["args"][-2:] == ["--repo", "o/r"], c
-    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", "o/r\n", 7):
+    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", "o/.", "o/-x", ".o/r", "o/r\n", 7):
         with pytest.raises(forge.ForgeError):
             forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # a bad slug never ran gh
 
 
 def test_forge_gh_ignores_inherited_git_location_env_1622(fake_gh, tmp_path, monkeypatch):
-    """#1622 review R3: an inherited GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_* would point gh's git back at the project
-    config whatever the cwd; the allow-listed child environment drops them."""
+    """#1622 review R3 (regression guard, not fail-before: gitops.child_env already drops these): an inherited GIT_DIR /
+    GIT_WORK_TREE / GIT_CONFIG_* would point gh's git back at the project config whatever the cwd."""
     from jarves.projectmgr import forge
     repo = tmp_path / "r"
     repo.mkdir()
@@ -1328,9 +1331,11 @@ def test_forge_gh_ignores_inherited_git_location_env_1622(fake_gh, tmp_path, mon
     forge.issues("o/r")
     call = json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])
     assert not call["git_repo"], call
+    for k in ("GIT_DIR", "GIT_WORK_TREE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        assert k not in call["git_env"], call
 
 
-def test_forge_gh_temp_cleanup_failure_is_not_a_crash_1622(fake_gh, tmp_path, monkeypatch):
+def test_forge_gh_temp_cleanup_failure_is_not_a_crash_1622(fake_gh, tmp_path, monkeypatch, caplog):
     """#1622 review R2: a temp folder that cannot be removed (Windows: a gh grandchild still has it as cwd) must not
     turn a successful gh call into an error."""
     from jarves.projectmgr import forge
@@ -1342,8 +1347,10 @@ def test_forge_gh_temp_cleanup_failure_is_not_a_crash_1622(fake_gh, tmp_path, mo
         return real_rmdir(path, *a, **k)
     monkeypatch.setattr(os, "rmdir", busy)
     (tmp_path / "signed_in").write_text("1")
+    caplog.set_level(logging.DEBUG, logger="jarves.projectmgr.forge")
     try:
         assert forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b").endswith("/pull/9")
+        assert "gh temp folder left behind" in caplog.text                # review R4: a leftover is visible in the log
     finally:
         monkeypatch.setattr(os, "rmdir", real_rmdir)
         left = Path(json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])["cwd"])
