@@ -45,9 +45,10 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 # #1516: an unbroken single-case base32 run (16+ chars) with a digit 2-7, not plain hex, within 20 chars of a seed
 # word is an authenticator/TOTP seed. The digit keeps long words (`INTERNATIONALIZATION`) out; known miss: a
-# digit-free seed (~4% of 16-char seeds). Hebrew seed words take only prefix letters, so `מפסידה` does not count.
+# digit-free seed (~4% of 16-char seeds) or one in spaced groups. `otpauth`/`secret` cover pasted otpauth:// URIs.
+# Hebrew seed words take only prefix letters, so `מפסידה` does not count.
 _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
-_SEED_WORD = re.compile(r"(?<![a-z])(?:totp|otp|2fa|mfa|seed|authenticator)s?(?![a-z])|"
+_SEED_WORD = re.compile(r"(?<![a-z])(?:totp|otp|otpauth|2fa|mfa|seed|secret|authenticator)s?(?![a-z])|"
                         r"(?<![א-ת])[הושבלמכ]{0,2}(?:סיד|מאמת|אימות|אוטנטיקטור)(?:ים|ות)?(?![א-ת])", re.I)
 _SEED_NEAR = 20
 _B32_DIGIT = re.compile(r"[2-7]")
