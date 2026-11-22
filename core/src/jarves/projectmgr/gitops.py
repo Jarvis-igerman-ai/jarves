@@ -1,14 +1,23 @@
-"""Git for the project manager. Every JARVES worktree lives under `<home>/projects/<id>/` (never inside the owner's
+"""Git for the project manager. Every JARVES folder lives under `<home>/projects/<id>/` (never inside the owner's
 repository, so tests/linters at the repo root never see them and agents do not inherit the owner's CLAUDE.md of a parent
 folder). The owner's checkout is never touched: the integration branch `jarves/p<ID>/integration` has its own worktree,
-merges are fast-forward only after the check ran on the merged result. JARVES never pushes."""
+merges are fast-forward only after the check ran on the merged result. JARVES never pushes.
+
+Task folders are separate clones, not worktrees (#1599, #1390). An agent works in `<home>/projects/<id>/wt/t<S>-a<A>`,
+a `git clone --shared` with its OWN `.git` (config, hooks, info/attributes), so nothing an agent writes there is
+the config, hooks or attributes of the owner's repository. JARVES never runs git with a task folder's `.git`: it
+reads the folder's files with the owner's git folder and a private index (`commit_all`, `folder_state`), merges with
+`merge-tree` in the owner's repository (`merge_in`) and answers every diff from the task branch there (`where`).
+No config read can race an agent's config write: JARVES's git only reads a config the agent never writes."""
 from __future__ import annotations
 
 import fnmatch
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -69,20 +78,21 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
-def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
-        ) -> subprocess.CompletedProcess:
+def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True,
+        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
+    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program, config hooks)
+    are kept out by never running git with a config an agent can write (module docstring, #1599).
+    env: extra variables (GIT_INDEX_FILE for a private index)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **(env or {})}),
+                           encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
@@ -131,14 +141,103 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
 
 
 def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -> tuple[Path, str]:
-    """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
+    """A fresh task folder on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it).
+    The branch lives in the owner's repository. The folder is a separate clone of it with its own `.git` (#1599):
+    `--shared` borrows the owner's objects read-only (cheap), and the remote is removed, so nothing points back."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
     with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git(repo, "worktree", "add", "-b", br, str(wt), integration_branch(pid))
+        git(repo, "branch", br, integration_branch(pid))
+        try:
+            git(repo, "clone", "-q", "--shared", "--no-tags", "--single-branch", "--branch", br, "--origin",
+                "jarves", os.path.abspath(str(repo)), str(wt))
+            git(wt, "remote", "remove", "jarves")      # a fresh clone: its config is JARVES's own, no agent ran yet
+        except GitError:
+            remove_worktree(repo, wt, br)
+            raise
     return wt, br
+
+
+_TASK_DIR = re.compile(r"^t(\d+)-a(\d+)$")
+
+
+def task_ref(wt: str | Path) -> tuple[Path, str] | None:
+    """(the integration worktree, the task branch) for a task folder `<home>/projects/<pid>/wt/t<S>-a<A>`, from the
+    path alone (never from anything inside the folder, which the agent controls). None for any other folder."""
+    w = Path(wt)
+    m = _TASK_DIR.match(w.name)
+    if not m or w.parent.name != "wt" or not w.parent.parent.name.isdigit() or w.parent.parent.parent.name != "projects":
+        return None
+    return w.parent.parent / "integration", task_branch(int(w.parent.parent.name), int(m.group(1)), int(m.group(2)))
+
+
+def where(wt: str | Path) -> tuple[Path, str]:
+    """Where to ask git about a folder's work, and the revision that stands for its HEAD: for a task folder the
+    integration worktree (the owner's repository) and the task branch, never the folder's `.git`; else (folder, HEAD)."""
+    return task_ref(wt) or (Path(wt), "HEAD")
+
+
+def _rev(cwd: Path, rev: str) -> str:
+    return git(cwd, "rev-parse", "--verify", "--quiet", rev, check=False).stdout.strip()
+
+
+class _FolderIndex:
+    """git on a task folder's FILES with the owner's git folder and a private index outside the task folder, so the
+    folder's `.git` (config, hooks, info/attributes, index) is never read. git never adds a `.git` entry itself."""
+
+    def __init__(self, wt: str | Path):
+        ref = task_ref(wt)
+        if ref is None:
+            raise GitError("not a JARVES task folder")
+        self.wt, (self.cwd, self.branch) = Path(wt), ref
+        self.gitdir = git(self.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+        self.index = ""
+
+    def __enter__(self) -> "_FolderIndex":
+        tmp = tempfile.mkdtemp(prefix="idx-", dir=str(self.cwd.parent))
+        self.index = os.path.join(tmp, "index")
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        shutil.rmtree(os.path.dirname(self.index), ignore_errors=True)
+
+    def run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return git(self.wt, f"--git-dir={self.gitdir}", f"--work-tree={self.wt}", *args, check=check,
+                   env={"GIT_INDEX_FILE": self.index})
+
+    def head(self) -> str:
+        sha = _rev(self.cwd, f"{self.branch}^{{commit}}")
+        if not sha:
+            raise GitError(f"the task branch {self.branch} is missing")
+        return sha
+
+    def tree(self, head: str) -> str:
+        """The tree of the folder's files now (a tracked file that matches .gitignore stays, as with `add -A`)."""
+        self.run("read-tree", head)
+        self.run("add", "-A")
+        return self.run("write-tree").stdout.strip()
+
+
+def folder_branch(wt: str | Path) -> str:
+    """The branch a task clone has checked out, read from its `.git/HEAD` file as text (no git process, so nothing
+    in the folder's config runs). "" when unknown: an older worktree, a detached HEAD or anything odd."""
+    head = Path(wt) / ".git" / "HEAD"
+    try:
+        if head.parent.is_symlink() or head.is_symlink() or not head.is_file() or head.stat().st_size > 4096:
+            return ""
+        text = head.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    return text[len("ref: refs/heads/"):] if text.startswith("ref: refs/heads/") else ""
+
+
+def folder_state(wt: str | Path) -> tuple[str, bool]:
+    """(the task branch's commit, do the folder's files differ from it). Writes only loose objects."""
+    with _FolderIndex(wt) as f:
+        head = f.head()
+        return head, f.tree(head) != _rev(f.cwd, f"{head}^{{tree}}")
 
 
 def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
@@ -151,24 +250,41 @@ def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     return wt
 
 
+def _rmtree(path: Path) -> None:
+    """Remove a folder, git's read-only object files included (Windows refuses to delete a read-only file)."""
+    def again(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onexc=again)
+
+
 def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
     with _repo_lock(repo):
-        git(repo, "worktree", "remove", "--force", str(wt), check=False)
+        git(repo, "worktree", "remove", "--force", str(wt), check=False)     # a worktree from an older install
         if Path(wt).exists():
-            shutil.rmtree(wt, ignore_errors=True)
+            _rmtree(Path(wt))
         git(repo, "worktree", "prune", check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
 
 
 def commit_all(wt: Path, message: str) -> bool:
-    git(wt, "add", "-A")
-    if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
-        return False
-    git(wt, "commit", "-m", message[:200], "--no-verify")
+    """Commit what is in a task folder onto its task branch, in the owner's repository (#1599): the files go through
+    a private index (`_FolderIndex`), then commit-tree and a compare-and-swap ref update. The folder's own `.git`
+    history is a scratch copy for the agent; the task branch is the record. False: nothing changed."""
+    with _FolderIndex(wt) as f:
+        old = f.head()
+        tree = f.tree(old)
+        if tree == _rev(f.cwd, f"{old}^{{tree}}"):
+            return False
+        new = git(f.cwd, "commit-tree", tree, "-p", old, "-m", message[:200]).stdout.strip()
+        git(f.cwd, "update-ref", f"refs/heads/{f.branch}", new, old)
     return True
 
 
@@ -176,7 +292,8 @@ def changed_files(wt: Path, base: str) -> list[str]:
     """Every path the task changed, as plain text. -z: git would otherwise print a non-ASCII name in quotes
     (octal escapes inside `"..."`), which no PROTECTED prefix matches. --no-renames: a rename lists both
     sides, so moving a file out of `.github/` still shows the protected source (JAR-574)."""
-    out = git(wt, "diff", "--name-only", "-z", "--no-renames", f"{base}...HEAD").stdout
+    cwd, head = where(wt)
+    out = git(cwd, "diff", "--name-only", "-z", "--no-renames", f"{base}...{head}").stdout
     return [x.replace("\\", "/") for x in out.split("\0") if x]
 
 
@@ -186,13 +303,15 @@ LINK_MODES = ("120000", "160000")       # a symlink and a gitlink (submodule ent
 def link_files(wt: Path, base: str) -> list[str]:
     """Paths the task added or changed as a symlink or a gitlink (#1381). Their path text can look harmless while a
     symlink points into `.github/` or `.claude/` and a gitlink pulls in another repository, so they count as protected."""
-    out = git(wt, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...HEAD").stdout.split("\0")
+    cwd, head = where(wt)
+    out = git(cwd, "diff", "--raw", "-z", "--no-renames", "--no-abbrev", f"{base}...{head}").stdout.split("\0")
     return [out[i + 1].replace("\\", "/") for i in range(0, len(out) - 1, 2)
             if out[i].startswith(":") and out[i].split()[1:2] and out[i].split()[1] in LINK_MODES]
 
 
 def diffstat(wt: Path, base: str) -> str:
-    out = git(wt, "diff", "--shortstat", f"{base}...HEAD", check=False).stdout.strip()
+    cwd, head = where(wt)
+    out = git(cwd, "diff", "--shortstat", f"{base}...{head}", check=False).stdout.strip()
     return out or "no changes"
 
 
@@ -231,7 +350,10 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
 def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
-    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
+    Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189).
+    A task folder is merged in the owner's repository instead (`_merge_task`, #1599): commit_all it first."""
+    if task_ref(wt):
+        return _merge_task(Path(wt), branch)
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
@@ -244,6 +366,42 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
     return [f"(not merged: {why})"]
+
+
+def _not_merged(p: subprocess.CompletedProcess) -> list[str]:
+    return [f"(not merged: {' '.join((p.stderr or p.stdout or 'merge failed').split())[:200]})"]
+
+
+def _merge_task(wt: Path, branch: str) -> list[str]:
+    """merge_in for a task folder: `merge-tree` of the task branch and `branch` in the owner's repository (its config
+    only), a merge commit there, then the folder's files move from the old tree to the new one through the private
+    index. The folder's own `.git` is never used; its index and HEAD stay behind (a scratch copy)."""
+    f = _FolderIndex(wt)
+    root = Path(f.gitdir)
+    with _repo_lock(root.parent if root.name == ".git" else root), f:
+        old, other = f.head(), _rev(f.cwd, f"{branch}^{{commit}}")
+        if not other:
+            return [f"(not merged: no branch {branch})"]
+        if git(f.cwd, "merge-base", "--is-ancestor", other, old, check=False).returncode == 0:
+            return []                                                      # already in
+        if git(f.cwd, "merge-base", "--is-ancestor", old, other, check=False).returncode == 0:
+            new = other                                                    # fast-forward
+        else:
+            p = git(f.cwd, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", old, other, check=False)
+            parts = p.stdout.split("\0")
+            if p.returncode == 1:
+                return sorted({x for x in parts[1:] if x}) or _not_merged(p)
+            if p.returncode != 0 or not parts[0].strip():
+                return _not_merged(p)
+            new = git(f.cwd, "commit-tree", parts[0].strip(), "-p", old, "-p", other, "-m",
+                      f"Merge branch '{branch}' into {f.branch}").stdout.strip()
+        f.run("read-tree", old)
+        f.run("update-index", "-q", "--refresh", check=False)
+        p = f.run("read-tree", "-m", "-u", old, new, check=False)          # the folder's files: old tree -> new tree
+        if p.returncode != 0:
+            return _not_merged(p)
+        git(f.cwd, "update-ref", f"refs/heads/{f.branch}", new, old)
+    return []
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:

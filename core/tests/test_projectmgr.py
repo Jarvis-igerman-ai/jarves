@@ -281,13 +281,13 @@ def test_merge_into_a_task_never_overlaps_another_tasks_worktree_cleanup(env, mo
     real, active, overlaps, merging = gitops.git, set(), [], threading.Event()
 
     def watched(cwd, *args, **kw):
-        op = args[0] if args else ""
-        shared = op in ("merge", "worktree", "branch")
+        op = next((a for a in args if not a.startswith("--")), "")      # #1599: task merges run `--git-dir=...` ops
+        shared = op in ("merge", "merge-tree", "read-tree", "update-ref", "worktree", "branch")
         if shared:
             if active:
                 overlaps.append((op, sorted(active)))
             active.add(op)
-            if op == "merge":
+            if op in ("merge", "merge-tree"):
                 merging.set()
                 threading.Event().wait(0.5)                                     # hold the window open
         try:

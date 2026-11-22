@@ -255,3 +255,116 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+# ---------------------------------------------------------------- #1599: task folders are separate clones
+def _poison(folder_git: Path, tmp_path: Path, marker: Path) -> None:
+    """Everything an agent can put in its own `.git` that would run a command: every hook, a hooks path, fsmonitor,
+    a clean/smudge/process filter and a merge driver named by `.git/info/attributes` for every file, and a config hook."""
+    for name in HOOKS:
+        _hook(folder_git / "hooks", name, marker)
+        _hook(tmp_path / "evil-hooks", name, marker)
+    _hook(tmp_path / "evil-bin", "run", marker)
+    cmd = (tmp_path / "evil-bin" / "run").as_posix()
+    for k, v in (("core.hooksPath", str(tmp_path / "evil-hooks")), ("core.fsmonitor", cmd),
+                 ("filter.x.clean", cmd), ("filter.x.smudge", cmd), ("filter.x.process", cmd),
+                 ("merge.x.driver", cmd), ("diff.external", cmd), ("hook.h.event", "post-commit"),
+                 ("hook.h.command", cmd), ("core.attributesFile", (folder_git / "info" / "attributes").as_posix())):
+        subprocess.run(["git", "config", "--file", str(folder_git / "config"), k, v], check=True)
+    (folder_git / "info").mkdir(exist_ok=True)
+    (folder_git / "info" / "attributes").write_text("* filter=x merge=x diff=x\n", encoding="utf-8")
+
+
+def _task(tmp_path: Path):
+    repo, home = _repo(tmp_path), tmp_path / "home"
+    integ = gitops.ensure_integration(home, str(repo), 1)
+    wt, br = gitops.new_task_worktree(home, str(repo), 1, 1, 1)
+    return repo, home, integ, wt, br
+
+
+def test_a_task_folder_is_a_separate_clone_with_no_way_back(tmp_path):
+    """#1599: the agent's folder has its own `.git` folder (not a worktree pointing into the owner's), no remote, and
+    the owner's config is not the one git reads there."""
+    repo, _home, _integ, wt, br = _task(tmp_path)
+    assert (wt / ".git").is_dir()
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=wt,
+                            capture_output=True, text=True, check=True).stdout.strip()
+    assert Path(common).resolve() == (wt / ".git").resolve()
+    assert subprocess.run(["git", "remote"], cwd=wt, capture_output=True, text=True, check=True).stdout.strip() == ""
+    assert gitops.folder_branch(wt) == br and (wt / "f.txt").read_text(encoding="utf-8") == "x"
+    assert gitops.where(wt) == (gitops.project_root(_home, 1) / "integration", br)
+    assert gitops.where(repo) == (repo, "HEAD")
+
+
+def test_commands_in_the_agents_own_git_folder_never_run_for_jarves(tmp_path):
+    """#1599 / #1390: JARVES's commit, diff, state, merge and cleanup of a task folder never read the folder's `.git`,
+    so hooks, filters, merge drivers, fsmonitor and config hooks set there never run, whatever is written when."""
+    repo, _home, integ, wt, br = _task(tmp_path)
+    marker = tmp_path / "ran.txt"
+    _poison(wt / ".git", tmp_path, marker)
+    (wt / "probe.txt").write_text("p\n", encoding="utf-8")
+    subprocess.run(["git", "add", "probe.txt"], cwd=wt, capture_output=True)          # the setup is live
+    assert marker.exists()
+    marker.unlink()
+    # earlier work on the integration branch touching the same file: a real three-way merge with a merge driver
+    # (first a five-line file, fast-forwarded into the folder; then each side changes a different line of it)
+    (integ / "g.txt").write_text("1\n2\n3\n4\n5\n", encoding="utf-8")
+    gitops.git(integ, "add", "-A")
+    gitops.git(integ, "commit", "-qm", "earlier task", "--no-verify")
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == [] and (wt / "g.txt").exists()
+    (integ / "g.txt").write_text("1\n2\n3\n4\nintegration\n", encoding="utf-8")
+    gitops.git(integ, "commit", "-qam", "later task", "--no-verify")
+    (wt / "g.txt").write_text("agent\n2\n3\n4\n5\n", encoding="utf-8")
+    (wt / "a.py").write_text("1\n", encoding="utf-8")
+    assert gitops.folder_state(wt)[1] is True
+    assert gitops.commit_all(wt, "task 1")
+    assert sorted(gitops.changed_files(wt, gitops.integration_branch(1))) == ["a.py", "g.txt", "probe.txt"]
+    assert gitops.link_files(wt, gitops.integration_branch(1)) == []
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == []
+    assert (wt / "g.txt").read_text(encoding="utf-8").replace("\r\n", "\n") == "agent\n2\n3\n4\nintegration\n"
+    head, dirty = gitops.folder_state(wt)
+    assert not dirty and head == gitops.git(repo, "rev-parse", br).stdout.strip()
+    gitops.fast_forward(integ, br)
+    gitops.remove_worktree(str(repo), wt, br)
+    assert not marker.exists() and not wt.exists()
+    owner_cfg = (repo / ".git" / "config").read_text(encoding="utf-8")
+    assert "filter" not in owner_cfg and "fsmonitor" not in owner_cfg and "hooksPath" not in owner_cfg
+
+
+def test_the_agents_git_folder_cannot_hide_a_protected_file(tmp_path):
+    """#1599: the task branch is built from the folder's files with the owner's git folder, so an agent that commits,
+    excludes or rewrites history in its own `.git` cannot make JARVES miss a `.github/` file."""
+    _repo_, _home, _integ, wt, _br = _task(tmp_path)
+    (wt / ".github" / "workflows").mkdir(parents=True)
+    (wt / ".github" / "workflows" / "x.yml").write_text("on: push\n", encoding="utf-8")
+    (wt / ".git" / "info").mkdir(exist_ok=True)
+    (wt / ".git" / "info" / "exclude").write_text(".github/\n", encoding="utf-8")       # the clone's git ignores it
+    subprocess.run(["git", "-c", "user.name=a", "-c", "user.email=a@b", "commit", "-qm", "own", "--allow-empty",
+                    "--no-verify"], cwd=wt, check=True)
+    assert gitops.commit_all(wt, "task 1")
+    files = gitops.changed_files(wt, gitops.integration_branch(1))
+    assert gitops.violations(files, ["src/**"])[0] == [".github/workflows/x.yml"]
+
+
+def test_a_task_merge_reports_conflicts_and_changes_nothing(tmp_path):
+    repo, _home, integ, wt, br = _task(tmp_path)
+    (integ / "f.txt").write_text("integration\n", encoding="utf-8")
+    gitops.git(integ, "commit", "-qam", "earlier", "--no-verify")
+    (wt / "f.txt").write_text("agent\n", encoding="utf-8")
+    gitops.commit_all(wt, "task")
+    before = gitops.git(repo, "rev-parse", br).stdout.strip()
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == ["f.txt"]
+    assert gitops.git(repo, "rev-parse", br).stdout.strip() == before
+    assert (wt / "f.txt").read_text(encoding="utf-8") == "agent\n"
+    assert gitops.folder_state(wt) == (before, False)
+
+
+def test_a_task_merge_fast_forwards_a_task_with_no_work(tmp_path):
+    repo, _home, integ, wt, br = _task(tmp_path)
+    (integ / "n.txt").write_text("new\n", encoding="utf-8")
+    gitops.git(integ, "add", "-A")
+    gitops.git(integ, "commit", "-qm", "earlier", "--no-verify")
+    assert not gitops.commit_all(wt, "nothing")
+    assert gitops.merge_in(wt, gitops.integration_branch(1)) == []
+    assert (wt / "n.txt").exists()
+    assert gitops.git(repo, "rev-parse", br).stdout.strip() == gitops.git(integ, "rev-parse", "HEAD").stdout.strip()

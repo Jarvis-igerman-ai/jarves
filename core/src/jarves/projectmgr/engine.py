@@ -303,7 +303,8 @@ class StageEngine:
         mine: set[str] = set()
         if owner:
             try:
-                out = gitops.git(wt, "diff", "--name-only", "-z", "--no-renames", mark, "HEAD").stdout if mark else ""
+                cwd, head = gitops.where(wt)
+                out = gitops.git(cwd, "diff", "--name-only", "-z", "--no-renames", mark, head).stdout if mark else ""
             except gitops.GitError as e:
                 return ("stop", "failed", f"git failed: {clean(e, 200)}")
             mine = {x.replace("\\", "/") for x in out.split("\0") if x}
@@ -318,7 +319,8 @@ class StageEngine:
                           ", ".join(outside[:5]))
         repro = self._job(t).get("repro") or {}
         if kind == "work" and repro.get("files") and repro.get("commit"):
-            touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
+            cwd, head = gitops.where(wt)
+            touched = gitops.git(cwd, "diff", "--name-only", repro["commit"], head, "--", *repro["files"],
                                  check=False).stdout.split()
             if touched:
                 return ("stop", "blocked", "the fix changed the reproduction test " + ", ".join(touched[:3]) +
@@ -333,7 +335,8 @@ class StageEngine:
         if kind == "reproduce":
             if not files:
                 return ("fail", "no reproduction test was written")
-            head = gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
+            cwd, head = gitops.where(wt)
+            head = gitops.git(cwd, "rev-parse", head, check=False).stdout.strip()
             self._set_job(t, repro={"files": files[:6], "commit": head, "cmd": repro.get("cmd") or []})
             return self._confirm_repro(p, self.db.task(t["id"]), wt)
         return ("next",)
@@ -474,7 +477,8 @@ class StageEngine:
             return ("stop", "blocked", "uncommitted edits in the task folder were never reviewed: commit them "
                                        "through a work stage or remove them")   # commit_all would fold these in
         base = gitops.integration_branch(p["id"])
-        diff = gitops.git(t["worktree"], "diff", f"{base}...HEAD", check=False).stdout
+        cwd, head = gitops.where(t["worktree"])
+        diff = gitops.git(cwd, "diff", f"{base}...{head}", check=False).stdout
         if not diff.strip():
             return ("next",)
         if self._day_cap():
@@ -548,7 +552,8 @@ class StageEngine:
                 ok, out = gitops.run_check(wt, argv or [], timeout=min(900, self.cfg.task_timeout_s))
                 outs.append(out)
             if ok and kind == "verify" and repro.get("files") and repro.get("commit") and has_wt:
-                touched = gitops.git(wt, "diff", "--name-only", repro["commit"], "HEAD", "--", *repro["files"],
+                cwd, head = gitops.where(wt)
+                touched = gitops.git(cwd, "diff", "--name-only", repro["commit"], head, "--", *repro["files"],
                                      check=False).stdout.split()
                 if touched:
                     ok = False
@@ -630,10 +635,10 @@ class StageEngine:
         edit after the approval (the merge stage would otherwise fold it in silently)."""
         if not t["worktree"] or not Path(t["worktree"]).exists():
             return "", False
-        wt = t["worktree"]
-        head = gitops.git(wt, "rev-parse", "HEAD", check=False).stdout.strip()
-        dirty = bool(gitops.git(wt, "status", "--porcelain", check=False).stdout.strip())
-        return head, dirty
+        try:                                    # #1599: the task branch and the folder's files, never its .git
+            return gitops.folder_state(t["worktree"])
+        except gitops.GitError:
+            return "", True                     # unknown counts as changed: an approval is never reused on doubt
 
     def _owner_stage(self, p, t, st, i, stages):
         kind = st["kind"]
@@ -647,12 +652,13 @@ class StageEngine:
                 return self._st_merge(p, self.db.task(t["id"]), stages, threading.Event())
             if kind == "work":
                 wt, br = Path(t["worktree"]), t["branch"]
-                head = gitops.git(wt, "rev-parse", "--abbrev-ref", "HEAD", check=False).stdout.strip()
+                head = gitops.folder_branch(wt) or br
                 if head != br:
                     return ("park", f"the folder {wt} is not on the task branch {br} any more: switch back, then say done")
                 base = gitops.integration_branch(p["id"])
-                if gitops.git(wt, "merge-base", "--is-ancestor", base, "HEAD", check=False).returncode != 0 and \
-                        gitops.git(wt, "merge-base", "--is-ancestor", f"{base}@{{1}}", "HEAD", check=False).returncode != 0:
+                cwd, tip = gitops.where(wt)
+                if gitops.git(cwd, "merge-base", "--is-ancestor", base, tip, check=False).returncode != 0 and \
+                        gitops.git(cwd, "merge-base", "--is-ancestor", f"{base}@{{1}}", tip, check=False).returncode != 0:
                     pass                                            # rebased by hand: the merge stage re-merges
                 return self._after_code(p, t, wt, br, "", "work", owner=True)
             return ("next",)
@@ -668,17 +674,19 @@ class StageEngine:
                 # a no-op on a clean folder (no empty commits).
                 try:
                     gitops.commit_all(wt, f"task {t['seq']}: before your edit"[:120])
-                    self._set_job(t, owner_from=gitops.git(wt, "rev-parse", "HEAD").stdout.strip())
+                    cwd, head = gitops.where(wt)
+                    self._set_job(t, owner_from=gitops.git(cwd, "rev-parse", head).stdout.strip())
                 except gitops.GitError as e:
                     return ("stop", "failed", f"git failed: {clean(e, 200)}")
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
+        gitdir, tip = gitops.where(t["worktree"]) if t["worktree"] else (where, "HEAD")      # never the folder's .git
         text = {
             "plan": f"plan task #{t['seq']} yourself: say done with your plan as the text",
             "test": f"test task #{t['seq']} yourself (code in {where}), then say pass or fail",
             "verify": f"check that the bug of task #{t['seq']} is fixed (code in {where}), then say pass or fail",
-            "review": f"review task #{t['seq']}: git -C \"{where}\" diff {base}...HEAD, then approve or reject with what "
+            "review": f"review task #{t['seq']}: git -C \"{gitdir}\" diff {base}...{tip}, then approve or reject with what "
                       "to change",
             "merge": f"approve merging task #{t['seq']} into {base}",
             "release": f"release {p['name']} yourself, then say done",
@@ -785,7 +793,8 @@ class StageEngine:
 
 
 def _diff_size(wt: Path, base: str) -> int:
-    out = gitops.git(wt, "diff", "--numstat", f"{base}...HEAD", check=False).stdout
+    cwd, head = gitops.where(wt)
+    out = gitops.git(cwd, "diff", "--numstat", f"{base}...{head}", check=False).stdout
     n = 0
     for line in out.splitlines():
         a, _, rest = line.partition("\t")
