@@ -912,24 +912,37 @@ class Manager(StageEngine):
                 return _res(False, "DIRTY", "your project folder has uncommitted changes: commit or stash them first")
             if self.db.tasks(p["id"], ("running", "review")):
                 return _res(False, "BUSY", "tasks are running: pause and wait first")
-            if not yes and not self._approve(f"Merge {br} into {st['branch']} in {p['path']}? (no push)", "project_ship",
-                                             {"project": p["name"], "branch": st["branch"]}):
+            try:                    # #1407: the approval names a commit and exactly that commit is merged
+                sha = gitops.commit_of(p["path"], br)
+            except gitops.GitError as e:
+                return _res(False, "GIT_ERROR", f"git failed: {clean(e, 200)}")
+            if not yes and not self._approve(f"Merge {br} at commit {sha[:12]} into {st['branch']} in {p['path']}? "
+                                             "(no push)", "project_ship",
+                                             {"project": p["name"], "branch": st["branch"], "commit": sha}):
                 return _res(False, "NOT_APPROVED", "not merged")
-            conflicts = gitops.merge_in(Path(p["path"]), br, ident=False)      # your own git identity / signing
+            conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
+                                        message=f"Merge {br} at {sha[:12]}")
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
             logs.info("projects", "PROJECT_SHIPPED", "integration branch merged into the owner branch", id=p["id"])
-            return _res(True, "ok", f"Merged {br} into {st['branch']}. Nothing was pushed.")
+            return _res(True, "ok", f"Merged {br} at commit {sha[:12]} into {st['branch']}. Nothing was pushed.",
+                        commit=sha)
         wt = gitops.project_root(self.home, p["id"]) / "integration"
         br = gitops.integration_branch(p["id"])
         try:
-            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{br}", check=False).stdout.strip() or "no changes"
-        except (OSError, gitops.GitError):
-            stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{br}", f"git -C \"{p['path']}\" merge --no-ff {br}   # when you are happy",
+            if gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{br}", check=False).returncode == 1:
+                return _res(True, "ok", f"{p['name']}: nothing to ship yet (no integration branch {br}).", branch=br,
+                            commit="", worktree=str(wt), commands=[])      # review R3: not created yet
+            sha = gitops.commit_of(p["path"], br)
+            stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}").stdout.strip() or "no changes"
+        except (OSError, gitops.GitError) as e:
+            return _res(False, "GIT_ERROR", f"git failed: {clean(e, 200)}")
+        cmds = [f"git -C \"{p['path']}\" diff HEAD...{sha}",
+                f"git -C \"{p['path']}\" merge --no-ff {sha}   # when you are happy",
                 f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
-        return _res(True, "ok", f"{p['name']}: integration branch {br} has {stat}. JARVES does not merge or push; "
-                                "the commands are in the result.", branch=br, worktree=str(wt), commands=cmds)
+        return _res(True, "ok", f"{p['name']}: integration branch {br} at commit {sha[:12]} has {stat}. JARVES does "
+                                "not merge or push; the commands are in the result.", branch=br, commit=sha,
+                    worktree=str(wt), commands=cmds)
 
     # ================================================================== the agents working on a project
     def _orch_call(self, op: str, **kw) -> dict:
