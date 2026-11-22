@@ -1305,10 +1305,43 @@ def test_forge_gh_runs_outside_the_repo_with_explicit_repo_1622(fake_gh, tmp_pat
         assert repo.resolve() not in Path(c["cwd"]).resolve().parents
     for c in calls[1:]:
         assert c["args"][-2:] == ["--repo", "o/r"], c
-    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", 7):
+    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", "o/r\n", 7):
         with pytest.raises(forge.ForgeError):
             forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # a bad slug never ran gh
+
+
+def test_forge_gh_ignores_inherited_git_location_env_1622(fake_gh, tmp_path, monkeypatch):
+    """#1622 review R3: an inherited GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_* would point gh's git back at the project
+    config whatever the cwd; the allow-listed child environment drops them."""
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    monkeypatch.setenv("GIT_DIR", str(repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(repo))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.fsmonitor")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "echo pwned")
+    (tmp_path / "signed_in").write_text("1")
+    forge.issues("o/r")
+    call = json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])
+    assert not call["git_repo"], call
+
+
+def test_forge_gh_temp_cleanup_failure_is_not_a_crash_1622(fake_gh, tmp_path, monkeypatch):
+    """#1622 review R2: a temp folder that cannot be removed (Windows: a gh grandchild still has it as cwd) must not
+    turn a successful gh call into an error."""
+    from jarves.projectmgr import forge
+    real_rmdir = os.rmdir
+
+    def busy(path, *a, **k):
+        if "jarves-gh-" in os.fsdecode(path):
+            raise PermissionError(13, "in use", os.fsdecode(path))
+        return real_rmdir(path, *a, **k)
+    monkeypatch.setattr(os, "rmdir", busy)
+    (tmp_path / "signed_in").write_text("1")
+    assert forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b").endswith("/pull/9")
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):

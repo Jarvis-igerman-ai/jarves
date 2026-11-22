@@ -14,7 +14,7 @@ from . import gitops
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
-_OWNER_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_OWNER_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")     # fullmatch: no trailing newline
 
 
 class ForgeError(RuntimeError):
@@ -34,7 +34,7 @@ def repo_slug(path: str) -> str:
 
 
 def _checked_slug(repo: str) -> str:
-    if not isinstance(repo, str) or not _OWNER_REPO.match(repo) or ".." in repo or repo.startswith(("-", ".")):
+    if not isinstance(repo, str) or not _OWNER_REPO.fullmatch(repo) or ".." in repo or repo.startswith(("-", ".")):
         raise ForgeError("a GitHub call needs an explicit owner/repo")
     return repo
 
@@ -48,7 +48,9 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
     argv = [*cmd, *args, *(["--repo", _checked_slug(repo)] if repo is not None else [])]
-    with tempfile.TemporaryDirectory(prefix="jarves-gh-") as cwd:
+    # ignore_cleanup_errors: on Windows a gh grandchild may still hold the folder as its cwd; a leftover empty folder
+    # in the temp area must not turn a gh call that already succeeded into a crash
+    with tempfile.TemporaryDirectory(prefix="jarves-gh-", ignore_cleanup_errors=True) as cwd:
         env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
                                 "GIT_CEILING_DIRECTORIES": os.path.dirname(cwd)})
         for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
