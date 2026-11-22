@@ -44,19 +44,22 @@ _SENSITIVE = re.compile(
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 # #1516: an unbroken single-case base32 run (16+ chars) with a digit 2-7, not plain hex, within 20 chars of a seed
-# word is an authenticator/TOTP seed. The digit keeps long words (`INTERNATIONALIZATION`) out; known miss: a
-# digit-free seed (~4% of 16-char seeds) or one in spaced groups. `otpauth`/`secret` cover pasted otpauth:// URIs.
+# word is an authenticator/TOTP seed. The digit keeps long words (`INTERNATIONALIZATION`) out; known misses (#1559):
+# a digit-free seed (~4% of 16-char seeds) or one in spaced groups. Broad words (seed, secret, סיד) count only when a
+# strong word (totp, otpauth, 2fa, authenticator...) is also in the text, so `client_secret` in a dev draft passes.
 # Hebrew seed words take only prefix letters, so `מפסידה` does not count.
 _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
-_SEED_WORD = re.compile(r"(?<![a-z])(?:totp|otp|otpauth|2fa|mfa|seed|secret|authenticator)s?(?![a-z])|"
-                        r"(?<![א-ת])[הושבלמכ]{0,2}(?:סיד|מאמת|אימות|אוטנטיקטור)(?:ים|ות)?(?![א-ת])", re.I)
+_SEED_STRONG = re.compile(r"(?<![a-z])(?:totp|otp|otpauth|2fa|mfa|authenticator)s?(?![a-z])|"
+                          r"(?<![א-ת])[הושבלמכ]{0,2}(?:מאמת|אימות|אוטנטיקטור)(?:ים|ות)?(?![א-ת])", re.I)
+_SEED_WEAK = re.compile(r"(?<![a-z])(?:seed|secret)s?(?![a-z])|(?<![א-ת])[הושבלמכ]{0,2}סיד(?:ים|ות)?(?![א-ת])", re.I)
 _SEED_NEAR = 20
 _B32_DIGIT = re.compile(r"[2-7]")
 _HEX_ONLY = re.compile(r"[0-9a-fA-F]+")
 
 
 def _seed_near_word(text: str) -> bool:
-    words = [m.span() for m in _SEED_WORD.finditer(text)]
+    words = [m.span() for m in _SEED_STRONG.finditer(text)]
+    words += [m.span() for m in _SEED_WEAK.finditer(text)] if words else []
     for m in _BASE32_RUN.finditer(text) if words else ():
         run = m.group()
         if not (run.isupper() or run.islower()) or not _B32_DIGIT.search(run) or _HEX_ONLY.fullmatch(run):

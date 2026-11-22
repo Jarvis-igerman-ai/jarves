@@ -20,7 +20,8 @@ LEAKY = [
     f"{SEED} is my google authenticator seed",
     f"הסיד של האימות הוא {SEED}",
     f"מאמת: {SEED}",
-    "key: OTP3JBSWYDPEHPKQ",                         # `OTP` + digit inside the run counts as the seed word
+    "key: OTP3JBSWYDPEHPKQ",
+    f"backup seed {SEED} for my 2fa app",            # weak word near the run, strong word elsewhere                         # `OTP` + digit inside the run counts as the seed word
     "otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example",  # review R1 (#1555)
     "otpauth://hotp/AcmeCorporation:a.long.user.name@example.com?counter=1&secret=JBSWY3DPEHPK3PXP",
 ]
@@ -33,8 +34,10 @@ SAFE = [
     f"הקבוצה מפסידה {SEED}",                         # סיד inside מפסידה is not a seed word
     "OTP SETUP: INTERNATIONALIZATION",               # review R1: digit-free upper-case word next to a seed word
     "TOTP IS GREAT FOR ACCOUNTABILITYCHECKS",        # review R1: shouted prose
-    "my totp app: internationalization",
-    "the secret to good coffee is fresh beans",      # `secret` alone, no base32 run             # digit-free lower-case word
+    "my totp app: internationalization",             # digit-free lower-case word
+    "the secret to good coffee is fresh beans",      # `secret` alone, no base32 run
+    "seed the database with base64urlencoded rows",  # review R2 (#1555): weak word `seed` with no strong word
+    "set client_secret to user2authorization",       # review R2 (#1555): weak word `secret` with no strong word
 ]
 
 
@@ -61,17 +64,17 @@ def test_word_adjacent_16_char_seed_rate_is_high():
 
 
 def test_known_miss_digit_free_seed():
-    # Trade-off (review R1): a digit-free run is indistinguishable from a long word, so it passes in either case.
+    # Follow-up #1559. Trade-off (review R1): a digit-free run is indistinguishable from a long word, so it passes in either case.
     assert not looks_sensitive("my totp seed: JBSWYDPEHPKAPXPQ")
 
 
 def test_known_miss_spaced_group_seed():
-    # Review R2 (#1555): groups shorter than 16 chars each are not joined; pinned until a separate ticket fixes it.
+    # Follow-up #1559: groups shorter than 16 chars each are not joined; flip this pin when #1559 lands.
     assert not looks_sensitive("my totp seed: JBSW Y3DP EHPK 3PXP")
 
 
-def test_known_fail_safe_identifier_with_a_digit_next_to_a_seed_word_is_refused():
-    assert looks_sensitive("seed the database with base64urlencoded rows")
+def test_known_fail_safe_identifier_with_a_digit_next_to_a_strong_seed_word_is_refused():
+    assert looks_sensitive("totp: seed the database with base64urlencoded rows")
 
 
 # ---------------------------------------------------------------- write paths (review R2)
