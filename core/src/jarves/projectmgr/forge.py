@@ -48,9 +48,11 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
     argv = [*cmd, *args, *(["--repo", _checked_slug(repo)] if repo is not None else [])]
-    # ignore_cleanup_errors: on Windows a gh grandchild may still hold the folder as its cwd; a leftover empty folder
-    # in the temp area must not turn a gh call that already succeeded into a crash
-    with tempfile.TemporaryDirectory(prefix="jarves-gh-", ignore_cleanup_errors=True) as cwd:
+    # Not TemporaryDirectory: on Python 3.12 its cleanup recurses without end when the folder stays locked (Windows: a
+    # gh grandchild still has it as cwd) and the RecursionError escapes ignore_cleanup_errors. A leftover empty folder in
+    # the temp area must not turn a gh call that already succeeded into a crash, so removal errors are ignored.
+    cwd = tempfile.mkdtemp(prefix="jarves-gh-")
+    try:
         env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
                                 "GIT_CEILING_DIRECTORIES": os.path.dirname(cwd)})
         for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
@@ -58,6 +60,8 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
                 env[k] = os.environ[k]
         p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
                            creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
+    finally:
+        shutil.rmtree(cwd, ignore_errors=True)
     if p.returncode != 0:
         raise ForgeError(" ".join((p.stderr or p.stdout or "gh failed").split())[:300])
     return p.stdout

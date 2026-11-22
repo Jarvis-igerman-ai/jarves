@@ -1303,6 +1303,7 @@ def test_forge_gh_runs_outside_the_repo_with_explicit_repo_1622(fake_gh, tmp_pat
         assert not c["git_repo"], c                                   # no repository visible to gh's git
         assert Path(c["cwd"]).resolve() != repo.resolve()
         assert repo.resolve() not in Path(c["cwd"]).resolve().parents
+        assert not Path(c["cwd"]).exists()                            # the temp folder is removed after the call
     for c in calls[1:]:
         assert c["args"][-2:] == ["--repo", "o/r"], c
     for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", "o/r\n", 7):
@@ -1341,7 +1342,12 @@ def test_forge_gh_temp_cleanup_failure_is_not_a_crash_1622(fake_gh, tmp_path, mo
         return real_rmdir(path, *a, **k)
     monkeypatch.setattr(os, "rmdir", busy)
     (tmp_path / "signed_in").write_text("1")
-    assert forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b").endswith("/pull/9")
+    try:
+        assert forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b").endswith("/pull/9")
+    finally:
+        monkeypatch.setattr(os, "rmdir", real_rmdir)
+        left = Path(json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])["cwd"])
+        shutil.rmtree(left, ignore_errors=True)                       # the folder the "busy" rmdir kept
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):
