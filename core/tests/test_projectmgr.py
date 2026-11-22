@@ -1341,188 +1341,32 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
 
 
-def test_ship_names_and_merges_the_approved_commit_not_the_branch(env):
-    """#1407: the ship plan, approval and merge name the integration commit; a same-named tag cannot supply it and a
-    commit landing on the branch while you approve is not merged."""
+def test_owner_text_names_the_integration_commit_not_the_branch(env):
+    """#1469 (#1407 item 1): the agent card, the owner's review command and the "merged into" event named the
+    integration branch, a ref any agent with the shared repo can move; they now name the recorded commit."""
+    import re
     m, repo, home = env
     open_project(m, repo)
-    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    a = task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    task(m, "B", "FAKE write b.txt=2", scope=["b.txt"], deps=[a])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], deps=[a],
+           flow="work:owner review:owner merge:owner")
     m.call("resume", project="demo")
     finish(m)
-    br = gitops.integration_branch(1)
-    sha = sh(repo, "git", "rev-parse", f"refs/heads/{br}").strip()
-    sh(repo, "git", "tag", br, "main")                                   # a tag with the branch's name, elsewhere
-    r = m.call("ship_plan", project="demo")
-    assert r["commit"] == sha and all(sha in c for c in r["commands"][:2]) and sha[:12] in r["text"]
+    branch = gitops.integration_branch(1)
+    ev = [e["text"] for e in m.db.events(m.db.by_seq(1, a)["id"], 40) if e["kind"] == "merged"]
+    got = re.search(r"at commit ([0-9a-f]{12})", ev[0]) if ev else None
+    assert got, ev                                                    # the event records the merged commit
+    card = (gitops.project_root(home, 1) / "wt" / "last_prompt_2.txt").read_text()
+    assert f"(commit {got.group(1)})" in card and branch not in card
+    t = m.db.by_seq(1, 3)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"]
+    (Path(t["worktree"]) / "mine.txt").write_text("by hand\n")
+    assert m.call("answer", project="demo", task=3, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 3)
     integ = gitops.project_root(home, 1) / "integration"
-    seen = []
-
-    def ask(prompt, **_):
-        seen.append(prompt)
-        (integ / "late.txt").write_text("not approved\n")
-        gitops.commit_all(integ, "late")
-        return True
-    m._ask = ask
-    (repo / "own.txt").write_text("yours\n")                            # your branch moved: a real merge commit
-    sh(repo, "git", "add", "own.txt")
-    sh(repo, "git", "-c", "user.name=o", "-c", "user.email=o@x", "commit", "-qm", "own", "--no-verify")
-    assert m.call("ship_plan", project="demo", apply=True)["ok"]
-    assert sha[:12] in seen[0] and (repo / "a.txt").exists() and not (repo / "late.txt").exists()
-    assert sh(repo, "git", "log", "-1", "--format=%s").strip() == f"Merge {br} at {sha[:12]}"     # review R6
-
-
-def test_owner_merge_prompt_names_the_commit_and_a_later_commit_voids_the_approval(env):
-    """#1407: the review command and the merge prompt name commits, and approving binds the commit you were shown."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"],
-           flow="work review:owner merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    at = sh(repo, "git", "rev-parse", f"refs/heads/{gitops.integration_branch(1)}").strip()[:12]
-    assert t["status"] == "waiting" and f"diff {at}...HEAD" in t["waiting"], t["waiting"]
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    wt = Path(t["worktree"])
-    tip = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
-    assert f"(commit {tip})" in t["waiting"] and f"(now at {at})" in t["waiting"], t["waiting"]
-    (wt / "t.txt").write_text("unseen\n")
-    gitops.commit_all(wt, "after the prompt")                            # not the commit you were shown
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    later = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
-    assert t["status"] == "waiting" and f"(now commit {later})" in t["waiting"], t["waiting"]
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "done"
-    merged = sh(gitops.project_root(home, 1) / "integration", "git", "rev-parse", "HEAD").strip()[:12]
-    assert any(e["kind"] == "merged" and f"at {merged}:" in e["text"] for e in m.db.events(t["id"], 40))
-
-
-def test_an_owner_edit_never_carries_an_unseen_agent_commit_into_the_merge(env):
-    """Review R3: an agent commit after the merge prompt, then your own edit on top: approving re-parks, naming it."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
-    wt = Path(t["worktree"])
-    (wt / "t.txt").write_text("unseen\n")
-    gitops.commit_all(wt, "agent, after the prompt")
-    (wt / "mine.txt").write_text("my edit\n")                          # yours: committed by the approval
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "waiting", (t["status"], t["reason"])       # before the fix: merged, unseen commit too
-    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
-    assert f"(now commit {head})" in t["waiting"], t["waiting"]
-    assert not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()          # nothing merged yet
-
-
-def test_a_commit_after_the_approval_check_is_never_merged(env, monkeypatch):
-    """Review round 2 R2: a commit that lands after the approval check is caught under the merge lock, and the
-    fast-forward names the checked commit, never the branch."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    wt = Path(m.db.by_seq(1, 1)["worktree"])
-    real = gitops.commit_all
-
-    def late(path, message):
-        if message.startswith("task 1: T"):                              # the merge stage's own commit
-            (Path(path) / "t.txt").write_text("unseen\n")
-            real(path, "agent, after the check")
-        return real(path, message)
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    monkeypatch.setattr(gitops, "commit_all", late)
-    finish(m)
-    monkeypatch.setattr(gitops, "commit_all", real)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "waiting", (t["status"], t["reason"])
-    assert "(now commit " in t["waiting"] and not (gitops.project_root(home, 1) / "integration" / "t.txt").exists()
-
-
-def test_uncommitted_files_at_approval_are_never_merged_unseen(env):
-    """Review round 3 R1: files left uncommitted after the merge prompt become a commit you approve by its SHA."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    wt = Path(m.db.by_seq(1, 1)["worktree"])
-    (wt / "t.txt").write_text("unseen\n")                              # never committed by the agent
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    integ = gitops.project_root(home, 1) / "integration"
-    assert t["status"] == "waiting", (t["status"], t["reason"])       # before the fix: merged as an "owner edit"
-    assert f"(now commit {sh(wt, 'git', 'rev-parse', 'HEAD').strip()[:12]})" in t["waiting"], t["waiting"]
-    assert not (integ / "t.txt").exists()
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    finish(m)
-    assert m.db.by_seq(1, 1)["status"] == "done" and (integ / "t.txt").read_text() == "unseen\n"
-
-
-def _moved(m, home, n):
-    integ = gitops.project_root(home, 1) / "integration"
-    for k in range(n):                                                   # another task merged meanwhile
-        (integ / f"o{k}.txt").write_text("other\n")
-        gitops.commit_all(integ, f"other {k}")
-    return integ
-
-
-def test_a_replaced_merge_commit_is_never_merged(env, monkeypatch):
-    """Review round 3 R2: the re-merge must have exactly your commit and the integration head read as parents."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    wt = Path(m.db.by_seq(1, 1)["worktree"])
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    integ = _moved(m, home, 1)
-    real = gitops.merge_in
-
-    def swap(w, *a, **k):
-        out = real(w, *a, **k)
-        mine, head = (gitops.git(w, "rev-parse", f"HEAD^{n}").stdout.strip() for n in (1, 2))
-        gitops.git(w, "checkout", "-q", "--detach", head)                # a commit on top of the integration head
-        (Path(w) / "evil.txt").write_text("unseen\n")
-        gitops.commit_all(Path(w), "more")
-        y = gitops.git(w, "rev-parse", "HEAD").stdout.strip()
-        gitops.git(w, "checkout", "-q", "-B", m.db.by_seq(1, 1)["branch"], mine)
-        gitops.git(w, "merge", "-q", "--no-edit", y)                     # first parent yours, second parent not read
-        return out
-    monkeypatch.setattr(gitops, "merge_in", swap)
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "waiting" and "(now commit " in t["waiting"], (t["status"], t["reason"])
-    assert not (integ / "evil.txt").exists()
-
-
-def test_a_fast_forward_re_merge_does_not_ask_again(env):
-    """Review round 3 R3: a task branch with no commits of its own fast-forwards on the re-merge: no new approval."""
-    m, repo, home = env
-    open_project(m, repo)
-    m.call("add_task", project="demo", title="T", spec="FAKE write t.txt=1", scope=["t.txt"], flow="work merge:owner")
-    m.call("resume", project="demo")
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    wt = Path(t["worktree"])
-    integ = gitops.project_root(home, 1) / "integration"
-    base = sh(integ, "git", "rev-parse", "HEAD").strip()
-    sh(wt, "git", "reset", "-q", "--hard", base)                         # nothing of its own beyond the base
-    m._set_job(t, shown=base)
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
-    _moved(m, home, 2)
-    finish(m)
-    t = m.db.by_seq(1, 1)
-    assert t["status"] == "done", (t["status"], t["waiting"], t["reason"])     # before the fix: a spurious re-park
+    sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
+    assert branch not in t["waiting"]
+    sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
