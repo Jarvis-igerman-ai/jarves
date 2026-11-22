@@ -86,10 +86,21 @@ def _secret_shaped(t: str) -> bool:
                for r in (m.group(0) for m in _BASE64.finditer(t)))
 
 
+def _drop_sha(m: re.Match) -> str:
+    """Hide a commit-SHA candidate from the long-number rule, unless a credential word sits right before it."""
+    return m.group(0) if _CRED_NEAR.search(m.string[max(0, m.start() - 40):m.start()]) else " "
+
+
 def looks_sensitive(text: str) -> bool:
+    """Refuse credentials, long numbers, health/money words and secret-shaped values (#1482).
+
+    Not caught (known gaps, out of scope for #1482): all-lowercase or all-uppercase letter+digit tokens
+    outside hex/base32, base32 with fewer than two digits 2-7, lowercase base32, and base64url (``-``/``_``)
+    values, unless ``logs.has_secret`` or another rule here matches them.
+    """
     t = text or ""
     # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)
-    return bool(_SENSITIVE.search(_SHA.sub(" ", t))) or logs.has_secret(t) or _secret_shaped(t)
+    return bool(_SENSITIVE.search(_SHA.sub(_drop_sha, t))) or logs.has_secret(t) or _secret_shaped(t)
 
 
 def normalize(text: str) -> str:

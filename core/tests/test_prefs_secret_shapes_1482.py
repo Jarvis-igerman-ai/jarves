@@ -69,6 +69,12 @@ def test_long_numbers_are_still_refused():
     assert looks_sensitive("a1234567")                   # one hex letter is not enough to count as a SHA
 
 
+@pytest.mark.parametrize("text", ["token 12345678ab", "api key 1234567abc", "my secret is 9988776655ff"])
+def test_digit_heavy_hex_next_to_a_credential_word_is_refused(text):
+    # review R1: a short SHA-like token next to a credential word is not exempt from the long-number rule
+    assert looks_sensitive(text), text
+
+
 def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
     store = Store(home / "store.db")
     assert devmanager.suggest(store, "regression since " + SHA_WITH_DIGIT_RUN, "bisected to " + SHA40)
