@@ -260,3 +260,73 @@ def test_a_merge_question_on_unchecked_content_says_so(env):
     t = m.db.by_seq(1, 1)
     assert t["status"] == "waiting" and f"NOT the checked commit {checked[:12]}" in t["waiting"], t
     assert "outside the task scope: b.txt" in t["waiting"]
+
+
+def test_a_check_without_a_recorded_checked_commit_fails_closed(env):
+    """Doctor R1: with no checked commit recorded (a legacy task) the check never binds unscoped content."""
+    m, repo, home = env
+    t = _start(m, repo, "work gate test merge")
+    _sibling_moves(home, repo, t, "unscoped\n")
+    m._set_job(t, tested_head=None)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "no checked commit" in t["reason"] and "not checked" in t["reason"], t
+    assert m.db.by_seq(1, 1)["job"].get("tested_head") is None and not (_integration(home) / "a.txt").exists()
+
+
+def test_after_a_back_rule_the_check_binds_only_what_the_rerun_work_stage_saw(env, monkeypatch):
+    """Doctor R1: a review sends the task back:work; a move after that work stage is not checked or merged."""
+    m, repo, home = env
+    _start(m, repo, "work review:owner test merge")
+    assert m.call("answer", project="demo", task=1, answer="reject", note="again")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and t["rounds"] == 1 and t["job"].get("tested_head") == _rev(Path(t["worktree"]))
+    _move_before(m, monkeypatch, home, repo, "_st_check")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "changed after the check" in t["reason"] and "not checked" in t["reason"], t
+    assert not (_integration(home) / "a.txt").exists()
+
+
+def test_a_merge_commit_swapped_in_right_after_merge_in_is_not_merged(env, monkeypatch):
+    """Doctor R2: no check command; a commit with the re-merge's parents but other contents replaces it at once."""
+    m, repo, home = env
+    _start(m, repo, "work gate merge", check=None)
+    integ = _integration(home)
+    (integ / "c.txt").write_text("newer work\n")                   # another task merged meanwhile: merge re-merges
+    sh(integ, "git", "add", "c.txt")
+    sh(integ, "git", "-c", "user.name=s", "-c", "user.email=s@s", "commit", "-qm", "newer")
+    before = _rev(integ)
+    real = gitops.merge_in
+
+    def swap(wt, *a, **k):
+        out = real(wt, *a, **k)
+        cur = _rev(wt)
+        (Path(wt) / "a.txt").write_text("forged\n")
+        sh(wt, "git", "add", "a.txt")
+        c = sh(wt, "git", "-c", "user.name=x", "-c", "user.email=x@x", "commit-tree", sh(wt, "git", "write-tree").strip(),
+               "-p", _rev(wt, cur + "^1"), "-p", _rev(wt, cur + "^2"), "-m", "forged").strip()
+        sh(wt, "git", "reset", "-q", "--hard", c)
+        return out
+    monkeypatch.setattr(gitops, "merge_in", swap)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved during the merge" in t["reason"], t
+    assert _rev(integ) == before
+
+
+def test_worktree_tree_matches_what_commit_all_commits(env):
+    """Doctor R4: the temporary index starts from the real one (staged, changed, deleted and new files)."""
+    m, repo, home = env
+    t = _start(m, repo, "work merge:owner", check=None)
+    wt = Path(t["worktree"])
+    (wt / "a.txt").write_text("changed\n")
+    (wt / "n.txt").write_text("new\n")
+    sh(wt, "git", "add", "n.txt")
+    (wt / "u.txt").write_text("untracked\n")
+    tree = gitops.worktree_tree(wt)
+    assert gitops.commit_all(wt, "x") and tree == _rev(wt, "HEAD^{tree}")

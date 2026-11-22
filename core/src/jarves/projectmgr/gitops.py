@@ -82,8 +82,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
-                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **(env or {})}), encoding="utf-8",
-                           errors="replace")
+                           creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0", **(env or {})}),
+                           encoding="utf-8", errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
@@ -175,11 +175,27 @@ def dirty_files(wt: Path, ref: str = "HEAD") -> list[str]:
 def worktree_tree(wt: Path) -> str:
     """The tree id commit_all would commit now (HEAD plus every uncommitted, non-ignored file, contents included),
     built in a throwaway index so the real index is untouched (#1461: an owner answer binds to contents, not names)."""
+    real = Path(wt) / git(wt, "rev-parse", "--git-path", "index").stdout.strip()
     with tempfile.TemporaryDirectory() as d:
         env = {"GIT_INDEX_FILE": os.path.join(d, "index")}
-        git(wt, "read-tree", "HEAD", env=env)
+        if real.is_file():
+            shutil.copyfile(real, env["GIT_INDEX_FILE"])    # reuse its stat data: only changed files are rehashed
+        else:
+            git(wt, "read-tree", "HEAD", env=env)
         git(wt, "add", "-A", env=env)
         return git(wt, "write-tree", env=env).stdout.strip()
+
+
+def is_merge_of(wt: Path, commit: str, first: str, second: str) -> bool:
+    """True when `commit` is exactly the merge of `first` and `second`: those parents in that order and the tree git
+    computes for that merge (#1461: a commit swapped in after merge_in with the same parents but other contents is
+    not). False when git cannot compute it (e.g. git older than 2.38): fails closed."""
+    parents = git(wt, "rev-parse", f"{commit}^1", f"{commit}^2", check=False).stdout.split()
+    if parents != [first, second]:
+        return False
+    p = git(wt, "merge-tree", "--write-tree", first, second, check=False)
+    tree = git(wt, "rev-parse", f"{commit}^{{tree}}", check=False).stdout.strip()
+    return p.returncode == 0 and bool(tree) and p.stdout.split()[:1] == [tree]
 
 
 def commit_all(wt: Path, message: str) -> bool:

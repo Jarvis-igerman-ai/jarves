@@ -566,7 +566,7 @@ class StageEngine:
             if has_wt:
                 try:
                     pre = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()
-                    why = self._unchecked(t, pre) if self._job(self.db.task(t["id"]) or t).get("tested_head") else ""
+                    why = self._unchecked(t, pre)                   # fails closed when none is recorded (R1)
                     why = f"{why}: not checked" if why else self._leftover(wt)  # moved after a review / unscoped files
                     if why:
                         return ("stop", "blocked", why)
@@ -627,8 +627,7 @@ class StageEngine:
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     new = gitops.git(wt, "rev-parse", "HEAD").stdout.strip()     # the merge commit merge_in made
-                    if new not in (head, tip) and gitops.git(wt, "rev-parse", f"{new}^1", f"{new}^2",
-                                                  check=False).stdout.split() != [tip, head]:
+                    if new not in (head, tip) and not gitops.is_merge_of(wt, new, tip, head):    # parents + tree
                         return ("stop", "blocked", f"the task branch {br} moved during the merge: not merged")
                     if has_check:
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
