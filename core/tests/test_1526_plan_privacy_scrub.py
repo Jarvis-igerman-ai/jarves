@@ -6,12 +6,19 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from test_v5_goal_plans import Env, steps
+from test_v5_goal_plans import Env, Say, steps
 
 from jarves import goal_plans as gp
 from jarves import logs
+from jarves.skills import Skill, Tool, ToolResult
 
 WORDS = (b"read secret", b"it broke", b"steps done")
+
+
+@pytest.fixture(autouse=True)
+def _privacy_restored(monkeypatch):
+    """logs.set_privacy only sets a module global (no flag file: conftest keeps logs._flag None); restore it."""
+    monkeypatch.setattr(logs, "_privacy", logs._privacy)
 
 
 @pytest.fixture
@@ -56,6 +63,7 @@ async def test_1526_privacy_switched_on_blanks_older_plan_text_and_keeps_states_
     assert (b["state"], b["steps"][0]["status"], b["steps"][0]["error"], b["note"]) == ("failed", "failed", "X_BROKE", "")
     assert ("PLAN_PRIVACY_SCRUBBED", {"count": 2, "changed": 2}) in seen
     assert not any(w in _disk(env) for w in WORDS)          # not in memory.db, its free pages or memory.db-wal
+    assert env.db.row("PRAGMA secure_delete")["secure_delete"] == 0      # the shared connection's setting is restored
     seen.clear()
     await env.runner.tick()                                  # once per switch-on: a second tick does nothing
     assert not [c for c, _ in seen if c.startswith("PLAN_PRIVACY")]
@@ -105,6 +113,27 @@ async def test_1526_a_busy_wal_checkpoint_is_logged_once_and_retried_without_scr
     monkeypatch.setattr(env.store, "scrub_private", lambda: pytest.fail("scrubbed twice"))
     await env.runner.tick()
     assert not any(w in _disk(env) for w in WORDS)
+
+
+async def test_1526_text_written_while_privacy_was_off_during_a_step_is_scrubbed_at_the_next_tick(env, seen):
+    class Flip(Skill):
+        name, description = "flip", "switches privacy off while it runs"
+
+        def tools(self):
+            async def flip(a: Say):
+                logs.set_privacy(False)
+                return ToolResult(True, f"out {a.text}")
+            return [Tool("fake_flip", "f", flip, Say, permission="read")]
+    env.reg.register(Flip())
+    logs.set_privacy(True)
+    await env.runner.tick()                                  # privacy on, nothing to scrub: clean
+    p = env.store.propose("c", steps(("fake_flip", {"text": "secret"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()                                  # the step writes its text with privacy off
+    assert env.store.get(p["id"])["steps"][0]["evidence"] == "out secret"
+    logs.set_privacy(True)                                   # on again before any tick start saw it off
+    await env.runner.tick()
+    assert env.store.get(p["id"])["steps"][0]["evidence"] == "" and env.store.get(p["id"])["result"] == ""
 
 
 @pytest.mark.parametrize("text,code", [("X_BROKE: it broke", "X_BROKE"), ("TOOL_TIMEOUT", "TOOL_TIMEOUT"),

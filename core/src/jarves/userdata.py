@@ -11,6 +11,7 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +177,18 @@ class UserDB:
             cur = self._db.execute(sql, args)
             self._db.commit()
             return cur
+
+    @contextmanager
+    def transaction(self):
+        """ONE write transaction (BEGIN IMMEDIATE) under the lock: commit on success, rollback and re-raise on any error."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                yield self._db
+                self._db.commit()
+            except BaseException:
+                self._db.rollback()
+                raise
 
     def rows(self, sql: str, args: tuple = ()) -> list[dict]:
         with self._lock:

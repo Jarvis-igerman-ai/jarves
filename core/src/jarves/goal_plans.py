@@ -295,12 +295,12 @@ class PlanStore:
     # ------------------------------------------------------------------ privacy (#1526)
     def scrub_private(self) -> tuple[int, int]:
         """Blank plan text written before privacy mode was on: step evidence, plan result and note; a step error keeps
-        only its code. States are not touched. ONE transaction, freed bytes overwritten (secure_delete). Returns
-        (steps, plans) changed; a sqlite3.Error is raised after the rollback."""
-        with self.db._lock:
-            c = self.db._db
+        only its code. States are not touched. ONE transaction (UserDB.transaction); secure_delete is on for it, so
+        the bytes it frees are overwritten, then restored. Returns (steps, plans) changed; a sqlite3.Error is raised
+        after the rollback."""
+        with self.db.transaction() as c:
+            prev = int(c.execute("PRAGMA secure_delete").fetchone()[0])
             c.execute("PRAGMA secure_delete=ON")
-            c.execute("BEGIN IMMEDIATE")
             try:
                 rows = c.execute("SELECT id, evidence, error FROM goal_plan_steps WHERE evidence<>'' OR error<>'' "
                                  "ORDER BY id").fetchall()
@@ -311,10 +311,8 @@ class PlanStore:
                         c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (code, r["id"]))
                         n += 1
                 plans = c.execute("UPDATE goal_plans SET result='', note='' WHERE result<>'' OR note<>''").rowcount
-                c.commit()
-            except BaseException:
-                c.rollback()
-                raise
+            finally:
+                c.execute(f"PRAGMA secure_delete={prev}")
         return n, plans
 
     def truncate_wal(self) -> bool:
@@ -476,7 +474,14 @@ class PlanRunner:
     def stop(self) -> None:
         self._stop = True
 
+    def _rearm(self) -> None:
+        """#1526: plan text about to be written while privacy is off is scrubbed at the next tick that sees privacy
+        on, even when no tick start saw it off (switched off and on again during a step)."""
+        if not logs.privacy():
+            self._private = False
+
     def _stop_plan(self, pid: int, state: str, note: str, **extra) -> None:
+        self._rearm()
         if not self.store._set_if(pid, ("running",), state, note=_short(note, 200), **extra):
             return                                   # the owner paused/cancelled meanwhile: that wins (#813)
         logs.info("goals", "PLAN_STOPPED", "plan stopped", id=pid, state=state)
@@ -578,6 +583,7 @@ class PlanRunner:
             if res.ok:
                 if tool.untrusted_output:
                     st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
+                self._rearm()
                 st.db.x("UPDATE goal_plan_steps SET status='done', finished=?, evidence=?, error='' WHERE id=?",
                         (self.clock(), _short(res.message), step["id"]))
                 logs.info("goals", "PLAN_STEP_DONE", "plan step done", id=pid, step=step["idx"], tool=step["tool"])
@@ -603,6 +609,7 @@ class PlanRunner:
         self._stop_plan(pid, "blocked", f"step {step['idx'] + 1}: {why}")
 
     def _fail(self, pid: int, step: dict, why: str, t0: float, evidence: str = "", status: str = "failed") -> None:
+        self._rearm()
         ran = max(0.0, self.clock() - t0)
         self.store.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=? AND state='running'", (ran, pid))
         self.store.db.x("UPDATE goal_plan_steps SET status=?, finished=?, error=?, evidence=? WHERE id=?",
@@ -610,6 +617,7 @@ class PlanRunner:
         self._stop_plan(pid, "failed", f"step {step['idx'] + 1}: {why}", finished=self.clock())
 
     def _finish(self, pid: int) -> dict:
+        self._rearm()
         st = self.store
         steps = st.steps(pid)
         lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
