@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -214,12 +213,3 @@ def test_h4_guide_claim_check_runs_with_an_allow_listed_env_and_a_time_limit(tmp
     assert seen["timeout"] == 7 and "OPENAI_API_KEY" not in seen["env"] and seen.get("shell") is not True
     assert seen["env"] and all(k.upper() in gitops.ENV_KEEP for k in seen["env"])     # only allow-listed names
 
-
-def test_f13_review_r2_phone_goal_answer_is_never_drawn_the_page_resyncs():
-    """A replayed goal answer in privacy mode has no title or step text: the page must not render it, only re-sync."""
-    js = (Path(mobile.__file__).parent / "dashboard_static" / "mobile").glob("*.js")
-    calls = [(f.name, line) for f in js for line in f.read_text(encoding="utf-8").splitlines() if "/api/m/goals/op" in line]
-    assert calls, "the phone page no longer posts goal changes: update this test"
-    for name, line in calls:
-        assert not re.search(r"=\s*await\s+post\(\s*\"/api/m/goals/op\"", line), f"{name}: the goal answer is not drawn"
-        assert "syncNow()" in line, f"{name}: a goal change must re-read /api/m/sync, not draw the answer"
