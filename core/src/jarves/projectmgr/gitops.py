@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
-IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false"]
+IDENT = ["-c", "user.name=JARVES", "-c", "user.email=jarves@localhost", "-c", "commit.gpgsign=false",
+         "-c", "tag.gpgsign=false"]        # agent work is never signed (JAR-678 council)
 # files an agent may never change: they would widen the permissions of every later task or run code on its own
 # (.github/ holds CI workflows that run with the repository's secrets). Matched case-insensitively (JAR-317): Windows
 # and macOS file systems ignore case, so `.Claude/settings.json` or `.GitHub/workflows/x.yml` is the same file.
@@ -69,26 +70,120 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+DIFF_CMDS = ("diff", "show", "log")
+NO_CONFIG_CMDS = ("rev-parse", "merge-base")   # run no config-named command: no extra config read (review R5)
+_DRIVER = re.compile(r"^(filter|merge)\.(.+)\.(clean|smudge|process|driver|required)$", re.S)
+_HOOK = re.compile(r"^hook\.(.+)\.[^.]+$", re.S)
+_SIGN = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+         "gpg.ssh.program": "ssh-keygen", "gpg.ssh.defaultkeycommand": "",
+         "gpg.format": "openpgp", "user.signingkey": ""}      # format and key: the owner's too (review R4)
+_UNTRUSTED = ("local", "worktree")      # the shared .git/config (+ includes) and config.worktree: agent-writable
+FILTER_FAIL = "exit 1"                  # a repository-only filter fails (required), never stores raw content
+
+
+def _config_overrides(cwd: str | Path, pre: list[str], timeout: float, sign: bool = False
+                      ) -> list[str] | subprocess.CompletedProcess:
+    """`-c` pairs that override every command the repository's own config names at this read (#1407; a later write
+    before git's own read is not covered, #1533); the owner's global/system config is kept, also for a repository
+    copy of the same key. A filter the repository config sets but the owner does not fails closed (`exit 1`,
+    required): a file it applies to stops the command instead of being stored unconverted (git-crypt). A merge
+    driver gets `exit 1` (always a conflict), any config-defined hook (`hook.<name>.command`/`.event`) `exit 0`;
+    signing programs and format always come from the owner's scope; the owner's key (else the owner's committer
+    email) only when `sign` (ident=False, the ship path), never for agent work (JAR-678 council).
+    A failed read is returned as is (the caller fails closed)."""
+    p = subprocess.run(["git", *pre, "config", "--list", "--show-scope", "-z"], cwd=str(cwd), capture_output=True,
+                       text=True, timeout=timeout, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
+                       encoding="utf-8", errors="replace")
+    if p.returncode == 129:                     # an unknown option: `--show-scope` needs git 2.26
+        return subprocess.CompletedProcess(p.args, 129, "", "JARVES projects need git 2.38 or newer (#1407)")
+    if p.returncode != 0:
+        return p
+    items = p.stdout.split("\0")
+    owner: dict[str, str] = {}
+    out: dict[str, str] = {}
+    filters: dict[str, set[str]] = {}           # filter name -> keys the repository config sets
+    email = ""
+    for scope, entry in zip(items[0::2], items[1::2]):
+        key, _, value = entry.partition("\n")
+        if key == "user.email" and scope in ("global", "system"):    # never `command` (IDENT) or the repo
+            email = value                       # the owner's committer email: the fallback signing key (review R4)
+        if scope not in _UNTRUSTED:
+            if key in _SIGN or _DRIVER.match(key):
+                owner[key] = value
+                if key in ("gpg.program", "gpg.openpgp.program"):
+                    owner["pgp"] = value                # the last of the two wins, as in git
+            continue
+        m, h = _DRIVER.match(key), _HOOK.match(key)
+        if (m or h) and "=" in key:             # `-c` would split the key there: refuse, never half-apply
+            return subprocess.CompletedProcess(p.args, 128, "", f"refusing the config key {key!r} (#1407)")
+        if h:                                   # also `.event`: never attach any (owner) command to an event
+            out[f"hook.{h.group(1)}.command"] = "exit 0"
+        elif m and m.group(1) == "filter":
+            filters.setdefault(m.group(2), set()).add(key)
+        elif m and m.group(3) == "driver":
+            out[key] = owner.get(key) or "exit 1"
+        elif key in _SIGN:
+            out.update({k: "" for k in _SIGN})
+    for name, keys in filters.items():
+        req = f"filter.{name}.required"
+        cmds = keys - {req}
+        if all(k in owner for k in cmds):       # a repository copy of the owner's filter: the owner's values
+            out.update({k: owner[k] for k in cmds}, **{req: owner.get(req, "false")})
+        else:
+            out.update({k: FILTER_FAIL for k in cmds}, **{req: "true"})
+    if "gpg.program" in out:                    # git reads gpg.program and gpg.openpgp.program into one setting
+        pgp = owner.get("pgp") or "gpg"
+        out.update({k: owner.get(k) or d for k, d in _SIGN.items()}, **{"gpg.program": pgp, "gpg.openpgp.program": pgp})
+        if not sign:                            # agent work: no owner key is ever offered to a signer
+            out.update({"user.signingkey": "", "gpg.ssh.defaultkeycommand": ""})
+        elif not out["user.signingkey"] and out["gpg.format"] != "ssh":
+            out["user.signingkey"] = email      # an empty key is used as is; git's own default is the committer
+    return [x for k, v in out.items() for x in ("-c", f"{k}={v}")]
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
     No git hook ever runs (#1381): `core.hooksPath` points at NO_HOOKS, which can never hold a hook, so neither the
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
-    git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    git would otherwise run on every index refresh; `submodule.recurse=false` keeps checkout, reset and `worktree add`
+    out of submodules (whose own config the overrides cannot name). This also skips the owner's own hooks (LFS, post-merge) when
+    JARVES merges into the owner's branch. Commands named in the repository's own config, as read just before the
+    command, are overridden too (#1407, see `_config_overrides`); a config entry written between that read and the
+    command's own read is not (open race, #1533). diff/show/log never run an external diff or textconv command
+    (projectmgr calls no blame, `cat-file --textconv` or `stash show -p`). Cost: one extra `git config` process per
+    call except rev-parse/merge-base, which run no such command; needs git 2.38 or newer (merge-tree --write-tree)."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           "-c", "submodule.recurse=false"]     # no checkout/reset/worktree add child in a submodule (review R1)
+    over = [] if args and args[0] in NO_CONFIG_CMDS else _config_overrides(cwd, pre, timeout, sign=not ident)
+    if isinstance(over, subprocess.CompletedProcess):          # the config cannot be read: fail closed
+        if check:
+            raise GitError((over.stderr or "git config failed").strip()[:300])
+        return over
+    if args and args[0] in ("status", "diff"):     # no child git in a submodule (its own config, review R1)
+        args = (args[0], "--ignore-submodules=dirty", *args[1:])
+    if args and args[0] in DIFF_CMDS:
+        args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
-        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        p = subprocess.run(["git", *pre, *over, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
                            errors="replace")
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
     if check and p.returncode != 0:
-        raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
+        raise GitError(_hint((p.stderr or p.stdout or "git failed").strip()[:300]))
     return p
+
+
+def _hint(err: str) -> str:
+    """What the owner can do about a #1407 override that stopped git."""
+    if f"'{FILTER_FAIL}'" in err:
+        return err + " (a filter set only in the repository's git config does not run: set it in your global config)"
+    if "gpg" in err.lower() or "signing" in err.lower():
+        return err + " (check your global git signing settings: user.signingkey, gpg.format, gpg.program)"
+    return err
 
 
 def is_repo(path: str) -> bool:
@@ -100,6 +195,14 @@ def is_repo(path: str) -> bool:
 
 def current_branch(path: str) -> str:
     return git(path, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+
+def commit_of(path: str | Path, ref: str) -> str:
+    """The full commit `ref` names now (#1407): owner text and approvals name this, never a branch that can move."""
+    try:
+        return git(path, "rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
+    except GitError as e:
+        raise GitError(f"no commit for {ref}: {e}") from None
 
 
 def project_root(home: Path, pid: int) -> Path:
@@ -164,8 +267,56 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
             git(repo, "branch", "-D", branch, check=False)
 
 
+def retire_worktree(repo: str, wt: Path, branch: str, tip: str) -> bool:
+    """Remove a merged task's worktree and branch only while the branch is still exactly `tip` and nothing is
+    edited (#1407 review). Untracked files (a check's build output) are cleaned first; the folder removal is never
+    forced, so git's own clean check refuses an edit made up to that moment (JAR-678 council). The branch is then
+    deleted with a compare-and-swap (`update-ref -d ref tip`): a commit that landed meanwhile keeps the branch.
+    False = nothing lost: the folder and/or branch were kept."""
+    if "projects" not in Path(wt).parts:
+        raise GitError("refusing to remove a folder outside the JARVES projects area")
+    ref = f"refs/heads/{branch}"
+    with _repo_lock(repo):
+        if tracked_dirty(wt, tip) or git(repo, "rev-parse", "--verify", "-q", ref, check=False).stdout.strip() != tip:
+            return False                                # an edit, or the branch moved: keep both
+        git(wt, "clean", "-fdq", check=False)                # untracked check output only (not ignored files)
+        if git(repo, "worktree", "remove", str(wt), check=False).returncode != 0:    # never --force: git refuses
+            return False
+        git(repo, "worktree", "prune", check=False)
+        return git(repo, "update-ref", "-d", ref, tip, check=False).returncode == 0
+
+
+def tracked_dirty(wt: str | Path, base: str) -> bool:
+    """A staged or unstaged change to a tracked file against the commit `base` (also after the branch ref is
+    gone); untracked files (check output) do not count. A failed read counts as dirty (keep the work)."""
+    git(wt, "update-index", "-q", "--refresh", check=False)
+    return any(git(wt, "diff-index", "--quiet", "--ignore-submodules=dirty", *c, base, "--", check=False).returncode
+               for c in (["--cached"], []))
+
+
+def _add_all(wt: Path) -> None:
+    """`git add -A` without the child `git status` it runs inside each submodule (review R1): that child reads the
+    submodule's own config, whose filters the `-c` overrides cannot name. Submodule pointers are staged directly."""
+    idx = git(wt, "ls-files", "-s", "-z").stdout.split("\0")
+    links = [e.split("\t", 1)[1] for e in idx if e.startswith("160000 ") and "\t" in e]
+    git(wt, "add", "-A", "--", ".", *[f":(exclude,literal){x}" for x in links])
+    for x in links:
+        sub = Path(wt) / x
+        if (sub / ".git").exists():
+            r = git(sub, "rev-parse", "--verify", "-q", "HEAD^{commit}", check=False)
+            if r.returncode == 0:                   # an unborn submodule: its pointer stays (review R4)
+                git(wt, "update-index", "--cacheinfo", f"160000,{r.stdout.strip()},{x}")
+        elif not sub.exists():
+            git(wt, "update-index", "--force-remove", "--", x)
+        elif not any(sub.iterdir()):                # uninitialised (`worktree add`): the pointer stays (council)
+            continue
+        else:                                       # a submodule replaced by plain files: stage them
+            git(wt, "update-index", "--force-remove", "--", x)
+            git(wt, "add", "-A", "--", f":(literal){x}")
+
+
 def commit_all(wt: Path, message: str) -> bool:
-    git(wt, "add", "-A")
+    _add_all(wt)
     if git(wt, "diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
     git(wt, "commit", "-m", message[:200], "--no-verify")
@@ -228,14 +379,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]
@@ -243,7 +394,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
     if files:
         return files
     why = " ".join((p.stderr or p.stdout or "merge failed").split())[:200]
-    return [f"(not merged: {why})"]
+    return [f"(not merged: {_hint(why)})"]
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:

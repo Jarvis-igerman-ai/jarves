@@ -3,6 +3,7 @@ git worktrees driven by a fake agent executable (a Python script that speaks Cla
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -245,6 +246,7 @@ def test_parallel_tasks_merge_and_dependent_gets_handoff(env):
     assert {f for f in os.listdir(integ / "src")} == {"a.py", "b.py", "c.py"}
     prompt_c = (gitops.project_root(home, 1) / "wt" / "last_prompt_3.txt")
     assert "Handoff from finished task #1" in prompt_c.read_text() and "finished task" in prompt_c.read_text()
+    assert re.search(r"branch jarves/p1/integration at commit [0-9a-f]{12}\)", prompt_c.read_text())   # #1407
     assert not (repo / "src").exists()                                         # the owner's checkout is untouched
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     assert "pushed" not in sh(repo, "git", "log", "--all", "--format=%s")
@@ -965,8 +967,10 @@ def test_owner_does_work_and_approves_merge_bound_to_tree(env):
     (wt / "mine.txt").write_text("changed after the approval\n")                      # the approval no longer holds
     finish(m)
     t = m.db.by_seq(1, 1)
-    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"]
-    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]                # #1407: the edit is committed and named
+    assert t["status"] == "waiting" and f"changed after your approval: approve merging task #1 (now commit {head})" \
+        in t["waiting"], t["waiting"]
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]          # one approve of that commit
     finish(m)
     assert m.db.by_seq(1, 1)["status"] == "done"
     assert (gitops.project_root(home, 1) / "integration" / "mine.txt").read_text() == "changed after the approval\n"
@@ -1339,3 +1343,435 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+
+
+def test_ship_merges_the_commit_the_owner_approved_not_the_branch_name(env):
+    """#1407 items 1-2: the ship prompt and commands name the integration commit, and a branch moved during the
+    approval prompt is not merged (the approved commit is)."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    sha = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == sha and all(sha in c for c in plan["commands"][:2])
+    seen = []
+
+    def ask(prompt, *a, **k):
+        seen.append(prompt)
+        integ = gitops.project_root(home, 1) / "integration"
+        (integ / "late.txt").write_text("late\n")
+        gitops.commit_all(integ, "late")                       # the branch moves after the owner saw the prompt
+        return True
+    m._ask = ask
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and r["commit"] == sha and sha[:12] in seen[0], (r, seen)
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
+def test_ship_names_the_integration_branch_not_a_same_named_tag(env):
+    """JAR-678 (#1561 review R1): a tag `jarves/p1/integration` wins a short-name lookup; ship never names or merges it."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    sha = sh(repo, "git", "rev-parse", f"refs/heads/{gitops.integration_branch(1)}").strip()
+    other = sh(repo, "git", "rev-parse", f"{sha}^").strip()
+    sh(repo, "git", "tag", gitops.integration_branch(1), other)
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == sha and all(other not in c for c in plan["commands"]), plan
+    seen = []
+    m._ask = lambda prompt, *a, **k: seen.append(prompt) or True
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and r["commit"] == sha and sha[:12] in seen[0] and (repo / "a.txt").exists(), (r, seen)
+
+
+def test_owner_merge_without_a_task_folder_names_no_task_commit(env):
+    """JAR-678 (#1561 review R2): with no task folder the merge prompt never shows the integration commit as the
+    task's commit; it says there is nothing to merge."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "nothing to merge" in t["waiting"] and "(commit" not in t["waiting"], t
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done"
+
+
+def test_owner_review_and_merge_text_name_commits(env):
+    """#1407 item 1: the owner's review command and merge approval name commits, not the integration branch."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "work"}, {"kind": "review", "by": "owner"}, {"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    base = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()[:12]
+    head = sh(t["worktree"], "git", "rev-parse", "HEAD").strip()[:12]
+    assert t["status"] == "waiting" and f"diff {base}...{head}" in t["waiting"], t["waiting"]
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert f"(commit {head})" in t["waiting"] and gitops.integration_branch(1) in t["waiting"], t["waiting"]
+    m.call("answer", project="demo", task=1, answer="approve")
+    finish(m)
+    assert any(f"merged commit {head}" in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_ship_plan_reports_an_unresolvable_commit_as_git_error(env, monkeypatch):
+    """#1407: without a commit to name, ship neither shows a branch-only plan nor asks to merge."""
+    m, repo, _ = env
+    open_project(m, repo)
+
+    def boom(*a):
+        raise gitops.GitError("bad ref")
+    monkeypatch.setattr(gitops, "commit_of", boom)
+    assert m.call("ship_plan", project="demo")["code"] == "GIT_ERROR"
+    assert m.call("ship_plan", project="demo", apply=True)["code"] == "GIT_ERROR"
+
+
+def test_owner_review_without_a_task_folder_diffs_against_head(env):
+    """JAR-678 (#1540 review R2): with no task worktree the review command keeps HEAD, never an empty base...base."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "review", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    base = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()[:12]
+    assert t["status"] == "waiting" and f"diff {base}...HEAD" in t["waiting"], t["waiting"]
+
+
+def test_ship_plan_with_a_failing_stat_still_names_the_commit(env, monkeypatch):
+    """JAR-678 (#1540 review R4): only the diff stat falls back to "unknown"; the plan still names the commit."""
+    m, repo, _ = env
+    open_project(m, repo)
+    real = gitops.git
+
+    def fake(cwd, *args, **kw):
+        if "--shortstat" in args:                                    # e.g. an unborn HEAD in the owner checkout
+            if kw.get("check", True):
+                raise gitops.GitError("fatal: bad HEAD")
+            return subprocess.CompletedProcess(args, 128, "", "fatal: bad HEAD")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", fake)
+    r = m.call("ship_plan", project="demo")
+    sha = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()
+    assert r["ok"] and "unknown" in r["text"] and r["commit"] == sha, r
+
+
+def _owner_merge_waiting(m, repo):
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow=[{"kind": "work"}, {"kind": "merge", "by": "owner"}])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"]
+    return t, Path(t["worktree"])
+
+
+def test_owner_merge_approval_binds_the_commit_shown_in_the_prompt(env):
+    """#1407 review R1: a commit added to the task branch after the prompt is never approved under it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")                                   # the branch moves while the owner reads the prompt
+    r = m.call("answer", project="demo", task=1, answer="approve")
+    late = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert r["code"] == "CHANGED" and f"(commit {late})" in m.db.by_seq(1, 1)["waiting"], r
+    finish(m)
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+
+
+def test_owner_merge_never_merges_a_branch_moved_after_the_approval_check(env, monkeypatch):
+    """#1407 review R1: the merge fast-forwards to the approved commit; a branch moved inside the merge stage parks."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.commit_all
+
+    def racing(path, msg):                                          # another writer moves the branch right here
+        (Path(path) / "late.txt").write_text("late\n")
+        return real(path, msg)
+    monkeypatch.setattr(gitops, "commit_all", racing)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], t
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+
+
+@pytest.mark.parametrize("owner", [True, False])
+def test_a_commit_after_the_fast_forward_is_never_deleted_with_the_task_branch(env, monkeypatch, owner):
+    """JAR-678 (#1561 review R1): a commit landing on the task branch after the exact-commit fast-forward is kept:
+    an owner merge asks again naming it, an agent merge stops with the folder kept; the branch is never deleted."""
+    m, repo, home = env
+    if owner:
+        t, wt = _owner_merge_waiting(m, repo)
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    else:
+        open_project(m, repo)
+        task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+        m.call("resume", project="demo")
+    real = gitops.fast_forward
+
+    def racing(integ, ref):
+        real(integ, ref)
+        wt = Path(m.db.by_seq(1, 1)["worktree"])
+        (wt / "late.txt").write_text("late\n")
+        gitops.commit_all(wt, "late")                               # lands after the final tip check
+    monkeypatch.setattr(gitops, "fast_forward", racing)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["worktree"] and (Path(t["worktree"]) / "late.txt").exists(), t
+    assert sh(repo, "git", "log", "-1", "--format=%s", t["branch"]).strip() == "late"
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+    if owner:
+        assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], t
+        monkeypatch.setattr(gitops, "fast_forward", real)
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+        finish(m)
+        assert (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+    else:
+        assert t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
+
+
+@pytest.mark.parametrize("when", [("clean", "-fdq"), ("worktree", "remove")])
+def test_a_commit_during_the_cleanup_keeps_the_task_branch(env, monkeypatch, when):
+    """JAR-678 (#1561 review): a commit after the final tip check (before the clean, or right before the folder
+    removal) is never lost: the branch delete is a compare-and-swap on the merged commit."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    real, fired = gitops.git, []
+
+    def racing(cwd, *args, **kw):
+        wt = Path(m.db.by_seq(1, 1)["worktree"] or home / "none")      # never the test's own cwd
+        if args[:2] == when and not fired and wt.is_relative_to(home) and wt.exists():
+            fired.append(1)
+            (wt / "late.txt").write_text("late\n")
+            gitops.commit_all(wt, "late")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", racing)
+    finish(m)
+    monkeypatch.setattr(gitops, "git", real)
+    t = m.db.by_seq(1, 1)
+    assert fired and t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
+    assert "late.txt" in sh(repo, "git", "ls-tree", "--name-only", t["branch"])      # the late work has a ref
+    assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+
+
+def test_an_untracked_check_artifact_after_a_re_merge_does_not_block_the_merge(env):
+    """JAR-678 (#1561 review): a check that writes an untracked file after merging newer work used to read as a
+    moved task: merged but not done, then an "edit after the approval" commit of the build output."""
+    m, repo, home = env
+    gen = [sys.executable, "-c", "import os; os.path.exists('other.txt') and open('out.log', 'w').write('x')"]
+    open_project(m, repo, check=gen)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a.txt=1", acceptance="x", scope=["a.txt"],
+           flow="work test merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    assert "approve merging" in m.db.by_seq(1, 1)["waiting"]
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")                       # the re-merge runs the check, which leaves out.log
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done" and not t["worktree"], (t["status"], t["waiting"], t["reason"])
+    log = sh(integ, "git", "log", "--format=%s")
+    assert "edit after the approval" not in log and (integ / "a.txt").exists() and not (integ / "out.log").exists()
+
+
+def test_owner_merge_approval_stores_the_commit_it_checked(env, monkeypatch):
+    """#1407 review round 2 R1: a commit landing between the approval check and storing it is never approved."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    real, calls = m._tree, []
+
+    def tree(task):                                               # a commit lands right after the first read
+        calls.append(1)
+        out = real(task)
+        if len(calls) == 1:
+            (wt / "late.txt").write_text("late\n")
+            gitops.commit_all(wt, "late")
+        return out
+    monkeypatch.setattr(m, "_tree", tree)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    monkeypatch.setattr(m, "_tree", real)
+    finish(m)
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+    assert "changed after your approval" in m.db.by_seq(1, 1)["waiting"]
+
+
+def test_ship_merge_message_names_the_branch_and_commit(env):
+    """#1407 review round 2 R6: merging the SHA would read "Merge commit '<sha>'"; the message names both."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    for k, v in (("user.name", "Owner"), ("user.email", "o@example.invalid")):
+        sh(repo, "git", "config", k, v)
+    (repo / "own.txt").write_text("mine\n")
+    sh(repo, "git", "add", "own.txt")
+    sh(repo, "git", "commit", "-qm", "own")                       # the owner's branch moved: a real merge commit
+    sha = sh(repo, "git", "rev-parse", gitops.integration_branch(1)).strip()
+    assert m.call("ship_plan", project="demo", apply=True)["ok"]
+    assert sh(repo, "git", "log", "-1", "--format=%s").strip() == f"Merge {gitops.integration_branch(1)} at {sha[:12]}"
+
+
+def test_commit_of_names_the_ref_it_could_not_resolve(tmp_path):
+    """#1407 review round 2 R5: a failed lookup says which ref, never an empty "git failed: "."""
+    gitops.git(tmp_path, "init", "-q")
+    with pytest.raises(gitops.GitError, match="no commit for jarves/p9/integration: .+"):
+        gitops.commit_of(tmp_path, "jarves/p9/integration")
+
+
+def test_owner_merge_of_a_task_already_on_the_moved_integration_branch_does_not_park(env):
+    """#1407 review round 3 R5: when the task tip is already an ancestor of the moved integration branch, the merge
+    fast-forwards the task branch; that is not "moved during the merge" and needs no second approval."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    tip = sh(wt, "git", "rev-parse", "HEAD").strip()
+    integ = gitops.project_root(home, 1) / "integration"
+    sh(integ, "git", "merge", "-q", "--ff-only", tip)                # the task commit lands on the integration branch
+    for n in ("later", "later2"):                                    # ... and moves on past it (2 commits: ^1 != tip)
+        (integ / f"{n}.txt").write_text(n + "\n")
+        gitops.commit_all(integ, n)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert "changed after your approval" not in (t["waiting"] or "") and t["status"] == "done", t
+    assert any("merged commit" in e["text"] for e in m.db.events(t["id"], 40))
+
+
+def test_owner_merge_reparked_during_the_merge_still_binds_the_named_commit(env, monkeypatch):
+    """#1407 restart R1: the "moved during the merge" park names and binds the new commit; a later commit is not
+    approved under it (it used to park with no bound commit, so the next approve took whatever HEAD was)."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")                               # the integration branch moved: a real merge
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.merge_in
+
+    def racing(path, branch, **kw):                                 # another writer commits during the merge
+        (Path(path) / "rogue.txt").write_text("rogue\n")
+        gitops.commit_all(path, "rogue")
+        return real(path, branch, **kw)
+    monkeypatch.setattr(gitops, "merge_in", racing)
+    finish(m)
+    monkeypatch.setattr(gitops, "merge_in", real)
+    head = sh(wt, "git", "rev-parse", "HEAD").strip()[:12]
+    assert f"(now commit {head})" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")
+    assert m.call("answer", project="demo", task=1, answer="approve")["code"] == "CHANGED"
+    finish(m)
+    assert not (integ / "late.txt").exists()
+
+
+def test_owner_merge_changed_prompt_with_a_git_failure_stops_the_task(env, monkeypatch):
+    """#1407 restart R3: a git failure while re-asking stops the task; its error is never shown as "CHANGED"."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    (wt / "late.txt").write_text("late\n")
+    gitops.commit_all(wt, "late")
+
+    def boom(*a):
+        raise gitops.GitError("bad ref")
+    monkeypatch.setattr(gitops, "commit_of", boom)
+    r = m.call("answer", project="demo", task=1, answer="approve")
+    assert r["code"] == "GIT_ERROR" and m.db.by_seq(1, 1)["status"] == "failed", (r, m.db.by_seq(1, 1))
+
+
+def test_owner_merge_never_lands_a_forged_merge_commit(env, monkeypatch):
+    """#1407 restart round 2 R1: a commit with parents (tip, integration HEAD) but another tree, forged during the
+    merge, is not a merge of the approved commit: it parks naming it and the integration branch never gets it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.merge_in
+
+    def forge(path, branch, **kw):
+        tip, head = sh(path, "git", "rev-parse", "HEAD").strip(), sh(integ, "git", "rev-parse", "HEAD").strip()
+        (Path(path) / "evil.txt").write_text("evil\n")
+        sh(path, "git", "add", "-A")
+        tree = sh(path, "git", "write-tree").strip()
+        x = sh(path, "git", "-c", "user.name=x", "-c", "user.email=x@x", "commit-tree", tree, "-p", tip, "-p", head,
+               "-m", "forged").strip()
+        sh(path, "git", "reset", "-q", "--hard", x)
+        return real(path, branch, **kw)                               # "Already up to date"
+    monkeypatch.setattr(gitops, "merge_in", forge)
+    finish(m)
+    monkeypatch.setattr(gitops, "merge_in", real)
+    assert "changed after your approval" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    assert not (integ / "evil.txt").exists()
+    (wt / "evil.txt").unlink()
+    gitops.commit_all(wt, "drop evil")
+    assert m.call("answer", project="demo", task=1, answer="approve")["code"] == "CHANGED"   # names the new commit
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)
+    assert (integ / "a.txt").exists() and not (integ / "evil.txt").exists()      # the commit named and approved
+
+
+def test_owner_merge_without_merge_tree_reparks_once_and_converges(env, monkeypatch):
+    """#1407 restart round 3 R2: a git without `merge-tree --write-tree` (older than 2.38) fails closed: the merge
+    asks once more naming the merge commit, and one approve of that commit then lands it."""
+    m, repo, home = env
+    t, wt = _owner_merge_waiting(m, repo)
+    integ = gitops.project_root(home, 1) / "integration"
+    (integ / "other.txt").write_text("other\n")
+    gitops.commit_all(integ, "other")
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.git
+
+    def old_git(cwd, *args, **kw):
+        if args[:1] == ("merge-tree",):
+            return subprocess.CompletedProcess(args, 129, "", "unknown option `write-tree'")
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", old_git)
+    finish(m)
+    assert "changed after your approval" in m.db.by_seq(1, 1)["waiting"], m.db.by_seq(1, 1)
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    assert m.db.by_seq(1, 1)["status"] == "done", m.db.by_seq(1, 1)
+    assert (integ / "a.txt").exists() and (integ / "other.txt").exists()
+
+
+def test_ship_plan_without_an_integration_branch_is_nothing_to_ship(env):
+    """#1407 restart round 3 R3: no integration branch yet is an ok "nothing to ship", not GIT_ERROR."""
+    m, repo, home = env
+    open_project(m, repo)
+    sh(repo, "git", "update-ref", "-d", f"refs/heads/{gitops.integration_branch(1)}")
+    r = m.call("ship_plan", project="demo")
+    assert r["ok"] and "nothing to ship" in r["text"] and not r["commands"], r
+
+
+def test_card_without_the_integration_folder_names_the_bare_branch(env):
+    """#1407 restart round 3 R4: a missing integration folder never breaks the agent card."""
+    m, repo, home = env
+    open_project(m, repo)
+    a = task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    task(m, "B", "FAKE write b.txt=1", scope=["b.txt"], deps=[a])
+    m.call("resume", project="demo")
+    finish(m)
+    shutil.rmtree(gitops.project_root(home, 1) / "integration")
+    card = m._card(m.db.project(1), m.db.by_seq(1, 2))
+    assert f"(branch {gitops.integration_branch(1)})" in card
