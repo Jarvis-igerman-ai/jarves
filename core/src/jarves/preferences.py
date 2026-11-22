@@ -45,8 +45,51 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
+# Secret-shaped values without a known vendor prefix (#1482). Git commit SHAs (7-40 hex) stay allowed in drafts.
+_SHA = re.compile(r"(?<![0-9A-Za-z])(?=(?:[0-9]*[a-f]){2})[0-9a-f]{7,40}(?![0-9A-Za-z])|"
+                  r"(?<![0-9A-Za-z])(?=(?:[0-9]*[A-F]){2})[0-9A-F]{7,40}(?![0-9A-Za-z])")
+_HEX = re.compile(r"(?<![0-9A-Za-z])(?:[0-9a-f]{32,}|[0-9A-F]{32,})(?![0-9A-Za-z])")
+_BASE32 = re.compile(r"(?<![0-9A-Za-z])[A-Z2-7]{16,}=*(?![0-9A-Za-z])")
+_BASE62 = re.compile(r"(?<![0-9A-Za-z])[A-Za-z0-9]{20,}(?![0-9A-Za-z])")
+_BASE64 = re.compile(r"(?<![0-9A-Za-z+/])[A-Za-z0-9+/]{32,}={0,2}(?![0-9A-Za-z+/=])")
+_CRED_NEAR = re.compile(r"\b(?:keys?|tokens?|secrets?|password|passwd|credentials?|bearer|webhook|auth|api)\b\W*(?:\w+\W+){0,2}$", re.I)
+_HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
+
+
+def _mixed(run: str) -> bool:
+    """Random base62/base64: upper, lower and digits, with the letter case switching often (CamelCase rarely does)."""
+    letters = [c for c in run if c.isalpha()]
+    if not any(c.isdigit() for c in run) or len(letters) < 8:
+        return False
+    up = sum(c.isupper() for c in letters)
+    if not 0.25 <= up / len(letters) <= 0.75:
+        return False
+    switches = sum(a.isupper() != b.isupper() for a, b in zip(letters, letters[1:]))
+    return switches >= len(letters) // 4
+
+
+def _secret_shaped(t: str) -> bool:
+    for m in _HEX.finditer(t):
+        before = t[max(0, m.start() - 40):m.start()]
+        if _CRED_NEAR.search(before):
+            return True
+        if len(m.group(0)) != 40 and not _HASH_NEAR.search(before):
+            return True              # 32/64-char hex alone: an API key or webhook secret, not a git SHA
+    for m in _BASE32.finditer(t):
+        run = m.group(0).rstrip("=")
+        if sum(c in "234567" for c in run) >= 2 and sum(c.isalpha() for c in run) >= len(run) // 2:
+            return True              # TOTP seeds and other base32 secrets
+    if any(_mixed(m.group(0)) for m in _BASE62.finditer(t)):
+        return True
+    # base64 with '+' or '/' inside: a path has '/' too, but path segments are words, not random mixed case
+    return any(re.search(r"[+/]", r) and not r.startswith("/") and _mixed(re.sub(r"[+/=]", "", r))
+               for r in (m.group(0) for m in _BASE64.finditer(t)))
+
+
 def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+    t = text or ""
+    # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)
+    return bool(_SENSITIVE.search(_SHA.sub(" ", t))) or logs.has_secret(t) or _secret_shaped(t)
 
 
 def normalize(text: str) -> str:
