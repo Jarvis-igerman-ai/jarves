@@ -354,8 +354,9 @@ def test_every_command_key_set_in_the_shared_config_gets_a_safe_value():
                          "local", "filter.lfs.clean\nevil", "worktree", "merge.m.driver\nevil", "local", "core.editor\ne",
                          "local", "hook.h.command\nevil", "local",
                          "core.sshcommand\nevil", "local", "credential.helper\nevil", "command", "diff.d.textconv\nok",
+                         "local", "diff.d.textconv\nevil", "local", "gpg.program\nevil",
                          "local", "user.name\nAgent", ""])
     assert gitops.config_overrides(listing) == [
         ("filter.lfs.clean", "git-lfs clean -- %f"), ("merge.m.driver", ""), ("core.editor", "vim"),
-        ("hook.h.command", ""), ("core.sshcommand", "ssh"),
+        ("hook.h.command", ""), ("core.sshcommand", "ssh"), ("diff.d.textconv", ""), ("gpg.program", ""),
         ("credential.helper", ""), ("credential.helper", "manager"), ("credential.https://o.helper", "x")]
