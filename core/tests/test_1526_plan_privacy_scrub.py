@@ -79,7 +79,7 @@ async def test_1526_core_start_with_privacy_on_scrubs_and_privacy_off_keeps_text
     assert env.store.get(done)["steps"][0]["evidence"] == "" and env.store.get(done)["result"] == ""
 
 
-async def test_1526_a_failed_scrub_rolls_back_logs_once_and_is_tried_again_next_tick(env, seen, monkeypatch):
+async def test_1526_a_failed_scrub_rolls_back_logs_once_and_is_tried_again_after_the_delay(env, seen, monkeypatch):
     done, bad = await _two_plans_with_text(env)
     logs.set_privacy(True)
     real, calls = gp._code_only, []
@@ -91,28 +91,47 @@ async def test_1526_a_failed_scrub_rolls_back_logs_once_and_is_tried_again_next_
         return real(text)
     monkeypatch.setattr(gp, "_code_only", flaky)
     await env.runner.tick()
-    await env.runner.tick()
+    await env.runner.tick()                                  # within the delay: not tried again
+    assert len(calls) == 2
+    env.clock.t += gp.PRIVACY_RETRY_S
+    await env.runner.tick()                                  # tried again, fails again: still logged once
+    assert len(calls) == 4
     assert [c for c in seen if c[0] == "PLAN_PRIVACY_SCRUB_FAILED"] == [("PLAN_PRIVACY_SCRUB_FAILED", {"error_type": "OperationalError"})]
     assert env.store.get(done)["steps"][0]["evidence"] == "read secret"     # rolled back, nothing half-done
     assert env.store.get(bad)["note"]
     monkeypatch.setattr(gp, "_code_only", real)
+    logs.set_privacy(False)
+    await env.runner.tick()
+    logs.set_privacy(True)                                   # a new switch-on clears the delay: scrubbed at once
     await env.runner.tick()
     assert env.store.get(done)["steps"][0]["evidence"] == "" and env.store.get(bad)["steps"][0]["error"] == "X_BROKE"
 
 
-async def test_1526_a_busy_wal_checkpoint_is_logged_once_and_retried_without_scrubbing_again(env, seen, monkeypatch):
+async def test_1526_a_busy_wal_checkpoint_is_logged_once_and_retried_after_the_delay_without_scrubbing_again(env, seen, monkeypatch):
     await _two_plans_with_text(env)
     logs.set_privacy(True)
     reader = sqlite3.connect(env.db.path)
     reader.execute("BEGIN")
     reader.execute("SELECT * FROM goal_plans").fetchall()     # an open read snapshot keeps the WAL from truncating
+    tries, real = [], env.store.truncate_wal
+    monkeypatch.setattr(env.store, "truncate_wal", lambda: tries.append(1) or real())
     await env.runner.tick()
-    await env.runner.tick()
-    assert [c for c, _ in seen].count("PLAN_PRIVACY_WAL_BUSY") == 1
+    await env.runner.tick()                                  # within the delay: no new connection, no retry
+    assert len(tries) == 1
+    env.clock.t += gp.PRIVACY_RETRY_S
+    await env.runner.tick()                                  # retried, still busy: logged once
+    assert len(tries) == 2 and [c for c, _ in seen].count("PLAN_PRIVACY_WAL_BUSY") == 1
     reader.close()
     monkeypatch.setattr(env.store, "scrub_private", lambda: pytest.fail("scrubbed twice"))
+    env.clock.t += gp.PRIVACY_RETRY_S
     await env.runner.tick()
     assert not any(w in _disk(env) for w in WORDS)
+
+
+def test_1526_secure_delete_fast_mode_is_restored_as_fast(env):
+    env.db.x("PRAGMA secure_delete=FAST")
+    env.store.scrub_private()
+    assert env.db.row("PRAGMA secure_delete")["secure_delete"] == 2
 
 
 async def test_1526_text_written_while_privacy_was_off_during_a_step_is_scrubbed_at_the_next_tick(env, seen):
@@ -137,7 +156,8 @@ async def test_1526_text_written_while_privacy_was_off_during_a_step_is_scrubbed
 
 
 @pytest.mark.parametrize("text,code", [("X_BROKE: it broke", "X_BROKE"), ("TOOL_TIMEOUT", "TOOL_TIMEOUT"),
-                                       ("the step timed out", ""), ("A_B1: 0521234567", ""), ("NOCODE: x", ""),
+                                       ("the step timed out", ""), ("A_B1: 0521234567", ""), ("BUSY: x", "BUSY"),
+                                       ("TIMEOUT", "TIMEOUT"), ("A: x", ""), ("HTTP_404: x", ""),
                                        ("X_" + "A" * 80 + ": x", ""), (None, "")])
 def test_1526_only_a_leading_code_is_kept(text, code):
     assert gp._code_only(text) == code

@@ -60,7 +60,9 @@ TERMINAL = ("done", "failed", "cancelled")
 STATES = OPEN + TERMINAL
 _RECURSION = ("goal_plan_",)        # a plan never plans
 CODE_MAX = 64
-_CODE = re.compile(r"([A-Z]+(?:_[A-Z]+)+)(?::|$)")
+_CODE = re.compile(r"([A-Z]+(?:_[A-Z]+)*)(?::|$)")    # every tool code in src (277, 2026-11-22) has no digit
+PRIVACY_RETRY_S = 30.0              # #1526: a failed scrub / busy WAL checkpoint is tried again after this
+_SECURE_DELETE = {0: "OFF", 1: "ON", 2: "FAST"}
 
 
 def _clean(text: object, n: int) -> str:
@@ -75,7 +77,7 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
 def _code_only(text: object) -> str:
     """#1526: all that privacy mode keeps of an error text: its leading code (A-Z and '_', no digits), else ''."""
     m = _CODE.match(str(text or ""))
-    return m.group(1) if m and len(m.group(1)) <= CODE_MAX else ""
+    return m.group(1) if m and 2 <= len(m.group(1)) <= CODE_MAX else ""
 
 
 class PlanStore:
@@ -299,7 +301,7 @@ class PlanStore:
         the bytes it frees are overwritten, then restored. Returns (steps, plans) changed; a sqlite3.Error is raised
         after the rollback."""
         with self.db.transaction() as c:
-            prev = int(c.execute("PRAGMA secure_delete").fetchone()[0])
+            prev = _SECURE_DELETE.get(c.execute("PRAGMA secure_delete").fetchone()[0], "OFF")
             c.execute("PRAGMA secure_delete=ON")
             try:
                 rows = c.execute("SELECT id, evidence, error FROM goal_plan_steps WHERE evidence<>'' OR error<>'' "
@@ -420,6 +422,7 @@ class PlanRunner:
         self._stop = False
         self._private: bool | str = False    # #1526: False -> scrub; "wal"/"busy" -> only the checkpoint; True -> clean
         self._scrub_failed = False
+        self._retry_at = 0.0
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
@@ -439,9 +442,9 @@ class PlanRunner:
     def _privacy_scrub(self) -> None:
         """#1526: at Core start with privacy on, or when privacy is switched on, scrub the older plan text once."""
         if not logs.privacy():
-            self._private = False
+            self._private, self._retry_at = False, 0.0
             return
-        if self._private is True:
+        if self._private is True or self.clock() < self._retry_at:
             return
         if not self._private:
             try:
@@ -450,14 +453,16 @@ class PlanRunner:
                 if not self._scrub_failed:
                     logs.warn("goals", "PLAN_PRIVACY_SCRUB_FAILED", "could not scrub older plan text: retrying",
                               error_type=type(e).__name__)
-                self._scrub_failed = True
+                self._scrub_failed, self._retry_at = True, self.clock() + PRIVACY_RETRY_S
                 return
             self._scrub_failed, self._private = False, "wal"
             if steps or plans:
                 logs.info("goals", "PLAN_PRIVACY_SCRUBBED", "older plan text removed", count=steps, changed=plans)
         if self.store.truncate_wal():
             self._private = True
-        elif self._private == "wal":
+            return
+        self._retry_at = self.clock() + PRIVACY_RETRY_S
+        if self._private == "wal":
             logs.warn("goals", "PLAN_PRIVACY_WAL_BUSY", "memory.db-wal still holds old plan text: retrying")
             self._private = "busy"
 
