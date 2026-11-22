@@ -258,3 +258,38 @@ def test_confirm_of_an_item_removed_after_the_read_is_not_found_not_changed(pref
     with pytest.raises(KeyError):
         p.confirm(pid, by="cli", shown=ver if shown else None)
     assert prefs_mod.api_pref_op(SimpleNamespace(_prefs=p), None, {"op": "confirm", "id": pid, "updated": ver})[0] == 404
+
+
+def test_phone_confirm_without_the_version_cannot_confirm_after_an_a_b_a_rewrite(prefs, home):
+    p, pid, _ = prefs                                     # review (gpt blocker): the old words match again, the version not
+    mob = SimpleNamespace(bridge=None, _prefs=p, home=home)
+    _edit_to_b(p, pid)
+    p.edit(pid, A, by="voice")                            # back to A: a cached page's words match once more
+    st, body = mobile_prefs.action(mob, {"op": "confirm", "pref": pid, "text": A}, "dev")
+    assert st == 400 and body["code"] == "PREF_PAGE_OLD" and body["error_he"] and p.get(pid)["state"] == "proposed"
+
+
+PHONE_API_HARNESS = r"""
+const fs = require("fs"), vm = require("vm");
+const src = fs.readFileSync(process.argv[2], "utf8");
+const body = src.slice(src.indexOf("  async function api("), src.indexOf("  const post = "));
+const ctx = { JSON, Error, Promise, console, token: "t", lang: "he", t: (k) => k, setConn() {}, forget() {},
+  fetch: async () => ({ ok: false, status: 409, json: async () => ({ error: "changed", error_he: "השתנתה", code: "PREF_CHANGED" }) }) };
+vm.createContext(ctx);
+vm.runInContext(body + "\nthis.api = api;", ctx);
+ctx.api("/api/m/prefs/op", { method: "POST" }).catch((e) => console.log(JSON.stringify({ code: e.code, status: e.status, msg: e.message })));
+"""
+
+
+def test_the_real_phone_api_copies_the_error_code_for_the_changed_note(tmp_path):
+    out = _node(tmp_path, PHONE_API_HARNESS, str(STATIC / "mobile" / "app.js"), STATIC / "mobile" / "app.js")
+    assert out == {"code": "PREF_CHANGED", "status": 409, "msg": "השתנתה"}   # review (sonnet): prefs.js reads e.code
+
+
+def test_production_confirms_accept_meta_so_the_voice_confirm_can_show_the_wording(home):
+    from jarves.app import Core                           # review (opus): approval_meta runs only for these confirms
+    from jarves.approvals import audited
+
+    async def plain(prompt):
+        return False
+    assert getattr(Core.ask_confirm, "accepts_meta", False) and audited(home, plain).accepts_meta

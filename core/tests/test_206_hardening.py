@@ -141,10 +141,12 @@ def test_h2_phone_confirm_needs_the_shown_words_and_refuses_stale_ones(home):
     pid = p.suggest("Play jazz while cooking", "I love jazz when I cook", "music")["item"]["id"]
     st, out = mobile_prefs.action(m, {"op": "confirm", "pref": pid}, "dev1")
     assert st == 400 and out["code"] == "PREF_TEXT_REQUIRED" and p.get(pid)["state"] == "proposed"
+    seen = p.get(pid)["updated"]                         # #1514: the page also sends the version it listed
     p.edit(pid, "Play loud jazz while cooking", by="pc", repropose=True)          # another screen changed the words
-    st, out = mobile_prefs.action(m, {"op": "confirm", "pref": pid, "text": "Play jazz while cooking"}, "dev1")
-    assert st == 409 and out["code"] == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
-    st, out = mobile_prefs.action(m, {"op": "confirm", "pref": pid, "text": "Play loud jazz while cooking"}, "dev1")
+    st, out = mobile_prefs.action(m, {"op": "confirm", "pref": pid, "text": "Play jazz while cooking", "updated": seen}, "dev1")
+    assert st == 409 and out["code"] == "PREF_CHANGED" and p.get(pid)["state"] == "proposed"   # a PrefConflict (#1514 code)
+    st, out = mobile_prefs.action(m, {"op": "confirm", "pref": pid, "text": "Play loud jazz while cooking",
+                                      "updated": p.get(pid)["updated"]}, "dev1")
     assert st == 200 and out["state"] == "confirmed"
 
 

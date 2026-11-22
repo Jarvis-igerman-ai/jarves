@@ -60,7 +60,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
     p = store(mob)
-    from .preferences import CHANGED_HE, PrefChanged, PrefConflict, shown_version   # lazy, like store()
+    from .preferences import CHANGED_HE, OLD_PAGE, PrefChanged, PrefConflict, shown_version   # lazy, like store()
     if not p.get(pid):
         return 404, {"error": "no such preference"}
     by = "phone"
@@ -70,8 +70,9 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
             seen = d.get("text")                              # #206 H2: confirm only the words the phone showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            shown = shown_version(d["updated"]) if "updated" in d else None   # #1514: also the version, when the page sends it
-            r = p.confirm(pid, by=by, expect=seen[:400], shown=shown)
+            if "updated" not in d:                            # #1514: words alone miss an A->B->A rewrite
+                return 400, dict(OLD_PAGE)
+            r = p.confirm(pid, by=by, expect=seen[:400], shown=shown_version(d["updated"]))
             return 200, {"ok": True, "pref": pid, "state": "confirmed", "conflicts": len(r["conflicts"])}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by=by), "pref": pid}

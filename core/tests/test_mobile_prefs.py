@@ -95,7 +95,8 @@ def test_list_confirm_edit_forget_show_on_the_pc_too(srv, prefs):
     st, out = op(srv, tok, op="edit", pref=a, text="I like very short answers in the morning")
     assert st == 200 and out["state"] == "proposed"                                    # #206 H2: new words need a new confirm
     assert p.get(a)["state"] == "proposed" and op(srv, tok, op="confirm", pref=a,
-                                                  text="I like very short answers in the morning")[1]["state"] == "confirmed"
+                                                  text="I like very short answers in the morning",
+                                                  updated=p.get(a)["updated"])[1]["state"] == "confirmed"
     _, pc = call(srv, "GET", "/api/prefs", owner=True)                                 # the PC dashboard page: same store
     assert sorted(x["text"] for x in pc["items"]) == ["I like very short answers in the morning", "Play jazz while cooking"]
     assert op(srv, tok, op="remove", pref=a)[1]["ok"] is True
@@ -151,7 +152,7 @@ def test_privacy_mode_keeps_no_text_in_the_audit_the_ledger_or_the_logs(srv, pre
     assert v["privacy"] is True
     assert [x["text"] for x in v["items"]] == ["I like short answers in the morning"]     # the owner's phone sees it
     op(srv, tok, op="edit", pref=a, text="Brief answers please, every morning")
-    op(srv, tok, op="confirm", pref=b, text="Play jazz while cooking")
+    op(srv, tok, op="confirm", pref=b, text="Play jazz while cooking", updated=p.get(b)["updated"])
     audit = (home / mobile.AUDIT_FILE).read_text(encoding="utf-8")
     assert "Brief answers" not in audit and "jazz" not in audit and '"pref"' in audit
     ledger = srv.mobile.cont._rows("SELECT body FROM ledger")
@@ -198,6 +199,6 @@ def test_206_h2_review_r3_a_max_length_pref_confirms_with_the_listed_text(srv, p
     pid = p.suggest(long, "I said so", "food")["item"]["id"]
     tok, _ = pair(srv)
     _, v = call(srv, "GET", "/api/m/prefs", tok)
-    shown = next(x["text"] for x in v["proposed"] if x["id"] == pid)           # exactly what the phone page lists
-    st, out = op(srv, tok, op="confirm", pref=pid, text=shown)                  # what prefs.js sends back (p.text)
+    row = next(x for x in v["proposed"] if x["id"] == pid)                     # exactly what the phone page lists
+    st, out = op(srv, tok, op="confirm", pref=pid, text=row["text"], updated=row["updated"])   # what prefs.js sends back
     assert st == 200 and out["state"] == "confirmed" and p.get(pid)["state"] == "confirmed"
