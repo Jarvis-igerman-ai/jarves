@@ -267,23 +267,41 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
             git(repo, "branch", "-D", branch, check=False)
 
 
-def retire_worktree(repo: str, wt: Path, branch: str, tip: str) -> bool:
+def retire_worktree(repo: str, wt: Path, branch: str, tip: str, artifacts: set[str] | frozenset = frozenset()) -> str:
     """Remove a merged task's worktree and branch only while the branch is still exactly `tip` and nothing is
-    edited (#1407 review). Untracked files (a check's build output) are cleaned first; the folder removal is never
-    forced, so git's own clean check refuses an edit made up to that moment (JAR-678 council). The branch is then
-    deleted with a compare-and-swap (`update-ref -d ref tip`): a commit that landed meanwhile keeps the branch.
-    False = nothing lost: the folder and/or branch were kept."""
+    edited (#1407 review). Only `artifacts` (untracked files the check created, see `untracked`) are cleaned; the
+    folder removal is never forced, so git's own clean check refuses any other edit or untracked file (JAR-678
+    council). The branch is then deleted with a compare-and-swap (`update-ref -d ref tip`).
+    Returns "" (removed), "moved" (a later commit: the branch is kept), "dirty" (an edit or other untracked file:
+    folder and branch kept) or "cleanup_failed" (nothing changed, git could not remove the folder: kept)."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
     ref = f"refs/heads/{branch}"
+
+    def moved() -> bool:
+        return git(repo, "rev-parse", "--verify", "-q", ref, check=False).stdout.strip() != tip
     with _repo_lock(repo):
-        if tracked_dirty(wt, tip) or git(repo, "rev-parse", "--verify", "-q", ref, check=False).stdout.strip() != tip:
-            return False                                # an edit, or the branch moved: keep both
-        git(wt, "clean", "-fdq", check=False)                # untracked check output only (not ignored files)
+        if moved():
+            return "moved"
+        if tracked_dirty(wt, tip):
+            return "dirty"
+        if artifacts:
+            git(wt, "clean", "-fq", "--", *[f":(literal){x}" for x in sorted(artifacts)], check=False)
         if git(repo, "worktree", "remove", str(wt), check=False).returncode != 0:    # never --force: git refuses
-            return False
+            if moved():
+                return "moved"
+            st = git(wt, "status", "--porcelain", "--untracked-files=all", check=False)
+            return "dirty" if st.returncode or st.stdout.strip() else "cleanup_failed"
         git(repo, "worktree", "prune", check=False)
-        return git(repo, "update-ref", "-d", ref, tip, check=False).returncode == 0
+        if git(repo, "update-ref", "-d", ref, tip, check=False).returncode == 0:
+            return ""
+        return "moved" if moved() else "cleanup_failed"
+
+
+def untracked(wt: str | Path) -> set[str]:
+    """Untracked, not ignored files in the worktree (to tell a check's output from other new work)."""
+    out = git(wt, "ls-files", "--others", "--exclude-standard", "-z").stdout
+    return {x for x in out.split("\0") if x}
 
 
 def tracked_dirty(wt: str | Path, base: str) -> bool:
@@ -308,7 +326,7 @@ def _add_all(wt: Path) -> None:
                 git(wt, "update-index", "--cacheinfo", f"160000,{r.stdout.strip()},{x}")
         elif not sub.exists():
             git(wt, "update-index", "--force-remove", "--", x)
-        elif not any(sub.iterdir()):                # uninitialised (`worktree add`): the pointer stays (council)
+        elif sub.is_dir() and not any(sub.iterdir()):                # uninitialised (`worktree add`): the pointer stays (council)
             continue
         else:                                       # a submodule replaced by plain files: stage them
             git(wt, "update-index", "--force-remove", "--", x)

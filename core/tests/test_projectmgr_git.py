@@ -467,7 +467,7 @@ def test_a_tracked_edit_right_before_the_folder_removal_is_kept(tmp_path, monkey
             (wt / "f.txt").write_text("owner edit", encoding="utf-8")
         return real(cwd, *args, **kw)
     monkeypatch.setattr(gitops, "git", racing)
-    assert gitops.retire_worktree(str(repo), wt, "t1", tip) is False
+    assert gitops.retire_worktree(str(repo), wt, "t1", tip) == "dirty"
     monkeypatch.setattr(gitops, "git", real)
     assert (wt / "f.txt").read_text(encoding="utf-8") == "owner edit"
     assert gitops.commit_of(repo, "refs/heads/t1") == tip
@@ -478,7 +478,7 @@ def test_retire_worktree_still_removes_untracked_output(tmp_path):
     wt = tmp_path / "projects" / "1" / "t1"
     gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
     (wt / "out.log").write_text("build", encoding="utf-8")
-    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD")) is True
+    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD"), {"out.log"}) == ""
     assert not wt.exists() and gitops.git(repo, "rev-parse", "-q", "--verify", "refs/heads/t1",
                                           check=False).returncode != 0
 
@@ -497,3 +497,39 @@ def test_an_uninitialised_submodule_keeps_its_pointer_in_a_task_worktree(tmp_pat
     assert gitops.commit_all(wt, "edit")
     assert gitops.git(wt, "ls-tree", "HEAD", "lib").stdout.split()[:3] == ["160000", "commit", old]
 
+
+
+def test_an_untracked_file_made_during_the_merge_is_never_cleaned(tmp_path):
+    """JAR-678 (#1601 council): a new untracked source file (owner or agent work after commit_all) was deleted by an
+    unconditional `git clean -fd`; only the listed check artifacts are removed, anything else keeps the folder."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "1" / "t1"
+    gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
+    (wt / "out.log").write_text("build", encoding="utf-8")
+    (wt / "new.py").write_text("work", encoding="utf-8")
+    tip = gitops.commit_of(wt, "HEAD")
+    assert gitops.retire_worktree(str(repo), wt, "t1", tip, {"out.log"}) == "dirty"
+    assert (wt / "new.py").read_text(encoding="utf-8") == "work" and not (wt / "out.log").exists()
+    assert gitops.commit_of(repo, "refs/heads/t1") == tip
+
+
+def test_a_refused_removal_without_changes_is_a_cleanup_failure(tmp_path, monkeypatch):
+    """JAR-678 (#1601 council): a folder git cannot remove (a Windows file lock) is not "moved" or "dirty"."""
+    repo = _repo(tmp_path)
+    wt = tmp_path / "projects" / "1" / "t1"
+    gitops.git(repo, "worktree", "add", "-q", "-b", "t1", str(wt))
+    real = gitops.git
+    monkeypatch.setattr(gitops, "git", lambda cwd, *a, **kw: subprocess.CompletedProcess(a, 1, "", "locked")
+                        if a[:2] == ("worktree", "remove") else real(cwd, *a, **kw))
+    assert gitops.retire_worktree(str(repo), wt, "t1", gitops.commit_of(wt, "HEAD")) == "cleanup_failed"
+
+
+def test_a_submodule_replaced_by_a_file_is_committed(tmp_path):
+    """JAR-678 (#1601 council): a gitlink path that became a regular file raised NotADirectoryError in commit_all."""
+    repo = _repo(tmp_path)
+    old = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    gitops.git(repo, "update-index", "--add", "--cacheinfo", f"160000,{old},lib")
+    gitops.git(repo, "commit", "-qm", "sub", "--no-verify")
+    (repo / "lib").write_text("plain", encoding="utf-8")
+    assert gitops.commit_all(repo, "file")
+    assert gitops.git(repo, "ls-tree", "HEAD", "lib").stdout.split()[:2] == ["100644", "blob"]

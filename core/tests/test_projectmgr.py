@@ -1544,10 +1544,10 @@ def test_a_commit_after_the_fast_forward_is_never_deleted_with_the_task_branch(e
         assert t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
 
 
-@pytest.mark.parametrize("when", [("clean", "-fdq"), ("worktree", "remove")])
+@pytest.mark.parametrize("when", [("update-index", "-q"), ("worktree", "remove")])
 def test_a_commit_during_the_cleanup_keeps_the_task_branch(env, monkeypatch, when):
-    """JAR-678 (#1561 review): a commit after the final tip check (before the clean, or right before the folder
-    removal) is never lost: the branch delete is a compare-and-swap on the merged commit."""
+    """JAR-678 (#1561 review): a commit after the final tip check (before the dirty check, or right before the
+    folder removal) is never lost: the branch delete is a compare-and-swap on the merged commit."""
     m, repo, home = env
     open_project(m, repo)
     task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
@@ -1565,7 +1565,7 @@ def test_a_commit_during_the_cleanup_keeps_the_task_branch(env, monkeypatch, whe
     finish(m)
     monkeypatch.setattr(gitops, "git", real)
     t = m.db.by_seq(1, 1)
-    assert fired and t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
+    assert fired and t["status"] != "done" and "during the merge" in (t["reason"] or ""), t
     assert "late.txt" in sh(repo, "git", "ls-tree", "--name-only", t["branch"])      # the late work has a ref
     assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
     assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
@@ -1775,3 +1775,42 @@ def test_card_without_the_integration_folder_names_the_bare_branch(env):
     shutil.rmtree(gitops.project_root(home, 1) / "integration")
     card = m._card(m.db.project(1), m.db.by_seq(1, 2))
     assert f"(branch {gitops.integration_branch(1)})" in card
+
+
+def test_a_folder_git_cannot_remove_after_the_merge_ends_done_not_moved(env, monkeypatch):
+    """JAR-678 (#1601 council): a refused `worktree remove` (file lock) with the branch unchanged was reported as
+    "the task branch moved" (owner: asked again forever). The merge landed: the task ends done and says so."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    real = gitops.git
+    monkeypatch.setattr(gitops, "git", lambda cwd, *a, **kw: subprocess.CompletedProcess(a, 1, "", "locked")
+                        if a[:2] == ("worktree", "remove") else real(cwd, *a, **kw))
+    finish(m)
+    monkeypatch.setattr(gitops, "git", real)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "done", (t["status"], t["reason"], t["waiting"])
+    assert any(e["kind"] == "cleanup_failed" for e in m.db.events(t["id"], 40))
+    assert (gitops.project_root(home, 1) / "integration" / "a.txt").exists()
+
+
+def test_a_new_untracked_file_after_the_check_is_kept(env, monkeypatch):
+    """JAR-678 (#1601 council): a new untracked file written in the task folder during the merge (after the check)
+    was deleted by the cleanup; now the folder is kept and the task stops naming it."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    real, seen = gitops.fast_forward, []
+
+    def late(integ, sha):
+        wt = Path(m.db.by_seq(1, 1)["worktree"])
+        (wt / "new.py").write_text("work\n")
+        seen.append(wt)
+        return real(integ, sha)
+    monkeypatch.setattr(gitops, "fast_forward", late)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert seen and (seen[0] / "new.py").read_text() == "work\n"
+    assert t["status"] != "done" and "changed during the merge" in (t["reason"] or ""), t

@@ -579,6 +579,7 @@ class StageEngine:
         with self._merge_locks.setdefault(p["id"], threading.Lock()):
             if self._stopped(t, cancel):
                 return ("end",)
+            artifacts: set[str] = set()
             try:
                 gitops.commit_all(wt, f"task {t['seq']}: {t['title']}"[:120])
                 tip = gitops.commit_of(wt, "HEAD")
@@ -597,7 +598,9 @@ class StageEngine:
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
                     if has_check:
+                        before = gitops.untracked(wt)
                         ok, out = gitops.run_check(wt, p["check_cmd"], timeout=min(900, self.cfg.task_timeout_s))
+                        artifacts = gitops.untracked(wt) - before   # the check's output; other new files are work
                         if not ok:
                             self.db.event(t["id"], "manager", "check_failed", clean(out, cards.FAIL_MAX))
                             test_i = pl.find(stages, ("test", "verify"), before=len(stages))
@@ -606,12 +609,17 @@ class StageEngine:
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
                 gitops.fast_forward(self._integration(p), tip)      # the exact commit, never the branch name
-                # Cleanup only while the branch is exactly `tip` and no tracked file changed (atomic ref check);
-                # untracked check output is not "work". A later commit or edit is never deleted (#1561 review).
-                if not gitops.retire_worktree(p["path"], wt, br, tip):
+                # Cleanup only while the branch is exactly `tip` and nothing else changed; only the check's own
+                # untracked output is removed. A later commit, edit or new file is never deleted (#1601 review).
+                why = gitops.retire_worktree(p["path"], wt, br, tip, artifacts)
+                if why == "cleanup_failed":                 # merged; only the folder removal failed: never re-ask
+                    self.db.event(t["id"], "manager", "cleanup_failed", f"merged commit {tip[:12]}, but the task "
+                                  f"folder could not be removed: {wt} (branch {br}); remove it yourself")
+                elif why:
                     if approved and wt.exists():
                         return self._repark_merge(t)
-                    return ("stop", "blocked", f"the task branch moved during the merge; merged commit {tip[:12]}, "
+                    what = "branch moved" if why == "moved" else "folder changed"
+                    return ("stop", "blocked", f"the task {what} during the merge; merged commit {tip[:12]}, "
                                                f"later work kept in {wt if wt.exists() else 'branch ' + br}")
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
