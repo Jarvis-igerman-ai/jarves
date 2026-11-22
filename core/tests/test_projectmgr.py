@@ -1221,6 +1221,10 @@ def test_claim_stage_atomic_guard_against_a_racing_stop(env):
 FAKE_GH = textwrap.dedent('''
     import json, os, sys
     a = sys.argv[1:]
+    import subprocess
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    with open(os.path.join(os.path.dirname(__file__), "gh_calls.jsonl"), "a") as f:
+        f.write(json.dumps({"args": a, "cwd": os.getcwd(), "git_repo": top.returncode == 0}) + "\\n")
     if a[:2] == ["auth", "status"]:
         sys.exit(0 if os.path.exists(os.path.join(os.path.dirname(__file__), "signed_in")) else 1)
     if a[:2] == ["issue", "list"]:
@@ -1264,11 +1268,11 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     try:
         st = forge.status(str(repo))
         assert st["signed_in"] and st["repo"] == "o/r"
-        rows = forge.issues(str(repo))
+        rows = forge.issues("o/r")
         assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
-        url = forge.create_pr(str(repo), "jarves/p1/t1-a1", "main", "title", "body")
+        url = forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "title", "body")
         assert url.endswith("/pull/9")
-        checks = forge.pr_checks(str(repo), "9")
+        checks = forge.pr_checks("o/r", "9")
         assert checks and checks[0]["bucket"] == "pass"
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
@@ -1276,6 +1280,35 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
         forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
         forge.push_branch(str(repo), "jarves/p1/../escape")
+
+
+def test_forge_gh_runs_outside_the_repo_with_explicit_repo_1622(fake_gh, tmp_path):
+    """#1622: gh's own git reads must never see the project's agent-writable config (a planted remote URL or
+    core.fsmonitor), so gh runs outside the repository and every repository call names its target with --repo."""
+    from jarves.projectmgr import forge
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/attacker/evil.git")   # planted by an agent
+    (tmp_path / "signed_in").write_text("1")
+    forge.status(str(repo))
+    first = json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])
+    assert not first["git_repo"], first                               # before #1622: gh ran inside the repo
+    forge.issues("o/r")
+    forge.create_pr("o/r", "jarves/p1/t1-a1", "main", "t", "b")
+    forge.pr_checks("o/r", "9")
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 4
+    for c in calls:
+        assert not c["git_repo"], c                                   # no repository visible to gh's git
+        assert Path(c["cwd"]).resolve() != repo.resolve()
+        assert repo.resolve() not in Path(c["cwd"]).resolve().parents
+    for c in calls[1:]:
+        assert c["args"][-2:] == ["--repo", "o/r"], c
+    for bad in ("", "o", "o/r/x", "../r", "-R/x", "o/r --web", "o/..", 7):
+        with pytest.raises(forge.ForgeError):
+            forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
+    assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # a bad slug never ran gh
 
 
 def test_github_mode_config_and_status_op(env, fake_gh):

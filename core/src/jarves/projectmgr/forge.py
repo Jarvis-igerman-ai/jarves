@@ -7,12 +7,14 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 
 from . import gitops
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+_OWNER_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class ForgeError(RuntimeError):
@@ -31,16 +33,29 @@ def repo_slug(path: str) -> str:
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
-def gh(path: str, *args: str, input_: str | None = None, timeout: float = 120) -> str:
+def _checked_slug(repo: str) -> str:
+    if not isinstance(repo, str) or not _OWNER_REPO.match(repo) or ".." in repo or repo.startswith(("-", ".")):
+        raise ForgeError("a GitHub call needs an explicit owner/repo")
+    return repo
+
+
+def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: float = 120) -> str:
+    """Runs `gh` OUTSIDE the project repository (#1622): in a fresh empty folder with GIT_CEILING_DIRECTORIES set,
+    so gh's own git reads can never see the project's agent-writable `.git/config` (`remote.*.url`,
+    `url.*.insteadOf`, `core.fsmonitor`, ...). A repository call passes `repo` (checked owner/repo) as an explicit
+    `--repo`; only account-level calls such as `auth status` leave it None."""
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
-    env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})
-    for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
-        if os.environ.get(k):
-            env[k] = os.environ[k]
-    p = subprocess.run([*cmd, *args], cwd=path, capture_output=True, text=True, timeout=timeout, env=env,
-                       creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
+    argv = [*cmd, *args, *(["--repo", _checked_slug(repo)] if repo is not None else [])]
+    with tempfile.TemporaryDirectory(prefix="jarves-gh-") as cwd:
+        env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
+                                "GIT_CEILING_DIRECTORIES": os.path.dirname(cwd)})
+        for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
+            if os.environ.get(k):
+                env[k] = os.environ[k]
+        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
+                           creationflags=_NOWIN, input=input_, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         raise ForgeError(" ".join((p.stderr or p.stdout or "gh failed").split())[:300])
     return p.stdout
@@ -51,19 +66,19 @@ def status(path: str) -> dict:
     out = {"gh": bool(gh_cmd()), "signed_in": False, "repo": repo_slug(path)}
     if out["gh"]:
         try:
-            gh(path, "auth", "status")
+            gh("auth", "status")
             out["signed_in"] = True
         except (ForgeError, OSError, subprocess.SubprocessError):
             pass
     return out
 
 
-def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
+def issues(repo: str, label: str = "", limit: int = 20) -> list[dict]:
     args = ["issue", "list", "--state", "open", "--limit", str(max(1, min(50, limit))), "--json",
             "number,title,body,labels,url"]
     if label:
         args += ["--label", label]
-    rows = json.loads(gh(path, *args) or "[]")
+    rows = json.loads(gh(*args, repo=repo) or "[]")
     return [{"number": r["number"], "title": r["title"], "body": (r.get("body") or "")[:1200], "url": r.get("url", ""),
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
@@ -75,16 +90,17 @@ def push_branch(path: str, branch: str) -> None:
     gitops.git(path, "push", "--no-verify", "origin", f"{branch}:{branch}", timeout=300, ident=False)
 
 
-def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:
-    out = gh(path, "pr", "create", "--head", head, "--base", base, "--title", title[:200], "--body", body[:6000])
+def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
+    """repo: an explicit owner/repo from the caller; gh never resolves the target from the project's config (#1622)."""
+    out = gh("pr", "create", "--head", head, "--base", base, "--title", title[:200], "--body", body[:6000], repo=repo)
     m = re.search(r"https://github\.com/\S+/pull/\d+", out)
     return m.group(0) if m else out.strip()[:200]
 
 
-def pr_checks(path: str, ref: str) -> list[dict]:
+def pr_checks(repo: str, ref: str) -> list[dict]:
     """CI of a PR (number, URL or branch): [{name, state, bucket}] (bucket: pass|fail|pending|skipping|cancel)."""
     try:
-        out = gh(path, "pr", "checks", ref, "--json", "name,state,bucket")
+        out = gh("pr", "checks", ref, "--json", "name,state,bucket", repo=repo)
     except ForgeError as e:
         if "no checks" in str(e).lower():
             return []
