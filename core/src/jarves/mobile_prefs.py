@@ -60,6 +60,7 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
     except (TypeError, ValueError):
         return 400, {"error": "pref must be a number"}
     p = store(mob)
+    from .preferences import PrefConflict                     # lazy, like store(): the module loads only when used
     if not p.get(pid):
         return 404, {"error": "no such preference"}
     by = "phone"
@@ -73,10 +74,12 @@ def action(mob, d: dict, device: str) -> tuple[int, dict]:
         if op == "reaffirm":
             return 200, {"ok": p.reaffirm(pid, by=by), "pref": pid}
         if op == "edit":
-            p.edit(pid, str(d.get("text", ""))[:400], by=by)
-            return 200, {"ok": True, "pref": pid}
+            r = p.edit(pid, str(d.get("text", ""))[:400], by=by, repropose=True)   # #206 H2: new words need a new confirm
+            return 200, {"ok": True, "pref": pid, "state": r["state"]}
         return 200, {"ok": p.remove(pid, by=by), "pref": pid}
     except ValueError as e:                                   # sensitive / empty / duplicate text: nothing stored
         return 400, {"error": str(e)}
     except KeyError:
         return 404, {"error": "no such preference"}
+    except PrefConflict:                                      # #206 H2: it still exists but kept changing; nothing written
+        return 409, {"error": "the preference changed meanwhile: try again", "code": "PREF_CONFLICT"}

@@ -148,6 +148,9 @@ class Bridge:
     voice_transcribe: Callable[[bytes, str], str] | None = None            # (wav, device) -> transcript only, no reply (hands-free Drive voice, #219)
 
 
+NOT_KEPT_REPLY = "התשובה לא נשמרה (מצב פרטיות): שאלו שוב אם צריך. / The answer was not kept (privacy mode): ask again if needed."
+
+
 class MobileAccess:
     """Device store (hashed tokens), pairing codes, rate limits, settings and audit for the phone API."""
 
@@ -477,6 +480,8 @@ class MobileAccess:
                 self._replies.pop(k, None)
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
+        if logs.privacy():           # #206 F13: the ledger is on disk, so in privacy mode it keeps a fixed note, not the words
+            reply = {"reply": NOT_KEPT_REPLY, "ok": bool(reply.get("ok")), "not_kept": True}
         try:
             self.cont.store(device, mid, "chat", 200, reply)
         except Exception:
@@ -944,7 +949,8 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
         if not (isinstance(cid, str) and MSG_ID_RE.match(cid)):
             return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
-        status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"))
+        status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"),
+                                              at_rest=_goal_at_rest)
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/audio" and method == "GET":        # mic / cloud-audio indicator (V5 G5): true state, read-only
         if not need("status"):
@@ -1218,6 +1224,19 @@ def _chat_routes(h, mob, dev, path, method, done, need, need_page) -> None:
 def _goal_brief(g: dict) -> dict:
     return {"id": g["id"], "title": str(g["title"])[:120], "status": g["status"], "percent": g.get("progress"),
             "steps": [{"id": x["id"], "text": str(x["text"])[:120], "done": bool(x.get("done"))} for x in g.get("steps", [])]}
+
+
+GOAL_ERROR_NOT_KEPT = "the goal change was refused (details not kept in privacy mode)"
+
+
+def _goal_at_rest(body: dict) -> dict:
+    """#206 F13: the stored copy of a goal answer keeps ids and state, not the title or step text (the page re-syncs)."""
+    out: dict = {"error": GOAL_ERROR_NOT_KEPT} if "error" in body else {}   # allow-list: no other key reaches disk
+    g = body.get("goal")
+    if isinstance(g, dict):
+        out["goal"] = {"id": g.get("id"), "status": g.get("status"), "percent": g.get("percent"),
+                       "steps": [{"id": x.get("id"), "done": x.get("done")} for x in g.get("steps") or [] if isinstance(x, dict)]}
+    return out
 
 
 GOAL_OPS = ("status", "step_set")
