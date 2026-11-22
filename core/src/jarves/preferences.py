@@ -45,19 +45,41 @@ _SENSITIVE = re.compile(
     r"\d{6,}|\d[\d -]{10,}\d", re.I)
 
 
-# #1559: an authenticator (TOTP) seed next to a strong seed word: base32 (A-Z, 2-7), one case, unbroken (16+) or in
-# spaced/dashed 4-character groups as authenticator apps show it. Hebrew words may carry a prefix letter only.
-_SEED_WORD = re.compile(r"\b(?:totp|otp|otpauth|2fa|mfa|authenticator)\b|"
-                        r"(?<![א-ת])[ובלכמהש]?(?:מאמת|אוטנטיקטור)(?![א-ת])", re.I)
+# #1516: an unbroken base32 run (A-Z, 2-7; TOTP/2FA seeds) of 16+ chars. Refused when it has two or more separate
+# digit groups, or one digit group with a seed word within ~20 chars. A single digit group on its own is allowed so
+# development words such as "base64urlencoded" or "sha256checksumfile" in drafts and plans are not refused.
+_BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
+_DIGIT_GROUP = re.compile(r"[2-7]+")
+# Whole tokens only, so "footprint" or "יסוד" is no seed word. Hebrew allows up to three stacked prefix letters,
+# each may carry niqqud ("המאמת", "שהאוטנטיקטור", "וּבמאמת"; #1559 R4).
+_SEED_WORD = re.compile(r"(?<![A-Za-z0-9])(?:totp|otp|otpauth|seed|2fa|mfa|authenticator)s?(?![A-Za-z0-9])"
+                        r"|(?<![\u05d0-\u05ea])(?:[הובלמשכ][\u0591-\u05c7]*){0,3}(?:מאמת|אימות|זרע|סוד|אוטנטיקטור)"
+                        r"(?![\u05d0-\u05ea])", re.I)
+_SEED_NEAR = 20
+
+
+def _base32(text: str) -> bool:
+    for m in _BASE32_RUN.finditer(text):
+        groups = len(_DIGIT_GROUP.findall(m.group()))
+        if groups >= 2:
+            return True
+        # Only the text beside the run counts, so a word inside the run (e.g. "getOtpSecret4Value") is no seed word.
+        near = text[max(0, m.start() - _SEED_NEAR):m.start()] + " " + text[m.end():m.end() + _SEED_NEAR]
+        if groups == 1 and _SEED_WORD.search(near):
+            return True
+    return False
+
+
+# #1559: near a seed word, a one-case base32 run also counts when shown in spaced/dashed 4-character groups (as
+# authenticator apps show it) or when it has no digit but reads like random letters, not a word.
 _SEED_RUN = (re.compile(r"(?<![A-Za-z0-9])(?:[A-Z2-7]{16,}|[A-Z2-7]{4}(?:[ -][A-Z2-7]{4}){3,})(?![A-Za-z0-9])"),
              re.compile(r"(?<![A-Za-z0-9])(?:[a-z2-7]{16,}|[a-z2-7]{4}(?:[ -][a-z2-7]{4}){3,})(?![A-Za-z0-9])"))
-_SEED_NEAR = 20                   # characters between the seed word and the run
 
 
 def _seed_like(run: str) -> bool:
     """A digit 2-7, or (no digit) fewer vowels than English: random base32 letters are ~23% vowels, English ~40%.
     Unbroken: at most a third vowels (INTERNATIONALIZATION passes). Spaced groups: a 4-character group with no vowel,
-    or at most a fifth vowels ("with this must work" passes). Catches ~85% of digit-free 16-character seeds."""
+    or at most a fifth vowels ("with this must work" passes)."""
     groups = re.split(r"[ -]", run.upper())
     s = "".join(groups)
     vowels = sum(c in "AEIOUY" for c in s)
@@ -71,7 +93,7 @@ def _seed_like(run: str) -> bool:
 def _seed_near_word(text: str) -> bool:
     for rx in _SEED_RUN:
         for m in rx.finditer(text):
-            near = text[max(0, m.start() - _SEED_NEAR):m.end() + _SEED_NEAR]
+            near = text[max(0, m.start() - _SEED_NEAR):m.start()] + " " + text[m.end():m.end() + _SEED_NEAR]
             if _seed_like(m.group()) and _SEED_WORD.search(near):
                 return True
     return False
@@ -79,7 +101,7 @@ def _seed_near_word(text: str) -> bool:
 
 def looks_sensitive(text: str) -> bool:
     text = text or ""
-    return bool(_SENSITIVE.search(text)) or _seed_near_word(text)
+    return bool(_SENSITIVE.search(text)) or _base32(text) or _seed_near_word(text)
 
 
 def normalize(text: str) -> str:
