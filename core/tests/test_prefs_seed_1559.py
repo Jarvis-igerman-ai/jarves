@@ -11,6 +11,9 @@ LEAKY = [
     "my totp seed: JBSWYDPEHPKAPXPQ",             # no digit
     "2fa key JBSWY3DPEHPK3PXP please keep",       # unbroken with a digit
     "האוטנטיקטור שלי JBSW Y3DP EHPK 3PXP",
+    "שהאוטנטיקטור נתן JBSW Y3DP EHPK 3PXP",       # R4: stacked prefix letters
+    "ובמאמת שמרתי JBSWYDPEHPKAPXPQ",               # R4: two stacked prefixes, digit-free seed
+    "וּבמאמת שמרתי JBSWYDPEHPKAPXPQ",              # R4: stacked prefixes with niqqud
 ]
 SAFE = [
     "OTP SETUP: INTERNATIONALIZATION",            # a long real word

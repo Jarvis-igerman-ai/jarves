@@ -91,8 +91,10 @@ def _seed_like(run: str) -> bool:
 
 
 def _seed_near_word(text: str) -> bool:
+    # A seed word is masked first, so in "totp seed jbsw y3dp ..." it is the word beside the run, not a 4-letter group.
+    masked = _SEED_WORD.sub(lambda w: "#" * len(w.group()), text)
     for rx in _SEED_RUN:
-        for m in rx.finditer(text):
+        for m in rx.finditer(masked):
             near = text[max(0, m.start() - _SEED_NEAR):m.start()] + " " + text[m.end():m.end() + _SEED_NEAR]
             if _seed_like(m.group()) and _SEED_WORD.search(near):
                 return True
