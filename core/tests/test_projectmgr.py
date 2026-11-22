@@ -1339,3 +1339,34 @@ def test_review_with_empty_committed_diff_blocks_uncommitted_edits(env):
     (wt / "mine.txt").write_text("edited after the commit\n")
     r = m._st_review(p, t, {"kind": "review"}, ["claude"])
     assert r[:2] == ("stop", "blocked") and "uncommitted" in r[2]
+
+
+def test_owner_text_names_the_integration_commit_not_the_branch(env):
+    """#1469 (#1407 item 1): the agent card, the owner's review command and the "merged into" event named the
+    integration branch, a ref any agent with the shared repo can move; they now name the recorded commit."""
+    import re
+    m, repo, home = env
+    open_project(m, repo)
+    a = task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    task(m, "B", "FAKE write b.txt=2", scope=["b.txt"], deps=[a])
+    m.call("add_task", project="demo", title="Mine", spec="I do it", scope=["mine.txt"], deps=[a],
+           flow="work:owner review:owner merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    branch = gitops.integration_branch(1)
+    ev = [e["text"] for e in m.db.events(m.db.by_seq(1, a)["id"], 40) if e["kind"] == "merged"]
+    got = re.search(r"at commit ([0-9a-f]{12})", ev[0]) if ev else None
+    assert got, ev                                                    # the event records the merged commit
+    card = (gitops.project_root(home, 1) / "wt" / "last_prompt_2.txt").read_text()
+    assert f"(commit {got.group(1)})" in card and branch not in card
+    t = m.db.by_seq(1, 3)
+    assert t["status"] == "waiting" and "your turn" in t["waiting"]
+    (Path(t["worktree"]) / "mine.txt").write_text("by hand\n")
+    assert m.call("answer", project="demo", task=3, answer="done")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 3)
+    integ = gitops.project_root(home, 1) / "integration"
+    sha = sh(integ, "git", "rev-parse", "HEAD").strip()
+    assert t["status"] == "waiting" and f"diff {sha[:12]}...HEAD" in t["waiting"], t["waiting"]
+    assert branch not in t["waiting"]
+    sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
