@@ -4,15 +4,17 @@ Flow: the owner says a preference ("I prefer short answers in the morning") -> t
 the item is stored as `proposed` (visible on the Learned preferences page, NEVER used anywhere yet) -> the owner
 confirms (spoken/typed yes on the approval, or the Confirm button) -> `confirmed`. Declining keeps only the
 normalised text so the same suggestion is not asked again (removable). Nothing is inferred silently: a suggestion
-must carry the owner's own words as evidence, sensitive text (passwords, card/ID/long numbers, health and money
+must carry the owner's own words as evidence, sensitive text (passwords, API keys/tokens, card/ID/long numbers, health and money
 details) is refused and NOT stored, proposals are capped and expire, and conflicts are shown, never auto-merged.
 Every item is listable, editable, removable (dashboard, CLI, voice). Local only, in memory.db `learned_prefs`.
 """
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
+from collections import Counter
 
 from pydantic import BaseModel, Field
 
@@ -42,11 +44,65 @@ _NIQQUD = re.compile(r"[֑-ׇ]")
 _SENSITIVE = re.compile(
     r"סיסמ|קוד\s|קוד$|הקוד|פין|אשראי|תעודת\s+זהות|ת\"ז|חשבון\s+(?:ה)?בנק|משכורת|שכר|חוב|אבחנ|תרופ|מחלה|"
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
-    r"\d{6,}|\d[\d -]{10,}\d", re.I)
+    r"\d{6,}|\d[\d -]{10,}\d|"
+    # #1099: well-known credential prefixes (a real key in any text is refused, whoever stores it). `bearer` and `sk-`
+    # values must hold a digit, so wording like "bearer instrument/bond-terms" or "sk-learn-pipeline" passes.
+    r"\bbearer\s+(?=[a-z0-9._~+/-]*\d)[a-z0-9._~+/-]{16,}|\bsk-(?=[a-z0-9_-]*\d)[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|"
+    r"\baiza[0-9a-z_-]{20,}|\bxox[abprs]-[a-z0-9-]{10,}|\b(?-i:eyJ)[a-z0-9_-]{8,}\.|-----begin [a-z ]*private key", re.I)
+# #1099, preference path only (`strict=True`): key/token wording and random-looking strings. Goals and dev drafts may
+# legitimately say "add API key support" or carry commit SHAs, UUIDs and code ids, so they keep the rules above.
+_KEY_WORDS = re.compile(
+    r"הטוקן\s+שלי|טוקן\s+(?:ה-?)?(?:גישה|api|אימות)|מפתח\s+(?:ה-?)?api|\bapi[\s_-]?keys?\b|"
+    r"\b(?:access|auth|api|bearer|refresh|session)[\s_-]?tokens?\b|\bsecret[\s_-]?keys?\b|\bprivate\s+key\b", re.I)
+_TOKEN_RUN = re.compile(r"[A-Za-z0-9+=]{20,}")   # split at _ - . / so snake_case, kebab-case, dotted names, paths pass
+# Standard base64 may contain '/', which _TOKEN_RUN splits at; a slash run counts only when the whole run looks random
+# AND some segment is not word-shaped, so paths like /Users/Igal/Projects2 still pass.
+_B64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}")
+_WORDISH = re.compile(r"(?:[A-Z]?[a-z]+|[A-Z]{2,}(?![a-z])|\d+)+")
+_HEX_RUN = re.compile(r"\b[0-9a-f]{32,}\b", re.I)
+_MIN_ENTROPY = 3.5                 # bits per character for letter+digit runs
+_MIN_ENTROPY_LETTERS = 4.0         # stricter for letter-only runs (24+ chars, mixed case), so CamelCase words pass
+_MIN_DIGIT_SHARE = 0.3             # lowercase+digit runs: random base36 is digit-heavy, words with a version are not
 
 
-def looks_sensitive(text: str) -> bool:
-    return bool(_SENSITIVE.search(text or ""))
+def _entropy(s: str) -> float:
+    n = len(s)
+    return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
+
+
+def _random_run(run: str) -> bool:
+    lower, upper = any(c.islower() for c in run), any(c.isupper() for c in run)
+    digits = sum(c.isdigit() for c in run)
+    if digits and lower and upper:
+        return _entropy(run) >= _MIN_ENTROPY
+    if digits and (lower or upper):
+        return digits / len(run) >= _MIN_DIGIT_SHARE and _entropy(run) >= _MIN_ENTROPY
+    if not digits and lower and upper and len(run) >= 24:
+        return _entropy(run) >= _MIN_ENTROPY_LETTERS
+    return False
+
+
+def _mixed(seg: str) -> bool:
+    return len(seg) >= 6 and any(c.isdigit() for c in seg) and seg.lower() != seg != seg.upper()
+
+
+def _b64_run(run: str) -> bool:
+    segs = run.split("/")
+    return ("/" in run and _random_run(run.replace("/", ""))
+            and (sum(map(_mixed, segs)) >= 2       # 2+ pieces that each mix upper, lower and digits
+                 or any(len(seg) > 2 and not _WORDISH.fullmatch(seg) for seg in segs)))
+
+
+def _high_entropy(text: str) -> bool:
+    return (bool(_HEX_RUN.search(text)) or any(_random_run(r) for r in _TOKEN_RUN.findall(text))
+            or any(_b64_run(r) for r in _B64_RUN.findall(text)))
+
+
+def looks_sensitive(text: str, *, strict: bool = False) -> bool:
+    """Keyword/prefix/number rules for every caller; `strict=True` (learned preferences) adds key/token wording and
+    the random-looking-string rule (#1099)."""
+    t = text or ""
+    return bool(_SENSITIVE.search(t)) or (strict and (bool(_KEY_WORDS.search(t)) or _high_entropy(t)))
 
 
 def normalize(text: str) -> str:
@@ -79,7 +135,7 @@ class Preferences:
             raise ValueError("nothing to remember")
         if not ev:
             raise ValueError("a suggestion needs the owner's own words as evidence")
-        if looks_sensitive(t) or looks_sensitive(ev):
+        if looks_sensitive(t, strict=True) or looks_sensitive(ev, strict=True):
             logs.info("prefs", "PREF_REFUSED_SENSITIVE", "sensitive preference not stored", by=by)
             raise ValueError("this looks sensitive (secret, number, health or money detail): not stored")
         self._expire()
@@ -129,7 +185,7 @@ class Preferences:
         """Reword an item. `repropose` (the model's edit, V5 sec F2): a confirmed item goes back to 'proposed' so the
         new wording needs a fresh confirm before it can reach the instructions."""
         t = _clean(text, MAX_TEXT)
-        if not t or looks_sensitive(t):
+        if not t or looks_sensitive(t, strict=True):
             raise ValueError("empty or sensitive text: not stored")
         norm = normalize(t)
         other = self.db.row("SELECT id FROM learned_prefs WHERE norm=? AND id<>?", (norm, pid))
@@ -176,16 +232,35 @@ class Preferences:
                                         (me["topic"], pid))
                 if difflib.SequenceMatcher(None, me["norm"], r["norm"]).ratio() >= CONFLICT_RATIO]
 
+    def usable(self) -> list[dict]:
+        """Confirmed, not stale, not sensitive (#1099: items stored before the stricter rule are skipped, logged once)."""
+        rows = []
+        for r in self.items("confirmed"):
+            if r["stale"]:
+                continue
+            if looks_sensitive(r["text"], strict=True):
+                key = (self.db.path, r["id"])         # per database: two DBs in one process log separately
+                if key not in _SKIP_LOGGED:            # bounded: once per item per process, not on every prompt
+                    _SKIP_LOGGED.add(key)
+                    logs.info("prefs", "PREF_SKIPPED_SENSITIVE", "confirmed preference kept out of instructions",
+                              id=r["id"])
+                continue
+            rows.append(r)
+        return rows
+
     def for_prompt(self, limit: int = 20) -> list[str]:
-        """What may influence behaviour: confirmed, not stale. Proposals and declined items never appear."""
-        return [r["text"] for r in self.items("confirmed") if not r["stale"]][:limit]
+        """What may influence behaviour: `usable()` items. Proposals, declined and sensitive items never appear."""
+        return [r["text"] for r in self.usable()][:limit]
+
+
+_SKIP_LOGGED: set[tuple[str, int]] = set()
 
 
 def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:
-    """The instruction block: confirmed, not stale, not sensitive items, newest first, within the token budget."""
+    """The instruction block: `prefs.usable()` items, newest first, within the token budget."""
     from .context_trace import estimate_tokens
-    rows = sorted((r for r in prefs.items("confirmed") if not r["stale"] and not looks_sensitive(r["text"])),
-                  key=lambda r: -(r["confirmed_at"] or r["updated"]))
+    rows = prefs.usable()
+    rows.sort(key=lambda r: -(r["confirmed_at"] or r["updated"]))
     out, used = [], estimate_tokens(PROMPT_HEAD)
     for r in rows:
         cost = estimate_tokens(r["text"]) + 2
