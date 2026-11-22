@@ -178,7 +178,7 @@ class Preferences:
                       id=pid, by=by)
             raise PrefConflict(pid)
         logs.info("prefs", "PREF_CONFIRMED", "preference confirmed", id=pid, by=by)
-        return {"item": self._view(self.get(pid)), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
+        return {"item": self._written(pid), "conflicts": [self._view(c) for c in self.conflicts(pid)]}
 
     def decline(self, pid: int, *, by: str = "user") -> bool:
         n = self.db.x("UPDATE learned_prefs SET state='declined', " + _BUMP + " WHERE id=?", (self.clock(), pid)).rowcount

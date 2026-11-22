@@ -131,12 +131,14 @@ const ctx = { console, Promise, JSON, Object, el, PAGES: {}, tx: (he, en) => en,
   } };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(process.argv[3], "utf8"), ctx);
+const settle = async (ok) => { for (let i = 0; i < 10000; i++) { if (ok()) return; await Promise.resolve(); }
+  throw new Error("the page did not settle"); };   // review R4: microtasks only, no clock
 const find = (n, label) => !n || typeof n !== "object" ? null : (n.tag === "button" && (n.kids || []).includes(label)) ? n
   : (Array.isArray(n) ? n : n.kids || []).map((k) => find(k, label)).find(Boolean) || null;
 (async () => {
   await ctx.PAGES.preferences();
   await find({ kids: nodes }, "Confirm, remember it").attrs.onclick();
-  await new Promise((r) => setTimeout(r, 10));
+  await settle(() => routed === 1);
   const notes = []; if (mode === "changed") { await ctx.PAGES.preferences(); JSON.stringify(nodes, (k, v) => {
     if (v && v.attrs && v.attrs.role === "status" && v.textContent) notes.push(v.textContent); return v; }); }
   console.log(JSON.stringify({ calls, routed, notes }));
@@ -174,7 +176,7 @@ const mk = (tag) => ({ tag, className: "", textContent: "", kids: [], attrs: {},
   appendChild(c) { this.kids.push(c); return c; }, append(...c) { this.kids.push(...c); },
   replaceChildren(...c) { this.kids = c; }, setAttribute(k, v) { this.attrs[k] = v; },
   addEventListener(k, f) { this.on[k] = f; } });
-const ctx = { console, Promise, JSON, Date, Math, setTimeout, document: { createElement: mk }, window: {} };
+const ctx = { console, Promise, JSON, Date, Math, document: { createElement: mk }, window: {} };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(file, "utf8"), ctx);
 const all = (n) => [n, ...n.kids.flatMap(all)];
@@ -184,13 +186,16 @@ const cx = { lang: () => "he",
   post: async (path, body) => { posts.push([path, body]);
     if (mode === "changed") { const e = new Error("changed"); e.code = "PREF_CHANGED"; e.status = 409; throw e; }
     return { ok: true }; } };
+const settle = async (ok) => { for (let i = 0; i < 10000; i++) { if (ok()) return; await Promise.resolve(); }
+  throw new Error("the page did not settle"); };   // review R4: microtasks only, no clock
 const root = mk("div");
 (async () => {
   ctx.window.JarvesPrefs.mount(root, cx);
-  await new Promise((r) => setTimeout(r, 10));
   const he = ctx.window.JarvesPrefs.catalogs.he;
-  all(root).find((n) => n.tag === "button" && n.textContent === he.confirm).on.click();
-  await new Promise((r) => setTimeout(r, 10));
+  const yes = () => all(root).find((n) => n.tag === "button" && n.textContent === he.confirm);
+  await settle(yes);
+  yes().on.click();
+  await settle(() => gets === 2 && all(root).some((n) => n.attrs.role === "status"));
   const notes = all(root).filter((n) => n.attrs.role === "status").map((n) => n.textContent);
   console.log(JSON.stringify({ posts, gets, notes, changed: he.changed }));
 })();
@@ -358,3 +363,35 @@ def test_the_live_core_registry_confirm_shows_the_details(cfg, home):
         finally:
             await core.stop()
     asyncio.run(run())
+
+
+def test_every_write_moves_the_version_forward_within_one_tick(prefs):
+    p, pid, v = prefs                                     # review R1: every writer of an existing row, frozen clock
+    seen = [v]
+    for write in (lambda: p.edit(pid, "Play soft jazz while cooking", by="cli"),
+                  lambda: p.edit(pid, B, by="voice", repropose=True),
+                  lambda: p.confirm(pid, by="cli"),
+                  lambda: p.reaffirm(pid, by="cli"),
+                  lambda: p.edit(pid, A, by="voice", repropose=True),
+                  lambda: p.decline(pid, by="cli"),
+                  lambda: p.add_confirmed(A, "music", by="cli")):
+        write()
+        seen.append(p.get(pid)["updated"])
+    assert all(b > a for a, b in zip(seen, seen[1:])), seen
+    src = Path(prefs_mod.__file__).read_text(encoding="utf-8")            # a future writer must use _BUMP too
+    for stmt in src.split("UPDATE learned_prefs SET")[1:]:
+        assert "_BUMP" in stmt.split("WHERE")[0], stmt[:80]
+
+
+def test_confirm_of_an_item_removed_right_after_the_write_is_not_found(prefs):
+    p, pid, ver = prefs                                   # review R3: KeyError (404), never a TypeError (500)
+    real_x = p.db.x
+
+    def x(sql, args=()):
+        cur = real_x(sql, args)
+        if sql.startswith("UPDATE learned_prefs SET state='confirmed'"):
+            real_x("DELETE FROM learned_prefs WHERE id=?", (pid,))
+        return cur
+    p.db.x = x
+    with pytest.raises(KeyError):
+        p.confirm(pid, by="cli", shown=ver)
