@@ -56,8 +56,20 @@ _CRED_NEAR = re.compile(r"\b(?:keys?|tokens?|secrets?|password|passwd|credential
 _HASH_NEAR = re.compile(r"\b(?:sha[-\d]*|md5|commits?|checksums?|digests?|hash(?:es)?|revision|rev)\b\W*(?:\w+\W+){0,2}$", re.I)
 
 
+_WORD_TOK = re.compile(r"[A-Z]{2,}(?![a-z])|[A-Z]?[a-z]+|[A-Z](?![A-Za-z])|[0-9]+")
+_HASH_LENS = {32, 40, 64, 128}       # md5, sha1/git, sha256, sha512 hex lengths
+
+
+def _camel(run: str) -> bool:
+    """An identifier made of words, acronyms and numbers (``getUserByIdAndName2024``, ``ConfigLoaderV3x``)."""
+    toks = _WORD_TOK.findall(run)
+    return bool(toks) and "".join(toks) == run and len(run) / len(toks) >= 3
+
+
 def _mixed(run: str) -> bool:
     """Random base62/base64: upper, lower and digits, with the letter case switching often (CamelCase rarely does)."""
+    if _camel(run):
+        return False
     letters = [c for c in run if c.isalpha()]
     if not any(c.isdigit() for c in run) or len(letters) < 8:
         return False
@@ -73,17 +85,23 @@ def _secret_shaped(t: str) -> bool:
         before = t[max(0, m.start() - 40):m.start()]
         if _CRED_NEAR.search(before):
             return True
-        if len(m.group(0)) != 40 and not _HASH_NEAR.search(before):
-            return True              # 32/64-char hex alone: an API key or webhook secret, not a git SHA
+        n = len(m.group(0))
+        if n != 40 and not (n in _HASH_LENS and _HASH_NEAR.search(before)):
+            return True              # 32+ char hex alone, or of no digest length: a key or webhook secret
     for m in _BASE32.finditer(t):
         run = m.group(0).rstrip("=")
         if sum(c in "234567" for c in run) >= 2 and sum(c.isalpha() for c in run) >= len(run) // 2:
             return True              # TOTP seeds and other base32 secrets
     if any(_mixed(m.group(0)) for m in _BASE62.finditer(t)):
         return True
-    # base64 with '+' or '/' inside: a path has '/' too, but path segments are words, not random mixed case
-    return any(re.search(r"[+/]", r) and not r.startswith("/") and _mixed(re.sub(r"[+/=]", "", r))
-               for r in (m.group(0) for m in _BASE64.finditer(t)))
+    # base64 with '+' or '/' inside. A path (absolute or relative) has '/' too, so a '/' run is judged per segment:
+    # random segments are mixed case, path segments are words. Segments of 20+ chars are also checked by _BASE62.
+    for r in (m.group(0).rstrip("=") for m in _BASE64.finditer(t)):
+        if "/" in r and _mixed(re.sub(r"[+/]", "", r)) and any(_mixed(seg.replace("+", "")) for seg in r.split("/")):
+            return True
+        if "/" not in r and "+" in r and _mixed(r.replace("+", "")):
+            return True
+    return False
 
 
 def _drop_sha(m: re.Match) -> str:
@@ -100,6 +118,11 @@ def looks_sensitive(text: str) -> bool:
 
     Tradeoff: a 7-40 char hex token with two or more letters a-f counts as a commit SHA and is not checked by
     the long-number rule unless a credential word sits just before it, so "my id is 12345678ab" is allowed.
+    A hex value of a digest length (32, 40, 64 or 128 chars) is allowed when a hash word (commit, sha256, md5,
+    checksum, digest, hash, rev...) sits within two words before it and no credential word does, so
+    "commit <32 hex>" passes; other 32+ char hex lengths are refused even after a hash word.
+    Identifiers whose words average under three letters (``UserByIdV4Test``) can still be refused as random
+    tokens; that error is on the safe side.
     """
     t = text or ""
     # commit SHAs are judged by _secret_shaped, not by the long-number rule (a SHA can hold 6+ digits in a row)

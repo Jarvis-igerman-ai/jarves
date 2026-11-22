@@ -96,3 +96,18 @@ def test_dev_draft_keeps_shas_and_refuses_a_hex_key(home):
     assert devmanager.suggest(store, "regression since " + SHA_WITH_DIGIT_RUN, "bisected to " + SHA40)
     with pytest.raises(ValueError):
         devmanager.suggest(store, "add webhook", "the secret is " + _hex("d", 32))
+
+
+@pytest.mark.parametrize("text", ["rename getUserByIdAndName2024 to findUser", "call parseJSONv2ResponseBody here",
+                                  "open MyApp2/ConfigLoaderV3x/HttpClientV2 next"])
+def test_short_word_camelcase_and_relative_paths_are_allowed(text):
+    # review round 4 R2/R3: CamelCase with short words and digits, and relative paths, are not random tokens
+    assert not looks_sensitive(text), text
+
+
+@pytest.mark.parametrize("text", ["key " + _b62("s1", 16) + "/" + _b62("s2", 18),       # random '/' segments
+                                  "commit " + _hex("c48", 48)])
+def test_random_slash_segments_and_hex_of_no_digest_length_are_refused(text):
+    # review round 4 R3/R5: a relative-path exemption must not let random base64 segments through, and a hash
+    # word only excuses hex of a digest length (32/40/64/128)
+    assert looks_sensitive(text), text
