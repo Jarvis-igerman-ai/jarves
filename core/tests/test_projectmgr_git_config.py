@@ -3,6 +3,7 @@ never run under JARVES's own git calls. An agent can write the shared `.git/conf
 plain git runs the planted command, then that `gitops.git()` does not."""
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -164,7 +165,8 @@ def test_owner_values_survive_and_shared_ones_are_undone():
     assert last["filter.lfs.smudge"] == "git-lfs smudge -- %f" and last["filter.Ev.x=y.clean"] == ""
     # a shared helper empties the whole helper list, then the owner's helper comes back under its own key (R2)
     gen = "credential.helper"
-    assert pairs.index((gen, "manager")) > pairs.index((gen, "")) > pairs.index(("credential.https://h.example.helper", ""))
+    url = "credential.https://h.example.helper"
+    assert pairs.index((gen, "manager")) > pairs.index((gen, "")) > pairs.index((url, ""))
     assert last["gpg.program"] == "gpg" and last["core.sshcommand"] == "ssh"
     assert last["remote.origin.receivepack"] == "git-receive-pack"
     assert not {"remote.origin.url", "user.name", "diff.tool"} & set(last)
@@ -312,18 +314,35 @@ def test_config_hook_events_are_undone_on_every_git(monkeypatch, tmp_path):
 
 
 def test_inert_git_calls_spawn_one_process(monkeypatch, tmp_path):
-    """R3 (#1615): rev-parse/rev-list/merge-base run no config-named command, so they skip both config reads
-    (most projectmgr calls are rev-parse); anything else still reads the config before and after."""
+    """R3 (#1615): rev-parse/rev-list/merge-base run no config-named command, so where GIT_NO_LAZY_FETCH works they
+    skip both config reads (most projectmgr calls are rev-parse); a failed one, an older git and anything else read
+    the config before and after (#1632 R1)."""
     repo, seen = _repo(tmp_path), []
     real = subprocess.run
-    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append((argv, kw["env"])) or real(argv, **kw))
+    monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [True])
     for args in (("rev-parse", "HEAD"), ("rev-list", "--count", "HEAD"), ("merge-base", "HEAD", "HEAD")):
         seen.clear()
         gitops.git(repo, *args)
-        assert len(seen) == 1 and "protocol.ext.allow=never" in seen[0]
-    seen.clear()
-    gitops.git(repo, "status", "--porcelain")
-    assert len(seen) == 3
+        assert len(seen) == 1 and "protocol.ext.allow=never" in seen[0][0]
+        assert seen[0][1]["GIT_NO_LAZY_FETCH"] == "1"
+    for lazy_ok, args, spawned in ((True, ("rev-parse", "--verify", "-q", "nope"), 4),
+                                   (False, ("rev-parse", "HEAD"), 3), (True, ("status", "--porcelain"), 3)):
+        monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [lazy_ok])
+        seen.clear()
+        gitops.git(repo, *args, check=False)
+        assert len(seen) == spawned
+
+
+@pytest.mark.parametrize("version,ok", [("git version 2.45.1", True), ("git version 2.43.4.windows.1", True),
+                                        ("git version 2.43.0", False), ("git version 2.44.0", False), ("junk", False)])
+def test_the_fast_path_needs_a_git_with_the_lazy_fetch_switch(monkeypatch, version, ok):
+    """#1632 R1: GIT_NO_LAZY_FETCH exists from 2.45.1 and its maintenance releases; an older git ignores it."""
+    monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [])
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, version, ""))
+    assert gitops._lazy_fetch_switch() is ok
+    assert gitops._LAZY_OFF_OK == ([ok] if version != "junk" else [])
+
 
 
 def test_a_key_that_is_not_utf8_stops_the_command(tmp_path):
@@ -408,3 +427,27 @@ def test_a_key_toggled_between_the_two_reads_is_a_known_residual(monkeypatch, tm
     monkeypatch.setattr(gitops.subprocess, "run", run)
     assert gitops.git(repo, "diff", check=False).returncode == 0
     assert marker.exists()
+
+
+@pytest.mark.parametrize("fast_path", [False, True])
+def test_a_lazy_fetch_in_a_partial_clone_never_runs_the_shared_ssh_command(monkeypatch, tmp_path, fast_path):
+    """R1 (#1632): in a partial clone, rev-parse/rev-list/merge-base start a lazy `git fetch` for a missing object; the
+    fast path must never let that fetch run the shared `core.sshCommand` (or helper, upload-pack) un-overridden."""
+    server, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    subprocess.run(["git", "config", "uploadpack.allowFilter", "true"], cwd=server, check=True)
+    clone = tmp_path / "clone"
+    _plain(tmp_path, "-c", "protocol.file.allow=always", "clone", "-q", "--filter=tree:0", "--no-checkout",
+           server.as_uri(), str(clone))
+    subprocess.run(["git", "remote", "set-url", "origin", "ssh://127.0.0.1:9/x"], cwd=clone, check=True)
+    _shared_config(clone, f'[core]\n\tsshCommand = "{_runs(marker, "exit 1")}"\n')
+    _plain(clone, "rev-parse", "HEAD:f.txt")                  # the tree of HEAD is missing: lazy fetch over ssh
+    assert marker.exists()
+    marker.unlink()
+    subprocess.run(["git", "rev-parse", "HEAD:f.txt"], cwd=clone, capture_output=True, env={**os.environ,
+                   "GIT_NO_LAZY_FETCH": "1"})
+    if fast_path and marker.exists():
+        pytest.skip("this git ignores GIT_NO_LAZY_FETCH")
+    monkeypatch.setattr(gitops, "_LAZY_OFF_OK", [fast_path])
+    for args in (("rev-parse", "HEAD:f.txt"), ("rev-list", "--objects", "HEAD"), ("merge-base", "HEAD", "HEAD")):
+        gitops.git(clone, *args, check=False)
+    assert not marker.exists()

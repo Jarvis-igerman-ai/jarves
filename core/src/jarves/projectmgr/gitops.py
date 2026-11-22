@@ -69,7 +69,8 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 # Config keys whose value git runs as a command (#1390). Keys as `git config --list` prints them: section and name in
-# lower case, a subsection (`filter.<x>.smudge`) as written. Editors are fixed by GIT_EDITOR below, pagers by --no-pager.
+# lower case, a subsection (`filter.<x>.smudge`) as written. Editors are fixed by GIT_EDITOR below, pagers by
+# --no-pager.
 _RUNS = re.compile(r"(?:filter\..+\.(?:clean|smudge|process)|merge\..+\.driver|diff\..+\.(?:command|textconv)"
                    r"|diff\.external|core\.(?:sshcommand|askpass|gitproxy|pager|alternaterefscommand)"
                    r"|gpg\.(?:program|.+\.program|ssh\.defaultkeycommand)|credential\.(?:.+\.)?helper"
@@ -102,8 +103,32 @@ def _reset_keys(entries: list[tuple[str, str, str]]) -> set[str]:
 
 
 # subcommands that run no command a config names (no index refresh, filter, driver, helper or hook): they skip both
-# config reads, so most projectmgr calls (rev-parse) cost one git process instead of three (R3)
+# config reads, so most projectmgr calls (rev-parse) cost one git process instead of three (R3). Except a lazy fetch:
+# in a partial clone a missing object starts `git fetch`, which would run the shared ssh command or helper (#1632 R1),
+# so this fast path runs only where GIT_NO_LAZY_FETCH works and any failure retries on the full path.
 _INERT = ("rev-parse", "rev-list", "merge-base")
+# upstream releases with GIT_NO_LAZY_FETCH (2.45.1 and the CVE-2024-32465 maintenance releases); a distro backport
+# under an older number simply takes the full path
+_NO_LAZY_FETCH = {(2, 39): 4, (2, 40): 2, (2, 41): 1, (2, 42): 2, (2, 43): 4, (2, 44): 1}
+_LAZY_OFF_OK: list[bool] = []
+
+
+def _lazy_fetch_switch() -> bool:
+    """True when this git honours GIT_NO_LAZY_FETCH (read once per process; an unreadable version means no)."""
+    if not _LAZY_OFF_OK:
+        try:
+            out = subprocess.run(["git", "--version"], capture_output=True, text=True, timeout=30,
+                                 creationflags=_NOWIN, env=child_env(), encoding="utf-8", errors="replace").stdout
+        except (OSError, subprocess.SubprocessError):
+            return False
+        m = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+        if not m:
+            return False
+        v = tuple(int(x) for x in m.groups())
+        _LAZY_OFF_OK.append(v >= (2, 45, 1) or v[2] >= _NO_LAZY_FETCH.get(v[:2], 10**6))
+    return _LAZY_OFF_OK[0]
+
+
 FIXED_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": ":", "GIT_SEQUENCE_EDITOR": ":"}   # ":" = no editor at all
 
 
@@ -164,21 +189,29 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. No other command the shared config names runs either (#1390, see
     config_overrides): filters, merge drivers, diff commands, credential helpers, ssh/gpg programs, trailer commands,
-    config hooks, `ext::` remotes, editors and pagers. rev-parse/rev-list/merge-base (_INERT) run none of these and
-    skip both config reads. Submodules never recurse (their config in `.git/modules` is never read)
+    config hooks, `ext::` remotes, editors and pagers. rev-parse/rev-list/merge-base (_INERT) run none of these, so
+    with GIT_NO_LAZY_FETCH=1 they skip both config reads; one that fails (a missing ref, or an object a partial clone
+    must fetch) runs again on the full path. Submodules never recurse (their config in `.git/modules` is never read)
     and a branch- or gitdir-conditional include or a key that is not UTF-8 stops the command (fail closed). No
     fetch/push recurses into submodules and no local (file) remote is reached: its receive-pack and hooks would run
-    without these overrides, so a push to an `origin` that is a folder fails (no JARVES flow uses one). Limit (not prevention): the config is read just before the command, so a key an agent
-    adds between that read and the command is not undone and may run. It is read again after the command, and the
-    call fails with the key's name only when that key is still present then; a writer that adds the key and removes
-    it again between the two reads is not caught (#1390 residual). When this after-read fails the call, the
-    command has already run, so its effects stay (e.g. a registered worktree); callers never run git with a `cwd`
-    the command deletes (remove_worktree runs in the repo, not in the worktree)."""
+    without these overrides, so a push to an `origin` that is a folder fails (no JARVES flow uses one). A shared
+    `core.sshCommand` becomes `ssh`; the owner's GIT_SSH/GIT_SSH_COMMAND never reach JARVES git (child_env), so
+    this changes no owner transport that worked before. Limit (not prevention): the config is read just before the
+    command, so a key an agent adds between that read and the command is not undone and may run. It is read again
+    after the command, and the call fails with the key's name only when that key is still present then; a
+    writer that adds the key and removes it again between the two reads is not caught (#1390 residual). When this
+    after-read fails the call, the command has already run, so its effects stay (e.g. a registered worktree);
+    callers never run git with a `cwd` the command deletes (remove_worktree runs in the repo, not in the worktree)."""
     pre = ["--no-pager", *(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
            "-c", "protocol.ext.allow=never", "-c", "submodule.recurse=false",
            "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no", "-c", "protocol.file.allow=never"]
-    inert = bool(args) and args[0] in _INERT
-    entries = [] if inert else _config_entries(cwd, timeout)
+    if args and args[0] in _INERT and _lazy_fetch_switch():
+        p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+                           creationflags=_NOWIN, env=child_env({**FIXED_ENV, "GIT_NO_LAZY_FETCH": "1"}),
+                           encoding="utf-8", errors="replace")
+        if p.returncode == 0:
+            return p
+    entries = _config_entries(cwd, timeout)
     if isinstance(entries, subprocess.CompletedProcess):     # unreadable config: fail closed, the command never runs
         if check:
             raise GitError((entries.stderr or "git config could not be read").strip()[:300])
@@ -194,7 +227,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
-    after = entries if inert else _config_entries(cwd, timeout)     # detect a command key added while it ran
+    after = _config_entries(cwd, timeout)       # detect a command key added while the command ran
     new = (sorted(_reset_keys(after) - _reset_keys(entries)) if isinstance(after, list)
            else ["(config could not be read again)"])
     if new:
