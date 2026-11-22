@@ -110,6 +110,12 @@ fix_he = "הסוכן שינה קבצים שלא הוגדרו למשימה (או 
 fix_en = "The agent changed files the task did not list (or agent settings files). Nothing was merged; the work stays on the task branch. Widen the scope: jarvis project update N --scope ... then jarvis project retry N."
 
 [[problems]]
+he = "משימה סומנה \"תקועה\": קבצים לא שמורים הופיעו בתיקיית המשימה אחרי הבדיקה, או שענף המשימה זז"
+en = "A task is \"blocked\": uncommitted files appeared in the task folder after the check, or the task branch moved"
+fix_he = "ג'ארביס ממזג רק את הגרסה (commit) שהבדיקה או הסקירה ראו. קבצים שהבדיקה משאירה (כיסוי, פלט בנייה, מטמון): הוסיפו אותם ל-.gitignore או מחקו אותם, ואז jarvis project retry N. ענף שזז: לא מוזג כלום; בדקו מה נוסף לענף המשימה, ואז retry."
+fix_en = "JARVES merges only the commit the check or review saw. Files the check leaves behind (coverage, build output, a cache): add them to .gitignore or remove them, then jarvis project retry N. A moved branch: nothing was merged; look at what was added to the task branch, then retry."
+
+[[problems]]
 he = "משימה נכשלה אחרי שתי ניסיונות"
 en = "A task failed after two attempts"
 fix_he = "ראו למה: jarvis project deep N (ציר זמן ופלט הבדיקה). פצלו למשימות קטנות יותר או תקנו את המפרט, ואז retry. סוכן שלא מותקן מופיע ב-jarvis project runners."

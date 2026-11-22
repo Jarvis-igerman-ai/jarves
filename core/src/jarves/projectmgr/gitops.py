@@ -247,6 +247,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
+    """`branch` may be a commit SHA: the merge stage passes the exact checked commit (#1461)."""
     git(integration_wt, "merge", "--ff-only", branch)
 
 

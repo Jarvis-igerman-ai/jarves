@@ -61,7 +61,11 @@ class StageEngine:
         seen = self._job(self.db.task(t["id"]) or t).get("tested_head") or ""
         if not head:
             return f"could not read the task commit of {t['branch']}: not merged"
-        if seen and head not in (seen, ok):
+        allowed = {seen, ok} - {""}                                 # the approved commit binds even with no check
+        if allowed and head not in allowed:
+            if not seen:
+                return (f"the task branch {t['branch']} moved after your approval: {head[:12]} is not the approved "
+                        f"commit {ok[:12]}; not merged")
             return (f"the task branch {t['branch']} moved after the check/review: {head[:12]} was never checked "
                     f"(the checked commit is {seen[:12]}); not merged")
         return ""
@@ -608,7 +612,8 @@ class StageEngine:
                 new = self._head(wt)                                # #1461: only this exact commit is merged
                 if new != before and self._job(self.db.task(t["id"]) or t).get("tested_head"):
                     return ("stop", "blocked", f"uncommitted files appeared in the task folder after the check/review "
-                                               f"(not merged; on {br})")
+                                               f"(not merged; on {br}): add them to .gitignore or remove them, "
+                                               "then retry")
                 if self._moved(t, new, approved):
                     return ("stop", "blocked", self._moved(t, new, approved))
                 job = self._job(self.db.task(t["id"]) or t)
@@ -722,9 +727,10 @@ class StageEngine:
             what = "write a failing test for the bug" if kind == "reproduce" else "edit the code"
             return ("park", f"your turn: {what} in {wt} (branch {br}), then say done")
         where = t["worktree"] or str(self._integration(p))
-        head, bsha = self._head(where), self._head(self._integration(p))      # #1469: name commits, not branches
+        head = self._head(where) if Path(where).exists() else ""           # #1469: name commits, not branches
+        bsha = self._head(self._integration(p))
         if kind == "merge":
-            if t["worktree"] and self._moved(t, head):              # never ask you to approve an unchecked commit
+            if t["worktree"] and Path(t["worktree"]).exists() and self._moved(t, head):   # never an unchecked one
                 return ("stop", "blocked", self._moved(t, head))
             self._set_job(t, shown=head or None)                    # answer() approves only this commit (#1461)
         text = {

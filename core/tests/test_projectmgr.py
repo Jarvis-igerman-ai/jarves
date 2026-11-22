@@ -1185,6 +1185,7 @@ def test_files_left_after_the_check_are_named_as_such_1461(env):
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "blocked" and "uncommitted files appeared" in t["reason"], (t["status"], t["reason"])
+    assert ".gitignore" in t["reason"]
     assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
 
 
@@ -1203,6 +1204,39 @@ def test_task_already_in_the_integration_branch_merges_as_a_no_op_1461(env):
     finish(m)
     t = m.db.by_seq(1, 1)
     assert t["status"] == "done", (t["status"], t["reason"])
+
+
+def test_owner_approval_binds_without_a_check_or_review_1461(env, monkeypatch):
+    """Flow work merge:owner: no tested_head. A sibling commit after the approval, e.g. while the merge waits for the
+    project's merge lock, must not reach the integration branch."""
+    m, repo, home = env
+    open_project(m, repo)
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"], (t["status"], t["reason"])
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    real = gitops.commit_all
+    monkeypatch.setattr(gitops, "commit_all", lambda wt, *a, **k: (_sibling_commit(wt), real(wt, *a, **k))[1])
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "blocked" and "moved after your approval" in t["reason"], (t["status"], t["reason"])
+    assert not (gitops.project_root(home, 1) / "integration" / "a").exists()
+
+
+def test_owner_merge_prompt_with_a_removed_task_folder_moves_on_1461(env):
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    m.call("add_task", project="demo", title="A", spec="FAKE write a=1", scope=["a"], flow="work test gate merge:owner")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    shutil.rmtree(t["worktree"])                                    # the folder is gone: nothing to merge
+    assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["status"] == "waiting" and "approve merging" in t["waiting"], (t["status"], t["reason"])
 
 
 def test_task_branch_moved_during_the_review_is_not_merged_1461(env, monkeypatch):
