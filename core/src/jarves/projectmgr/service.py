@@ -75,6 +75,14 @@ class Manager(StageEngine):
         self._orch = orch                        # live sessions of the coding-agent orchestrator (tests: a fake)
         self.jobs: dict[str, dict] = {}          # background voice/phone operations (plan, split, talk)
         self._prepaid: set[int] = set()          # tasks whose dispatch already counted one agent run
+        gitops.watch_projects(self)              # #1592: a run in one project also guards the others' git config
+
+    def project_repos(self) -> list[str]:
+        """Every registered project's repository (archived ones too); [] once the database is closed."""
+        try:
+            return [p["path"] for p in self.db.projects(include_archived=True)]
+        except sqlite3.Error:
+            return []
 
     # ================================================================== lifecycle
     def start(self) -> "Manager":

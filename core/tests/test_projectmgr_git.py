@@ -435,7 +435,7 @@ def test_a_run_ending_while_another_starts_never_makes_its_planted_entry_trusted
     monkeypatch.setattr(gitops, "_read", read)
     with gitops.config_guard(repo) as b_state:
         a.close()                                                        # A ends after B started
-        assert gitops._GUARDS[str(cfg.resolve())]["data"] == clean
+        assert gitops._GUARDS[gitops._key(cfg)]["data"] == clean
         assert gitops.git(repo, "status", check=False).returncode == 0 and cfg.read_bytes() == clean
     assert a_state["changed"] and not b_state["changed"] and cfg.read_bytes() == clean and not gitops._GUARDS
 
@@ -594,9 +594,53 @@ def test_one_file_reached_by_two_spellings_gets_one_guard(tmp_path, monkeypatch)
     repo = _repo(tmp_path)
     real = Path(os.environ["HOME"])
     link = tmp_path / "home-link"
-    link.symlink_to(real, target_is_directory=True)
+    try:
+        link.symlink_to(real, target_is_directory=True)
+    except OSError as e:                  # round-7 R4: Windows without Developer Mode or admin rights
+        pytest.skip(f"symlinks unavailable: {e}")
     (real / ".gitconfig").write_bytes(b"[user]\n\tname = owner\n")
     monkeypatch.setenv("HOME", str(link))
     keys = gitops._guarded_files(repo)
     assert len([k for k in keys if k.endswith(".gitconfig")]) == 1
     assert os.path.normcase(os.path.join(os.path.realpath(real), ".gitconfig")) in keys
+
+
+class _Projects:
+    def __init__(self, repos):
+        self.repos = repos
+
+    def project_repos(self):
+        return self.repos
+
+
+def test_a_check_in_one_project_cannot_plant_config_in_another_project(tmp_path, monkeypatch):
+    """#1592 round-7 R2: project 2's shared `.git/config` is guarded while project 1's check runs."""
+    import sys
+    (tmp_path / "one").mkdir(), (tmp_path / "two").mkdir()
+    one, two = _repo(tmp_path / "one"), _repo(tmp_path / "two")
+    cfg = two / ".git" / "config"
+    before = cfg.read_bytes()
+    monkeypatch.setattr(gitops, "_MANAGERS", [_Projects([str(one), str(two)])])
+    argv = [sys.executable, "-c", f"open({str(cfg)!r}, 'ab').write({PLANT.encode()!r})"]
+    ok, out = gitops.run_check(one, argv)
+    assert not ok and "git config file" in out and cfg.read_bytes() == before and not gitops._GUARDS
+
+
+def test_the_manager_registers_its_project_repositories(tmp_path):
+    from jarves.projectmgr.service import Manager
+    m = Manager(tmp_path / "home")
+    m.db.add_project("p", str(tmp_path / "r"))
+    assert m in list(gitops._MANAGERS) and str(tmp_path / "r") in gitops._project_repos()
+    m.stop()
+    assert m.project_repos() == []                                   # a closed database lists nothing
+
+
+def test_a_quarantine_starting_while_a_run_starts_refuses_it(tmp_path, monkeypatch):
+    """#1592 round-7 R3: the locked re-check failing (a restore failed meanwhile) refuses the run, no snapshot."""
+    repo = _repo(tmp_path)
+    lock = _FlagLock()
+    monkeypatch.setattr(gitops, "_GUARDS_LOCK", lock)
+    monkeypatch.setattr(gitops, "check_guards", lambda: not lock.depth)
+    with gitops.config_guard(repo) as state:
+        assert state.get("refused") and not gitops._GUARDS
+

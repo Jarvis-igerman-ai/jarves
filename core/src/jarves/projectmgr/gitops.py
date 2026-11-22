@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import weakref
 from pathlib import Path
 
 from .. import logs
@@ -113,7 +114,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # `filter.<n>.clean` entry runs a command on the next JARVES or owner git call), `config.worktree` files, every file
 # those configs include (also a named but missing one), and the worktree's `.git` pointer and
 # `commondir`/`gitdir` files (they would point later git calls at another, unguarded config). While such code runs these
-# files are guarded: a copy (or "absent") taken when the run starts; every JARVES git call and the end of the run
+# files are guarded, for the run's own repository and every registered project's repository (`watch_projects`): a
+# copy (or "absent") taken when the run starts; every JARVES git call and the end of the run
 # compare and restore them, and the run is rejected. Every run active on that file is rejected, because the writer
 # cannot be told apart. Limits: not an OS sandbox (a process the run leaves behind can still write after it ends; the
 # owner's own git can read a planted entry during a run; the system config, an owner-set GIT_CONFIG_GLOBAL, an include
@@ -126,6 +128,19 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 # PROJECT_GIT_CONFIG_RESTORED log line. JARVES's own git calls write no config (CONFIG_PINS).
 _GUARDS: dict[str, dict] = {}            # file path -> {"data": trusted bytes or None (absent), "runs": [state dicts]}
 _GUARDS_LOCK = threading.RLock()
+
+
+_MANAGERS: "weakref.WeakSet" = weakref.WeakSet()   # objects with project_repos(): the registered projects
+
+
+def watch_projects(manager) -> None:
+    """Register a project manager: a run in one project also guards the config files of every repository the
+    manager has registered (round-7 R2: an agent in project 1 could plant an entry in project 2's `.git/config`)."""
+    _MANAGERS.add(manager)
+
+
+def _project_repos() -> list[str]:
+    return sorted({r for m in list(_MANAGERS) for r in m.project_repos() if r})
 
 
 def _home() -> Path:
@@ -317,6 +332,9 @@ def config_guard(wt: str | Path):
         return
     try:
         files = _guarded_files(wt)
+        for repo in _project_repos():     # round-7 R2: the owner's other project repositories too
+            for k, side in _guarded_files(repo).items():
+                files.setdefault(k, side)
     except (OSError, subprocess.SubprocessError):
         files = {}
     if not files:
@@ -326,7 +344,9 @@ def config_guard(wt: str | Path):
         return
     keys, held = list(files), []
     with _GUARDS_LOCK:                    # review R1: snapshot under the lock, after restoring, only for new keys:
-        check_guards()                    # a run ending meanwhile can never hand us its planted bytes as trusted
+        if not check_guards():            # a run ending meanwhile can never hand us its planted bytes as trusted;
+            state.update(changed=True, unrestored=True, refused=True)     # round-7 R3: a quarantine began meanwhile
+            keys = []
         for k in keys:
             if k not in _GUARDS:
                 try:
