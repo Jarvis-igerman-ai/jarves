@@ -166,3 +166,57 @@ def test_missing_worktree_fails_closed(env, tmp_path):
     m._set_job(t, tested_head="abc")
     why = m._moved(t, tmp_path / "gone", "not merged")
     assert "worktree" in why and "not merged" in why, why
+
+
+def test_sibling_merge_that_makes_merge_in_a_noop_is_not_checked(env, monkeypatch):
+    """Review 2 R1: a merge whose first parent is the vetted commit but whose second parent is not the base."""
+    m, repo, home = env
+    open_project(m, repo, check=[sys.executable, "-c", "pass"])
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    done = []
+
+    def sibling_merge(wt: Path, base: str) -> None:
+        if done:
+            return
+        done.append(1)
+        br = sh(wt, "git", "rev-parse", "--abbrev-ref", "HEAD").strip()
+        sh(wt, "git", "checkout", "-q", "-b", "side", base)
+        (wt / "extra.txt").write_text("never scope-checked\n")
+        sh(wt, *GIT, "add", "-A")
+        sh(wt, *GIT, "commit", "-q", "-m", "side")
+        sh(wt, "git", "checkout", "-q", br)
+        sh(wt, *GIT, "merge", "-q", "--no-ff", "--no-edit", "side")
+    orig = gitops.merge_in
+    monkeypatch.setattr(gitops, "merge_in",
+                        lambda wt, base, *a, **k: (sibling_merge(Path(wt), base), orig(wt, base, *a, **k))[1])
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert done and t["status"] == "blocked" and "not checked" in t["reason"], t["reason"]
+    assert not (gitops.project_root(home, 1) / "integration" / "extra.txt").exists()
+
+
+def _repo_ab(tmp_path: Path) -> tuple[Path, str, str]:
+    """A repo with commit a and its child b checked out (a merge_in that fast-forwarded the task branch to b)."""
+    tmp_path.mkdir()
+    sh(tmp_path, "git", "init", "-q")
+    shas = []
+    for n in ("a", "b"):
+        (tmp_path / "f").write_text(n)
+        sh(tmp_path, *GIT, "add", "-A")
+        sh(tmp_path, *GIT, "commit", "-q", "-m", n)
+        shas.append(sh(tmp_path, "git", "rev-parse", "HEAD").strip())
+    return tmp_path, shas[0], shas[1]
+
+
+def test_bind_accepts_a_fast_forward_to_the_base(env, tmp_path):
+    m, repo, home = env
+    wt, a, b = _repo_ab(tmp_path / "r")
+    assert m._bind(wt, a, "x", merged=True, base_sha=b) == (b, "")
+    assert m._bind(wt, a, "x", merged=True, base_sha=a)[0] == ""          # b is not the base: blocked
+
+
+def test_bind_on_a_missing_worktree_fails_closed(env, tmp_path):
+    m, repo, home = env
+    sha, why = m._bind(tmp_path / "gone", "abc", "not merged")
+    assert sha == "" and "worktree is missing" in why and "not merged" in why, why

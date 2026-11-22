@@ -62,13 +62,17 @@ class StageEngine:
         return ""
 
     @staticmethod
-    def _bind(wt: Path, vetted: str, what: str, *, committed: bool = False, merged: bool = False
-              ) -> tuple[str, str]:
-        """Read HEAD once: (sha, '') when it is `vetted`, our own commit_all right on it (`committed`) or our merge
-        whose first parent is it (`merged`); else ('', why). Later steps use that exact sha, not the branch (#1461)."""
-        sha, *parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split() or [""]
+    def _bind(wt: Path, vetted: str, what: str, *, committed: bool = False, merged: bool = False,
+              base_sha: str = "") -> tuple[str, str]:
+        """Read HEAD once: (sha, '') when it is `vetted`, our own commit_all right on it (`committed`), or after
+        merging the base at `base_sha` (`merged`) our merge of exactly [vetted, base_sha] or a fast-forward to
+        base_sha (only base content); else ('', why). Later steps use that exact sha, not the branch (#1461)."""
+        try:
+            sha, *parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").stdout.split() or [""]
+        except OSError:                                 # the worktree is gone: fail closed
+            return "", f"the task worktree is missing ({what})"
         if sha and vetted and (sha == vetted or (committed and parents == [vetted])
-                               or (merged and len(parents) == 2 and parents[0] == vetted)):
+                               or (merged and base_sha and (parents == [vetted, base_sha] or sha == base_sha))):
             return sha, ""
         return "", (f"the task branch moved after JARVES checked it: {sha[:12]} is not the checked commit "
                     f"{vetted[:12]} ({what})")
@@ -572,9 +576,10 @@ class StageEngine:
                     sha, moved = self._bind(wt, vetted, "not checked", committed=committed)
                     if moved:
                         return ("stop", "blocked", moved)
+                    base_sha = gitops.git(wt, "rev-parse", base).stdout.strip()
                     conflicts = gitops.merge_in(wt, base)
                     if not conflicts:
-                        sha, moved = self._bind(wt, sha, "not checked", merged=True)
+                        sha, moved = self._bind(wt, sha, "not checked", merged=True, base_sha=base_sha)
                         if moved:
                             return ("stop", "blocked", moved)
                 except gitops.GitError as e:
@@ -630,10 +635,11 @@ class StageEngine:
                     return ("stop", "blocked", moved)
                 head = gitops.git(self._integration(p), "rev-parse", "HEAD", check=False).stdout.strip()
                 if head != self._job(t).get("tested_base"):
+                    base_sha = gitops.git(wt, "rev-parse", base).stdout.strip()
                     conflicts = gitops.merge_in(wt, base)            # the integration branch moved since the check
                     if conflicts:
                         return ("stop", "blocked", "merge conflict with earlier tasks in: " + ", ".join(conflicts[:5]))
-                    sha, moved = self._bind(wt, sha, "not merged", merged=True)
+                    sha, moved = self._bind(wt, sha, "not merged", merged=True, base_sha=base_sha)
                     if moved:
                         return ("stop", "blocked", moved)
                     if has_check:
