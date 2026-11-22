@@ -253,9 +253,11 @@ class Preferences:
             if r["stale"]:
                 continue
             if looks_sensitive(r["text"], strict=True):
-                key = (getattr(self.db, "path", id(self.db)), r["id"])   # per database, not per process
-                if key not in _SKIP_LOGGED:            # bounded: once per item per process, not on every prompt
-                    _SKIP_LOGGED.add(key)
+                path = getattr(self.db, "path", None)   # id(db) can be reused after GC and ":memory:" is shared:
+                key = (path, r["id"]) if path and path != ":memory:" else None   # no stable identity, no dedup
+                if key is None or key not in _SKIP_LOGGED:   # bounded: once per item per database file
+                    if key is not None:
+                        _SKIP_LOGGED.add(key)
                     logs.info("prefs", "PREF_SKIPPED_SENSITIVE", "confirmed preference kept out of instructions",
                               id=r["id"])
                 continue
@@ -267,7 +269,7 @@ class Preferences:
         return [r["text"] for r in self.usable()][:limit]
 
 
-_SKIP_LOGGED: set[tuple[object, int]] = set()
+_SKIP_LOGGED: set[tuple[str, int]] = set()
 
 
 def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:
@@ -373,7 +375,11 @@ def make_skill(prefs: Preferences):
             async def show(_a: NoArgs):
                 rows = prefs.items()
                 shown = [r for r in rows if r["state"] != "declined"]
-                data = {"items": [{k: r[k] for k in ("id", "text", "topic", "state", "stale")} for r in shown]}
+                for r in shown:              # #1099: the result reaches the model; older sensitive text stays out
+                    r["hidden"] = looks_sensitive(r["text"], strict=True)
+                    if r["hidden"]:
+                        r["text"] = f"[preference {r['id']} hidden: looks sensitive, forget it]"
+                data = {"items": [{k: r[k] for k in ("id", "text", "topic", "state", "stale", "hidden")} for r in shown]}
                 if not shown:
                     return ToolResult(True, "no learned preferences", data)
                 return ToolResult(True, "; ".join(f"{r['text']} ({r['state']})" for r in shown), data)

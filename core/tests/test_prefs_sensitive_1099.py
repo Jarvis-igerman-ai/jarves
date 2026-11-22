@@ -127,3 +127,25 @@ def test_skip_log_is_per_database(tmp_path, monkeypatch):
         p.db.x("UPDATE learned_prefs SET text=? WHERE id=1", ("my api key is handy",))
         assert p.for_prompt() == []
     assert seen.count("PREF_SKIPPED_SENSITIVE") == 2
+
+
+def test_skip_log_is_not_deduplicated_without_a_stable_db_path(monkeypatch):
+    seen = []
+    monkeypatch.setattr(prefs_mod.logs, "info", lambda *a, **k: seen.append(a[1]))
+    monkeypatch.setattr(prefs_mod, "_SKIP_LOGGED", set())
+    for _ in range(2):                          # two in-memory databases share ":memory:" and may reuse id(db)
+        p = prefs_mod.Preferences(UserDB(":memory:"))
+        p.add_confirmed("short answers in the morning")
+        p.db.x("UPDATE learned_prefs SET text=? WHERE id=1", ("my api key is handy",))
+        assert p.for_prompt() == []
+    assert seen.count("PREF_SKIPPED_SENSITIVE") == 2 and prefs_mod._SKIP_LOGGED == set()
+
+
+async def test_voice_show_hides_a_sensitive_confirmed_item_from_the_model(home):
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.add_confirmed("short answers in the morning")["item"]["id"]
+    p.db.x("UPDATE learned_prefs SET text=? WHERE id=?", ("my api key is handy", pid))   # stored before #1099
+    show = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_show")
+    r = await show.handler(None)
+    assert r.ok and "api key" not in r.message and "api key" not in repr(r.data)
+    assert r.data["items"][0]["id"] == pid and r.data["items"][0]["hidden"] is True     # still forgettable by id
