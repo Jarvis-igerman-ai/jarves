@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import unicodedata
 
@@ -62,6 +63,41 @@ def _clean(text: object, n: int) -> str:
     return " ".join(str(text or "").split())[:n]
 
 
+_CODE = re.compile(r"^([A-Z][A-Z0-9_]{2,})(?::|$)")  # a tool result code ("TOOL_X: <tool text>" or a bare code)
+_DONE = re.compile(r"^\d+/\d+ steps done\.")
+_STEP = re.compile(r"^(step \d+): (.*)$", re.S)
+# Our own fixed reasons (never tool text): privacy scrub keeps them so the owner still sees why a plan stopped.
+_OWN = ("the owner did not approve this step", "text written by others was read earlier in this plan: resume to continue",
+        "tool not available (switched off or removed)", "no approval was given for this step (no answer in time or nowhere to ask)",
+        "the arguments are too long to show in full for your approval; shorten the step", "the step timed out",
+        "the step timed out: it may already have happened", "the step failed unexpectedly", "interrupted by a restart",
+        "paused by the owner", "cancelled by the owner", "interrupted by a restart: resume when ready",
+        "the daily AI budget is used up")
+_OWN_PREFIX = ("time cap of ", "cost cap of ")
+
+
+def _private_text(text: str) -> str:
+    """#1526: an error / note at rest in privacy mode: a fixed reason stays, a tool code stays, other text goes."""
+    t = text or ""
+    if t in _OWN or t.startswith(_OWN_PREFIX):
+        return t
+    m = _CODE.match(t)
+    return m.group(1) if m else ""
+
+
+def _private_note(text: str) -> str:
+    m = _STEP.match(text or "")
+    if not m:
+        return _private_text(text)
+    rest = _private_text(m.group(2))
+    return f"{m.group(1)}: {rest}" if rest else m.group(1)
+
+
+def _private_result(text: str) -> str:
+    m = _DONE.match(text or "")
+    return m.group(0) if m else ""
+
+
 def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     s = " ".join(str(text or "").split())
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -73,6 +109,7 @@ class PlanStore:
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+        self._scrubbed = False                # #1526: scrub_if_private() already ran during this privacy-on period
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -281,6 +318,44 @@ class PlanStore:
         logs.info("goals", "PLAN_DELETED", "plan deleted", id=pid, by=by)
         return True
 
+    # ------------------------------------------------------------------ privacy at rest (#1526)
+    def scrub(self) -> int:
+        """Privacy mode: blank the tool text that older rows still hold (step evidence / error, plan result / note) in ONE
+        transaction. Status, error codes, step numbers and the done count stay. Returns how many rows changed."""
+        n = 0
+        with self.db._lock:
+            c = self.db._db
+            try:
+                for r in c.execute("SELECT id, evidence, error FROM goal_plan_steps "
+                                   "WHERE evidence != '' OR error != ''").fetchall():
+                    er = _private_text(r[2])
+                    if r[1] != "" or er != r[2]:
+                        c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (er, r[0]))
+                        n += 1
+                for r in c.execute("SELECT id, result, note FROM goal_plans WHERE result != '' OR note != ''").fetchall():
+                    res, note = _private_result(r[1]), _private_note(r[2])
+                    if (res, note) != (r[1], r[2]):
+                        c.execute("UPDATE goal_plans SET result=?, note=? WHERE id=?", (res, note, r[0]))
+                        n += 1
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+        if n:
+            logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy mode: older plan text removed", count=n)
+        return n
+
+    def scrub_if_private(self) -> int:
+        """Run scrub() once each time privacy is (or turns) on: at Core start and after the switch flips on."""
+        if not logs.privacy():
+            self._scrubbed = False
+            return 0
+        if self._scrubbed:
+            return 0
+        n = self.scrub()
+        self._scrubbed = True
+        return n
+
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:
         """After a Core start: a plan that was running is paused (the checkpoint is the step table). A read-only step
@@ -392,6 +467,7 @@ class PlanRunner:
     async def run(self, poll_s: float = 2.0) -> None:
         while not self._stop:
             try:
+                self.store.scrub_if_private()          # #1526: at Core start and within a tick of the switch turning on
                 await self.tick()
             except asyncio.CancelledError:
                 raise

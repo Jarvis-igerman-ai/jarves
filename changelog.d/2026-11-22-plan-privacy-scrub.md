@@ -1,0 +1,1 @@
+- Fixed: privacy mode now also removes tool text that plans saved before it was switched on (step evidence and error text, plan result and note); status, error codes and Jarvis's own reasons stay (#1526).

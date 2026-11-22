@@ -614,3 +614,38 @@ def test_813_runner_writes_do_not_overwrite_a_cancel(env):
     assert env.store.get(p["id"])["state"] == "cancelled"
     assert env.runner._finish(p["id"])["state"] == "cancelled"
     assert env.store._set_if(p["id"], ("ready", "running"), "running") is False
+
+
+async def test_1526_privacy_on_scrubs_plan_text_written_before_it(env, monkeypatch):
+    """#1526: rows written with privacy off keep tool text; turning privacy on blanks it once, keeping status and codes."""
+    from jarves import logs
+    monkeypatch.setattr(logs, "_privacy", False)
+    ok = env.store.propose("ok", steps(("fake_read", {"text": "secret words"})))
+    env.store.approve(ok["id"])
+    bad = env.store.propose("bad", steps(("fake_bad", {})))
+    env.store.approve(bad["id"])
+    deny = env.store.propose("deny", steps(("fake_act", {"text": "x"})))
+    env.store.approve(deny["id"])
+    env.answer = False
+    await env.runner.tick()
+    assert "secret words" in env.store.get(ok["id"])["result"] and "it broke" in env.store.get(bad["id"])["note"]
+    assert env.store.scrub_if_private() == 0                              # privacy off: nothing is touched
+
+    monkeypatch.setattr(logs, "_privacy", True)
+    assert env.store.scrub_if_private() > 0
+    o, b, d = (env.store.get(p["id"]) for p in (ok, bad, deny))
+    assert o["state"] == "done" and o["result"] == "1/1 steps done." and o["steps"][0]["evidence"] == ""
+    assert o["steps"][0]["status"] == "done"
+    assert b["state"] == "failed" and b["note"] == "step 1: X_BROKE" and b["steps"][0]["error"] == "X_BROKE"
+    assert b["steps"][0]["evidence"] == ""
+    assert d["state"] == "blocked" and d["steps"][0]["error"] == "the owner did not approve this step"   # own words stay
+    rows = env.db.rows("SELECT evidence, error FROM goal_plan_steps") + env.db.rows("SELECT result, note FROM goal_plans")
+    assert not any("secret" in str(v) or "broke" in str(v) for r in rows for v in r.values())
+    assert env.store.scrub() == 0                                         # idempotent: codes and own words survive a rerun
+    assert env.store.scrub_if_private() == 0                              # once per privacy-on period
+
+    monkeypatch.setattr(logs, "_privacy", False)
+    assert env.store.scrub_if_private() == 0
+    env.db.x("UPDATE goal_plan_steps SET evidence='again' WHERE plan_id=?", (ok["id"],))
+    monkeypatch.setattr(logs, "_privacy", True)                           # the switch turns on again: scrubbed again
+    assert env.store.scrub_if_private() == 1 and env.store.get(ok["id"])["steps"][0]["evidence"] == ""
