@@ -255,3 +255,58 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+PLANT = '[filter "evil"]\n\tclean = sh -c "touch pwned"\n'
+
+
+def test_a_check_command_that_writes_the_shared_git_config_is_rejected_and_undone(tmp_path):
+    """#1592: the check command runs agent-written code; a planted config entry is restored and the check fails."""
+    import sys
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    argv = [sys.executable, "-c", f"open({str(cfg)!r}, 'a').write({PLANT!r})"]
+    ok, out = gitops.run_check(repo, argv)
+    assert not ok and "shared git config" in out
+    assert cfg.read_bytes() == before
+
+
+def test_git_calls_restore_the_shared_config_while_a_run_is_active(tmp_path):
+    """#1592: another task's git call during a run never reads an entry the run planted; the run is flagged."""
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+    with gitops.config_guard(repo) as guard:
+        cfg.write_bytes(before + PLANT.encode())
+        gitops.git(repo, "status")
+        assert cfg.read_bytes() == before
+    assert guard["changed"] and not gitops._GUARDS
+
+
+def test_an_unchanged_config_passes_the_guard(tmp_path):
+    repo = _repo(tmp_path)
+    ok, _ = gitops.run_check(repo, ["git", "--version"])
+    assert ok and not gitops._GUARDS
+
+
+def test_an_agent_run_that_writes_the_shared_git_config_is_rejected_and_undone(tmp_path):
+    """#1592: the agent itself (or a check it runs through its allowed Bash rule) plants a config entry."""
+    import sys
+    from jarves.projectmgr import runners
+    repo = _repo(tmp_path)
+    cfg = repo / ".git" / "config"
+    before = cfg.read_bytes()
+
+    class Planter(runners.Runner):
+        name = "planter"
+
+        def build(self, prompt, cwd, **kw):
+            return runners.Spec([sys.executable, "-c", f"open({str(cfg)!r}, 'a').write({PLANT!r})"], None, {})
+
+        def parse(self, stdout, rc):
+            return runners.Result(ok=rc == 0, text="done")
+
+    r = Planter().run("x", str(repo))
+    assert not r.ok and "shared git config" in r.error
+    assert cfg.read_bytes() == before

@@ -103,6 +103,13 @@ class Runner:
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
+        with gitops.config_guard(cwd) as guard:        # #1592: agent-run code may not change the shared git config
+            r = self._spawn(spec, cwd, timeout, on_start, cancel)
+        if guard["changed"]:
+            return Result(error="the agent changed the shared git config: it was restored and the run rejected (#1592)")
+        return r
+
+    def _spawn(self, spec: Spec, cwd: str, timeout: float, on_start, cancel: threading.Event | None) -> Result:
         try:
             p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,

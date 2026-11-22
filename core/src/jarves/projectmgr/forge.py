@@ -7,11 +7,15 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 from . import gitops
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
+PUSH_BASE = "https://github.com/"        # the only push target (#1595); tests point it at a local folder
+_SLUG_OK = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 
 
@@ -68,11 +72,24 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
-def push_branch(path: str, branch: str) -> None:
-    """A normal push of one branch to origin (never --force, never a tag, never the default branch)."""
+def push_branch(path: str, branch: str, slug: str) -> None:
+    """A normal push of one branch (never --force, never a tag, never the default branch) to the pinned
+    `https://github.com/<slug>.git`; `slug` comes from the caller's trusted record, not the shared config (#1595).
+    The push runs from a private throw-away repository that borrows the project's objects (alternates), so no
+    repository-scope key in the shared, agent-writable config is read: no `url.*.insteadOf`/`pushInsteadOf`,
+    `http.proxy`, `http.sslVerify`, `http.<url>.*` or remote URL. The owner's global/system config (credential
+    helper) and environment still apply."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    gitops.git(path, "push", "--no-verify", "origin", f"{branch}:{branch}", timeout=300, ident=False)
+    if not _SLUG_OK.match(slug or "") or ".." in slug:
+        raise ForgeError("push target must be owner/repo")
+    sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
+    objects = (Path(path) / gitops.git(path, "rev-parse", "--git-path", "objects").stdout.strip()).resolve()
+    with tempfile.TemporaryDirectory(prefix="jarves-push-") as d:
+        gitops.git(d, "init", "-q", "--bare", ident=False)
+        (Path(d) / "objects" / "info" / "alternates").write_text(str(objects) + "\n", encoding="utf-8")
+        gitops.git(d, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
+                   ident=False)
 
 
 def create_pr(path: str, head: str, base: str, title: str, body: str) -> str:

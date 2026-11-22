@@ -4,6 +4,7 @@ folder). The owner's checkout is never touched: the integration branch `jarves/p
 merges are fast-forward only after the check ran on the merged result. JARVES never pushes."""
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import os
 import re
@@ -79,6 +80,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
     config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    if _GUARDS:
+        check_guards()                    # #1592: never read an entry a running agent or check planted
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -89,6 +92,71 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
+
+
+# #1592: agent-written code (the agent, its tests, the check command) runs as the owner's user and can write the
+# repository's shared `.git/config` (a `filter.<n>.clean` entry runs a command on the next JARVES or owner git call).
+# While such code runs, the config is guarded: a copy taken when the run starts; every JARVES git call and the end of the
+# run compare and restore it, and the run is rejected. Every run active on that repository is rejected, because the
+# writer cannot be told apart. Not an OS sandbox: a process the run leaves behind can still write after it ends.
+_GUARDS: dict[str, dict] = {}            # config path -> {"data": trusted bytes, "runs": [state dicts]}
+_GUARDS_LOCK = threading.RLock()
+
+
+def _shared_config(wt: str | Path) -> Path | None:
+    p = git(wt, "rev-parse", "--git-common-dir", check=False)
+    common = p.stdout.strip()
+    return (Path(wt) / common).resolve() / "config" if p.returncode == 0 and common else None
+
+
+def _restore(path: Path, data: bytes) -> None:
+    tmp = path.with_name(f"config.jarves-{os.getpid()}-{threading.get_ident()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def check_guards() -> bool:
+    """Restore every guarded shared config that changed; True when one did (its active runs are marked)."""
+    hit = False
+    with _GUARDS_LOCK:
+        for key, g in _GUARDS.items():
+            try:
+                same = Path(key).read_bytes() == g["data"]
+            except FileNotFoundError:
+                same = False
+            if not same:
+                _restore(Path(key), g["data"])
+                for st in g["runs"]:
+                    st["changed"] = True
+                hit = True
+    return hit
+
+
+@contextlib.contextmanager
+def config_guard(wt: str | Path):
+    """Guard the shared git config of the repository at `wt` while agent-written code runs. Yields a dict whose
+    "changed" is True after the block when the config was changed (it is already restored). Not a repository: no-op."""
+    state = {"changed": False}
+    try:
+        path = _shared_config(wt)
+    except (OSError, subprocess.SubprocessError):
+        path = None
+    if path is None or not path.is_file():
+        yield state
+        return
+    key = str(path)
+    with _GUARDS_LOCK:
+        check_guards()
+        g = _GUARDS.setdefault(key, {"data": path.read_bytes(), "runs": []})
+        g["runs"].append(state)
+    try:
+        yield state
+    finally:
+        with _GUARDS_LOCK:
+            check_guards()
+            g["runs"].remove(state)
+            if not g["runs"]:
+                del _GUARDS[key]
 
 
 def is_repo(path: str) -> bool:
@@ -256,13 +324,18 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
-    try:
-        p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
+    with config_guard(wt) as guard:
+        try:
+            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
+                               env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired:
+            p = None
+        except OSError as e:
+            return False, f"check could not start: {e}"
+    if guard["changed"]:
+        return False, "the check changed the shared git config: it was restored and the check failed (#1592)"
+    if p is None:
         return False, "check timed out"
-    except OSError as e:
-        return False, f"check could not start: {e}"
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
 
