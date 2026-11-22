@@ -46,8 +46,10 @@ _SENSITIVE = re.compile(
     r"password|passcode|\bpin\b|credit\s*card|\bssn\b|\biban\b|salary|diagnos|medicat|prescription|"
     r"\d{6,}|\d[\d -]{10,}\d|"
     # #1099: well-known credential prefixes (a real key in any text is refused, whoever stores it). `bearer` and `sk-`
-    # values must hold a digit, so wording like "bearer instrument/bond-terms" or "sk-learn-pipeline" passes.
-    r"\bbearer\s+(?=[a-z0-9._~+/-]*\d)[a-z0-9._~+/-]{16,}|\bsk-(?=[a-z0-9_-]*\d)[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|"
+    # values must hold a digit (an `sk-` value: 20+ chars mixing upper, lower and digits), so wording like
+    # "bearer instrument/bond-terms", "sk-learn-pipeline" or "sk-2024-rollout-plan" passes.
+    r"\bbearer\s+(?=[a-z0-9._~+/-]*\d)[a-z0-9._~+/-]{16,}|"
+    r"\bsk-(?-i:(?=[\w-]*\d)(?=[\w-]*[A-Z])(?=[\w-]*[a-z])[A-Za-z0-9_-]{20,})|\bgh[pousr]_[a-z0-9]{20,}|\bakia[0-9a-z]{16}\b|"
     r"\baiza[0-9a-z_-]{20,}|\bxox[abprs]-[a-z0-9-]{10,}|\b(?-i:eyJ)[a-z0-9_-]{8,}\.|-----begin [a-z ]*private key", re.I)
 # #1099, preference path only (`strict=True`): key/token wording and random-looking strings. Goals and dev drafts may
 # legitimately say "add API key support" or carry commit SHAs, UUIDs and code ids, so they keep the rules above.
@@ -58,7 +60,10 @@ _TOKEN_RUN = re.compile(r"[A-Za-z0-9+=]{20,}")   # split at _ - . / so snake_cas
 # Standard base64 may contain '/', which _TOKEN_RUN splits at; a slash run counts only when the whole run looks random
 # AND some segment is not word-shaped, so paths like /Users/Igal/Projects2 still pass.
 _B64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}")
-_WORDISH = re.compile(r"(?:[A-Z]?[a-z]+|[A-Z]{2,}(?![a-z])|\d+)+")
+# URL-safe base64 splits at '-'/'_' in _TOKEN_RUN; a 32+ run counts under the same rule as a '/' run.
+_URLSAFE_RUN = re.compile(r"[A-Za-z0-9_-]{32,}")
+_WORD_PIECE = r"[A-Z]?[a-z]+|[A-Z]{2,}(?![a-z])|\d+"
+_WORDISH = re.compile(f"(?:{_WORD_PIECE})+")
 _HEX_RUN = re.compile(r"\b[0-9a-f]{32,}\b", re.I)
 _MIN_ENTROPY = 3.5                 # bits per character for letter+digit runs
 _MIN_ENTROPY_LETTERS = 4.0         # stricter for letter-only runs (24+ chars, mixed case), so CamelCase words pass
@@ -70,7 +75,15 @@ def _entropy(s: str) -> float:
     return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
 
 
+def _word_shaped(run: str) -> bool:
+    """CamelCase words with a number ("MyHomeAssistant2024Setup"): word pieces of 3+ chars on average."""
+    pieces = re.findall(_WORD_PIECE, run)
+    return bool(_WORDISH.fullmatch(run)) and len(run) / len(pieces) >= 3
+
+
 def _random_run(run: str) -> bool:
+    if _word_shaped(run):
+        return False
     lower, upper = any(c.islower() for c in run), any(c.isupper() for c in run)
     digits = sum(c.isdigit() for c in run)
     if digits and lower and upper:
@@ -86,16 +99,17 @@ def _mixed(seg: str) -> bool:
     return len(seg) >= 6 and any(c.isdigit() for c in seg) and seg.lower() != seg != seg.upper()
 
 
-def _b64_run(run: str) -> bool:
-    segs = run.split("/")
-    return ("/" in run and _random_run(run.replace("/", ""))
+def _joined_run(run: str, seps: str) -> bool:
+    segs = re.split(f"[{re.escape(seps)}]", run)
+    return (len(segs) > 1 and _random_run("".join(segs))
             and (sum(map(_mixed, segs)) >= 2       # 2+ pieces that each mix upper, lower and digits
                  or any(len(seg) > 2 and not _WORDISH.fullmatch(seg) for seg in segs)))
 
 
 def _high_entropy(text: str) -> bool:
     return (bool(_HEX_RUN.search(text)) or any(_random_run(r) for r in _TOKEN_RUN.findall(text))
-            or any(_b64_run(r) for r in _B64_RUN.findall(text)))
+            or any(_joined_run(r, "/") for r in _B64_RUN.findall(text))
+            or any(_joined_run(r, "-_") for r in _URLSAFE_RUN.findall(text)))
 
 
 def looks_sensitive(text: str, *, strict: bool = False) -> bool:
@@ -239,7 +253,7 @@ class Preferences:
             if r["stale"]:
                 continue
             if looks_sensitive(r["text"], strict=True):
-                key = (self.db.path, r["id"])         # per database: two DBs in one process log separately
+                key = (getattr(self.db, "path", id(self.db)), r["id"])   # per database, not per process
                 if key not in _SKIP_LOGGED:            # bounded: once per item per process, not on every prompt
                     _SKIP_LOGGED.add(key)
                     logs.info("prefs", "PREF_SKIPPED_SENSITIVE", "confirmed preference kept out of instructions",
@@ -253,7 +267,7 @@ class Preferences:
         return [r["text"] for r in self.usable()][:limit]
 
 
-_SKIP_LOGGED: set[tuple[str, int]] = set()
+_SKIP_LOGGED: set[tuple[object, int]] = set()
 
 
 def prompt_block(prefs: "Preferences", limit_tokens: int = PROMPT_TOKENS) -> str:

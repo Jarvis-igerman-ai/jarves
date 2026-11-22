@@ -5,7 +5,7 @@ import pytest
 
 from jarves import goals as goals_mod
 from jarves import preferences as prefs_mod
-from jarves.userdata import open_db
+from jarves.userdata import UserDB, open_db
 
 _TAIL = "Q7xLm2Vb9KpR4tZw8NcH3yFd"
 # Real key shapes: refused for EVERY caller (preferences, goals, plans, dev drafts).
@@ -34,6 +34,7 @@ PREF_ONLY_SECRETS = [
     "k3j9x2m8q7w4z1p6r5t0y8u2",                                  # lowercase base36, digit-heavy
     "secret DrKq1pph8cKb/gjxx4X" + "UgsJchO39r3",                  # standard base64 with '/': pieces under 20 chars
     "token Ab3Cd9Ef2Gh/Kl7Mn4Pq8Rs1",                            # base64 with '/': every piece word-shaped (R2)
+    "token Q7xLm2Vb-9KpR4tZw_8NcH3yFd-k2Jq8",                   # URL-safe base64: '-'/'_' pieces under 20 chars
 ]
 # Ordinary text: allowed on BOTH paths.
 SAFE_TEXTS = [
@@ -56,6 +57,9 @@ SAFE_TEXTS = [
     "copy to C:/Work/Jarvis/Core/Src2",
     "build it as a sk-learn-pipeline step",                      # scikit-learn short name, no digit after 'sk-'
     "a bearer instrument/bond-terms summary",                    # finance wording, no digit after 'bearer'
+    "my MyHomeAssistant2024Setup hub",                           # CamelCase device id with a year
+    "fix sk-2024-rollout-plan first",                            # lowercase id after 'sk-'
+    "keep my_project_folder_v2_backup_2026_final",               # 32+ snake_case run
 ]
 
 
@@ -118,7 +122,7 @@ def test_skip_log_is_per_database(tmp_path, monkeypatch):
     monkeypatch.setattr(prefs_mod.logs, "info", lambda *a, **k: seen.append(a[1]))
     monkeypatch.setattr(prefs_mod, "_SKIP_LOGGED", set())
     for name in ("a.db", "b.db"):                                # same row id 1 in two databases
-        p = prefs_mod.Preferences(prefs_mod.UserDB(tmp_path / name))
+        p = prefs_mod.Preferences(UserDB(tmp_path / name))
         p.add_confirmed("short answers in the morning")
         p.db.x("UPDATE learned_prefs SET text=? WHERE id=1", ("my api key is handy",))
         assert p.for_prompt() == []
