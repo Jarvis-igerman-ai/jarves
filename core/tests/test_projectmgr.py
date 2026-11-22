@@ -1509,6 +1509,41 @@ def test_owner_merge_never_merges_a_branch_moved_after_the_approval_check(env, m
     assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
 
 
+@pytest.mark.parametrize("owner", [True, False])
+def test_a_commit_after_the_fast_forward_is_never_deleted_with_the_task_branch(env, monkeypatch, owner):
+    """JAR-678 (#1561 review R1): a commit landing on the task branch after the exact-commit fast-forward is kept:
+    an owner merge asks again naming it, an agent merge stops with the folder kept; the branch is never deleted."""
+    m, repo, home = env
+    if owner:
+        t, wt = _owner_merge_waiting(m, repo)
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+    else:
+        open_project(m, repo)
+        task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+        m.call("resume", project="demo")
+    real = gitops.fast_forward
+
+    def racing(integ, ref):
+        real(integ, ref)
+        wt = Path(m.db.by_seq(1, 1)["worktree"])
+        (wt / "late.txt").write_text("late\n")
+        gitops.commit_all(wt, "late")                               # lands after the final tip check
+    monkeypatch.setattr(gitops, "fast_forward", racing)
+    finish(m)
+    t = m.db.by_seq(1, 1)
+    assert t["worktree"] and (Path(t["worktree"]) / "late.txt").exists(), t
+    assert sh(repo, "git", "log", "-1", "--format=%s", t["branch"]).strip() == "late"
+    assert not (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+    if owner:
+        assert t["status"] == "waiting" and "changed after your approval" in t["waiting"], t
+        monkeypatch.setattr(gitops, "fast_forward", real)
+        assert m.call("answer", project="demo", task=1, answer="approve")["ok"]
+        finish(m)
+        assert (gitops.project_root(home, 1) / "integration" / "late.txt").exists()
+    else:
+        assert t["status"] != "done" and "moved during the merge" in (t["reason"] or ""), t
+
+
 def test_owner_merge_approval_stores_the_commit_it_checked(env, monkeypatch):
     """#1407 review round 2 R1: a commit landing between the approval check and storing it is never approved."""
     m, repo, home = env

@@ -606,6 +606,10 @@ class StageEngine:
                                           reason="the check failed after merging newer work: " + clean(out, 120))
                             return ("end",)
                 gitops.fast_forward(self._integration(p), tip)      # the exact commit, never the branch name
+                if self._tree(t) != (tip, False):                   # a later commit or edit: never delete it (R1)
+                    return self._repark_merge(t) if approved else \
+                        ("stop", "blocked", f"the task branch moved during the merge; merged commit {tip[:12]}, "
+                                            f"later work kept in {wt}")
             except gitops.GitError as e:
                 return ("stop", "failed", f"merge failed: {clean(e, 200)}")
         stat, sha = t["result"], tip[:12]
