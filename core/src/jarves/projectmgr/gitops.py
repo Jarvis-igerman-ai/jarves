@@ -8,6 +8,7 @@ import fnmatch
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -125,7 +126,7 @@ def ensure_integration(home: Path, repo: str, pid: int, base: str = "") -> Path:
         return wt
     wt.parent.mkdir(parents=True, exist_ok=True)
     start = base or "HEAD"
-    with _jarves_writes(), _repo_lock(repo):
+    with _repo_lock(repo):
         if git(repo, "rev-parse", "--verify", "--quiet", br, check=False).returncode == 0:
             git(repo, "worktree", "add", str(wt), br)
         else:
@@ -137,7 +138,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
     """A fresh worktree on a fresh branch from the CURRENT integration branch (earlier tasks' code is in it)."""
     br = task_branch(pid, seq, attempt)
     wt = project_root(home, pid) / "wt" / f"t{seq}-a{attempt}"
-    with _jarves_writes(), _repo_lock(repo):
+    with _repo_lock(repo):
         remove_worktree(repo, wt, br)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "--no-track", "-b", br, str(wt), integration_branch(pid))
@@ -147,7 +148,7 @@ def new_task_worktree(home: Path, repo: str, pid: int, seq: int, attempt: int) -
 def detached_worktree(home: Path, repo: str, pid: int, sha: str) -> Path:
     """A throw-away worktree at one exact commit (a release runs there, never in your folder)."""
     wt = project_root(home, pid) / "release" / sha[:12]
-    with _jarves_writes(), _repo_lock(repo):
+    with _repo_lock(repo):
         remove_worktree(repo, wt)
         wt.parent.mkdir(parents=True, exist_ok=True)
         git(repo, "worktree", "add", "--detach", str(wt), sha)
@@ -158,7 +159,7 @@ def remove_worktree(repo: str, wt: Path, branch: str = "") -> None:
     """Only ever called for paths under <home>/projects (callers build them); a missing one is fine."""
     if "projects" not in Path(wt).parts:
         raise GitError("refusing to remove a folder outside the JARVES projects area")
-    with _jarves_writes(), _repo_lock(repo):
+    with _repo_lock(repo):
         git(repo, "worktree", "remove", "--force", str(wt), check=False)
         if Path(wt).exists():
             shutil.rmtree(wt, ignore_errors=True)
@@ -264,13 +265,18 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 # guard compares, so nothing can write after the run ends. NOT on Windows or macOS (UNVERIFIED there, tracked in
 # #1665): a detached descendant can still write after the run, which is not seen. Also not guarded: ~/.gitconfig and
 # config include targets; a change undone before the run ends is not seen. Any change during a run is reverted, the
-# owner's own `git config` in that repository included (the text is kept); JARVES's own worktree calls write no config
-# (`--no-track`) and re-take the snapshot (`_jarves_writes`).
+# owner's own `git config` in that repository included (the text is kept). JARVES's own worktree calls never change a
+# guarded file (`--no-track`: no `branch.*` entry), so the snapshot is never re-taken during a run: a write timed to
+# land during a JARVES call is still undone. A file over SNAP_CAP is never read whole: one at the start refuses the
+# run, one at the end counts as a change. At most KEEP_REJECTED copies (each at most SNAP_CAP) are kept.
+SNAP_CAP = 1 << 20
+KEEP_REJECTED = 20
 GUARDED_FILES = ("config", "config.worktree", "info/attributes")
 _GUARDS: dict[str, dict] = {}
 _GUARDS_LOCK = threading.RLock()
 TAMPERED = "changed the shared git config; the change was undone"
 _REAPER = str(Path(__file__).with_name("_reaper.py"))
+REAPER_TIMEOUT = "jarves-reaper: the run timed out"            # the reaper's last stderr line (exit 124)
 
 
 def guarded_files(wt: str | Path) -> list[tuple[str, str, str]]:
@@ -296,9 +302,11 @@ def guarded_files(wt: str | Path) -> list[tuple[str, str, str]]:
 
 
 def _read(path: str):
+    """(first SNAP_CAP bytes, mode, full size) or None for a missing file; never reads more than SNAP_CAP + 1."""
     try:
         with open(path, "rb") as f:
-            return f.read(), os.stat(path).st_mode & 0o7777
+            st = os.fstat(f.fileno())
+            return f.read(SNAP_CAP), st.st_mode & 0o7777, st.st_size
     except FileNotFoundError:
         return None
 
@@ -318,7 +326,10 @@ def _reject(rej: str, path: str, now) -> None:
     os.makedirs(rej, exist_ok=True)
     fd, _ = tempfile.mkstemp(prefix=time.strftime("%Y%m%d-%H%M%S-") + os.path.basename(path) + "-", dir=rej)
     with os.fdopen(fd, "wb") as f:
-        f.write(now[0])
+        f.write(now[0])                                  # at most SNAP_CAP bytes
+    kept = sorted(os.scandir(rej), key=lambda e: (e.stat().st_mtime, e.name))
+    for old in kept[:-KEEP_REJECTED]:                    # the oldest go first
+        os.remove(old.path)
 
 
 def _put(path: str, data) -> None:
@@ -354,7 +365,16 @@ def config_guard(files: list[tuple[str, str, str]]):
     mark: dict = {"tampered": False}
     with _GUARDS_LOCK:
         for path, kind, rej in files:
-            _GUARDS.setdefault(path, {"kind": kind, "rej": rej, "data": _snap(path, kind), "marks": []})["marks"].append(mark)
+            if path not in _GUARDS:
+                data = _snap(path, kind)
+                if any(d and d[2] > SNAP_CAP for d in ([data] if kind == "file" else data.values())):
+                    for p2, _k, _r in files[:files.index((path, kind, rej))]:    # undo this run's registrations
+                        _GUARDS[p2]["marks"].remove(mark)
+                        if not _GUARDS[p2]["marks"]:
+                            del _GUARDS[p2]
+                    raise GitError(f"{path} is too large to guard")
+                _GUARDS[path] = {"kind": kind, "rej": rej, "data": data, "marks": []}
+            _GUARDS[path]["marks"].append(mark)
     try:
         yield mark
     finally:
@@ -375,21 +395,22 @@ def config_guard(files: list[tuple[str, str, str]]):
 
 
 @contextmanager
-def _jarves_writes():
-    """JARVES's own worktree calls: an unchanged guarded file takes its new content as the snapshot (R3 of #1592)."""
-    with _GUARDS_LOCK:
-        before = {k: _snap(k, g["kind"]) for k, g in _GUARDS.items()}
-        try:
-            yield
-        finally:
-            for k, g in _GUARDS.items():
-                if before.get(k) == g["data"]:
-                    g["data"] = _snap(k, g["kind"])
+def term_blocked(on: bool = True):
+    """SIGTERM blocked in this thread while a reaper starts: the child inherits the mask, and the reaper unblocks it
+    only after its handler is in place, so an early SIGTERM is never the default (die, leaving its processes)."""
+    if not on or not hasattr(signal, "pthread_sigmask"):
+        yield
+        return
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old)
 
 
 def contain(argv: list[str], timeout: float = 0) -> tuple[list[str], bool]:
     """On Linux: argv run under `_reaper.py`, a child subreaper that kills every process the run left behind (a
-    detached one too) before it exits; exit 124 = it hit `timeout`. Elsewhere argv is unchanged (see #1592 above)."""
+    detached one too) before it exits; REAPER_TIMEOUT on stderr = it hit `timeout`. Elsewhere argv is unchanged (see #1592 above)."""
     if not sys.platform.startswith("linux"):
         return list(argv), False
     return [sys.executable, "-I", _REAPER, str(float(timeout)), *argv], True
@@ -413,10 +434,10 @@ def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[st
                 p = subprocess.run(cmd, cwd=str(wt), capture_output=True, text=True,
                                    timeout=timeout + 30 if contained else timeout, creationflags=_NOWIN,
                                    env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
-                timed_out = contained and p.returncode == 124
+                timed_out = contained and p.returncode == 124 and (p.stderr or "").rstrip().endswith(REAPER_TIMEOUT)
             except subprocess.TimeoutExpired:
                 timed_out = True
-    except OSError as e:
+    except (GitError, OSError) as e:
         return False, f"check could not start: {e}"
     if timed_out:
         return False, "check timed out" + (f"; it {TAMPERED} {guard.get('error', '')}".rstrip() if guard["tampered"] else "")

@@ -1,7 +1,9 @@
 """#1592: a check command (run by JARVES or by the agent) executes worktree code that could write the shared git config."""
 from __future__ import annotations
 
+import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -165,7 +167,8 @@ def test_an_agent_run_without_a_check_command_is_not_guarded(tmp_path):
 
 
 # A check that leaves a detached grandchild (its own session) behind: the grandchild writes its pid, waits for `go`,
-# then plants the entry. The parent exits as soon as the pid is written, so the run ends while the grandchild lives.
+# then plants the entry. The parent exits as soon as the pid is written (or, with a 5th argument, waits for that file:
+# the run is then cancelled), so the run ends while the grandchild lives.
 GRANDCHILD = """import os, sys
 open(sys.argv[2] + '.tmp', 'w').write(str(os.getpid()))
 os.replace(sys.argv[2] + '.tmp', sys.argv[2])
@@ -174,9 +177,9 @@ while not os.path.exists(sys.argv[3]):
 open(sys.argv[1], 'a').write('[filter "x"]\\n\\tclean = evil\\n')
 """
 PARENT = """import os, subprocess, sys
-subprocess.Popen([sys.executable, sys.argv[1], *sys.argv[2:]], start_new_session=True,
+subprocess.Popen([sys.executable, *sys.argv[1:5]], start_new_session=True,
                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-while not os.path.exists(sys.argv[3]):
+while not os.path.exists(sys.argv[5] if len(sys.argv) > 5 else sys.argv[3]):
     pass
 """
 
@@ -190,7 +193,7 @@ def _alive(pid: int) -> bool:
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
-@pytest.mark.parametrize("via", ["check", "agent"])
+@pytest.mark.parametrize("via", ["check", "agent", "agent-cancelled"])
 def test_a_detached_grandchild_cannot_write_after_the_run_ends(tmp_path, via):
     wt, cfg = _wt(tmp_path)
     before, pidf, go, child = cfg.read_bytes(), tmp_path / "pid", tmp_path / "go", tmp_path / "child.py"
@@ -198,8 +201,82 @@ def test_a_detached_grandchild_cannot_write_after_the_run_ends(tmp_path, via):
     argv = [sys.executable, "-c", PARENT, str(child), str(cfg), str(pidf), str(go)]
     if via == "check":
         gitops.run_check(wt, argv)
-    else:
+    elif via == "agent":
         _Script(argv).run("p", str(wt), check_argv=["python", "-m", "pytest"])
+    else:                                            # the parent never ends; cancel once the grandchild is up
+        cancel = threading.Event()
+        threading.Thread(target=lambda: (_wait_for(pidf), cancel.set()), daemon=True).start()
+        r = _Script([*argv, str(tmp_path / "never")]).run("p", str(wt), check_argv=["x"], cancel=cancel)
+        assert r.error == "cancelled"
     pid = int(pidf.read_text(encoding="utf-8"))
     go.touch()                                       # a surviving grandchild would now plant the entry
     assert not _alive(pid) and cfg.read_bytes() == before
+
+
+def _wait_for(path: Path) -> None:
+    while not (path.exists() and path.read_text(encoding="utf-8")):
+        threading.Event().wait(0.01)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
+def test_a_sigterm_right_at_start_still_lets_the_reaper_clean_up():
+    """R2: the reaper starts with SIGTERM blocked, so a SIGTERM before its handler exists is handled, not fatal."""
+    with gitops.term_blocked():
+        p = subprocess.Popen(gitops.contain([sys.executable, "-c", "import time; time.sleep(60)"])[0])
+    p.terminate()                                    # long before the reaper's interpreter has started
+    assert p.wait(30) == 143                         # handled: the default action would give -15
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
+def test_a_check_that_exits_124_itself_is_not_reported_as_timed_out(tmp_path):
+    wt, _cfg = _wt(tmp_path)
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", "raise SystemExit(124)"])
+    assert not ok and not out.startswith("check timed out")
+
+
+def test_the_reaper_and_gitops_agree_on_the_timeout_line():
+    from jarves.projectmgr import _reaper
+    assert _reaper.TIMEOUT == gitops.REAPER_TIMEOUT
+
+
+def test_a_write_timed_to_land_during_a_jarves_worktree_call_is_still_undone(tmp_path, monkeypatch):
+    wt, cfg = _wt(tmp_path)
+    before, real = cfg.read_bytes(), gitops.git
+
+    def git(cwd, *args, **kw):
+        if args[:2] == ("worktree", "add"):
+            cfg.write_text(cfg.read_text(encoding="utf-8") + PLANT, encoding="utf-8")   # lands during the call
+        return real(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", git)
+    with gitops.config_guard(gitops.guarded_files(wt)) as mark:
+        gitops.new_task_worktree(tmp_path / "home", str(cfg.parent.parent), 1, 3, 1)
+    assert mark["tampered"] and cfg.read_bytes() == before
+
+
+def test_an_oversized_file_is_never_read_whole_and_counts_as_a_change(tmp_path, monkeypatch):
+    wt, cfg = _wt(tmp_path)
+    monkeypatch.setattr(gitops, "SNAP_CAP", 8192)
+    before = cfg.read_bytes()
+    ok, out = gitops.run_check(wt, _append(cfg, "#" * 20_000))
+    assert not ok and gitops.TAMPERED in out and cfg.read_bytes() == before
+    assert [f.stat().st_size for f in _rejected(cfg)] == [8192]          # the kept copy is capped too
+
+
+def test_a_guarded_file_already_too_large_refuses_the_run(tmp_path, monkeypatch):
+    wt, cfg = _wt(tmp_path)
+    monkeypatch.setattr(gitops, "SNAP_CAP", 8192)
+    (cfg.parent / "hooks" / "big").write_bytes(b"x" * 9000)
+    marker = tmp_path / "ran"
+    ok, out = gitops.run_check(wt, _append(marker, "x"))
+    assert not ok and "too large to guard" in out and not marker.exists() and gitops._GUARDS == {}
+    r = _Script(_append(marker, "x")).run("p", str(wt), check_argv=["x"])
+    assert not r.ok and "too large to guard" in r.error and not marker.exists()
+
+
+def test_only_the_newest_rejected_copies_are_kept(tmp_path, monkeypatch):
+    wt, cfg = _wt(tmp_path)
+    monkeypatch.setattr(gitops, "KEEP_REJECTED", 2)
+    for word in ("one", "two", "three"):
+        assert not gitops.run_check(wt, _append(cfg, f"# {word}\n"))[0]
+    texts = "".join(f.read_text(encoding="utf-8") for f in _rejected(cfg))
+    assert len(_rejected(cfg)) == 2 and "one" not in texts and "three" in texts

@@ -110,8 +110,11 @@ class Runner:
             files = gitops.guarded_files(cwd)
         except (gitops.GitError, OSError) as e:
             return Result(error=f"refused: the shared git config cannot be guarded ({e})")
-        with gitops.config_guard(files) as guard:       # contained on Linux: no process outlives the comparison
-            r = self._spawn(spec, cwd, timeout, on_start, cancel, contained=True)
+        try:
+            with gitops.config_guard(files) as guard:   # contained on Linux: no process outlives the comparison
+                r = self._spawn(spec, cwd, timeout, on_start, cancel, contained=True)
+        except gitops.GitError as e:                     # e.g. a guarded file too large to snapshot
+            return Result(error=f"refused: {e}")
         if guard["tampered"]:
             r.ok, r.error = False, f"{self.name} run {gitops.TAMPERED} {guard.get('error', '')}".strip()
         return r
@@ -120,10 +123,11 @@ class Runner:
                contained: bool = False) -> Result:
         argv, contained = gitops.contain(spec.argv) if contained else (spec.argv, False)
         try:
-            p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
-                                 creationflags=_NOWIN, encoding="utf-8", errors="replace",
-                                 start_new_session=(os.name != "nt"))
+            with gitops.term_blocked(contained):       # #1592: an early SIGTERM must reach the reaper's handler
+                p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,
+                                     creationflags=_NOWIN, encoding="utf-8", errors="replace",
+                                     start_new_session=(os.name != "nt"))
         except OSError as e:
             return Result(error=f"could not start {self.name}: {e}")
         if on_start:
