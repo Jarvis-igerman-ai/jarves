@@ -16,6 +16,13 @@ LEAKY = [
     "תזכור את הטוקן שלי",                                      # Hebrew "token"
     "המפתח הסודי נמצא אצלי",                                   # Hebrew "secret key"
     "the value Zq8LmP2vT9xRk4NwB7yHc3Fd",                     # 24-char mixed-case + digit high-entropy run
+    "the value PCB9t2039bicBTW5ZE9LFaez",                     # few class switches, near-maximal entropy (review 2 R2)
+    "remember my api token",                                  # review 2 R1: more credential phrases
+    "store the api secret here",
+    "the secret token is on the fridge",
+    "copy my session token",
+    "my credentials are in the notebook",
+    "המפתח שלי נמצא במגירה",                                   # Hebrew "my key"
 ]
 
 SAFE = [
@@ -28,6 +35,10 @@ SAFE = [
     "the bearer of bad news",                                 # bare "bearer" is not a credential word (review R3)
     "open core/src/jarves/guides/data/Feature2.toml",         # path: separators are not class switches (review R4)
     "slug my-Post-2026-Title-Draft-v3-final",                 # dashed slug with digits (review R4)
+    "call getUserProfileByIdV2Handler next",                  # identifiers stay under the entropy rule (review 2 R2)
+    "parse it with XMLHttpRequest2ResponseParser",
+    "use GPT4oMiniRealtimePreview2024 for voice",
+    "see docs/reviews/SWV4_P_PERF_BUDGETS first",            # path segments are short, not near-max entropy
 ]
 
 

@@ -11,8 +11,10 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
+from collections import Counter
 
 from pydantic import BaseModel, Field
 
@@ -70,20 +72,36 @@ def _base32(text: str) -> bool:
 
 # #1099: credential words (the plain word "token(s)" alone is not one) and high-entropy key-like runs.
 _CRED_WORD = re.compile(
-    r"\b(?:api[\s_-]?key|access[\s_-]?(?:token|key)|refresh[\s_-]?token|auth[\s_-]?token|secret[\s_-]?key|"
-    r"private[\s_-]?key|client[\s_-]?secret|bearer\s+(?:token|auth))s?\b|"
-    r"טוקן|מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+ה(?:סודי|פרטי)",
+    r"\b(?:api[\s_-]?(?:key|token|secret)|access[\s_-]?(?:token|key)|(?:refresh|auth|secret|session)[\s_-]?token|"
+    r"secret[\s_-]?key|private[\s_-]?key|client[\s_-]?secret|bearer\s+(?:token|auth)|credential)s?\b|"
+    r"טוקן|מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+(?:ה(?:סודי|פרטי)|שלי)",
     re.I)
 # A 24+ char run mixing upper, lower and digits that switches character class often (random keys switch on ~60% of
 # neighbours; camelCase identifiers such as "HandleUserRequestV2Async" only at word boundaries, ~40%). Separators
 # (_ + / -) are skipped when counting, so paths and slugs are judged by their letters and digits only.
 # "private key" stays a credential word even in non-credential talk: refusing a harmless preference is the safe side.
+# A run that switches class less often is still refused when one separator-free segment of 20+ chars has nearly all
+# distinct characters (Shannon entropy within _KEYISH_ENTROPY_GAP bits of log2 of its length); identifiers repeat
+# letters and stay below, and paths such as "docs/reviews/SWV4_P_PERF" are judged per short segment, so not refused.
 _KEYISH_RUN = re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{24,}={0,2}")
 _KEYISH_SWITCH = 0.5
+_KEYISH_ENTROPY_GAP = 0.45
+_KEYISH_SEGMENT = 20
+_SEPARATORS = re.compile(r"[_+/-]+")
 
 
 def _cls(c: str) -> int:
     return 0 if c.islower() else 1 if c.isupper() else 2 if c.isdigit() else 3
+
+
+def _near_max_entropy(s: str) -> bool:
+    for seg in _SEPARATORS.split(s):
+        n = len(seg)
+        if n >= _KEYISH_SEGMENT:
+            entropy = -sum(k / n * math.log2(k / n) for k in Counter(seg).values())
+            if entropy >= math.log2(n) - _KEYISH_ENTROPY_GAP:
+                return True
+    return False
 
 
 def _keyish(text: str) -> bool:
@@ -91,7 +109,7 @@ def _keyish(text: str) -> bool:
         s = m.group().rstrip("=")
         kinds = [k for k in map(_cls, s) if k != 3]
         switches = sum(a != b for a, b in zip(kinds, kinds[1:])) / max(1, len(kinds) - 1)
-        if {0, 1, 2} <= set(kinds) and switches >= _KEYISH_SWITCH:
+        if {0, 1, 2} <= set(kinds) and (switches >= _KEYISH_SWITCH or _near_max_entropy(s)):
             return True
     return False
 
