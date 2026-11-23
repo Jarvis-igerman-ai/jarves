@@ -781,7 +781,7 @@ async def test_1526_busy_wal_is_retried_until_truncated_and_warned_once(env, mon
     assert "read secret-a" not in json.dumps(env.store.get(pid))
     reader.close()
     await env.runner.tick()                                            # the reader is gone: the retry truncates
-    assert b"read secret-a" not in _on_disk(env.db) and env.runner._disk_step == ""
+    assert b"read secret-a" not in _on_disk(env.db) and not env.runner._wal_pending
     c = env.db._db                                                     # it never waited, and the settings are restored
     assert c.execute("PRAGMA busy_timeout").fetchone()[0] == wait0
 
@@ -886,27 +886,68 @@ async def test_1526_text_in_space_freed_before_privacy_is_removed_from_disk(env,
     assert b"read secret-a" in _on_disk(env.db)                         # the residue this test is about
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
     await env.runner.tick()
-    assert b"read secret-a" not in _on_disk(env.db) and env.runner._disk_step == ""
+    assert b"read secret-a" not in _on_disk(env.db) and not env.runner._wal_pending
 
 
-async def test_1526_busy_vacuum_is_warned_once_and_retried(env, monkeypatch):
-    import sqlite3
-    await _text_plan(env, monkeypatch)
-    seen, tries = [], []
-    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **k: seen.append((code, k.get("error_type"))))
-    real = env.store.vacuum
-
-    def flaky():
-        tries.append(1)
-        if len(tries) < 3:
-            raise sqlite3.OperationalError("database is locked")
-        return real()
-    monkeypatch.setattr(env.store, "vacuum", flaky)
+async def test_1526_wipe_keeps_rowids_of_tables_it_does_not_own(env, monkeypatch):
+    """Review R1: a whole-file VACUUM may renumber implicit rowids of memory.db tables without INTEGER PRIMARY KEY."""
+    c = env.db._db
+    c.execute("CREATE TABLE other_feature (v TEXT)")                   # implicit rowid, no index: VACUUM renumbers it
+    c.executemany("INSERT INTO other_feature (rowid, v) VALUES (?, ?)", [(1, "a"), (5, "b"), (9, "c")])
+    c.commit()
+    gone = await _text_plan(env, monkeypatch)
+    env.store.delete(gone)
     monkeypatch.setattr(gp.logs, "privacy", lambda: True)
-    for _ in range(4):
-        await env.runner.tick()
-    assert tries == [1, 1, 1] and seen == [("PLAN_SCRUB_VACUUM_FAILED", "OperationalError")]
-    assert env.runner._disk_step == ""
+    await env.runner.tick()
+    assert [tuple(r) for r in c.execute("SELECT rowid, v FROM other_feature ORDER BY rowid")] == [(1, "a"), (5, "b"), (9, "c")]
+    assert b"read secret-a" not in _on_disk(env.db)
+
+
+async def test_1526_text_on_pages_freed_before_privacy_is_zeroed(env, monkeypatch):
+    """Long text spills onto overflow pages; deleted with secure_delete off, those pages sit on the free list."""
+    c = env.db._db
+    c.execute("PRAGMA secure_delete=0")
+    pid = await _text_plan(env, monkeypatch)
+    env.db.x("UPDATE goal_plans SET title=? WHERE id=?", ("secret-z" * 3000, pid))
+    env.store.delete(pid)
+    c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    assert b"secret-z" in _on_disk(env.db) and c.execute("PRAGMA freelist_count").fetchone()[0] > 0
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    assert b"secret-z" not in _on_disk(env.db) and c.execute("SELECT name FROM sqlite_master WHERE name LIKE '%wipe%'").fetchall() == []
+
+
+async def test_1526_scrub_failure_after_a_new_off_on_edge_is_logged_again(env, monkeypatch):
+    """Review R4."""
+    import sqlite3
+    private, seen = {"on": True}, []
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
+    monkeypatch.setattr(env.store, "scrub_private", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("locked")))
+    await env.runner.tick()
+    private["on"] = False
+    await env.runner.tick()
+    private["on"] = True
+    await env.runner.tick()
+    assert seen == ["PLAN_SCRUB_FAILED", "PLAN_SCRUB_FAILED"]
+
+
+async def test_1526_step_in_flight_when_privacy_turns_on_stores_no_text(env, monkeypatch):
+    """Review R6: the text is checked when the step's result is written, not when it started."""
+    private = {"on": False}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    p = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
+    env.store.approve(p["id"])
+    env.hang_on = "read"
+    task = asyncio.create_task(env.runner.tick())
+    while not env.ran:
+        await asyncio.sleep(0)
+    private["on"] = True                                               # privacy turns on while the tool runs
+    env.hang.set()
+    await task
+    d = env.store.get(p["id"])
+    assert d["steps"][0]["status"] == "done" and "read secret-a" not in json.dumps(d)
+    assert not env.db._db.in_transaction                                # review R3: plan writes always commit
 
 
 def test_1526_connection_uses_legacy_transactions(env):

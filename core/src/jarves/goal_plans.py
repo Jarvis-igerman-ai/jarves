@@ -309,10 +309,12 @@ class PlanStore:
     # ------------------------------------------------------------------ privacy (#1526)
     def scrub_private(self) -> int:
         """Privacy switched on: blank the text kept by rows written before it (step evidence and error, the plan's
-        note and result) in ONE explicit transaction; state, status and the "N/M steps done." count stay. The cells
-        it rewrites are overwritten (secure_delete); space freed EARLIER is cleared by vacuum() and truncate_wal(),
-        which the runner calls next. It never waits for another writer (busy_timeout 0): a locked database raises and
-        the runner retries. Assumes the UserDB connection's legacy transaction control (tested). Returns rows changed."""
+        note and result) in ONE explicit transaction; state, status and the "N/M steps done." count stay. With
+        secure_delete on it then zero-fills memory.db's free pages and rewrites the two plan tables (same ids), so text
+        freed EARLIER (a deleted plan, a row rewritten while secure_delete was off) is overwritten too. No VACUUM: it
+        would rebuild every table of the shared memory.db and may renumber implicit rowids (review R1); only the plan
+        tables and free pages are touched. Never waits for another writer (busy_timeout 0): a locked database raises
+        and the runner retries. Assumes the UserDB connection's legacy transaction control (tested). Returns rows changed."""
         with self.db._lock:
             c = self.db._db
             if c.in_transaction:                     # never adopt (and commit) someone else's open transaction
@@ -329,6 +331,12 @@ class PlanStore:
                         if (r["note"], r["result"]) != ("", keep):
                             c.execute("UPDATE goal_plans SET note='', result=? WHERE id=?", (keep, r["id"]))
                             n += 1
+                    self._wipe_free_pages(c)
+                    for t in ("goal_plans", "goal_plan_steps"):    # deleting every row zeroes the old pages (secure_delete)
+                        rows = [tuple(r) for r in c.execute(f"SELECT * FROM {t}").fetchall()]
+                        c.execute(f"DELETE FROM {t}")
+                        if rows:
+                            c.executemany(f"INSERT INTO {t} VALUES ({','.join('?' * len(rows[0]))})", rows)
                     c.commit()
                 except BaseException:
                     c.rollback()
@@ -338,22 +346,27 @@ class PlanStore:
         logs.info("goals", "PLAN_SCRUBBED", "plan text written before privacy mode was removed", count=n)
         return n
 
-    def vacuum(self) -> None:
-        """Rebuild memory.db without its free space: text freed before privacy (a deleted plan, a rewritten row while
-        secure_delete was off) does not stay in it. Never waits; raises sqlite3.Error when another writer is busy."""
-        self._pragma_op("VACUUM")
+    @staticmethod
+    def _wipe_free_pages(c) -> None:
+        """Take every free page into a scratch table, then drop it: with secure_delete on, SQLite zeroes each freed page."""
+        left = int(c.execute("PRAGMA freelist_count").fetchone()[0]) * int(c.execute("PRAGMA page_size").fetchone()[0])
+        if left <= 0:
+            return
+        c.execute("CREATE TABLE goal_plans_wipe (b BLOB)")
+        while left > 0:
+            chunk = min(left, 1 << 24)
+            c.execute("INSERT INTO goal_plans_wipe VALUES (zeroblob(?))", (chunk,))
+            left -= chunk
+        c.execute("DROP TABLE goal_plans_wipe")
 
     def truncate_wal(self) -> bool:
         """Copy the scrubbed pages into memory.db and empty the WAL, without waiting. False = another reader is busy."""
-        return self._pragma_op("PRAGMA wal_checkpoint(TRUNCATE)")[0] == 0
-
-    def _pragma_op(self, sql: str) -> tuple:
         with self.db._lock:
             c = self.db._db
             saved: dict = {}
             try:
                 self._quick(c, saved)
-                return tuple(c.execute(sql).fetchone() or ())
+                return c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] == 0
             finally:
                 self._restore(c, saved)
 
@@ -453,12 +466,14 @@ class PlanRunner:
         self._stop = False
         self._private: bool | None = None     # last privacy state seen; None = not checked since the Core started
         self._scrub_failed = False
-        self._disk_step, self._disk_warned = "", ""   # "vacuum" then "wal": old bytes still on disk; retried each tick
+        self._wal_pending = self._wal_warned = False   # old WAL frames still hold text; the checkpoint is retried each tick
 
     def _scrub_on_privacy(self) -> None:
         """#1526: at Core start and whenever privacy turns on, remove plan text written before it (feature on or off)."""
         on = logs.privacy()
-        if on and self._private is not True:
+        if not on:
+            self._scrub_failed = False                # review R4: a failure after the next off->on edge is a new incident
+        elif self._private is not True:
             try:
                 self.store.scrub_private()
             except sqlite3.Error as e:
@@ -466,27 +481,17 @@ class PlanRunner:
                     logs.warn("goals", "PLAN_SCRUB_FAILED", "could not remove old plan text; will retry", **logs.error_fields(e))
                 self._scrub_failed = True
                 return
-            self._scrub_failed, self._disk_step = False, "vacuum"
+            self._scrub_failed, self._wal_pending = False, True
         self._private = on
-        if self._disk_step == "vacuum":
-            try:
-                self.store.vacuum()
-                self._disk_step = "wal"
-            except sqlite3.Error as e:
-                if self._disk_warned != "vacuum":    # warned once per incident; VACUUM is retried, not the scrub
-                    self._disk_warned = "vacuum"
-                    logs.warn("goals", "PLAN_SCRUB_VACUUM_FAILED", "old plan text may stay in the free space of "
-                              "memory.db until VACUUM succeeds; retrying", **logs.error_fields(e))
-                return
-        if self._disk_step == "wal":
+        if self._wal_pending:
             try:
                 done, err = self.store.truncate_wal(), None
             except sqlite3.Error as e:
                 done, err = False, e
             if done:
-                self._disk_step = self._disk_warned = ""
-            elif self._disk_warned != "wal":
-                self._disk_warned = "wal"
+                self._wal_pending = self._wal_warned = False
+            elif not self._wal_warned:
+                self._wal_warned = True
                 logs.warn("goals", "PLAN_SCRUB_WAL_BUSY", "old plan text may stay in memory.db until the WAL checkpoint "
                           "succeeds; retrying", **logs.error_fields(err or "WAL_BUSY"))
 
