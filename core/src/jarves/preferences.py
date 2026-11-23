@@ -11,8 +11,10 @@ Every item is listable, editable, removable (dashboard, CLI, voice). Local only,
 from __future__ import annotations
 
 import difflib
+import math
 import re
 import time
+from collections import Counter
 
 from pydantic import BaseModel, Field
 
@@ -68,9 +70,58 @@ def _base32(text: str) -> bool:
     return False
 
 
+# #1099: credential words (the plain word "token(s)" alone is not one) and high-entropy key-like runs. The English
+# words are bounded by letters/digits only, so env-var names such as OPENAI_API_KEY or MY_SECRET_KEY are caught; the
+# Hebrew "טוקן" is a whole word with one optional prefix letter, so "טוקנים" (tokens) passes like English "tokens".
+_CRED_WORD = re.compile(
+    r"(?<![A-Za-z0-9])(?:api[\s_-]?(?:key|token|secret)|access[\s_-]?(?:token|key)|"
+    r"(?:refresh|auth|secret|session)[\s_-]?token|secret[\s_-]?key|private[\s_-]?key|client[\s_-]?secret|"
+    r"bearer\s+(?:token|auth)|credential)s?(?![A-Za-z0-9])|"
+    r"(?<![\u05d0-\u05ea])[הובלמשכ]?טוקן(?![\u05d0-\u05ea])|"
+    r"מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+(?:ה(?:סודי|פרטי)|שלי)",
+    re.I)
+# A 24+ char run mixing upper, lower and digits that switches character class often (random keys ~60% of neighbours,
+# camelCase identifiers ~40%), or has one separator-free 20+ char segment with nearly all distinct characters
+# (Shannon entropy within _KEYISH_ENTROPY_GAP bits of log2 of its length). Separators (_ + / -) are skipped, so paths
+# and slugs are judged by their letters and digits only.
+_KEYISH_RUN = re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{24,}={0,2}")
+_KEYISH_SWITCH = 0.5
+_KEYISH_ENTROPY_GAP = 0.45
+_KEYISH_SEGMENT = 20
+_SEPARATORS = re.compile(r"[_+/-]+")
+
+
+def _cls(c: str) -> int:
+    return 0 if c.islower() else 1 if c.isupper() else 2 if c.isdigit() else 3
+
+
+def _near_max_entropy(s: str) -> bool:
+    for seg in _SEPARATORS.split(s):
+        n = len(seg)
+        if n >= _KEYISH_SEGMENT:
+            entropy = -sum(k / n * math.log2(k / n) for k in Counter(seg).values())
+            if entropy >= math.log2(n) - _KEYISH_ENTROPY_GAP:
+                return True
+    return False
+
+
+def _keyish(text: str) -> bool:
+    for m in _KEYISH_RUN.finditer(text):
+        s = m.group().rstrip("=")
+        kinds = [k for k in map(_cls, s) if k != 3]
+        switches = sum(a != b for a, b in zip(kinds, kinds[1:])) / max(1, len(kinds) - 1)
+        if {0, 1, 2} <= set(kinds) and (switches >= _KEYISH_SWITCH or _near_max_entropy(s)):
+            return True
+    return False
+
+
 def looks_sensitive(text: str) -> bool:
-    text = text or ""
-    return bool(_SENSITIVE.search(text)) or _base32(text)
+    if text is None:
+        return False
+    if not isinstance(text, str):
+        return True               # cannot be checked (e.g. bytes holding a key): refuse, never pass as safe
+    return (bool(_SENSITIVE.search(text)) or _base32(text) or bool(_CRED_WORD.search(text))
+            or logs.has_secret(text) or _keyish(text))
 
 
 def normalize(text: str) -> str:
