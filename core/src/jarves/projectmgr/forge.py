@@ -114,6 +114,7 @@ def _gh_helper(cmd: list[str]) -> str:
 # any other key in the temp repo's config means a same-user process wrote it, and the push is refused.
 _INIT_KEYS = frozenset({"core.repositoryformatversion", "core.filemode", "core.bare", "core.symlinks",
                         "core.ignorecase", "core.precomposeunicode", "extensions.objectformat"})
+_INIT_ENTRIES = frozenset({"HEAD", "branches", "config", "description", "hooks", "info", "objects", "refs"})
 
 
 def push_branch(path: str, branch: str, slug: str) -> None:
@@ -149,15 +150,18 @@ def push_branch(path: str, branch: str, slug: str) -> None:
                **{k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR") if os.environ.get(k)}}
         gitops.git(d, "init", "-q", "--bare", f"--object-format={fmt}", str(repo), ident=False, env=env)
         (repo / "objects" / "info" / "alternates").write_bytes(str(objects).encode() + b"\n")   # no CRLF on Windows
-        # review R1: the temp folder is the owner's, but any same-user process can write it. Right before the push
-        # only the exact keys git init writes (_INIT_KEYS) may be in its config; a small window between this check
-        # and the push remains
-        keys = gitops.git(d, "config", "--file", str(repo / "config"), "--name-only", "--null", "--list",   # R2 of
-                          env=env).stdout.split("\0")                                      # #1673: names hold spaces
-        if any(k and k.lower() not in _INIT_KEYS for k in keys):
-            raise ForgeError("the temporary push repository's config was changed; push refused")
-        gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
-                   *tls, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
+        # Any same-user process can write the temp folder. GIT_DIR pins the repository (no discovery of a planted
+        # r.git/.git), only the entries `git init --bare` makes may exist (no commondir, gitdir, config.worktree), and
+        # the check reads config exactly as the push will: same -c options and env (review R1 of 59b11146). Every
+        # value not from the command line must be one of _INIT_KEYS. A window between check and push remains.
+        env["GIT_DIR"] = str(repo)
+        pre = ["-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true", *tls]
+        out = gitops.git(d, *pre, "config", "--list", "--show-origin", "--name-only", "--null", ident=False, env=env)
+        f = out.stdout.split("\0")
+        if ({x.name for x in repo.iterdir()} - _INIT_ENTRIES
+                or any(o != "command line:" and k.lower() not in _INIT_KEYS for o, k in zip(f[0::2], f[1::2]))):
+            raise ForgeError("the temporary push repository was changed; push refused")
+        gitops.git(d, *pre, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
                    ident=False, env=env)
 
 

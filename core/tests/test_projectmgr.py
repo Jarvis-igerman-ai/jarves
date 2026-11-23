@@ -1374,7 +1374,8 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
 
 _PLANTED_ENV = ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
                 "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS", "SSL_CERT_DIR", "CURL_CA_BUNDLE",   # R3 of #1673
-                "GH_DEBUG", "GH_ENTERPRISE_TOKEN", "GH_REPO")
+                "GH_DEBUG", "GH_ENTERPRISE_TOKEN", "GH_REPO", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
+                "GIT_CONFIG_VALUE_0", "GIT_DIR")                                # R2 of 59b11146: env-defined config
 
 
 def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_path, monkeypatch):
@@ -1424,11 +1425,13 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
             origins.extend(real_git(cwd, *pre, "config", "--list", "--show-origin", check=False,
                                     env=kw.get("env")).stdout.splitlines())
             child = forge.gitops.child_env(kw.get("env"))
-            assert set(kw["env"]) == {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GH_TOKEN", "GH_CONFIG_DIR"}  # R4
+            assert set(kw["env"]) == {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_DIR", "GH_TOKEN", "GH_CONFIG_DIR"}
+            assert child["GIT_DIR"] == str(Path(cwd) / "r.git")         # R1 of 59b11146: the pinned temp repo
             assert not {"SSL_CERT_DIR", "CURL_CA_BUNDLE", "GH_DEBUG", "GH_ENTERPRISE_TOKEN"} & set(child)       # R3
             assert child["GIT_CONFIG_NOSYSTEM"] == "1" and Path(child["GIT_CONFIG_GLOBAL"]).read_bytes() == b""
             assert not [k for k in child if k.startswith(("GIT_SSL", "GIT_TRACE", "GIT_CURL", "GIT_PROXY",
-                                                          "GIT_CONFIG_PARAMETERS"))]
+                                                          "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+                                                          "GIT_CONFIG_KEY", "GIT_CONFIG_VALUE"))]
         return real_git(cwd, *args, **kw)
     monkeypatch.setattr(forge.gitops, "git", spy)
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
@@ -1438,7 +1441,8 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
                                                     "sslverify=false"))
     # review R2: no system, global, XDG or project file is read; only the command line and the temp repo's own core.*
     bad = [x for x in origins if not x.startswith("command line:")
-           and not (x.startswith("file:config\t") and x.split("\t", 1)[1].split("=")[0] in forge._INIT_KEYS)]
+           and not (x.split("\t", 1)[0].replace("\\", "/").endswith("/r.git/config")
+                    and x.split("\t", 1)[1].split("=")[0] in forge._INIT_KEYS)]
     assert origins and not bad, bad
     assert "credential.helper=!'gh' auth git-credential" in seen[0] and "http.sslverify=true" in seen[0]
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
@@ -1469,7 +1473,8 @@ def _push_fixture(tmp_path, monkeypatch, fmt="sha1"):
     return forge, repo, good, evil
 
 
-@pytest.mark.parametrize("planted", ["url", "core.askPass", "core.sshCommand", "core.gitProxy", "spaced"])
+@pytest.mark.parametrize("planted", ["url", "core.askPass", "core.sshCommand", "core.gitProxy", "spaced", ".git",
+                                     "commondir"])
 def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monkeypatch, planted):
     """#1595 (review R1 of 308f24df and 86f15520): a same-user process that writes the temp repo's config between init
     and push (a pushInsteadOf, or a core.* command key) makes the push refuse instead of following it."""
@@ -1477,11 +1482,19 @@ def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monke
     real_git = forge.gitops.git
     text = (f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n' if planted == "url"
             else '[core "bare core"]\n\tfilemode = true\n' if planted == "spaced"     # review R2 of #1673: one key with
-            else f"[core]\n\t{planted.split('.')[1]} = {tmp_path / 'evil.sh'}\n")   # a space, not two allowed keys
+            else f"[core]\n\t{planted.split('.')[-1]} = {tmp_path / 'evil.sh'}\n")   # a space, not two allowed keys
+
+    side = tmp_path / "side.git"                                       # review R1 of 59b11146: a config the old
+    sh(tmp_path, "git", "init", "-q", "--bare", str(side))             # check never read, via .git or commondir
+    (side / "config").write_text((side / "config").read_text() + f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = '
+                                 f'{forge.PUSH_BASE}\n')
+    (side / "objects" / "info" / "alternates").write_text(str((repo / ".git" / "objects").resolve()) + "\n")
 
     def spy(cwd, *args, **kw):
         p = real_git(cwd, *args, **kw)
-        if "init" in args:
+        if "init" in args and planted in (".git", "commondir"):
+            (Path(args[-1]) / planted).write_text(f"gitdir: {side}\n" if planted == ".git" else f"{side}\n")
+        elif "init" in args:
             with open(Path(args[-1]) / "config", "a", encoding="utf-8") as f:
                 f.write(text)
         return p
@@ -1513,7 +1526,10 @@ def test_push_refuses_a_git_that_ignores_git_config_global(tmp_path, monkeypatch
     with pytest.raises(forge.ForgeError, match="2.32 or newer"):
         forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
     assert not [a for a in calls if "push" in a or "init" in a] and not sh(good, "git", "branch", "--list").strip()
-    assert forge._git_version(str(repo)) == (0, 0) if version == "unknown" else forge._git_version(str(repo)) < (2, 32)
+    if version == "unknown":                                           # review R3 of 59b11146: explicit branches
+        assert forge._git_version(str(repo)) == (0, 0)
+    else:
+        assert forge._git_version(str(repo)) < (2, 32)
 
 
 def test_push_keeps_a_sha256_repository_format(tmp_path, monkeypatch):
