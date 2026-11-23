@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -502,7 +503,40 @@ def test_605_verify_env_drops_injected_git_config(tmp_path, monkeypatch):
     ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
     assert gate.tag_signature_problems(tmp_path, "v4.1.0", "owner ssh-ed25519 AAAA", SHA, run=ok, verifier=sys.executable) == []
     assert ok.envs and all(e.get("GIT_CONFIG_NOSYSTEM") == "1" for e in ok.envs)
-    assert not [k for e in ok.envs for k in e if k.startswith("GIT_CONFIG") and k != "GIT_CONFIG_NOSYSTEM"]
+    assert all(e.get("GIT_CONFIG_GLOBAL") == os.devnull for e in ok.envs)         # PR #1643 review R3: no ~/.gitconfig
+    assert not [k for e in ok.envs for k in e if k.startswith("GIT_CONFIG") and k not in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")]
+
+
+def test_605_rows_hash_line_is_anchored(tmp_path):
+    """PR #1643 review R2: the gate and release.yml read 'Rows hash:' by the same rule, a whole line of 64 hex
+    (any case, trailing blanks allowed); a longer hex run or trailing text is no hash."""
+    ok_err = 'Good "git" signature for owner with ED25519 key SHA256:x\n'
+    for tail, passes in (("  ", True), ("0", False), (" extra", False)):
+        run = _Run(0, ok_err, body=TAG_BODY.replace(f"Rows hash: {ROWS}", f"Rows hash: {ROWS.upper()}{tail}"))
+        got = gate.tag_signature_problems(tmp_path, "v4.1.0", "o ssh-ed25519 A", SHA, run=run, verifier=sys.executable,
+                                          rows_hash=ROWS)
+        assert (got == []) is passes, (tail, got)
+    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "grep -m1 -iE '^Rows hash: [0-9a-f]{64}[[:blank:]]*$'" in wf
+
+
+def test_605_releasing_doc_signing_example_uses_a_fido_key():
+    """PR #1643 review R1: the copy-paste signing example must not set up the plain key file the custody paragraph
+    says an agent can use to pass the gate."""
+    doc = (Path(__file__).resolve().parents[2] / "docs/RELEASING.md").read_text(encoding="utf-8")
+    assert "user.signingkey ~/.ssh/id_ed25519.pub" not in doc
+    assert "ssh-keygen -t ed25519-sk" in doc and "user.signingkey ~/.ssh/id_ed25519_sk.pub" in doc
+
+
+@pytest.mark.linux_only      # runs release.yml's own grep pipeline in bash (the release job runs on ubuntu)
+def test_605_workflow_rows_hash_extractor_is_anchored():
+    """PR #1643 review R2: release.yml's extractor accepts exactly the lines the gate accepts."""
+    wf = (Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    pipe = re.search(r"\| (grep -m1 -iE .*?) \|\| true\)", wf).group(1)
+    for tail, want in (("  ", ROWS), ("0", ""), (" extra", "")):
+        r = subprocess.run(["bash", "-c", f"printf 'x\\nRows hash: %s\\n' \"$H\" | {pipe} || true"], capture_output=True,
+                           text=True, env={"PATH": os.environ.get("PATH", ""), "H": ROWS.upper() + tail})
+        assert r.stdout.strip() == want, (tail, r.stdout, r.stderr)
 
 
 def test_605_tag_signature_by_owner_key(tmp_path):

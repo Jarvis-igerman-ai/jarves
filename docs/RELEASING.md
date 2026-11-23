@@ -188,7 +188,8 @@ created without the coordinator checking `git log` of the sign-off sheet. Each s
    (`you@example namespaces="git" ssh-ed25519 AAAA...`). Do NOT create a repository or organization variable of that
    name: `vars.*` falls back to those when the environment one is missing, so the release workflow's `signers-fallback`
    job (no environment) looks for one and a real publish refuses while one exists or the check result is missing.
-   Sign with SSH (`git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/id_ed25519.pub`) and tag
+   Sign with an SSH key agents cannot use (see the custody paragraph below), for example a FIDO key: `ssh-keygen -t ed25519-sk`,
+   `git config --global gpg.format ssh`, `git config --global user.signingkey ~/.ssh/id_ed25519_sk.pub`; then tag
    with `git tag -s vX.Y.Z -m 'Rows hash: <sha256>'`. On a real publish the release job runs in `stable-release` and the gate
    runs `git verify-tag` against that list; it refuses an unsigned tag, a key not on the list, a signed tag on a commit
    other than the gated one, or a missing variable. A tag dry run has no environment, so it does not verify the signature and only prints a note.

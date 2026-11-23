@@ -224,7 +224,8 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
     if not Path(verifier).is_file():
         return [f"sign-off: signature verifier {verifier} not found (the check runs on the ubuntu release runner); refused"]
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG")}  # no injected config (review R3)
-    env.update({"LC_ALL": "C", "LANG": "C", "GIT_CONFIG_NOSYSTEM": "1"})  # GOOD_SIG_RE reads the untranslated wording
+    env.update({"LC_ALL": "C", "LANG": "C", "GIT_CONFIG_NOSYSTEM": "1",  # GOOD_SIG_RE reads the untranslated wording
+            "GIT_CONFIG_GLOBAL": os.devnull})                    # no ~/.gitconfig either (#605 review R3)
     try:                                    # resolve the tag ONCE; verify and dereference that object id (review R2)
         ref = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, text=True,
                   timeout=60, env=env)
@@ -265,7 +266,7 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
     name = next((ln[4:].strip() for ln in head.splitlines() if ln.startswith("tag ")), "")
     if body.returncode != 0 or name != tag:
         return [f"sign-off: the signed tag object is named {name[:40]!r}, not {tag}; refused"]
-    m = re.search(r"^Rows hash: ([0-9a-fA-F]{64})", msg, re.M | re.I)
+    m = re.search(r"^Rows hash: ([0-9a-f]{64})[ \t]*$", msg, re.M | re.I)  # same rule as release.yml's grep
     signed = m.group(1).lower() if m else ""
     if rows_hash is not None and signed != rows_hash.strip().lower():
         return [f"sign-off: the rows hash in the signed tag {tag} ({signed[:12] or 'none'}) differs from the one "

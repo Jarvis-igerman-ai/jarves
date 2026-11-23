@@ -104,7 +104,7 @@ jobs:
             # checkout can turn an annotated tag into a lightweight one: fetch the tag object itself
             git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
             if [ "$(git cat-file -t "refs/tags/$TAG" 2>/dev/null)" = "tag" ]; then
-              h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
+              h=$(git for-each-ref --format='%(contents)' "refs/tags/$TAG" | grep -m1 -iE '^Rows hash: [0-9a-f]{64}[[:blank:]]*$' | grep -oiE '[0-9a-f]{64}' | tr 'A-F' 'a-f' || true)
               [ -z "$h" ] || echo "JARVES_EXPECT_ROWS_HASH=$h" >> "$GITHUB_ENV"
             fi
           fi
