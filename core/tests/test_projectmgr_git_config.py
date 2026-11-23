@@ -81,7 +81,7 @@ def test_a_merge_driver_named_in_the_shared_config_never_runs(tmp_path):
                                  "gpg.ssh.defaultKeyCommand", "submodule.evil.update", "core.alternateRefsCommand",
                                  "filter.evil.process", "core.gitProxy", "remote.origin.receivepack",
                                  "remote.origin.vcs", "difftool.evil.path", "credential.https://x.invalid.helper",
-                                 "gpg.x509.program"])
+                                 "gpg.x509.program", "pager.log"])
 def test_other_command_keys_in_the_shared_config_are_refused(tmp_path, key):
     """#1390 other command types: every git call refuses while the shared config names one."""
     repo = _repo(tmp_path)
@@ -139,7 +139,10 @@ def test_the_ext_transport_never_runs_a_command(tmp_path):
     assert not marker.exists()
 
 
-@pytest.mark.parametrize("args", [("-C", "elsewhere", "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status")])
+@pytest.mark.parametrize("args", [("-C", "elsewhere", "status"), ("--git-dir=x", "status"), ("--work-tree", "x", "status"),
+                                  ("-c", "user.name=Owner", "--git-dir=x", "status"),
+                                  ("-c", "user.name=Owner", "-C", "x", "status"),
+                                  ("--namespace", "n", "--work-tree=x", "status"), ("-Cx", "status")])
 def test_a_call_that_points_git_at_another_folder_is_refused(tmp_path, args):
     """#1390 review R6: the config check reads `cwd`, so git must not be pointed at another repository."""
     with pytest.raises(gitops.GitError, match="another folder"):

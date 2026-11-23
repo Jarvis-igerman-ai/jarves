@@ -68,16 +68,32 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
-# config keys that name a command git runs (#1390). core.hooksPath and core.fsmonitor are not listed: every call
-# overrides both. includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree.
+# config keys that name a command git runs (#1390); pagers never run without a terminal (listed as belt and braces).
+# core.hooksPath and core.fsmonitor are not listed: every call overrides both. includeIf is listed because its
+# condition (branch, gitdir) can match only inside a new worktree.
 _RUNS = re.compile(
-    r"(core\.(sshcommand|editor|pager|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
+    r"(core\.(sshcommand|editor|pager|askpass|gitproxy)|pager\..+|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
     r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
     r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
     r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
     r"|core\.alternaterefscommand)")
 # git options that point git at another repository than `cwd`, which config_commands checked
 _ELSEWHERE = ("-C", "--git-dir", "--work-tree")
+# global options whose value is the NEXT argument (git's own list); the scan skips that value
+_TAKES_VALUE = ("-c", "-C", "--git-dir", "--work-tree", "--namespace", "--config-env", "--super-prefix",
+                "--attr-source", "--list-cmds")
+
+
+def _points_elsewhere(args: tuple[str, ...]) -> bool:
+    """True when a global option before the subcommand selects another repository (#1390 review): option values
+    (`-c k=v`) are skipped, so a later `-C`/`--git-dir`/`--work-tree` is still seen; `-Cdir` counts too."""
+    i = 0
+    while i < len(args) and args[i].startswith("-"):
+        a = args[i]
+        if a.split("=", 1)[0] in _ELSEWHERE or a.startswith("-C"):
+            return True
+        i += 2 if a in _TAKES_VALUE else 1
+    return False
 _SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
 
 
@@ -105,8 +121,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`) makes the call fail before git
     starts (#1390). Residual: a key written in the moment between that read and git's own read is not seen.
     `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
-    lead = args[:next((i for i, a in enumerate(args) if not a.startswith("-")), len(args))]
-    if any(a.split("=", 1)[0] in _ELSEWHERE for a in lead):
+    if _points_elsewhere(args):
         raise GitError("refused: a git call may not point git at another folder than the one checked (#1390)")
     bad = config_commands(cwd)
     if bad:
