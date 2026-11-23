@@ -1404,23 +1404,43 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
+    for k in ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
+              "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS"):           # review R1: env cannot weaken TLS
+        monkeypatch.setenv(k, "1")
     seen: list = []
+    origins: list = []
     real_git = forge.gitops.git
 
     def spy(cwd, *args, **kw):
         if "push" in args:                                             # what the pushing git sees, same options/env
             pre = args[:args.index("push")]
             seen.append(real_git(cwd, *pre, "config", "--list", check=False, env=kw.get("env")).stdout.lower())
+            origins.extend(real_git(cwd, *pre, "config", "--list", "--show-origin", check=False,
+                                    env=kw.get("env")).stdout.splitlines())
+            child = forge.gitops.child_env(kw.get("env"))
+            assert child["GIT_CONFIG_NOSYSTEM"] == "1" and Path(child["GIT_CONFIG_GLOBAL"]).read_bytes() == b""
+            assert not [k for k in child if k.startswith(("GIT_SSL", "GIT_TRACE", "GIT_CURL", "GIT_PROXY",
+                                                          "GIT_CONFIG_PARAMETERS"))]
         return real_git(cwd, *args, **kw)
     monkeypatch.setattr(forge.gitops, "git", spy)
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    for k in ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
+              "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS"):           # the test's own `sh` needs a clean env
+        monkeypatch.delenv(k)
     assert seen and not any(k in seen[0] for k in ("insteadof", "remote.origin", "proxy", "sslcainfo",
                                                     "sslverify=false"))
+    # review R2: no system, global, XDG or project file is read; only the command line and the temp repo's own core.*
+    bad = [x for x in origins if not x.startswith("command line:")
+           and not (x.startswith("file:config\t") and x.split("\t", 1)[1].startswith("core."))]
+    assert origins and not bad, bad
     assert "credential.helper=!'gh' auth git-credential" in seen[0] and "http.sslverify=true" in seen[0]
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
     assert not sh(evil, "git", "branch", "--list").strip()
     with pytest.raises(forge.ForgeError):
         forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r/../x")    # the slug is checked
+    for bad_slug in ("o/r.git", "o/.", "o/-x", ".o/r", "-o/r", "o/", "o/r/x", ""):   # review R3
+        with pytest.raises(forge.ForgeError):
+            forge.push_branch(str(repo), "jarves/p1/t1-a1", bad_slug)
 
 
 def test_push_tls_backend_follows_only_the_system_config(monkeypatch):

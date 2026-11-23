@@ -15,7 +15,7 @@ from . import gitops
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 PUSH_BASE = "https://github.com/"        # the only push target (#1595); tests point it at a local folder
-_SLUG_OK = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_SLUG_OK = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*$")   # no leading `.`/`-` (review R3)
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 
 
@@ -89,12 +89,13 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     (agent-written code runs as the owner's user and can write all of them), so no `url.*.insteadOf`/`pushInsteadOf`,
     `http.proxy`, `http.sslVerify`, URL-specific `http.<url>.*`, credential helper or remote URL from there applies.
     Only JARVES's own settings do: the owner's gh login as the one credential helper and `http.sslVerify=true`.
-    The owner's environment (HTTPS_PROXY, SSL_CERT_FILE) still applies. The `rev-parse` calls still run in the project
+    gitops.child_env is an allow-list, so git's GIT_SSL_*, GIT_TRACE*, GIT_CURL_VERBOSE, GIT_PROXY_* and
+    GIT_CONFIG_PARAMETERS never reach it; only the owner's HTTPS_PROXY/HTTP_PROXY/SSL_CERT_FILE do. The `rev-parse` calls still run in the project
     repository with its config; rev-parse runs no filter, driver or transport."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    if not _SLUG_OK.match(slug or "") or ".." in slug:
-        raise ForgeError("push target must be owner/repo")
+    if not _SLUG_OK.match(slug or "") or ".." in slug or slug.lower().endswith(".git"):
+        raise ForgeError("push target must be owner/repo (without .git)")
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
