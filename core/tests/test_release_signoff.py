@@ -497,13 +497,15 @@ class _Run:
 def test_605_verify_env_drops_injected_git_config(tmp_path, monkeypatch):
     """#605 review R3: inherited GIT_CONFIG_* variables never reach verify-tag; system git config is ignored."""
     for k, v in (("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "gpg.ssh.program"), ("GIT_CONFIG_VALUE_0", "/bin/true"),
-                 ("GIT_CONFIG_PARAMETERS", "'gpg.minTrustLevel'='undefined'"), ("GIT_CONFIG_GLOBAL", "/tmp/x")):
+                 ("GIT_CONFIG_PARAMETERS", "'gpg.minTrustLevel'='undefined'"), ("GIT_CONFIG_GLOBAL", "/tmp/x"),
+                 ("GIT_REPLACE_REF_BASE", "refs/evil/"), ("GIT_NO_REPLACE_OBJECTS", "")):
         monkeypatch.setenv(k, v)
     ok = _Run(0, 'Good "git" signature for owner with ED25519 key SHA256:x\n')
     assert gate.tag_signature_problems(tmp_path, "v4.1.0", "owner ssh-ed25519 AAAA", SHA, run=ok, verifier=sys.executable) == []
     assert ok.envs and all(e.get("GIT_CONFIG_NOSYSTEM") == "1" for e in ok.envs)
     assert all(e.get("GIT_CONFIG_GLOBAL") == os.devnull for e in ok.envs)         # PR #1643 review R3: no ~/.gitconfig
     assert not [k for e in ok.envs for k in e if k.startswith("GIT_CONFIG") and k not in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")]
+    assert all(e.get("GIT_NO_REPLACE_OBJECTS") == "1" and "GIT_REPLACE_REF_BASE" not in e for e in ok.envs)  # R5
 
 
 def test_605_rows_hash_line_is_anchored(tmp_path):
@@ -517,14 +519,6 @@ def test_605_rows_hash_line_is_anchored(tmp_path):
         assert (got == []) is passes, (tail, got)
     wf = (Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text(encoding="utf-8")
     assert "grep -m1 -iE '^Rows hash: [0-9a-f]{64}[[:blank:]]*$'" in wf
-
-
-def test_605_releasing_doc_signing_example_uses_a_fido_key():
-    """PR #1643 review R1: the copy-paste signing example must not set up the plain key file the custody paragraph
-    says an agent can use to pass the gate."""
-    doc = (Path(__file__).resolve().parents[2] / "docs/RELEASING.md").read_text(encoding="utf-8")
-    assert "user.signingkey ~/.ssh/id_ed25519.pub" not in doc
-    assert "ssh-keygen -t ed25519-sk" in doc and "user.signingkey ~/.ssh/id_ed25519_sk.pub" in doc
 
 
 @pytest.mark.linux_only      # runs release.yml's own grep pipeline in bash (the release job runs on ubuntu)

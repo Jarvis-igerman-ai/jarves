@@ -223,9 +223,11 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
         return [f"sign-off: {tag[:40]!r} is not a stable tag; cannot verify its signature"]
     if not Path(verifier).is_file():
         return [f"sign-off: signature verifier {verifier} not found (the check runs on the ubuntu release runner); refused"]
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_CONFIG")}  # no injected config (review R3)
+    env = {k: v for k, v in os.environ.items()                      # no injected config (review R3)
+           if not k.startswith("GIT_CONFIG") and k != "GIT_REPLACE_REF_BASE"}
     env.update({"LC_ALL": "C", "LANG": "C", "GIT_CONFIG_NOSYSTEM": "1",  # GOOD_SIG_RE reads the untranslated wording
-            "GIT_CONFIG_GLOBAL": os.devnull})                    # no ~/.gitconfig either (#605 review R3)
+            "GIT_CONFIG_GLOBAL": os.devnull,                     # no ~/.gitconfig either (#605 review R3)
+            "GIT_NO_REPLACE_OBJECTS": "1"})                      # no refs/replace substitution (PR #1643 review R5)
     try:                                    # resolve the tag ONCE; verify and dereference that object id (review R2)
         ref = run(["git", "rev-parse", "--verify", f"refs/tags/{tag}"], cwd=root, capture_output=True, text=True,
                   timeout=60, env=env)
