@@ -298,7 +298,9 @@ def test_expected_refusals_stay_in_history_without_runtime_defect_issues(st, cod
 
 
 # #1328: rolling windows took time.time() with no override, so tests on the Oct 19 fixture broke once it aged out
-FIXTURE_NOW = 1792454400.0           # 2026-10-20 UTC, one day after the fixture session
+# one day after the fixture's last record, derived from the fixture itself (not a hand-typed epoch)
+FIXTURE_NOW = max(store.parse_ts(json.loads(line)["ts"])
+                  for line in FIXTURE.read_text(encoding="utf-8").splitlines()) + 86400
 
 
 def test_diagnose_window_uses_injected_now_not_the_wall_clock(st, monkeypatch):
