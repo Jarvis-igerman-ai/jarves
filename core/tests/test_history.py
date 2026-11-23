@@ -141,10 +141,13 @@ def test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st):
 
 
 def test_privacy_mode_is_clock_free_issue_1328(st, monkeypatch):
-    """#1328: the Oct 19 fixture must not age out of diagnose's 30-day window; shift the clock 14 years ahead."""
+    """#1328: the Oct 19 fixture must not age out of diagnose's 30-day window; shift the clock 14 years ahead.
+    Guards the test against going back to a wall-clock-dependent fixture; the window itself is covered by
+    test_diagnose_window_uses_injected_now_not_the_wall_clock."""
     real = time.time
     monkeypatch.setattr(time, "time", lambda: real() + 14 * 365 * 86400)
     test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st)
+
 
 def test_dead_air_from_measured_reply_wait(st):
     for i, (code, extra) in enumerate([("LIVE_STARTED", {"msg": "GPT-Live session started (gpt-live-1 -> gpt-6-luna)"}),

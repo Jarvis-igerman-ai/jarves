@@ -177,8 +177,11 @@ def far_future(monkeypatch):
 
 
 def test_skills_tool_stats_are_clock_free_issue_1328(far_future, dash, home):
-    """#1328: the Oct 19 fixture's tool calls must stay inside tool_stats' 30-day window whatever today's date."""
+    """#1328: the Oct 19 fixture's tool calls must stay inside tool_stats' 30-day window whatever today's date.
+    Guards the `dash` fixture against going back to wall-clock-dependent data; the window itself is covered by
+    test_history.py::test_tool_stats_window_uses_injected_now_not_the_wall_clock."""
     test_skills_memory_settings_show_no_secrets(dash, home)
+
 
 def test_workspace_files_and_plugin_route(dash):
     ws = get(dash, "/api/workspace")
