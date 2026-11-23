@@ -25,6 +25,9 @@ SAFE = [
     "use fewer tokens in long answers",                       # plain word "tokens" is not a credential word
     "keep the keyboard shortcuts simple",
     "internationalization",
+    "the bearer of bad news",                                 # bare "bearer" is not a credential word (review R3)
+    "open core/src/jarves/guides/data/Feature2.toml",         # path: separators are not class switches (review R4)
+    "slug my-Post-2026-Title-Draft-v3-final",                 # dashed slug with digits (review R4)
 ]
 
 
@@ -38,5 +41,7 @@ def test_ordinary_text_is_not_refused(text):
     assert not looks_sensitive(text)
 
 
-def test_non_string_input_is_safe_not_a_crash():
-    assert looks_sensitive(None) is False
+@pytest.mark.parametrize("value", [None, 123, b"x", ["sk-x"]])
+def test_non_string_input_is_safe_not_a_crash(value):
+    # 123 / b"x" used to raise TypeError inside re.search (review R2)
+    assert looks_sensitive(value) is False

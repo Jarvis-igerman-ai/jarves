@@ -71,10 +71,13 @@ def _base32(text: str) -> bool:
 # #1099: credential words (the plain word "token(s)" alone is not one) and high-entropy key-like runs.
 _CRED_WORD = re.compile(
     r"\b(?:api[\s_-]?key|access[\s_-]?(?:token|key)|refresh[\s_-]?token|auth[\s_-]?token|secret[\s_-]?key|"
-    r"private[\s_-]?key|client[\s_-]?secret|bearer)s?\b|טוקן|מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+ה(?:סודי|פרטי)",
+    r"private[\s_-]?key|client[\s_-]?secret|bearer\s+(?:token|auth))s?\b|"
+    r"טוקן|מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+ה(?:סודי|פרטי)",
     re.I)
 # A 24+ char run mixing upper, lower and digits that switches character class often (random keys switch on ~60% of
-# neighbours; camelCase identifiers such as "HandleUserRequestV2Async" only at word boundaries, ~40%).
+# neighbours; camelCase identifiers such as "HandleUserRequestV2Async" only at word boundaries, ~40%). Separators
+# (_ + / -) are skipped when counting, so paths and slugs are judged by their letters and digits only.
+# "private key" stays a credential word even in non-credential talk: refusing a harmless preference is the safe side.
 _KEYISH_RUN = re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{24,}={0,2}")
 _KEYISH_SWITCH = 0.5
 
@@ -86,8 +89,8 @@ def _cls(c: str) -> int:
 def _keyish(text: str) -> bool:
     for m in _KEYISH_RUN.finditer(text):
         s = m.group().rstrip("=")
-        kinds = [_cls(c) for c in s]
-        switches = sum(a != b for a, b in zip(kinds, kinds[1:])) / (len(s) - 1)
+        kinds = [k for k in map(_cls, s) if k != 3]
+        switches = sum(a != b for a, b in zip(kinds, kinds[1:])) / max(1, len(kinds) - 1)
         if {0, 1, 2} <= set(kinds) and switches >= _KEYISH_SWITCH:
             return True
     return False
