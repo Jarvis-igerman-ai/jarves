@@ -923,8 +923,7 @@ class Manager(StageEngine):
             conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False)     # your own git identity / signing
             if conflicts:
                 return _res(False, "CONFLICT", "merge conflict, nothing changed: " + ", ".join(conflicts[:5]))
-            logs.info("projects", "PROJECT_SHIPPED", "integration commit merged into the owner branch", id=p["id"],
-                      commit=sha[:12])
+            logs.info("projects", "PROJECT_SHIPPED", "integration commit merged into the owner branch", id=p["id"])
             return _res(True, "ok", f"Merged commit {sha[:12]} of {br} into {st['branch']}. Nothing was pushed.",
                         commit=sha)
         wt = gitops.project_root(self.home, p["id"]) / "integration"
