@@ -364,3 +364,49 @@ def test_repository_signing_program_falls_back_to_the_owner_alias(tmp_path, monk
     monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
     gitops.git(repo, "status", ident=False)
     assert f"{repo_key}=owner-wrapper" in seen[-1] and f"{repo_key}=gpg" not in seen[-1]
+
+
+def test_diff_drivers_named_in_the_repository_config_never_run(tmp_path):
+    """#1407 review R1: `diff.external`, `diff.<x>.command` and `diff.<x>.textconv` in the shared config (with an
+    agent-written attributes file) name commands too; every JARVES diff runs with --no-ext-diff --no-textconv."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("*.txt diff=evil\n", encoding="utf-8")
+    for k, name in (("diff.external", "external"), ("diff.evil.command", "command"), ("diff.evil.textconv", "conv")):
+        subprocess.run(["git", "config", k, _run_marker(tmp_path, name, marker)], cwd=repo, check=True)
+    (repo / "f.txt").write_text("changed", encoding="utf-8")
+    gitops.commit_all(repo, "change")
+    gitops.diffstat(repo, "HEAD~1")
+    gitops.git(repo, "diff", "HEAD~1", "HEAD", check=False)
+    assert gitops.changed_files(repo, "HEAD~1") == ["f.txt"]
+    assert not marker.exists()
+
+
+def test_a_required_repository_filter_explains_the_failure(tmp_path):
+    """#1407 review R2: an owner's `git lfs install --local` filter is switched off like an agent's; when it is
+    `required`, git would store the raw file, so no git runs and the error says how to move it to the global config."""
+    repo = _repo(tmp_path)                       # `big`, not `lfs`: Git for Windows ships a system `filter.lfs`
+    (repo / ".gitattributes").write_text("*.bin filter=big\n", encoding="utf-8")
+    for k, v in (("filter.big.clean", "big clean -- %f"), ("filter.big.required", "true")):
+        subprocess.run(["git", "config", k, v], cwd=repo, check=True)
+    (repo / "x.bin").write_bytes(b"data")
+    with pytest.raises(gitops.GitError, match="global config"):
+        gitops.git(repo, "add", "x.bin")
+    assert "x.bin" not in subprocess.run(["git", "ls-files"], cwd=repo, capture_output=True, text=True).stdout
+    subprocess.run(["git", "config", "--unset", "filter.big.required"], cwd=repo, check=True)
+    gitops.git(repo, "status")                                     # not required: skipped, as before
+
+
+def test_the_ship_merge_message_names_the_branch_and_commit(tmp_path):
+    """#1407 review R4: `ship` merges a commit, so git's default message would lose the branch name."""
+    repo = _repo(tmp_path)
+    gitops.git(repo, "checkout", "-qb", "side")
+    (repo / "s.txt").write_text("s", encoding="utf-8")
+    gitops.commit_all(repo, "side")
+    sha = gitops.git(repo, "rev-parse", "HEAD").stdout.strip()
+    gitops.git(repo, "checkout", "-q", "main")
+    (repo / "m.txt").write_text("m", encoding="utf-8")
+    gitops.commit_all(repo, "main")
+    msg = f"Merge branch 'side' at commit {sha[:12]}"
+    assert gitops.merge_in(repo, sha, message=msg) == []
+    assert gitops.git(repo, "log", "-1", "--format=%s").stdout.strip() == msg

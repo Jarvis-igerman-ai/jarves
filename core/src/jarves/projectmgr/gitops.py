@@ -85,6 +85,8 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     program falls back to your global/system one (or git's default). Config-defined hooks (`hook.<name>.command`,
     newer git) become `true` in every scope, like `core.hooksPath`. ident=False (the owner's ship merge): the signing
     format and key also come from your global/system config (else git's default), never the repository's.
+    A repository-config filter marked `required` (e.g. `git lfs install --local`) fails closed with a clear message:
+    emptied, git gives a bare error or stores the raw file without the filter.
     Fails closed (GitError) when the config cannot be read (git older than 2.26 has no --show-scope) or a name cannot
     be overridden exactly on the command line (`=` in it, or bytes that are not UTF-8: git matches subsections
     byte for byte, so a lossy decode would override a different key).
@@ -100,6 +102,8 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     owner = {k.lower(): v for scope, k, v in entries if scope in ("global", "system")}
     pgp = [v for scope, k, v in entries if scope in ("global", "system") and k.lower() in _OPENPGP]
     owner.update(dict.fromkeys(_OPENPGP, pgp[-1] if pgp else "gpg"))     # your effective OpenPGP program, either alias
+    required = {k.lower()[7:-9] for _s, k, v in entries if re.fullmatch(r"filter\..+\.required", k, re.I | re.S)
+                and v.strip().lower() in ("true", "yes", "on", "1")}
     out: list[str] = []
     for scope, key, _v in entries:
         m = _RUN_KEY.fullmatch(key)
@@ -109,6 +113,11 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
         if "=" in key or "\ufffd" in key or any("\udc80" <= c <= "\udcff" for c in key):
             raise GitError(f"cannot neutralise the git config entry {key!r}: remove it from the repository config")
         low = key.lower()
+        if m and m.group(2) and mine and m.group(2).lower() in required:    # review R2: emptied, a required filter gives
+            raise GitError(                                                  # a bare git error or stores the raw file
+                f"the filter {m.group(2)!r} is set in the repository's own git config and marked required; JARVES "
+                "never runs commands from that config (an agent can write it). Set the filter in your global "
+                "config instead (for Git LFS: `git lfs install`, not `--local`), then remove it from the repository")
         val = "" if m and m.group(2) else "false" if m and m.group(3) else "true" if m and m.group(4) else owner.get(
             low, _GPG_DEFAULT.get(low, ""))
         out += ["-c", f"{key}={val}"]
@@ -123,9 +132,12 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Commands named in the repository's own config are neutralised too (#1407,
-    see `_config_overrides`)."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           *_config_overrides(cwd, ident)]
+    see `_config_overrides`). Every `diff` runs with `--no-ext-diff --no-textconv`: `diff.external`,
+    `diff.<x>.command` and `diff.<x>.textconv` (with an agent-written `info/attributes`) name commands too."""
+    over = _config_overrides(cwd, ident)
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false", *over]
+    if args[:1] == ("diff",):
+        args = ("diff", "--no-ext-diff", "--no-textconv", *args[1:])
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -275,14 +287,14 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True) -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

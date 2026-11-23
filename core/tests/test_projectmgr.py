@@ -632,6 +632,25 @@ def test_ship_without_an_integration_branch_says_nothing_to_ship(env):
         assert r["code"] == "NOTHING_TO_SHIP" and "nothing to ship" in r["text"], r
 
 
+def test_ship_reports_a_git_failure_and_merges_nothing(env, monkeypatch):
+    """#1407 review R5: when the commit cannot be read (git or the config read fails) ship says GIT_ERROR and
+    nothing merges."""
+    from jarves.projectmgr import gitops
+    m, repo, _ = env
+    open_project(m, repo)
+    head = sh(repo, "git", "rev-parse", "HEAD").strip()
+
+    def boom(*a, **k):
+        raise gitops.GitError("cannot read the git config")
+    monkeypatch.setattr(gitops, "git", boom)
+    m._ask = lambda *a, **k: True
+    for apply in (False, True):
+        r = m.call("ship_plan", project="demo", apply=apply)
+        assert r["code"] == "GIT_ERROR" and not r["ok"], r
+    monkeypatch.undo()
+    assert sh(repo, "git", "rev-parse", "HEAD").strip() == head
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
