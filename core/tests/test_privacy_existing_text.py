@@ -86,11 +86,47 @@ def test_1557_failed_step_keeps_code_and_plan_note_loses_tool_text(ctx):
     assert privacy.scrub_stored_text(ctx.home) == {"ledger": 0, "plan_steps": 0}   # idempotent
 
 
+def test_1557_ledger_scrub_is_idempotent_whatever_the_stored_spacing(ctx):
+    """Review R5: rows are compared parsed, so a body stored with other spacing or key order is not rewritten again."""
+    from jarves import mobile
+    c = Continuity(ctx.home, clock=lambda: 1_800_000_000.0)
+    c.store("phone", "c1", "chat", 200, {"ok": True, "answer": "private"})
+    c.store("phone", "g1", "goal", 200, {"ok": True, "goal": {"id": 1, "title": "private", "steps": []}})
+    assert privacy.scrub_stored_text(ctx.home) == {"ledger": 2, "plan_steps": 0}
+    with sqlite3.connect(c.path) as db:                      # the same answers, written with other separators
+        db.execute("UPDATE ledger SET body=? WHERE cid='c1'",
+                   (json.dumps(dict(reversed(list(mobile.chat_at_rest({"ok": True}).items()))), indent=1),))
+    assert privacy.scrub_stored_text(ctx.home) == {"ledger": 0, "plan_steps": 0}
+
+
+def test_1557_a_blocked_checkpoint_is_finished_by_the_retry(ctx):
+    """Review R1: the first pass commits, then a reader blocks the checkpoint; the retry (nothing left to rewrite)
+    must still fold the old frames out of the -wal file before the scrub counts as done."""
+    secret = b"Bialik-street-secret"
+    db = open_db(ctx.home)                                   # the Core's own connection stays open throughout
+    try:
+        pid = db.x("INSERT INTO goal_plans (title, state, created, updated) VALUES ('plan', 'done', 1, 1)").lastrowid
+        db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence) VALUES (?, 0, 't', 'done', ?)",
+             (pid, secret.decode()))
+        reader = sqlite3.connect(ctx.home / "memory.db", isolation_level=None)
+        reader.execute("BEGIN")
+        reader.execute("SELECT COUNT(*) FROM goal_plan_steps").fetchone()
+        try:
+            assert privacy.scrub_stored_text(ctx.home, timeout=0.05)["plan_steps"] is None
+        finally:
+            reader.close()
+        assert secret in (ctx.home / "memory.db-wal").read_bytes()     # committed, but the old frames remain
+        assert privacy.scrub_stored_text(ctx.home) == {"ledger": 0, "plan_steps": 0}
+        assert secret not in (ctx.home / "memory.db-wal").read_bytes() + (ctx.home / "memory.db").read_bytes()
+    finally:
+        db.close()
+
+
 def test_1557_core_tick_scrubs_once_privacy_is_on(ctx, monkeypatch):
     from jarves.operations import Operations
     c = Continuity(ctx.home, clock=lambda: 1_800_000_000.0)
     c.store("phone", "command-1557", "chat", 200, {"ok": True, "answer": "private answer"})
-    ops = SimpleNamespace(core=SimpleNamespace(home=ctx.home))
+    ops = SimpleNamespace(core=SimpleNamespace(home=ctx.home), _privacy_scrubbed=False, _privacy_scrub_logged=False)
 
     monkeypatch.setattr(logs, "privacy", lambda: False)
     Operations._privacy_scrub(ops)                      # privacy off: the text is the owner's choice
@@ -176,7 +212,24 @@ def test_1557_core_tick_scrub_runs_off_the_loop_and_a_crash_is_logged_once(ctx, 
         monkeypatch.setattr(Operations, name, lambda self: flush())
     ops.cheer = SimpleNamespace(check=flush)
     ops._synced = float("inf")
+    ops._privacy_scrubbed = ops._privacy_scrub_logged = False
     asyncio.run(ops._after_tick())
     asyncio.run(ops._after_tick())
     assert seen and all(t != loop_thread for t in seen) and len(seen) == 2
     assert errors == ["PRIVACY_SCRUB_FAILED"] and ops._privacy_scrubbed is False
+    monkeypatch.setattr(privacy, "scrub_stored_text", lambda home: {"ledger": 0, "plan_steps": 0})
+    asyncio.run(ops._after_tick())                         # review R3: a success re-arms the log
+    assert ops._privacy_scrubbed is True and ops._privacy_scrub_logged is False
+    ops._privacy_scrubbed = False
+    monkeypatch.setattr(privacy, "scrub_stored_text", boom)
+    asyncio.run(ops._after_tick())
+    assert errors == ["PRIVACY_SCRUB_FAILED", "PRIVACY_SCRUB_FAILED"]
+
+
+def test_1557_the_switch_waits_briefly_and_leaves_a_busy_database_to_the_tick(ctx, monkeypatch):
+    """Review R2: the dashboard / CLI switch uses a short busy timeout; the Core's off-loop tick retries."""
+    seen = []
+    monkeypatch.setattr(privacy, "scrub_stored_text", lambda home, timeout=99: seen.append(timeout) or {})
+    privacy.set_privacy(ctx, True)
+    privacy.set_full_text(ctx, False)
+    assert seen and all(t == privacy.HANDLER_TIMEOUT_S < privacy.TICK_TIMEOUT_S for t in seen)

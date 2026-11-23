@@ -21,6 +21,7 @@ def _ops(store, synced):
     async def _noop(): pass
     ops._signals_tick = _noop
     ops._connect_nudge = _noop
+    ops._privacy_scrub = lambda: None          # #1557 step of the tick: not what these tests are about
     return ops
 
 

@@ -948,7 +948,7 @@ def serve(h, mob: MobileAccess, ip: str) -> None:
             return h._json(400, _err("BAD_ID"))
         mob.cont.beat(dev["id"], used=True)
         status, obj, again = mob.cont.execute(dev["id"], cid, "goal", lambda: goal_action(mob, d), age_s=d.get("age_s"),
-                                              at_rest=_goal_at_rest)
+                                              at_rest=goal_at_rest)
         return done(status, {**obj, "replay": True} if again else obj, op=str(d.get("op", ""))[:20])
     if path == "/api/m/audio" and method == "GET":        # mic / cloud-audio indicator (V5 G5): true state, read-only
         if not need("status"):
@@ -1233,7 +1233,7 @@ def chat_at_rest(reply: dict) -> dict:
 GOAL_ERROR_NOT_KEPT = "the goal change was refused (details not kept in privacy mode)"
 
 
-def _goal_at_rest(body: dict) -> dict:
+def goal_at_rest(body: dict) -> dict:
     """#206 F13: the stored copy of a goal answer keeps ids and state, not the title or step text (the page re-syncs)."""
     out: dict = {"error": GOAL_ERROR_NOT_KEPT} if "error" in body else {}   # allow-list: no other key reaches disk
     if isinstance(body.get("ok"), bool):

@@ -196,6 +196,8 @@ class Operations:
     def __init__(self, core) -> None:
         self.core = core
         home = core.home
+        self._privacy_scrubbed = False           # #1557: the older stored text was scrubbed since privacy went on
+        self._privacy_scrub_logged = False       # an unexpected scrub error was logged (once per failure run)
         self.db = open_db(home)
         self.alerts = alerts_mod.AlertEngine(self.db, outputs={"popup": PopupOutput(core), "speech": SpeechOutput(core),
                                                                "os": OSOutput(core)})
@@ -370,8 +372,8 @@ class Operations:
         try:                                     # off the event loop: a busy database waits up to its timeout
             await asyncio.to_thread(self._privacy_scrub)
         except Exception:
-            self._privacy_scrubbed = False       # tried again next tick; logged once, not on every tick
-            if not getattr(self, "_privacy_scrub_logged", False):
+            self._privacy_scrubbed = False       # tried again next tick; logged once per failure run, not every tick
+            if not self._privacy_scrub_logged:
                 self._privacy_scrub_logged = True
                 logs.error("privacy", "PRIVACY_SCRUB_FAILED", "older stored text scrub failed", exc=True)
         now = time.time()
@@ -394,11 +396,13 @@ class Operations:
         """#1557: once privacy is on (at start, switched by another process, or a full-text window ended), remove the
         text kept on disk from before; again after every off -> on change. A failed attempt is retried next tick."""
         on = logs.privacy()
-        if on and not getattr(self, "_privacy_scrubbed", False):
+        if on and not self._privacy_scrubbed:
             from . import privacy as privacy_mod
             res = privacy_mod.scrub_stored_text(self.core.home)
             on = None not in res.values()
         self._privacy_scrubbed = bool(on)
+        if on:
+            self._privacy_scrub_logged = False   # a later failure is logged again
 
     async def stop(self) -> None:
         await self.scheduler.stop()            # no tick may run after the history store is closed below

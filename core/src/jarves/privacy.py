@@ -70,7 +70,7 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
-        scrub_stored_text(ctx.home)
+        scrub_stored_text(ctx.home, timeout=HANDLER_TIMEOUT_S)
     return state(ctx)
 
 
@@ -85,13 +85,15 @@ def set_privacy(ctx, on: bool) -> dict:
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
     if on:
-        scrub_stored_text(ctx.home)
+        scrub_stored_text(ctx.home, timeout=HANDLER_TIMEOUT_S)
     return {**state(ctx), "saved_in_config": saved, "config_error": err}
 
 
 # #1557: text written to disk before privacy was switched on. New rows already keep no text (#206 F13); these rows are
 # rewritten the same way once privacy is on (here, and by the Core's tick for a switch from another process, a start
 # with privacy on, or the end of a full-text window). The conversation history itself stays on "mask existing history".
+HANDLER_TIMEOUT_S = 2.0      # the switch answers quickly; a busy database is left to the Core's tick (10 s, off-loop)
+TICK_TIMEOUT_S = 10.0
 _STEP_NOTE = re.compile(r"(step \d+: )(.*)", re.S)       # a plan note written by a stopped step
 
 
@@ -101,14 +103,14 @@ def _note_at_rest(note: str) -> str:
     return m.group(1) + reason_at_rest(m.group(2)) if m else note
 
 
-def _scrub_ledger(home: Path) -> int:
+def _scrub_ledger(home: Path, timeout: float) -> int:
     from . import continuity, mobile
     path = home / continuity.DB_FILE
     if not path.is_file():
         return 0
-    fixes = {"chat": mobile.chat_at_rest, "goal": mobile._goal_at_rest}
+    fixes = {"chat": mobile.chat_at_rest, "goal": mobile.goal_at_rest}
     n = 0
-    cx = sqlite3.connect(path, timeout=10)
+    cx = sqlite3.connect(path, timeout=timeout)
     try:
         with cx:
             cx.execute("PRAGMA secure_delete=ON")
@@ -119,14 +121,14 @@ def _scrub_ledger(home: Path) -> int:
                 except (TypeError, ValueError):                    # NULL or not JSON: replaced like an empty answer
                     d = None
                 try:
-                    new = json.dumps(fixes[kind](d if isinstance(d, dict) else {}))
+                    new = fixes[kind](d if isinstance(d, dict) else {})
                 except (TypeError, ValueError):                    # an odd shape inside the answer: keep nothing
-                    new = json.dumps(fixes[kind]({}))
-                if new != body:      # the row (and so the duplicate-command protection) stays, only the text goes
-                    cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?", (new, device, cid))
+                    new = fixes[kind]({})
+                if new != d:         # compared parsed: the stored bytes' spacing / key order does not matter
+                    # the row (and so the duplicate-command protection) stays, only the text goes
+                    cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?", (json.dumps(new), device, cid))
                     n += 1
-        if n:
-            _checkpoint(cx)
+        _checkpoint(cx)          # every pass: an earlier pass may have committed and then found the checkpoint busy
     finally:
         cx.close()
     return n
@@ -140,12 +142,12 @@ def _checkpoint(cx: sqlite3.Connection) -> None:
         raise sqlite3.OperationalError("checkpoint busy")
 
 
-def _scrub_plan_steps(home: Path) -> int:
+def _scrub_plan_steps(home: Path, timeout: float) -> int:
     path = home / "memory.db"
     if not path.is_file():
         return 0
     n = 0
-    cx = sqlite3.connect(path, timeout=10)
+    cx = sqlite3.connect(path, timeout=timeout)
     try:
         with cx:
             cx.execute("PRAGMA secure_delete=ON")
@@ -161,19 +163,18 @@ def _scrub_plan_steps(home: Path) -> int:
                 if _note_at_rest(note) != note:   # 'step 2: CODE: tool text' from a failed step
                     cx.execute("UPDATE goal_plans SET note=? WHERE id=?", (_note_at_rest(note), pid))
                     n += 1
-        if n:
-            _checkpoint(cx)
+        _checkpoint(cx)          # every pass: an earlier pass may have committed and then found the checkpoint busy
     finally:
         cx.close()
     return n
 
 
-def scrub_stored_text(home: Path) -> dict:
-    """Best effort (a busy database is retried by the Core's next tick); logs counts only, never the text."""
+def scrub_stored_text(home: Path, timeout: float = TICK_TIMEOUT_S) -> dict:
+    """Best effort (a busy database or checkpoint gives None and is retried by the Core's next tick); counts only."""
     out = {}
     for name, fn in (("ledger", _scrub_ledger), ("plan_steps", _scrub_plan_steps)):
         try:
-            out[name] = fn(Path(home))
+            out[name] = fn(Path(home), timeout)
         except sqlite3.Error as e:
             out[name] = None
             logs.warn("privacy", "PRIVACY_SCRUB_PARTIAL", "older stored text could not be removed yet", part=name,
