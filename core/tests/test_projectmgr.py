@@ -1279,9 +1279,9 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     finally:
         (tmp_path / "signed_in").unlink(missing_ok=True)
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "main")                         # only jarves/p<N>/... branches
+        forge.push_branch(str(repo), "main", "o/r")                       # only jarves/p<N>/... branches
     with pytest.raises(forge.ForgeError):
-        forge.push_branch(str(repo), "jarves/p1/../escape")
+        forge.push_branch(str(repo), "jarves/p1/../escape", "o/r")
 
 
 def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monkeypatch):
@@ -1314,7 +1314,9 @@ def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monk
             forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     with pytest.raises(forge.ForgeError):                             # review R2: a stale gh(path, ...) caller
         forge.gh(str(repo), "auth", "status")
-    for bad_ref in ("-R", "--web", "", 9):                            # review R3: a ref is never read as a gh flag
+    for bad_ref in ("-R", "--web", "", 9, "https://github.com/attacker/evil/pull/1", "github.com/attacker/evil/pull/1",
+                    "a/../b"):                                         # a flag, or a URL gh resolves past --repo
+
         with pytest.raises(forge.ForgeError):
             forge.pr_checks("o/r", bad_ref)
     assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # nothing bad ever ran gh
@@ -1333,6 +1335,53 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     assert m.call("configure", project="demo", github_repo="o/r\n")["code"] == "BAD_GITHUB_REPO"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+
+
+def test_forge_pr_checks_takes_a_number_or_branch_only_1622(fake_gh, tmp_path):
+    """#1622 review: a PR URL names its own repository, which gh would use instead of the recorded --repo."""
+    from jarves.projectmgr import forge
+    assert forge.pr_checks("o/r", "9")[0]["bucket"] == "pass"
+    assert forge.pr_checks("o/r", "jarves/p1/t1-a1")[0]["bucket"] == "pass"
+    with pytest.raises(forge.ForgeError):
+        forge.pr_checks("o/r", "https://github.com/attacker/evil/pull/9")
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert len(calls) == 2 and all("attacker" not in " ".join(c["args"]) for c in calls), calls
+
+
+def test_forge_push_goes_to_the_recorded_repo_not_a_planted_origin_1622(tmp_path, monkeypatch):
+    """#1622 review: the branch push targets https://github.com/<recorded owner/repo>.git, never `origin`; a
+    project-level url.*.insteadOf (which would rewrite even that URL) makes JARVES refuse to push."""
+    from jarves.projectmgr import forge, gitops
+    repo = tmp_path / "r"
+    repo.mkdir()
+    sh(repo, "git", "init", "-q", "-b", "main")
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/attacker/evil.git")   # planted by an agent
+    pushes, real_git = [], gitops.git
+
+    def spy(cwd, *args, **kw):
+        if args[:1] == ("push",):
+            pushes.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real_git(cwd, *args, **kw)
+    monkeypatch.setattr(gitops, "git", spy)
+    forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    assert pushes == [("push", "--no-verify", "https://github.com/o/r.git", "jarves/p1/t1-a1:jarves/p1/t1-a1")]
+    sh(repo, "git", "config", "url.https://github.com/attacker/evil.git.pushInsteadOf", "https://github.com/o/r.git")
+    with pytest.raises(forge.ForgeError, match="rewrites URLs"):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
+    with pytest.raises(forge.ForgeError):
+        forge.push_branch(str(repo), "jarves/p1/t1-a1", "")          # no recorded repo: no push at all
+    assert len(pushes) == 1
+
+
+def test_github_op_tells_a_migrated_project_to_record_its_repo_1622(env, fake_gh):
+    """#1622 review: a project switched to read/write before github_repo existed gets an actionable NEED_GITHUB_REPO."""
+    m, repo, _ = env
+    open_project(m, repo)
+    p = m.db.projects()[0]
+    m.db.update_project(p["id"], github="write")                      # as migrated: github on, github_repo ''
+    g = m.call("github", project="demo")
+    assert not g["ok"] and g["code"] == "NEED_GITHUB_REPO" and "--github-repo owner/repo" in g["text"], g
 
 
 def test_github_op_uses_the_recorded_repo_not_a_planted_origin_1622(env, fake_gh, tmp_path):

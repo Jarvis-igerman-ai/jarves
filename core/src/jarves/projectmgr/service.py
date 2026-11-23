@@ -387,6 +387,9 @@ class Manager(StageEngine):
             return err
         st = forge.status(p.get("github_repo") or "")
         mode = p.get("github") or "off"
+        if mode != "off" and not st["repo"]:     # #1622: a project switched on before the repo was recorded
+            return _res(False, "NEED_GITHUB_REPO", f"{p['name']}: GitHub {mode} is on but no repository is recorded: "
+                        f"run jarvis project config -p {p['name']} --github-repo owner/repo", mode=mode, **st)
         return _res(True, "ok", f"{p['name']}: GitHub {mode}" + (f" ({st['repo']})" if st["repo"] else
                     " (no GitHub repository recorded)"), mode=mode, **st)
 

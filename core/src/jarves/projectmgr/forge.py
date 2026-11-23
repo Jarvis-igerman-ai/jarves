@@ -15,6 +15,8 @@ _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 MODES = ("off", "read", "write")
 _SLUG = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 _OWNER_REPO = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*")   # fullmatch: no trailing newline
+_OWN_BRANCH = re.compile(r"jarves/p\d+/[\w.\-/]+")                     # fullmatch: the only branches JARVES pushes
+_PR_REF = re.compile(r"[1-9][0-9]{0,8}")
 _GH_GROUPS = ("auth", "issue", "pr")    # the only gh command groups JARVES runs; a stale gh(path, ...) call is refused
 
 
@@ -86,11 +88,23 @@ def issues(repo: str, label: str = "", limit: int = 20) -> list[dict]:
              "labels": [x.get("name") for x in r.get("labels") or []]} for r in rows]
 
 
-def push_branch(path: str, branch: str) -> None:
-    """A normal push of one branch to origin (never --force, never a tag, never the default branch)."""
-    if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
+def _own_branch(b: object) -> bool:
+    return isinstance(b, str) and bool(_OWN_BRANCH.fullmatch(b)) and ".." not in b and not b.endswith("/")
+
+
+def push_branch(path: str, branch: str, repo: str) -> None:
+    """A normal push of one branch (never --force, never a tag, never the default branch) to the owner's recorded
+    owner/repo as an explicit URL, never to the `origin` remote (#1622: `remote.origin.url` is agent-writable). A
+    project-level `url.*.insteadOf` / `pushInsteadOf` could still rewrite that URL, so the push is refused while one
+    exists in the project's own (local or worktree) git config."""
+    if not _own_branch(branch):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
-    gitops.git(path, "push", "--no-verify", "origin", f"{branch}:{branch}", timeout=300, ident=False)
+    url = f"https://github.com/{checked_slug(repo)}.git"
+    rw = gitops.git(path, "config", "--show-scope", "--includes", "--get-regexp", r"^url\..*\.(push)?insteadof$",
+                    check=False).stdout.splitlines()
+    if any(line.split(None, 1)[:1] in (["local"], ["worktree"]) for line in rw):
+        raise ForgeError("the project's git config rewrites URLs (url.*.insteadOf): JARVES does not push from it")
+    gitops.git(path, "push", "--no-verify", url, f"{branch}:{branch}", timeout=300, ident=False)
 
 
 def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
@@ -101,9 +115,11 @@ def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
 
 
 def pr_checks(repo: str, ref: str) -> list[dict]:
-    """CI of a PR (number, URL or branch): [{name, state, bucket}] (bucket: pass|fail|pending|skipping|cancel)."""
-    if not isinstance(ref, str) or not ref or ref.startswith("-"):
-        raise ForgeError("a pull request number, URL or branch is needed")
+    """CI of a PR (number or one of JARVES's own jarves/p<N>/... branches): [{name, state, bucket}] (bucket:
+    pass|fail|pending|skipping|cancel). A PR URL is refused: gh resolves it against the repository in the URL, not
+    the recorded --repo (#1622)."""
+    if not ((isinstance(ref, str) and _PR_REF.fullmatch(ref)) or _own_branch(ref)):
+        raise ForgeError("a pull request number or a jarves/p<N>/... branch is needed")
     try:
         out = gh("pr", "checks", ref, "--json", "name,state,bucket", repo=repo)
     except ForgeError as e:
