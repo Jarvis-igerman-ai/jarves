@@ -114,19 +114,34 @@ class UnlockWrong:
 UNLOCK_WRONG_FILE = "unlock_wrong.json"
 
 
-def load_unlock_wrong(home: Path, salt: str) -> UnlockWrong:
-    """Wrong tries stored for the code with this salt (#1416 R1), so a restart cannot reset the guess bound."""
+def load_unlock_wrong(home: Path, salt: str) -> UnlockWrong | None:
+    """Wrong tries stored for the code with this salt (#1416 R1), so a restart cannot reset the guess bound.
+    No file or another code's file: fresh counts. Unreadable or damaged: None, and the caller cancels the code."""
     wrong = UnlockWrong(salt)
     try:
         raw = json.loads((Path(home) / UNLOCK_WRONG_FILE).read_text(encoding="ascii"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return wrong
-    if isinstance(raw, dict) and raw.get("salt") == salt:
-        for name, top in (("total", UNLOCK_WRONG_TOTAL), ("owner", UNLOCK_WRONG_PER_SESSION)):
-            value = raw.get(name)
-            if isinstance(value, int) and not isinstance(value, bool):
-                setattr(wrong, name, max(0, min(value, top)))
+    except (OSError, ValueError):
+        return None  # fail closed: a read error must not give fresh tries
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("salt") != salt:
+        return wrong
+    for name, top in (("total", UNLOCK_WRONG_TOTAL), ("owner", UNLOCK_WRONG_PER_SESSION)):
+        value = raw.get(name)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        setattr(wrong, name, max(0, min(value, top)))
     return wrong
+
+
+def drop_unlock_wrong(home: Path) -> None:
+    """Remove stored counts; a failure is harmless because they are keyed by the code's salt (#1416 R3)."""
+    try:
+        (Path(home) / UNLOCK_WRONG_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _write_private_json(home: Path, name: str, record: dict) -> None:
@@ -550,7 +565,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             if self.server.unlock_wrong.salt != salt:  # new code or a fresh process: stored tries count (#1416 R1)
-                self.server.unlock_wrong = load_unlock_wrong(self.server.home, salt)
+                stored_wrong = load_unlock_wrong(self.server.home, salt)
+                if stored_wrong is None:  # #1416 R2: unreadable counts close the code instead of giving fresh tries
+                    path.unlink(missing_ok=True)
+                    drop_unlock_wrong(self.server.home)
+                    self.server.unlock_wrong = UnlockWrong()
+                    self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
+                    return
+                self.server.unlock_wrong = stored_wrong
             wrong = self.server.unlock_wrong
             owner = self.server.owner_window == (salt, session)
             tries = wrong.owner if owner else wrong.by_session.get(session, 0)
@@ -584,12 +606,12 @@ class Handler(BaseHTTPRequestHandler):
                 # the owner's window has also used its own 3 tries (bound 5 + 3; the mark has the token link's exposure).
                 if not stored or (closed and (not marked or wrong.owner >= UNLOCK_WRONG_PER_SESSION)):
                     path.unlink(missing_ok=True)
-                    (Path(self.server.home) / UNLOCK_WRONG_FILE).unlink(missing_ok=True)
+                    drop_unlock_wrong(self.server.home)
                     self.server.unlock_wrong = UnlockWrong()
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = UnlockWrong()
-            (Path(self.server.home) / UNLOCK_WRONG_FILE).unlink(missing_ok=True)
+            drop_unlock_wrong(self.server.home)  # never a 500 after the code is consumed (#1416 R3)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             ttl = owner_unlock_s(self.server.home)
             self.server.unlocked[session] = now + ttl
@@ -624,7 +646,9 @@ class Handler(BaseHTTPRequestHandler):
             # #1416: the owner mark from `open` makes this the code's owner window, once per code (first login wins).
             # Still inside `with session_lock` (above), like every other read or write of owner_window.
             salt = unlock.owner_salt(self.server.home, data.get("owner"), now=now) if data.get("owner") else ""
-            if salt and self.server.owner_window[0] != salt:
+            # A mark is single use across restarts too: a salt already claimed live or in the stored owner window is
+            # refused, so a replayed link cannot take the owner role before the real owner tab returns (review R1).
+            if salt and salt not in (self.server.owner_window[0], self.server.restored_owner[0]):
                 self.server.owner_window, self.server.restored_owner = (salt, session), ("", "")  # newer wins (R1)
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})

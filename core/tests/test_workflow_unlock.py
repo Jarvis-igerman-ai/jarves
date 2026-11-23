@@ -355,6 +355,47 @@ class UnlockTests(unittest.TestCase):
         self.server.unlock_attempts.clear()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
+    def test_owner_mark_replayed_after_a_restart_is_refused_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        owner = self.owner_login(mark).split("=", 1)[1]
+        self.restart()
+        self.owner_login(mark)                                         # someone replays the captured link in the gap
+        self.assertEqual(self.server.owner_window, ("", ""))           # the stored owner window keeps the mark's salt
+        for i in range(2):                                             # 3 + 2 from token windows use up the shared 5
+            self.cookie = ""
+            self.login()
+            for _ in range(3 if i == 0 else 2):
+                self.wrong_try(wrong)
+        self.cookie = f"{self.server.cookie}={owner}"                  # the real owner tab returns: still the owner
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_unreadable_stored_counts_cancel_the_code_after_a_restart_1416(self):
+        shown = unlock.issue(self.home, owner_mark=unlock.new_owner_mark())
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        self.wrong_try(wrong)
+        self.restart()
+        (self.home / "unlock_wrong.json").write_text("damaged")
+        self.cookie = ""
+        self.login()
+        with patch.object(unlock, "consume", wraps=unlock.consume) as consume:
+            self.assertEqual(self.wrong_try(shown), (403, None))       # R2: no fresh tries, not even the right code
+        consume.assert_not_called()
+        self.assertFalse((self.home / unlock.FILE).exists())
+
+    def test_unlock_succeeds_when_the_stale_counts_cannot_be_removed_1416(self):
+        shown = unlock.issue(self.home)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.login()
+        self.wrong_try(wrong)                                          # counts loaded and stored for this code
+        (self.home / "unlock_wrong.json").unlink()
+        (self.home / "unlock_wrong.json").mkdir()                      # unlink now fails with an OSError
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)  # R3: no 500 after the code is used
+
     def test_marked_code_is_cancelled_when_an_early_count_cannot_be_stored_1416(self):
         from jarves.workflow import server as srv
         shown = unlock.issue(self.home, owner_mark=unlock.new_owner_mark())
@@ -381,11 +422,16 @@ class UnlockTests(unittest.TestCase):
                     self.wrong_try(wrong)
         self.assertFalse((self.home / unlock.FILE).exists())          # fail closed: no unstored live code past 5
 
-    def test_stored_counts_of_another_code_or_damaged_are_ignored_1416(self):
+    def test_stored_counts_of_another_code_are_ignored_and_damaged_ones_close_1416(self):
         from jarves.workflow.server import load_unlock_wrong
-        for raw in ('{"salt": "b", "total": 5, "owner": 3}', "not json", '{"salt": "a", "total": true, "owner": "3"}'):
+        self.assertEqual(load_unlock_wrong(self.home, "a"), UnlockWrong("a"))  # no file yet: fresh counts
+        (self.home / "unlock_wrong.json").write_text('{"salt": "b", "total": 5, "owner": 3}')
+        self.assertEqual(load_unlock_wrong(self.home, "a"), UnlockWrong("a"))  # another code's counts
+        for raw in ("not json", "[1]", '{"salt": "a", "total": true, "owner": "3"}'):
             (self.home / "unlock_wrong.json").write_text(raw)
-            self.assertEqual(load_unlock_wrong(self.home, "a"), UnlockWrong("a"), raw)
+            self.assertIsNone(load_unlock_wrong(self.home, "a"), raw)  # R2: damaged means closed, not fresh
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            self.assertIsNone(load_unlock_wrong(self.home, "a"))
         (self.home / "unlock_wrong.json").write_text('{"salt": "a", "total": 99, "owner": -2}')
         self.assertEqual((load_unlock_wrong(self.home, "a").total, load_unlock_wrong(self.home, "a").owner), (5, 0))
 
