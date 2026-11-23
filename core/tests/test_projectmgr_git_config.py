@@ -85,7 +85,8 @@ def test_a_merge_driver_named_in_the_shared_config_never_runs(tmp_path):
                                  "remote.origin.vcs", "difftool.evil.path", "credential.https://x.invalid.helper",
                                  "gpg.x509.program", "interactive.diffFilter",
                                  "browser.evil.cmd", "browser.evil.path", "web.browser", "man.evil.cmd",
-                                 "help.browser", "instaweb.browser", "instaweb.httpd"])
+                                 "help.browser", "instaweb.browser", "instaweb.httpd",
+                                 "gc.recentObjectsHook"])
 def test_other_command_keys_in_the_shared_config_are_refused(tmp_path, key):
     """#1390 other command types: every git call refuses while the shared config names one."""
     repo = _repo(tmp_path)
@@ -134,13 +135,29 @@ def test_a_repository_that_names_a_command_is_not_a_usable_repo(tmp_path):
 
 @pytest.mark.parametrize("key,value", [("submodule.lib.update", "checkout"), ("submodule.lib.update", "rebase"),
                                        ("submodule.lib.update", "none"), ("credential.helper", ""),
-                                       ("core.pager", "less"), ("pager.log", "false")])
+                                       ("core.pager", "less"), ("pager.log", "false"),
+                                       ("alias.st", "status --short")])
 def test_values_that_name_no_command_are_accepted(tmp_path, key, value):
     """#1390 review R2: `git submodule init` copies update=checkout/rebase/merge/none, an empty credential.helper
     resets the list, and pagers never start without a terminal; none of these runs a command."""
     repo = _repo(tmp_path)
     _setcfg(repo, key, value)
     assert gitops.git(repo, "status").returncode == 0
+
+
+def test_a_shell_alias_never_runs(tmp_path):
+    """#1662 review: `alias.evil=!cmd` in the shared config runs a shell command on `git evil`; it is refused."""
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    _setcfg(repo, "alias.evil", f"!touch '{marker.as_posix()}'")
+    subprocess.run(["git", "evil"], cwd=repo, check=True)
+    assert marker.exists()                                                       # the setup itself runs the alias
+    marker.unlink()
+    with pytest.raises(gitops.GitError, match="alias.evil"):
+        gitops.git(repo, "evil")
+    _setcfg(repo, "alias.evil", f"-c core.editor={marker.as_posix()} commit")   # git allows a leading -c in an alias
+    with pytest.raises(gitops.GitError, match="alias.evil"):
+        gitops.git(repo, "evil")
+    assert not marker.exists()
 
 
 def test_a_submodule_update_command_is_refused(tmp_path):
@@ -159,7 +176,7 @@ def test_a_key_written_during_the_call_is_detected(tmp_path, monkeypatch):
             real(["git", "config", "core.editor", "evil"], cwd=repo, check=True)
         return real(argv, **kw)
     monkeypatch.setattr(gitops.subprocess, "run", racing)
-    with pytest.raises(gitops.GitError, match="changed during the call.*core.editor"):
+    with pytest.raises(gitops.GitError, match="changed during the call \\(which already ran\\).*core.editor"):
         gitops.git(repo, "status")
 
 

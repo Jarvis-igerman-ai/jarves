@@ -77,10 +77,12 @@ _RUNS = re.compile(
     r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
     r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
     r"|core\.alternaterefscommand|interactive\.difffilter|(browser|man)\..+\.(cmd|path)|web\.browser|help\.browser"
-    r"|instaweb\..+)")
+    r"|instaweb\..+|gc\.recentobjectshook|alias\..+)")
 # values that name no command: an empty credential.helper resets the list, and submodule.*.update runs a command
-# only as `!cmd` (checkout/rebase/merge/none are what `git submodule init` copies from .gitmodules)
-_HARMLESS = {"credential": lambda v: v == "", "submodule": lambda v: not v.startswith("!")}
+# only as `!cmd` (checkout/rebase/merge/none are what `git submodule init` copies from .gitmodules);
+# an alias names a command as `!cmd`, or through leading global options (`-c filter.x.clean=cmd add`, `--exec-path`)
+_HARMLESS = {"credential": lambda v: v == "", "submodule": lambda v: not v.startswith("!"),
+             "alias": lambda v: not v.startswith(("!", "-"))}
 _SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
 # git options that point git at another repository than `cwd`, which config_commands checked
 _ELSEWHERE = ("-C", "--git-dir", "--work-tree")
@@ -158,7 +160,8 @@ def config_commands(cwd: str | Path, _prefix: str = "", _depth: int = 0) -> list
 
 # a submodule git can enter without a work tree (fetch/push recursion, a checkout that populates one) is never entered:
 # config_commands checks only populated gitlinks (#1662 R1)
-_NO_RECURSE = ["-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false", "-c", "push.recurseSubmodules=no"]
+_NO_RECURSE = ["-c", "submodule.recurse=false", "-c", "fetch.recurseSubmodules=false",
+               "-c", "push.recurseSubmodules=no"]
 
 
 def _refused(args: tuple[str, ...], check: bool, why: str) -> subprocess.CompletedProcess:
@@ -178,7 +181,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
     drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`), or in the config of a populated
-    gitlink git would enter, makes the call fail before git starts (#1390); submodule recursion is off otherwise. Residual: a key written in the moment between that read and git's own read is not prevented;
+    gitlink git would enter, makes the call fail before git starts (#1390); submodule recursion is off otherwise.
+    Residual: a key written in the moment between that read and git's own read is not prevented;
     it is detected by a second read after the call, which then fails loudly (prevention: #1655).
     `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
     if _points_elsewhere(args):
@@ -197,8 +201,8 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         time.sleep(0.15 * (attempt + 1))
     late = [k for k in config_commands(cwd) if not k.startswith("(")]     # detect a key written during the call
     if late:
-        return _refused(args, check, f"refused: the repository config changed during the call to name a command: "
-                                     f"{', '.join(late)}")
+        return _refused(args, check, "refused: the repository config changed during the call (which already ran) "
+                                     f"to name a command: {', '.join(late)}")
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p
@@ -207,7 +211,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError, GitError):
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
