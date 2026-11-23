@@ -131,15 +131,33 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
         return {}
 
 
-def save_sessions(home: Path, digests: dict[str, float]) -> None:
-    """Atomic owner-only write of session digests (never the session id or the access token)."""
+def load_owner_window(home: Path) -> tuple[str, str]:
+    """(salt, session digest) of the stored owner window (#1416), or ("", "") when missing or damaged."""
+    try:
+        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        row = raw.get("owner") if isinstance(raw, dict) else None
+        salt, digest = (row.get("salt"), row.get("session")) if isinstance(row, dict) else ("", "")
+    except (OSError, ValueError):
+        return "", ""
+    if (isinstance(salt, str) and re.fullmatch(r"[0-9a-f]{32}", salt)
+            and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+        return salt, digest
+    return "", ""
+
+
+def save_sessions(home: Path, digests: dict[str, float], owner: tuple[str, str] = ("", "")) -> None:
+    """Atomic owner-only write of session digests (never the session id or the access token). `owner` is the
+    (code salt, session digest) of the owner window (#1416), so a restart keeps it."""
     private_directory(Path(home))
     path = Path(home) / "sessions.json"
     tmp = path.with_name(f"sessions.{os.getpid()}.{threading.get_ident()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "sessions": digests}, f)
+        record: dict = {"version": 1, "sessions": digests}
+        if owner[0] and owner[1]:
+            record["owner"] = {"salt": owner[0], "session": owner[1]}
+        json.dump(record, f)
     os.replace(tmp, path)
 
 
@@ -173,6 +191,9 @@ class Server(ThreadingHTTPServer):
         # #1416: (salt, session) of the one window that logged in with the code's owner mark from `open` in the owner's
         # terminal. Its tries do not count in the shared total, and the total cannot cancel a code that has a mark.
         self.owner_window: tuple[str, str] = ("", "")
+        # Stored owner window from before a restart: (salt, session digest). It becomes `owner_window` when its
+        # cookie comes back (session_end), like `restored` does for sessions.
+        self.restored_owner: tuple[str, str] = load_owner_window(self.home)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -188,9 +209,12 @@ class Server(ThreadingHTTPServer):
         """End time of a live session, restoring it from a stored digest. Caller holds session_lock."""
         end = self.sessions.get(session, 0)
         if not end and session and self.restored:
-            end = self.restored.pop(session_key(self.token, session), 0)
+            digest = session_key(self.token, session)
+            end = self.restored.pop(digest, 0)
             if end > now:
                 self.sessions[session] = end
+                if self.restored_owner[1] == digest:  # #1416: the owner window survives a restart
+                    self.owner_window, self.restored_owner = (self.restored_owner[0], session), ("", "")
         return end if end > now else 0
 
     def persist_sessions(self, now: float) -> None:
@@ -199,8 +223,11 @@ class Server(ThreadingHTTPServer):
         self.restored = {k: end for k, end in self.restored.items() if end > now}
         digests = dict(self.restored)
         digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
+        salt, session = self.owner_window
+        owner = (salt, session_key(self.token, session)) if salt and session in self.sessions else (
+            self.restored_owner if self.restored_owner[1] in self.restored else ("", ""))
         try:
-            save_sessions(self.home, digests)
+            save_sessions(self.home, digests, owner)
         except OSError:
             pass  # persistence is a convenience; the live session still works in memory
 
@@ -558,6 +585,7 @@ class Handler(BaseHTTPRequestHandler):
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
             # #1416: the owner mark from `open` makes this the code's owner window, once per code (first login wins).
+            # Still inside `with session_lock` (above), like every other read or write of owner_window.
             salt = unlock.owner_salt(self.server.home, data.get("owner"), now=now) if data.get("owner") else ""
             if salt and self.server.owner_window[0] != salt:
                 self.server.owner_window = (salt, session)

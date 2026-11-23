@@ -278,6 +278,43 @@ class UnlockTests(unittest.TestCase):
         self.server.unlock_attempts.clear()
         self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])
 
+    def restart(self):
+        self.server.shutdown()
+        self.thread.join(5)
+        self.server.server_close()
+        self.server = Server(self.home, 0)                             # same home: same token and stored sessions
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def test_owner_window_survives_a_server_restart_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        owner = self.owner_login(mark).split("=", 1)[1]
+        self.assertNotIn(owner, (self.home / "sessions.json").read_text(encoding="utf-8"))  # only its digest is stored
+        self.restart()
+        self.assertEqual(self.server.owner_window, ("", ""))           # nothing in memory until its cookie returns
+        for i in range(2):                                             # token windows on the new server use up the 5
+            self.cookie = ""
+            self.login()
+            for _ in range(3 if i == 0 else 2):
+                self.wrong_try(wrong)
+        self.assertEqual(self.wrong_try(shown), (403, "code_closed"))
+        self.cookie = f"{self.server.cookie}={owner}"                  # the owner's persisted cookie is still the owner
+        self.assertEqual(self.wrong_try(wrong), (403, None))
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_damaged_stored_owner_window_is_ignored_1416(self):
+        from jarves.workflow.server import load_owner_window, save_sessions
+        for row in ({"salt": "x", "session": "y"}, ["a"], {"salt": "a" * 32}, None):
+            (self.home / "sessions.json").write_text(json.dumps({"version": 1, "sessions": {}, "owner": row}))
+            self.assertEqual(load_owner_window(self.home), ("", ""), row)
+        (self.home / "sessions.json").write_text("not json")
+        self.assertEqual(load_owner_window(self.home), ("", ""))
+        save_sessions(self.home, {}, ("a" * 32, "b" * 64))
+        self.assertEqual(load_owner_window(self.home), ("a" * 32, "b" * 64))
+
     def test_owner_mark_is_single_use_and_bound_to_its_code_1416(self):
         mark = unlock.new_owner_mark()
         shown = unlock.issue(self.home, owner_mark=mark)

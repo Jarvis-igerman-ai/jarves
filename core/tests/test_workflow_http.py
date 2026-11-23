@@ -233,6 +233,9 @@ class WorkflowHTTPTests(unittest.TestCase):
         # #789: an early 401 while the one-time #token is being exchanged must not end the new session.
         self.assertIn("window.workflowSessionEnded = () => { if (sessionReady) sessionEnded(); };", app)
         self.assertLess(app.index('await api("/api/session", '), app.index("    sessionReady = true;"))  # {token} or {token, owner} (#1416)
+        # #1416: the owner mark from the '#owner=' fragment reaches the login, or the owner window never exists.
+        self.assertIn('const owner = fragment.get("owner");', app)
+        self.assertIn('await api("/api/session", owner ? {token, owner} : {token});', app)
         guard = "response.status === 401 || response.status === 403"
         for name, minimum in (("health.js", 1), ("timeline.js", 1), ("overview.js", 3)):
             text = (static / name).read_text(encoding="utf-8")
