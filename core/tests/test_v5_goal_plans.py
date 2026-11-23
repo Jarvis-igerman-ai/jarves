@@ -766,6 +766,7 @@ async def _text_plan(env, monkeypatch):
 
 
 async def test_1526_busy_wal_is_retried_until_truncated_and_warned_once(env, monkeypatch):
+    wait0 = env.db._db.execute("PRAGMA busy_timeout").fetchone()[0]   # whatever the db config sets
     import sqlite3
     pid = await _text_plan(env, monkeypatch)
     seen = []
@@ -780,12 +781,13 @@ async def test_1526_busy_wal_is_retried_until_truncated_and_warned_once(env, mon
     assert "read secret-a" not in json.dumps(env.store.get(pid))
     reader.close()
     await env.runner.tick()                                            # the reader is gone: the retry truncates
-    assert b"read secret-a" not in _on_disk(env.db) and env.runner._wal_pending is False
+    assert b"read secret-a" not in _on_disk(env.db) and env.runner._disk_step == ""
     c = env.db._db                                                     # it never waited, and the settings are restored
-    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == wait0
 
 
 async def test_1526_error_mid_scrub_rolls_back_everything_and_restores_settings(env, monkeypatch):
+    wait0 = env.db._db.execute("PRAGMA busy_timeout").fetchone()[0]   # whatever the db config sets
     pid = await _text_plan(env, monkeypatch)
     real = env.db._db
     real.execute("PRAGMA secure_delete=0")
@@ -795,7 +797,7 @@ async def test_1526_error_mid_scrub_rolls_back_everything_and_restores_settings(
         env.store.scrub_private()
     env.db._db = real
     assert env.store.get(pid)["steps"][0]["evidence"] == "read secret-a"   # the step UPDATE ran first and was undone
-    assert real.execute("PRAGMA secure_delete").fetchone()[0] == 0 and real.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert real.execute("PRAGMA secure_delete").fetchone()[0] == 0 and real.execute("PRAGMA busy_timeout").fetchone()[0] == wait0
     assert not real.in_transaction
 
 
@@ -830,6 +832,7 @@ async def test_1526_privacy_on_off_on_scrubs_again(env, monkeypatch):
 
 
 def test_1526_failed_settings_restore_is_logged_and_keeps_the_first_error(env, monkeypatch):
+    wait0 = env.db._db.execute("PRAGMA busy_timeout").fetchone()[0]   # whatever the db config sets
     import sqlite3
     seen = []
     monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
@@ -840,7 +843,7 @@ def test_1526_failed_settings_restore_is_logged_and_keeps_the_first_error(env, m
         env.store.scrub_private()
     env.db._db = real
     assert seen == ["PLAN_SCRUB_PRAGMA_RESTORE_FAILED"]
-    assert real.execute("PRAGMA busy_timeout").fetchone()[0] == 5000   # the other setting was still restored
+    assert real.execute("PRAGMA busy_timeout").fetchone()[0] == wait0   # the other setting was still restored
 
 
 async def test_1526_wal_checkpoint_error_is_warned_once_and_retried(env, monkeypatch):
@@ -871,3 +874,55 @@ async def test_1526_scrub_never_adopts_an_open_transaction(env, monkeypatch):
     assert c.in_transaction                                            # neither committed nor rolled back by the scrub
     c.rollback()
     assert env.store.get(pid)["title"] == "p" and "read secret-a" in json.dumps(env.store.get(pid))
+
+
+async def test_1526_text_in_space_freed_before_privacy_is_removed_from_disk(env, monkeypatch):
+    """Review R1: rows rewritten or deleted while secure_delete was off leave old text in free space; VACUUM removes it."""
+    env.db._db.execute("PRAGMA secure_delete=0")                       # how a stock SQLite build frees space
+    gone = await _text_plan(env, monkeypatch)
+    env.store.cancel(gone) if env.store.get(gone)["state"] not in gp.TERMINAL else None
+    assert env.store.delete(gone)                                       # deleted with privacy off: its bytes are freed only
+    env.db._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    assert b"read secret-a" in _on_disk(env.db)                         # the residue this test is about
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    await env.runner.tick()
+    assert b"read secret-a" not in _on_disk(env.db) and env.runner._disk_step == ""
+
+
+async def test_1526_busy_vacuum_is_warned_once_and_retried(env, monkeypatch):
+    import sqlite3
+    await _text_plan(env, monkeypatch)
+    seen, tries = [], []
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **k: seen.append((code, k.get("error_type"))))
+    real = env.store.vacuum
+
+    def flaky():
+        tries.append(1)
+        if len(tries) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return real()
+    monkeypatch.setattr(env.store, "vacuum", flaky)
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    for _ in range(4):
+        await env.runner.tick()
+    assert tries == [1, 1, 1] and seen == [("PLAN_SCRUB_VACUUM_FAILED", "OperationalError")]
+    assert env.runner._disk_step == ""
+
+
+def test_1526_connection_uses_legacy_transactions(env):
+    """Review R4: BEGIN IMMEDIATE and the in_transaction guard assume legacy transaction control (not autocommit=False)."""
+    import sqlite3
+    c = env.db._db
+    assert c.autocommit == sqlite3.LEGACY_TRANSACTION_CONTROL and c.isolation_level is not None and not c.in_transaction
+
+
+def test_1526_failed_setup_pragma_still_restores_the_first(env):
+    """Review R2: if setting secure_delete fails, busy_timeout is restored too."""
+    import sqlite3
+    real = env.db._db
+    before = real.execute("PRAGMA busy_timeout").fetchone()[0]
+    env.db._db = _Conn(real, fail=lambda sql: sql.startswith("PRAGMA secure_delete=1"))
+    with pytest.raises(sqlite3.OperationalError, match="forced"):
+        env.store.scrub_private()
+    env.db._db = real
+    assert real.execute("PRAGMA busy_timeout").fetchone()[0] == before and not real.in_transaction
