@@ -610,6 +610,7 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
 
     def approve(text, *a, **k):
         asked.append(text)
+        assert k["details"]["commit"] == sha                         # the approval record carries the full commit
         (wt / "late.txt").write_text("not approved\n")              # the branch moves after the approval
         sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "add", "late.txt")
         sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "late", "--no-verify")

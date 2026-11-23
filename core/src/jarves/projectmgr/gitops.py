@@ -74,18 +74,24 @@ NO_HOOKS = _no_hooks_path()
 _RUN_KEY = re.compile(r"(filter\.(.+)\.(?:clean|smudge|process)|merge\.(.+)\.driver|hook\.(.+)\.command"
                       r"|gpg\.(?:[^.]+\.)?program|gpg\.ssh\.defaultkeycommand)", re.S)
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
-                "gpg.ssh.program": "ssh-keygen"}
+                "gpg.ssh.program": "ssh-keygen", "gpg.format": "openpgp", "user.signingkey": ""}
+_SIGN_CHOICE = ("gpg.format", "user.signingkey")       # no command, but they choose how the owner's commit is signed
 
 
-def _config_overrides(cwd: str | Path) -> list[str]:
+def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     """`-c` pairs that neutralise commands named in the repository's own config: a filter driver becomes empty (git
     skips it; a `required` filter then fails), a merge driver becomes `false` (a conflict, nothing merged), a signing
     program falls back to your global/system one (or git's default). Config-defined hooks (`hook.<name>.command`,
-    newer git) become `true` in every scope, like `core.hooksPath`. Fails closed (GitError) when the config cannot be
-    read (git older than 2.26 has no --show-scope) or a name cannot be overridden on the command line."""
+    newer git) become `true` in every scope, like `core.hooksPath`. ident=False (the owner's ship merge): the signing
+    format and key also come from your global/system config (else git's default), never the repository's.
+    Fails closed (GitError) when the config cannot be read (git older than 2.26 has no --show-scope) or a name cannot
+    be overridden exactly on the command line (`=` in it, or bytes that are not UTF-8: git matches subsections
+    byte for byte, so a lossy decode would override a different key).
+    Residual risk (review R2, #1533): the config is read just before git runs; an entry written in between (by an
+    agent process still running beside a task merge) is not seen. `ship --apply` refuses while tasks run."""
     p = subprocess.run(["git", "config", "--show-scope", "-z", "--list"], cwd=str(cwd), capture_output=True,
                        text=True, timeout=30, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="surrogateescape")
     if p.returncode != 0:
         raise GitError("cannot read the git config (git 2.26 or newer is needed): " + (p.stderr or "").strip()[:200])
     items = p.stdout.split("\0")
@@ -94,12 +100,13 @@ def _config_overrides(cwd: str | Path) -> list[str]:
     out: list[str] = []
     for scope, key, _v in entries:
         m = _RUN_KEY.fullmatch(key)
-        if not m or (scope not in ("local", "worktree") and not m.group(4)):
+        mine = scope in ("local", "worktree")
+        if not ((m and (mine or m.group(4))) or (not ident and mine and key.lower() in _SIGN_CHOICE)):
             continue
-        if "=" in key:
+        if "=" in key or "\ufffd" in key or any("\udc80" <= c <= "\udcff" for c in key):
             raise GitError(f"cannot neutralise the git config entry {key!r}: remove it from the repository config")
         low = key.lower()
-        val = "" if m.group(2) else "false" if m.group(3) else "true" if m.group(4) else owner.get(
+        val = "" if m and m.group(2) else "false" if m and m.group(3) else "true" if m and m.group(4) else owner.get(
             low, _GPG_DEFAULT.get(low, ""))
         out += ["-c", f"{key}={val}"]
     return out
@@ -115,7 +122,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     JARVES merges into the owner's branch. Commands named in the repository's own config are neutralised too (#1407,
     see `_config_overrides`)."""
     pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
-           *_config_overrides(cwd)]
+           *_config_overrides(cwd, ident)]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
