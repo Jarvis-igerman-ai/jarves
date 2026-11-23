@@ -72,8 +72,8 @@ def _base32(text: str) -> bool:
 # #1099: a key/token word refuses the text only when a value follows it ("my api key is ...", "token: ...",
 # "הטוקן שלי הוא ..."), so a dev task or goal that merely names one ("fix token refresh expiry") is still allowed.
 # #1099 review R2/R4: English key words start a word (a letter may not precede them; "_" may: my_api_key, my_token)
-_KEY_WORD = (r"(?<![A-Za-z])(?:api[\s_-]*key|access[\s_-]*key|secret[\s_-]*key|client[\s_-]*secret|private[\s_-]*key|"
-             r"tokens?\b)|"
+# #1099 doctor R2: every English key word also ends a word ("api keyboard" is no key word; "api keys" is)
+_KEY_WORD = (r"(?<![A-Za-z])(?:(?:api|access|secret|private)[\s_-]*keys?|client[\s_-]*secrets?|tokens?)\b|"
              r"טוקן|מפתח\s*(?:ה)?api|מפתח\s+(?:ה)?גישה|מפתח\s+(?:ה)?סוד")
 _KEY_VALUE = re.compile(
     # "keyword: value" / "keyword = value" with at most two words between
@@ -86,9 +86,13 @@ _KEY_VALUE = re.compile(
 # An unprefixed key/token is a long run of mixed letters and digits with high character entropy. #1099 review R1: a
 # base64url key is scored whole (separators _ - / dropped), unless every part is word-like: identifiers
 # (test_prefs_1099, my-service-v2), UUIDs, paths. Pure hex (git SHAs) is not a key, and neither is a camelCase name
-# built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback).
+# built from words of 2+ lowercase letters and short numbers (handleOAuth2Callback). #1099 doctor R1: hex of 32+
+# characters is an HMAC/API key, except a 40-char SHA right after a git word ("revert commit 9fceb02...", "fix ...").
 _KEY_TOKEN = re.compile(r"[A-Za-z0-9+=/_-]{20,}")
 _HEX = re.compile(r"[0-9a-fA-F]+")
+HEX_KEY_LEN = 32
+_COMMIT_CTX = re.compile(r"\b(?:commit|sha1?|revert|cherry-pick|rev|fix(?:e[sd])?|bisect|checkout|rebase|reset)\W*$",
+                         re.I)
 _CAMEL = re.compile(r"(?:[A-Z]{0,4}[a-z]{2,}(?![a-z])|\d{1,2}(?!\d))+")  # lookaheads: no backtracking
 # plain words (one case or Capitalized: random mixed case such as AbCdEf is not a word, #1099 review R3) and short tags
 _WORDY = re.compile(r"[A-Z]?[a-z]+|[A-Z]+|[A-Za-z]{1,4}\d{1,4}")  # (v2, sha256)
@@ -100,14 +104,18 @@ def _entropy(s: str) -> float:
 
 
 def _wordy(part: str) -> bool:
-    return bool(_HEX.fullmatch(part) or _CAMEL.fullmatch(part) or _WORDY.fullmatch(part))
+    return bool((len(part) < HEX_KEY_LEN and _HEX.fullmatch(part)) or _CAMEL.fullmatch(part) or _WORDY.fullmatch(part))
 
 
 def _keylike(text: str) -> bool:
-    for tok in _KEY_TOKEN.findall(text):
-        parts = [p for p in re.split(r"[/_-]", tok) if p]
+    for hit in _KEY_TOKEN.finditer(text):
+        parts = [p for p in re.split(r"[/_-]", hit.group()) if p]
         m = "".join(parts)
         if len(m) < 20 or (len(parts) > 1 and all(_wordy(p) for p in parts)):
+            continue
+        if len(m) >= HEX_KEY_LEN and _HEX.fullmatch(m):
+            if not (len(m) == 40 and _COMMIT_CTX.search(text[:hit.start()])):
+                return True
             continue
         if (re.search(r"[A-Za-z]", m) and re.search(r"\d", m) and not _HEX.fullmatch(m) and not _CAMEL.fullmatch(m)
                 and _entropy(m) >= KEY_ENTROPY_BITS):

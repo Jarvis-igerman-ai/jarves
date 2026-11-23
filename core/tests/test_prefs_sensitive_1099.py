@@ -31,6 +31,11 @@ KEYS = [
     "remember AbCdEfGhIjKl-mnopQRst-wxyz12",
     "set my_token: abc",
     "github_token=abc",
+    # #1099 doctor R1: 32+ hex chars is a key outside a commit context; R2: plural key words still count
+    "remember 4f9c2b7e8a1d3f6c9e0b5a7d2c4e6f81",
+    "my hmac 9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "remember " + "ab12cd34" * 8,
+    "api keys: abc",
 ]
 PLAIN = [
     "I prefer short answers in the morning",
@@ -65,6 +70,11 @@ PLAIN = [
     "open docs/reports/2026-11-23-intake-1099 later",
     "play the Rapi Key: Live album",
     "rename Build_Release_Pipeline_Config_v2 to BuildPipeline",          # Capitalized words stay word-like
+    # #1099 doctor R1/R2: a short hex id stays allowed; key words end a word
+    "check build 9fceb02d0ae598e95dc970b7",                              # 24-char hex (short SHA)
+    "cherry-pick 9fceb02d0ae598e95dc970b74767f19372d61af8",
+    "api keyboard: logitech",
+    "private keynote: monday",
 ]
 
 
