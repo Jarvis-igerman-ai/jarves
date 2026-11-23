@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import sqlite3
 import time
 import unicodedata
 
@@ -97,6 +98,7 @@ class PlanStore:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
         self._private = False                 # privacy state already applied to the stored rows (scrub_if_private)
+        self._scrub_failed = False            # a failed scrub is warned once per incident, then retried quietly
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -341,8 +343,20 @@ class PlanStore:
     def scrub_if_private(self) -> int:
         """At Core start and on every Core tick: scrub once each time privacy turns on (cheap when nothing changed)."""
         on = logs.privacy()
-        n = self.scrub_private() if on and not self._private else 0
-        self._private = on
+        if not on:
+            self._private = self._scrub_failed = False   # a failure after the next off -> on switch is a new incident
+            return 0
+        if self._private:
+            return 0
+        try:
+            n = self.scrub_private()
+        except sqlite3.Error as e:            # e.g. memory.db locked: retried on the next tick, logged once
+            if not self._scrub_failed:
+                logs.warn("goals", "PLAN_SCRUB_FAILED", "stored plan text not scrubbed yet; will retry",
+                          **logs.error_fields(e))
+            self._scrub_failed = True
+            return 0
+        self._private, self._scrub_failed = True, False
         return n
 
     # ------------------------------------------------------------------ restart

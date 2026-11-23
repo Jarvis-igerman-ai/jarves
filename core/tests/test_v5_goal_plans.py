@@ -718,3 +718,55 @@ def test_1526_codes_only_keeps_fixed_sentences():
     for fixed in ("interrupted by a restart", "the step timed out: it may already have happened",
                   "step 1: the owner did not approve this step", ""):
         assert gp._codes_only(fixed) == fixed
+
+
+def test_1526_failed_scrub_warns_once_per_incident_and_retries(env, monkeypatch):
+    """Review R1: a persistent failure is retried every tick but logged once; it never raises into the Core tick."""
+    import sqlite3
+    private, seen, tries = {"on": True}, [], []
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
+
+    def locked():
+        tries.append(1)
+        if len(tries) in (1, 2, 4):
+            raise sqlite3.OperationalError("database is locked")
+        return 0
+    monkeypatch.setattr(env.store, "scrub_private", locked)
+    for _ in range(4):                                                  # fail, fail, ok, then once per switch: no call
+        env.store.scrub_if_private()
+    assert len(tries) == 3 and seen == ["PLAN_SCRUB_FAILED"]
+    private["on"] = False
+    env.store.scrub_if_private()
+    private["on"] = True
+    env.store.scrub_if_private()                                        # a new incident: logged again
+    assert len(tries) == 4 and seen == ["PLAN_SCRUB_FAILED", "PLAN_SCRUB_FAILED"]
+
+
+def test_1526_codes_only_keeps_every_fixed_sentence_in_goal_plans():
+    """Review R3: every fixed note/error sentence passed to _block/_fail/_stop_plan/note= must survive _codes_only;
+    a new sentence shaped "word: ..." would be cut silently, so this scans the module source."""
+    import ast
+    import inspect
+
+    def text(n):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            return n.value
+        if isinstance(n, ast.JoinedStr) and n.values and isinstance(n.values[0], ast.Constant):
+            return "".join(v.value if isinstance(v, ast.Constant) else "1" for v in n.values)
+        if isinstance(n, ast.BinOp):                                    # "a" + ("b" if x else "")
+            return (text(n.left) or "") + (text(n.right) or "")
+        if isinstance(n, ast.IfExp):
+            return text(n.body)
+        return None
+    found = []
+    for n in ast.walk(ast.parse(inspect.getsource(gp))):
+        if not isinstance(n, ast.Call):
+            continue
+        name = getattr(n.func, "attr", getattr(n.func, "id", ""))
+        args = [a for i, a in enumerate(n.args) if (name, i) in {("_block", 2), ("_fail", 2), ("_stop_plan", 2)}]
+        args += [k.value for k in n.keywords if k.arg == "note"]
+        found += [s for s in map(text, args) if s]
+    assert len(found) >= 10
+    for s in found:
+        assert gp._codes_only(s) == s and gp._codes_only(f"step 1: {s}") == f"step 1: {s}", s
