@@ -100,7 +100,8 @@ jobs:
         if: ${{ env.DRY_RUN == 'true' }}
         run: python3 packaging/release.py public-publish --dir dist --dry-run
       - name: Publish the stable release (signed latest.json, newest 3 kept)
-        if: ${{ env.DRY_RUN != 'true' }}
+        # #544: the only step that reads the release secrets requires a real tag ref on its own, not only via DRY_RUN
+        if: ${{ github.ref_type == 'tag' && env.DRY_RUN != 'true' }}
         env:
           RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           RELEASES_REPO: ${{ vars.RELEASES_REPO }}
