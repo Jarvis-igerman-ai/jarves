@@ -367,7 +367,13 @@ class Operations:
             except Exception:
                 logs.error("goals", "PLAN_DONE_LINE_FAILED", "plan finished line failed", exc=True)
         await self.alerts.flush()
-        self._privacy_scrub()
+        try:                                     # off the event loop: a busy database waits up to its timeout
+            await asyncio.to_thread(self._privacy_scrub)
+        except Exception:
+            self._privacy_scrubbed = False       # tried again next tick; logged once, not on every tick
+            if not getattr(self, "_privacy_scrub_logged", False):
+                self._privacy_scrub_logged = True
+                logs.error("privacy", "PRIVACY_SCRUB_FAILED", "older stored text scrub failed", exc=True)
         now = time.time()
         if now - self._synced >= AUTONOMY_SYNC_S:
             self._synced = now

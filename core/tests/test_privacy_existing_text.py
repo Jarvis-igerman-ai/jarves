@@ -103,13 +103,80 @@ def test_1557_core_tick_scrubs_once_privacy_is_on(ctx, monkeypatch):
     assert ops._privacy_scrubbed is True
 
 
-def test_1557_runner_reasons_are_all_allow_listed():
-    """A new fixed reason in the runner must join FIXED_REASONS, or the scrub would blank it."""
-    import inspect
-    import re as _re
+def test_1557_runner_reasons_come_from_the_named_constants():
+    """Review R4: the runner writes named constants and FIXED_REASONS is built from them (no source grep)."""
     from jarves import goal_plans
-    src = inspect.getsource(goal_plans)
-    found = set(_re.findall(r'self\._(?:block|fail)\(pid, step, "([^"]+)"', src))
-    assert found and found <= goal_plans.FIXED_REASONS
+    named = {v for k, v in vars(goal_plans).items() if k.startswith("REASON_") and k != "REASON_NOT_KEPT"}
+    assert named and named <= goal_plans.FIXED_REASONS
+    for why in goal_plans.FIXED_REASONS:
+        assert goal_plans.reason_at_rest(why) == why
     assert goal_plans.reason_at_rest("TOOL_ERROR: private") == "TOOL_ERROR"
     assert goal_plans.reason_at_rest("free text from an older version") == goal_plans.REASON_NOT_KEPT
+
+
+def test_1557_a_null_or_odd_ledger_body_is_scrubbed_not_raised(ctx):
+    """Review R1: a NULL body (TypeError in json.loads) or an odd goal shape must not stop the switch."""
+    c = Continuity(ctx.home, clock=lambda: 1_800_000_000.0)
+    c.store("phone", "ok-1", "chat", 200, {"ok": True, "answer": "private answer"})
+    with sqlite3.connect(c.path) as db:
+        cols = [r[1] for r in db.execute("PRAGMA table_info(ledger)")]
+        row = dict(zip(cols, db.execute("SELECT * FROM ledger").fetchone()))
+        db.execute("DROP TABLE ledger")                       # an older schema that allowed NULL bodies
+        db.execute(f"CREATE TABLE ledger ({', '.join(cols)})")
+        db.execute(f"INSERT INTO ledger VALUES ({', '.join('?' * len(cols))})", tuple(row.values()))
+        db.execute("INSERT INTO ledger (device, cid, kind, body) VALUES ('phone', 'null-1', 'chat', NULL)")
+        db.execute("INSERT INTO ledger (device, cid, kind, body) VALUES ('phone', 'odd-1', 'goal', ?)",
+                   (json.dumps({"goal": {"steps": 5}, "title": "private answer"}),))
+    assert privacy.set_privacy(ctx, True)["privacy"] is True
+    with sqlite3.connect(c.path) as db:
+        bodies = dict(db.execute("SELECT cid, body FROM ledger").fetchall())
+    assert set(bodies) == {"ok-1", "null-1", "odd-1"} and "private answer" not in json.dumps(bodies)
+
+
+def test_1557_no_old_words_stay_in_the_database_files(ctx):
+    """Review R3: memory.db runs in WAL mode; the old text must be gone from the main file and the -wal file."""
+    secret = "Bialik-street-secret"
+    c = Continuity(ctx.home, clock=lambda: 1_800_000_000.0)
+    c.store("phone", "command-1557", "chat", 200, {"ok": True, "answer": secret})
+    db = open_db(ctx.home)
+    try:
+        pid = db.x("INSERT INTO goal_plans (title, state, created, updated) VALUES ('plan', 'done', 1, 1)").lastrowid
+        db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence) VALUES (?, 0, 't', 'done', ?)",
+             (pid, secret))
+        wal = ctx.home / "memory.db-wal"
+        assert wal.exists() and secret.encode() in wal.read_bytes() + (ctx.home / "memory.db").read_bytes()
+        assert privacy.set_privacy(ctx, True)["privacy"] is True
+        for f in ("memory.db", "memory.db-wal", c.path.name, c.path.name + "-wal"):    # the Core still has it open
+            p = ctx.home / f
+            assert not p.exists() or secret.encode() not in p.read_bytes(), f
+    finally:
+        db.close()
+
+
+def test_1557_core_tick_scrub_runs_off_the_loop_and_a_crash_is_logged_once(ctx, monkeypatch):
+    """Review R1/R2: the tick runs the scrub in a worker thread; an unexpected error is logged, not raised."""
+    import asyncio
+    import threading
+    from jarves.operations import Operations
+    loop_thread, seen, errors = threading.get_ident(), [], []
+    monkeypatch.setattr(logs, "privacy", lambda: True)
+    monkeypatch.setattr(logs, "error", lambda *a, **k: errors.append(a[1]))
+
+    def boom(home):
+        seen.append(threading.get_ident())
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(privacy, "scrub_stored_text", boom)
+
+    async def flush():
+        return None
+    ops = Operations.__new__(Operations)
+    ops.core = SimpleNamespace(home=ctx.home)
+    ops.alerts = SimpleNamespace(flush=flush)
+    for name in ("_signals_tick", "_connect_nudge"):
+        monkeypatch.setattr(Operations, name, lambda self: flush())
+    ops.cheer = SimpleNamespace(check=flush)
+    ops._synced = float("inf")
+    asyncio.run(ops._after_tick())
+    asyncio.run(ops._after_tick())
+    assert seen and all(t != loop_thread for t in seen) and len(seen) == 2
+    assert errors == ["PRIVACY_SCRUB_FAILED"] and ops._privacy_scrubbed is False

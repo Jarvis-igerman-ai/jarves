@@ -116,15 +116,28 @@ def _scrub_ledger(home: Path) -> int:
                                                       "('chat', 'goal')").fetchall():
                 try:
                     d = json.loads(body)
-                except ValueError:
+                except (TypeError, ValueError):                    # NULL or not JSON: replaced like an empty answer
                     d = None
-                new = json.dumps(fixes[kind](d if isinstance(d, dict) else {}))
+                try:
+                    new = json.dumps(fixes[kind](d if isinstance(d, dict) else {}))
+                except (TypeError, ValueError):                    # an odd shape inside the answer: keep nothing
+                    new = json.dumps(fixes[kind]({}))
                 if new != body:      # the row (and so the duplicate-command protection) stays, only the text goes
                     cx.execute("UPDATE ledger SET body=? WHERE device=? AND cid=?", (new, device, cid))
                     n += 1
+        if n:
+            _checkpoint(cx)
     finally:
         cx.close()
     return n
+
+
+def _checkpoint(cx: sqlite3.Connection) -> None:
+    """WAL mode keeps the old page images in the -wal file: fold them into the (secure_delete) main file and empty it.
+    A reader that keeps it from finishing is reported, and the Core's next tick tries again."""
+    busy, wal, done = cx.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if busy or (wal != -1 and wal != done):
+        raise sqlite3.OperationalError("checkpoint busy")
 
 
 def _scrub_plan_steps(home: Path) -> int:
@@ -148,6 +161,8 @@ def _scrub_plan_steps(home: Path) -> int:
                 if _note_at_rest(note) != note:   # 'step 2: CODE: tool text' from a failed step
                     cx.execute("UPDATE goal_plans SET note=? WHERE id=?", (_note_at_rest(note), pid))
                     n += 1
+        if n:
+            _checkpoint(cx)
     finally:
         cx.close()
     return n
