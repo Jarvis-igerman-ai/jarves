@@ -258,17 +258,21 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
 # as the owner's user. That code can plant something the owner's own git later runs: a `filter.<n>.clean` entry in the
 # shared config, a hook in `<common>/hooks/`, a `config.worktree` or an `info/attributes` file. No permission rule stops
 # executed code, so each such run is wrapped in `config_guard`: the guarded files (GUARDED_FILES below, the worktree's
-# `.git` pointer and every file in `<common>/hooks/`) are read when the run starts. If any changed when it ends, it is
-# put back, the rejected text is kept in `<common>/jarves-rejected/`, and the run fails. Overlapping runs on one
-# repository share the snapshot taken by the first, so a later run never takes a planted entry as its baseline.
+# `.git` pointer, `<gitdir>/commondir` and `<gitdir>/gitdir`, and every file in `<common>/hooks/`) are read when the
+# run starts. A symlinked one is guarded as a link: the link itself and the content behind it. If any changed when it
+# ends, it is put back, the rejected text is kept in `<common>/jarves-rejected/`, and the run fails. Overlapping runs
+# on one repository share the snapshot taken by the first, so a later run never takes a planted entry as its baseline.
 # On Linux the run is contained (`contain`): every process it started, a detached one included, is killed before the
-# guard compares, so nothing can write after the run ends. NOT on Windows or macOS (UNVERIFIED there, tracked in
-# #1665): a detached descendant can still write after the run, which is not seen. Also not guarded: ~/.gitconfig and
-# config include targets; a change undone before the run ends is not seen. Any change during a run is reverted, the
-# owner's own `git config` in that repository included (the text is kept). JARVES's own worktree calls never change a
-# guarded file (`--no-track`: no `branch.*` entry), so the snapshot is never re-taken during a run: a write timed to
-# land during a JARVES call is still undone. A file over SNAP_CAP is never read whole: one at the start refuses the
-# run, one at the end counts as a change. At most KEEP_REJECTED copies (each at most SNAP_CAP) are kept.
+# guard compares. A fork loop that outruns that sweep makes the reaper exit 125 (the run fails), but a survivor's
+# later write is not seen. NOT contained on Windows or macOS (UNVERIFIED there, tracked in #1665): a detached
+# descendant can still write after the run. Also not guarded: ~/.gitconfig and config include targets; a change undone
+# before the run ends is not seen. Any change during a run is reverted, the owner's own `git config` in that repository
+# included (the text is kept). JARVES's own worktree calls never change a guarded file (`--no-track`: no `branch.*`
+# entry), so the snapshot is never re-taken during a run: a write timed to land during a JARVES call is still undone.
+# A task branch made before this fix may still have a `branch.*` entry: its `branch -D` during another run is then
+# taken for a change and undone (a false alarm, once per such branch, until that branch is removed outside a run).
+# A file over SNAP_CAP is never read whole: one at the start refuses the run, one at the end counts as a change.
+# At most KEEP_REJECTED copies (each at most SNAP_CAP) are kept.
 SNAP_CAP = 1 << 20
 KEEP_REJECTED = 20
 GUARDED_FILES = ("config", "config.worktree", "info/attributes")
@@ -293,11 +297,13 @@ def guarded_files(wt: str | Path) -> list[tuple[str, str, str]]:
     common = gd / (gd / "commondir").read_text(encoding="utf-8").strip() if (gd / "commondir").is_file() else gd
     if not (common / "config").is_file():
         raise GitError(f"no shared git config found for {wt}")
-    out += [(common / n, "file") for n in GUARDED_FILES] + [(gd / "config.worktree", "file"), (common / "hooks", "dir")]
+    out += [(common / n, "file") for n in GUARDED_FILES] + [(gd / n, "file") for n in ("config.worktree", "commondir", "gitdir")]
+    out.append((common / "hooks", "dir"))
     rej = os.path.join(os.path.realpath(common), "jarves-rejected")
     seen: dict[str, tuple[str, str, str]] = {}
-    for path, kind in out:                               # the real file: a symlinked config stays linked
-        seen.setdefault(os.path.realpath(path), (os.path.realpath(path), kind, rej))
+    for path, kind in out:                               # the folder resolved, the name itself not: a link is guarded as a link
+        key = os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
+        seen.setdefault(key, (key, kind, rej))
     return list(seen.values())
 
 
@@ -311,7 +317,7 @@ def _read(path: str):
         return None
 
 
-def _snap(path: str, kind: str):
+def _content(path: str, kind: str):
     if kind == "file":
         return _read(path)
     try:
@@ -319,6 +325,15 @@ def _snap(path: str, kind: str):
     except FileNotFoundError:
         return {}
     return {n: _read(os.path.join(path, n)) for n in names}
+
+
+def _snap(path: str, kind: str):
+    """(symlink target or None, content read through it): a link swapped for a planted file is a change too."""
+    return (os.readlink(path) if os.path.islink(path) else None), _content(path, kind)
+
+
+def _too_large(snap, kind: str) -> bool:
+    return any(d and d[2] > SNAP_CAP for d in ([snap[1]] if kind == "file" else snap[1].values()))
 
 
 def _reject(rej: str, path: str, now) -> None:
@@ -348,9 +363,33 @@ def _put(path: str, data) -> None:
         raise
 
 
+def _relink(path: str, kind: str, rej: str, want: str | None, have: str | None) -> None:
+    """Put the original link (or no link) back at `path`; whatever stands there now is kept in `rej` first."""
+    if have is not None:
+        _reject(rej, path, (f"symlink to {have}".encode(),))
+        os.remove(path)
+    elif os.path.isdir(path):                            # a planted real folder where the link was: moved aside whole
+        os.makedirs(rej, exist_ok=True)
+        os.rename(path, tempfile.mkdtemp(prefix=os.path.basename(path) + "-", dir=rej))
+    elif os.path.lexists(path):
+        _reject(rej, path, _read(path))
+        os.remove(path)
+    if want is None:
+        if kind == "dir":
+            os.makedirs(path, exist_ok=True)
+        return
+    tmp = os.path.join(os.path.dirname(path), f".jarves-{os.getpid()}-{threading.get_ident()}-link")
+    os.symlink(want, tmp)                                # unique temp link + os.replace: atomic
+    os.replace(tmp, path)
+
+
 def _restore(path: str, kind: str, rej: str, data, now) -> None:
-    pairs = [(path, data, now)] if kind == "file" else [
-        (os.path.join(path, n), data.get(n), now.get(n)) for n in sorted(set(data) | set(now))]
+    if data[0] != now[0]:
+        _relink(path, kind, rej, data[0], now[0])
+        now = _snap(path, kind)
+    real = os.path.realpath(path)                        # content goes to the link's target, so a link stays a link
+    pairs = [(real, data[1], now[1])] if kind == "file" else [
+        (os.path.join(real, n), data[1].get(n), now[1].get(n)) for n in sorted(set(data[1]) | set(now[1]))]
     for p, want, have in pairs:
         if want != have:
             if have is not None:
@@ -366,13 +405,17 @@ def config_guard(files: list[tuple[str, str, str]]):
     with _GUARDS_LOCK:
         for path, kind, rej in files:
             if path not in _GUARDS:
-                data = _snap(path, kind)
-                if any(d and d[2] > SNAP_CAP for d in ([data] if kind == "file" else data.values())):
+                try:
+                    data = _snap(path, kind)
+                    why = "is too large to guard" if _too_large(data, kind) else ""
+                except OSError as e:                     # e.g. a folder where a file belongs, or no permission
+                    why = f"cannot be read ({e.strerror or e})"
+                if why:
                     for p2, _k, _r in files[:files.index((path, kind, rej))]:    # undo this run's registrations
                         _GUARDS[p2]["marks"].remove(mark)
                         if not _GUARDS[p2]["marks"]:
                             del _GUARDS[p2]
-                    raise GitError(f"{path} is too large to guard")
+                    raise GitError(f"{path} {why}")
                 _GUARDS[path] = {"kind": kind, "rej": rej, "data": data, "marks": []}
             _GUARDS[path]["marks"].append(mark)
     try:

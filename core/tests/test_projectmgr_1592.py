@@ -1,6 +1,7 @@
 """#1592: a check command (run by JARVES or by the agent) executes worktree code that could write the shared git config."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -192,7 +193,7 @@ def _alive(pid: int) -> bool:
         return False
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
+@pytest.mark.linux_only                                # containment is Linux only (#1665)
 @pytest.mark.parametrize("via", ["check", "agent", "agent-cancelled"])
 def test_a_detached_grandchild_cannot_write_after_the_run_ends(tmp_path, via):
     wt, cfg = _wt(tmp_path)
@@ -218,7 +219,7 @@ def _wait_for(path: Path) -> None:
         threading.Event().wait(0.01)
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
+@pytest.mark.linux_only                                # containment is Linux only (#1665)
 def test_a_sigterm_right_at_start_still_lets_the_reaper_clean_up():
     """R2: the reaper starts with SIGTERM blocked, so a SIGTERM before its handler exists is handled, not fatal."""
     with gitops.term_blocked():
@@ -227,7 +228,7 @@ def test_a_sigterm_right_at_start_still_lets_the_reaper_clean_up():
     assert p.wait(30) == 143                         # handled: the default action would give -15
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="containment is Linux only (#1665)")
+@pytest.mark.linux_only                                # containment is Linux only (#1665)
 def test_a_check_that_exits_124_itself_is_not_reported_as_timed_out(tmp_path):
     wt, _cfg = _wt(tmp_path)
     ok, out = gitops.run_check(wt, [sys.executable, "-c", "raise SystemExit(124)"])
@@ -280,3 +281,49 @@ def test_only_the_newest_rejected_copies_are_kept(tmp_path, monkeypatch):
         assert not gitops.run_check(wt, _append(cfg, f"# {word}\n"))[0]
     texts = "".join(f.read_text(encoding="utf-8") for f in _rejected(cfg))
     assert len(_rejected(cfg)) == 2 and "one" not in texts and "three" in texts
+
+
+def _gitdir(wt: Path) -> Path:
+    return wt / (wt / ".git").read_text(encoding="utf-8").strip()[7:].strip()
+
+
+@pytest.mark.parametrize("name", ["commondir", "gitdir"])
+def test_a_check_that_repoints_the_worktree_gitdir_files_is_undone(tmp_path, name):
+    """Review 3 R1: `<gitdir>/commondir` decides which config git reads; a run must not be able to re-point it."""
+    wt, _cfg = _wt(tmp_path)
+    evil = tmp_path / "evil"
+    gitops.git(tmp_path, "init", "-q", str(evil))
+    f = _gitdir(wt) / name
+    before = f.read_bytes()
+    argv = [sys.executable, "-c", f"open({str(f)!r}, 'w').write({str(evil / '.git')!r} + '\\n')"]
+    ok, out = gitops.run_check(wt, argv)
+    assert not ok and gitops.TAMPERED in out and f.read_bytes() == before
+
+
+@pytest.mark.linux_only                                # a symlinked git config: the owner's setup on Linux/Pi
+def test_a_symlinked_config_swapped_for_a_planted_file_gets_its_link_back(tmp_path):
+    """Review 3 R2: the link itself is guarded, not only the file it points to."""
+    wt, cfg = _wt(tmp_path)
+    real = tmp_path / "real-config"
+    real.write_bytes(cfg.read_bytes())
+    cfg.unlink()
+    cfg.symlink_to(real)
+    before = real.read_bytes()
+    swap = f"import os; os.remove({str(cfg)!r}); open({str(cfg)!r}, 'w').write(open({str(real)!r}).read() + {PLANT!r})"
+    ok, out = gitops.run_check(wt, [sys.executable, "-c", swap])
+    assert not ok and gitops.TAMPERED in out
+    assert cfg.is_symlink() and os.readlink(cfg) == str(real) and real.read_bytes() == before
+    assert any("evil" in f.read_text(encoding="utf-8") for f in _rejected(cfg))
+    ok, out = gitops.run_check(wt, _append(cfg, PLANT))          # written through the link: the link stays a link
+    assert not ok and cfg.is_symlink() and real.read_bytes() == before
+
+
+def test_an_unreadable_guarded_file_refuses_the_run_instead_of_raising(tmp_path):
+    """Review 3 R4: a folder where `config.worktree` belongs makes the snapshot fail with an OSError."""
+    wt, cfg = _wt(tmp_path)
+    (cfg.parent / "config.worktree").mkdir()
+    marker = tmp_path / "ran"
+    r = _Script(_append(marker, "x")).run("p", str(wt), check_argv=["python", "-m", "pytest"])
+    assert not r.ok and r.error.startswith("refused") and not marker.exists() and gitops._GUARDS == {}
+    ok, out = gitops.run_check(wt, _append(marker, "x"))
+    assert not ok and out.startswith("check") and not marker.exists() and gitops._GUARDS == {}

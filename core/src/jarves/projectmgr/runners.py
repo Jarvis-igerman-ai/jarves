@@ -113,7 +113,7 @@ class Runner:
         try:
             with gitops.config_guard(files) as guard:   # contained on Linux: no process outlives the comparison
                 r = self._spawn(spec, cwd, timeout, on_start, cancel, contained=True)
-        except gitops.GitError as e:                     # e.g. a guarded file too large to snapshot
+        except (gitops.GitError, OSError) as e:          # e.g. a guarded file too large or unreadable
             return Result(error=f"refused: {e}")
         if guard["tampered"]:
             r.ok, r.error = False, f"{self.name} run {gitops.TAMPERED} {guard.get('error', '')}".strip()
