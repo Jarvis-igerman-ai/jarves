@@ -47,22 +47,37 @@ def state(ctx) -> dict:
                            if on else "כל מה שנאמר ונכתב נשמר במלואו ביומנים ובהיסטוריה במחשב הזה."),
             "applies": "now",
             # #1557: switching on also scrubbed older text; say so when a database could not be scrubbed
-            **_scrub_note(getattr(ctx, "_scrub_failed", None) if on else None),
+            **_scrub_note(_SCRUB_FAILED.get(_key(ctx.home)) if on else None),
             # SW-V4 B: the plain state line shown by the dashboard banner and `jarvis status` (empty when on)
             "banner_en": "" if on else logs.PRIVACY_OFF_NOTE, "banner_he": "" if on else logs.PRIVACY_OFF_NOTE_HE}
+
+
+# #1557: the databases the last scrub could not clear, per home (kept here, not on the caller's ctx object)
+_SCRUB_FAILED: dict[str, list] = {}
+_RETRYABLE = frozenset(("CHECKPOINT_BUSY", "OperationalError"))      # in use / locked: a later scrub can succeed
+
+
+def _key(home) -> str:
+    return str(Path(home).resolve())
 
 
 def _scrub_note(failed: list | None) -> dict:
     if not failed:
         return {"scrub_note_en": "", "scrub_note_he": ""}
-    return {"scrub_note_en": "Some text kept before privacy was on could not be cleared yet (it was in use). "
-                             "Turn privacy off and on again to retry.",
-            "scrub_note_he": "חלק מהטקסט שנשמר לפני שהפרטיות הופעלה עוד לא נמחק (הוא היה בשימוש). כבו והפעילו פרטיות שוב כדי לנסות שוב."}
+    if all(e.get("error") in _RETRYABLE for e in failed):
+        return {"scrub_note_en": "Some text kept before privacy was on could not be cleared yet (it was in use). "
+                                 "Turn privacy off and on again to retry.",
+                "scrub_note_he": "חלק מהטקסט שנשמר לפני שהפרטיות הופעלה עוד לא נמחק (הוא היה בשימוש). כבו והפעילו פרטיות שוב כדי לנסות שוב."}
+    return {"scrub_note_en": "Some text kept before privacy was on could not be cleared. See the diagnostics "
+                             "(PRIVACY_SCRUB_FAILED in the log).",
+            "scrub_note_he": "חלק מהטקסט שנשמר לפני שהפרטיות הופעלה לא נמחק. ראו באבחון (PRIVACY_SCRUB_FAILED ביומן)."}
 
 
 def _scrub(ctx) -> dict:
+    """Runs on the caller's thread: the dashboard serves each request on its own thread (ThreadingHTTPServer), never on
+    the Core's event loop, and uses its own SQLite connection, so a Core write only delays it up to the timeout."""
     out = scrub_at_rest(ctx.home)
-    ctx._scrub_failed = [e["db"] for e in out["errors"]]          # state() keeps saying so until a clean scrub
+    _SCRUB_FAILED[_key(ctx.home)] = list(out["errors"])           # state() keeps saying so until a clean scrub
     return out
 
 
@@ -112,7 +127,18 @@ STEP_TEXT_NOT_KEPT = "details not kept (privacy mode)"
 CHECKPOINT_WAIT_MS = 2000                       # how long the WAL checkpoint waits for a reader (the Core) to finish
 _CODE = re.compile(r"([A-Z][A-Z0-9_]{0,39}|failed)(?:: .*)?", re.S)     # a tool-result code, then its tool text
 _STEP_NOTE = re.compile(r"(step \d+: )(.*)", re.S)
-_RESULT = re.compile(r"(\d+/\d+ steps done\.) .*", re.S)                   # _finish: the count, then step evidence
+_RESULT = re.compile(r"(\d+/\d+ steps done\.)(?: .*)?", re.S)              # _finish: the count, then step evidence
+# allow-list of the plan notes goal_plans writes without user or tool text; any other note becomes STEP_TEXT_NOT_KEPT
+_PLAN_NOTES = frozenset(("", "paused by the owner", "cancelled by the owner", "interrupted by a restart: resume when ready",
+                         "the daily AI budget is used up"))
+_PLAN_CAP = re.compile(r"time cap of \d+ min reached|cost cap of \d+ AI requests reached")
+
+
+def _plan_note(note: str) -> str:
+    if note in _PLAN_NOTES or _PLAN_CAP.fullmatch(note):
+        return note
+    m = _STEP_NOTE.fullmatch(note)
+    return m.group(1) + _step_text(m.group(2)) if m else STEP_TEXT_NOT_KEPT
 
 
 def _step_text(text: str) -> str:
@@ -157,10 +183,9 @@ def _scrub_plans(cx: sqlite3.Connection) -> tuple[int, int]:
     for pid, note, result in cx.execute(
             "SELECT id, COALESCE(note, ''), COALESCE(result, '') FROM goal_plans").fetchall() \
             if "goal_plans" in have else ():
-        m = _STEP_NOTE.fullmatch(note)
-        new_note = m.group(1) + _step_text(m.group(2)) if m else note
+        new_note = _plan_note(note)
         m = _RESULT.fullmatch(result)
-        new_result = m.group(1) if m else result
+        new_result = m.group(1) if m else ""                      # allow-list: only the step count is kept
         if (new_note, new_result) != (note, result):
             plans += cx.execute("UPDATE goal_plans SET note = ?, result = ? WHERE id = ?",
                                 (new_note, new_result, pid)).rowcount

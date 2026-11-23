@@ -183,7 +183,7 @@ def test_a_failed_scrub_is_shown_until_a_clean_one(home, monkeypatch, capsys):
     assert privacy.state(ctx)["scrub_note_en"] == r["scrub_note_en"]            # the top bar keeps showing it
     capsys.readouterr()
     assert privacy.cmd_privacy(SimpleNamespace(action="full-text", state="off"), ctx.cfg, home) == 0
-    assert "could not be cleared yet" in capsys.readouterr().out                # the CLI says it too
+    assert "could not be cleared. See the diagnostics" in capsys.readouterr().out     # the CLI says it too
     monkeypatch.undo()
     assert privacy.set_privacy(ctx, True)["scrub_note_en"] == ""
     assert privacy.state(ctx)["scrub_note_en"] == ""
@@ -195,3 +195,52 @@ def test_fixed_step_reasons_stay_and_other_text_does_not():
         assert privacy._step_text(why) == why
     assert privacy._step_text("CALL_FAILED: Dana") == "CALL_FAILED"
     assert privacy._step_text("Dana: not reachable") == privacy.STEP_TEXT_NOT_KEPT
+
+
+def test_the_note_says_retry_only_when_the_database_was_in_use(home, monkeypatch):
+    _seed(home)                                                                  # review R1: wording follows the error
+    (home / "continuity.db").write_bytes(b"this is not a database " * 200)
+    r = privacy.set_privacy(_ctx(home), True)
+    assert r["scrubbed"]["errors"] == [{"db": "continuity.db", "error": "DatabaseError"}]
+    assert "See the diagnostics" in r["scrub_note_en"] and "in use" not in r["scrub_note_en"]
+    assert "PRIVACY_SCRUB_FAILED" in r["scrub_note_he"]
+    (home / "continuity.db").unlink()
+    monkeypatch.setattr(privacy, "CHECKPOINT_WAIT_MS", 50)
+    reader = sqlite3.connect(home / "memory.db", isolation_level=None)
+    reader.execute("BEGIN")
+    reader.execute("SELECT COUNT(*) FROM goal_plan_steps").fetchone()
+    try:
+        r = privacy.set_privacy(_ctx(home), True)
+    finally:
+        reader.close()
+    assert r["scrubbed"]["errors"] == [{"db": "memory.db", "error": "CHECKPOINT_BUSY"}]
+    assert "it was in use" in r["scrub_note_en"] and "retry" in r["scrub_note_en"]
+
+
+def test_a_ctx_that_takes_no_new_attributes_still_works(home, monkeypatch):
+    class Slotted:                                                               # review R2: nothing is set on ctx
+        __slots__ = ("home", "cfg", "config_path")
+
+    ctx, base = Slotted(), _ctx(home)
+    ctx.home, ctx.cfg, ctx.config_path = base.home, base.cfg, base.config_path
+    _seed(home)
+    monkeypatch.setattr(privacy, "_scrub_plans", lambda cx: 1 / 0)
+    r = privacy.set_privacy(ctx, True)
+    assert r["privacy"] is True and r["scrub_note_en"]
+    assert privacy.state(_ctx(home))["scrub_note_en"] == r["scrub_note_en"]    # another ctx for the same home sees it
+
+
+def test_plan_notes_and_results_are_an_allow_list(home):
+    home.mkdir(parents=True, exist_ok=True)                                      # review R4: unknown text is not kept
+    db = open_db(home)
+    kept = ["", "paused by the owner", "cancelled by the owner", "interrupted by a restart: resume when ready",
+            "the daily AI budget is used up", "time cap of 30 min reached", "cost cap of 5 AI requests reached",
+            "step 1: CALL_FAILED"]
+    for i, note in enumerate(kept + ["Dana asked to stop", "step 2: Dana: not reachable"], 1):
+        db.x("INSERT INTO goal_plans (id, title, state, note, result, created, updated) VALUES (?, 'p', 'done', ?, ?, 0, 0)",
+             (i, note, "2/2 steps done." if i == 1 else "Dana's summary" if i == 2 else ""))
+    privacy.set_privacy(_ctx(home), True)
+    with sqlite3.connect(home / "memory.db") as cx:
+        rows = cx.execute("SELECT note, result FROM goal_plans ORDER BY id").fetchall()
+    assert [n for n, _ in rows] == kept + [privacy.STEP_TEXT_NOT_KEPT, "step 2: " + privacy.STEP_TEXT_NOT_KEPT]
+    assert [r for _, r in rows[:2]] == ["2/2 steps done.", ""] and "Dana" not in _dump(home)
