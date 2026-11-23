@@ -70,3 +70,25 @@ def test_cli_confirm_applies_only_the_words_it_prints(home, capsys, monkeypatch)
     monkeypatch.setattr(prefs_mod.Preferences, "confirm", real)
     assert cli.main(["prefs", "confirm", str(pid)]) == 0
     assert NEW in capsys.readouterr().out and p.for_prompt() == [NEW]
+
+
+async def test_voice_confirm_without_a_shown_popup_fails_closed(home):
+    p, pid = _proposed(home)
+    tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
+    r = await tool.handler(prefs_mod.IdArgs(id=pid))                  # the handler alone: no popup computed the words
+    assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
+
+
+async def test_a_preference_removed_between_read_and_confirm_answers_not_found(home, monkeypatch):
+    p, pid = _proposed(home)
+
+    def gone(self, i, **kw):
+        raise KeyError(i)
+    monkeypatch.setattr(prefs_mod.Preferences, "confirm", gone)
+    r = await registry(prefs=p, answer=True).call("pref_confirm", {"id": pid}, origin="model")
+    assert not r.ok and r.code == "PREF_NOT_FOUND"
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": OLD})[0] == 404
+    finally:
+        ctx.close()
