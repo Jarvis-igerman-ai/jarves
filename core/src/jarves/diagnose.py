@@ -326,6 +326,7 @@ class Finder:
 def run(store: Store, cfg, session_ids: list[str] | None = None, days: int = 30,
         now: float | None = None) -> list[dict]:
     """Diagnose the given conversations (default: all of the `days` before `now`, which defaults to the wall clock).
+    `now` only selects the default session window; cost alerts and the `diagnosed` stamp still use the wall clock.
     Returns the issues raised/updated."""
     f = Finder(store, cfg)
     if session_ids is None:

@@ -140,12 +140,17 @@ def test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st):
     assert not any(k.startswith(("filler", "user_", "backend_stall")) for k in iss)
 
 
-def test_privacy_mode_is_clock_free_issue_1328(st, monkeypatch):
-    """#1328: the Oct 19 fixture must not age out of diagnose's 30-day window; shift the clock 14 years ahead.
-    Guards the test against going back to a wall-clock-dependent fixture; the window itself is covered by
-    test_diagnose_window_uses_injected_now_not_the_wall_clock."""
+@pytest.fixture
+def far_future(monkeypatch):
+    """#1328: move the wall clock 14 years ahead, so a 30-day window on time.time() misses the Oct 19 fixture."""
     real = time.time
     monkeypatch.setattr(time, "time", lambda: real() + 14 * 365 * 86400)
+
+
+def test_privacy_mode_is_clock_free_issue_1328(st, far_future):
+    """#1328: the Oct 19 fixture must not age out of diagnose's 30-day window whatever today's date.
+    Guards the test against going back to a wall-clock-dependent fixture; the window itself is covered by
+    test_diagnose_window_uses_injected_now_not_the_wall_clock."""
     test_privacy_mode_keeps_only_lengths_and_raises_no_text_issues(st)
 
 
@@ -298,25 +303,23 @@ def test_expected_refusals_stay_in_history_without_runtime_defect_issues(st, cod
 
 
 # #1328: rolling windows took time.time() with no override, so tests on the Oct 19 fixture broke once it aged out
-# one day after the fixture's last record, derived from the fixture itself (not a hand-typed epoch)
-FIXTURE_NOW = max(store.parse_ts(json.loads(line)["ts"])
-                  for line in FIXTURE.read_text(encoding="utf-8").splitlines()) + 86400
+def _fixture_now() -> float:
+    """One day after the fixture's last record, read from the fixture itself (not a hand-typed epoch).
+    Computed per test, so a missing or malformed fixture fails that test instead of module collection."""
+    return max(store.parse_ts(json.loads(line)["ts"])
+               for line in FIXTURE.read_text(encoding="utf-8").splitlines() if line.strip()) + 86400
 
 
-def test_diagnose_window_uses_injected_now_not_the_wall_clock(st, monkeypatch):
+def test_diagnose_window_uses_injected_now_not_the_wall_clock(st, far_future):
     st.ingest_log(FIXTURE)
-    real = time.time
-    monkeypatch.setattr(time, "time", lambda: real() + 5000 * 86400)   # years later: the 30-day window misses Oct 19
-    diagnose.run(st, Config(), days=30)
+    diagnose.run(st, Config(), days=30)   # wall clock years later: the 30-day window misses Oct 19
     assert "early_response" not in _issues(st)
-    diagnose.run(st, Config(), days=30, now=FIXTURE_NOW)
+    diagnose.run(st, Config(), days=30, now=_fixture_now())
     assert "early_response" in _issues(st)
 
 
-def test_tool_stats_window_uses_injected_now_not_the_wall_clock(st, monkeypatch):
+def test_tool_stats_window_uses_injected_now_not_the_wall_clock(st, far_future):
     st.ingest_log(FIXTURE)
-    real = time.time
-    monkeypatch.setattr(time, "time", lambda: real() + 5000 * 86400)
     assert st.tool_stats(30) == {}
-    stats = st.tool_stats(30, now=FIXTURE_NOW)
+    stats = st.tool_stats(30, now=_fixture_now())
     assert stats["music_status"]["n"] == 2 and stats["music_volume"]["n"] == 2
