@@ -170,6 +170,16 @@ def test_skills_memory_settings_show_no_secrets(dash, home):
     assert "sk-" not in json.dumps(st)
 
 
+@pytest.fixture
+def far_future(monkeypatch):
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 14 * 365 * 86400)
+
+
+def test_skills_tool_stats_are_clock_free_issue_1328(far_future, dash, home):
+    """#1328: the Oct 19 fixture's tool calls must stay inside tool_stats' 30-day window whatever today's date."""
+    test_skills_memory_settings_show_no_secrets(dash, home)
+
 def test_workspace_files_and_plugin_route(dash):
     ws = get(dash, "/api/workspace")
     names = {f["name"] for f in ws["files"]}
