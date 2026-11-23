@@ -76,6 +76,7 @@ _RUN_KEY = re.compile(r"(filter\.(.+)\.(?:clean|smudge|process)|merge\.(.+)\.dri
 _GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
                 "gpg.ssh.program": "ssh-keygen", "gpg.format": "openpgp", "user.signingkey": ""}
 _SIGN_CHOICE = ("gpg.format", "user.signingkey")       # no command, but they choose how the owner's commit is signed
+_OPENPGP = ("gpg.program", "gpg.openpgp.program")      # git treats these as one setting: the last one read wins
 
 
 def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
@@ -97,6 +98,8 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
     items = p.stdout.split("\0")
     entries = [(items[i], *(items[i + 1].split("\n", 1) + [""])[:2]) for i in range(0, len(items) - 1, 2)]
     owner = {k.lower(): v for scope, k, v in entries if scope in ("global", "system")}
+    pgp = [v for scope, k, v in entries if scope in ("global", "system") and k.lower() in _OPENPGP]
+    owner.update(dict.fromkeys(_OPENPGP, pgp[-1] if pgp else "gpg"))     # your effective OpenPGP program, either alias
     out: list[str] = []
     for scope, key, _v in entries:
         m = _RUN_KEY.fullmatch(key)

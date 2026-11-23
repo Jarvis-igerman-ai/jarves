@@ -281,6 +281,7 @@ def test_commands_named_in_the_repository_config_never_run(tmp_path, monkeypatch
     for k, v in (("user.name", "Owner"), ("user.email", "owner@example.invalid"),
                  ("filter.evil.clean", _run_marker(tmp_path, "clean", marker)),
                  ("filter.evil.smudge", _run_marker(tmp_path, "smudge", marker)),
+                 ("filter.evil.process", _run_marker(tmp_path, "process", marker)),
                  ("merge.evil.driver", _run_marker(tmp_path, "driver", marker) + " %O %A %B"),
                  ("gpg.program", _run_marker(tmp_path, "gpg", marker)), ("commit.gpgsign", "true"),
                  ("hook.evil.command", _run_marker(tmp_path, "hook", marker)), ("hook.evil.event", "pre-commit")):
@@ -345,3 +346,21 @@ def test_ship_signing_format_and_key_come_from_the_owner_scope(tmp_path, monkeyp
     assert "gpg.format=openpgp" in seen[-1] and "user.signingkey=" in seen[-1]
     gitops.git(repo, "status")
     assert not [a for a in seen[-1] if a.startswith(("gpg.format=", "user.signingkey="))]
+
+
+@pytest.mark.parametrize("owner_key,repo_key", [("gpg.program", "gpg.openpgp.program"),
+                                                ("gpg.openpgp.program", "gpg.program")])
+def test_repository_signing_program_falls_back_to_the_owner_alias(tmp_path, monkeypatch, owner_key, repo_key):
+    """#1407 review: git reads gpg.program and gpg.openpgp.program as one setting, so a repository entry under either
+    name is replaced by your own global program set under the other name, not by plain `gpg`."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    subprocess.run(["git", "config", "--global", owner_key, "owner-wrapper"], check=True, cwd=tmp_path)
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "config", repo_key, "agent-gpg"], cwd=repo, check=True)
+    seen: list = []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    gitops.git(repo, "status", ident=False)
+    assert f"{repo_key}=owner-wrapper" in seen[-1] and f"{repo_key}=gpg" not in seen[-1]

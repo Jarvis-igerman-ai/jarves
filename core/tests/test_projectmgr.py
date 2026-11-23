@@ -621,6 +621,17 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
 
 
+def test_ship_without_an_integration_branch_says_nothing_to_ship(env):
+    """#1407 review: a missing integration branch gives a clear result, not a raw git error, and nothing merges."""
+    m, repo, _ = env
+    open_project(m, repo)
+    sh(repo, "git", "update-ref", "-d", "refs/heads/jarves/p1/integration")
+    m._ask = lambda *a, **k: True
+    for apply in (False, True):
+        r = m.call("ship_plan", project="demo", apply=apply)
+        assert r["code"] == "NOTHING_TO_SHIP" and "nothing to ship" in r["text"], r
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
