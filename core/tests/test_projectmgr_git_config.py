@@ -86,7 +86,10 @@ def test_a_merge_driver_named_in_the_shared_config_never_runs(tmp_path):
                                  "gpg.x509.program", "interactive.diffFilter",
                                  "browser.evil.cmd", "browser.evil.path", "web.browser", "man.evil.cmd",
                                  "help.browser", "instaweb.browser", "instaweb.httpd",
-                                 "gc.recentObjectsHook"])
+                                 "gc.recentObjectsHook", "tar.tgz.command", "tar.evil.command",
+                                 "sendemail.toCmd", "sendemail.ccCmd", "sendemail.headerCmd",
+                                 "sendemail.sendmailCmd", "sendemail.smtpServer", "sendemail.work.toCmd",
+                                 "sendemail.work.smtpServer"])
 def test_other_command_keys_in_the_shared_config_are_refused(tmp_path, key):
     """#1390 other command types: every git call refuses while the shared config names one."""
     repo = _repo(tmp_path)
@@ -264,6 +267,31 @@ def test_a_failed_nested_repository_read_is_refused(tmp_path, monkeypatch):
                         if "ls-files" in argv else real(argv, **kw))
     p = gitops.git(repo, "status", check=False)
     assert p.returncode == 128 and "unreadable" in p.stderr
+
+
+def test_a_config_unreadable_after_the_call_is_refused(tmp_path, monkeypatch):
+    """#1662 review R2: the read after the call fails closed like the read before it, saying the call already ran."""
+    repo, real, seen = _repo(tmp_path), subprocess.run, []
+
+    def late_fail(argv, **kw):
+        seen.append("status" in argv)
+        if "ls-files" in argv and any(seen):                                   # only the read after `git status`
+            return subprocess.CompletedProcess(argv, 1, b"", b"boom")
+        return real(argv, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", late_fail)
+    with pytest.raises(gitops.GitError, match="already ran.*unreadable config"):
+        gitops.git(repo, "status")
+
+
+def test_a_bare_repository_is_still_usable_and_checked(tmp_path):
+    """#1662 review R4: a bare repository (no work tree, no gitlinks) is not refused as unreadable; its keys count."""
+    bare = tmp_path / "bare.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    assert gitops.is_repo(str(bare))
+    assert gitops.git(bare / "hooks", "rev-parse", "--git-dir", check=False).returncode == 0
+    _setcfg(bare, "tar.tgz.command", "evil")
+    with pytest.raises(gitops.GitError, match="tar.tgz.command"):
+        gitops.git(bare, "rev-parse", "--git-dir")
 
 
 def test_check_false_reports_a_refusal_as_a_failed_call(tmp_path):

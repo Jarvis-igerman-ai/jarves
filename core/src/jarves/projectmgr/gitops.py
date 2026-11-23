@@ -70,14 +70,16 @@ NO_HOOKS = _no_hooks_path()
 
 # config keys that name a command git runs (#1390). core.hooksPath and core.fsmonitor are not listed: every call
 # overrides both. Pagers are not listed: git never starts one without a terminal and every call captures output.
-# includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree.
+# includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree. sendemail.smtpServer
+# is refused whatever its value (a path there is a command); JARVES never sends mail.
 _RUNS = re.compile(
     r"(core\.(sshcommand|editor|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
     r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
     r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
     r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
     r"|core\.alternaterefscommand|interactive\.difffilter|(browser|man)\..+\.(cmd|path)|web\.browser|help\.browser"
-    r"|instaweb\..+|gc\.recentobjectshook|alias\..+)")
+    r"|instaweb\..+|gc\.recentobjectshook|alias\..+|tar\..+\.command"
+    r"|sendemail\.(.+\.)?(tocmd|cccmd|headercmd|sendmailcmd|smtpserver))")
 # values that name no command: an empty credential.helper resets the list, and submodule.*.update runs a command
 # only as `!cmd` (checkout/rebase/merge/none are what `git submodule init` copies from .gitmodules);
 # an alias names a command as `!cmd`, or through leading global options (`-c filter.x.clean=cmd add`, `--exec-path`)
@@ -126,8 +128,10 @@ def _populated_gitlinks(cwd: str | Path) -> tuple[Path, list[Path]] | str:
     top = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--show-toplevel"], cwd=str(cwd),
                          capture_output=True, creationflags=_NOWIN, env=env, timeout=30)
     err = top.stderr.decode("utf-8", "replace").strip()
-    if top.returncode != 0:                  # not a repository at all (e.g. before `git init`): nothing to recurse into
-        return (Path(cwd), []) if "not a git repository" in err else f"(unreadable config: gitlinks: {err[:150]})"
+    if top.returncode != 0:     # not a repository, or a bare one / inside `.git` (no work tree): nothing to recurse into
+        if "not a git repository" in err or "must be run in a work tree" in err:
+            return Path(cwd), []
+        return f"(unreadable config: gitlinks: {err[:150]})"
     root = Path(os.fsdecode(top.stdout.strip()))
     ls = subprocess.run(["git", "-c", "core.fsmonitor=false", "ls-files", "--stage", "-z"], cwd=str(root),
                         capture_output=True, creationflags=_NOWIN, env=env, timeout=60)
@@ -179,11 +183,11 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
-    drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`), or in the config of a populated
-    gitlink git would enter, makes the call fail before git starts (#1390); submodule recursion is off otherwise.
-    Residual: a key written in the moment between that read and git's own read is not prevented;
-    it is detected by a second read after the call, which then fails loudly (prevention: #1655).
+    JARVES merges into the owner's branch. A command key listed in `_RUNS` (filter and merge drivers, diff commands,
+    editors, ssh, gpg, config-defined hooks, archive and send-email commands) in the repository's own config, or in
+    the config of a populated gitlink git would enter, makes the call fail before git starts (#1390); submodule
+    recursion is off otherwise. Residual: a key written in the moment between that read and git's own read is not
+    prevented; a second read after the call detects it (or an unreadable config) and fails loudly (prevention: #1655).
     `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
     if _points_elsewhere(args):
         return _refused(args, check, "refused: a git call may not point git at another folder than the one checked")
@@ -199,7 +203,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
-    late = [k for k in config_commands(cwd) if not k.startswith("(")]     # detect a key written during the call
+    late = config_commands(cwd)     # detect a key written during the call; unreadable now fails as it does before
     if late:
         return _refused(args, check, "refused: the repository config changed during the call (which already ran) "
                                      f"to name a command: {', '.join(late)}")
