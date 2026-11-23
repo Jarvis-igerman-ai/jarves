@@ -88,8 +88,8 @@ he = "שחרור: jarvis project config --release \"פקודת השחרור של
 en = "Release: jarvis project config --release \"your release command\" (from the PC only). Then add release to the flow; JARVES asks for approval on every release and never retries one that failed by itself."
 
 [[steps]]
-he = "GitHub הוא תוסף לא חובה, פרויקט בפרויקט: off (כברירת מחדל, גיט מקומי בלבד), read (קריאת issues וסטטוס CI), write (רק אחרי jarvis project config --github write, מהמחשב; דורש gh מותקן ומחובר). בלי GitHub עדיין אפשר הכול מקומית."
-en = "GitHub is an optional add-on, per project: off (default, local git only), read (reads issues and CI status), write (only after jarvis project config --github write, from the PC; needs gh installed and signed in). Without GitHub everything still works locally."
+he = "GitHub הוא תוסף לא חובה, פרויקט בפרויקט: off (כברירת מחדל, גיט מקומי בלבד), read (קריאת issues וסטטוס CI), write (רק אחרי jarvis project config --github write --github-repo owner/repo, מהמחשב; ג'ארביס פונה רק למאגר שציינתם; דורש gh מותקן ומחובר). בלי GitHub עדיין אפשר הכול מקומית."
+en = "GitHub is an optional add-on, per project: off (default, local git only), read (reads issues and CI status), write (only after jarvis project config --github write --github-repo owner/repo, from the PC; JARVES only targets the repository you named; needs gh installed and signed in). Without GitHub everything still works locally."
 
 [[problems]]
 he = "ג'ארביס לא מוצא את התיקייה של הפרויקט"

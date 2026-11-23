@@ -330,6 +330,7 @@ def add_cli(sub) -> None:
                                                "\"plan work test review merge\")")
     p.add_argument("--release", default=None, help="config: the release command (empty = none)")
     p.add_argument("--github", choices=["off", "read", "write"], default=None, help="config: GitHub mode for this project")
+    p.add_argument("--github-repo", default=None, help="config: the project's GitHub repository, owner/repo")
     p.add_argument("--hours", type=float, default=24, help="digest: look back this many hours")
     p.add_argument("--text", default="", help="answer: your note (why you reject, or your decision in a debate)")
 
@@ -494,6 +495,8 @@ def cmd_project(a, cfg, home) -> int:
             f["release_cmd"] = shlex.split(a.release, posix=(sys.platform != "win32")) if a.release else []
         if a.github is not None:
             f["github"] = a.github
+        if a.github_repo is not None:
+            f["github_repo"] = a.github_repo
         if a.check is not None:
             f["check"] = shlex.split(a.check, posix=(sys.platform != "win32")) if a.check else []
         if a.brief is not None:

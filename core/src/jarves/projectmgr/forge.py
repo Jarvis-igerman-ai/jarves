@@ -34,7 +34,7 @@ def repo_slug(path: str) -> str:
     return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
-def _checked_slug(repo: object) -> str:
+def checked_slug(repo: object) -> str:
     if not isinstance(repo, str) or not _OWNER_REPO.fullmatch(repo) or ".." in repo:
         raise ForgeError("a GitHub call needs an explicit owner/repo")
     return repo
@@ -51,7 +51,7 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
-    argv = [*cmd, *args, *(["--repo", _checked_slug(repo)] if repo is not None else [])]
+    argv = [*cmd, *args, *(["--repo", checked_slug(repo)] if repo is not None else [])]
     env = gitops.child_env({"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1", "GIT_DIR": gitops.NO_HOOKS})
     for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST"):        # the owner's gh login, or a token they set for gh
         if os.environ.get(k):
@@ -63,9 +63,10 @@ def gh(*args: str, repo: str | None = None, input_: str | None = None, timeout: 
     return p.stdout
 
 
-def status(path: str) -> dict:
-    """Read-only facts for `jarvis project github`: gh installed, signed in, the repo slug."""
-    out = {"gh": bool(gh_cmd()), "signed_in": False, "repo": repo_slug(path)}
+def status(repo: str) -> dict:
+    """Read-only facts for `jarvis project github`: gh installed, signed in, and the owner/repo JARVES recorded for
+    the project (#1622: never re-read from the project's agent-writable git config)."""
+    out = {"gh": bool(gh_cmd()), "signed_in": False, "repo": repo}
     if out["gh"]:
         try:
             gh("auth", "status")
@@ -101,6 +102,8 @@ def create_pr(repo: str, head: str, base: str, title: str, body: str) -> str:
 
 def pr_checks(repo: str, ref: str) -> list[dict]:
     """CI of a PR (number, URL or branch): [{name, state, bucket}] (bucket: pass|fail|pending|skipping|cancel)."""
+    if not isinstance(ref, str) or not ref or ref.startswith("-"):
+        raise ForgeError("a pull request number, URL or branch is needed")
     try:
         out = gh("pr", "checks", ref, "--json", "name,state,bucket", repo=repo)
     except ForgeError as e:

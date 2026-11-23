@@ -302,7 +302,7 @@ class Manager(StageEngine):
             counts[t["status"]] = counts.get(t["status"], 0) + 1
         return {"id": p["id"], "name": p["name"], "path": p["path"], "goal": p["goal"], "status": p["status"],
                 "check": p["check_cmd"], "runners": p["runners"], "brief": p["brief"], "counts": counts,
-                "github": p.get("github") or "off", "release_cmd": p.get("release_cmd") or [],
+                "github": p.get("github") or "off", "github_repo": p.get("github_repo") or "", "release_cmd": p.get("release_cmd") or [],
                 "flow": pl.describe(pl.parse(self._project_flow(p) or pl.DEFAULT_TEMPLATE, trusted=True)),
                 "total": len(ts), "branch": gitops.integration_branch(p["id"])}
 
@@ -348,11 +348,11 @@ class Manager(StageEngine):
 
     def configure(self, project: str = "", check: list[str] | None = None, brief: str | None = None,
                   runners_: list[str] | None = None, goal: str | None = None, release_cmd: list[str] | None = None,
-                  github: str | None = None, trusted: bool = False, **_) -> dict:
+                  github: str | None = None, github_repo: str | None = None, trusted: bool = False, **_) -> dict:
         p, err = self._need_project(project)
         if err:
             return err
-        if not trusted and (release_cmd is not None or github is not None):
+        if not trusted and (release_cmd is not None or github is not None or github_repo is not None):
             return _res(False, "CLI_ONLY", "the release command and GitHub mode are set on the PC")
         f: dict = {}
         if check is not None:
@@ -370,9 +370,14 @@ class Manager(StageEngine):
         if github is not None:
             if github not in forge.MODES:
                 return _res(False, "BAD_GITHUB", "github is off, read or write")
-            if github != "off" and not forge.repo_slug(p["path"]):
-                return _res(False, "NOT_GITHUB", "this project's origin is not a github.com repository")
+            if github != "off" and not (github_repo or p.get("github_repo")):
+                return _res(False, "NEED_GITHUB_REPO", "name the GitHub repository: --github-repo owner/repo")
             f["github"] = github
+        if github_repo is not None:       # #1622: the owner names the target; the project's git config never decides it
+            try:
+                f["github_repo"] = forge.checked_slug(github_repo)
+            except forge.ForgeError:
+                return _res(False, "BAD_GITHUB_REPO", "the GitHub repository is owner/repo")
         self.db.update_project(p["id"], **f)
         return _res(True, "ok", "saved", project=self._pview(self.db.project(p["id"])))
 
@@ -380,10 +385,10 @@ class Manager(StageEngine):
         p, err = self._need_project(project)
         if err:
             return err
-        st = forge.status(p["path"])
+        st = forge.status(p.get("github_repo") or "")
         mode = p.get("github") or "off"
         return _res(True, "ok", f"{p['name']}: GitHub {mode}" + (f" ({st['repo']})" if st["repo"] else
-                    " (no github.com remote)"), mode=mode, **st)
+                    " (no GitHub repository recorded)"), mode=mode, **st)
 
     def runners_info(self, **_) -> dict:
         rows = []

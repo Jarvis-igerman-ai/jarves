@@ -1264,11 +1264,11 @@ def test_forge_status_issues_pr_and_checks(fake_gh, tmp_path):
     sh(repo, "git", "init", "-q", "-b", "main")
     sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
     assert forge.repo_slug(str(repo)) == "o/r"
-    st = forge.status(str(repo))
+    st = forge.status("o/r")
     assert st["gh"] and not st["signed_in"]
     (tmp_path / "signed_in").write_text("1")
     try:
-        st = forge.status(str(repo))
+        st = forge.status("o/r")
         assert st["signed_in"] and st["repo"] == "o/r"
         rows = forge.issues("o/r")
         assert rows and rows[0]["number"] == 7 and rows[0]["labels"] == ["bug"]
@@ -1296,7 +1296,7 @@ def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monk
     sh(repo, "git", "remote", "add", "origin", "https://github.com/attacker/evil.git")   # planted by an agent
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(repo))                      # worst case: cwd is a repo
     (tmp_path / "signed_in").write_text("1")
-    forge.status(str(repo))
+    forge.status("o/r")
     first = json.loads((tmp_path / "gh_calls.jsonl").read_text().splitlines()[0])
     assert first["origin"] != "https://github.com/attacker/evil.git", first   # before #1622: gh ran in the repo
     forge.issues("o/r")
@@ -1314,6 +1314,9 @@ def test_forge_gh_never_sees_the_project_git_config_1622(fake_gh, tmp_path, monk
             forge.create_pr(bad, "jarves/p1/t1-a1", "main", "t", "b")
     with pytest.raises(forge.ForgeError):                             # review R2: a stale gh(path, ...) caller
         forge.gh(str(repo), "auth", "status")
+    for bad_ref in ("-R", "--web", "", 9):                            # review R3: a ref is never read as a gh flag
+        with pytest.raises(forge.ForgeError):
+            forge.pr_checks("o/r", bad_ref)
     assert len((tmp_path / "gh_calls.jsonl").read_text().splitlines()) == 4   # nothing bad ever ran gh
 
 
@@ -1322,11 +1325,32 @@ def test_github_mode_config_and_status_op(env, fake_gh):
     sh(repo, "git", "remote", "add", "origin", "https://github.com/o/r.git")
     open_project(m, repo)
     assert m.call("configure", project="demo", github="write", by="voice")["code"] == "CLI_ONLY"
-    r = m.call("configure", project="demo", github="write")
-    assert r["ok"] and r["project"]["github"] == "write"
+    assert m.call("configure", project="demo", github="write")["code"] == "NEED_GITHUB_REPO"
+    assert m.call("configure", project="demo", github_repo="o/r", by="voice")["code"] == "CLI_ONLY"
+    r = m.call("configure", project="demo", github="write", github_repo="o/r")
+    assert r["ok"] and r["project"]["github"] == "write" and r["project"]["github_repo"] == "o/r"
     assert m.call("configure", project="demo", github="nope")["code"] == "BAD_GITHUB"
+    assert m.call("configure", project="demo", github_repo="o/r\n")["code"] == "BAD_GITHUB_REPO"
     g = m.call("github", project="demo", by="voice")
     assert g["ok"] and g["mode"] == "write" and g["repo"] == "o/r"
+
+
+def test_github_op_uses_the_recorded_repo_not_a_planted_origin_1622(env, fake_gh, tmp_path):
+    """#1622 review R1: the owner/repo JARVES uses comes from its own project record (set on the PC with
+    --github-repo), never from the agent-writable `remote.origin.url`; a planted origin changes nothing."""
+    from jarves.projectmgr import forge
+    m, repo, _ = env
+    open_project(m, repo)
+    assert m.call("configure", project="demo", github="read", github_repo="o/r")["ok"]
+    sh(repo, "git", "remote", "add", "origin", "https://github.com/attacker/evil.git")   # planted by an agent later
+    (tmp_path / "signed_in").write_text("1")
+    g = m.call("github", project="demo")
+    assert g["ok"] and g["repo"] == "o/r" and g["signed_in"], g     # before: repo came from origin = attacker/evil
+    p = m.db.projects()[0]
+    forge.issues(p["github_repo"])
+    calls = [json.loads(x) for x in (tmp_path / "gh_calls.jsonl").read_text().splitlines()]
+    assert calls[-1]["args"][-2:] == ["--repo", "o/r"], calls
+    assert all("attacker" not in " ".join(c["args"]) for c in calls), calls
 
 
 def _rule_matches(rule: str, cmd: str) -> bool:
