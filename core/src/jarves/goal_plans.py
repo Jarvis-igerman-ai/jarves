@@ -427,7 +427,7 @@ class PlanRunner:
                 self.store.scrub_private()
             except sqlite3.Error as e:
                 if not self._scrub_failed:            # logged once per incident; retried on the next tick
-                    logs.warn("goals", "PLAN_SCRUB_FAILED", "could not remove old plan text; will retry", err=str(e)[:120])
+                    logs.warn("goals", "PLAN_SCRUB_FAILED", "could not remove old plan text; will retry", **logs.error_fields(e))
                 self._scrub_failed = True
                 return
             self._scrub_failed = False
