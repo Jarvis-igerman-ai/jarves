@@ -24,6 +24,8 @@ def _repo(tmp_path: Path) -> Path:
 
 def _fake_run(outcomes, calls):
     def run(argv, **kw):
+        if argv[1:3] == ["config", "--show-scope"]:                   # the config read (#1407): nothing to neutralise
+            return subprocess.CompletedProcess(argv, 0, "", "")
         calls.append(argv)
         rc, err = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
         return subprocess.CompletedProcess(argv, rc, "", err)
@@ -255,3 +257,49 @@ def test_every_git_call_disables_hooks_and_fsmonitor(monkeypatch, tmp_path):
         pairs = [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == "-c"]
         assert f"core.hooksPath={gitops.NO_HOOKS}" in pairs and "core.fsmonitor=false" in pairs
         assert argv.index("merge") > max(i for i, a in enumerate(argv) if a == "-c")
+
+
+def _run_marker(tmp_path: Path, name: str, marker: Path) -> str:
+    """A command that only records that it ran (then fails, like a hostile driver that also breaks the merge)."""
+    _hook(tmp_path / "evil-bin", name, marker)
+    return (tmp_path / "evil-bin" / name).as_posix()
+
+
+def test_commands_named_in_the_repository_config_never_run(tmp_path, monkeypatch):
+    """#1407 item 3: filter and merge drivers, `gpg.program` and config hooks set in the shared repository config
+    (agent-writable) are neutralised for every JARVES git call; a merge with a hostile driver is a conflict."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))               # no owner global config in this test
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home"))
+    repo, marker = _repo(tmp_path), tmp_path / "ran.txt"
+    (repo / ".gitattributes").write_text("*.txt filter=evil merge=evil\n", encoding="utf-8")
+    gitops.git(repo, "add", "-A")
+    gitops.git(repo, "commit", "-qm", "attrs", "--no-verify")
+    for br, text in (("side", "s\n"), ("main", "m\n")):
+        gitops.git(repo, "checkout", "-q", *(["main"] if br == "main" else ["-b", br]))
+        (repo / "f.txt").write_text(text, encoding="utf-8")
+        gitops.git(repo, "commit", "-qam", br, "--no-verify")
+    for k, v in (("user.name", "Owner"), ("user.email", "owner@example.invalid"),
+                 ("filter.evil.clean", _run_marker(tmp_path, "clean", marker)),
+                 ("filter.evil.smudge", _run_marker(tmp_path, "smudge", marker)),
+                 ("merge.evil.driver", _run_marker(tmp_path, "driver", marker) + " %O %A %B"),
+                 ("gpg.program", _run_marker(tmp_path, "gpg", marker)), ("commit.gpgsign", "true"),
+                 ("hook.evil.command", _run_marker(tmp_path, "hook", marker)), ("hook.evil.event", "pre-commit")):
+        subprocess.run(["git", "config", k, v], cwd=repo, check=True)
+    assert gitops.merge_in(repo, "side") == ["f.txt"]                  # the hostile driver never decides the merge
+    gitops.merge_in(repo, "side", ident=False)                        # the ship path: owner signing settings only
+    gitops.git(repo, "commit", "--allow-empty", "-qm", "signed", check=False, ident=False)   # signs: no gpg.program
+    seen: list = []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    gitops.git(repo, "status")
+    assert "hook.evil.command=true" in seen[-1] and "filter.evil.clean=" in seen[-1]
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("key", ["filter.a=b.clean", "merge.x=y.driver"])
+def test_a_config_name_that_cannot_be_overridden_fails_closed(tmp_path, key):
+    """#1407 item 3: `-c name=value` splits at the first `=`, so such a name cannot be neutralised: no git runs."""
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "config", key, "x"], cwd=repo, check=True)
+    with pytest.raises(gitops.GitError, match="cannot neutralise"):
+        gitops.git(repo, "status")

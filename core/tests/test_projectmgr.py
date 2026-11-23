@@ -593,6 +593,33 @@ def test_ship_apply_merges_into_owner_branch_after_approval(env):
     assert sh(repo, "git", "rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
+def test_ship_names_and_merges_the_commit_the_owner_approved(env):
+    """#1407: the ship plan, its commands and the approval prompt name the integration commit (not the movable
+    branch name), and the merge lands exactly that commit even when the branch moves after the approval."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    br = "jarves/p1/integration"
+    sha = sh(repo, "git", "rev-parse", f"refs/heads/{br}").strip()
+    plan = m.call("ship_plan", project="demo")
+    assert plan["commit"] == sha and sha[:12] in plan["text"] and all(sha in c for c in plan["commands"][:2])
+    wt = home / "projects" / "1" / "integration"
+    asked = []
+
+    def approve(text, *a, **k):
+        asked.append(text)
+        (wt / "late.txt").write_text("not approved\n")              # the branch moves after the approval
+        sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "add", "late.txt")
+        sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "late", "--no-verify")
+        return True
+    m._ask = approve
+    r = m.call("ship_plan", project="demo", apply=True)
+    assert r["ok"] and sha[:12] in asked[0] and sha[:12] in r["text"], (asked, r)
+    assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)
