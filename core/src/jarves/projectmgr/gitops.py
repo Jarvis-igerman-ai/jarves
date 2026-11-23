@@ -68,15 +68,19 @@ def _no_hooks_path() -> str:
 
 NO_HOOKS = _no_hooks_path()
 
-# config keys that name a command git runs (#1390); pagers never run without a terminal (listed as belt and braces).
-# core.hooksPath and core.fsmonitor are not listed: every call overrides both. includeIf is listed because its
-# condition (branch, gitdir) can match only inside a new worktree.
+# config keys that name a command git runs (#1390). core.hooksPath and core.fsmonitor are not listed: every call
+# overrides both. Pagers are not listed: git never starts one without a terminal and every call captures output.
+# includeIf is listed because its condition (branch, gitdir) can match only inside a new worktree.
 _RUNS = re.compile(
-    r"(core\.(sshcommand|editor|pager|askpass|gitproxy)|pager\..+|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
+    r"(core\.(sshcommand|editor|askpass|gitproxy)|sequence\.editor|diff\.external|gpg\.(.+\.)?program"
     r"|credential\.(.+\.)?helper|filter\..+\.(clean|smudge|process)|merge\..+\.driver|diff\..+\.(command|textconv)"
     r"|hook\..+\.command|trailer\..+\.(cmd|command)|(merge|diff)tool\..+\.(cmd|path)"
     r"|remote\..+\.(uploadpack|receivepack|vcs)|includeif\..+|gpg\..+\.defaultkeycommand|submodule\..+\.update"
-    r"|core\.alternaterefscommand)")
+    r"|core\.alternaterefscommand|interactive\.difffilter|(browser|man)\..+\.(cmd|path)|web\.browser)")
+# values that name no command: an empty credential.helper resets the list, and submodule.*.update runs a command
+# only as `!cmd` (checkout/rebase/merge/none are what `git submodule init` copies from .gitmodules)
+_HARMLESS = {"credential": lambda v: v == "", "submodule": lambda v: not v.startswith("!")}
+_SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
 # git options that point git at another repository than `cwd`, which config_commands checked
 _ELSEWHERE = ("-C", "--git-dir", "--work-tree")
 # global options whose value is the NEXT argument (git's own list); the scan skips that value
@@ -94,7 +98,11 @@ def _points_elsewhere(args: tuple[str, ...]) -> bool:
             return True
         i += 2 if a in _TAKES_VALUE else 1
     return False
-_SHARED_SCOPES = ("local", "worktree")      # the repository's own config (and files it includes): agents can write it
+
+
+def _names_command(key: str, value: str) -> bool:
+    harmless = _HARMLESS.get(key.split(".", 1)[0])
+    return bool(_RUNS.fullmatch(key)) and not (harmless and harmless(value.strip()))
 
 
 def config_commands(cwd: str | Path) -> list[str]:
@@ -106,8 +114,8 @@ def config_commands(cwd: str | Path) -> list[str]:
     if p.returncode != 0:
         return [f"(unreadable config: {p.stderr.decode('utf-8', 'replace').strip()[:150]})"]
     parts = p.stdout.decode("utf-8", "replace").split("\0")
-    keys = [kv.split("\n", 1)[0].lower() for scope, kv in zip(parts[::2], parts[1::2]) if scope in _SHARED_SCOPES]
-    return sorted({k for k in keys if _RUNS.fullmatch(k)})
+    pairs = [(kv.split("\n", 1) + [""])[:2] for scope, kv in zip(parts[::2], parts[1::2]) if scope in _SHARED_SCOPES]
+    return sorted({k.lower() for k, v in pairs if _names_command(k.lower(), v)})
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -119,7 +127,9 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
     JARVES merges into the owner's branch. Any other command named in the repository's own config (filter and merge
     drivers, diff commands, editors, ssh, gpg, config-defined hooks, see `_RUNS`) makes the call fail before git
-    starts (#1390). Residual: a key written in the moment between that read and git's own read is not seen.
+    starts (#1390). Residual: a key written in the moment between that read and git's own read is not prevented;
+    it is detected by a second read after the call, which then fails loudly (follow-up: run from a `.git` agents
+    cannot write).
     `protocol.ext.allow=never` stops an `ext::` remote (a command as transport) whatever the shared config allows."""
     if _points_elsewhere(args):
         raise GitError("refused: a git call may not point git at another folder than the one checked (#1390)")
@@ -135,6 +145,10 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
         if p.returncode == 0 or attempt == LOCK_RETRIES or not _lock_contention(p.stderr):
             break
         time.sleep(0.15 * (attempt + 1))
+    late = [k for k in config_commands(cwd) if not k.startswith("(")]     # detect a key written during the call
+    if late:
+        raise GitError(f"refused: the repository config changed during the call to name a command: "
+                       f"{', '.join(late)[:200]}")
     if check and p.returncode != 0:
         raise GitError((p.stderr or p.stdout or "git failed").strip()[:300])
     return p

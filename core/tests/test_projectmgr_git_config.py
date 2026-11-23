@@ -75,13 +75,14 @@ def test_a_merge_driver_named_in_the_shared_config_never_runs(tmp_path):
 
 
 @pytest.mark.parametrize("key", ["diff.external", "diff.evil.command", "diff.evil.textconv", "core.sshCommand",
-                                 "core.editor", "sequence.editor", "core.pager", "core.askpass", "gpg.program",
+                                 "core.editor", "sequence.editor", "core.askpass", "gpg.program",
                                  "gpg.ssh.program", "credential.helper", "hook.evil.command",
                                  "trailer.evil.cmd", "mergetool.evil.cmd", "remote.origin.uploadpack",
-                                 "gpg.ssh.defaultKeyCommand", "submodule.evil.update", "core.alternateRefsCommand",
+                                 "gpg.ssh.defaultKeyCommand", "core.alternateRefsCommand",
                                  "filter.evil.process", "core.gitProxy", "remote.origin.receivepack",
                                  "remote.origin.vcs", "difftool.evil.path", "credential.https://x.invalid.helper",
-                                 "gpg.x509.program", "pager.log"])
+                                 "gpg.x509.program", "interactive.diffFilter",
+                                 "browser.evil.cmd", "browser.evil.path", "web.browser", "man.evil.cmd"])
 def test_other_command_keys_in_the_shared_config_are_refused(tmp_path, key):
     """#1390 other command types: every git call refuses while the shared config names one."""
     repo = _repo(tmp_path)
@@ -121,10 +122,42 @@ def test_the_owners_global_config_and_neutralised_keys_still_work(tmp_path):
 
 
 def test_a_repository_that_names_a_command_is_not_a_usable_repo(tmp_path):
-    """is_repo answers False (instead of crashing) when the shared config names a command."""
+    """is_repo answers False and repo_state returns its empty defaults (instead of crashing) on a refused repo."""
     repo = _repo(tmp_path)
     _setcfg(repo, "core.editor", "evil")
     assert gitops.is_repo(str(repo)) is False
+    assert gitops.repo_state(str(repo)) == {"branch": "", "commits": 0, "dirty": 0, "untracked": 0}
+
+
+@pytest.mark.parametrize("key,value", [("submodule.lib.update", "checkout"), ("submodule.lib.update", "rebase"),
+                                       ("submodule.lib.update", "none"), ("credential.helper", ""),
+                                       ("core.pager", "less"), ("pager.log", "false")])
+def test_values_that_name_no_command_are_accepted(tmp_path, key, value):
+    """#1390 review R2: `git submodule init` copies update=checkout/rebase/merge/none, an empty credential.helper
+    resets the list, and pagers never start without a terminal; none of these runs a command."""
+    repo = _repo(tmp_path)
+    _setcfg(repo, key, value)
+    assert gitops.git(repo, "status").returncode == 0
+
+
+def test_a_submodule_update_command_is_refused(tmp_path):
+    repo = _repo(tmp_path)
+    _setcfg(repo, "submodule.lib.update", "!evil")
+    with pytest.raises(gitops.GitError, match="submodule.lib.update"):
+        gitops.git(repo, "status")
+
+
+def test_a_key_written_during_the_call_is_detected(tmp_path, monkeypatch):
+    """#1390 review R1: a key that slips in between JARVES's read and git's own read fails the call afterwards."""
+    repo, real = _repo(tmp_path), subprocess.run
+
+    def racing(argv, **kw):
+        if "status" in argv:                                                       # the agent wins the race
+            real(["git", "config", "core.editor", "evil"], cwd=repo, check=True)
+        return real(argv, **kw)
+    monkeypatch.setattr(gitops.subprocess, "run", racing)
+    with pytest.raises(gitops.GitError, match="changed during the call.*core.editor"):
+        gitops.git(repo, "status")
 
 
 def test_the_ext_transport_never_runs_a_command(tmp_path):
