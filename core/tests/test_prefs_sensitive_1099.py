@@ -24,6 +24,10 @@ LEAKY = [
     "export GITHUB_ACCESS_TOKEN first",
     "תזכור את הטוקן שלי",                                      # Hebrew "the token", one prefix letter
     "טוקן",
+    "והטוקן שלי בקובץ",                                        # two prefix letters (review 4 R1)
+    "שהטוקן נמצא אצלי",
+    "ולטוקן אין תוקף",
+    "כשהטוקן יפוג תגיד לי",                                     # three prefix letters
     "המפתח הסודי נמצא אצלי",                                   # Hebrew "secret key"
     "המפתח שלי נמצא במגירה",                                   # Hebrew "my key"
     "שמור את מפתח פרטי של השרת",                               # Hebrew "private key" (review 3 R3)
@@ -35,12 +39,16 @@ LEAKY = [
     "the value Zq8LmP2vT9xRk4NwB7yHc3Fd==",
 ]
 
+# The seed-word rule shares the Hebrew prefix rule: a one-digit-group base32 run beside a two-prefix seed word.
+LEAKY.append("והסוד ABCDEFGHIJKLMNOP7QRS")
+
 SAFE = [
     "I prefer short answers in the morning",
     "fix a3f9c2e1b7d4f6a8c0e2b4d6f8a1c3e5b7d9f0a2",           # 40-char git SHA (one case only)
     "call HandleUserRequestV2Async in the handler",           # long camelCase identifier, low entropy
     "use fewer tokens in long answers",                       # plain word "tokens" is not a credential word
     "תשתמש בפחות טוקנים בתשובות ארוכות",                       # same in Hebrew: "טוקנים" (tokens) is allowed (review R2)
+    "ובטוקנים אין צורך",                                        # prefixed plural "tokens" still allowed
     "set max_tokens lower",
     "keep the keyboard shortcuts simple",
     "internationalization",

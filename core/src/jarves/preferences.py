@@ -52,9 +52,11 @@ _SENSITIVE = re.compile(
 # development words such as "base64urlencoded" or "sha256checksumfile" in drafts and plans are not refused.
 _BASE32_RUN = re.compile(r"(?<![A-Za-z0-9])[A-Za-z2-7]{16,}(?![A-Za-z0-9])")
 _DIGIT_GROUP = re.compile(r"[2-7]+")
-# Whole tokens only, so "footprint" or "יסוד" is no seed word; Hebrew allows one prefix letter (e.g. "המאמת").
+# Hebrew prefix letters (ו ה ב ל מ ש כ) stack up to three, e.g. "והטוקן", "כשהטוקן"; shared by both word rules.
+_HE_PREFIX = r"(?<![\u05d0-\u05ea])[הובלמשכ]{0,3}"
+# Whole tokens only, so "footprint" or "יסוד" is no seed word; Hebrew allows prefix letters (e.g. "והמאמת").
 _SEED_WORD = re.compile(r"(?<![A-Za-z0-9])(?:totp|otp|seed|2fa|mfa|authenticator)s?(?![A-Za-z0-9])"
-                        r"|(?<![\u05d0-\u05ea])[הובלמשכ]?(?:מאמת|אימות|זרע|סוד)(?![\u05d0-\u05ea])", re.I)
+                        r"|" + _HE_PREFIX + r"(?:מאמת|אימות|זרע|סוד)(?![\u05d0-\u05ea])", re.I)
 _SEED_NEAR = 20
 
 
@@ -72,12 +74,12 @@ def _base32(text: str) -> bool:
 
 # #1099: credential words (the plain word "token(s)" alone is not one) and high-entropy key-like runs. The English
 # words are bounded by letters/digits only, so env-var names such as OPENAI_API_KEY or MY_SECRET_KEY are caught; the
-# Hebrew "טוקן" is a whole word with one optional prefix letter, so "טוקנים" (tokens) passes like English "tokens".
+# Hebrew "טוקן" is a whole word with up to three prefix letters, so "טוקנים" (tokens) passes like English "tokens".
 _CRED_WORD = re.compile(
     r"(?<![A-Za-z0-9])(?:api[\s_-]?(?:key|token|secret)|access[\s_-]?(?:token|key)|"
     r"(?:refresh|auth|secret|session)[\s_-]?token|secret[\s_-]?key|private[\s_-]?key|client[\s_-]?secret|"
     r"bearer\s+(?:token|auth)|credential)s?(?![A-Za-z0-9])|"
-    r"(?<![\u05d0-\u05ea])[הובלמשכ]?טוקן(?![\u05d0-\u05ea])|"
+    + _HE_PREFIX + r"טוקן(?![\u05d0-\u05ea])|"
     r"מפתח\s+(?:ה)?(?:סודי|פרטי|api)|המפתח\s+(?:ה(?:סודי|פרטי)|שלי)",
     re.I)
 # A 24+ char run mixing upper, lower and digits that switches character class often (random keys ~60% of neighbours,
