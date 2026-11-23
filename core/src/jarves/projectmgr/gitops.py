@@ -69,6 +69,42 @@ def _no_hooks_path() -> str:
 NO_HOOKS = _no_hooks_path()
 
 
+# Config keys that name a command git runs (#1407). The repository's own config (`.git/config`, `config.worktree` and
+# what they include) is shared with every task worktree, so an agent can write it.
+_RUN_KEY = re.compile(r"(filter\.(.+)\.(?:clean|smudge|process)|merge\.(.+)\.driver|hook\.(.+)\.command"
+                      r"|gpg\.(?:[^.]+\.)?program|gpg\.ssh\.defaultkeycommand)", re.S)
+_GPG_DEFAULT = {"gpg.program": "gpg", "gpg.openpgp.program": "gpg", "gpg.x509.program": "gpgsm",
+                "gpg.ssh.program": "ssh-keygen"}
+
+
+def _config_overrides(cwd: str | Path) -> list[str]:
+    """`-c` pairs that neutralise commands named in the repository's own config: a filter driver becomes empty (git
+    skips it; a `required` filter then fails), a merge driver becomes `false` (a conflict, nothing merged), a signing
+    program falls back to your global/system one (or git's default). Config-defined hooks (`hook.<name>.command`,
+    newer git) become `true` in every scope, like `core.hooksPath`. Fails closed (GitError) when the config cannot be
+    read (git older than 2.26 has no --show-scope) or a name cannot be overridden on the command line."""
+    p = subprocess.run(["git", "config", "--show-scope", "-z", "--list"], cwd=str(cwd), capture_output=True,
+                       text=True, timeout=30, creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}),
+                       encoding="utf-8", errors="replace")
+    if p.returncode != 0:
+        raise GitError("cannot read the git config (git 2.26 or newer is needed): " + (p.stderr or "").strip()[:200])
+    items = p.stdout.split("\0")
+    entries = [(items[i], *(items[i + 1].split("\n", 1) + [""])[:2]) for i in range(0, len(items) - 1, 2)]
+    owner = {k.lower(): v for scope, k, v in entries if scope in ("global", "system")}
+    out: list[str] = []
+    for scope, key, _v in entries:
+        m = _RUN_KEY.fullmatch(key)
+        if not m or (scope not in ("local", "worktree") and not m.group(4)):
+            continue
+        if "=" in key:
+            raise GitError(f"cannot neutralise the git config entry {key!r}: remove it from the repository config")
+        low = key.lower()
+        val = "" if m.group(2) else "false" if m.group(3) else "true" if m.group(4) else owner.get(
+            low, _GPG_DEFAULT.get(low, ""))
+        out += ["-c", f"{key}={val}"]
+    return out
+
+
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
         ) -> subprocess.CompletedProcess:
     """ident=False: the owner's own git identity and signing settings (a merge into the owner's branch).
@@ -76,9 +112,10 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
     shared `.git/hooks` nor a `core.hooksPath` from the shared config (both writable by agents) runs on a merge,
     commit, index or ref write; `core.fsmonitor=false` stops an fsmonitor command set in the shared config, which
     git would otherwise run on every index refresh. This also skips the owner's own hooks (LFS, post-merge) when
-    JARVES merges into the owner's branch. Other config-run commands (filter/merge drivers, gpg.program) and
-    config-defined hooks (`hook.<name>.command`, newer git) are not covered here."""
-    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false"]
+    JARVES merges into the owner's branch. Commands named in the repository's own config are neutralised too (#1407,
+    see `_config_overrides`)."""
+    pre = [*(IDENT if ident else []), "-c", f"core.hooksPath={NO_HOOKS}", "-c", "core.fsmonitor=false",
+           *_config_overrides(cwd)]
     for attempt in range(LOCK_RETRIES + 1):
         p = subprocess.run(["git", *pre, *args], cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
                            creationflags=_NOWIN, env=child_env({"GIT_TERMINAL_PROMPT": "0"}), encoding="utf-8",
@@ -94,7 +131,7 @@ def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, i
 def is_repo(path: str) -> bool:
     try:
         return git(path, "rev-parse", "--git-dir", check=False).returncode == 0
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, GitError):
         return False
 
 
