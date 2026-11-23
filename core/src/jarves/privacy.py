@@ -155,10 +155,10 @@ def scrub_at_rest(home: Path) -> dict:
         except sqlite3.Error as e:
             if "no such table" not in str(e):                     # an older database without the table: nothing kept
                 out["errors"].append({"db": name, "error": type(e).__name__})
-                logs.warn("privacy", "PRIVACY_SCRUB_FAILED", "older text could not be scrubbed", db=name,
+                logs.warn("privacy", "PRIVACY_SCRUB_FAILED", "older text could not be scrubbed", file=name,
                           error_type=type(e).__name__)
     logs.info("privacy", "PRIVACY_SCRUBBED_AT_REST", "text stored before privacy was on scrubbed",
-              ledger=out["ledger"], plan_steps=out["plan_steps"], plans=out["plans"], failed=len(out["errors"]))
+              count=out["ledger"] + out["plan_steps"] + out["plans"], failed=len(out["errors"]))
     return out
 
 

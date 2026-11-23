@@ -97,6 +97,7 @@ def test_an_unreadable_database_is_reported_and_the_switch_still_works(home):
     assert r["privacy"] is True and logs.privacy() is True
     assert [e["db"] for e in r["scrubbed"]["errors"]] == ["continuity.db"]
     assert r["scrubbed"]["plan_steps"] == 2                                    # the other database was still scrubbed
+    assert "PRIVACY_SCRUB_FAILED" in (home / "logs" / "jarves.log").read_text(encoding="utf-8")
 
 
 def test_missing_databases_are_not_created(home):
