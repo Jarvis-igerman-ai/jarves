@@ -675,3 +675,34 @@ async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, mon
     d = env.store.get(p["id"])
     assert d["state"] == state and d["steps"][0]["status"] == status
     assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
+
+
+# ---------------------------------------------------------------- #1526: privacy on scrubs text written before it
+async def test_1526_privacy_switched_on_scrubs_tool_text_written_before(env, monkeypatch):
+    private = {"on": False}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    ok = env.store.propose("ok", steps(("fake_read", {"text": "secret-a"})))
+    env.store.approve(ok["id"])
+    bad = env.store.propose("bad", steps(("fake_bad", {})))
+    env.store.approve(bad["id"])
+    await env.runner.tick()
+    before = json.dumps([env.store.get(ok["id"]), env.store.get(bad["id"])])
+    assert "read secret-a" in before and "it broke" in before           # full-text mode kept the tool text
+    assert env.store.scrub_if_private() == 0                            # privacy still off: nothing touched
+
+    private["on"] = True
+    assert env.store.scrub_if_private() > 0
+    d, f = env.store.get(ok["id"]), env.store.get(bad["id"])
+    assert "read secret-a" not in json.dumps(d) and "it broke" not in json.dumps(f)
+    assert d["state"] == "done" and d["steps"][0]["status"] == "done" and d["steps"][0]["evidence"] == ""
+    assert d["result"].startswith("1/1 steps done.") and "fake_read: done" in d["result"]
+    assert f["state"] == "failed" and f["steps"][0]["error"] == "X_BROKE" and f["note"] == "step 1: X_BROKE"
+    assert env.store.scrub_if_private() == 0                            # once per switch, not every tick
+
+
+def test_1526_codes_only_keeps_fixed_sentences():
+    assert gp._codes_only("X_BROKE: it broke") == "X_BROKE"
+    assert gp._codes_only("step 2: failed: secret") == "step 2: failed"
+    for fixed in ("interrupted by a restart", "the step timed out: it may already have happened",
+                  "step 1: the owner did not approve this step", ""):
+        assert gp._codes_only(fixed) == fixed

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 import unicodedata
 
@@ -72,12 +73,30 @@ def _at_rest(text: str) -> str:
     return "" if logs.privacy() else text
 
 
+_CODE_TEXT = re.compile(r"^((?:step \d+: )?[A-Za-z][A-Za-z0-9_.-]*): .*$", re.S)
+
+
+def _codes_only(text: object) -> str:
+    """#1526: "CODE: tool text" (optionally behind "step N: ") keeps only the code; fixed sentences written by this
+    module (they never start with a single code word followed by ': ') stay as they are."""
+    s = str(text or "")
+    m = _CODE_TEXT.match(s)
+    return m.group(1) if m else s
+
+
+def _result(steps: list[dict]) -> str:
+    lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
+    done = sum(1 for s in steps if s["status"] == "done")
+    return f"{done}/{len(steps)} steps done. " + _short("; ".join(lines), RESULT_CHARS)
+
+
 class PlanStore:
     """Persistence and the owner's controls. All state lives in memory.db (goal_plans / goal_plan_steps)."""
 
     def __init__(self, db, *, clock=time.time, known=None) -> None:
         self.db, self.clock = db, clock
         self.known = known                    # optional (tool name) -> Tool | None: validate against the live registry
+        self._private = False                 # privacy state already applied to the stored rows (scrub_if_private)
 
     # ------------------------------------------------------------------ reading
     def _plan(self, pid: int) -> dict:
@@ -285,6 +304,44 @@ class PlanStore:
         self.db.x("DELETE FROM goal_plans WHERE id=?", (int(pid),))
         logs.info("goals", "PLAN_DELETED", "plan deleted", id=pid, by=by)
         return True
+
+    # ------------------------------------------------------------------ privacy at rest
+    def scrub_private(self) -> int:
+        """#1526: rows written before privacy was on still hold tool text. Blank step evidence, cut step errors and plan
+        notes to their code, and rebuild each plan result from status only: ONE transaction. Returns rows changed."""
+        n = 0
+        with self.db._lock:
+            c = self.db._db
+            try:
+                steps = [dict(r) for r in c.execute("SELECT * FROM goal_plan_steps ORDER BY plan_id, idx").fetchall()]
+                by_plan: dict[int, list[dict]] = {}
+                for st in steps:
+                    ev, err = st["evidence"] or "", _codes_only(st["error"])
+                    if ev or err != (st["error"] or ""):
+                        c.execute("UPDATE goal_plan_steps SET evidence='', error=? WHERE id=?", (err, st["id"]))
+                        n += 1
+                    st["evidence"], st["error"] = "", err
+                    by_plan.setdefault(st["plan_id"], []).append(st)
+                for p in c.execute("SELECT id, note, result FROM goal_plans").fetchall():
+                    note = _codes_only(p["note"])
+                    result = _result(by_plan.get(p["id"], [])) if p["result"] else (p["result"] or "")
+                    if note != (p["note"] or "") or result != (p["result"] or ""):
+                        c.execute("UPDATE goal_plans SET note=?, result=? WHERE id=?", (note, result, p["id"]))
+                        n += 1
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+        if n:
+            logs.info("goals", "PLAN_TEXT_SCRUBBED", "privacy on: stored plan text removed", count=n)
+        return n
+
+    def scrub_if_private(self) -> int:
+        """At Core start and on every Core tick: scrub once each time privacy turns on (cheap when nothing changed)."""
+        on = logs.privacy()
+        n = self.scrub_private() if on and not self._private else 0
+        self._private = on
+        return n
 
     # ------------------------------------------------------------------ restart
     def recover(self) -> int:
@@ -545,11 +602,8 @@ class PlanRunner:
     def _finish(self, pid: int) -> dict:
         st = self.store
         steps = st.steps(pid)
-        lines = [f"{s['idx'] + 1}. {s['tool']}: " + (s["evidence"] or s["status"]) for s in steps]
-        text = _short("; ".join(lines), RESULT_CHARS)
         done = sum(1 for s in steps if s["status"] == "done")
-        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="",
-                          result=f"{done}/{len(steps)} steps done. {text}"):
+        if not st._set_if(pid, ("running",), "done", finished=self.clock(), note="", result=_result(steps)):
             return st.get(pid)                       # cancelled/paused meanwhile (#813)
         logs.info("goals", "PLAN_DONE", "plan done", id=pid, count=done)
         return st.get(pid)

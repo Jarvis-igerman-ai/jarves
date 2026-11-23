@@ -211,6 +211,10 @@ class Operations:
         self.goals = goals_mod.Goals(self.db)
         self.plans = plans_mod.PlanStore(self.db, known=core.registry.get)
         self.plans.recover()                 # a plan that was running when the Core stopped is paused, never repeated
+        try:
+            self.plans.scrub_if_private()    # #1526: privacy on = no tool text left from rows written before it
+        except Exception:
+            logs.error("goals", "PLAN_SCRUB_FAILED", "stored plan text not scrubbed", exc=True)
         self.plan_runner = plans_mod.PlanRunner(self.plans, core.registry, budget=getattr(core, "budget", None),
                                                 features=core.features)
         self._plan_task: asyncio.Task | None = None
@@ -360,6 +364,12 @@ class Operations:
             await self.cheer.check()
         except Exception:
             logs.error("goals", "GOAL_DONE_LINE_FAILED", "goal finished line failed", exc=True)
+        plans = getattr(self, "plans", None)                 # absent on a partial Operations (tick tests)
+        if plans is not None:
+            try:
+                plans.scrub_if_private()                     # #1526: the privacy switch turned on since the last tick
+            except Exception:
+                logs.error("goals", "PLAN_SCRUB_FAILED", "stored plan text not scrubbed", exc=True)
         plan_cheer = getattr(self, "plan_cheer", None)       # absent on a partial Operations (tick tests)
         if plan_cheer is not None:
             try:
