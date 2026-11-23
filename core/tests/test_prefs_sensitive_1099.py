@@ -1,7 +1,8 @@
 """#1099: looks_sensitive refuses key/token-shaped text (vendor token shapes, credential words, high-entropy runs)."""
 import pytest
 
-from jarves.preferences import looks_sensitive
+from jarves import logs
+from jarves.preferences import _keyish, looks_sensitive
 
 LEAKY = [
     "my key is sk-proj-AbCdEfGhIjKlMnOp",                    # OpenAI-style key (shared logs.has_secret shapes)
@@ -23,6 +24,8 @@ LEAKY = [
     "copy my session token",
     "my credentials are in the notebook",
     "המפתח שלי נמצא במגירה",                                   # Hebrew "my key"
+    "the value dGhpc0lzQVNlY3JldEtleTEyMzQ1Njc4OQ==",         # base64 key with "==" padding (review 3 R2)
+    "the value Zq8LmP2vT9xRk4NwB7yHc3Fd==",                   # 24-char run plus padding (review 3 R2)
 ]
 
 SAFE = [
@@ -39,7 +42,20 @@ SAFE = [
     "parse it with XMLHttpRequest2ResponseParser",
     "use GPT4oMiniRealtimePreview2024 for voice",
     "see docs/reviews/SWV4_P_PERF_BUDGETS first",            # path segments are short, not near-max entropy
+    "the value Zq8LmP2vT9xRk4NwB7yHc3F",                      # 23-char run: one under the 24-char limit (review 3 R2)
+    "the value Zq8LmP2vT9xRk4NwB7yHc3==",                     # padding is not counted toward the 24 chars (review 3 R2)
 ]
+
+# These vendor shapes are caught only by the shared logs.has_secret patterns, not by the entropy rule (review 3 R1):
+# if logs.py narrows a pattern, this test names the shape that lost coverage.
+VENDOR = ["sk-proj-AbCdEfGhIjKlMnOp", "ghp_abcdefghijklmnopqrstuvwxyzABCD", "AKIAIOSFODNN7EXAMPLE",
+          "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.abc"]
+
+
+@pytest.mark.parametrize("token", VENDOR)
+def test_vendor_shapes_rely_on_shared_logs_patterns(token):
+    assert not _keyish(token)
+    assert logs.has_secret(token), f"logs.has_secret no longer matches {token[:8]}...: looks_sensitive loses it"
 
 
 @pytest.mark.parametrize("text", LEAKY)

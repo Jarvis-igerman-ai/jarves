@@ -79,7 +79,8 @@ _CRED_WORD = re.compile(
 # A 24+ char run mixing upper, lower and digits that switches character class often (random keys switch on ~60% of
 # neighbours; camelCase identifiers such as "HandleUserRequestV2Async" only at word boundaries, ~40%). Separators
 # (_ + / -) are skipped when counting, so paths and slugs are judged by their letters and digits only.
-# "private key" stays a credential word even in non-credential talk: refusing a harmless preference is the safe side.
+# "private key", "access key" and "secret key" stay credential words even in harmless talk ("the access key for the
+# front gate"): refusing a harmless preference is the safe side (false refusals are tracked in #1649).
 # A run that switches class less often is still refused when one separator-free segment of 20+ chars has nearly all
 # distinct characters (Shannon entropy within _KEYISH_ENTROPY_GAP bits of log2 of its length); identifiers repeat
 # letters and stay below, and paths such as "docs/reviews/SWV4_P_PERF" are judged per short segment, so not refused.
