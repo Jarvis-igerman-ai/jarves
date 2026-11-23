@@ -621,6 +621,29 @@ def test_ship_names_and_merges_the_commit_the_owner_approved(env):
     assert (repo / "a.txt").exists() and not (repo / "late.txt").exists()
 
 
+def test_ship_yes_is_bound_to_the_commit_from_the_plan(env):
+    """PR #1657 review R1: with --yes no prompt names the commit, so apply needs the plan's commit and refuses (MOVED)
+    when an agent moved the branch after the plan; the ship is a real merge commit naming branch and commit (R2)."""
+    m, repo, home = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    seen = m.call("ship_plan", project="demo")["commit"]
+    assert m.call("ship_plan", project="demo", apply=True, yes=True)["code"] == "NEED_COMMIT"
+    wt = home / "projects" / "1" / "integration"
+    (wt / "late.txt").write_text("not seen\n")
+    sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "add", "late.txt")
+    sh(wt, "git", "-c", "user.name=a", "-c", "user.email=a@a", "commit", "-qm", "late", "--no-verify")
+    r = m.call("ship_plan", project="demo", apply=True, yes=True, commit=seen)
+    assert r["code"] == "MOVED" and not (repo / "a.txt").exists(), r
+    now = m.call("ship_plan", project="demo")["commit"]
+    r = m.call("ship_plan", project="demo", apply=True, yes=True, commit=now[:12])
+    assert r["ok"] and (repo / "late.txt").exists(), r
+    subject = sh(repo, "git", "log", "-1", "--format=%s").strip()           # owner branch had not moved: no ff
+    assert subject == f"Merge branch 'jarves/p1/integration' at commit {now[:12]}", subject
+
+
 def test_ship_without_an_integration_branch_says_nothing_to_ship(env):
     """#1407 review: a missing integration branch gives a clear result, not a raw git error, and nothing merges."""
     m, repo, _ = env

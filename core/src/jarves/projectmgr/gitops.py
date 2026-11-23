@@ -118,6 +118,7 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
         entries.append((items[i], key, val))
         has[i // 2] = bool(nl)
     owner = {k.lower(): v for scope, k, v in entries if scope in ("global", "system")}
+    owner_exact = {k: v for scope, k, v in entries if scope in ("global", "system")}   # subsections match exactly
     pgp = [v for scope, k, v in entries if scope in ("global", "system") and k.lower() in _OPENPGP]
     owner.update(dict.fromkeys(_OPENPGP, pgp[-1] if pgp else "gpg"))     # your effective OpenPGP program, either alias
     required = {k.lower()[7:-9] for n, (_s, k, v) in enumerate(entries)
@@ -131,6 +132,10 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
         if "=" in key or "\ufffd" in key or any("\udc80" <= c <= "\udcff" for c in key):
             raise GitError(f"cannot neutralise the git config entry {key!r}: remove it from the repository config")
         low = key.lower()
+        drv = owner_exact.get(key) if m and (m.group(2) or m.group(3)) else None   # PR #1657 R3: `-c` would also hide
+        if drv is not None:                                              # your own global driver of the same name
+            out += ["-c", f"{key}={drv}"]
+            continue
         if m and m.group(2) and mine and m.group(2).lower() in required:    # review R2: emptied, a required filter gives
             raise GitError(                                                  # a bare git error or stores the raw file
                 f"the filter {m.group(2)!r} is set in the repository's own git config and marked required; JARVES "
@@ -311,14 +316,15 @@ def violations(files: list[str], scope: list[str]) -> tuple[list[str], list[str]
     return prot, out
 
 
-def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "") -> list[str]:
+def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "", no_ff: bool = False) -> list[str]:
     """Bring `branch` into the worktree's branch. Returns conflicting files ([] = merged); a conflict is aborted
     (nothing changes). A refusal without conflicts (e.g. an untracked file in the way) returns git's own reason.
     Takes the repository's lock: another task's worktree remove/prune/branch -D must not run during the merge (JAR-189)."""
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", *(["-m", message] if message else []), branch, check=False, ident=ident)
+        p = git(wt, "merge", "--no-edit", *(["--no-ff"] if no_ff else []), *(["-m", message] if message else []),
+                branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
         files = [x for x in git(wt, "diff", "--name-only", "--diff-filter=U", check=False).stdout.split() if x]

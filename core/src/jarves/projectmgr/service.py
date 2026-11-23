@@ -903,9 +903,11 @@ class Manager(StageEngine):
         return _res(True, "ok", f"Last {hours:g} h in {p['name']}: " + (", ".join(
             f"#{t['seq']} {t['status']}" for t in fin) or "nothing finished"), tasks=[self._view(t) for t in fin])
 
-    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", **_) -> dict:
+    def ship_plan(self, project: str = "", apply: bool = False, yes: bool = False, by: str = "owner", commit: str = "",
+                  **_) -> dict:
         """What the agents built and how to take it. apply=True (PC only, asks first) merges it into the branch your
-        project folder is on; only when that folder has no uncommitted changes. Never pushes."""
+        project folder is on; only when that folder has no uncommitted changes. Never pushes. `commit` (the plan's
+        commit, needed with yes=True: no prompt shows it then) refuses with MOVED when the branch has moved."""
         p, err = self._need_project(project)
         if err:
             return err
@@ -918,6 +920,13 @@ class Manager(StageEngine):
         if rp.returncode != 0 or not sha:
             return _res(False, "NOTHING_TO_SHIP", f"nothing to ship yet: the integration branch {br} does not exist "
                                                   "in your project folder", branch=br)
+        want = (commit or "").strip().lower()
+        if apply and yes and not want:                    # PR #1657 R1: no prompt names the commit, so you must
+            return _res(False, "NEED_COMMIT", "with --yes, say which commit you approve: --commit SHA from "
+                                              "`jarvis project ship`", branch=br, commit=sha)
+        if want and (len(want) < 7 or not sha.startswith(want)):
+            return _res(False, "MOVED", f"the integration branch {br} is now at commit {sha[:12]}, not {want[:12]}: "
+                                        "nothing merged; check the plan again", branch=br, commit=sha)
         if apply:
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
@@ -930,7 +939,7 @@ class Manager(StageEngine):
                 return _res(False, "NOT_APPROVED", "not merged")
             try:
                 conflicts = gitops.merge_in(Path(p["path"]), sha, ident=False,     # your own git identity / signing
-                                            message=f"Merge branch '{br}' at commit {sha[:12]}")
+                                            message=f"Merge branch '{br}' at commit {sha[:12]}", no_ff=True)
             except (OSError, gitops.GitError) as e:         # review R4: git() raises GitError even with check=False
                 return _res(False, "GIT_ERROR", f"git failed, nothing merged: {e}")
             if conflicts:

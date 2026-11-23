@@ -428,3 +428,48 @@ def test_the_ship_merge_message_names_the_branch_and_commit(tmp_path):
     msg = f"Merge branch 'side' at commit {sha[:12]}"
     assert gitops.merge_in(repo, sha, message=msg) == []
     assert gitops.git(repo, "log", "-1", "--format=%s").stdout.strip() == msg
+
+
+def test_a_repository_driver_falls_back_to_your_own_global_driver(tmp_path, monkeypatch):
+    """PR #1657 review R3: a `-c` override is command scope, so emptying a repository `filter.big.clean` would also
+    switch off your own global filter of that name; your global value is used instead (filter and merge driver)."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    for k, v in (("filter.big.clean", "owner-clean %f"), ("filter.big.required", "true"),
+                 ("merge.big.driver", "owner-merge %A")):
+        subprocess.run(["git", "config", "--global", k, v], check=True, cwd=tmp_path)
+    repo = _repo(tmp_path)
+    for k in ("filter.big.clean", "filter.other.smudge", "merge.big.driver"):
+        subprocess.run(["git", "config", k, "agent-cmd"], cwd=repo, check=True)
+    seen: list = []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    gitops.git(repo, "status")                                    # required, but your own global filter: no error
+    assert "filter.big.clean=owner-clean %f" in seen[-1] and "merge.big.driver=owner-merge %A" in seen[-1]
+    assert "filter.other.smudge=" in seen[-1] and not [a for a in seen[-1] if "agent-cmd" in a]
+
+
+# subcommands JARVES may call through git(): none of them runs a diff/textconv command the repository config names,
+# or they get the flags in gitops._NO_DIFF_CMDS. A new subcommand must be checked and added here (PR #1657 R6).
+_CHECKED_SUBCOMMANDS = {"add", "branch", "commit", "merge", "merge-base", "push", "remote", "rev-list", "rev-parse",
+                        "stash", "status", "worktree"} | set(gitops._NO_DIFF_CMDS)
+
+
+def test_every_git_subcommand_jarves_uses_is_checked_for_config_commands():
+    """PR #1657 review R6: `difftool`, `range-diff`, `stash show` or `add -p` would run commands from the repository
+    config; this fails when projectmgr calls git() with a subcommand (or stash/add mode) nobody checked."""
+    import ast
+    src = Path(gitops.__file__).parent
+    bad = []
+    for f in sorted(src.glob("*.py")):
+        for n in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            fn = getattr(n, "func", None)
+            if not (isinstance(n, ast.Call) and (getattr(fn, "id", "") == "git" or (
+                    getattr(fn, "attr", "") == "git" and getattr(fn.value, "id", "") == "gitops"))):
+                continue
+            words = [a.value if isinstance(a, ast.Constant) else None for a in n.args[1:3]]
+            if not words or words[0] not in _CHECKED_SUBCOMMANDS or (
+                    words[0] in ("stash", "add") and words[1:] and words[1] in (None, "show", "-p", "--patch", "-i")):
+                bad.append(f"{f.name}:{n.lineno} {words}")
+    assert not bad, bad
