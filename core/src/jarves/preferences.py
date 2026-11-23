@@ -446,7 +446,7 @@ def api_pref_op(ctx, m, body):
             seen = b.get("text")              # #1514: confirm only the words the page showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            return 200, p.confirm(pid, by="dashboard", expect=seen[:400])
+            return 200, p.confirm(pid, by="dashboard", expect=seen[:MAX_TEXT])   # same cut as the voice path
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":

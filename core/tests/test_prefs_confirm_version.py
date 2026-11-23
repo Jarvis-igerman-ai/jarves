@@ -3,6 +3,12 @@ wording A, but before their confirm lands, leaves wording B `proposed` (dashboar
 was already guarded and is covered in test_mobile_prefs.py)."""
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from jarves import dashboard
@@ -93,3 +99,85 @@ async def test_voice_confirm_of_an_item_removed_after_the_approval_is_not_found(
     reg, _ = _voice(p, lambda: p.remove(pid))
     r = await reg.call("pref_confirm", {"id": pid}, origin="model")
     assert (r.ok, r.code) == (False, "PREF_NOT_FOUND")
+
+
+@pytest.mark.parametrize("approved", [True, False])
+async def test_voice_shown_wording_comes_only_from_the_approval_the_handler_runs_after(home, approved):
+    """Review R2: the registry calls approval_meta exactly once per call, only to build the approval it then asks,
+    on the same args object the handler gets; a declined approval confirms nothing."""
+    p = prefs_mod.Preferences(open_db(home))
+    pid = p.suggest(A, "I prefer short answers in the morning", "voice")["item"]["id"]
+    reg, asked = _voice(p)
+    if not approved:
+        async def no(prompt, **meta):
+            asked.append(meta)
+            return False
+        no.accepts_meta = True
+        reg.confirm = no
+    tool = reg.get("pref_confirm")
+    seen, real_meta, real_handler = [], tool.approval_meta, tool.handler
+    def meta_spy(a):
+        seen.append(("meta", a, len(asked)))
+        return real_meta(a)
+    async def handler_spy(a):
+        seen.append(("run", a, len(asked)))
+        return await real_handler(a)
+    tool.approval_meta, tool.handler = meta_spy, handler_spy
+    r = await reg.call("pref_confirm", {"id": pid}, origin="model")
+    assert seen[0][0] == "meta" and seen[0][2] == 0 and len(asked) == 1          # built right before the one ask
+    assert asked[0]["details"]["preference"] == seen[0][1]._shown == A        # the words shown = the words bound
+    if approved:
+        assert [s[0] for s in seen] == ["meta", "run"] and seen[1][1] is seen[0][1] and r.ok
+        assert p.get(pid)["state"] == "confirmed"
+    else:
+        assert [s[0] for s in seen] == ["meta"] and not r.ok and p.get(pid)["state"] == "proposed"
+
+
+PILLARS_HARNESS = r"""
+const calls = [], renders = [];
+const flat = (xs) => xs.flat(9).filter((x) => x !== null && x !== undefined && x !== false);
+global.el = (tag, attrs, ...kids) => ({ tag, attrs: attrs || {}, kids: flat(kids), textContent: "", addEventListener() {} });
+global.tx = (he, en) => en; global.header = (...a) => ({ tag: "header", attrs: {}, kids: [] });
+global.pill = () => null; global.JL = { t: (s) => "T(" + s + ")" }; global.PAGES = {}; global.window = {};
+global.render = (...kids) => renders.push(flat(kids));
+global.route = () => { calls.push(["route"]); return PAGES.preferences(); };
+global.api = async (path, opts) => {
+  if (!opts) return { proposed: [{ id: 5, text: "wording A", topic: "voice" }], items: [], declined: [], topics: [],
+                      in_prompt: false, prompt_text: "" };
+  calls.push(["post", JSON.parse(opts.body)]);
+  const e = new Error(process.argv[2]); e.code = process.argv[3] || undefined; throw e;
+};
+require(process.argv[1]);
+const walk = (n, f) => { if (!n || typeof n !== "object") return; f(n); (n.kids || []).forEach((k) => walk(k, f)); };
+const find = (pred) => { let hit = null; renders[renders.length - 1].forEach((r) => walk(r, (n) => { if (!hit && pred(n)) hit = n; })); return hit; };
+(async () => {
+  await PAGES.preferences();
+  await find((n) => n.tag === "button" && n.kids.includes("Confirm, remember it")).attrs.onclick();
+  await new Promise((r) => setTimeout(r, 0));
+  const msg = find((n) => n.attrs.role === "status");
+  console.log(JSON.stringify({ calls, renders: renders.length, msg: msg.textContent }));
+})();
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node") and not os.environ.get("CI"), reason="node is not installed (CI must have it)")
+@pytest.mark.parametrize("code,reloads", [("PREF_CONFLICT", True), ("PREF_TEXT_REQUIRED", True), ("", False)])
+def test_dashboard_page_reloads_and_explains_a_refused_confirm(code, reloads):
+    """Review R3/R4: the Confirm button sends the shown words; a refused confirm reloads the list (new wording) and
+    shows the server's message through the catalog (JL.t, Hebrew in locales/parts); other errors stay as before."""
+    js = Path(prefs_mod.__file__).parent / "dashboard_static/pillars.js"
+    err = "the preference changed meanwhile: reload the page"
+    out = subprocess.run(["node", "-e", PILLARS_HARNESS, str(js), err, code], capture_output=True, text=True,
+                         timeout=30, check=False)
+    assert out.returncode == 0, out.stderr
+    res = json.loads(out.stdout)
+    assert res["calls"][0] == ["post", {"op": "confirm", "id": 5, "text": "wording A"}]
+    assert (["route"] in res["calls"], res["renders"]) == (reloads, 2 if reloads else 1)
+    assert res["msg"] == "Failed: T(" + err + ")"
+
+
+def test_dashboard_refusal_texts_have_hebrew():
+    from jarves import locale_parts
+    he = locale_parts.catalog("he")["dict"]
+    for en in ("confirm needs the text you saw: reload the page", "the preference changed meanwhile: reload the page"):
+        assert he.get(en) and "מחדש" in he[en]
