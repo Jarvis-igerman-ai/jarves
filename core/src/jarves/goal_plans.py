@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import sqlite3
 import time
 import unicodedata
 
@@ -304,7 +306,42 @@ class PlanStore:
             logs.warn("goals", "PLAN_RECOVERED", "running plans paused after a restart", count=n)
         return n
 
+    # ------------------------------------------------------------------ privacy (#1526)
+    def scrub_private(self) -> int:
+        """Privacy switched on: blank the text kept by rows written before it (step evidence and error, the plan's
+        note and result) in ONE transaction; state, status and the "N/M steps done." count stay. The old bytes are
+        overwritten (secure_delete) and the WAL is truncated so they do not linger on disk. Returns rows changed."""
+        with self.db._lock:
+            c = self.db._db
+            old = c.execute("PRAGMA secure_delete").fetchone()[0]
+            c.execute("PRAGMA secure_delete=ON")
+            try:
+                n = c.execute("UPDATE goal_plan_steps SET evidence='', error='' WHERE evidence!='' OR error!=''").rowcount
+                for r in c.execute("SELECT id, note, result FROM goal_plans WHERE note!='' OR result!=''").fetchall():
+                    m = _DONE.match(r["result"] or "")
+                    keep = m.group(0) if m else ""
+                    if (r["note"], r["result"]) != ("", keep):
+                        c.execute("UPDATE goal_plans SET note='', result=? WHERE id=?", (keep, r["id"]))
+                        n += 1
+                c.commit()
+            except BaseException:
+                c.rollback()
+                raise
+            finally:
+                c.execute(f"PRAGMA secure_delete={int(old)}")
+            wait = c.execute("PRAGMA busy_timeout").fetchone()[0]
+            c.execute("PRAGMA busy_timeout=0")          # never block the Core's loop waiting for another reader
+            try:
+                busy = c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                c.execute(f"PRAGMA busy_timeout={int(wait)}")
+        if busy:
+            logs.warn("goals", "PLAN_SCRUB_WAL_BUSY", "old plan text may stay in the WAL until the next checkpoint")
+        logs.info("goals", "PLAN_SCRUBBED", "plan text written before privacy mode was removed", count=n)
+        return n
 
+
+_DONE = re.compile(r"\d+/\d+ steps done\.")   # the count kept in a scrubbed result
 MAX_ATTEMPTS = 3
 
 
@@ -379,12 +416,29 @@ class PlanRunner:
         self._sleep = sleep
         self._busy: set[int] = set()
         self._stop = False
+        self._private: bool | None = None     # last privacy state seen; None = not checked since the Core started
+        self._scrub_failed = False
+
+    def _scrub_on_privacy(self) -> None:
+        """#1526: at Core start and whenever privacy turns on, remove plan text written before it (feature on or off)."""
+        on = logs.privacy()
+        if on and self._private is not True:
+            try:
+                self.store.scrub_private()
+            except sqlite3.Error as e:
+                if not self._scrub_failed:            # logged once per incident; retried on the next tick
+                    logs.warn("goals", "PLAN_SCRUB_FAILED", "could not remove old plan text; will retry", err=str(e)[:120])
+                self._scrub_failed = True
+                return
+            self._scrub_failed = False
+        self._private = on
 
     def _on(self) -> bool:
         return self.features is None or self.features.active(FEATURE)
 
     async def tick(self) -> int:
         """Advance every ready / running plan; returns how many were touched."""
+        self._scrub_on_privacy()
         if not self._on():
             return 0
         n = 0

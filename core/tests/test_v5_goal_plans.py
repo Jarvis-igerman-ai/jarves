@@ -675,3 +675,86 @@ async def test_f13_privacy_mode_no_fail_or_block_branch_keeps_tool_text(env, mon
     d = env.store.get(p["id"])
     assert d["state"] == state and d["steps"][0]["status"] == status
     assert "secret" not in json.dumps(d) and "None" not in json.dumps(d)
+
+
+# ---------------------------------------------------------------- #1526: text written before privacy was switched on
+class _Off:
+    def active(self, _name):
+        return False
+
+
+def _on_disk(db) -> bytes:
+    from pathlib import Path
+    return b"".join(Path(db.path + s).read_bytes() for s in ("", "-wal") if Path(db.path + s).exists())
+
+
+async def test_1526_privacy_on_scrubs_plan_text_written_before_it(env, monkeypatch):
+    private = {"on": False}
+    monkeypatch.setattr(gp.logs, "privacy", lambda: private["on"])
+    ok = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
+    bad = env.store.propose("q", steps(("fake_bad", {})))
+    env.store.approve(ok["id"])
+    env.store.approve(bad["id"])
+    await env.runner.tick()
+    before = json.dumps([env.store.get(ok["id"]), env.store.get(bad["id"])])
+    assert "read secret-a" in before and "it broke" in before                 # full-text mode kept the tool text
+    private["on"] = True
+    assert await env.runner.tick() == 0
+    d, f = env.store.get(ok["id"]), env.store.get(bad["id"])
+    assert (d["state"], d["steps"][0]["status"], f["state"], f["steps"][0]["status"]) == ("done", "done", "failed", "failed")
+    assert d["result"] == "1/1 steps done." and d["steps"][0]["evidence"] == ""
+    assert f["note"] == f["steps"][0]["error"] == f["steps"][0]["evidence"] == ""
+    assert "read secret-a" not in json.dumps([d, f]) and "it broke" not in json.dumps([d, f])
+    assert b"read secret-a" not in _on_disk(env.db) and b"it broke" not in _on_disk(env.db)   # not left in free pages / WAL
+
+
+async def test_1526_scrub_runs_at_core_start_once_and_even_with_the_feature_off(env, monkeypatch):
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
+    p = env.store.propose("p", steps(("fake_read", {"text": "secret-a"})))
+    env.store.approve(p["id"])
+    await env.runner.tick()
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)               # the Core restarts with privacy on
+    runner = gp.PlanRunner(env.store, env.reg, clock=env.clock, features=_Off())
+    calls = []
+    real = env.store.scrub_private
+    monkeypatch.setattr(env.store, "scrub_private", lambda: calls.append(1) or real())
+    await runner.tick()
+    await runner.tick()
+    assert calls == [1] and "read secret-a" not in json.dumps(env.store.get(p["id"]))
+
+
+async def test_1526_failed_scrub_is_logged_once_retried_and_never_stops_plans(env, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(gp.logs, "privacy", lambda: True)
+    seen, tries = [], []
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
+
+    def locked():
+        tries.append(1)
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(env.store, "scrub_private", locked)
+    p = env.store.propose("p", steps(("fake_read", {"text": "a"})))
+    env.store.approve(p["id"])
+    assert await env.runner.tick() == 1 and env.store.get(p["id"])["state"] == "done"
+    await env.runner.tick()
+    assert len(tries) == 2 and seen.count("PLAN_SCRUB_FAILED") == 1
+
+
+def test_1526_busy_wal_is_reported_not_hidden(env, monkeypatch):
+    import sqlite3
+    monkeypatch.setattr(gp.logs, "privacy", lambda: False)
+    env.store.propose("p", steps(("fake_read", {"text": "a"})))
+    seen = []
+    monkeypatch.setattr(gp.logs, "warn", lambda _c, code, *_a, **_k: seen.append(code))
+    monkeypatch.setattr(gp.logs, "info", lambda _c, code, *_a, **_k: seen.append(code))
+    c = env.db._db
+    env.db._db.execute("PRAGMA secure_delete=0")
+    reader = sqlite3.connect(env.db.path)
+    reader.execute("BEGIN")
+    reader.execute("SELECT count(*) FROM goal_plans").fetchone()     # another process is reading: TRUNCATE cannot finish
+    try:
+        env.store.scrub_private()
+    finally:
+        reader.close()
+    assert seen == ["PLAN_SCRUB_WAL_BUSY", "PLAN_SCRUBBED"]          # it did not wait, and the settings are restored
+    assert c.execute("PRAGMA busy_timeout").fetchone()[0] == 5000 and c.execute("PRAGMA secure_delete").fetchone()[0] == 0
