@@ -907,9 +907,13 @@ class Manager(StageEngine):
             return err
         br = gitops.integration_branch(p["id"])
         try:            # the commit, resolved once from the branch itself (never a same-named tag): the owner approves
-            sha = gitops.git(p["path"], "rev-parse", "--verify", f"refs/heads/{br}^{{commit}}").stdout.strip()
+            rp = gitops.git(p["path"], "rev-parse", "--verify", "--quiet", f"refs/heads/{br}^{{commit}}", check=False)
         except (OSError, gitops.GitError) as e:                     # and gets exactly this commit (#1407)
             return _res(False, "GIT_ERROR", f"git failed: {e}")
+        sha = rp.stdout.strip()
+        if rp.returncode != 0 or not sha:
+            return _res(False, "NOTHING_TO_SHIP", f"nothing to ship yet: the integration branch {br} does not exist "
+                                                  "in your project folder", branch=br)
         if apply:
             st = gitops.repo_state(p["path"])
             if st["dirty"]:
