@@ -326,10 +326,21 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "proposed, not saved yet: ask the owner whether to remember it", r)
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
+            shown: dict[int, str] = {}        # #206 H2: the words the approval popup showed, per item id
+
             async def confirm(a: IdArgs):
-                if not prefs.get(a.id):
+                cur = prefs.get(a.id)
+                if not cur:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                r = prefs.confirm(a.id, by="voice")
+                seen = shown.pop(a.id, None)
+                if seen is None:              # no popup showed the words: fail closed rather than confirm unseen text
+                    return ToolResult(False, "ask the owner again: the words were not shown", code="PREF_CONFLICT")
+                try:
+                    r = prefs.confirm(a.id, by="voice", expect=seen)
+                except KeyError:
+                    return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                except PrefConflict:
+                    return ToolResult(False, "it changed meanwhile: ask the owner again", code="PREF_CONFLICT")
                 msg = "remembered"
                 if r["conflicts"]:
                     msg += "; it may conflict with: " + "; ".join(c["text"] for c in r["conflicts"])
@@ -366,7 +377,10 @@ def make_skill(prefs: Preferences):
 
             def confirm_meta(a: IdArgs) -> dict:
                 r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
-                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}} if r else {}
+                if not r:
+                    return {}
+                shown[a.id] = str(r["text"])
+                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
@@ -428,7 +442,10 @@ def api_pref_op(ctx, m, body):
         return 404, {"error": "no such preference"}
     try:
         if op == "confirm":
-            return 200, p.confirm(pid, by="dashboard")
+            seen = b.get("text")                              # #206 H2: confirm only the words the page showed
+            if not isinstance(seen, str) or not seen.strip():
+                return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
+            return 200, p.confirm(pid, by="dashboard", expect=seen)
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
@@ -439,6 +456,10 @@ def api_pref_op(ctx, m, body):
             return 200, {"ok": p.remove(pid, by="dashboard")}
     except ValueError as e:
         return 400, {"error": str(e)}
+    except KeyError:
+        return 404, {"error": "no such preference"}
+    except PrefConflict:                                      # #206 H2: it changed meanwhile; nothing written
+        return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}
 
 

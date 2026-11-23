@@ -426,12 +426,19 @@ def cmd_prefs(a, cfg, home) -> int:
             r = p.add_confirmed(a.text, a.topic, by="cli")
             print(clilang.fmt(f"נשמר: {r['item']['id']}", f"saved: {r['item']['id']}"))
             return 0
-        if not p.get(a.id):
+        cur = p.get(a.id)
+        if not cur:
             print(clilang.fmt("אין העדפה כזאת", "no such preference"), file=sys.stderr)
             return 1
         if a.action == "confirm":
-            r = p.confirm(a.id, by="cli")
-            print(clilang.fmt("נשמר", "remembered")
+            from .preferences import PrefConflict
+            try:                                  # #206 H2: confirm exactly the words printed below
+                r = p.confirm(a.id, by="cli", expect=cur["text"])
+            except PrefConflict:
+                print(clilang.fmt("ההעדפה השתנתה בינתיים: הרץ list ונסה שוב",
+                                  "the preference changed meanwhile: run list and try again"), file=sys.stderr)
+                return 1
+            print(clilang.fmt("נשמר", "remembered") + f": {cur['text']}"
                   + ("; may conflict with: " + "; ".join(c["text"] for c in r["conflicts"]) if r["conflicts"] else ""))
         elif a.action == "decline":
             p.decline(a.id, by="cli")
