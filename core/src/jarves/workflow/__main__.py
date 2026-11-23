@@ -255,8 +255,11 @@ def main(argv=None) -> int:
             owner_only_guard("open")
             mark = unlock.new_owner_mark()  # #1416: the window this link opens is the code's owner window
             code = unlock.issue(home, owner_mark=mark)
-        except OSError:  # PermissionError: not the owner's terminal; other OSError: unlock.json not written (#1416 R2)
-            mark = code = ""  # either way the dashboard still opens, unmarked, as before
+        except PermissionError:  # not the owner's terminal: no code, no hint
+            mark = code = ""
+        except OSError:  # unlock.json not written (#1416): open unmarked, and tell the owner why no code is shown
+            mark = code = ""
+            print("unlock code could not be written; run 'jarvis workflow unlock'", file=sys.stderr)
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner_mark=mark)
         if code:
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)

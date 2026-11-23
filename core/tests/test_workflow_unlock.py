@@ -483,6 +483,18 @@ class UnlockTests(unittest.TestCase):
         self.assertIn("#token=", out.getvalue())
         self.assertNotIn("&owner=", out.getvalue())
         self.assertNotIn("Unlock code", err.getvalue())
+        self.assertIn("unlock code could not be written; run 'jarvis workflow unlock'", err.getvalue())  # review R1
+
+    def test_cli_open_outside_the_owner_terminal_prints_no_unlock_hint_1416(self):
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
+                "open", "--no-open"]
+        out, err = io.StringIO(), io.StringIO()
+        with (patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}),
+              patch.object(cli, "owner_only_guard", side_effect=PermissionError("agent")),
+              redirect_stdout(out), redirect_stderr(err)):
+            self.assertEqual(cli.main(argv), 0)
+        self.assertNotIn("&owner=", out.getvalue())
+        self.assertNotIn("unlock code", err.getvalue().lower())         # not the owner's terminal: stay silent
 
     def test_code_expiry_honours_an_explicit_zero_clock_1416(self):
         unlock.issue(self.home, now=0)                                 # now=0 is a time, not "use the clock"
