@@ -305,6 +305,26 @@ class UnlockTests(unittest.TestCase):
         self.server.unlock_attempts.clear()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
+    def test_restored_owner_window_of_an_old_code_is_dropped_1416(self):
+        mark = unlock.new_owner_mark()
+        unlock.issue(self.home, owner_mark=mark)
+        owner = self.owner_login(mark).split("=", 1)[1]
+        self.restart()
+        self.assertNotEqual(self.server.restored_owner, ("", ""))     # same code: the stored window is kept
+        unlock.issue(self.home)                                        # a new code while the server runs
+        self.cookie = f"{self.server.cookie}={owner}"
+        self.assertEqual(self.request("/api/state")[0], 200)           # the cookie returns: session restored
+        self.assertEqual((self.server.owner_window, self.server.restored_owner), (("", ""), ("", "")))
+        self.cookie = ""
+        self.login()                                                   # the next persist no longer writes it
+        self.assertNotIn('"owner"', (self.home / "sessions.json").read_text(encoding="utf-8"))
+        unlock.issue(self.home, owner_mark=mark)
+        self.owner_login(mark)
+        self.restart()
+        unlock.issue(self.home)                                        # a new code while the server was down
+        self.restart()
+        self.assertEqual(self.server.restored_owner, ("", ""))
+
     def test_closed_marked_code_stays_closed_for_token_windows_after_a_restart_1416(self):
         mark = unlock.new_owner_mark()
         shown = unlock.issue(self.home, owner_mark=mark)
@@ -455,9 +475,16 @@ class UnlockTests(unittest.TestCase):
         self.assertEqual(self.server.owner_window, first)
         self.owner_login("not-the-mark")
         self.assertEqual(self.server.owner_window, first)
-        unlock.issue(self.home)                                        # a new unmarked code: no owner window for it
-        self.assertNotEqual(self.server.owner_window[0], unlock.live(self.home)["salt"])
         self.assertNotIn(mark, (self.home / unlock.FILE).read_text(encoding="ascii"))
+        shown = unlock.issue(self.home)                                # a new unmarked code: no owner window for it
+        wrong = "0000" if shown != "0000" else "1111"
+        self.owner_login(mark)                                         # the old mark does not mark the new code
+        self.cookie = f"{self.server.cookie}={session}"                # the old owner window counts like any window
+        self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
+        self.cookie = ""
+        self.login()
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)
+        self.assertFalse((self.home / unlock.FILE).exists())           # 5 shared tries cancel the unmarked code
 
     def test_cli_open_link_carries_the_owner_mark_of_the_shown_code_1416(self):
         argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
