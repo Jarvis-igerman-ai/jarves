@@ -1431,7 +1431,7 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
                                                     "sslverify=false"))
     # review R2: no system, global, XDG or project file is read; only the command line and the temp repo's own core.*
     bad = [x for x in origins if not x.startswith("command line:")
-           and not (x.startswith("file:config\t") and x.split("\t", 1)[1].startswith("core."))]
+           and not (x.startswith("file:config\t") and x.split("\t", 1)[1].split("=")[0] in forge._INIT_KEYS)]
     assert origins and not bad, bad
     assert "credential.helper=!'gh' auth git-credential" in seen[0] and "http.sslverify=true" in seen[0]
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
@@ -1476,17 +1476,20 @@ def _push_fixture(tmp_path, monkeypatch, fmt="sha1"):
     return forge, repo, good, evil
 
 
-def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monkeypatch):
-    """#1595 (review R1 of 308f24df): a same-user process that writes the temp repo's config between init and push
-    (here a pushInsteadOf) makes the push refuse instead of following it."""
+@pytest.mark.parametrize("planted", ["url", "core.askPass", "core.sshCommand", "core.gitProxy"])
+def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monkeypatch, planted):
+    """#1595 (review R1 of 308f24df and 86f15520): a same-user process that writes the temp repo's config between init
+    and push (a pushInsteadOf, or a core.* command key) makes the push refuse instead of following it."""
     forge, repo, good, evil = _push_fixture(tmp_path, monkeypatch)
     real_git = forge.gitops.git
+    text = (f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n' if planted == "url"
+            else f"[core]\n\t{planted.split('.')[1]} = {tmp_path / 'evil.sh'}\n")
 
     def spy(cwd, *args, **kw):
         p = real_git(cwd, *args, **kw)
         if "init" in args:
             with open(Path(args[-1]) / "config", "a", encoding="utf-8") as f:
-                f.write(f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n')
+                f.write(text)
         return p
     monkeypatch.setattr(forge.gitops, "git", spy)
     with pytest.raises(forge.ForgeError, match="temporary push repository"):
@@ -1507,3 +1510,44 @@ def test_push_keeps_a_sha256_repository_format(tmp_path, monkeypatch):
     forge, repo, good, _ = _push_fixture(tmp_path, monkeypatch, fmt="sha256")
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
     assert sh(good, "git", "branch", "--list").strip().endswith("jarves/p1/t1-a1")
+
+
+def test_push_openssl_keeps_only_the_git_install_ca_bundle(tmp_path, monkeypatch):
+    """#1595 (review R2 of 86f15520): with sslBackend=openssl the system sslCAInfo is carried over only when it is a
+    file inside the git install (exec-path two levels up); a CA path elsewhere is dropped (verification fails closed)."""
+    from jarves.projectmgr import forge
+    exec_path = tmp_path / "Git" / "mingw64" / "libexec" / "git-core"
+    exec_path.mkdir(parents=True)
+    inside = tmp_path / "Git" / "mingw64" / "etc" / "ssl" / "ca-bundle.crt"
+    inside.parent.mkdir(parents=True)
+    outside = tmp_path / "evil-ca.pem"
+    for f in (inside, outside):
+        f.write_text("ca")
+
+    class P:
+        def __init__(self, out):
+            self.stdout, self.returncode = out, 0
+    for backend, ca, want in (("openssl", inside, ["-c", "http.sslBackend=openssl", "-c", f"http.sslCAInfo={inside.resolve()}"]),
+                              ("openssl", outside, ["-c", "http.sslBackend=openssl"]),
+                              ("openssl", inside.parent / "missing.crt", ["-c", "http.sslBackend=openssl"]),
+                              ("schannel", inside, ["-c", "http.sslBackend=schannel"])):
+        answers = {"http.sslBackend": backend, "http.sslCAInfo": str(ca), "--exec-path": str(exec_path)}
+        monkeypatch.setattr(forge.gitops, "git", lambda _p, *a, **k: P(answers.get(a[-1], "")))
+        assert forge._tls_pins(".") == want
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell script as the fake gh")
+def test_push_gh_helper_quoting_survives_a_real_credential_exchange(tmp_path):
+    """#1595 (review R3 of 86f15520): the exact helper string push_branch passes goes through git's own credential
+    machinery (`git credential fill`, the code path an HTTPS push uses) and runs a fake gh at a path with a space and
+    a quote, which receives `auth git-credential get`."""
+    from jarves.projectmgr import forge
+    gh = tmp_path / "Program Files" / "it's gh" / "gh"
+    gh.parent.mkdir(parents=True)
+    gh.write_text('#!/bin/sh\n[ "$*" = "auth git-credential get" ] || exit 3\necho username=x-access-token\n'
+                  'echo password=fake-token\n')
+    gh.chmod(0o755)
+    p = subprocess.run(["git", "-c", "credential.helper=", "-c", f"credential.helper={forge._gh_helper([str(gh)])}",
+                        "credential", "fill"], input="protocol=https\nhost=github.com\n\n", capture_output=True,
+                       text=True, env={**forge.gitops.child_env(), "GIT_TERMINAL_PROMPT": "0"}, timeout=30)
+    assert p.returncode == 0 and "password=fake-token" in p.stdout, p.stderr

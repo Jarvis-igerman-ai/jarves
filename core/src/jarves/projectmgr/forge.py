@@ -74,10 +74,37 @@ def issues(path: str, label: str = "", limit: int = 20) -> list[dict]:
 
 def _tls_pins(path: str) -> list[str]:
     """The pinned push reads no system config (GIT_CONFIG_NOSYSTEM), which also drops Git for Windows' own
-    `http.sslBackend=schannel` (the Windows certificate store). Only that one value is carried over, and only when it
-    is schannel or openssl; neither can switch verification off. No value (MSYS2, Cygwin, most Linux git): no pin."""
-    v = gitops.git(path, "config", "--system", "--get", "http.sslBackend", check=False).stdout.strip().lower()
-    return ["-c", f"http.sslBackend={v}"] if v in ("schannel", "openssl") else []
+    `http.sslBackend` (schannel: the Windows certificate store; openssl: its bundled `http.sslCAInfo`). Only that value
+    is carried over, and only when it is schannel or openssl; neither can switch verification off. With openssl the
+    system `http.sslCAInfo` comes back too (review R2), but only an existing file inside the git install itself
+    (`git --exec-path`, two levels up: `<Git>/mingw64`); any other CA path is dropped and verification fails closed.
+    No value (MSYS2, Cygwin, most Linux git): no pin."""
+    def system(key: str) -> str:
+        return gitops.git(path, "config", "--system", "--get", key, check=False).stdout.strip()
+    v = system("http.sslBackend").lower()
+    if v not in ("schannel", "openssl"):
+        return []
+    pins = ["-c", f"http.sslBackend={v}"]
+    ca = system("http.sslCAInfo") if v == "openssl" else ""
+    if ca:
+        root = Path(gitops.git(path, "--exec-path", check=False).stdout.strip() or "/nonexistent").resolve().parent.parent
+        f = Path(ca).resolve()
+        if root != Path(root.anchor) and f.is_file() and f.is_relative_to(root):
+            pins += ["-c", f"http.sslCAInfo={f}"]
+    return pins
+
+
+def _gh_helper(cmd: list[str]) -> str:
+    """git's `!` credential helper running the owner's gh: one program, single-quoted for git's shell (spaces, `'`)."""
+    if len(cmd) != 1:                                                   # review R3: never drop a wrapper's arguments
+        raise ForgeError("the gh credential helper must be one program")
+    return "!'" + cmd[0].replace("'", "'\\''") + "' auth git-credential"
+
+
+# Exactly the keys `git init --bare` writes (review R1 of 86f15520): core.askPass, core.sshCommand, core.gitProxy or
+# any other key in the temp repo's config means a same-user process wrote it, and the push is refused.
+_INIT_KEYS = frozenset({"core.repositoryformatversion", "core.filemode", "core.bare", "core.symlinks",
+                        "core.ignorecase", "core.precomposeunicode", "extensions.objectformat"})
 
 
 def push_branch(path: str, branch: str, slug: str) -> None:
@@ -99,9 +126,7 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     cmd = gh_cmd()
     if not cmd:
         raise ForgeError("the GitHub CLI (gh) is not installed: install it and run gh auth login")
-    if len(cmd) != 1:                                                   # review R3: never drop a wrapper's arguments
-        raise ForgeError("the gh credential helper must be one program")
-    helper = "!'" + cmd[0].replace("'", "'\\''") + "' auth git-credential"
+    helper = _gh_helper(cmd)
     sha = gitops.git(path, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}").stdout.strip()
     fmt = gitops.git(path, "rev-parse", "--show-object-format").stdout.strip() or "sha1"     # review R4
     if fmt not in ("sha1", "sha256"):
@@ -116,10 +141,10 @@ def push_branch(path: str, branch: str, slug: str) -> None:
         gitops.git(d, "init", "-q", "--bare", f"--object-format={fmt}", str(repo), ident=False, env=env)
         (repo / "objects" / "info" / "alternates").write_bytes(str(objects).encode() + b"\n")   # no CRLF on Windows
         # review R1: the temp folder is the owner's, but any same-user process can write it. Right before the push
-        # only git init's own keys (core.*, sha256's extensions.objectformat) may be in its config; a small window
-        # between this check and the push remains
+        # only the exact keys git init writes (_INIT_KEYS) may be in its config; a small window between this check
+        # and the push remains
         keys = gitops.git(d, "config", "--file", str(repo / "config"), "--name-only", "--list", env=env).stdout.split()
-        if any(not k.lower().startswith("core.") and k.lower() != "extensions.objectformat" for k in keys):
+        if any(k.lower() not in _INIT_KEYS for k in keys):
             raise ForgeError("the temporary push repository's config was changed; push refused")
         gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
                    *tls, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
