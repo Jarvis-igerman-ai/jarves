@@ -232,7 +232,7 @@ class WorkflowHTTPTests(unittest.TestCase):
         app = (static / "app.js").read_text(encoding="utf-8")
         # #789: an early 401 while the one-time #token is being exchanged must not end the new session.
         self.assertIn("window.workflowSessionEnded = () => { if (sessionReady) sessionEnded(); };", app)
-        self.assertLess(app.index('await api("/api/session", {token})'), app.index("    sessionReady = true;"))
+        self.assertLess(app.index('await api("/api/session", '), app.index("    sessionReady = true;"))  # {token} or {token, owner} (#1416)
         guard = "response.status === 401 || response.status === 403"
         for name, minimum in (("health.js", 1), ("timeline.js", 1), ("overview.js", 3)):
             text = (static / name).read_text(encoding="utf-8")

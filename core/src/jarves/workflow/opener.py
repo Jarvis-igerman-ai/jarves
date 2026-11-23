@@ -21,17 +21,21 @@ def listening(port: int, host: str = HOST, timeout: float = 1.0) -> bool:
 
 def open_dashboard(home: Path, port: int, *, show_link: bool, token: Callable[[Path], str],
                    probe: Callable[[int], bool] | None = None,
-                   browser: Callable[[str], bool] | None = None) -> int:
+                   browser: Callable[[str], bool] | None = None, owner_mark: str = "") -> int:
     """Open the dashboard. The token link is printed only on explicit request (--no-open).
+
+    `owner_mark` (#1416, only from the owner's own terminal) is added to the link so that window becomes the
+    unlock code's owner window.
 
     Exit codes: 0 opened/printed, 1 no browser could be started, 2 no dashboard server listens.
     """
     probe = probe or listening              # resolved at call time so tests can patch the module
     browser = browser or webbrowser.open
     up = probe(port)
+    mark = f"&owner={owner_mark}" if owner_mark else ""
     if show_link:
         # Explicit request (scripts, another device): print the private link. Never share it publicly.
-        print(f"http://{HOST}:{port}/#token={token(home)}")
+        print(f"http://{HOST}:{port}/#token={token(home)}{mark}")
         if not up:
             print(f"Note: no dashboard server answers on port {port} yet. Start it with: jarvis workflow supervise",
                   file=sys.stderr)
@@ -41,7 +45,7 @@ def open_dashboard(home: Path, port: int, *, show_link: bool, token: Callable[[P
         print(f"The dashboard server is not running on port {port}. Start it with: jarvis workflow supervise "
               f"(or check with factory-check), then run jarvis workflow open again.")
         return 2
-    link = f"http://{HOST}:{port}/#token={token(home)}"
+    link = f"http://{HOST}:{port}/#token={token(home)}{mark}"
     try:
         opened = bool(browser(link))
     except Exception:  # noqa: BLE001 - any browser launcher failure is reported the same way

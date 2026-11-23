@@ -1,0 +1,1 @@
+- Fixed: someone holding only the dashboard token can no longer cancel the owner's unlock code from two windows (3 + 2 wrong tries). `jarvis workflow open` now marks the window it opens as the owner's window; wrong tries from other windows do not use up its own 3 tries (#1416).

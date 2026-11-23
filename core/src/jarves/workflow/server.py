@@ -170,6 +170,9 @@ class Server(ThreadingHTTPServer):
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
+        # #1416: (salt, session) of the one window that logged in with the code's owner mark from `open` in the owner's
+        # terminal. Its tries do not count in the shared total, and the total cannot cancel a code that has a mark.
+        self.owner_window: tuple[str, str] = ("", "")
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -481,9 +484,10 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
-            except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+                record = json.loads(path.read_text(encoding="ascii"))
+                salt, marked = record["salt"], bool(record.get("owner"))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                salt, marked = "", False
             # Counters are read and changed only under session_lock. A new code (new salt) starts them again.
             if not salt:  # no live code: nothing to guess and nothing to count
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
@@ -491,6 +495,13 @@ class Handler(BaseHTTPRequestHandler):
             if self.server.unlock_wrong.salt != salt:
                 self.server.unlock_wrong = UnlockWrong(salt)
             wrong = self.server.unlock_wrong
+            owner = self.server.owner_window == (salt, session)
+            if not owner and wrong.total >= UNLOCK_WRONG_TOTAL:
+                # #1416: the shared total is used up, but the code stays live for the owner's marked window.
+                self._json(403, {"error": "too many wrong codes from other windows; use the window that "
+                                 "'jarvis workflow open' started, or run 'jarvis workflow unlock' for a new code",
+                                 "locked": True, "reason": "code_closed"})
+                return
             if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
                 # No further guess from this session; the code stays live for the owner's other window.
                 self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
@@ -499,8 +510,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
                 wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
-                wrong.total += 1
-                if wrong.total >= UNLOCK_WRONG_TOTAL:
+                if not owner:
+                    wrong.total += 1
+                closed = wrong.total >= UNLOCK_WRONG_TOTAL
+                owner_done = wrong.by_session[session] >= UNLOCK_WRONG_PER_SESSION if owner else (
+                    self.server.owner_window[0] == salt
+                    and wrong.by_session.get(self.server.owner_window[1], 0) >= UNLOCK_WRONG_PER_SESSION)
+                # Unmarked code: the backstop cancels it as before (guess bound 5 of 10,000). Marked code: only once
+                # the owner's window has also used its own 3 tries (bound 5 + 3, the 3 need the terminal-only mark).
+                if closed and (not marked or owner_done):
                     path.unlink(missing_ok=True)
                     self.server.unlock_wrong = UnlockWrong()
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
@@ -537,6 +555,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
+            # #1416: the owner mark from `open` makes this the code's owner window, once per code (first login wins).
+            salt = unlock.owner_salt(self.server.home, data.get("owner"), now=now) if data.get("owner") else ""
+            if salt and self.server.owner_window[0] != salt:
+                self.server.owner_window = (salt, session)
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 

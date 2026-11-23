@@ -201,6 +201,69 @@ class UnlockTests(unittest.TestCase):
         self.cookie = exhausted                                        # a new code gives the exhausted window its 3 tries
         self.assertEqual([self.wrong_try(wrong) for _ in range(3)], [(403, None)] * 3)
 
+    def owner_login(self, mark):
+        status, headers, _ = self.request("/api/session", {"token": self.server.token, "owner": mark})
+        self.assertEqual(status, 200)
+        self.cookie = headers["Set-Cookie"].split(";", 1)[0]
+        return self.cookie
+
+    def test_two_token_windows_cannot_cancel_a_code_with_an_owner_window_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        owner = self.owner_login(mark)                                 # the window 'jarvis workflow open' started
+        for _ in range(2):                                             # the token holder: 3 tries in A, 2 in B
+            self.cookie = ""
+            self.login()
+            [self.wrong_try(wrong) for _ in range(3 if _ == 0 else 2)]
+        self.assertTrue((self.home / unlock.FILE).exists())           # the marked code survives the backstop
+        self.cookie = ""
+        self.login()                                                   # a third token window gets no 6th guess
+        self.assertEqual(self.wrong_try(shown), (403, "code_closed"))
+        self.cookie = owner                                            # the owner's own 3 tries are separate
+        self.assertEqual(self.wrong_try(wrong), (403, None))
+        self.server.unlock_attempts.clear()
+        self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
+
+    def test_owner_window_tries_are_bounded_and_then_the_code_is_cancelled_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        owner = self.owner_login(mark)
+        self.assertEqual([self.wrong_try(wrong) for _ in range(4)], [(403, None)] * 3 + [(403, "session_exhausted")])
+        self.assertEqual(self.server.unlock_wrong.total, 0)           # the owner's tries are not in the shared total
+        for i in range(2):
+            self.cookie = ""
+            self.login()
+            [self.wrong_try(wrong) for _ in range(3 if i == 0 else 2)]
+        self.assertFalse((self.home / unlock.FILE).exists())          # owner done + total used: cancelled (bound 8)
+        self.cookie = owner
+        self.assertEqual(self.wrong_try(shown), (403, None))
+
+    def test_owner_mark_is_single_use_and_bound_to_its_code_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        self.owner_login(mark)
+        first = self.server.owner_window
+        self.owner_login(mark)                                         # a second login with the same mark: not owner
+        self.assertEqual(self.server.owner_window, first)
+        self.owner_login("not-the-mark")
+        self.assertEqual(self.server.owner_window, first)
+        unlock.issue(self.home)                                        # a new unmarked code: no owner window for it
+        self.assertNotEqual(self.server.owner_window[0], unlock.live(self.home)["salt"])
+        self.assertNotIn(mark, (self.home / unlock.FILE).read_text(encoding="ascii"))
+        del shown
+
+    def test_cli_open_link_carries_the_owner_mark_of_the_shown_code_1416(self):
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
+                "open", "--no-open"]
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"),                 redirect_stdout(out), redirect_stderr(err):
+            self.assertEqual(cli.main(argv), 0)
+        mark = out.getvalue().strip().split("&owner=", 1)[1]
+        self.assertTrue(unlock.owner_salt(self.home, mark))
+        self.assertNotIn(mark, (self.home / unlock.FILE).read_text(encoding="ascii"))
+
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()
         self.assertFalse((self.home / unlock.FILE).exists())
