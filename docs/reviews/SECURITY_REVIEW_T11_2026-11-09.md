@@ -1,7 +1,7 @@
 # Security review T11: goal_plans, continuity, devstatus, projectmgr, preferences
 
-Date: 2026-11-09 (findings authored); re-checked 2026-11-24. Every `file:line` reference and every issue state below
-is as of that re-check against `origin/main` 25f0a54; "at review time" describes only the old 2026-11-09 behaviour,
+Date: 2026-11-09 (findings authored); re-checked 2026-11-23. Every `file:line` reference and every issue state below
+is as of that re-check against `origin/main` 25f0a54 (each line anchor re-read with `git show 25f0a54:<file>`); "at review time" describes only the old 2026-11-09 behaviour,
 never a line number.
 Scope: `core/src/jarves/{goal_plans,continuity,devstatus,preferences}.py` and `core/src/jarves/projectmgr/`.
 Method: a static read of the code paths that touch subprocesses, files, network, SQL, tokens and prompt text. Nothing
@@ -65,8 +65,17 @@ Severity: P0 exploitable now / data loss; P1 bypass of a gate; P2 real weakness 
   `allow_openrouter` is on. Claude/Codex use stdin.
 - **#11 P3: `CODEOWNERS` outside `.github/`.** GitHub also reads `CODEOWNERS` from the repo root and `docs/`; neither
   is in `PROTECTED` or `PROTECTED_NAMES` (`gitops.py:21-23`), so an agent branch could change review ownership there.
+  Why P3, not P1 like #1: a `.github/` workflow on a pushed branch can run with the repo's secrets before anyone
+  reviews it, while GitHub applies the `CODEOWNERS` of the PR's *base* branch
+  ([GitHub docs, "About code owners"](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners);
+  not re-checked by test). An edited root or `docs/` `CODEOWNERS` changes nothing until a reviewed merge to the
+  base, where the file shows in the diff; JARVES never pushes the default branch. Also, `.github/CODEOWNERS`
+  (protected) wins when present.
 - **#12 P3: nested `.claude/`.** `is_protected()` (`gitops.py:216-221`) matches `PROTECTED` prefixes from the repo
-  root only, so `sub/.claude/settings.json` is not flagged. Claude Code reads `.claude/` from the folder it starts in.
+  root only, so `sub/.claude/settings.json` is not flagged. Why P3, not P1 like #1: the coding run starts the agent
+  at the worktree root (`_run_agent`, `engine.py:275`, passes `wt` as `cwd` to `runners.py:107`), so a later task loads the
+  root `.claude/`, which is protected, not a nested one. The risk is a person who later opens Claude Code in that
+  subfolder; whether Claude Code then loads that `settings.json` is UNVERIFIED.
 
 Good: `child_env` allow-lists the environment (no keys unless named); checks run with `shell=False` and stdin closed;
 JARVES never force-pushes and never pushes the default branch; merges are fast-forward only; the agent never runs the
@@ -104,7 +113,9 @@ check command.
   re-proposes.
 
 ## Disposition
-One issue per defect (AGENTS.md rule 8):
+One issue per P1/P2 defect (AGENTS.md rule 8); the P3 notes are bundled in #1517 (last item) because they
+are hardening with no exploit path found in this read, share one fix area (path and argument guards, privacy at rest), and
+are small enough to fix in one change:
 - P1 #1: [#1096](https://github.com/Jarvis-igerman-ai/jarves/issues/1096). Fixed on main by #1101 (JAR-317) and #1351
   (JAR-574); #1408 (JAR-600) also protects links; issue closed.
 - P2 #2: [#1097](https://github.com/Jarvis-igerman-ai/jarves/issues/1097). Same fixes; issue closed.
