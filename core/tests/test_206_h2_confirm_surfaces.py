@@ -56,26 +56,64 @@ def test_dashboard_confirm_needs_and_checks_the_shown_text(home):
         ctx.close()
 
 
-def test_cli_confirm_applies_only_the_words_it_prints(home, capsys, monkeypatch):
+def test_cli_confirm_with_the_listed_words_refuses_a_reword_made_after_list(home, capsys):
     p, pid = _proposed(home)
-    real = prefs_mod.Preferences.confirm
-
-    def edit_first(self, i, **kw):                                    # a reword lands after the CLI read the item
-        self.edit(i, NEW, by="voice", repropose=True)
-        return real(self, i, **kw)
-    monkeypatch.setattr(prefs_mod.Preferences, "confirm", edit_first)
-    assert cli.main(["prefs", "confirm", str(pid)]) == 1
+    assert cli.main(["prefs", "list"]) == 0 and OLD in capsys.readouterr().out       # what the owner saw
+    p.edit(pid, NEW, by="voice", repropose=True)                      # the model rewords it before the confirm
+    assert cli.main(["prefs", "confirm", str(pid), "--text", OLD]) == 1
     assert "changed meanwhile" in capsys.readouterr().err
-    assert p.get(pid)["state"] == "proposed" and p.get(pid)["text"] == NEW
-    monkeypatch.setattr(prefs_mod.Preferences, "confirm", real)
-    assert cli.main(["prefs", "confirm", str(pid)]) == 0
+    assert p.get(pid)["state"] == "proposed" and p.for_prompt() == []
+    assert cli.main(["prefs", "confirm", str(pid), "--text", NEW]) == 0
     assert NEW in capsys.readouterr().out and p.for_prompt() == [NEW]
+
+
+def test_cli_confirm_without_text_needs_a_terminal_and_a_yes(home, capsys, monkeypatch):
+    p, pid = _proposed(home)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert cli.main(["prefs", "confirm", str(pid)]) == 2               # nothing to ask in: refused, nothing saved
+    assert "--text" in capsys.readouterr().err and p.for_prompt() == []
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _q: "n")
+    assert cli.main(["prefs", "confirm", str(pid)]) == 1 and p.for_prompt() == []
+
+    def reword_while_asking(_q):                                      # the words change while the question is open
+        p.edit(pid, NEW, by="voice", repropose=True)
+        return "y"
+    monkeypatch.setattr("builtins.input", reword_while_asking)
+    assert cli.main(["prefs", "confirm", str(pid)]) == 1
+    assert OLD in capsys.readouterr().out and p.for_prompt() == []    # it printed OLD and did not save NEW
+    monkeypatch.setattr("builtins.input", lambda _q: "y")
+    assert cli.main(["prefs", "confirm", str(pid)]) == 0 and p.for_prompt() == [NEW]
+
+
+async def test_voice_confirm_by_the_user_origin_also_shows_the_popup_and_works(home):
+    p, pid = _proposed(home)
+    asked: list = []
+    assert (await registry(prefs=p, answer=True, asked=asked).call("pref_confirm", {"id": pid}, origin="user")).ok
+    assert asked and p.for_prompt() == [OLD]                          # no origin skips the popup that binds the words
+
+
+async def test_a_denied_popup_leaves_nothing_for_a_later_confirm(home):
+    p, pid = _proposed(home)
+    reg = registry(prefs=p, answer=False)
+    assert not (await reg.call("pref_confirm", {"id": pid}, origin="model")).ok
+    tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
+    assert (await tool.handler(prefs_mod.ConfirmArgs(id=pid))).code == "PREF_CONFLICT"
+    assert prefs_mod.ConfirmArgs.model_validate({"id": pid, "_shown": OLD})._shown is None   # the model cannot set it
+    assert p.for_prompt() == []
+
+
+def test_dashboard_confirm_errors_have_hebrew_text():
+    from jarves import locale_parts
+    he = locale_parts.catalog("he")["dict"]
+    for en in ("confirm needs the text you saw: reload the page", "the preference changed meanwhile: reload the page"):
+        assert en in he and he[en] != en                              # the page shows JL.t(error): Hebrew exists
 
 
 async def test_voice_confirm_without_a_shown_popup_fails_closed(home):
     p, pid = _proposed(home)
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
-    r = await tool.handler(prefs_mod.IdArgs(id=pid))                  # the handler alone: no popup computed the words
+    r = await tool.handler(prefs_mod.ConfirmArgs(id=pid))                  # the handler alone: no popup computed the words
     assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
 
 

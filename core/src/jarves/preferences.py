@@ -14,7 +14,7 @@ import difflib
 import re
 import time
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from . import calm
 from . import features as feat
@@ -300,6 +300,13 @@ class IdArgs(BaseModel):
     id: int = Field(..., ge=1)
 
 
+class ConfirmArgs(IdArgs):
+    # #206 H2: the registry hands the SAME args object to the approval popup and then to the tool, so the words the
+    # popup showed travel with this one call (a private attribute: never part of the schema, never set by the model).
+    # No docstring: pydantic would send it to the model as the schema description.
+    _shown: str | None = PrivateAttr(default=None)
+
+
 class EditArgs(BaseModel):
     id: int = Field(..., ge=1)
     text: str = Field(..., min_length=3, max_length=MAX_TEXT)
@@ -326,13 +333,10 @@ def make_skill(prefs: Preferences):
                     return ToolResult(True, "proposed, not saved yet: ask the owner whether to remember it", r)
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
-            shown: dict[int, str] = {}        # #206 H2: the words the approval popup showed, per item id
-
-            async def confirm(a: IdArgs):
-                cur = prefs.get(a.id)
-                if not cur:
+            async def confirm(a: ConfirmArgs):
+                if not prefs.get(a.id):
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
-                seen = shown.pop(a.id, None)
+                seen = a._shown                   # set by this same call's approval popup (confirm_meta) only
                 if seen is None:              # no popup showed the words: fail closed rather than confirm unseen text
                     return ToolResult(False, "ask the owner again: the words were not shown", code="PREF_CONFLICT")
                 try:
@@ -375,17 +379,17 @@ def make_skill(prefs: Preferences):
             async def forget_impact(_a: IdArgs):
                 return 1, "לשכוח את ההעדפה? / Forget this preference?"
 
-            def confirm_meta(a: IdArgs) -> dict:
+            def confirm_meta(a: ConfirmArgs) -> dict:
                 r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
                 if not r:
                     return {}
-                shown[a.id] = str(r["text"])
-                return {"details": {"preference": str(r["text"])[:MAX_TEXT]}}
+                a._shown = str(r["text"])[:MAX_TEXT]      # #206 H2: exactly the words the popup shows, for this call only
+                return {"details": {"preference": a._shown}}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
                      suggest, SuggestArgs, permission="action"),
-                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, IdArgs,
+                Tool("pref_confirm", "Owner said yes: 'yes keep that preference', 'כן תשמור את ההעדפה'.", confirm, ConfirmArgs,
                      permission="action", confirm="לזכור את ההעדפה הזאת? / Remember this preference?",
                      approval_meta=confirm_meta),
                 Tool("pref_decline", "Owner said no: 'no do not keep that preference', 'לא תשמור את ההעדפה'.", decline, IdArgs, permission="action"),
