@@ -1372,6 +1372,11 @@ def test_owner_text_names_the_integration_commit_not_the_branch(env):
     sh(Path(t["worktree"]), "git", "diff", "--quiet", f"{sha[:12]}...HEAD", "--", "b.txt")   # the command works
 
 
+_PLANTED_ENV = ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
+                "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS", "SSL_CERT_DIR", "CURL_CA_BUNDLE",   # R3 of #1673
+                "GH_DEBUG", "GH_ENTERPRISE_TOKEN", "GH_REPO")
+
+
 def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_path, monkeypatch):
     """#1595: agent-written insteadOf/pushInsteadOf, http.proxy, sslVerify=false or a URL-specific sslCAInfo in the
     shared (or global) git config never redirect or weaken the owner-identity push."""
@@ -1404,9 +1409,10 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setattr(forge, "gh_cmd", lambda: ["gh"])
-    for k in ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
-              "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS"):           # review R1: env cannot weaken TLS
+    for k in _PLANTED_ENV:           # review R1: env cannot weaken TLS
         monkeypatch.setenv(k, "1")
+    for k, v in (("GH_TOKEN", "t"), ("GH_CONFIG_DIR", str(tmp_path / "gh")), ("GITHUB_TOKEN", ""), ("GH_HOST", "")):
+        monkeypatch.setenv(k, v)                                       # an empty value is not forwarded
     seen: list = []
     origins: list = []
     real_git = forge.gitops.git
@@ -1418,14 +1424,15 @@ def test_push_ignores_url_rewrites_and_tls_keys_in_the_shared_git_config(tmp_pat
             origins.extend(real_git(cwd, *pre, "config", "--list", "--show-origin", check=False,
                                     env=kw.get("env")).stdout.splitlines())
             child = forge.gitops.child_env(kw.get("env"))
+            assert set(kw["env"]) == {"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GH_TOKEN", "GH_CONFIG_DIR"}  # R4
+            assert not {"SSL_CERT_DIR", "CURL_CA_BUNDLE", "GH_DEBUG", "GH_ENTERPRISE_TOKEN"} & set(child)       # R3
             assert child["GIT_CONFIG_NOSYSTEM"] == "1" and Path(child["GIT_CONFIG_GLOBAL"]).read_bytes() == b""
             assert not [k for k in child if k.startswith(("GIT_SSL", "GIT_TRACE", "GIT_CURL", "GIT_PROXY",
                                                           "GIT_CONFIG_PARAMETERS"))]
         return real_git(cwd, *args, **kw)
     monkeypatch.setattr(forge.gitops, "git", spy)
     forge.push_branch(str(repo), "jarves/p1/t1-a1", "o/r")
-    for k in ("GIT_SSL_NO_VERIFY", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH", "GIT_PROXY_COMMAND", "GIT_CURL_VERBOSE",
-              "GIT_TRACE_CURL", "GIT_TRACE", "GIT_CONFIG_PARAMETERS"):           # the test's own `sh` needs a clean env
+    for k in _PLANTED_ENV:           # the test's own `sh` needs a clean env
         monkeypatch.delenv(k)
     assert seen and not any(k in seen[0] for k in ("insteadof", "remote.origin", "proxy", "sslcainfo",
                                                     "sslverify=false"))
@@ -1462,14 +1469,15 @@ def _push_fixture(tmp_path, monkeypatch, fmt="sha1"):
     return forge, repo, good, evil
 
 
-@pytest.mark.parametrize("planted", ["url", "core.askPass", "core.sshCommand", "core.gitProxy"])
+@pytest.mark.parametrize("planted", ["url", "core.askPass", "core.sshCommand", "core.gitProxy", "spaced"])
 def test_push_refuses_a_temp_repo_config_written_before_the_push(tmp_path, monkeypatch, planted):
     """#1595 (review R1 of 308f24df and 86f15520): a same-user process that writes the temp repo's config between init
     and push (a pushInsteadOf, or a core.* command key) makes the push refuse instead of following it."""
     forge, repo, good, evil = _push_fixture(tmp_path, monkeypatch)
     real_git = forge.gitops.git
     text = (f'[url "{evil.as_uri()}"]\n\tpushInsteadOf = {forge.PUSH_BASE}\n' if planted == "url"
-            else f"[core]\n\t{planted.split('.')[1]} = {tmp_path / 'evil.sh'}\n")
+            else '[core "bare core"]\n\tfilemode = true\n' if planted == "spaced"     # review R2 of #1673: one key with
+            else f"[core]\n\t{planted.split('.')[1]} = {tmp_path / 'evil.sh'}\n")   # a space, not two allowed keys
 
     def spy(cwd, *args, **kw):
         p = real_git(cwd, *args, **kw)

@@ -124,7 +124,8 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     GIT_CONFIG_NOSYSTEM=1, so no repository, global, XDG or system `url.*`, `http.*`, credential or remote key
     applies; only JARVES's gh credential helper and `http.sslVerify=true` (plus _tls_pins). git older than 2.32
     ignores GIT_CONFIG_GLOBAL, so it is refused (review R1). gitops.child_env is an allow-list: GIT_SSL_*, GIT_TRACE*,
-    GIT_PROXY_* and GIT_CONFIG_PARAMETERS never reach git. rev-parse runs in the project repo (no filter/transport)."""
+    GIT_PROXY_*, GIT_CONFIG_PARAMETERS, SSL_CERT_DIR and CURL_CA_BUNDLE never reach git; the owner's own SSL_CERT_FILE and
+    HTTPS_PROXY do (corporate TLS proxies). rev-parse runs in the project repo (no filter/transport)."""
     if not re.match(r"^jarves/p\d+/[\w.\-/]+$", branch) or ".." in branch or branch.startswith("/") or branch.endswith("/"):
         raise ForgeError("JARVES pushes only its own jarves/p<N>/... branches")
     if not _SLUG_OK.match(slug or "") or ".." in slug or slug.lower().endswith(".git"):
@@ -151,8 +152,9 @@ def push_branch(path: str, branch: str, slug: str) -> None:
         # review R1: the temp folder is the owner's, but any same-user process can write it. Right before the push
         # only the exact keys git init writes (_INIT_KEYS) may be in its config; a small window between this check
         # and the push remains
-        keys = gitops.git(d, "config", "--file", str(repo / "config"), "--name-only", "--list", env=env).stdout.split()
-        if any(k.lower() not in _INIT_KEYS for k in keys):
+        keys = gitops.git(d, "config", "--file", str(repo / "config"), "--name-only", "--null", "--list",   # R2 of
+                          env=env).stdout.split("\0")                                      # #1673: names hold spaces
+        if any(k and k.lower() not in _INIT_KEYS for k in keys):
             raise ForgeError("the temporary push repository's config was changed; push refused")
         gitops.git(repo, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "-c", "http.sslVerify=true",
                    *tls, "push", "--no-verify", f"{PUSH_BASE}{slug}.git", f"{sha}:refs/heads/{branch}", timeout=300,
