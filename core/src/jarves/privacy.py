@@ -15,6 +15,7 @@ Two one-way actions (each needs {"confirm": true}):
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -69,6 +70,7 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
+        return {**state(ctx), "scrubbed": scrub_at_rest(ctx.home)}
     return state(ctx)
 
 
@@ -82,7 +84,82 @@ def set_privacy(ctx, on: bool) -> dict:
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
-    return {**state(ctx), "saved_in_config": saved, "config_error": err}
+    extra = {"scrubbed": scrub_at_rest(ctx.home)} if on else {}
+    return {**state(ctx), "saved_in_config": saved, "config_error": err, **extra}
+
+
+# #1557: text written before privacy was on. "CODE: tool text" keeps the code, as privacy mode writes it (goal_plans)
+_CODE_THEN_TEXT = re.compile(r"((?:step \d+: )?[A-Za-z][A-Za-z0-9_]{0,39}): .*", re.S)
+
+
+def _code_only(text: str) -> str:
+    m = _CODE_THEN_TEXT.fullmatch(text)
+    return m.group(1) if m else text
+
+
+def _scrub_ledger(cx: sqlite3.Connection) -> int:
+    from .mobile import _goal_at_rest, chat_at_rest
+    n = 0
+    for r in cx.execute("SELECT rowid, kind, body FROM ledger WHERE kind IN ('chat', 'goal')").fetchall():
+        try:
+            body = json.loads(r[2])
+        except (TypeError, ValueError):
+            body = None
+        new = chat_at_rest(body) if r[1] == "chat" else _goal_at_rest(body if isinstance(body, dict) else {"error": ""})
+        if body != new:
+            cx.execute("UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps(new), r[0]))
+            n += 1
+    return n
+
+
+def _scrub_plans(cx: sqlite3.Connection) -> tuple[int, int]:
+    steps = plans = 0
+    for r in cx.execute("SELECT id, evidence, error FROM goal_plan_steps WHERE evidence != '' OR error LIKE '%: %'"
+                        ).fetchall():
+        err = _code_only(r[2])
+        if r[1] or err != r[2]:
+            steps += cx.execute("UPDATE goal_plan_steps SET evidence = '', error = ? WHERE id = ?", (err, r[0])).rowcount
+    for r in cx.execute("SELECT id, note FROM goal_plans WHERE note LIKE 'step %: %: %'").fetchall():
+        note = _code_only(r[1])
+        if note != r[1]:
+            plans += cx.execute("UPDATE goal_plans SET note = ? WHERE id = ?", (note, r[0])).rowcount
+    return steps, plans
+
+
+def scrub_at_rest(home: Path) -> dict:
+    """#1557: rewrite rows stored before privacy was switched on to what privacy mode stores now: the phone command
+    ledger (chat and goal answers) and goal plan step evidence/error text. One transaction per database; a database
+    that cannot be scrubbed is reported (and logged) while the other is still done. Missing databases are not made."""
+    out: dict = {"ledger": 0, "plan_steps": 0, "plans": 0, "errors": []}
+    for name in ("continuity.db", "memory.db"):
+        path = Path(home) / name
+        if not path.exists():
+            continue
+        try:
+            cx = sqlite3.connect(path, timeout=10, isolation_level=None)
+            try:
+                cx.execute("PRAGMA secure_delete=ON")             # freed pages do not keep the old words
+                cx.execute("BEGIN IMMEDIATE")
+                try:
+                    if name == "continuity.db":
+                        out["ledger"] = _scrub_ledger(cx)
+                    else:
+                        out["plan_steps"], out["plans"] = _scrub_plans(cx)
+                    cx.execute("COMMIT")
+                except BaseException:
+                    cx.execute("ROLLBACK")
+                    raise
+                cx.execute("PRAGMA wal_checkpoint(TRUNCATE)")    # and the write-ahead log does not either
+            finally:
+                cx.close()
+        except sqlite3.Error as e:
+            if "no such table" not in str(e):                     # an older database without the table: nothing kept
+                out["errors"].append({"db": name, "error": type(e).__name__})
+                logs.warn("privacy", "PRIVACY_SCRUB_FAILED", "older text could not be scrubbed", db=name,
+                          error_type=type(e).__name__)
+    logs.info("privacy", "PRIVACY_SCRUBBED_AT_REST", "text stored before privacy was on scrubbed",
+              ledger=out["ledger"], plan_steps=out["plan_steps"], plans=out["plans"], failed=len(out["errors"]))
+    return out
 
 
 # ---------------------------------------------------------------------- one-way actions

@@ -478,8 +478,7 @@ class MobileAccess:
             while len(self._replies) > REPLY_KEEP:               # bounded: oldest out first
                 self._replies.pop(next(iter(self._replies)))
         if logs.privacy():           # #206 F13: the ledger is on disk, so in privacy mode it keeps a fixed note, not the words
-            en, he = _MSG["NOT_KEPT"]                             # one text per language, like _err's error/error_he
-            reply = {"reply": en, "reply_he": he, "ok": bool(reply.get("ok")), "not_kept": True, "code": "NOT_KEPT"}
+            reply = chat_at_rest(reply)
         try:
             self.cont.store(device, mid, "chat", 200, reply)
         except Exception:
@@ -1223,6 +1222,13 @@ def _chat_routes(h, mob, dev, path, method, done, need, need_page) -> None:
 def _goal_brief(g: dict) -> dict:
     return {"id": g["id"], "title": str(g["title"])[:120], "status": g["status"], "percent": g.get("progress"),
             "steps": [{"id": x["id"], "text": str(x["text"])[:120], "done": bool(x.get("done"))} for x in g.get("steps", [])]}
+
+
+def chat_at_rest(reply: object) -> dict:
+    """#206 F13: the stored copy of a chat answer in privacy mode: a fixed note per language, never the words."""
+    en, he = _MSG["NOT_KEPT"]                             # one text per language, like _err's error/error_he
+    ok = bool(reply.get("ok")) if isinstance(reply, dict) else False
+    return {"reply": en, "reply_he": he, "ok": ok, "not_kept": True, "code": "NOT_KEPT"}
 
 
 GOAL_ERROR_NOT_KEPT = "the goal change was refused (details not kept in privacy mode)"
