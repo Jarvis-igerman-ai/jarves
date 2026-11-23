@@ -128,7 +128,7 @@ class Preferences:
         """The owner typed it themselves (dashboard/CLI): explicit by definition, stored as confirmed."""
         r = self.suggest(text, "typed by the owner", topic, by=by)
         if r["status"] in ("proposed", "known_proposed", "known_declined"):
-            r["item"] = self.confirm(r["item"]["id"], by=by)["item"]
+            r["item"] = self.confirm(r["item"]["id"], by=by, expect=r["item"]["text"])["item"]
             r["status"] = "confirmed"
         return r
 
@@ -334,8 +334,12 @@ def make_skill(prefs: Preferences):
                 return ToolResult(True, "already " + r["status"].split("_")[1], r)
 
             async def confirm(a: ConfirmArgs):
-                if not prefs.get(a.id):
+                cur = prefs.get(a.id)
+                if not cur:
                     return ToolResult(False, "no such preference", code="PREF_NOT_FOUND")
+                if len(str(cur["text"])) > MAX_TEXT:
+                    return ToolResult(False, "too long to show in full: shorten it first (edit), then confirm",
+                                      code="PREF_TOO_LONG")
                 seen = a._shown                   # set by this same call's approval popup (confirm_meta) only
                 if seen is None:              # no popup showed the words: fail closed rather than confirm unseen text
                     return ToolResult(False, "ask the owner again: the words were not shown", code="PREF_CONFLICT")
@@ -383,8 +387,10 @@ def make_skill(prefs: Preferences):
                 r = prefs.get(a.id)           # the popup shows WHAT would be remembered, not just "a preference"
                 if not r:
                     return {}
-                a._shown = str(r["text"])[:MAX_TEXT]      # #206 H2: exactly the words the popup shows, for this call only
-                return {"details": {"preference": a._shown}}
+                text = str(r["text"])
+                if len(text) <= MAX_TEXT:     # #206 H2: bind the FULL words, and only when the popup shows them all
+                    a._shown = text           # (every write caps at MAX_TEXT; a longer legacy row is refused below)
+                return {"details": {"preference": text[:MAX_TEXT]}}
 
             return [
                 Tool("pref_suggest", "Owner STATED a lasting preference: propose it, then ask. 'I always prefer', 'אני תמיד מעדיף'. Never secrets, health or money.",
@@ -449,7 +455,10 @@ def api_pref_op(ctx, m, body):
             seen = b.get("text")                              # #206 H2: confirm only the words the page showed
             if not isinstance(seen, str) or not seen.strip():
                 return 400, {"error": "confirm needs the text you saw: reload the page", "code": "PREF_TEXT_REQUIRED"}
-            return 200, p.confirm(pid, by="dashboard", expect=seen)
+            try:
+                return 200, p.confirm(pid, by="dashboard", expect=seen)
+            except KeyError:                                  # removed between the check above and the confirm
+                return 404, {"error": "no such preference"}
         if op == "decline":
             return 200, {"ok": p.decline(pid, by="dashboard")}
         if op == "reaffirm":
@@ -460,8 +469,6 @@ def api_pref_op(ctx, m, body):
             return 200, {"ok": p.remove(pid, by="dashboard")}
     except ValueError as e:
         return 400, {"error": str(e)}
-    except KeyError:
-        return 404, {"error": "no such preference"}
     except PrefConflict:                                      # #206 H2: it changed meanwhile; nothing written
         return 409, {"error": "the preference changed meanwhile: reload the page", "code": "PREF_CONFLICT"}
     return 400, {"error": "op must be confirm, decline, reaffirm, edit or remove"}

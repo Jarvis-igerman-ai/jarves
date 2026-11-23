@@ -694,6 +694,9 @@ class SkillRegistry:
                 return ToolResult(prev.ok, prev.message, {**prev.data, "cached": "same result as a moment ago; "
                                   "do not call this tool again with the same arguments"}, code=prev.code)
         asked0 = self.asks
+        # The SAME `args` object goes to _authorize (approval_meta) and to _run (the handler): pref_confirm binds the
+        # words its popup showed on it (preferences.ConfirmArgs, #206 H2). Copying or re-validating args here would
+        # make every voice confirm fail closed (test_206_h2_confirm_surfaces).
         refused = await self._authorize(tool, args, origin)
         if refused is not None:
             return refused
