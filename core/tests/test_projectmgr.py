@@ -698,6 +698,48 @@ def test_ship_reports_a_git_failure_and_merges_nothing(env, monkeypatch):
     assert sh(repo, "git", "rev-parse", "HEAD").strip() == head
 
 
+def test_ship_plan_commands_never_run_repository_config_commands(env, tmp_path):
+    """PR #1657 review R1: the owner runs the plan's commands with their own git, which reads the same agent-writable
+    config and attributes: the suggested diff switches off external diff and textconv, and the plan offers JARVES's
+    own merge (`ship --apply --commit SHA`) instead of a bare `git merge`, which would run repository drivers/hooks."""
+    import shlex
+    m, repo, _ = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    m.call("resume", project="demo")
+    finish(m)
+    marker = tmp_path / "ran.txt"
+    evil = tmp_path / "evil.sh"
+    evil.write_text(f"#!/bin/sh\necho ran >> '{marker.as_posix()}'\n", encoding="utf-8")
+    evil.chmod(0o755)
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "attributes").write_text("* diff=evil\n", encoding="utf-8")
+    for k in ("diff.external", "diff.evil.command", "diff.evil.textconv"):
+        sh(repo, "git", "config", k, evil.as_posix())
+    plan = m.call("ship_plan", project="demo")
+    sha, cmds = plan["commit"], plan["commands"]
+    assert "diff --no-ext-diff --no-textconv HEAD..." + sha in cmds[0], cmds
+    assert not [c for c in cmds if " merge " in c] and any(f"--apply --commit {sha}" in c for c in cmds), cmds
+    assert "drivers and hooks" in plan["text"], plan["text"]
+    out = subprocess.run(shlex.split(cmds[0]), capture_output=True, text=True)
+    assert out.returncode == 0 and "a.txt" in out.stdout and not marker.exists(), out
+
+
+def test_a_running_task_fails_cleanly_when_the_config_turns_unusable(env):
+    """PR #1657 review R2: an open project whose repository config gains a required local filter (`git lfs install
+    --local`): git() raises GitError for every call, and a task fails with that reason instead of staying running."""
+    m, repo, _ = env
+    open_project(m, repo)
+    task(m, "A", "FAKE write a.txt=1", scope=["a.txt"])
+    sh(repo, "git", "config", "filter.big.clean", "big clean")
+    sh(repo, "git", "config", "filter.big.required", "true")
+    m.call("resume", project="demo")
+    finish(m)
+    t = m.db.tasks(1)[0]
+    assert t["status"] == "failed" and "global config" in m.call("show", project="demo")["text"] + str(t), t
+    assert m.call("status")["ok"]
+
+
 def test_new_task_on_a_done_project_continues_it(env):
     m, repo, _ = env
     open_project(m, repo)

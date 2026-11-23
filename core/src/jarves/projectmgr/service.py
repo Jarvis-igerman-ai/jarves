@@ -952,12 +952,13 @@ class Manager(StageEngine):
             stat = gitops.git(p["path"], "diff", "--shortstat", f"HEAD...{sha}", check=False).stdout.strip() or "no changes"
         except (OSError, gitops.GitError):
             stat = "unknown"
-        cmds = [f"git -C \"{p['path']}\" diff HEAD...{sha}",
-                f"git -C \"{p['path']}\" merge --no-ff {sha}   # when you are happy",
-                f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]
+        cmds = [f"git -C \"{p['path']}\" diff --no-ext-diff --no-textconv HEAD...{sha}",   # PR #1657 R1: no
+                f"jarvis project ship --project {p['name']} --apply --commit {sha}   # when you are happy",  # repo
+                f"git -C \"{p['path']}\" push   # your own decision; JARVES never pushes"]       # config commands
         return _res(True, "ok", f"{p['name']}: integration branch {br} at commit {sha[:12]} has {stat}. JARVES does not "
-                                "merge or push; the commands are in the result.", branch=br, commit=sha,
-                    worktree=str(wt), commands=cmds)
+                                "merge or push; the commands are in the result. Merge with the ship command: a plain "
+                                "`git merge` runs the filter and merge drivers and hooks named in the repository's own "
+                                "config, which agents can write.", branch=br, commit=sha, worktree=str(wt), commands=cmds)
 
     # ================================================================== the agents working on a project
     def _orch_call(self, op: str, **kw) -> dict:

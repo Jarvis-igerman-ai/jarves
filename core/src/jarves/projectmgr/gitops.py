@@ -143,8 +143,20 @@ def _config_overrides(cwd: str | Path, ident: bool = True) -> list[str]:
                 "config instead (for Git LFS: `git lfs install`, not `--local`), then remove it from the repository")
         val = "" if m and m.group(2) else "false" if m and m.group(3) else "true" if m and m.group(4) else owner.get(
             low, _GPG_DEFAULT.get(low, ""))
+        if low == "user.signingkey" and low not in owner:       # PR #1657 R3: git reads `-c user.signingkey=` as
+            val = _committer(owner)                              # `gpg -u ""`; its own default is the committer ident
         out += ["-c", f"{key}={val}"]
     return out
+
+
+def _committer(owner: dict) -> str:
+    """Your committer ident as git's default signing key; GitError when there is none to fall back to."""
+    name = os.environ.get("GIT_COMMITTER_NAME") or owner.get("user.name", "")
+    email = os.environ.get("GIT_COMMITTER_EMAIL") or owner.get("user.email", "")
+    if not email:
+        raise GitError("the repository config sets user.signingkey and you have no own key or user.email to sign "
+                       "with: set user.signingkey or user.email in your global config, or remove it from the repository")
+    return f"{name} <{email}>" if name else email
 
 
 def git(cwd: str | Path, *args: str, check: bool = True, timeout: float = 120, ident: bool = True
@@ -323,7 +335,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "", no_ff
     common = git(wt, "rev-parse", "--git-common-dir", check=False).stdout.strip()
     root = (Path(wt) / common).resolve() if common else Path(wt)
     with _repo_lock(root.parent if root.name == ".git" else root):
-        p = git(wt, "merge", "--no-edit", *(["--no-ff"] if no_ff else []), *(["-m", message] if message else []),
+        p = git(wt, "merge", "--no-edit", "--no-stat", *(["--no-ff"] if no_ff else []), *(["-m", message] if message else []),
                 branch, check=False, ident=ident)
         if p.returncode == 0:
             return []
@@ -336,7 +348,7 @@ def merge_in(wt: Path, branch: str, ident: bool = True, message: str = "", no_ff
 
 
 def fast_forward(integration_wt: Path, branch: str) -> None:
-    git(integration_wt, "merge", "--ff-only", branch)
+    git(integration_wt, "merge", "--ff-only", "--no-stat", branch)
 
 
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
