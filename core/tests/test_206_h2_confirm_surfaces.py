@@ -100,7 +100,7 @@ async def test_a_denied_popup_leaves_nothing_for_a_later_confirm(home):
     reg = registry(prefs=p, answer=False)
     assert not (await reg.call("pref_confirm", {"id": pid}, origin="model")).ok
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
-    assert (await tool.handler(prefs_mod.ConfirmArgs(id=pid))).code == "PREF_CONFLICT"
+    assert (await tool.handler(prefs_mod.ConfirmArgs(id=pid))).code == "PREF_NOT_SHOWN"
     assert prefs_mod.ConfirmArgs.model_validate({"id": pid, "_shown": OLD})._shown is None   # the model cannot set it
     assert p.for_prompt() == []
 
@@ -116,7 +116,7 @@ async def test_voice_confirm_without_a_shown_popup_fails_closed(home):
     p, pid = _proposed(home)
     tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
     r = await tool.handler(prefs_mod.ConfirmArgs(id=pid))                  # the handler alone: no popup computed the words
-    assert not r.ok and r.code == "PREF_CONFLICT" and p.get(pid)["state"] == "proposed"
+    assert not r.ok and r.code == "PREF_NOT_SHOWN" and "Do not retry" in r.message and p.get(pid)["state"] == "proposed"
 
 
 async def test_a_preference_removed_between_read_and_confirm_answers_not_found(home, monkeypatch):
@@ -156,3 +156,27 @@ def test_dashboard_only_maps_a_confirm_keyerror_to_404(home, monkeypatch):
             prefs_mod.api_pref_op(ctx, None, {"op": "decline", "id": pid})
     finally:
         ctx.close()
+
+
+@pytest.mark.parametrize("origin", ["model", "user"])
+async def test_every_approval_path_for_pref_confirm_runs_approval_meta(home, origin):
+    # review R2: the words are bound only by approval_meta; pin that no allowed path (any origin, an approval that
+    # answers yes without a person, e.g. a standing allow) reaches the handler without it, so no PREF_NOT_SHOWN loop.
+    p, pid = _proposed(home)
+    tool = next(t for t in prefs_mod.make_skill(p).tools() if t.name == "pref_confirm")
+    assert tool.confirm and tool.approval_meta is not None and tool.permission == "action"
+    calls: list = []
+    reg = registry(prefs=p, answer=True)
+    real = reg._tools["pref_confirm"][1].approval_meta
+    reg._tools["pref_confirm"][1].approval_meta = lambda a: calls.append(a) or real(a)
+    r = await reg.call("pref_confirm", {"id": pid}, origin=origin)
+    assert r.ok and len(calls) == 1 and p.for_prompt() == [OLD]
+
+
+def test_dashboard_confirm_button_posts_the_shown_words():
+    # review R1: the page must send {text} in the POST body, or every dashboard confirm gets PREF_TEXT_REQUIRED.
+    import pathlib, re
+    js = (pathlib.Path(prefs_mod.__file__).parent / "dashboard_static" / "pillars.js").read_text(encoding="utf-8")
+    assert re.search(r'const op = \(id, o, extra\) => act\(msg, \(\) => post\("/api/prefs/op", '
+                     r'Object\.assign\(\{ op: o, id: id \}, extra \|\| \{\}\)\)\)', js)
+    assert 'op(p.id, "confirm", { text: p.text })' in js

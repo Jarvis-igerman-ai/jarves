@@ -342,7 +342,9 @@ def make_skill(prefs: Preferences):
                                       code="PREF_TOO_LONG")
                 seen = a._shown                   # set by this same call's approval popup (confirm_meta) only
                 if seen is None:              # no popup showed the words: fail closed rather than confirm unseen text
-                    return ToolResult(False, "ask the owner again: the words were not shown", code="PREF_CONFLICT")
+                    # distinct from PREF_CONFLICT ("changed"): asking again would not help, so the model must not loop
+                    return ToolResult(False, "not saved: no approval showed the words. Do not retry; tell the owner to "
+                                      "confirm it on the dashboard or with jarvis prefs confirm", code="PREF_NOT_SHOWN")
                 try:
                     r = prefs.confirm(a.id, by="voice", expect=seen)
                 except KeyError:
