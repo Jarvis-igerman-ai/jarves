@@ -1233,7 +1233,8 @@
     const token = fragment.get("token");
     if (token) {
       history.replaceState(null, "", `${location.pathname}${location.search}#overview`);
-      try { await api("/api/session", {token}); }
+      const owner = fragment.get("owner");  // #1416: set only by 'jarvis workflow open' in the owner's terminal
+      try { await api("/api/session", owner ? {token, owner} : {token}); }
       catch (error) { if (error.sessionEnded) return; connectionState(false, error.message); switchView(); return; }
     }
     sessionReady = true;

@@ -108,6 +108,42 @@ class UnlockWrong:
     salt: str = ""
     total: int = 0
     by_session: dict[str, int] = field(default_factory=dict)
+    owner: int = 0  # #1416: the owner window's own tries (kept apart from by_session so a restart keeps them)
+
+
+UNLOCK_WRONG_FILE = "unlock_wrong.json"
+
+
+def load_unlock_wrong(home: Path, salt: str) -> UnlockWrong:
+    """Wrong tries stored for the code with this salt (#1416 R1), so a restart cannot reset the guess bound."""
+    wrong = UnlockWrong(salt)
+    try:
+        raw = json.loads((Path(home) / UNLOCK_WRONG_FILE).read_text(encoding="ascii"))
+    except (OSError, ValueError):
+        return wrong
+    if isinstance(raw, dict) and raw.get("salt") == salt:
+        for name, top in (("total", UNLOCK_WRONG_TOTAL), ("owner", UNLOCK_WRONG_PER_SESSION)):
+            value = raw.get(name)
+            if isinstance(value, int) and not isinstance(value, bool):
+                setattr(wrong, name, max(0, min(value, top)))
+    return wrong
+
+
+def _write_private_json(home: Path, name: str, record: dict) -> None:
+    """Atomic owner-only JSON write: unique temp file, ACL before writing, os.replace."""
+    private_directory(Path(home))
+    path = Path(home) / name
+    tmp = path.with_name(f"{path.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(record, f)
+    os.replace(tmp, path)
+
+
+def save_unlock_wrong(home: Path, wrong: UnlockWrong) -> None:
+    """Store the shared total and the owner window's tries for one code (never a code, session or token)."""
+    _write_private_json(home, UNLOCK_WRONG_FILE, {"salt": wrong.salt, "total": wrong.total, "owner": wrong.owner})
 
 
 def session_key(token: str, session: str) -> str:
@@ -131,16 +167,27 @@ def load_sessions(home: Path, now: float | None = None) -> dict[str, float]:
         return {}
 
 
-def save_sessions(home: Path, digests: dict[str, float]) -> None:
-    """Atomic owner-only write of session digests (never the session id or the access token)."""
-    private_directory(Path(home))
-    path = Path(home) / "sessions.json"
-    tmp = path.with_name(f"sessions.{os.getpid()}.{threading.get_ident()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    owner_only_file(tmp)  # before writing; the ACL moves with the file on replace (#824)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "sessions": digests}, f)
-    os.replace(tmp, path)
+def load_owner_window(home: Path) -> tuple[str, str]:
+    """(salt, session digest) of the stored owner window (#1416), or ("", "") when missing or damaged."""
+    try:
+        raw = json.loads((Path(home) / "sessions.json").read_text(encoding="utf-8"))
+        row = raw.get("owner") if isinstance(raw, dict) else None
+        salt, digest = (row.get("salt"), row.get("session")) if isinstance(row, dict) else ("", "")
+    except (OSError, ValueError):
+        return "", ""
+    if (isinstance(salt, str) and re.fullmatch(r"[0-9a-f]{32}", salt)
+            and isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+        return salt, digest
+    return "", ""
+
+
+def save_sessions(home: Path, digests: dict[str, float], owner: tuple[str, str] = ("", "")) -> None:
+    """Atomic owner-only write of session digests (never the session id or the access token). `owner` is the
+    (code salt, session digest) of the owner window (#1416), so a restart keeps it."""
+    record: dict = {"version": 1, "sessions": digests}
+    if owner[0] and owner[1]:
+        record["owner"] = {"salt": owner[0], "session": owner[1]}
+    _write_private_json(home, "sessions.json", record)
 
 
 class Server(ThreadingHTTPServer):
@@ -170,6 +217,12 @@ class Server(ThreadingHTTPServer):
         # #1265: wrong tries per code. One session gets UNLOCK_WRONG_PER_SESSION, so a token-only window cannot
         # cancel the owner's code; UNLOCK_WRONG_TOTAL over all sessions still cancels it (guess bound 5 of 10,000).
         self.unlock_wrong = UnlockWrong()
+        # #1416: (salt, session) of the one window that logged in with the code's owner mark from `open` in the owner's
+        # terminal. Its tries do not count in the shared total, and the total cannot cancel a code that has a mark.
+        self.owner_window: tuple[str, str] = ("", "")
+        # Stored owner window from before a restart: (salt, session digest). It becomes `owner_window` when its
+        # cookie comes back (session_end), like `restored` does for sessions.
+        self.restored_owner: tuple[str, str] = load_owner_window(self.home)
         self.streams = threading.BoundedSemaphore(8)
         self.stopping = threading.Event()
         self.discuss = Helper(self.home, token=self.token)
@@ -185,9 +238,13 @@ class Server(ThreadingHTTPServer):
         """End time of a live session, restoring it from a stored digest. Caller holds session_lock."""
         end = self.sessions.get(session, 0)
         if not end and session and self.restored:
-            end = self.restored.pop(session_key(self.token, session), 0)
+            digest = session_key(self.token, session)
+            end = self.restored.pop(digest, 0)
             if end > now:
                 self.sessions[session] = end
+                # #1416: the owner window survives a restart, but never replaces a newer one set by a login (R1).
+                if self.restored_owner[1] == digest and not self.owner_window[0]:
+                    self.owner_window, self.restored_owner = (self.restored_owner[0], session), ("", "")
         return end if end > now else 0
 
     def persist_sessions(self, now: float) -> None:
@@ -196,8 +253,11 @@ class Server(ThreadingHTTPServer):
         self.restored = {k: end for k, end in self.restored.items() if end > now}
         digests = dict(self.restored)
         digests.update({session_key(self.token, s): end for s, end in self.sessions.items()})
+        salt, session = self.owner_window
+        owner = (salt, session_key(self.token, session)) if salt and session in self.sessions else (
+            self.restored_owner if self.restored_owner[1] in self.restored else ("", ""))
         try:
-            save_sessions(self.home, digests)
+            save_sessions(self.home, digests, owner)
         except OSError:
             pass  # persistence is a convenience; the live session still works in memory
 
@@ -481,31 +541,55 @@ class Handler(BaseHTTPRequestHandler):
             self.server.unlock_attempts.append(now)
             path = Path(self.server.home) / unlock.FILE
             try:
-                salt = json.loads(path.read_text(encoding="ascii"))["salt"]
-            except (OSError, ValueError, KeyError, TypeError):
-                salt = ""
+                record = json.loads(path.read_text(encoding="ascii"))
+                salt, marked = record["salt"], bool(record.get("owner"))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                salt, marked = "", False
             # Counters are read and changed only under session_lock. A new code (new salt) starts them again.
             if not salt:  # no live code: nothing to guess and nothing to count
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
-            if self.server.unlock_wrong.salt != salt:
-                self.server.unlock_wrong = UnlockWrong(salt)
+            if self.server.unlock_wrong.salt != salt:  # new code or a fresh process: stored tries count (#1416 R1)
+                self.server.unlock_wrong = load_unlock_wrong(self.server.home, salt)
             wrong = self.server.unlock_wrong
-            if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
-                # No further guess from this session; the code stays live for the owner's other window.
-                self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
+            owner = self.server.owner_window == (salt, session)
+            tries = wrong.owner if owner else wrong.by_session.get(session, 0)
+            if not owner and wrong.total >= UNLOCK_WRONG_TOTAL:
+                # #1416: the shared total is used up, but the code stays live for the owner's marked window.
+                self._json(403, {"error": "too many wrong codes from other windows; use the window that "
+                                 "'jarvis workflow open' started, or run 'jarvis workflow unlock' for a new code",
+                                 "locked": True, "reason": "code_closed"})
+                return
+            if tries >= UNLOCK_WRONG_PER_SESSION:
+                # No further guess from this session; the code stays live for the owner's other window. The owner's
+                # window gets no "another window" advice (#1416 R3): the other windows share tries that may be closed.
+                where = "run" if owner else "use the code in another window, or run"
+                self._json(403, {"error": f"too many wrong codes in this window; {where} "
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
             if not (isinstance(code, str) and unlock.consume(self.server.home, code)):
-                wrong.by_session[session] = wrong.by_session.get(session, 0) + 1
-                wrong.total += 1
-                if wrong.total >= UNLOCK_WRONG_TOTAL:
+                if owner:
+                    wrong.owner += 1
+                else:
+                    wrong.by_session[session] = tries + 1
+                    wrong.total += 1
+                closed = wrong.total >= UNLOCK_WRONG_TOTAL
+                try:  # #1416 R1: the counts outlive a restart, so the bound is per code, not per process
+                    save_unlock_wrong(self.server.home, wrong)
+                    stored = True
+                except OSError:
+                    stored = False  # fail closed (R2): a count that a restart could lose cancels the code now
+                # Unmarked code: the backstop cancels it as before (guess bound 5 of 10,000). Marked code: only once
+                # the owner's window has also used its own 3 tries (bound 5 + 3; the mark has the token link's exposure).
+                if not stored or (closed and (not marked or wrong.owner >= UNLOCK_WRONG_PER_SESSION)):
                     path.unlink(missing_ok=True)
+                    (Path(self.server.home) / UNLOCK_WRONG_FILE).unlink(missing_ok=True)
                     self.server.unlock_wrong = UnlockWrong()
                 self._json(403, {"error": "wrong or expired code; run 'jarvis workflow unlock' in your own terminal", "locked": True})
                 return
             self.server.unlock_wrong = UnlockWrong()
+            (Path(self.server.home) / UNLOCK_WRONG_FILE).unlink(missing_ok=True)
             self.server.unlocked = {k: v for k, v in self.server.unlocked.items() if v > now and k in self.server.sessions}
             ttl = owner_unlock_s(self.server.home)
             self.server.unlocked[session] = now + ttl
@@ -537,6 +621,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             session = secrets.token_hex(32)
             self.server.sessions[session] = now + SESSION_TTL_S
+            # #1416: the owner mark from `open` makes this the code's owner window, once per code (first login wins).
+            # Still inside `with session_lock` (above), like every other read or write of owner_window.
+            salt = unlock.owner_salt(self.server.home, data.get("owner"), now=now) if data.get("owner") else ""
+            if salt and self.server.owner_window[0] != salt:
+                self.server.owner_window, self.server.restored_owner = (salt, session), ("", "")  # newer wins (R1)
             self.server.persist_sessions(now)
         self._json(200, {"ok": True}, {"Set-Cookie": f"{self.server.cookie}={session}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_S}"})
 

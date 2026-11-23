@@ -29,17 +29,53 @@ def _digest(code: str, salt: bytes) -> bytes:
     return hashlib.scrypt(normalize(code).encode("ascii"), salt=salt, **_SCRYPT)
 
 
-def issue(home: Path, *, now: float | None = None) -> str:
-    """Make a new code (replaces any older one) and return it for display in the owner's terminal only."""
+def new_owner_mark() -> str:
+    """A one-time secret for the link that `open` starts in the owner's own terminal (#1416)."""
+    return secrets.token_urlsafe(32)
+
+
+def _mark_digest(mark: str) -> str:
+    return hashlib.sha256(mark.encode("ascii", "replace")).hexdigest()  # 256-bit random mark: no slow hash needed
+
+
+def issue(home: Path, *, now: float | None = None, owner_mark: str = "") -> str:
+    """Make a new code (replaces any older one) and return it for display in the owner's terminal only.
+
+    With `owner_mark` (#1416) the record also keeps the mark's digest: the one window that logs in with the mark is
+    the owner's window, and wrong tries from other windows cannot cancel the code for it."""
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     salt = secrets.token_bytes(16)
-    record = {"salt": salt.hex(), "hash": _digest(raw, salt).hex(), "expires": (now or time.time()) + CODE_TTL_S}
+    record = {"salt": salt.hex(), "hash": _digest(raw, salt).hex(), "expires": (now if now is not None else time.time()) + CODE_TTL_S}
+    if owner_mark:
+        record["owner"] = _mark_digest(owner_mark)
     path = Path(home) / FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="ascii") as f:
         json.dump(record, f)
     return raw
+
+
+def live(home: Path, *, now: float | None = None) -> dict:
+    """The live code record (salt, expiry, owner-mark digest if any), or {} when no unexpired code exists."""
+    try:
+        record = json.loads((Path(home) / FILE).read_text(encoding="ascii"))
+        clock = now if now is not None else time.time()
+        if (isinstance(record, dict) and isinstance(record.get("salt"), str) and record["salt"]
+                and clock <= float(record["expires"])):
+            return record
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return {}
+
+
+def owner_salt(home: Path, mark: object, *, now: float | None = None) -> str:
+    """Salt of the live code when `mark` is its owner mark, else ""."""
+    record = live(home, now=now)
+    want = record.get("owner")
+    if not (isinstance(mark, str) and mark and isinstance(want, str)):
+        return ""
+    return record["salt"] if hmac.compare_digest(_mark_digest(mark), want) else ""
 
 
 def consume(home: Path, code: str, *, now: float | None = None) -> bool:
@@ -50,7 +86,7 @@ def consume(home: Path, code: str, *, now: float | None = None) -> bool:
         salt, want, expires = bytes.fromhex(record["salt"]), bytes.fromhex(record["hash"]), float(record["expires"])
     except (OSError, ValueError, KeyError, TypeError):
         return False
-    if (now or time.time()) > expires:
+    if (now if now is not None else time.time()) > expires:
         path.unlink(missing_ok=True)
         return False
     if len(normalize(code)) != 4 or not hmac.compare_digest(_digest(code, salt), want):
