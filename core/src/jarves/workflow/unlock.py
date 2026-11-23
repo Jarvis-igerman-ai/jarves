@@ -45,7 +45,7 @@ def issue(home: Path, *, now: float | None = None, owner_mark: str = "") -> str:
     the owner's window, and wrong tries from other windows cannot cancel the code for it."""
     raw = f"{secrets.randbelow(10000):04d}"  # owner decision: 4 digits, like the autopilot grant prompt
     salt = secrets.token_bytes(16)
-    record = {"salt": salt.hex(), "hash": _digest(raw, salt).hex(), "expires": (now or time.time()) + CODE_TTL_S}
+    record = {"salt": salt.hex(), "hash": _digest(raw, salt).hex(), "expires": (now if now is not None else time.time()) + CODE_TTL_S}
     if owner_mark:
         record["owner"] = _mark_digest(owner_mark)
     path = Path(home) / FILE
@@ -60,7 +60,9 @@ def live(home: Path, *, now: float | None = None) -> dict:
     """The live code record (salt, expiry, owner-mark digest if any), or {} when no unexpired code exists."""
     try:
         record = json.loads((Path(home) / FILE).read_text(encoding="ascii"))
-        if isinstance(record, dict) and isinstance(record.get("salt"), str) and record["salt"]                 and (now or time.time()) <= float(record["expires"]):
+        clock = now if now is not None else time.time()
+        if (isinstance(record, dict) and isinstance(record.get("salt"), str) and record["salt"]
+                and clock <= float(record["expires"])):
             return record
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -84,7 +86,7 @@ def consume(home: Path, code: str, *, now: float | None = None) -> bool:
         salt, want, expires = bytes.fromhex(record["salt"]), bytes.fromhex(record["hash"]), float(record["expires"])
     except (OSError, ValueError, KeyError, TypeError):
         return False
-    if (now or time.time()) > expires:
+    if (now if now is not None else time.time()) > expires:
         path.unlink(missing_ok=True)
         return False
     if len(normalize(code)) != 4 or not hmac.compare_digest(_digest(code, salt), want):

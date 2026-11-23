@@ -305,6 +305,60 @@ class UnlockTests(unittest.TestCase):
         self.server.unlock_attempts.clear()
         self.assertEqual(self.request("/api/unlock", {"code": shown})[0], 200)
 
+    def test_closed_marked_code_stays_closed_for_token_windows_after_a_restart_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        owner = self.owner_login(mark).split("=", 1)[1]
+        self.wrong_try(wrong)                                          # 1 owner try + 4 shared tries before the restart
+        for i in range(2):
+            self.cookie = ""
+            self.login()
+            for _ in range(3 if i == 0 else 1):
+                self.wrong_try(wrong)
+        self.assertEqual((self.server.unlock_wrong.total, self.server.unlock_wrong.owner), (4, 1))
+        self.restart()
+        self.cookie = ""
+        self.login()
+        self.assertEqual(self.wrong_try(wrong), (403, None))           # the 5th shared guess, not a fresh 5
+        self.restart()
+        self.cookie = ""
+        self.login()
+        with patch.object(unlock, "consume", wraps=unlock.consume) as consume:
+            self.assertEqual(self.wrong_try(shown), (403, "code_closed"))
+        consume.assert_not_called()
+        self.assertTrue((self.home / unlock.FILE).exists())
+        self.restart()
+        self.cookie = f"{self.server.cookie}={owner}"                  # the owner keeps 2 of its 3 tries, not 3 fresh
+        self.assertEqual([self.wrong_try(wrong) for _ in range(2)], [(403, None)] * 2)
+        self.assertFalse((self.home / unlock.FILE).exists())          # bound 5 + 3 held across three restarts
+        self.assertFalse((self.home / "unlock_wrong.json").exists())
+
+    def test_closed_marked_code_is_cancelled_when_its_counts_cannot_be_stored_1416(self):
+        from jarves.workflow import server as srv
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.owner_login(mark)
+        for i in range(2):
+            self.cookie = ""
+            self.login()
+            for n in range(3 if i == 0 else 2):
+                if i == 1 and n == 1:
+                    with patch.object(srv, "save_unlock_wrong", side_effect=OSError("disk full")):
+                        self.wrong_try(wrong)
+                else:
+                    self.wrong_try(wrong)
+        self.assertFalse((self.home / unlock.FILE).exists())          # fail closed: no unstored live code past 5
+
+    def test_stored_counts_of_another_code_or_damaged_are_ignored_1416(self):
+        from jarves.workflow.server import load_unlock_wrong
+        for raw in ('{"salt": "b", "total": 5, "owner": 3}', "not json", '{"salt": "a", "total": true, "owner": "3"}'):
+            (self.home / "unlock_wrong.json").write_text(raw)
+            self.assertEqual(load_unlock_wrong(self.home, "a"), UnlockWrong("a"), raw)
+        (self.home / "unlock_wrong.json").write_text('{"salt": "a", "total": 99, "owner": -2}')
+        self.assertEqual((load_unlock_wrong(self.home, "a").total, load_unlock_wrong(self.home, "a").owner), (5, 0))
+
     def test_damaged_stored_owner_window_is_ignored_1416(self):
         from jarves.workflow.server import load_owner_window, save_sessions
         for row in ({"salt": "x", "session": "y"}, ["a"], {"salt": "a" * 32}, None):
@@ -333,11 +387,31 @@ class UnlockTests(unittest.TestCase):
         argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
                 "open", "--no-open"]
         out, err = io.StringIO(), io.StringIO()
-        with patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}), patch.object(cli, "owner_only_guard", return_value="terminal"),                 redirect_stdout(out), redirect_stderr(err):
+        with (patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}),
+              patch.object(cli, "owner_only_guard", return_value="terminal"),
+              redirect_stdout(out), redirect_stderr(err)):
             self.assertEqual(cli.main(argv), 0)
         mark = out.getvalue().strip().split("&owner=", 1)[1]
         self.assertTrue(unlock.owner_salt(self.home, mark))
         self.assertNotIn(mark, (self.home / unlock.FILE).read_text(encoding="ascii"))
+
+    def test_cli_open_still_opens_unmarked_when_the_code_cannot_be_written_1416(self):
+        argv = ["--home", str(self.home), "--profile-home", str(self.home), "--port", str(self.server.server_port),
+                "open", "--no-open"]
+        out, err = io.StringIO(), io.StringIO()
+        with (patch.dict(os.environ, {"JARVES_WORKFLOW_AGENT": ""}),
+              patch.object(cli, "owner_only_guard", return_value="terminal"),
+              patch.object(unlock, "issue", side_effect=OSError("read-only home")),
+              redirect_stdout(out), redirect_stderr(err)):
+            self.assertEqual(cli.main(argv), 0)
+        self.assertIn("#token=", out.getvalue())
+        self.assertNotIn("&owner=", out.getvalue())
+        self.assertNotIn("Unlock code", err.getvalue())
+
+    def test_code_expiry_honours_an_explicit_zero_clock_1416(self):
+        unlock.issue(self.home, now=0)                                 # now=0 is a time, not "use the clock"
+        self.assertEqual(json.loads((self.home / unlock.FILE).read_text())["expires"], unlock.CODE_TTL_S)
+        self.assertTrue(unlock.live(self.home, now=0))
 
     def test_wrong_tries_without_a_live_code_are_not_counted(self):
         self.login()

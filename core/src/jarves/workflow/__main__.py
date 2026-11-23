@@ -255,8 +255,8 @@ def main(argv=None) -> int:
             owner_only_guard("open")
             mark = unlock.new_owner_mark()  # #1416: the window this link opens is the code's owner window
             code = unlock.issue(home, owner_mark=mark)
-        except PermissionError:
-            mark = code = ""
+        except OSError:  # PermissionError: not the owner's terminal; other OSError: unlock.json not written (#1416 R2)
+            mark = code = ""  # either way the dashboard still opens, unmarked, as before
         rc = open_dashboard(home, a.port, show_link=a.no_open, token=access_token, owner_mark=mark)
         if code:
             print(f"Unlock code for answering (Questions tab, valid {unlock.CODE_TTL_S // 60} minutes): {code}", file=sys.stderr)
