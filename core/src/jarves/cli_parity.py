@@ -432,13 +432,28 @@ def cmd_prefs(a, cfg, home) -> int:
             return 1
         if a.action == "confirm":
             from .preferences import PrefConflict
-            try:                                  # #206 H2: confirm exactly the words printed below
-                r = p.confirm(a.id, by="cli", expect=cur["text"])
+            seen = a.text                         # #206 H2: confirm only the words the owner saw
+            if seen is None:
+                if not sys.stdin.isatty():
+                    print(clilang.fmt("הוסף --text עם המילים מ-prefs list", "add --text with the words from prefs list"),
+                          file=sys.stderr)
+                    return 2
+                seen = cur["text"]
+                print(seen)
+                try:
+                    yes = input(clilang.fmt("לזכור את זה? [y/N] ", "Remember this? [y/N] ")).strip().lower() in ("y", "yes")
+                except EOFError:                  # input closed: no answer is a no
+                    yes = False
+                if not yes:
+                    print(clilang.fmt("לא נשמר", "not saved"))
+                    return 1
+            try:
+                r = p.confirm(a.id, by="cli", expect=seen)
             except PrefConflict:
                 print(clilang.fmt("ההעדפה השתנתה בינתיים: הרץ list ונסה שוב",
                                   "the preference changed meanwhile: run list and try again"), file=sys.stderr)
                 return 1
-            print(clilang.fmt("נשמר", "remembered") + f": {cur['text']}"
+            print(clilang.fmt("נשמר", "remembered") + f": {r['item']['text']}"
                   + ("; may conflict with: " + "; ".join(c["text"] for c in r["conflicts"]) if r["conflicts"] else ""))
         elif a.action == "decline":
             p.decline(a.id, by="cli")
@@ -740,6 +755,8 @@ def add_cli(sub) -> None:
     for act in ("confirm", "decline", "reaffirm", "remove"):
         pp = ps.add_parser(act, help=f"{act} one item: {act} ID")
         pp.add_argument("id", type=int)
+        if act == "confirm":                # #206 H2: confirm only the words you saw (from `prefs list`)
+            pp.add_argument("--text", help="the words you saw in `prefs list`; without it you are asked yes/no")
     pp2 = ps.add_parser("prompt", help="use confirmed preferences in every conversation: prompt [on|off|show]")
     pp2.add_argument("state", nargs="?", choices=["on", "off", "show"])
     pe = ps.add_parser("edit", help="edit ID TEXT")
