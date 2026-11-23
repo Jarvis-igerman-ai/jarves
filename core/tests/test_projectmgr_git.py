@@ -303,3 +303,17 @@ def test_a_config_name_that_cannot_be_overridden_fails_closed(tmp_path, key):
     subprocess.run(["git", "config", key, "x"], cwd=repo, check=True)
     with pytest.raises(gitops.GitError, match="cannot neutralise"):
         gitops.git(repo, "status")
+
+
+def test_an_unreadable_config_fails_closed(monkeypatch, tmp_path):
+    """#1407 item 3: a git without --show-scope (older than 2.26) or a broken config: the command never runs."""
+    calls: list = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 129, "", "error: unknown option `show-scope'")
+    monkeypatch.setattr(gitops.subprocess, "run", run)
+    with pytest.raises(gitops.GitError, match="2.26"):
+        gitops.git(tmp_path, "merge", "x")
+    assert calls == [["git", "config", "--show-scope", "-z", "--list"]]
+    assert gitops.is_repo(str(tmp_path)) is False
