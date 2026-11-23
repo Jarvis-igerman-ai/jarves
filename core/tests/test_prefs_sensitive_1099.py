@@ -26,6 +26,9 @@ LEAKY = [
     "טוקן",
     "המפתח הסודי נמצא אצלי",                                   # Hebrew "secret key"
     "המפתח שלי נמצא במגירה",                                   # Hebrew "my key"
+    "שמור את מפתח פרטי של השרת",                               # Hebrew "private key" (review 3 R3)
+    "המפתח הפרטי בקובץ",                                       # Hebrew "the private key"
+    "תשמור את מפתח api של השירות",                             # Hebrew "api key"
     "the value Zq8LmP2vT9xRk4NwB7yHc3Fd",                     # 24-char mixed-case + digit high-entropy run
     "the value PCB9t2039bicBTW5ZE9LFaez",                     # few class switches, near-maximal entropy
     "the value dGhpc0lzQVNlY3JldEtleTEyMzQ1Njc4OQ==",         # base64 key with "==" padding
@@ -48,6 +51,12 @@ SAFE = [
     "parse it with XMLHttpRequest2ResponseParser",
     "use GPT4oMiniRealtimePreview2024 for voice",
     "see docs/reviews/SWV4_P_PERF_BUDGETS first",            # path segments are short, not near-max entropy
+    "use claude-sonnet-5-5 or gpt-4o-mini-transcribe",       # model ids (review 3 R4)
+    "call AbstractSingletonProxyFactoryBean2 there",
+    "set NSURLSessionDataTaskDelegate3 in iOS",
+    "run test_prefs_sensitive_1099 then test_v5_followups",
+    "the class WebRTCPeerConnectionFactory2 owns it",
+    "rename it to getHTTP2ConnectionPoolMaxSize",
     "the value Zq8LmP2vT9xRk4NwB7yHc3F",                      # 23-char run: one under the 24-char limit
     "the value Zq8LmP2vT9xRk4NwB7yHc3==",                     # padding is not counted toward the 24 chars
 ]
