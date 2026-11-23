@@ -472,7 +472,7 @@ def test_release_workflow_publishes_only_inside_the_protected_environment():
 
 TAG_OID = "c" * 40
 ROWS = "a" * 64
-TAG_BODY = f"object {SHA}\ntype commit\ntag v4.1.0\ntagger o <o@x> 1 +0000\n\nRows hash: {ROWS}\n-----BEGIN SSH SIGNATURE-----\n"
+TAG_BODY = f"object {SHA}\ntype commit\ntag v4.1.0\ntagger o <o@x> 1 +0000\n\nRows hash: {ROWS}\n-----BEGIN SSH SIGNATURE-----\nU1NIU0lH\n-----END SSH SIGNATURE-----\n"
 
 
 class _Run:
@@ -481,7 +481,6 @@ class _Run:
         self.body = body
 
     def __call__(self, cmd, **kw):
-        import subprocess
         self.calls.append(cmd)
         self.envs.append(kw.get("env") or {})
         if "rev-parse" in cmd and cmd[-1].endswith("^{commit}"):  # the commit the verified tag object points at
@@ -577,6 +576,9 @@ def test_605_tag_signature_by_owner_key(tmp_path):
     assert len(other) == 1 and "differs from the one given" in other[0]          # review R2: hash from the signed object
     nohash = _Run(0, ok.err, body=TAG_BODY.replace("Rows hash: ", "Rows: "))
     assert "(none)" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=nohash, verifier=v, rows_hash=ROWS)[0]
+    for body in (TAG_BODY + "Rows hash: " + "d" * 64 + "\n", TAG_BODY.split("-----BEGIN")[0]):  # appended / no block
+        out = gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=_Run(0, ok.err, body=body), verifier=v)
+        assert len(out) == 1 and "outside its signed part" in out[0], out
     renamed = _Run(0, ok.err, body=TAG_BODY.replace("tag v4.1.0", "tag v4.0.9"))  # signed for another version
     assert "named 'v4.0.9', not v4.1.0" in gate.tag_signature_problems(tmp_path, "v4.1.0", lines, SHA, run=renamed, verifier=v)[0]
 
@@ -660,7 +662,7 @@ def test_605_real_publish_requires_owner_signed_tag(tmp_path, monkeypatch, capsy
 
 
 @pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml); CI Core shards run it
-def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
+def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):  # needs git >= 2.32 (GIT_CONFIG_GLOBAL)
     """#605: with real git + ssh-keygen a tag signed by the owner's listed key passes; a good signature by an
     unlisted key (git verify-tag can exit 0 with "No principal matched") is refused."""
     for k, val in (("HOME", str(tmp_path)), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_CONFIG_GLOBAL", str(tmp_path / "gc"))):
@@ -700,6 +702,15 @@ def test_605_real_ssh_tag_signature_owner_key_only(tmp_path, monkeypatch):
     assert out.returncode == 0 and out.stdout == "a" * 64, out
     moved = gate.tag_signature_problems(repo, "v4.1.3", lines, head)
     assert len(moved) == 1 and "not at the gated commit" in moved[0], moved
+    # PR #1643 council blocker: a line appended AFTER the signature block is not signed; verify-tag still passes
+    sh(*git, "-c", "gpg.format=ssh", "-c", f"gpg.ssh.program={gate.SSH_KEYGEN}", "-c",
+       f"user.signingkey={tmp_path / 'owner'}", "tag", "-s", "v4.1.4", "-m", "no hash here", head, cwd=repo)
+    obj = subprocess.run(["git", "cat-file", "tag", "v4.1.4"], cwd=repo, capture_output=True, text=True).stdout
+    forged = subprocess.run(["git", "hash-object", "-t", "tag", "-w", "--stdin"], cwd=repo, capture_output=True,
+                            text=True, input=obj + "Rows hash: " + "d" * 64 + "\n").stdout.strip()
+    sh("git", "update-ref", "refs/tags/v4.1.4", forged, cwd=repo)
+    bad = gate.tag_signature_problems(repo, "v4.1.4", lines, head, rows_hash="d" * 64)
+    assert len(bad) == 1 and "signed tag" in bad[0], bad
 
 
 @pytest.mark.linux_only      # the release gate runs on ubuntu-24.04 (release.yml), like the real-ssh test above

@@ -266,7 +266,14 @@ def tag_signature_problems(root: Path, tag: str, signers: str, sha: str, run=sub
     name = next((ln[4:].strip() for ln in head.splitlines() if ln.startswith("tag ")), "")
     if body.returncode != 0 or name != tag:
         return [f"sign-off: the signed tag object is named {name[:40]!r}, not {tag}; refused"]
-    m = re.search(r"^Rows hash: ([0-9a-f]{64})[ \t]*$", msg, re.M | re.I)  # same rule as release.yml's grep
+    # only the payload verify-tag authenticated counts: git splits at the LAST signature start line, and text after
+    # the END line is not covered by the signature (PR #1643 council blocker), so the block must end the object
+    starts = [m.start() for m in re.finditer(r"^-----BEGIN (?:PGP SIGNATURE|PGP MESSAGE|SIGNED MESSAGE|SSH SIGNATURE)-----$",
+                                             msg, re.M)]
+    payload, sig = (msg[:starts[-1]], msg[starts[-1]:]) if starts else ("", "")
+    if not re.fullmatch(r"-----BEGIN SSH SIGNATURE-----\n[A-Za-z0-9+/=\n]*-----END SSH SIGNATURE-----\n?", sig):
+        return [f"sign-off: the signed tag {tag} has text outside its signed part (after the signature); refused"]
+    m = re.search(r"^Rows hash: ([0-9a-f]{64})[ \t]*$", payload, re.M | re.I)  # same rule as release.yml's grep
     signed = m.group(1).lower() if m else ""
     if rows_hash is not None and signed != rows_hash.strip().lower():
         return [f"sign-off: the rows hash in the signed tag {tag} ({signed[:12] or 'none'}) differs from the one "
