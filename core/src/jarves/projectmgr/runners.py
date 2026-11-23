@@ -103,6 +103,20 @@ class Runner:
             check_flags(spec.argv)
         except ValueError as e:
             return Result(error=str(e))
+        if not check_argv:
+            return self._spawn(spec, cwd, timeout, on_start, cancel)
+        # #1592: with check_argv the agent may run the check command, which executes worktree code; see gitops.
+        try:
+            files = gitops.guarded_files(cwd)
+        except (gitops.GitError, OSError) as e:
+            return Result(error=f"refused: the shared git config cannot be guarded ({e})")
+        with gitops.config_guard(files) as guard:
+            r = self._spawn(spec, cwd, timeout, on_start, cancel)
+        if guard["tampered"]:
+            r.ok, r.error = False, f"{self.name} run {gitops.TAMPERED} {guard.get('error', '')}".strip()
+        return r
+
+    def _spawn(self, spec: Spec, cwd: str, timeout: float, on_start, cancel: threading.Event | None) -> Result:
         try:
             p = subprocess.Popen(spec.argv, cwd=cwd, stdin=subprocess.PIPE if spec.stdin is not None else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=spec.env,

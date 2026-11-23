@@ -9,8 +9,10 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
@@ -250,19 +252,111 @@ def fast_forward(integration_wt: Path, branch: str) -> None:
     git(integration_wt, "merge", "--ff-only", branch)
 
 
+# #1592: a check command (run by JARVES, or by the agent through its `Bash(<check>:*)` rule) executes worktree code
+# as the owner's user, and that code can write the SHARED git config (a `filter.<n>.clean` entry runs on the owner's
+# next `git add`). No permission rule stops executed code, so each such run is wrapped in `config_guard`: the shared
+# `<common>/config` and the worktree's `.git` pointer are read when the run starts and, if either changed when it
+# ends, put back (the rejected text is kept in `<file>.jarves-rejected`) and the run fails. Overlapping runs on one
+# repository share the snapshot taken by the first, so a later run never adopts an entry an earlier run planted.
+# Limits: only these two files (not ~/.gitconfig or include targets); a change undone before the run ends is not seen.
+_GUARDS: dict[str, dict] = {}
+_GUARDS_LOCK = threading.Lock()
+TAMPERED = "changed the shared git config; the change was undone"
+
+
+def guarded_files(wt: str | Path) -> list[Path]:
+    """The worktree's `.git` pointer (when it is a file) and the shared config it leads to, read from disk without
+    running git. Raises GitError/OSError when `wt` is not a git worktree: the caller refuses the run."""
+    dot = Path(wt) / ".git"
+    files = [dot / "config"]
+    if not dot.is_dir():
+        text = dot.read_text(encoding="utf-8").strip()
+        if not text.startswith("gitdir:"):
+            raise GitError(f"{dot} is not a git pointer")
+        gd = Path(wt) / text[7:].strip()                 # an absolute gitdir replaces the worktree part
+        common = gd / (gd / "commondir").read_text(encoding="utf-8").strip() if (gd / "commondir").is_file() else gd
+        files = [dot, common / "config"]
+    if not files[-1].is_file():
+        raise GitError(f"no shared git config found for {wt}")
+    return files
+
+
+def _read(path: str) -> bytes | None:
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def _restore(path: str, data: bytes | None, now: bytes | None) -> None:
+    """Put `data` back at `path` atomically (unique temp file + os.replace), then keep the rejected text beside it."""
+    if data is None:
+        os.remove(path)
+    else:
+        fd, tmp = tempfile.mkstemp(prefix=".jarves-", dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        except OSError:
+            os.unlink(tmp)
+            raise
+    if now is not None:
+        with open(path + ".jarves-rejected", "wb") as f:
+            f.write(now)
+
+
+@contextmanager
+def config_guard(files: list[Path]):
+    """Guards `guarded_files(wt)`. Yields a dict whose "tampered" turns True when one of them changed during the run
+    (see #1592 above); "error" says why a changed file could not be put back."""
+    keys = [os.path.realpath(str(p)) for p in files]   # the real file: a symlinked config stays linked
+    mark: dict = {"tampered": False}
+    with _GUARDS_LOCK:
+        for k in keys:
+            g = _GUARDS.setdefault(k, {"data": _read(k), "marks": []})
+            g["marks"].append(mark)
+    try:
+        yield mark
+    finally:
+        with _GUARDS_LOCK:
+            for k in keys:
+                g = _GUARDS[k]
+                try:
+                    now = _read(k)
+                    if now != g["data"]:
+                        for m in g["marks"]:             # every run active on this file is suspect, not only this one
+                            m["tampered"] = True
+                        _restore(k, g["data"], now)
+                except OSError as e:                     # e.g. the file was replaced by a folder: still a failure
+                    mark.update(tampered=True, error=f"{k} could not be restored: {e}")
+                g["marks"].remove(mark)
+                if not g["marks"]:
+                    del _GUARDS[k]
+
+
 def run_check(wt: Path, argv: list[str], timeout: float = 900, env_keep: list[str] | None = None) -> tuple[bool, str]:
-    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree.
-    env_keep: extra variable names the owner allowed for this command (a release may need a token)."""
+    """The project's check command, run by JARVES (never by the agent): shell=False, allow-listed env, in the worktree,
+    inside `config_guard` (#1592). env_keep: extra variable names the owner allowed for this command."""
     if not argv:
         return True, ""
     extra = {k: os.environ[k] for k in (env_keep or []) if k in os.environ}
     try:
-        p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout, creationflags=_NOWIN,
-                           env=child_env(extra), encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL)
+        files = guarded_files(wt)
+    except (GitError, OSError) as e:
+        return False, f"check refused: the shared git config cannot be guarded ({e})"
+    try:
+        with config_guard(files) as guard:
+            p = subprocess.run(argv, cwd=str(wt), capture_output=True, text=True, timeout=timeout,
+                               creationflags=_NOWIN, env=child_env(extra), encoding="utf-8", errors="replace",
+                               stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        return False, "check timed out"
+        return False, "check timed out" + (f"; it {TAMPERED}" if guard["tampered"] else "")
     except OSError as e:
         return False, f"check could not start: {e}"
+    if guard["tampered"]:
+        return False, f"check {TAMPERED} {guard.get('error', '')}".strip()
     out = ((p.stdout or "") + (p.stderr or "")).strip()
     return p.returncode == 0, re.sub(r"\s+", " ", out[-600:])
 
