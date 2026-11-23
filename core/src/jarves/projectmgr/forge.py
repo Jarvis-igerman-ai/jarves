@@ -76,8 +76,9 @@ def _tls_pins(path: str) -> list[str]:
     """The pinned push reads no system config (GIT_CONFIG_NOSYSTEM), which also drops Git for Windows' own
     `http.sslBackend` (schannel: the Windows certificate store; openssl: its bundled `http.sslCAInfo`). Only that value
     is carried over, and only when it is schannel or openssl; neither can switch verification off. With openssl the
-    system `http.sslCAInfo` comes back too (review R2), but only an existing file inside the git install itself
-    (`git --exec-path`, two levels up: `<Git>/mingw64`); any other CA path is dropped and verification fails closed.
+    system `http.sslCAInfo` comes back too (review R2), but only an existing file under the grandparent of
+    `git --exec-path` (Git for Windows: `<Git>/mingw64`; Linux: `/usr`, a root-owned tree like the system config it
+    comes from); any other CA path is dropped and verification fails closed.
     No value (MSYS2, Cygwin, most Linux git): no pin."""
     def system(key: str) -> str:
         return gitops.git(path, "config", "--system", "--get", key, check=False).stdout.strip()
@@ -146,6 +147,8 @@ def push_branch(path: str, branch: str, slug: str) -> None:
     with tempfile.TemporaryDirectory(prefix="jarves-push-") as d:
         repo, empty = Path(d) / "r.git", Path(d) / "empty.gitconfig"
         empty.write_bytes(b"")
+        # gitops.child_env's ENV_KEEP does not list the gh variables, so this call alone adds them: the gh credential
+        # helper needs the owner's token/host/config; no other git or agent call receives them.
         env = {"GIT_CONFIG_GLOBAL": str(empty), "GIT_CONFIG_NOSYSTEM": "1",
                **{k: os.environ[k] for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR") if os.environ.get(k)}}
         gitops.git(d, "init", "-q", "--bare", f"--object-format={fmt}", str(repo), ident=False, env=env)
