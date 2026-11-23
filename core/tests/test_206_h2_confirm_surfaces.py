@@ -2,6 +2,8 @@
 
 Each test injects a reword (the model's edit, which re-proposes the item) between what the surface showed and the
 confirm. Before the fix every surface ran the unguarded confirm and the NEW words ended up confirmed unseen."""
+import pytest
+
 from jarves import cli, dashboard, preferences as prefs_mod
 from jarves.config import Config
 from jarves.userdata import open_db
@@ -128,5 +130,29 @@ async def test_a_preference_removed_between_read_and_confirm_answers_not_found(h
     ctx = dashboard.Ctx(home, Config())
     try:
         assert prefs_mod.api_pref_op(ctx, None, {"op": "confirm", "id": pid, "text": OLD})[0] == 404
+    finally:
+        ctx.close()
+
+
+async def test_an_over_long_legacy_row_is_refused_with_a_way_out_not_a_dead_conflict(home):
+    p, pid = _proposed(home)
+    long = "x " * prefs_mod.MAX_TEXT                                   # longer than any write allows today
+    p.db.x("UPDATE learned_prefs SET text=? WHERE id=?", (long, pid))
+    asked: list = []
+    r = await registry(prefs=p, answer=True, asked=asked).call("pref_confirm", {"id": pid}, origin="model")
+    assert len(asked[0][1]["details"]["preference"]) == prefs_mod.MAX_TEXT     # the popup shows only part of it
+    assert not r.ok and r.code == "PREF_TOO_LONG" and "shorten" in r.message and p.for_prompt() == []
+
+
+def test_dashboard_only_maps_a_confirm_keyerror_to_404(home, monkeypatch):
+    p, pid = _proposed(home)
+
+    def bug(self, i, **kw):
+        raise KeyError("unrelated")
+    monkeypatch.setattr(prefs_mod.Preferences, "decline", bug)
+    ctx = dashboard.Ctx(home, Config())
+    try:
+        with pytest.raises(KeyError):                                 # a real bug is not hidden as "no such preference"
+            prefs_mod.api_pref_op(ctx, None, {"op": "decline", "id": pid})
     finally:
         ctx.close()
