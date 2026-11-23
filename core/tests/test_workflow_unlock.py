@@ -212,10 +212,11 @@ class UnlockTests(unittest.TestCase):
         shown = unlock.issue(self.home, owner_mark=mark)
         wrong = "0000" if shown != "0000" else "1111"
         owner = self.owner_login(mark)                                 # the window 'jarvis workflow open' started
-        for _ in range(2):                                             # the token holder: 3 tries in A, 2 in B
+        for i in range(2):                                             # the token holder: 3 tries in A, 2 in B
             self.cookie = ""
             self.login()
-            [self.wrong_try(wrong) for _ in range(3 if _ == 0 else 2)]
+            for _ in range(3 if i == 0 else 2):
+                self.wrong_try(wrong)
         self.assertTrue((self.home / unlock.FILE).exists())           # the marked code survives the backstop
         self.cookie = ""
         self.login()                                                   # a third token window gets no 6th guess
@@ -235,10 +236,47 @@ class UnlockTests(unittest.TestCase):
         for i in range(2):
             self.cookie = ""
             self.login()
-            [self.wrong_try(wrong) for _ in range(3 if i == 0 else 2)]
+            for _ in range(3 if i == 0 else 2):
+                self.wrong_try(wrong)
         self.assertFalse((self.home / unlock.FILE).exists())          # owner done + total used: cancelled (bound 8)
         self.cookie = owner
         self.assertEqual(self.wrong_try(shown), (403, None))
+
+    def test_marked_code_without_an_owner_login_closes_at_the_backstop_1416(self):
+        shown = unlock.issue(self.home, owner_mark=unlock.new_owner_mark())  # browser never opened the marked link
+        wrong = "0000" if shown != "0000" else "1111"
+        for i in range(2):                                             # 3 + 2 wrong tries from two token windows
+            self.cookie = ""
+            self.login()
+            for _ in range(3 if i == 0 else 2):
+                self.assertEqual(self.wrong_try(wrong), (403, None))
+        self.assertEqual(self.server.owner_window, ("", ""))
+        self.cookie = ""
+        self.login()
+        with patch.object(unlock, "consume", wraps=unlock.consume) as consume:
+            self.assertEqual(self.wrong_try(shown), (403, "code_closed"))  # no 6th guess, even a right one
+        consume.assert_not_called()
+        self.assertEqual(self.server.unlock_wrong.total, 5)
+        self.assertTrue((self.home / unlock.FILE).exists())           # kept for a late owner login until it expires
+
+    def test_exhausted_owner_window_points_only_to_a_new_code_1416(self):
+        mark = unlock.new_owner_mark()
+        shown = unlock.issue(self.home, owner_mark=mark)
+        wrong = "0000" if shown != "0000" else "1111"
+        self.owner_login(mark)
+        for _ in range(3):
+            self.wrong_try(wrong)
+        self.server.unlock_attempts.clear()
+        status, _, data = self.request("/api/unlock", {"code": shown})
+        self.assertEqual((status, data["reason"]), (403, "session_exhausted"))
+        self.assertNotIn("another window", data["error"])             # other windows share tries that may be closed
+        self.assertIn("jarvis workflow unlock", data["error"])
+        self.cookie = ""
+        self.login()                                                   # a token window keeps the old wording
+        for _ in range(3):
+            self.wrong_try(wrong)
+        self.server.unlock_attempts.clear()
+        self.assertIn("another window", self.request("/api/unlock", {"code": shown})[2]["error"])
 
     def test_owner_mark_is_single_use_and_bound_to_its_code_1416(self):
         mark = unlock.new_owner_mark()

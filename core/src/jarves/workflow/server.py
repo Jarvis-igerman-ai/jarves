@@ -503,8 +503,10 @@ class Handler(BaseHTTPRequestHandler):
                                  "locked": True, "reason": "code_closed"})
                 return
             if wrong.by_session.get(session, 0) >= UNLOCK_WRONG_PER_SESSION:
-                # No further guess from this session; the code stays live for the owner's other window.
-                self._json(403, {"error": "too many wrong codes in this window; use the code in another window, or run "
+                # No further guess from this session; the code stays live for the owner's other window. The owner's
+                # window gets no "another window" advice (#1416 R3): the other windows share tries that may be closed.
+                where = "run" if owner else "use the code in another window, or run"
+                self._json(403, {"error": f"too many wrong codes in this window; {where} "
                                  "'jarvis workflow unlock' in your own terminal for a new code", "locked": True,
                                  "reason": "session_exhausted"})
                 return
