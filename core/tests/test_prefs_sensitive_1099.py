@@ -82,3 +82,19 @@ def test_empty_input_is_not_sensitive(value):
 def test_non_string_input_fails_closed(value):
     # review R3: a non-str value cannot be checked, so it is treated as sensitive (refused), never as safe
     assert looks_sensitive(value) is True
+
+
+def test_devmanager_draft_naming_a_credential_is_refused_with_the_shared_message(home):
+    # review 2 R2: dev drafts share this check, so naming a credential concept is refused on the safe side (the
+    # narrower dev-only check is a follow-up question); pin the user-visible message and that nothing is stored.
+    from jarves import devmanager
+    from jarves.diag import db as diag_db
+    from jarves.store import Store
+    st = Store(home / "store.db")
+    diag_db.ensure(st)
+    for title in ("add an api key field to settings", "rotate the access token on login"):
+        with pytest.raises(ValueError, match="this looks sensitive"):
+            devmanager.suggest(st, title)
+    assert devmanager.listing(st) == []
+    assert devmanager.suggest(st, "use fewer tokens in long answers")["status"] == "draft"
+    st.close()

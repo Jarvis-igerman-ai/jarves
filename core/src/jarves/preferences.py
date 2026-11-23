@@ -84,6 +84,8 @@ _CRED_WORD = re.compile(
 # camelCase identifiers ~40%), or has one separator-free 20+ char segment with nearly all distinct characters
 # (Shannon entropy within _KEYISH_ENTROPY_GAP bits of log2 of its length). Separators (_ + / -) are skipped, so paths
 # and slugs are judged by their letters and digits only.
+# Known limit: a single-case run (lower-case hex such as a 40-char git SHA, or all-letter keys) is NOT caught here,
+# so git SHAs pass; only the logs.has_secret vendor prefixes catch such keys. This is not full hex-secret coverage.
 _KEYISH_RUN = re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{24,}={0,2}")
 _KEYISH_SWITCH = 0.5
 _KEYISH_ENTROPY_GAP = 0.45
