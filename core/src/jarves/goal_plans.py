@@ -67,6 +67,19 @@ def _short(text: object, n: int = EVIDENCE_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+# The fixed reasons a step error can hold (no tool or user text): privacy.scrub_at_rest keeps exactly these (#1557).
+REASON_TOOL_OFF = "tool not available (switched off or removed)"
+REASON_TAINTED = "text written by others was read earlier in this plan: resume to continue"
+REASON_ARGS_LONG = "the arguments are too long to show in full for your approval; shorten the step"
+REASON_NOT_APPROVED = "the owner did not approve this step"
+REASON_NO_APPROVAL = "no approval was given for this step (no answer in time or nowhere to ask)"
+REASON_TIMED_OUT = "the step timed out"
+REASON_MAY_HAVE_RUN = "the step timed out: it may already have happened"
+REASON_CRASHED = "the step failed unexpectedly"
+STEP_REASONS = frozenset((REASON_TOOL_OFF, REASON_TAINTED, REASON_ARGS_LONG, REASON_NOT_APPROVED, REASON_NO_APPROVAL,
+                          REASON_TIMED_OUT, REASON_MAY_HAVE_RUN, REASON_CRASHED))
+
+
 def _at_rest(text: str) -> str:
     """#206 F13: tool output (evidence, error text) is stored on disk; in privacy mode keep the status and code only."""
     return "" if logs.privacy() else text
@@ -462,15 +475,15 @@ class PlanRunner:
                     return st.get(pid)
             tool = self.registry.get(step["tool"])
             if tool is None:
-                self._block(pid, step, "tool not available (switched off or removed)")
+                self._block(pid, step, REASON_TOOL_OFF)
                 return st.get(pid)
             consequential = tool.permission != "read"
             if consequential and p["tainted"]:
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, REASON_TAINTED)
                 return st.get(pid)
             if consequential and not tool.confirm and tool.permission != "destructive":
                 if _shown_len(step["args"]) > STEP_SHOW_CHARS:         # checked on the ESCAPED text: it can be 6x longer
-                    self._block(pid, step, "the arguments are too long to show in full for your approval; shorten the step")
+                    self._block(pid, step, REASON_ARGS_LONG)
                     return st.get(pid)
                 ok = await self.registry.ask(
                     f"Plan '{_show_text(p['title'], MAX_TITLE)}', step {step['idx'] + 1}/{len(st.steps(pid))}: {_show_text(step['tool'], 80)} "
@@ -479,7 +492,7 @@ class PlanRunner:
                     why=(_show_text(step["why"], MAX_WHY) or "A step of a plan you approved.")
                     + (" It was tried before and may already have happened: check first." if step["attempts"] else ""))
                 if not ok:
-                    self._block(pid, step, "the owner did not approve this step")
+                    self._block(pid, step, REASON_NOT_APPROVED)
                     return st.get(pid)
                 p = st._plan(pid)
                 if p["state"] != "running":                   # cancelled / paused while the popup was open
@@ -495,14 +508,14 @@ class PlanRunner:
                 res = await asyncio.wait_for(self.registry.call(step["tool"], step["args"], origin="model"),
                                              min(remaining, tool.timeout_s + STEP_GRACE_S))
             except (asyncio.TimeoutError, TimeoutError):
-                self._fail(pid, step, "the step timed out" + (": it may already have happened" if consequential else ""), t0,
+                self._fail(pid, step, REASON_MAY_HAVE_RUN if consequential else REASON_TIMED_OUT, t0,
                            status="unknown" if consequential else "failed")
                 return st.get(pid)
             except asyncio.CancelledError:
                 raise                                          # shutdown: the step stays 'running' for recover()
             except Exception:
                 logs.error("goals", "PLAN_STEP_CRASH", "plan step raised", tool=step["tool"], exc=True)
-                self._fail(pid, step, "the step failed unexpectedly", t0)
+                self._fail(pid, step, REASON_CRASHED, t0)
                 return st.get(pid)
             ran = self.clock() - t0
             st.db.x("UPDATE goal_plans SET spent_s=spent_s+? WHERE id=?", (max(0.0, ran), pid))
@@ -515,16 +528,16 @@ class PlanRunner:
                 continue
             if res.code == "TOOL_UNTRUSTED_TURN":
                 st.db.x("UPDATE goal_plans SET tainted=1 WHERE id=?", (pid,))
-                self._block(pid, step, "text written by others was read earlier in this plan: resume to continue")
+                self._block(pid, step, REASON_TAINTED)
                 return st.get(pid)
             if res.code in ("NOT_APPROVED", "APPROVAL_REFUSED", "TOOL_NOT_CONFIRMED", "TOOL_DECLINED"):
-                self._block(pid, step, "the owner did not approve this step")
+                self._block(pid, step, REASON_NOT_APPROVED)
                 return st.get(pid)
             if res.code in ("TOOL_APPROVAL_TIMEOUT", "TOOL_APPROVAL_UNAVAILABLE"):     # V5 sec F8: nothing ran; retry after resume
-                self._block(pid, step, "no approval was given for this step (no answer in time or nowhere to ask)")
+                self._block(pid, step, REASON_NO_APPROVAL)
                 return st.get(pid)
             if consequential and res.code == "TOOL_TIMEOUT":          # #385: it may have run: PC-only 'unknown', not a phone-retryable 'failed'
-                self._fail(pid, step, "the step timed out: it may already have happened", t0, evidence=res.message, status="unknown")
+                self._fail(pid, step, REASON_MAY_HAVE_RUN, t0, evidence=res.message, status="unknown")
                 return st.get(pid)
             msg = _at_rest(_short(res.message, 120))
             code = str(res.code or "") or "failed"                  # never a stored "None"

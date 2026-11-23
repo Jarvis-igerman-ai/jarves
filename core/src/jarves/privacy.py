@@ -38,14 +38,32 @@ def state(ctx) -> dict:
             "label_he": "פרטיות פועלת: מה שנאמר לא נשמר" if on else "פרטיות כבויה: הטקסט המלא נשמר (לפיתוח)",
             "label_en": "Privacy ON: what is said is not kept" if on else "Privacy OFF: full text is kept (development)",
             "explain_en": ("New log lines and conversation history keep only lengths and timings, never the words. "
-                           "Older entries stay as they were until you mask them." if on else
+                           "Older phone answers and plan step details were cleared when it was switched on; older log lines and "
+                           "conversation history stay until you mask them." if on else
                            "Everything you and JARVES say, and typed chat, is written in full to the logs and the "
                            "conversation history on this computer. Turn privacy on for daily use."),
-            "explain_he": ("מעכשיו נשמרים רק אורך ותזמון, לא המילים. מה שנשמר קודם נשאר עד שמסתירים אותו."
+            "explain_he": ("מעכשיו נשמרים רק אורך ותזמון, לא המילים. תשובות קודמות בטלפון ופרטי צעדי תוכניות נמחקו בהפעלה; "
+                           "יומנים והיסטוריית שיחות קודמים נשארים עד שמסתירים אותם."
                            if on else "כל מה שנאמר ונכתב נשמר במלואו ביומנים ובהיסטוריה במחשב הזה."),
             "applies": "now",
+            # #1557: switching on also scrubbed older text; say so when a database could not be scrubbed
+            **_scrub_note(getattr(ctx, "_scrub_failed", None) if on else None),
             # SW-V4 B: the plain state line shown by the dashboard banner and `jarvis status` (empty when on)
             "banner_en": "" if on else logs.PRIVACY_OFF_NOTE, "banner_he": "" if on else logs.PRIVACY_OFF_NOTE_HE}
+
+
+def _scrub_note(failed: list | None) -> dict:
+    if not failed:
+        return {"scrub_note_en": "", "scrub_note_he": ""}
+    return {"scrub_note_en": "Some text kept before privacy was on could not be cleared yet (it was in use). "
+                             "Turn privacy off and on again to retry.",
+            "scrub_note_he": "חלק מהטקסט שנשמר לפני שהפרטיות הופעלה עוד לא נמחק (הוא היה בשימוש). כבו והפעילו פרטיות שוב כדי לנסות שוב."}
+
+
+def _scrub(ctx) -> dict:
+    out = scrub_at_rest(ctx.home)
+    ctx._scrub_failed = [e["db"] for e in out["errors"]]          # state() keeps saying so until a clean scrub
+    return out
 
 
 def _window_until(home: Path) -> float:
@@ -70,7 +88,8 @@ def set_full_text(ctx, on: bool) -> dict:
         logs.write_privacy(ctx.home / "logs", True)
         ctx.cfg.log.privacy = True
         logs.info("privacy", "PRIVACY_FULL_TEXT_OFF", "full text switched off by the owner", enabled=False)
-        return {**state(ctx), "scrubbed": scrub_at_rest(ctx.home)}
+        scrubbed = _scrub(ctx)
+        return {**state(ctx), "scrubbed": scrubbed}
     return state(ctx)
 
 
@@ -84,19 +103,13 @@ def set_privacy(ctx, on: bool) -> dict:
     except Exception as e:                          # unreadable config.toml: the switch still works until restart
         saved, err = False, str(e)[:200]
     logs.info("privacy", "PRIVACY_SET", "privacy switched from the dashboard", on=bool(on), saved=saved)
-    extra = {"scrubbed": scrub_at_rest(ctx.home)} if on else {}
+    extra = {"scrubbed": _scrub(ctx)} if on else {}
     return {**state(ctx), "saved_in_config": saved, "config_error": err, **extra}
 
 
 # #1557: text written before privacy was on is rewritten to what privacy mode writes now (goal_plans._at_rest).
 STEP_TEXT_NOT_KEPT = "details not kept (privacy mode)"
 CHECKPOINT_WAIT_MS = 2000                       # how long the WAL checkpoint waits for a reader (the Core) to finish
-_STEP_REASONS = frozenset((                     # the fixed sentences goal_plans writes as a step error (no user text)
-    "tool not available (switched off or removed)", "the owner did not approve this step",
-    "text written by others was read earlier in this plan: resume to continue",
-    "the arguments are too long to show in full for your approval; shorten the step",
-    "no approval was given for this step (no answer in time or nowhere to ask)",
-    "the step timed out", "the step timed out: it may already have happened", "the step failed unexpectedly"))
 _CODE = re.compile(r"([A-Z][A-Z0-9_]{0,39}|failed)(?:: .*)?", re.S)     # a tool-result code, then its tool text
 _STEP_NOTE = re.compile(r"(step \d+: )(.*)", re.S)
 _RESULT = re.compile(r"(\d+/\d+ steps done\.) .*", re.S)                   # _finish: the count, then step evidence
@@ -104,15 +117,22 @@ _RESULT = re.compile(r"(\d+/\d+ steps done\.) .*", re.S)                   # _fi
 
 def _step_text(text: str) -> str:
     """A step error as privacy mode keeps it: a fixed reason, the code only, or a fixed note instead of other text."""
-    if not text or text in _STEP_REASONS:
+    from .goal_plans import STEP_REASONS
+    if not text or text in STEP_REASONS:
         return text
     m = _CODE.fullmatch(text)
     return m.group(1) if m else STEP_TEXT_NOT_KEPT
 
 
+def _tables(cx: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in cx.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
 def _scrub_ledger(cx: sqlite3.Connection) -> int:
     from .mobile import chat_at_rest, goal_at_rest
     n = 0
+    if "ledger" not in _tables(cx):                               # an older database without the table: nothing kept
+        return n
     for r in cx.execute("SELECT rowid, kind, body FROM ledger WHERE kind IN ('chat', 'goal')").fetchall():
         try:
             body = json.loads(r[2])
@@ -127,13 +147,16 @@ def _scrub_ledger(cx: sqlite3.Connection) -> int:
 
 def _scrub_plans(cx: sqlite3.Connection) -> tuple[int, int]:
     steps = plans = 0
+    have = _tables(cx)                                            # each table on its own: one may predate the other
     for sid, evidence, error in cx.execute(
-            "SELECT id, COALESCE(evidence, ''), COALESCE(error, '') FROM goal_plan_steps").fetchall():
+            "SELECT id, COALESCE(evidence, ''), COALESCE(error, '') FROM goal_plan_steps").fetchall() \
+            if "goal_plan_steps" in have else ():
         err = _step_text(error)
         if evidence or err != error:
             steps += cx.execute("UPDATE goal_plan_steps SET evidence = '', error = ? WHERE id = ?", (err, sid)).rowcount
     for pid, note, result in cx.execute(
-            "SELECT id, COALESCE(note, ''), COALESCE(result, '') FROM goal_plans").fetchall():
+            "SELECT id, COALESCE(note, ''), COALESCE(result, '') FROM goal_plans").fetchall() \
+            if "goal_plans" in have else ():
         m = _STEP_NOTE.fullmatch(note)
         new_note = m.group(1) + _step_text(m.group(2)) if m else note
         m = _RESULT.fullmatch(result)
@@ -146,8 +169,9 @@ def _scrub_plans(cx: sqlite3.Connection) -> tuple[int, int]:
 
 def scrub_at_rest(home: Path) -> dict:
     """#1557: rewrite rows stored before privacy was switched on to what privacy mode stores now: the phone command
-    ledger (chat and goal answers) and goal plan step evidence/error text. One transaction per database; a database
-    that cannot be scrubbed is reported (and logged) while the other is still done. Missing databases are not made."""
+    ledger (chat and goal answers) and goal plan step evidence/error text. One transaction per database, then VACUUM
+    (rows deleted earlier can still hold their words in free pages) and a WAL checkpoint. A database that cannot be
+    scrubbed is reported (and logged) while the other is still done. Missing databases are not made."""
     out: dict = {"ledger": 0, "plan_steps": 0, "plans": 0, "errors": []}
     for name in ("continuity.db", "memory.db"):
         path = Path(home) / name
@@ -168,6 +192,7 @@ def scrub_at_rest(home: Path) -> dict:
                     cx.execute("ROLLBACK")
                     raise
                 cx.execute(f"PRAGMA busy_timeout={int(CHECKPOINT_WAIT_MS)}")
+                cx.execute("VACUUM")                              # free pages of rows deleted before (LEDGER_TTL_S)
                 busy, wal, done = cx.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()  # and the WAL does not either
             finally:
                 cx.close()
@@ -175,10 +200,6 @@ def scrub_at_rest(home: Path) -> dict:
                 failed = "CHECKPOINT_BUSY"
             else:
                 continue
-        except sqlite3.OperationalError as e:
-            if "no such table" in str(e):                         # an older database without the table: nothing kept
-                continue
-            failed = type(e).__name__
         except Exception as e:                                    # any other failure: reported, the switch still holds
             failed = type(e).__name__
         out["errors"].append({"db": name, "error": failed})
@@ -387,6 +408,8 @@ def cmd_privacy(a, cfg, home) -> int:
         st = state(ctx)
     if st["privacy"]:
         print(clilang.fmt("פרטיות פועלת: מה שנאמר לא נשמר.", "Privacy is on: what is said is not kept."))
+        if st["scrub_note_en"]:
+            print(clilang.fmt(st["scrub_note_he"], st["scrub_note_en"]))
     elif st["full_text_active"]:
         print(clilang.fmt(st["full_text_note_he"], st["full_text_note_en"]))
     else:

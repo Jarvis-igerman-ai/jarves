@@ -38,7 +38,10 @@ async function renderTopbar() {
   const banner = privacyState.privacy ? null : el("span", { class: "priv-banner small", role: "status", id: "privacyBanner" },
     tx(privacyState.full_text_active ? privacyState.full_text_note_he : privacyState.banner_he,
       privacyState.full_text_active ? privacyState.full_text_note_en : privacyState.banner_en));
-  bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), ...(banner ? [banner] : []), msg);
+  // #1557: switching on clears older text; the server keeps saying so here while a database could not be cleared
+  const scrub = privacyState.scrub_note_en ? el("span", { class: "priv-banner small", role: "status", id: "privacyScrubNote" },
+    tx(privacyState.scrub_note_he, privacyState.scrub_note_en)) : null;
+  bar.replaceChildren(el("span", { class: "priv" }, privacyButton(msg, true)), ...(banner ? [banner] : []), ...(scrub ? [scrub] : []), msg);
 }
 function privacyCard(p) {
   const msg = el("div", { class: "muted small" });

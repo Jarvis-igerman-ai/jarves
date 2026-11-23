@@ -37,7 +37,13 @@ def _seed(home):
     with sqlite3.connect(c.path) as cx:                                    # a malformed body is scrubbed too
         cx.execute("INSERT INTO ledger (device, cid, kind, status, body, ts) VALUES ('phone','c2','chat',200,?,?)",
                    ("not json: Dana", 1e12))
+    big = "Dana's old address is 9 Bialik St. " * 300                             # long: its pages go to the free list
+    c.store("phone", "old", "chat", 200, {"reply": big, "ok": True})
+    with sqlite3.connect(c.path) as cx:                                    # R1: purged before the switch (LEDGER_TTL_S)
+        cx.execute("DELETE FROM ledger WHERE cid = 'old'")
     db = open_db(home)
+    db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence) VALUES (9, 0, 'web', 'done', ?)", (big,))
+    db.x("DELETE FROM goal_plan_steps WHERE plan_id = 9")                       # a plan removed before the switch
     db.x("INSERT INTO goal_plans (id, title, state, note, created, updated) VALUES (1, 'plan', 'failed', ?, 0, 0)",
          ("step 2: CALL_FAILED: Dana did not answer",))
     db.x("INSERT INTO goal_plan_steps (plan_id, idx, tool, status, evidence, error) VALUES (1, 0, 'web', 'done', ?, '')",
@@ -114,10 +120,13 @@ def test_missing_databases_are_not_created(home):
 
 def test_no_old_words_stay_in_the_database_files(home):
     _seed(home)
+    assert all(b"Bialik" in (home / f).read_bytes() + (home / (f + "-wal")).read_bytes()
+               if (home / (f + "-wal")).exists() else b"Bialik" in (home / f).read_bytes()
+               for f in ("continuity.db", "memory.db"))                         # deleted rows: still in free space
     privacy.set_privacy(_ctx(home), True)
     for f in ("continuity.db", "continuity.db-wal", "memory.db", "memory.db-wal"):     # secure_delete + checkpoint
         p = home / f
-        assert not p.exists() or b"Dana" not in p.read_bytes(), f
+        assert not p.exists() or (b"Dana" not in p.read_bytes() and b"Bialik" not in p.read_bytes()), f
 
 
 def test_an_older_memory_db_without_the_plan_tables_is_not_an_error(home):
@@ -155,14 +164,34 @@ def test_a_blocked_checkpoint_is_reported(home, monkeypatch):
     assert r["scrubbed"]["errors"] == [{"db": "memory.db", "error": "CHECKPOINT_BUSY"}]
 
 
-def test_every_fixed_step_reason_is_kept():
-    """R4: the fixed sentences goal_plans writes as a step error stay; anything else that is not a code is replaced."""
-    import ast
-    from pathlib import Path
+def test_a_memory_db_with_steps_but_no_plans_table_still_scrubs_the_steps(home):
+    home.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(home / "memory.db") as cx:                              # R3: tables are checked one by one
+        cx.execute("CREATE TABLE goal_plan_steps (id INTEGER PRIMARY KEY, evidence TEXT, error TEXT)")
+        cx.execute("INSERT INTO goal_plan_steps (evidence, error) VALUES ('Dana', '')")
+    r = privacy.set_privacy(_ctx(home), True)
+    assert r["scrubbed"] == {"ledger": 0, "plan_steps": 1, "plans": 0, "errors": []} and "Dana" not in _dump(home)
+
+
+def test_a_failed_scrub_is_shown_until_a_clean_one(home, monkeypatch, capsys):
+    _seed(home)
+    ctx = _ctx(home)
+    assert privacy.set_privacy(ctx, True)["scrub_note_en"] == ""
+    monkeypatch.setattr(privacy, "_scrub_plans", lambda cx: 1 / 0)               # R4: the owner is told, EN and HE
+    r = privacy.set_privacy(ctx, True)
+    assert r["scrub_note_en"].startswith("Some text kept before privacy was on") and r["scrub_note_he"]
+    assert privacy.state(ctx)["scrub_note_en"] == r["scrub_note_en"]            # the top bar keeps showing it
+    capsys.readouterr()
+    assert privacy.cmd_privacy(SimpleNamespace(action="full-text", state="off"), ctx.cfg, home) == 0
+    assert "could not be cleared yet" in capsys.readouterr().out                # the CLI says it too
+    monkeypatch.undo()
+    assert privacy.set_privacy(ctx, True)["scrub_note_en"] == ""
+    assert privacy.state(ctx)["scrub_note_en"] == ""
+
+
+def test_fixed_step_reasons_stay_and_other_text_does_not():
     from jarves import goal_plans
-    tree = ast.parse(Path(goal_plans.__file__).read_text(encoding="utf-8"))
-    reasons = {a.args[2].value for a in ast.walk(tree) if isinstance(a, ast.Call) and isinstance(a.func, ast.Attribute)
-               and a.func.attr in ("_block", "_fail") and isinstance(a.args[2], ast.Constant)}
-    assert len(reasons) >= 6
-    for why in reasons | {"the step timed out", "the step timed out: it may already have happened"}:
+    for why in goal_plans.STEP_REASONS:
         assert privacy._step_text(why) == why
+    assert privacy._step_text("CALL_FAILED: Dana") == "CALL_FAILED"
+    assert privacy._step_text("Dana: not reachable") == privacy.STEP_TEXT_NOT_KEPT
