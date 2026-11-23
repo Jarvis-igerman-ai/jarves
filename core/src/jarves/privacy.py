@@ -88,24 +88,37 @@ def set_privacy(ctx, on: bool) -> dict:
     return {**state(ctx), "saved_in_config": saved, "config_error": err, **extra}
 
 
-# #1557: text written before privacy was on. "CODE: tool text" keeps the code, as privacy mode writes it (goal_plans)
-_CODE_THEN_TEXT = re.compile(r"((?:step \d+: )?[A-Za-z][A-Za-z0-9_]{0,39}): .*", re.S)
+# #1557: text written before privacy was on is rewritten to what privacy mode writes now (goal_plans._at_rest).
+STEP_TEXT_NOT_KEPT = "details not kept (privacy mode)"
+CHECKPOINT_WAIT_MS = 2000                       # how long the WAL checkpoint waits for a reader (the Core) to finish
+_STEP_REASONS = frozenset((                     # the fixed sentences goal_plans writes as a step error (no user text)
+    "tool not available (switched off or removed)", "the owner did not approve this step",
+    "text written by others was read earlier in this plan: resume to continue",
+    "the arguments are too long to show in full for your approval; shorten the step",
+    "no approval was given for this step (no answer in time or nowhere to ask)",
+    "the step timed out", "the step timed out: it may already have happened", "the step failed unexpectedly"))
+_CODE = re.compile(r"([A-Z][A-Z0-9_]{0,39}|failed)(?:: .*)?", re.S)     # a tool-result code, then its tool text
+_STEP_NOTE = re.compile(r"(step \d+: )(.*)", re.S)
+_RESULT = re.compile(r"(\d+/\d+ steps done\.) .*", re.S)                   # _finish: the count, then step evidence
 
 
-def _code_only(text: str) -> str:
-    m = _CODE_THEN_TEXT.fullmatch(text)
-    return m.group(1) if m else text
+def _step_text(text: str) -> str:
+    """A step error as privacy mode keeps it: a fixed reason, the code only, or a fixed note instead of other text."""
+    if not text or text in _STEP_REASONS:
+        return text
+    m = _CODE.fullmatch(text)
+    return m.group(1) if m else STEP_TEXT_NOT_KEPT
 
 
 def _scrub_ledger(cx: sqlite3.Connection) -> int:
-    from .mobile import _goal_at_rest, chat_at_rest
+    from .mobile import chat_at_rest, goal_at_rest
     n = 0
     for r in cx.execute("SELECT rowid, kind, body FROM ledger WHERE kind IN ('chat', 'goal')").fetchall():
         try:
             body = json.loads(r[2])
         except (TypeError, ValueError):
             body = None
-        new = chat_at_rest(body) if r[1] == "chat" else _goal_at_rest(body if isinstance(body, dict) else {"error": ""})
+        new = chat_at_rest(body) if r[1] == "chat" else goal_at_rest(body if isinstance(body, dict) else {"error": ""})
         if body != new:
             cx.execute("UPDATE ledger SET body = ? WHERE rowid = ?", (json.dumps(new), r[0]))
             n += 1
@@ -114,15 +127,20 @@ def _scrub_ledger(cx: sqlite3.Connection) -> int:
 
 def _scrub_plans(cx: sqlite3.Connection) -> tuple[int, int]:
     steps = plans = 0
-    for r in cx.execute("SELECT id, evidence, error FROM goal_plan_steps WHERE evidence != '' OR error LIKE '%: %'"
-                        ).fetchall():
-        err = _code_only(r[2])
-        if r[1] or err != r[2]:
-            steps += cx.execute("UPDATE goal_plan_steps SET evidence = '', error = ? WHERE id = ?", (err, r[0])).rowcount
-    for r in cx.execute("SELECT id, note FROM goal_plans WHERE note LIKE 'step %: %: %'").fetchall():
-        note = _code_only(r[1])
-        if note != r[1]:
-            plans += cx.execute("UPDATE goal_plans SET note = ? WHERE id = ?", (note, r[0])).rowcount
+    for sid, evidence, error in cx.execute(
+            "SELECT id, COALESCE(evidence, ''), COALESCE(error, '') FROM goal_plan_steps").fetchall():
+        err = _step_text(error)
+        if evidence or err != error:
+            steps += cx.execute("UPDATE goal_plan_steps SET evidence = '', error = ? WHERE id = ?", (err, sid)).rowcount
+    for pid, note, result in cx.execute(
+            "SELECT id, COALESCE(note, ''), COALESCE(result, '') FROM goal_plans").fetchall():
+        m = _STEP_NOTE.fullmatch(note)
+        new_note = m.group(1) + _step_text(m.group(2)) if m else note
+        m = _RESULT.fullmatch(result)
+        new_result = m.group(1) if m else result
+        if (new_note, new_result) != (note, result):
+            plans += cx.execute("UPDATE goal_plans SET note = ?, result = ? WHERE id = ?",
+                                (new_note, new_result, pid)).rowcount
     return steps, plans
 
 
@@ -149,14 +167,22 @@ def scrub_at_rest(home: Path) -> dict:
                 except BaseException:
                     cx.execute("ROLLBACK")
                     raise
-                cx.execute("PRAGMA wal_checkpoint(TRUNCATE)")    # and the write-ahead log does not either
+                cx.execute(f"PRAGMA busy_timeout={int(CHECKPOINT_WAIT_MS)}")
+                busy, wal, done = cx.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()  # and the WAL does not either
             finally:
                 cx.close()
-        except sqlite3.Error as e:
-            if "no such table" not in str(e):                     # an older database without the table: nothing kept
-                out["errors"].append({"db": name, "error": type(e).__name__})
-                logs.warn("privacy", "PRIVACY_SCRUB_FAILED", "older text could not be scrubbed", file=name,
-                          error_type=type(e).__name__)
+            if busy or wal != done:                               # a reader kept old page images in the WAL/db file
+                failed = "CHECKPOINT_BUSY"
+            else:
+                continue
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):                         # an older database without the table: nothing kept
+                continue
+            failed = type(e).__name__
+        except Exception as e:                                    # any other failure: reported, the switch still holds
+            failed = type(e).__name__
+        out["errors"].append({"db": name, "error": failed})
+        logs.warn("privacy", "PRIVACY_SCRUB_FAILED", "older text could not be scrubbed", file=name, error_type=failed)
     logs.info("privacy", "PRIVACY_SCRUBBED_AT_REST", "text stored before privacy was on scrubbed",
               count=out["ledger"] + out["plan_steps"] + out["plans"], failed=len(out["errors"]))
     return out

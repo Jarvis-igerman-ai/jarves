@@ -179,10 +179,10 @@ def test_f13_goal_ledger_copy_is_an_allow_list_not_the_whole_answer():
     """Review R3: only the reduced goal and a fixed error note are stored; any other key or error text stays off disk."""
     body = {"goal": {"id": 1, "title": "Run 5k", "status": "paused", "percent": 0,
                      "steps": [{"id": 3, "text": "week 1", "done": False}, "junk"]}, "note": "secret note"}
-    assert mobile._goal_at_rest(body) == {"goal": {"id": 1, "status": "paused", "percent": 0, "steps": [{"id": 3, "done": False}]}}
-    stored = mobile._goal_at_rest({"error": "bad status 'Run 5k'", "note": "secret note", "ok": False, "code": "BAD_STATUS"})
+    assert mobile.goal_at_rest(body) == {"goal": {"id": 1, "status": "paused", "percent": 0, "steps": [{"id": 3, "done": False}]}}
+    stored = mobile.goal_at_rest({"error": "bad status 'Run 5k'", "note": "secret note", "ok": False, "code": "BAD_STATUS"})
     assert stored == {"error": mobile.GOAL_ERROR_NOT_KEPT, "ok": False, "code": "BAD_STATUS"}    # review R1: non-text keys stay
-    assert "code" not in mobile._goal_at_rest({"error": "x", "code": "Run 5k please"})            # free text in `code` does not
+    assert "code" not in mobile.goal_at_rest({"error": "x", "code": "Run 5k please"})            # free text in `code` does not
 
 
 # ---------------------------------------------------------------- H3 / H4: stated in the guides
