@@ -317,3 +317,29 @@ def test_an_unreadable_config_fails_closed(monkeypatch, tmp_path):
         gitops.git(tmp_path, "merge", "x")
     assert calls == [["git", "config", "--show-scope", "-z", "--list"]]
     assert gitops.is_repo(str(tmp_path)) is False
+
+
+@pytest.mark.parametrize("key", [b"filter.\xff.clean", b"merge.\xfe.driver"])
+def test_a_config_name_that_is_not_utf8_fails_closed(tmp_path, key):
+    """#1407 review R1: git matches subsection bytes exactly; a lossy decode would override a different key."""
+    repo = _repo(tmp_path)
+    subprocess.run([b"git", b"config", key, b"x"], cwd=repo, check=True)
+    with pytest.raises(gitops.GitError, match="cannot neutralise"):
+        gitops.git(repo, "status")
+
+
+def test_ship_signing_format_and_key_come_from_the_owner_scope(tmp_path, monkeypatch):
+    """#1407 review R4: on the ident=False ship path a repository-config `gpg.format`/`user.signingkey` (agent-
+    writable) never chooses how the owner's merge commit is signed; task (ident=True) calls are unchanged."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "home"))
+    repo = _repo(tmp_path)
+    subprocess.run(["git", "config", "gpg.format", "x509"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.signingkey", "agent-key"], cwd=repo, check=True)
+    seen: list = []
+    real = subprocess.run
+    monkeypatch.setattr(gitops.subprocess, "run", lambda argv, **kw: seen.append(argv) or real(argv, **kw))
+    gitops.git(repo, "status", ident=False)
+    assert "gpg.format=openpgp" in seen[-1] and "user.signingkey=" in seen[-1]
+    gitops.git(repo, "status")
+    assert not [a for a in seen[-1] if a.startswith(("gpg.format=", "user.signingkey="))]
